@@ -7,6 +7,9 @@ import { rovingTarget } from "./shared";
 
 import "./swatch.scss";
 
+// A type specimen, the same in every language: not text to translate.
+const DEFAULT_SAMPLE = "Aa";
+
 export interface SwatchProps {
     /** The colour the swatch is drawn in: a CSS colour, set as a custom property, so a runtime value never becomes a literal in a stylesheet. */
     color: string;
@@ -53,7 +56,7 @@ export function Swatch(props: SwatchProps): JSX.Element {
             onBlur={() => props.onPreview?.(false)}
         >
             <span class="ui-swatch-sample" aria-hidden="true">
-                {props.sample ?? "Aa"}
+                {props.sample ?? DEFAULT_SAMPLE}
             </span>
         </button>
     );

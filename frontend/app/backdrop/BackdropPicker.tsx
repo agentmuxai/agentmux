@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { t } from "@/app/i18n/i18n";
 import { Button, CloseButton, Field, Notice, SectionHeader, SegmentedControl, SwatchGrid, TextInput } from "@/app/element/ui";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
@@ -20,11 +21,11 @@ export interface BackdropPickerProps {
     onClose: () => void;
 }
 
-const POLARITY_OPTIONS = [
-    { value: "follow", label: "Follow" },
-    { value: "dark", label: "Dark" },
-    { value: "light", label: "Light" },
-] as const;
+const polarityOptions = () => [
+    { value: "follow" as const, label: t("backdrop.polarity.follow") },
+    { value: "dark" as const, label: t("backdrop.polarity.dark") },
+    { value: "light" as const, label: t("backdrop.polarity.light") },
+];
 
 interface CustomColourFieldProps {
     text: string;
@@ -41,17 +42,17 @@ interface CustomColourFieldProps {
 /** A custom colour: the native colour input beside a field to type it, with a note when the text is not a colour. */
 function CustomColourField(props: CustomColourFieldProps): JSX.Element {
     return (
-        <Field label="Custom colour" layout="stacked" error={props.invalid ? "Use #rrggbb or #rgb." : undefined}>
+        <Field label={t("backdrop.custom.label")} layout="stacked" error={props.invalid ? t("backdrop.custom.invalid") : undefined}>
             <div class="backdrop-picker-custom">
                 <input
                     type="color"
                     class="backdrop-picker-color"
-                    aria-label="Pick a custom colour"
+                    aria-label={t("backdrop.custom.pick")}
                     value={props.shown}
                     onChange={(e) => props.onPick(e.currentTarget.value.toLowerCase())}
                 />
                 <TextInput
-                    placeholder="#rrggbb"
+                    placeholder={t("backdrop.custom.placeholder")}
                     value={props.text}
                     onInput={(e) => props.onText(e.currentTarget.value)}
                     onBlur={() => props.text.trim() !== "" && props.onApply()}
@@ -65,8 +66,8 @@ function CustomColourField(props: CustomColourFieldProps): JSX.Element {
 /** Dark or light keeps a built-in's side under either app theme; Follow takes the app theme's. */
 function PolarityField(props: { value: BackdropPolarity; onChange: (next: BackdropPolarity) => void }): JSX.Element {
     return (
-        <Field label="Polarity" layout="stacked" hint="Dark or light keeps a built-in's side under either app theme.">
-            <SegmentedControl ariaLabel="Polarity" options={[...POLARITY_OPTIONS]} value={props.value} onChange={props.onChange} />
+        <Field label={t("backdrop.polarity.label")} layout="stacked" hint={t("backdrop.polarity.hint")}>
+            <SegmentedControl ariaLabel={t("backdrop.polarity.label")} options={polarityOptions()} value={props.value} onChange={props.onChange} />
         </Field>
     );
 }
@@ -143,7 +144,7 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
         <div
             class="backdrop-picker"
             role="dialog"
-            aria-label="Backdrop"
+            aria-label={t("backdrop.title")}
             onKeyDown={(e) => {
                 if (e.key !== "Escape") return;
                 e.stopPropagation();
@@ -151,12 +152,12 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
             }}
             onClick={(e) => e.stopPropagation()}
         >
-            <SectionHeader variant="title" level={3} title="Backdrop">
-                <CloseButton size="header" label="Close the backdrop picker" onClick={close} />
+            <SectionHeader variant="title" level={3} title={t("backdrop.title")}>
+                <CloseButton size="header" label={t("backdrop.close")} onClick={close} />
             </SectionHeader>
 
             <SwatchGrid
-                ariaLabel="Backdrop colours"
+                ariaLabel={t("backdrop.colours")}
                 options={options()}
                 value={record()?.kind === "builtin" ? record()!.id : undefined}
                 columns={4}
@@ -173,14 +174,14 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
                 onPick={(hex) => write(colorRecord(hex, polarity()))}
             />
             <Show when={record()?.kind === "color" && resolved()?.derived.nudged}>
-                <Notice tone="accent">Adjusted a little so the text reads. Your colour is kept for the other theme.</Notice>
+                <Notice tone="accent">{t("backdrop.nudged")}</Notice>
             </Show>
 
             <PolarityField value={polarity()} onChange={changePolarity} />
             <ContrastReadout derived={resolved()?.derived} missed={missed()} />
 
             <Button variant="row" icon="rotate-left" disabled={!record()} onClick={reset}>
-                Reset
+                {t("backdrop.reset")}
             </Button>
         </div>
     );

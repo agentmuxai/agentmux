@@ -6,6 +6,7 @@
  * side, the contrast readout, a typed colour, and the records a choice makes (spec §9, §10).
  */
 
+import { t } from "../i18n/i18n";
 import type { SwatchOption } from "../element/ui/Swatch";
 import { contrastRatio } from "../block/pane-color-scheme";
 import { BUILTINS, deriveBuiltin, type AppScheme } from "./builtins";
@@ -20,7 +21,10 @@ const ratio = (n: number) => `${n.toFixed(1)}:1`;
 
 /** The one-line readout of a backdrop's contrast: primary and muted text on its surface. */
 export function contrastReadout(d: DerivedBackdrop): string {
-    return `text ${ratio(contrastRatio(d.surfaces.surface, d.ink.text))}, muted ${ratio(contrastRatio(d.surfaces.surface, d.ink.muted))}`;
+    return t("backdrop.readout", {
+        text: ratio(contrastRatio(d.surfaces.surface, d.ink.text)),
+        muted: ratio(contrastRatio(d.surfaces.surface, d.ink.muted)),
+    });
 }
 
 /** The 16 built-ins as swatches, each drawn as the mini-pane a choice would make under `scheme`. */
