@@ -33,6 +33,7 @@
 }
 
 .status-bar {
+    // Tier 2: the agents go. An item with nothing waiting goes with them (its slot drops at tier 2, StatusBar.tsx).
     &[data-fit="2"],
     &[data-fit="3"],
     &[data-fit="4"] {
@@ -41,13 +42,24 @@
         }
     }
 
+    // Tier 3: the tasks go while an ask, a browser wait or a Vault request is still drawn; with none, the one badge
+    // takes over, so what waits is never left with nothing to show.
     &[data-fit="3"],
     &[data-fit="4"] {
-        .status-summary__part[data-part="tasks"] {
+        .status-summary[data-core] .status-summary__part[data-part="tasks"] {
             display: none;
+        }
+
+        .status-summary:not([data-core]) .status-summary__part {
+            display: none;
+        }
+
+        .status-summary:not([data-core]) .status-summary__badge {
+            display: flex;
         }
     }
 
+    // Tier 4: every part goes, and the one badge carries the total.
     &[data-fit="4"] {
         .status-summary .status-summary__part {
             display: none;

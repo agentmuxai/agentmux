@@ -53,9 +53,18 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
     const openSwarm = () => void openOrFocusPaneByView("swarm");
     const click = (first?: PartId) => (summary().waiting > 0 ? setOpen(open() && open()!.first === first ? null : { first }) : openSwarm());
     const any = () => summary().parts.some((p) => p.count > 0);
+    // Whether an ask, a browser wait or a Vault request is among the parts: a narrow bar sheds the tasks only while one is left to show
+    // (`_summary.scss`); with none, the one badge takes over from the tier that would shed them, so a waiting item never goes blank.
+    const core = () => summary().parts.some((p) => (p.id === "asks" || p.id === "browser" || p.id === "vault") && p.count > 0);
     return (
         <Show when={any()}>
-            <div ref={watchAnchor} class="status-bar-item status-summary" role="group" aria-label={summaryTip(summary())}>
+            <div
+                ref={watchAnchor}
+                class="status-bar-item status-summary"
+                role="group"
+                aria-label={summaryTip(summary())}
+                data-core={core() ? "" : undefined}
+            >
                 <For each={summary().parts}>
                     {(p) => (
                         <Show when={p.count > 0}>

@@ -126,6 +126,20 @@ describe("SummaryStatus", () => {
         expect(part(container, "tasks")?.textContent).toBe("2");
     });
 
+    it("marks an item that has an ask, a browser wait or a Vault request, so a narrow bar sheds the tasks only while one is left", () => {
+        const group = (c: HTMLElement) => c.querySelector(".status-summary") as HTMLElement;
+        const a = render(() => <SummaryStatus {...base} items={() => [item("q1")]} tasks={() => 2} />);
+        expect(group(a.container).hasAttribute("data-core")).toBe(true);
+        cleanup();
+        const b = render(() => <SummaryStatus {...base} uses={() => [use("u1")]} />);
+        expect(group(b.container).hasAttribute("data-core")).toBe(true);
+        cleanup();
+        // Tasks alone, or with agents running: no core, so the badge takes over from tier 3 and the item is never blank.
+        const c = render(() => <SummaryStatus {...base} rows={() => [agent("a", "working")]} tasks={() => 2} />);
+        expect(group(c.container).hasAttribute("data-core")).toBe(false);
+        expect(c.container.querySelector(".status-summary__badge")?.textContent).toBe("2");
+    });
+
     it("keeps the Vault part to the operator: a widget cannot read or click it", () => {
         const { container } = render(() => <SummaryStatus {...base} uses={() => [use("u1")]} items={() => [item("q1")]} />);
         expect(part(container, "vault")?.hasAttribute("data-operator-only")).toBe(true);

@@ -104,7 +104,8 @@ const DROP_AT: Record<string, DropAt | undefined> = {
     "token-usage": 2,
     // The first to go, at a tier of its own: it comes and goes on its own, so it never takes another readout with it.
     "last-sound": 0,
-    summary: 3,
+    // The agents part goes at tier 2, so an item with nothing waiting goes with it; while anything waits it is kept (slotDropAt).
+    summary: 2,
     "browser-pause-all": 3,
     "multi-input": 3,
     config: 3,
