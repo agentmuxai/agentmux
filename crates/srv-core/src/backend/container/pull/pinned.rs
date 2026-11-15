@@ -50,7 +50,7 @@ mod tests {
 
     /// Against a real daemon, with an image it already has (no registry): the tag is moved onto the
     /// image the reference names.
-    ///   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_pinned
+    ///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_pinned
     #[tokio::test]
     #[ignore]
     async fn itest_pinned_tag_is_moved_onto_the_image_the_reference_names() {

@@ -55,7 +55,7 @@ Overlap notes are not posted in this version: they go to the agent that edited, 
 
 ### 3.6 Guidance
 
-The Operator Config's MuxAPI entry (`crates/srv-core/operator-config-seed.json`) lists the two tools under coordination, with when to use them: post what concerns anyone touching a path or PR (a heads-up, a hold, a decision); read (or `WhoIsWorkingOn`) before starting on something others may be on; message one agent directly when it is for that agent.
+The Operator Config's MuxAPI entry (`crates/srv/operator-config-seed.json`) lists the two tools under coordination, with when to use them: post what concerns anyone touching a path or PR (a heads-up, a hold, a decision); read (or `WhoIsWorkingOn`) before starting on something others may be on; message one agent directly when it is for that agent.
 
 ## 4. Tests
 

@@ -500,7 +500,7 @@ mod tests {
 
     /// Manual check against a real transcript store (read-only): times a cold
     /// read of every agent in it.
-    /// `AGENTMUX_HISTORY_REAL_STORE=<path to filestore.db> cargo test -p agentmux-srv --bins -- --ignored --nocapture history_real_store`
+    /// `AGENTMUX_HISTORY_REAL_STORE=<path to filestore.db> cargo test -p agentmux-srv-core --lib -- --ignored --nocapture history_real_store`
     #[test]
     #[ignore]
     fn history_real_store_timing() {

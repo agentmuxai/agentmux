@@ -37,7 +37,7 @@ On 2026-10-23 Naki-2 held two tasks this way for 6 h 12 m. This is the most comm
 
 ### 3.1 The two states
 
-`AgentState` (`crates/srv-core/src/backend/agent_state.rs`) gains two variants:
+`AgentState` (`crates/srv/src/backend/agent_state.rs`) gains two variants:
 
 | Variant | Wire | Meaning |
 |---|---|---|

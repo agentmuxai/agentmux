@@ -293,7 +293,7 @@ Launch Claude agents with a 600K auto-compact window (`CLAUDE_CODE_AUTO_COMPACT_
 
 - **Saves:** ~23% of main-session cost in the replay, for ~40 more compactions a month on the measured machine.
 - **Risk:** auto compactions still land mid-task, more often than today (but at 567K, with a smaller summary to write). Check that the pane's context meter picks up the lower threshold (`get_context_usage` reports it).
-- **Touches:** the Claude launch environment in `crates/srv-core/src/backend/providers/claude.rs` or a per-agent setting; possibly a setting in the agent's configuration UI.
+- **Touches:** the Claude launch environment in `crates/srv/src/backend/providers/claude.rs` or a per-agent setting; possibly a setting in the agent's configuration UI.
 
 ### 6.2 Phase 2: self-compaction at the end of a turn
 

@@ -352,7 +352,7 @@ mod tests {
     }
 
     /// Manual: prints the diagnosis line this machine would log right now, so the format
-    /// can be read on real data. `cargo test -p agentmux-srv -- --ignored --nocapture
+    /// can be read on real data. `cargo test -p agentmux-srv-core -- --ignored --nocapture
     /// prints_the_diagnosis_for_this_machine`
     #[test]
     #[ignore = "reads this machine's sockets; run by hand"]

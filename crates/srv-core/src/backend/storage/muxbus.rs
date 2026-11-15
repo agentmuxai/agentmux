@@ -1168,7 +1168,7 @@ mod tests {
 
     /// Exercises the REAL OS keychain, so it's ignored in CI (no keychain
     /// there). Run on a dev machine:
-    /// `cargo test -p agentmux-srv --bin agentmux-srv per_channel_keychain_live -- --ignored`.
+    /// `cargo test -p agentmux-srv-core --lib per_channel_keychain_live -- --ignored`.
     /// Uses throwaway namespaces and cleans up after itself; never touches
     /// `muxbus:global`.
     #[test]
@@ -1354,7 +1354,7 @@ mod tests {
     /// A torn set keeps its refresh token when that field is whole (so a
     /// refresh can repair it), and not when the refresh field itself was
     /// caught mid-write. Real keychain, Windows (the split layout):
-    /// `cargo test -p agentmux-srv --bin agentmux-srv a_torn_set_keeps -- --ignored`.
+    /// `cargo test -p agentmux-srv-core --lib a_torn_set_keeps -- --ignored`.
     #[test]
     #[ignore]
     fn a_torn_set_keeps_a_whole_refresh_token_live() {
@@ -1428,7 +1428,7 @@ mod tests {
     /// The bug behind the retro, against the REAL OS keychain: several
     /// processes saving and reading one sign-in at once. Without the lock it
     /// usually tears (printed, not asserted: it's a race); with it, never.
-    /// `cargo test -p agentmux-srv --bin agentmux-srv concurrent_processes_never_tear -- --ignored --nocapture`
+    /// `cargo test -p agentmux-srv-core --lib concurrent_processes_never_tear -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn concurrent_processes_never_tear_a_live_sign_in() {

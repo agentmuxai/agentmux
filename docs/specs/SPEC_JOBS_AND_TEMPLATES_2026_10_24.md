@@ -237,7 +237,7 @@ A late event turns a `missed` row into a late run. Several misses of one job are
 
 ### 5.1 The job definition
 
-A `db_jobs` table replaces `db_cron_jobs`, in the same store: the shared store (`store.db`), with its DDL and additive columns in both schema runners next to `db_cron_jobs`, and no schema version bump. `db_cron_jobs` itself is left as it was for older builds. A one-time data migration (`crates/srv-core/src/migrations/`, `MigrationScope::Global`, run against the shared store only) copies every cron job into it as a job with a `cron` trigger in UTC and a `message` action, keeping its id, so Swarm, Schedule and the ledger don't notice. `POST/GET/DELETE/PATCH /agentmux/cron` stay as aliases of the new `/agentmux/jobs` routes for one release.
+A `db_jobs` table replaces `db_cron_jobs`, in the same store: the shared store (`store.db`), with its DDL and additive columns in both schema runners next to `db_cron_jobs`, and no schema version bump. `db_cron_jobs` itself is left as it was for older builds. A one-time data migration (`crates/srv/src/migrations/`, `MigrationScope::Global`, run against the shared store only) copies every cron job into it as a job with a `cron` trigger in UTC and a `message` action, keeping its id, so Swarm, Schedule and the ledger don't notice. `POST/GET/DELETE/PATCH /agentmux/cron` stay as aliases of the new `/agentmux/jobs` routes for one release.
 
 Published as `schema/agentmux-job.v1.schema.json`:
 

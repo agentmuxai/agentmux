@@ -73,7 +73,7 @@ Desk research on 2026-11-03: official docs, changelogs and GitHub issues, cited 
 
 ### 3.2 Where AgentMux must pass the person's language through to the provider
 
-AgentMux already writes each provider's startup instructions file at launch (`build_config_files` in `crates/srv-core/src/backend/agent_config.rs`, filename from `startup_instructions_filename`, `{{VARIABLE}}` templating) and passes `LANG` and `LC_ALL` to agents (`agent_env.rs`). So there is one universal lever and a few native ones:
+AgentMux already writes each provider's startup instructions file at launch (`build_config_files` in `crates/srv/src/backend/agent_config.rs`, filename from `startup_instructions_filename`, `{{VARIABLE}}` templating) and passes `LANG` and `LC_ALL` to agents (`agent_env.rs`). So there is one universal lever and a few native ones:
 
 | Provider | Reply language lever (use this) | Notes |
 |---|---|---|

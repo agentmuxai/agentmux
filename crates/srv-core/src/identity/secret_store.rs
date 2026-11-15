@@ -706,7 +706,7 @@ mod tests {
     /// Against the real login keychain: an `agentmux` entry that trusts no
     /// app (as one saved by an older srv looks to this build) is reported as
     /// NEEDS_CONSENT at once, with no dialog, and a write replaces it with one
-    /// this build can read. `cargo test -p agentmux-srv -- --ignored needs_consent_live`
+    /// this build can read. `cargo test -p agentmux-srv-core -- --ignored needs_consent_live`
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "uses the real login keychain"]

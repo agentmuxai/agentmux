@@ -970,7 +970,7 @@ mod tests {
     /// ```text
     /// AGENTMUX_ADOPTION_DRYRUN_HOME=~/.agentmux
     /// AGENTMUX_ADOPTION_DRYRUN_CHANNEL=local-main-b28b7a-ffffffff
-    /// cargo test -p agentmux-srv --bins -- --ignored --nocapture adoption_dry_run
+    /// cargo test -p agentmux-srv-core --lib -- --ignored --nocapture adoption_dry_run
     /// ```
     #[test]
     #[ignore = "reads a real home; run by hand"]

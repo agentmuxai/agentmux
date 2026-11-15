@@ -161,7 +161,7 @@ fn under_test_nothing_is_asked_of_the_host() {
     assert_eq!(config_dir_for("jcont"), None);
 }
 
-/// Run by hand on a host that has the CLIs installed: `cargo test -p agentmux-srv -- --ignored the_hosts_own_install`.
+/// Run by hand on a host that has the CLIs installed: `cargo test -p agentmux-srv-core -- --ignored the_hosts_own_install`.
 #[test]
 #[ignore = "needs secrets and deploy installed on this computer"]
 fn the_hosts_own_install_is_found_and_copied() {

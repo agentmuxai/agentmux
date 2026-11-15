@@ -7,7 +7,7 @@
 //!
 //! Written before `update` was split into one function per event, to hold the whole
 //! transition table still. After an intended change to the machine, regenerate the
-//! file with `UPDATE_TRANSITIONS=1 cargo test -p agentmux-srv --bins -- persistent_resume`
+//! file with `UPDATE_TRANSITIONS=1 cargo test -p agentmux-srv-core --lib -- persistent_resume`
 //! and read the diff.
 
 use super::*;

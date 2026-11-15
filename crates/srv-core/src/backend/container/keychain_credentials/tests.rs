@@ -422,7 +422,7 @@ fn removing_the_container_deletes_the_staged_login_and_its_note() {
 }
 
 /// Against the real login keychain, with an entry of its own that this test creates and deletes (never a
-/// Claude entry): `cargo test -p agentmux-srv -- --ignored keychain_credentials_live`
+/// Claude entry): `cargo test -p agentmux-srv-core -- --ignored keychain_credentials_live`
 #[cfg(target_os = "macos")]
 #[test]
 #[ignore = "uses the real login keychain"]

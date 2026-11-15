@@ -25,7 +25,7 @@ Answers to the questions that started this spec, with the evidence.
 
 ### 2.1 Is `widgets.json` still respected? Yes, read-only.
 
-- The built-in entries are `crates/srv-core/src/config/widgets.json`, compiled in (`wconfig/loader.rs:17-35`).
+- The built-in entries are `crates/srv/src/config/widgets.json`, compiled in (`wconfig/loader.rs:17-35`).
 - A user's `widgets.json` next to `settings.json` (`user_widgets.rs:27-31`, folder from `resolve_settings_dir()`)
   is merged on top. The order is built-ins, then installed widget packages (`ext@<id>/<pane>`), then the user file
   (`user_widgets.rs:117-124`). A user entry with the same key **replaces the whole built-in entry**; fields are not
@@ -230,8 +230,8 @@ Writers: `pinWidget`, `unpinWidget`, `hideWidget`, `showWidget` (to More), `reor
 | `frontend/app/view/settings/sections/widget-bar-settings.tsx` (+ `.scss`), `widgets-section.tsx`, `settings-index.ts` | the Widget bar group and its search entries |
 | `frontend/app/view/settings/sections/advanced-section.tsx` | icon-only row removed (moved to Widgets) |
 | `frontend/app/notification/usenotification.tsx` | `setNotificationAction`, so an Undo can be registered when raised |
-| `crates/srv-core/src/backend/config_watcher_fs.rs` | null removal in the in-memory merge |
-| `crates/srv-core/src/backend/wconfig/types.rs`, `schema/settings.json`, `frontend/types/srv-types.d.ts` | typed keys, read leniently (a malformed list is ignored, not fatal) |
+| `crates/srv/src/backend/config_watcher_fs.rs` | null removal in the in-memory merge |
+| `crates/srv/src/backend/wconfig/types.rs`, `schema/settings.json`, `frontend/types/srv-types.d.ts` | typed keys, read leniently (a malformed list is ignored, not fatal) |
 | agentmux-docs `widgets` page | document Pinned, More and Hidden, and `widget:hidden` |
 
 ## 7. Cleanup found by the audit

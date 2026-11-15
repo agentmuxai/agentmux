@@ -88,19 +88,19 @@ One fact changes how much can be scraped: on current Claude models the CLI no lo
 ### 5.1 The task queue
 
 - **Agents' tool:** `Tasks` with `enqueue, claim, heartbeat, complete, release, list` (`crates/mcp/src/tools/tasks_tool.rs`, schema `crates/mcp/src/tool_schemas.rs` `TASKS_TOOL`), over HTTP to srv (`crates/mcp/src/tools/work.rs`; routes `/agentmux/work…` in `crates/srv/src/server/routes.rs`, handlers `crates/srv/src/server/work_queue.rs`).
-- **Store:** `db_work_queue` in the identity store `~/.agentmux/shared/identity-store.db` (`crates/srv-core/src/backend/storage/migrations.rs`, `run_identity_store_schema`; logic in `crates/srv-core/src/backend/storage/work_queue.rs`). Fields: `id, title, payload, kind, target_agent, target_group, priority, state, claimed_by, claim_expires, attempts, max_attempts, created_by, created_at, updated_at, not_before, result`, and UIDs beside the names.
+- **Store:** `db_work_queue` in the identity store `~/.agentmux/shared/identity-store.db` (`crates/srv/src/backend/storage/migrations.rs`, `run_identity_store_schema`; logic in `crates/srv/src/backend/storage/work_queue.rs`). Fields: `id, title, payload, kind, target_agent, target_group, priority, state, claimed_by, claim_expires, attempts, max_attempts, created_by, created_at, updated_at, not_before, result`, and UIDs beside the names.
 - **States:** `open, claimed, done, failed, cancelled`. Claims are one `UPDATE … RETURNING`, by priority then age; the `attempt` number is a fence token, so a superseded holder's heartbeat or completion is refused. Default lease 2 minutes. The reaper runs before every claim and reopens an expired item, or parks it as `failed` after `max_attempts` (3).
 - **Teardown:** closing an agent releases its claims (`crates/srv/src/sagas/agent_teardown.rs`, `release_claims`).
 - **Scope:** one queue for the whole computer, every channel and instance (deliberately; `migrations.rs` doc comment). No repository column.
-- **Event:** `WorkQueueChanged` (`workqueue:changed`, no payload; `crates/srv-core/src/backend/mps_events.rs`, `frontend/app/store/mps-events.ts`) on every change.
+- **Event:** `WorkQueueChanged` (`workqueue:changed`, no payload; `crates/srv/src/backend/mps_events.rs`, `frontend/app/store/mps-events.ts`) on every change.
 - **UI:** none. No frontend code reads the queue or subscribes to its event, and there is no RPC stub for it.
 
 ### 5.2 What srv knows about each agent
 
-- **State:** `AgentState {Working, Waiting, Idle, Stopped, Error}` (`crates/srv-core/src/backend/agent_state.rs`): a turn in progress is Working, or Waiting when the pane set `term:awaiting_user`; otherwise the process decides, a non-zero exit being Error. Published to the UI through `ControllerStatus` and `AgentTurn` (`mps_events.rs`), failures through `AgentFailed`.
-- **Progress:** `crates/srv-core/src/backend/reactive/progress_watcher.rs` reads each agent's new transcript lines every 3 s and publishes `agent:progress` = `{todos, todos_truncated, todos_partial, current_tool}`. Todos come from `TodoWrite`, `TaskCreate`, `TaskUpdate` (`TODO_TOOL_NAMES`); `current_tool` is the oldest tool call without a result. Codex's plan updates are not parsed (`frontend/app/view/agent/providers/codex-translator.ts` only shows them as thinking).
-- **PRs:** the same watcher spots `gh pr create` / `gh-agent pr create` in an agent's shell calls (`pr_create`, `NewPr`), which feeds the overlap notes (`crates/srv-core/src/backend/work_facts/overlap_notes.rs`). Open PRs are credited to an agent by their `<Agent>@<host>: ` title prefix (`crates/mcp/src/tools/open_prs.rs`).
-- **Repository and branch** of each agent's working folder (`crates/srv-core/src/backend/work_facts/git.rs`); `WorkFacts::repo_key()` gives `owner/repo`, or `local:<clone root>`.
+- **State:** `AgentState {Working, Waiting, Idle, Stopped, Error}` (`crates/srv/src/backend/agent_state.rs`): a turn in progress is Working, or Waiting when the pane set `term:awaiting_user`; otherwise the process decides, a non-zero exit being Error. Published to the UI through `ControllerStatus` and `AgentTurn` (`mps_events.rs`), failures through `AgentFailed`.
+- **Progress:** `crates/srv/src/backend/reactive/progress_watcher.rs` reads each agent's new transcript lines every 3 s and publishes `agent:progress` = `{todos, todos_truncated, todos_partial, current_tool}`. Todos come from `TodoWrite`, `TaskCreate`, `TaskUpdate` (`TODO_TOOL_NAMES`); `current_tool` is the oldest tool call without a result. Codex's plan updates are not parsed (`frontend/app/view/agent/providers/codex-translator.ts` only shows them as thinking).
+- **PRs:** the same watcher spots `gh pr create` / `gh-agent pr create` in an agent's shell calls (`pr_create`, `NewPr`), which feeds the overlap notes (`crates/srv/src/backend/work_facts/overlap_notes.rs`). Open PRs are credited to an agent by their `<Agent>@<host>: ` title prefix (`crates/mcp/src/tools/open_prs.rs`).
+- **Repository and branch** of each agent's working folder (`crates/srv/src/backend/work_facts/git.rs`); `WorkFacts::repo_key()` gives `owner/repo`, or `local:<clone root>`.
 - **Who is calling:** each agent's MCP sends `X-Agent-Token`; srv resolves it to `Caller::Agent{uid}` (`crates/srv/src/server/caller.rs`). Calls from the UI come over the window's websocket, not through the MCP.
 
 ### 5.3 Neighbours
@@ -283,7 +283,7 @@ The `Tasks` tool keeps its six actions and gains three, all on a claimed task (`
 
 `enqueue` gains `for: "me"` (the task waits for the caller; shorthand for `target_agent` set to itself), `repo` (default: the caller's repository from its working folder), `hold` (on hold until it is taken off hold) and `review` (whether a person must accept it; default from who asked, §6.4). Its answer gives the task number to quote back to the operator. srv sets who asked from the turn (§6.5); the caller can't.
 
-The operator-config guidance (`crates/srv-core/operator-config-seed.json`) gets a short entry, aimed at few calls per task: when the operator asks for something while you're in the middle of other work, and it isn't urgent or tiny, file it for yourself (`enqueue` `for: "me"`, the request as a standalone prompt), say its number, and finish what you were doing; when you've finished, `claim` your next task; claim (or be started on) a task before larger work an operator asked for; `update` at milestones only; `ask` instead of waiting silently on something only the operator can decide; `submit` with the PR when done. A task's checklist is optional; an agent whose CLI keeps a todo list shows it anyway (§6.7).
+The operator-config guidance (`crates/srv/operator-config-seed.json`) gets a short entry, aimed at few calls per task: when the operator asks for something while you're in the middle of other work, and it isn't urgent or tiny, file it for yourself (`enqueue` `for: "me"`, the request as a standalone prompt), say its number, and finish what you were doing; when you've finished, `claim` your next task; claim (or be started on) a task before larger work an operator asked for; `update` at milestones only; `ask` instead of waiting silently on something only the operator can decide; `submit` with the PR when done. A task's checklist is optional; an agent whose CLI keeps a todo list shows it anyway (§6.7).
 
 **Codex** gets its plan parsed: the progress watcher reads Codex's plan updates into the same `todos`, so its checklists show like Claude's.
 
@@ -351,11 +351,11 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 
 ### 8.2 srv and MCP
 
-- `crates/srv-core/src/backend/storage/work_queue.rs` (new states, own-tasks-first claiming), new `work_board.rs` (cards, history, the board's transitions), `store.rs` (tables).
+- `crates/srv/src/backend/storage/work_queue.rs` (new states, own-tasks-first claiming), new `work_board.rs` (cards, history, the board's transitions), `store.rs` (tables).
 - `crates/srv/src/server/work_queue.rs` (cards, history rows, numbers as ids, the cancel guard), new `server/work_tasks.rs` (update, ask, submit; who asked; the next task; live leases), new `server/app_api/kanban.rs` (the typed RPCs), new `backend/kanban.rs` (the reminder, the PR link), `backend/rpc_types/commands.rs` (command names).
-- `crates/srv-core/src/backend/reactive/progress_watcher.rs` (PR link; Codex plans).
+- `crates/srv/src/backend/reactive/progress_watcher.rs` (PR link; Codex plans).
 - `crates/mcp/src/tools/tasks_tool.rs`, `work.rs`, `tool_schemas.rs` (`update`, `ask`, `submit`; `enqueue`'s new fields).
-- `crates/srv-core/src/config/widgets.json` (`defwidget@kanban`); `crates/srv-core/operator-config-seed.json` (guidance).
+- `crates/srv/src/config/widgets.json` (`defwidget@kanban`); `crates/srv/operator-config-seed.json` (guidance).
 - Generated: `frontend/types/rpc/rpc-schema.json`, `rpc-api/generated-manifest.json`, `rpc-api/generated.ts` (`export_bindings` test, `node scripts/gen-rpc-stubs.mjs`).
 
 ## 9. Plan

@@ -280,7 +280,7 @@ mod tests {
     }
 
     /// Against a real daemon: the relay is created, reached, adopted again and replaced.
-    ///   cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_dev_relay
+    ///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_dev_relay
     #[tokio::test]
     #[ignore]
     async fn itest_dev_relay_reaches_a_container_by_name_and_is_adopted() {

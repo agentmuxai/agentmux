@@ -106,4 +106,4 @@ no copy or a short one) and runs the dry run and `--apply` on it. The suite need
 Rust encoder, and runs the damage scan and a rebuild on a store holding frames. The Rust
 side decodes the same file (`tests_frame_vector.rs` in the filestore), so the two decoders
 can't drift apart. After a change to the frame format, write the file again with
-`AGENTMUX_WRITE_FRAME_VECTOR=1 cargo test -p agentmux-srv --bins -- tests_vector`.
+`AGENTMUX_WRITE_FRAME_VECTOR=1 cargo test -p agentmux-srv-core --lib -- tests_vector`.

@@ -27,7 +27,7 @@
 
 ### 2.1 The service-OAuth stack (shipped as code, usable only with your own client)
 
-- **`crates/srv-core/src/identity/oauth_client.rs`** (#1443): Authorization Code with PKCE (S256) on a `127.0.0.1:0` loopback redirect for Google and Microsoft. Device Grant for GitHub. `state` is checked and the browser is the system browser, following RFC 8252/7636/8628/9700. Providers: `google` (`openid email profile`), `microsoft`, `github`, `slack`.
+- **`crates/srv/src/identity/oauth_client.rs`** (#1443): Authorization Code with PKCE (S256) on a `127.0.0.1:0` loopback redirect for Google and Microsoft. Device Grant for GitHub. `state` is checked and the browser is the system browser, following RFC 8252/7636/8628/9700. Providers: `google` (`openid email profile`), `microsoft`, `github`, `slack`.
 - **Every built-in `client_id` is `None`**, so a flow runs only with BYO credentials (`ByoCredentials`). BYO credentials are **not persisted**: the user retypes them each time. The Trust Center spec §12.1 planned keychain storage, which wasn't built.
 - **Tokens:** `persist_oauth_account` puts `{access_token, refresh_token, expires_at}` as JSON in the keychain (`secret_store.rs`, service `agentmux`) and writes an `IdentityAccount{kind:"oauth"}` row. Gaps:
   - The Google request sends neither `access_type=offline` nor `prompt=consent`, so **Google never returns a refresh token**.

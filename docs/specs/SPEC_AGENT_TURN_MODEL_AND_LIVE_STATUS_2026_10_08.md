@@ -3,7 +3,7 @@
 **Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503, phase 2b (attention, §5.5) in PR #4511 and phase 3 (the live status, §6.8 and §6.9) in PR #4510. The live status's change timing was corrected in PR #4559 (§6.10). §7's replay tests are in the same PR. Still open: §7's live checks, and phase 4 (tuning `TIMING` from real log data). See §4.7 for how the build differs from the design below.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
-- Turn accounting: [`crates/srv-core/src/backend/blockcontroller/health.rs`](../../crates/srv-core/src/backend/blockcontroller/health.rs) (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
+- Turn accounting: [`crates/srv/src/backend/blockcontroller/health.rs`](../../crates/srv/src/backend/blockcontroller/health.rs) (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend [`frontend/app/store/agent-pane-state/`](../../frontend/app/store/agent-pane-state) (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
 - Working row: `AgentWorkingRow` in [`frontend/app/view/agent/components/AgentFooter.tsx`](../../frontend/app/view/agent/components/AgentFooter.tsx).
 
 **Builds on:**

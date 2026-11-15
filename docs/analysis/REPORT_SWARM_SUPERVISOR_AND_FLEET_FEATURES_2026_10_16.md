@@ -56,12 +56,12 @@ Two consequences:
 
 **Swarm (observe and broadcast).** `frontend/app/view/swarm/` lists tracked agents and their live state. A broadcast goes out as `[BROADCAST:FROM=user VIA=swarm ...]` with `TurnOrigin::User` (`crates/srv/src/server/app_api/fleet.rs`). `docs/specs/swarm-analysis.md` defines Swarm as a place to watch agents, not orchestrate them.
 
-**Turn end is already detected precisely.** `TurnActivityTracker` and the turn ledger (`crates/srv-core/src/backend/blockcontroller/health.rs`) end a turn on the provider's own signal: the stream-json `result` frame for Claude, ACP and Codex App Server events. They publish `controllerstatus` (`turn_active`) and `agentturn` (the ledger). The ledger also says who started each turn (`TriggerKind`: User, Broadcast, Agent, Service, Schedule, Task, System). `crates/srv-core/src/backend/notify/router.rs` already consumes completed turns and filters out system turns, which makes it the template for a Supervisor watcher.
+**Turn end is already detected precisely.** `TurnActivityTracker` and the turn ledger (`crates/srv/src/backend/blockcontroller/health.rs`) end a turn on the provider's own signal: the stream-json `result` frame for Claude, ACP and Codex App Server events. They publish `controllerstatus` (`turn_active`) and `agentturn` (the ledger). The ledger also says who started each turn (`TriggerKind`: User, Broadcast, Agent, Service, Schedule, Task, System). `crates/srv/src/backend/notify/router.rs` already consumes completed turns and filters out system turns, which makes it the template for a Supervisor watcher.
 
 **Warden auto-continue (the existing narrow version).** `docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md` was implemented:
 - a per-agent opt-in, `auto_continue_enabled` (off by default), toggled in `frontend/app/view/warden-supervisor/`;
 - `SupervisorNudge` (MCP) posts to `/agentmux/reactive/supervisor-decision`, and srv rejects nudges to agents that aren't opted in;
-- srv sends only the fixed text `NUDGE_MESSAGE` ("Continue the task you were already doing."), at most `MAX_CONSECUTIVE_AUTO_CONTINUES = 5` in a row, reset after a 30-minute cooldown, and logged to Warden's audit feed (`crates/srv-core/src/backend/reactive/handler.rs`).
+- srv sends only the fixed text `NUDGE_MESSAGE` ("Continue the task you were already doing."), at most `MAX_CONSECUTIVE_AUTO_CONTINUES = 5` in a row, reset after a 30-minute cooldown, and logged to Warden's audit feed (`crates/srv/src/backend/reactive/handler.rs`).
 
 What it lacks: nothing in srv watches turn ends or judges them. The operator has to run an agent that reads transcripts and calls `SupervisorNudge`, so in practice it is rarely on.
 

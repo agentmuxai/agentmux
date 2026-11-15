@@ -3,7 +3,7 @@
 **Date:** 2026-10-01
 **Status:** proposed — research and design; nothing implemented. Replaces the "keep LAN off to avoid the prompt" stance of [`windows-firewall-fix.md`](windows-firewall-fix.md), which is now marked historical; the opt-in default itself is unchanged.
 **Author:** AgentX (narko), at the owner's request
-**Affects:** [`crates/srv-core/src/backend/lan/listeners.rs`](../../crates/srv-core/src/backend/lan/listeners.rs), `lan_discovery.rs`, [`crates/srv/src/bootstrap/network.rs`](../../crates/srv/src/bootstrap/network.rs), the status-bar LAN indicator and HostPopover, [`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss).
+**Affects:** [`crates/srv/src/backend/lan/listeners.rs`](../../crates/srv/src/backend/lan/listeners.rs), `lan_discovery.rs`, [`crates/srv/src/bootstrap/network.rs`](../../crates/srv/src/bootstrap/network.rs), the status-bar LAN indicator and HostPopover, [`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss).
 
 ## 1. What went wrong (2026-09-30)
 

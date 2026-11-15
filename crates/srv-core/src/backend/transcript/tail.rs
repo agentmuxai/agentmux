@@ -228,7 +228,7 @@ mod tests {
 
     /// Before and after, on a 96 MB transcript: the cost of one read, and how long a
     /// 2-worker runtime stops answering while four of them run. Not run by default.
-    /// `cargo test -p agentmux-srv --bin agentmux-srv transcript::tail::tests::bench -- --ignored --nocapture`
+    /// `cargo test -p agentmux-srv-core --lib transcript::tail::tests::bench -- --ignored --nocapture`
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "a measurement, not a check"]
     async fn bench_a_96_mb_transcript() {

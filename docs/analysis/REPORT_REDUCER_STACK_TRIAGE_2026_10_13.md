@@ -17,7 +17,7 @@ One place for the state of every reducer and state machine in AgentMux: what is 
 
 | | srv | host (cef) | launcher |
 |---|---|---|---|
-| Owns | lifecycle, processes, workspaces, tabs, block ids, window→workspace, layout tree + focus/magnify (`crates/srv-core/src/state.rs:133`) | pending creations, browser panes, browsers, drag, window pool, pane pool, quit, opacity, pane-window states (`crates/cef/src/reducer/mod.rs:57`) | lifecycle, processes, windows mirror, pool, instance registry, monitors, pending HWNDs (`crates/launcher/src/state.rs:173`) |
+| Owns | lifecycle, processes, workspaces, tabs, block ids, window→workspace, layout tree + focus/magnify (`crates/srv/src/state.rs:133`) | pending creations, browser panes, browsers, drag, window pool, pane pool, quit, opacity, pane-window states (`crates/cef/src/reducer/mod.rs:57`) | lifecycle, processes, windows mirror, pool, instance registry, monitors, pending HWNDs (`crates/launcher/src/state.rs:173`) |
 | Actions | shared `ipc::Command` (73); 44 handled | own `HostCommand` (30) | shared `ipc::Command`; ~30 arms reply "misrouted" |
 | Effects | `Vec<Event>` → persist subscriber writes SQLite | `DispatchOutput` → caller applies Win32/CEF effects | `Vec<Event>` → saga coordinator |
 | Tests | ~126 (incl. a layout proptest) | 79 | 89 (3 proptest blocks) |
@@ -40,7 +40,7 @@ One place for the state of every reducer and state machine in AgentMux: what is 
 - **P2 — Focus/magnify changes aren't persisted** when a structural layout arm makes them (`persist_subscriber.rs:340-343`).
 - **P2 — Nine dead srv layout commands.** `LayoutClear`, `InsertNode`, `MoveNode`, `SwapNodes`, `ResizeNodes`, `ReplaceNode`, `SplitHorizontal`, `SplitVertical` and `InsertNodeAtIndex` have no producer (`reducer.rs:89-256`). A pipe client sending one would leave memory and SQLite out of step.
 - **P2 — Dead host gates.** `HostLifecyclePhase::ShuttingDown` is only ever set in tests, so the gates at `cef/src/reducer/mod.rs:1160`, `browsers.rs:23` and `panes.rs:47` never fire. `ConfirmDrained` and `PoolLeaveReason` are unused.
-- **P3 — `crates/srv-core/src/backend/wcore/dnd.rs`** reimplements move/tear-off/promote, is unreachable, and is hidden by `#![allow(dead_code)]` at `wcore/mod.rs:1`.
+- **P3 — `crates/srv/src/backend/wcore/dnd.rs`** reimplements move/tear-off/promote, is unreachable, and is hidden by `#![allow(dead_code)]` at `wcore/mod.rs:1`.
 
 ### Purity and cleanup (P2–P3)
 
@@ -143,8 +143,8 @@ Related open issues not owned by a reducer doc: #3338 (process/turn-state consol
   - Its "no I/O / deterministic" claim is false (§2).
   - Its line counts are stale.
 - In-code headers that still describe unfinished work:
-  - `crates/srv-core/src/state.rs:18-21`, `:94-100`;
-  - `crates/srv-core/src/reducer.rs:85-88`;
+  - `crates/srv/src/state.rs:18-21`, `:94-100`;
+  - `crates/srv/src/reducer.rs:85-88`;
   - `persist_subscriber.rs:298-303`;
   - `crates/cef/src/reducer/mod.rs:11-20`, `:73-75`.
 

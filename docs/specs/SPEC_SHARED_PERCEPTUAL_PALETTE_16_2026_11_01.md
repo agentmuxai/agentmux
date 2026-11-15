@@ -27,7 +27,7 @@ The operator, 2026-11-01: sixteen colours, **equidistant by human perception**, 
 
 | # | Palette | Where | Size | Stored as | Mirror / other readers |
 |---|---|---|---|---|---|
-| 1 | Agent border palette (Tailwind-500) | `frontend/app/view/agent/agent-color.ts` `AGENT_COLOR_PALETTE`, `pickAgentColor`, `dimAgentColor` | 14 | hex, agent content `ui:color`; seeded to block meta `frame:activebordercolor` and `frame:bordercolor` (`app_api/agent_open.rs`) | Rust `crates/srv-core/src/backend/agent_color.rs` (same 14, `pick_agent_color` FNV-1a, `dim_agent_color` x0.55), migration `m0020_agent_color_backfill`, Kanban `agent_colors` (`app_api/kanban.rs`), `agent_seat.rs`, `pane_env.rs` |
+| 1 | Agent border palette (Tailwind-500) | `frontend/app/view/agent/agent-color.ts` `AGENT_COLOR_PALETTE`, `pickAgentColor`, `dimAgentColor` | 14 | hex, agent content `ui:color`; seeded to block meta `frame:activebordercolor` and `frame:bordercolor` (`app_api/agent_open.rs`) | Rust `crates/srv/src/backend/agent_color.rs` (same 14, `pick_agent_color` FNV-1a, `dim_agent_color` x0.55), migration `m0020_agent_color_backfill`, Kanban `agent_colors` (`app_api/kanban.rs`), `agent_seat.rs`, `pane_env.rs` |
 | 2 | Window-tab picker | `frontend/app/tab/tab.tsx` `TAB_COLORS` | 14, desaturated copies of #1 | hex, tab meta `tab:color` | `windowTabToneVars` reads only the **hue** of the hex and draws the pill in pane tones |
 | 3 | Pane Color menu | `frontend/app/block/pane-color-menu.ts` `PANE_HUE_OPTIONS`, `hueToActiveBorder`, `hueToAgentIdentityColor` | 12 hues, 30° apart in **HSL** | number (HSL degrees), block meta `frame:hue`; an agent pick also writes `ui:color` as `hsl(h,65%,52%)` hex | `identityOklchHue` converts HSL to OKLCH |
 | 4 | Widget default colours | `defaultHue` in each widget manifest (`agent-manifest.tsx` 30, `browser.tsx` 60 …), setting `pane:colors`, `widget-colors.tsx`, `action-widgets-config.ts` | the same 12 hue steps, plus sandboxed widgets' `default_hue` | number (HSL degrees) | `widgetHueFor`, `widgetRoleColor` |
@@ -109,7 +109,7 @@ Reading the last row: with 16 hues, people with red-green or blue-yellow colour 
 schema/color-palette.json   (16 slots: id, name, hue, hex)
         |  TS: import        |  Rust: include_str! + a LazyLock
         v                    v
-frontend/app/theme/palette.ts      crates/srv-core/src/backend/palette.rs
+frontend/app/theme/palette.ts      crates/srv/src/backend/palette.rs
    PALETTE, slotById, slotOf(any colour), pickSlot(...)
         |
         v

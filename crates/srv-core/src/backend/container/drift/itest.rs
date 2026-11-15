@@ -1,5 +1,5 @@
 //! Live check against a real Docker daemon and ghcr.io:
-//!   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_old_image
+//!   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_old_image
 //!
 //! A container made from an older agent image is seen as older, `update_container` removes it,
 //! and the next start is from this AgentMux's image. Pulls two base images.

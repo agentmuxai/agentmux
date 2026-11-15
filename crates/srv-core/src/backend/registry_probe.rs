@@ -590,7 +590,7 @@ mod tests {
     }
 
     /// Hits the real registries. Run by hand:
-    /// `cargo test -p agentmux-srv --bin agentmux-srv -- --ignored probe_real`
+    /// `cargo test -p agentmux-srv-core --lib -- --ignored probe_real`
     #[tokio::test]
     #[ignore]
     async fn probe_real_registries() {

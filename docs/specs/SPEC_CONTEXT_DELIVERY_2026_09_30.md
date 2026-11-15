@@ -58,7 +58,7 @@ more places where a delivery still reads as something else (§9, C1–C3).
 - **Ambient** means one thing: **a model call AgentMux makes on its own**,
   not driven by the user. Titles, activity summaries, ghost text,
   narration and the running summary are all ambient calls. This is the
-  existing meaning (`crates/srv-core/src/ambient/mod.rs`, the AMC
+  existing meaning (`crates/srv/src/ambient/mod.rs`, the AMC
   framework). "Ambient" says **how** something was produced, never where
   it goes.
 - **Context delivery** (new) means **content the agent is given without
@@ -443,7 +443,7 @@ turn), not to the card.
 
 - **Reach the digest.** A card's frame and a hidden delivery's text are
   never read as user or assistant text by the digest, activity summary,
-  title or next-prompt readers (`crates/srv-core/src/ambient/digest.rs` skips
+  title or next-prompt readers (`crates/srv/src/ambient/digest.rs` skips
   `system` frames and hidden turns; `server/app_api/session.rs`). The
   catch-up turn's reply is the exception by design: it is the agent's
   own message.

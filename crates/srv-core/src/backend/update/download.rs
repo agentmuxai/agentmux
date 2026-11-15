@@ -820,7 +820,7 @@ mod tests {
     }
 
     /// The real thing, against a published release (125 MB; run by hand):
-    /// `cargo test -p agentmux-srv --bin agentmux-srv -- --ignored real_portable_release`.
+    /// `cargo test -p agentmux-srv-core --lib -- --ignored real_portable_release`.
     #[cfg(windows)]
     #[tokio::test]
     #[ignore]

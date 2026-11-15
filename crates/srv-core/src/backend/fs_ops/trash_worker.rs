@@ -319,7 +319,7 @@ mod tests {
     }
 
     /// Touches the real Recycle Bin / Trash, so it is opt-in:
-    /// `cargo test -p agentmux-srv trash_and_restore_round_trip -- --ignored`.
+    /// `cargo test -p agentmux-srv-core trash_and_restore_round_trip -- --ignored`.
     #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[tokio::test]
     #[ignore]

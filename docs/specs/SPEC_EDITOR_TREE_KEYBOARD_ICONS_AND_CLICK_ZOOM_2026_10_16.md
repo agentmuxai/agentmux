@@ -176,10 +176,10 @@ Today, in every case, the error ends up as a failed read string (`readeditorfile
 
 | File | Change |
 |---|---|
-| `crates/srv-core/src/backend/file_lock.rs` (new, Windows only; a stub elsewhere) | `classify(path, io::Error) -> Option<LockInfo>`; `holders(path) -> Vec<Holder { name, pid }>` through the Restart Manager; `write_blocked(path) -> bool`; `read_unlocked(path) -> (bytes, locked_ranges)` |
+| `crates/srv/src/backend/file_lock.rs` (new, Windows only; a stub elsewhere) | `classify(path, io::Error) -> Option<LockInfo>`; `holders(path) -> Vec<Holder { name, pid }>` through the Restart Manager; `write_blocked(path) -> bool`; `read_unlocked(path) -> (bytes, locked_ranges)` |
 | `crates/srv/src/server/editor_handlers.rs` | `readeditorfile` returns `read_only_reason: Option<ReadOnlyReason>` alongside the existing `read_only`; `writeeditorfile` maps 32 and 33 the same way |
-| `crates/srv-core/src/backend/editor_probe.rs` | A `locked` result for a probe that hits 32 or 33, so phase 1's viewer choice can still decide what to show |
-| `crates/srv-core/src/backend/rpc_types/editor_read.rs` and the generated TypeScript types | The new fields |
+| `crates/srv/src/backend/editor_probe.rs` | A `locked` result for a probe that hits 32 or 33, so phase 1's viewer choice can still decide what to show |
+| `crates/srv/src/backend/rpc_types/editor_read.rs` and the generated TypeScript types | The new fields |
 | `frontend/app/view/editor/` | The note bar (text and viewers), disabled save, *Check again* and *Try again*, re-check on window focus |
 
 The Restart Manager needs the `windows` crate's `Win32_System_RestartManager` feature; check whether srv already depends on `windows` and which features it enables.

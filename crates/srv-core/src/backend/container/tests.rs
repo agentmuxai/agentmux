@@ -270,7 +270,7 @@ fn test_parse_volume_spec_malformed() {
 /// Requires a reachable Docker daemon (Colima/Docker Desktop), so it is
 /// `#[ignore]` by default. Run with:
 ///   DOCKER_HOST=unix://$HOME/.colima/default/docker.sock \
-///     cargo test -p agentmux-srv -- --ignored --nocapture itest_container
+///     cargo test -p agentmux-srv-core -- --ignored --nocapture itest_container
 ///
 /// Validates the foundation Phase 2 rests on against a real daemon:
 /// `ensure_running` create→reuse, env delivered into the exec via the Docker
@@ -486,7 +486,7 @@ async fn itest_provision_cli_timeout_stops_the_install_before_returning() {
 /// (`docker tag <built-image> ghcr.io/agentmuxai/agent-base:latest`), so the
 /// fallback pull is satisfied locally, and network access so the legacy pull
 /// is really refused. Run with:
-///   cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_legacy_image_falls_back
+///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_legacy_image_falls_back
 #[tokio::test]
 #[ignore]
 async fn itest_legacy_image_falls_back_to_the_base_image() {
@@ -510,7 +510,7 @@ async fn itest_legacy_image_falls_back_to_the_base_image() {
 /// the binary. Needs a built base image, named by AGENTMUX_ITEST_BASE_IMAGE
 /// (`docker build -f docker/Dockerfile.agent-agentmux -t <tag> .`) and network
 /// access to npm. Run with:
-///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_provision_cli
+///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_provision_cli
 #[tokio::test]
 #[ignore]
 async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
@@ -570,7 +570,7 @@ async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
 /// named in AGENTMUX_ITEST_NON_NPM (comma separated, default `goose,aider`) into a container made from the real
 /// base image, checks the marker answers a second time, and runs `<cli> --version` the way a turn does. Needs the
 /// base image (AGENTMUX_ITEST_BASE_IMAGE) and network access to the vendors. Run with:
-///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_provision_non_npm
+///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_provision_non_npm
 #[tokio::test]
 #[ignore]
 async fn itest_provision_non_npm_clis_install_and_run() {
@@ -616,7 +616,7 @@ async fn itest_provision_non_npm_clis_install_and_run() {
 /// Docker-gated integration test for the dev-proxy network attachment
 /// added by docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
 /// Requires a reachable Docker daemon; `#[ignore]` by default. Run with:
-///   cargo test -p agentmux-srv -- --ignored --nocapture itest_dev_proxy
+///   cargo test -p agentmux-srv-core -- --ignored --nocapture itest_dev_proxy
 ///
 /// Confirms, against a REAL daemon (not a mock): `ensure_running`
 /// creates the shared `AGENTMUX_DOCKER_NETWORK` and attaches the

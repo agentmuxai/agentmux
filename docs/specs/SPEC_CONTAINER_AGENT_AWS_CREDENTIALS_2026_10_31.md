@@ -218,7 +218,7 @@ The grants for our own fleet (which cloud roles, accounts, escalation tiers and 
 
 Small PRs, in this order. Each is mergeable alone and does nothing visible until the last.
 
-1. **Policy + mint + cache + endpoint** (built): `crates/srv-core/src/identity/aws_broker/` (`policy.rs`, `mint.rs`, `cache.rs`), `server/app_api/aws_credentials.rs`, the route, `http_action_routes.rs`, the audit call; tests 1–3, 6, 7.
+1. **Policy + mint + cache + endpoint** (built): `crates/srv/src/identity/aws_broker/` (`policy.rs`, `mint.rs`, `cache.rs`), `server/app_api/aws_credentials.rs`, the route, `http_action_routes.rs`, the audit call; tests 1–3, 6, 7.
 2. **bashwrap `aws-credentials`** (`crates/bashwrap/src/aws.rs`, `main.rs`) and its tests (5) (built).
 3. **The container side** (built): the rendered config (`identity/aws_broker/container.rs`) and its mount (`container/mounts.rs`), the variables (`container_credential.rs`); test 4. The AWS CLI in the image and the host's CLIs (`identity/aws_broker/tools.rs`, mounted by `container/mounts.rs`) are built; the pane row (§9) is a follow-up.
 4. **Docs** (agentmux-docs: a "container agents and AWS" page: the policy file, the refusals, how to share a profile) and the live check (test 8).

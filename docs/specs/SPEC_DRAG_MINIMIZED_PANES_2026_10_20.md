@@ -18,7 +18,7 @@ Code read on main at 2026-10-20.
 
 - **The drag starts.** The whole-pane `draggable()` is registered on the pane header (`frontend/layout/lib/TileLayout.core.tsx`). A chip *is* its header, and `canDrag` only refuses ephemeral and maximized panes, so a chip can be picked up.
 - **The drop targets are offered.** `computeMoveNode` (`layoutTree.ts`) has no minimize check, so the drop indicators appear as for any pane.
-- **The drop is refused, silently.** `moveNode` rejects a source or destination that is effectively minimized (`layoutTree.ts`, "moveNode rejected: source or destination is minimize-locked", a console warning only), and so do `swapNode`, `resizeNode`, `splitHorizontal` and `splitVertical`. srv refuses the same intents (`crates/srv-core/src/backend/layout/intent.rs`: `move_node`, `swap_nodes`). The user sees the pane go back to where it was.
+- **The drop is refused, silently.** `moveNode` rejects a source or destination that is effectively minimized (`layoutTree.ts`, "moveNode rejected: source or destination is minimize-locked", a console warning only), and so do `swapNode`, `resizeNode`, `splitHorizontal` and `splitVertical`. srv refuses the same intents (`crates/srv/src/backend/layout/intent.rs`: `move_node`, `swap_nodes`). The user sees the pane go back to where it was.
 - **The ghost is the wrong size.** The tile keeps a rasterised ghost (`toPng` of its hidden `.tile-preview`, sized from the tile's rect by `computeDragPreviewSize`, cached with that size) and redraws it on a resting hover or on a press (`createDragPreviewIntent`). Redrawing is asynchronous (about 170 ms). A pane minimized since its last ghost still holds the full-size image, and a drag that starts before the new one is ready uses it: a ghost the size of the pane before it was minimized. `onGenerateDragPreview` uses whatever image is cached without comparing its size with the tile's size now. The same race exists for an expanded pane that was just resized, but the old and new sizes are usually close enough not to be noticed.
 
 **Why minimized panes were locked.** The lock comes from the July redesign (`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`), when minimizing still squeezed a pane's stored size and could dissolve a column into a neighbour: a moved or swapped chip carried a size that meant something else in its new parent. Since that spec's §8 minimize is a display mode: only the `minimized` flag is set, the stored `size` is untouched, and the chip's geometry is derived at render (`layoutGeometry.ts`). Moving a leaf with the flag set moves an ordinary leaf, so those reasons no longer apply to a chip as the thing being moved. They still apply to *splitting* a chip (a full pane would appear inside a header strip) and to *resizing* one.
@@ -57,7 +57,7 @@ Code read on main at 2026-10-20.
 
 - `frontend/layout/lib/TileLayout.core.tsx`: `onGenerateDragPreview` (header element for a chip; size check for every pane).
 - `frontend/layout/lib/layoutTree.ts`: `moveNode`, `swapNode`, `computeMoveNode` (the destination rule of 4, no indicator for a refused target).
-- `crates/srv-core/src/backend/layout/intent.rs`: `move_node`, `swap_nodes` (the same rules; srv stays the authority, `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`).
+- `crates/srv/src/backend/layout/intent.rs`: `move_node`, `swap_nodes` (the same rules; srv stays the authority, `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`).
 - `frontend/layout/lib/layoutIntentActions.ts` vectors and their Rust counterpart, so both sides agree case by case.
 - `frontend/layout/lib/crossTabDrag.ts` and the tear-off path: restore where §3 C says.
 - `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` I2: note that a minimized leaf may now be moved and swapped (still not split or resized).
@@ -71,7 +71,7 @@ Frontend (`frontend/layout/tests/`):
 4. The random layout stress test (local, `layoutStress.test.ts`) gains "move" and swap-with-a-chip steps; every step keeps the doctor clean and at least one pane expanded.
 5. Ghost: for a minimized tile `onGenerateDragPreview` passes the header element; for an expanded tile with a cached image of another size it passes the header element too, and with a matching size the cached image.
 
-srv (`crates/srv-core/src/backend/layout/`):
+srv (`crates/srv/src/backend/layout/`):
 6. `move_node` and `swap_nodes` with minimized sources, the same cases as 1 to 3, and the shared intent vectors pass on both sides.
 
 Cross-tab and tear-off:

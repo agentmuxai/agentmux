@@ -12,7 +12,7 @@
 - **README: about 55 of ~90 claims hold; the rest are stale or wrong.** The widget table is the most visible: it lists 9 of 22 widgets, three of its icon names are Font Awesome Pro names renamed in the move to Free (#4665), and "every widget is pinned by default" stopped being true when unpinned widgets arrived.
 - **File paths are now links.** A new script, [`scripts/link-md-paths.mjs`](../../scripts/link-md-paths.mjs), turns a backticked repo path into a relative link. This PR applies it to the top-level docs: 46 new links, 36 written by the script and 10 by hand in `README.md` (crate names, the jekt sources and specs, the CEF fork). It also widens [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs) from [`docs/`](..) to every tracked `.md`, so README links are checked too. About 11,100 more unlinked paths sit in [`docs/`](..) (8,100 in [`docs/specs/`](../specs)); those get their own PR so this one stays reviewable.
 
-## 2. Widgets (`crates/srv-core/src/config/widgets.json`)
+## 2. Widgets (`crates/srv/src/config/widgets.json`)
 
 How an icon renders: `makeIconClass()` in [`frontend/util/util.ts`](../../frontend/util/util.ts) turns `name`, `solid@name`, `regular@name` or `brands@name` into Font Awesome classes. Font Awesome Free 6.7.2 is vendored in [`public/fontawesome/`](../../public/fontawesome), and [`public/fontawesome/css/pro-icon-aliases.css`](../../public/fontawesome/css/pro-icon-aliases.css) maps every Pro-only name to a Free glyph, so an old name still renders, just not as its own icon.
 
@@ -44,7 +44,7 @@ The bar narrows in three steps ([`frontend/app/window/use-widget-bar-responsive.
 
 | README | Claim | What the code does |
 |---|---|---|
-| What AgentMux Does | Most CLIs run per turn via Subprocess/ACP; only Claude is persistent | ACP keeps one long-lived process ([`crates/srv-core/src/backend/blockcontroller/acp.rs`](../../crates/srv-core/src/backend/blockcontroller/acp.rs)). Copilot, OpenClaw and Pi are long-lived like Claude; Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity run per turn. |
+| What AgentMux Does | Most CLIs run per turn via Subprocess/ACP; only Claude is persistent | ACP keeps one long-lived process ([`crates/srv/src/backend/blockcontroller/acp.rs`](../../crates/srv/src/backend/blockcontroller/acp.rs)). Copilot, OpenClaw and Pi are long-lived like Claude; Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity run per turn. |
 | Accounts; Agent identity | Accounts swap without a restart | Binding an account restarts the agent ([`frontend/app/view/identity/bind-to-agent-menu.ts`](../../frontend/app/view/identity/bind-to-agent-menu.ts), `forcerestart: true`). |
 | How to rename an agent | Hover a card, click the pencil | No pencil on [`frontend/app/view/agent/components/AgentCard.tsx`](../../frontend/app/view/agent/components/AgentCard.tsx). Rename is in the My Agents row menu and on the pane tab. |
 | Agent identity (accounts) | A 👤 button on the agent card | No such button. Accounts are set in the Stash (Accounts tab) or in Connectors → Accounts. |
@@ -55,7 +55,7 @@ The bar narrows in three steps ([`frontend/app/window/use-widget-bar-responsive.
 
 ## 4. README claims that are out of date
 
-- **Providers:** ten, not eight; Mux Code and Antigravity are missing ([`crates/srv-core/src/backend/providers.rs`](../../crates/srv-core/src/backend/providers.rs)).
+- **Providers:** ten, not eight; Mux Code and Antigravity are missing ([`crates/srv/src/backend/providers.rs`](../../crates/srv/src/backend/providers.rs)).
 - **Crates:** eight, not five; [`crates/bashwrap`](../../crates/bashwrap), [`crates/mcp`](../../crates/mcp), [`crates/remote`](../../crates/remote) and [`crates/procstats`](../../crates/procstats) are not mentioned.
 - **Stash:** seven tabs (adds Registration and Devices), and it is a drawer under the pane header now, not a modal.
 - **Jekt marker:** carries `TO=`, `HELD_FOR=`, `INSTANCE=`, `SIG=`, `ESCALATE=` and `PRIORITY=` as well; the trust table lacks `wan-verified`, and `SIG=` is its own field, not a `TRUST=` value.

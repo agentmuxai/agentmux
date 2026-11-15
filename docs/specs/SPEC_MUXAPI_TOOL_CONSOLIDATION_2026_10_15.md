@@ -105,7 +105,7 @@ Model calls can only use tools that are listed, so an old name kept as an alias 
 
 | Reference | Where | What changes |
 |---|---|---|
-| The tool list every agent reads | `crates/srv-core/operator-config-seed.json`, the "MuxAPI" entry | the families and their actions |
+| The tool list every agent reads | `crates/srv/operator-config-seed.json`, the "MuxAPI" entry | the families and their actions |
 | Tool schemas and handlers | `crates/mcp/src/tool_schemas.rs`, `crates/mcp/src/tools/*` | one schema per family, an action router per family |
 | The agent pane's tool rows | `frontend/app/view/agent/tool-meta/*`, `components/tool-header*` | rows are labelled by family and action (`Browser · click`), not tool name |
 | Tips and help | `frontend/app/keybindings/tips.ts`, help pane | names |

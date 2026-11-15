@@ -448,7 +448,7 @@ mod tests {
     }
 
     /// Against a real daemon: a server is started for a container, and started again in a recreated one.
-    ///   cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_dev_keepalive
+    ///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_dev_keepalive
     #[tokio::test]
     #[ignore]
     async fn itest_dev_keepalive_starts_the_server_again_in_a_recreated_container() {

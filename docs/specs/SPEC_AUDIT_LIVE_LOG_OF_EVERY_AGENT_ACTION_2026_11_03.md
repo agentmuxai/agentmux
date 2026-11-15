@@ -3,7 +3,7 @@
 **Status:** active — approved by the operator 2026-11-03 (relayed by AgentY: "3 specs look good, go with recommendations"), so every open question in section 5 takes its recommendation. Task #21665; the build is #21666, in five PRs (section 4). PR 0 is the first.
 **Author:** Loap@narko, 2026-11-03.
 **Asked by the operator (2026-11-03):** "i often have the situation where there is a lot of activity, I hear the activity sounds, but I dont know where they are coming from. I thought that would be in the audit, which should show every agent action, right? we would want a live log of everything, we also want healthy use of links so we can directly access agents and even messages."
-**Related:** `crates/srv-core/src/backend/audit_query.rs`, `frontend/app/view/audit/`, `frontend/app/notification/sound/`, `SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md` §4, the "Links open in AgentMux" task #14995 (`agentmux://task/N`).
+**Related:** `crates/srv/src/backend/audit_query.rs`, `frontend/app/view/audit/`, `frontend/app/notification/sound/`, `SPEC_WARDEN_SPLIT_INTO_VAULT_HISTORY_AUDIT_2026_10_28.md` §4, the "Links open in AgentMux" task #14995 (`agentmux://task/N`).
 
 ## 1. In one paragraph
 

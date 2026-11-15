@@ -217,7 +217,7 @@ mod tests {
 }
 
 /// Live check against a real Docker daemon:
-///   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_cache_dirs
+///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_cache_dirs
 /// An image that names cache directories gets a labelled volume for each; the data survives the container being
 /// recreated (what an image update does); deleting the agent removes the container and the volumes.
 #[cfg(test)]

@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     /// Prints what detection makes of this machine. Run by hand:
-    /// `cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_what_this_machine_has`
+    /// `cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_what_this_machine_has`
     #[tokio::test]
     #[ignore = "reads this machine's real sockets"]
     async fn itest_what_this_machine_has() {

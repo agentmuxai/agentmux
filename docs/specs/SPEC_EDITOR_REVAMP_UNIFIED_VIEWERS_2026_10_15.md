@@ -78,8 +78,8 @@ PDF is phase 2, hex is phase 3, and large files are phase 4.
 - **Markdown preview** (`editor-view.tsx:1020-1034`, `:1141-1158`) renders `<Markdown>` with no `media` options. An image inside a previewed `.md` file therefore shows as the literal text `[img:src]` (`frontend/app/element/markdown-media.tsx:487-493`).
 - **File tree** (`editor-view.tsx:840-856`; actions at `editor-model.ts:1199-1303`): Open, Open to the Side, Open in New Tab, Copy Path, Copy Relative Path, Reveal in Explorer, Rename and Delete. Single-click opens a preview tab and double-click pins it (`editor-view.tsx:964-965`). There is no "Open with the system app".
 - **Drop** (`frontend/app/view/editor/editor-drop.ts:13-70`): image, PDF, Office, archive, audio and video names are refused while hovering ("The editor opens text files; … isn't one"). A pathless drop is capped at 10 MB and checked for NUL.
-- **Encodings** (`crates/srv-core/src/backend/text_encoding.rs:36-76`): BOM, then UTF-8, then `chardetng`, then `encoding_rs`. Phases 1–2 of the encodings spec are built. Phase 3 (the encoding chip and "Reopen with Encoding") is not. Saving is blocked when the decode needed replacement characters (`editor-model.ts:886-899`).
-- **Live reload** (`crates/srv-core/src/backend/editor_file_watcher.rs:38-40`, `editor:file_changed`, 300 ms debounce; RPCs at `crates/srv/src/server/editor_handlers.rs:157-198`; frontend at `editor-model.ts:217-224`, `:281-285`, `:737-788`): clean tabs reload and dirty tabs never do. SSH files are not watched.
+- **Encodings** (`crates/srv/src/backend/text_encoding.rs:36-76`): BOM, then UTF-8, then `chardetng`, then `encoding_rs`. Phases 1–2 of the encodings spec are built. Phase 3 (the encoding chip and "Reopen with Encoding") is not. Saving is blocked when the decode needed replacement characters (`editor-model.ts:886-899`).
+- **Live reload** (`crates/srv/src/backend/editor_file_watcher.rs:38-40`, `editor:file_changed`, 300 ms debounce; RPCs at `crates/srv/src/server/editor_handlers.rs:157-198`; frontend at `editor-model.ts:217-224`, `:281-285`, `:737-788`): clean tabs reload and dirty tabs never do. SSH files are not watched.
 
 ### 2.2 The Media pane: full inventory
 
@@ -88,7 +88,7 @@ Code: `frontend/app/view/media/`, about 1,940 lines including tests.
 | # | What it does | Where |
 |---|---|---|
 | M1 | Registered pane type `media`: label "Media", icon `photo-film`, hue 120; a split opens an empty Media pane | `media.tsx:37-54`, `:19-21`; registered at `frontend/app/block/block-registry.ts:19,52` |
-| M2 | Widget-bar entry `defwidget@media` (order 14, not pinned) | `crates/srv-core/src/config/widgets.json:228-239` |
+| M2 | Widget-bar entry `defwidget@media` (order 14, not pinned) | `crates/srv/src/config/widgets.json:228-239` |
 | M3 | Document tabs on the shared layer: payload `{path, blank?, file?}`, "New Tab" empty tab, strip always shown, Ctrl+T, drag between Media panes, `media:path` follows the front tab | `media-pane.tsx:47-170`, `:254-301`; `DOC_TAB_HOSTS = ["editor","media"]` at `frontend/app/keybindings/registry.ts:24` |
 | M4 | The `media:open` queue: clicks from elsewhere add tabs, drained once per request id | `media-pane.tsx:195-225`; writer `media-open.ts:50-64` |
 | M5 | Picks the Media pane on screen (focused, else visible, else any, including a background tab of a stack) and reveals it without moving focus | `media-open.ts:26-44`, `:61` (`showBlockWithoutFocus`) |
@@ -101,18 +101,18 @@ Code: `frontend/app/view/media/`, about 1,940 lines including tests.
 | M12 | **Video:** `<video controls>`, fades in on `loadeddata`; errors read the `MediaError` code ("MEDIA_ERR_SRC_NOT_SUPPORTED (likely a missing/disabled codec…)") | `media-view.tsx:469-478`; `describeMediaError` `local-media.ts:107-118` |
 | M13 | **Audio:** `<audio controls>`, 80% width, the same error path | `media-view.tsx:479-487` |
 | M14 | Fetches with the `X-AuthKey` header into a Blob object URL (an `<img src>` can't send the header); a fetch token drops superseded loads; the URL is revoked on swap and unmount | `media-view.tsx:328-370`; `fetchMediaBlob` `local-media.ts:120-169` |
-| M15 | **Follow the folder:** watches the file's directory, filtered to media extensions; a newer matching file replaces the tab's file, and its title follows; a revision counter forces a reload on an in-place overwrite | `media-view.tsx:185-236`; RPC `watchmediadir`/`unwatchmediadir` `crates/srv/src/server/editor_handlers.rs:200-235`; `crates/srv-core/src/backend/media_file_watcher.rs:37-39` (`media:file_changed`, 300 ms debounce) |
+| M15 | **Follow the folder:** watches the file's directory, filtered to media extensions; a newer matching file replaces the tab's file, and its title follows; a revision counter forces a reload on an in-place overwrite | `media-view.tsx:185-236`; RPC `watchmediadir`/`unwatchmediadir` `crates/srv/src/server/editor_handlers.rs:200-235`; `crates/srv/src/backend/media_file_watcher.rs:37-39` (`media:file_changed`, 300 ms debounce) |
 | M16 | Only the front tab is mounted, so a video behind it stops; switching back fetches again | `media-pane.tsx:264-297` |
 | M17 | Native "open file" picker filtered to media types (svg is missing from the filter); "Pick a different file" button; click the empty state to pick | `crates/cef/src/commands/platform.rs:1037-1062`; `media-view.tsx:246-253`, `:488-518` |
 | M18 | Drop: exactly one file, by name or MIME type; a pathless drop is shown from its bytes (no live updates, not restored after restart) | `media-drop.ts:36-69`; `media-view.tsx:255-269`, `:284-297`; `media-pane.tsx:155-164` |
 | M19 | Empty state with the faint logo and supported-types text | `media-view.tsx:488-498`; `media-pane.tsx:265-276`; `SPEC_MEDIA_PANE_EMPTY_LOGO_2026_10_12.md` |
 | M20 | MuxAPI `RunCommand` runs doc-tab actions | `media-pane.tsx:232-240` |
 | M21 | Shortcut tip "media:image" in the Help pane | `frontend/app/keybindings/tips.ts:322-330` |
-| M22 | Layout files export and import `media` with a `path` | `crates/srv-core/src/backend/layout_file.rs:512-516`, `:937-945` |
+| M22 | Layout files export and import `media` with a `path` | `crates/srv/src/backend/layout_file.rs:512-516`, `:937-945` |
 | M23 | `pane.open` builds `media:path`; refuses media on an SSH host | `crates/srv/src/server/app_api/pane.rs:271-276`, `:314-315` |
 | M24 | **`OpenMedia` MCP tool:** `file`, `title`, `split`, `floating`; always a **new** pane (no reuse), no extension check | schema `crates/mcp/src/tool_schemas.rs:853-866`; handler `crates/mcp/src/tools/panes.rs:98-~170` |
 | M25 | Other tools point agents at `OpenMedia` ("…or OpenMedia to show it to the user"): `UIScreenshot`, `CaptureWindow` | `crates/mcp/src/tool_schemas.rs:362`, `:692`; `crates/mcp/src/tools/ui.rs:32`; `crates/mcp/src/window_capture.rs:636` |
-| M26 | Operator Config text names the Media pane (rich output: "Clicking an image opens it in a Media pane"; MuxAPI tool list) | `crates/srv-core/operator-config-seed.json:7`, `:17` |
+| M26 | Operator Config text names the Media pane (rich output: "Clicking an image opens it in a Media pane"; MuxAPI tool list) | `crates/srv/operator-config-seed.json:7`, `:17` |
 
 **Related features that are not the Media pane but open it**:
 - Inline media in agent replies (`markdown-media.tsx`). `openInMediaPane` is at `:67-72` and is called from the image card (`:211`) and the media card (`:240`).
@@ -122,11 +122,11 @@ Code: `frontend/app/view/media/`, about 1,940 lines including tests.
 The inline player (`LocalAV`, `markdown-media.tsx:262-440`) is where the **poster frame**, the **muted start** and the **200 MB inline cap** live. Its poster comes from a 2 MB Range read through `fetchMediaRange` (`local-media.ts:171-199`). It stays in the agent pane; this spec changes only where its "open" click goes (§4.13). Its Range-read pattern is also what the Editor's video viewer adopts (§4.4.3).
 
 ### 2.3 How srv serves bytes
-- **`readeditorfile`** (`crates/srv/src/server/editor_handlers.rs:466-525`) reads the whole file and decodes it. It has no Range support and no binary check. It refuses files over 10 MB from the file's metadata (`:500`, "File too large (>10MB)"). The same cap applies over SSH (`crates/srv-core/src/backend/fs_ops/remote.rs:310-325`, `EDITOR_MAX`). `writeeditorfile` keeps the 10 MB cap and writes only under the home directory.
+- **`readeditorfile`** (`crates/srv/src/server/editor_handlers.rs:466-525`) reads the whole file and decodes it. It has no Range support and no binary check. It refuses files over 10 MB from the file's metadata (`:500`, "File too large (>10MB)"). The same cap applies over SSH (`crates/srv/src/backend/fs_ops/remote.rs:310-325`, `EDITOR_MAX`). `writeeditorfile` keeps the 10 MB cap and writes only under the home directory.
 - **`GET /agentmux/stream-local-file`** (route `crates/srv/src/server/routes.rs:207`; handler `crates/srv/src/server/files.rs:204-305`) streams the file asynchronously. The cap is `STREAM_LOCAL_FILE_MAX_BYTES = 500_000_000` (`files.rs:38`), and anything larger gets a 413. A **single `Range` gets a 206** (or a 416), via `parse_byte_range` (`:322-357`). CORS exposes `Content-Range`. The route needs `X-AuthKey`, so an element can't point at it directly (`SPEC_MEDIA_PANE_2026_07_26.md`, Post-implementation corrections).
 - **MIME** is a hand-written extension table (`mime_from_path`, `files.rs:171-190`): html, css, js, json, png, jpg, svg, gif, webp, webm, mp4, mov, wav and woff. **Anything else, including pdf, avif and mp3, is sent as `application/octet-stream`.**
 - A **content classifier already exists** but only the attachment pipeline uses it:
-  - `crates/srv-core/src/backend/attachments/kind.rs:222-300` (`classify`/`classify_bytes`) reads the first 8 KB and recognises images by magic bytes, HEIC/AVIF via `ftyp`, SVG, `%PDF-`, ZIP/OOXML/ODF, OLE2, RTF, the archive family, audio, video and MP4.
+  - `crates/srv/src/backend/attachments/kind.rs:222-300` (`classify`/`classify_bytes`) reads the first 8 KB and recognises images by magic bytes, HEIC/AVIF via `ftyp`, SVG, `%PDF-`, ZIP/OOXML/ODF, OLE2, RTF, the archive family, audio, video and MP4.
   - Its text test is "valid UTF-8 and no NUL" (`kind.rs:176-185`).
   - The image sniff is in `attachments/process.rs:42-76`.
   - srv already depends on `image` (with TIFF), `lopdf`, `zip`, `encoding_rs`, `chardetng` and `rusqlite` (`crates/srv/Cargo.toml:39,82-103`).
@@ -136,7 +136,7 @@ The inline player (`LocalAV`, `markdown-media.tsx:262-440`) is where the **poste
 - `docs/specs/cef-size-reduction.md:196,242,310` *proposes* `enable_pdf=false` to save 5–10 MB. Its status is "proposed".
 - **Browser panes render PDFs** with Chromium's viewer since #4938 (2026-10-14). `PDF_VIEWER_ORIGIN = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/"` is allowlisted for navigation (`crates/cef/src/commands/platform.rs:702-708`, checked at `:740`). `file:` is not an allowed scheme (`:687-700`).
 - Every browser in the app is **Alloy style**: the main window (`crates/cef/src/ui_tasks/window.rs:1731-1758`), browser panes (`crates/cef/src/browser_pane/creation.rs:225`) and floating panes (`crates/cef/src/floating_pane.rs:696`, `:930`). The app frontend is a page at `http://127.0.0.1:<port>`. srv is a different origin and is reached through CORS (`crates/cef/src/ipc.rs:66-100`).
-- No custom URL schemes are registered. **The main app has no CSP.** `index.html` has no CSP meta tag; the only CSP in the app is `WIDGET_CSP`, for sandboxed widgets (`crates/srv-core/src/backend/widget/packages.rs:1113-1115`).
+- No custom URL schemes are registered. **The main app has no CSP.** `index.html` has no CSP meta tag; the only CSP in the app is `WIDGET_CSP`, for sandboxed widgets (`crates/srv/src/backend/widget/packages.rs:1113-1115`).
 - **Not verified:** whether an `<iframe>` showing a `blob:` PDF inside the *main app page* would load Chromium's viewer. #4938 covered navigation in browser panes only.
 
 ### 2.5 Every way a file reaches a pane today
@@ -149,7 +149,7 @@ The inline player (`LocalAV`, `markdown-media.tsx:262-440`) is where the **poste
 | Drop on Editor / Media | name, then MIME | text only | one media file | — |
 | `OpenEditor` (MCP) | none | yes, reuses the Editor pane (`reuse_editor_pane: true`, `panes.rs:69`; `pane.rs:396`) | — | — |
 | `OpenMedia` (MCP) | none | — | yes, always a new pane | — |
-| `muxsh view` (`crates/srv-core/src/backend/shellintegration/muxsh.mjs:82-87`, `:152-158`) | its own list, including **`.pdf .bmp .ico .avi .mp3 .ogg .flac`** | everything else | yes, **but the pane can't show those seven** | — |
+| `muxsh view` (`crates/srv/src/backend/shellintegration/muxsh.mjs:82-87`, `:152-158`) | its own list, including **`.pdf .bmp .ico .avi .mp3 .ogg .flac`** | everything else | yes, **but the pane can't show those seven** | — |
 | Layout file import (`layout_file.rs:937`) | view in file | `editor` | `media` | — |
 
 ### 2.6 What happens today, per file type
@@ -718,9 +718,9 @@ Tests:
 - **Editor:** `frontend/app/view/editor/editor.tsx`, `editor-model.ts` (open path 535–626; sniff 1437–1457; languages 1466–1513; reload 217–224, 281–285, 737–788), `editor-view.tsx` (languages 50–88; error panel 1046–1062; preview 1020–1034, 1141–1158; tree menu 840–856), `editor-drop.ts`, `package.json:81-106`
 - **Media:** `frontend/app/view/media/media.tsx`, `media-pane.tsx`, `media-view.tsx`, `media-zoom.ts`, `media-view.scss`, `media-drop.ts`, `media-open.ts`; `frontend/app/element/local-media.ts`; `frontend/app/element/markdown-media.tsx`; `frontend/app/view/agent/components/ResultImages.tsx`
 - **Routing:** `frontend/app/view/files/files-open.ts`, `files-view.tsx:373-396`; `frontend/app/block/block-registry.ts`; `frontend/app/store/pane-tab-registry.ts:144-219`; `frontend/app/keybindings/registry.ts:24`, `tips.ts:322-330`
-- **srv:** `crates/srv/src/server/editor_handlers.rs` (157–235, 466–615), `crates/srv/src/server/files.rs` (38, 171–190, 204–357), `crates/srv/src/server/routes.rs:51-88,205-207`, `crates/srv/src/server/app_api/pane.rs` (223–321, 367, 396, 1042), `crates/srv-core/src/backend/attachments/kind.rs`, `attachments/process.rs:34-76`, `crates/srv-core/src/backend/text_encoding.rs`, `editor_file_watcher.rs`, `media_file_watcher.rs`, `layout_file.rs:505-516,930-945`, `fs_ops/remote.rs:310-325`, `config/widgets.json:228-239`, `operator-config-seed.json`, `backend/shellintegration/muxsh.mjs:82-158`, `crates/srv/Cargo.toml:39,82-103`
+- **srv:** `crates/srv/src/server/editor_handlers.rs` (157–235, 466–615), `crates/srv/src/server/files.rs` (38, 171–190, 204–357), `crates/srv/src/server/routes.rs:51-88,205-207`, `crates/srv/src/server/app_api/pane.rs` (223–321, 367, 396, 1042), `crates/srv/src/backend/attachments/kind.rs`, `attachments/process.rs:34-76`, `crates/srv/src/backend/text_encoding.rs`, `editor_file_watcher.rs`, `media_file_watcher.rs`, `layout_file.rs:505-516,930-945`, `fs_ops/remote.rs:310-325`, `config/widgets.json:228-239`, `operator-config-seed.json`, `backend/shellintegration/muxsh.mjs:82-158`, `crates/srv/Cargo.toml:39,82-103`
 - **MCP:** `crates/mcp/src/tool_schemas.rs:362,692,836-866`, `crates/mcp/src/tools/panes.rs:11-170`, `tools/ui.rs:32`, `window_capture.rs:636`
-- **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv-core/src/backend/widget/packages.rs:1113-1115`; commit #4938
+- **CEF:** `crates/cef/src/commands/platform.rs:687-740,1037-1062`, `crates/cef/src/app/mod.rs:572-1095`, `ui_tasks/window.rs:1731-1758`, `browser_pane/creation.rs:225`, `floating_pane.rs:696,930`, `ipc.rs:66-100`; `scripts/cef-build/args.gn`, `args-windows.gn`, `args-darwin.gn`; `crates/srv/src/backend/widget/packages.rs:1113-1115`; commit #4938
 - **Docs:** the specs listed under "Builds on"; `docs/specs/cef-size-reduction.md`; `docs/reports/REPORT_CEF_PROPRIETARY_CODEC_GAP_2026_07_26.md`; `docs/MUXSH.md`; `docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md`
 
 ### Web (retrieved 2026-10-15)
@@ -796,7 +796,7 @@ Built as §6 phase 1 describes, with these differences:
 
 1. **The Media pane's code is deleted now, not in release N+1** (§4.12.3, §4.13). Once nothing registered or opened it, CI's unused-file check (knip) failed on it. Its behaviour lives on in the Editor; the `media` view alias, the saved-block migration (`frontend/app/view/editor/media-migration.ts`), the `OpenMedia` alias and the layout-file import stay, as planned.
 2. **The native "open file" dialog has no filter at all** (M17). It was only ever the Media pane's; the one other caller (Settings → Widgets, picking a `widget.json`) was being shown a media-only filter.
-3. **`fileprobe` is registered next to the Files pane's `fs.*` commands** (`register_fs_handlers`), with its handler in `crates/srv-core/src/backend/editor_probe.rs`, so the editor's handler file doesn't grow past its size ratchet.
+3. **`fileprobe` is registered next to the Files pane's `fs.*` commands** (`register_fs_handlers`), with its handler in `crates/srv/src/backend/editor_probe.rs`, so the editor's handler file doesn't grow past its size ratchet.
 4. **The probe returns `image` for every format Chromium decodes** (PNG, JPEG, GIF, WebP, AVIF, APNG, BMP, ICO) and `image_file` for TIFF, HEIC and JPEG XL, which get the info card until phase 5's converter.
 5. **The viewer bar holds its own controls** (fit, 100%, background; the viewer switch; follow folder; reveal; open with the system's app; the file's facts). The markdown Preview/Source/Split switch stays where it was.
 6. **A dropped file with no host path** opens from its bytes in the image or media viewer (else the info card) under a session-only tab path; after a restart its tab says to drop it again, as the Media pane's did.

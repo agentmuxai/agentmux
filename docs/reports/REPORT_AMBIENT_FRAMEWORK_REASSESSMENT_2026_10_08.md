@@ -378,7 +378,7 @@ PR 1 is small and stands alone. PRs 2 and 3 can run in parallel. PR 4 should fol
 ## 9. Method
 
 - **Read in full:**
-  - [`crates/srv-core/src/ambient/`](../../crates/srv-core/src/ambient) (`mod.rs`, `purpose.rs`, `call.rs`, `cli.rs`, `prompt.rs`, `validate.rs`, `outcome.rs`, `digest.rs`, `tasks.rs`, the start of `sanitize.rs`, `limits.rs`);
+  - [`crates/srv/src/ambient/`](../../crates/srv/src/ambient) (`mod.rs`, `purpose.rs`, `call.rs`, `cli.rs`, `prompt.rs`, `validate.rs`, `outcome.rs`, `digest.rs`, `tasks.rs`, the start of `sanitize.rs`, `limits.rs`);
   - the two pull handlers in `server/app_api/session.rs`;
   - `backend/continuity_state.rs` (the call path);
   - `backend/reactive/activity_watcher.rs`;

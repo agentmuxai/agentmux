@@ -40,7 +40,7 @@ Not found and so not claimed: any mainstream app with a user-visible bandwidth o
 
 ## 3. Today's AgentMux: click count, measured from the code
 
-There is **no automatic check at all**. The 0.59.32 srv checked 60 s after start and every 6 h (`app:updatecheck`); the operator's 2026-10-18 decision removed it, and `check.rs::init` now "Asks nothing". `check_now` runs only when asked (30 s rate limit, unauthenticated GitHub `releases/latest`). Flow per `SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.1 and the code (`frontend/app/statusbar/MaintenanceSection.tsx`, `UpdateStatus.tsx`, `crates/srv-core/src/backend/update/{check,download,install,restart}.rs`, `crates/launcher/src/upgrade_{restart,macos,linux,package}.rs`):
+There is **no automatic check at all**. The 0.59.32 srv checked 60 s after start and every 6 h (`app:updatecheck`); the operator's 2026-10-18 decision removed it, and `check.rs::init` now "Asks nothing". `check_now` runs only when asked (30 s rate limit, unauthenticated GitHub `releases/latest`). Flow per `SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.1 and the code (`frontend/app/statusbar/MaintenanceSection.tsx`, `UpdateStatus.tsx`, `crates/srv/src/backend/update/{check,download,install,restart}.rs`, `crates/launcher/src/upgrade_{restart,macos,linux,package}.rs`):
 
 | Install kind | Clicks from "release is out" to running | Steps |
 |---|---|---|

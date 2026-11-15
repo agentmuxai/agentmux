@@ -346,7 +346,7 @@ mod tests {
     }
 
     /// Manual: prints what the firewall reader sees, so the verdict can be
-    /// compared with the real machine. `cargo test -p agentmux-srv -- --ignored --nocapture reads_and_reports`
+    /// compared with the real machine. `cargo test -p agentmux-srv-core -- --ignored --nocapture reads_and_reports`
     #[test]
     #[ignore = "reads the real firewall; run by hand"]
     fn reads_and_reports() {

@@ -39,7 +39,7 @@ The `PreCompact` hook (already wired by AgentMux, `agent_config.rs`) gives the s
 The **stdout** `compact_boundary` frame uses snake_case, `compact_metadata` with `pre_tokens`, `post_tokens`, `cumulative_dropped_tokens`, `duration_ms`, and has **no `timestamp`**. The **transcript** (`~/.claude/projects/**.jsonl`) entry for the same boundary uses camelCase, `compactMetadata` with `preTokens`, `durationMs`, **has** a `timestamp`, and carries the same `uuid`.
 
 Both live parsers read only the camelCase form:
-- [`crates/srv-core/src/agents/translator/claude.rs`](../../crates/srv-core/src/agents/translator/claude.rs) `handle_system_message`: `frame.get("compactMetadata")`.
+- [`crates/srv/src/agents/translator/claude.rs`](../../crates/srv/src/agents/translator/claude.rs) `handle_system_message`: `frame.get("compactMetadata")`.
 - [`frontend/app/view/agent/compact-boundary.ts`](../../frontend/app/view/agent/compact-boundary.ts) `parseCompactBoundaryFrame`: `e.compactMetadata`.
 
 The unit tests use camelCase fixtures, copied from the transcript (the old spec's "live evidence" was a `.jsonl` file). AgentMux's own stored agent output (the `output` blockfiles in `filestore.db`, 0.59.1) contains the stdout form: 3 snake_case boundary lines. (The one camelCase hit in that store is prose in an agent's message quoting this spec, not a frame.) [verified by grep; not watched live in a pane]

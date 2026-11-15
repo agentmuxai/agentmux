@@ -87,7 +87,7 @@ fn restore_mode_puts_the_backup_back_only_while_nothing_changed() {
 
 /// Writes the fixture home to `SLUG_MIGRATION_FIXTURE_OUT`, for a live run of
 /// the real binary against a copy of it (`agentmux-srv migrate-fork-slugs`
-/// with `AGENTMUX_HOME_OVERRIDE`). Run by hand: `cargo test -p agentmux-srv
+/// with `AGENTMUX_HOME_OVERRIDE`). Run by hand: `cargo test -p agentmux-srv-core
 /// write_the_fixture_home -- --ignored`.
 #[test]
 #[ignore]

@@ -56,7 +56,7 @@ Two more facts from the same code:
 
 ### 1.4 The toast
 
-- Policy (`crates/srv-core/src/backend/notify/policy.rs`): `ShutdownPending` is Attention priority, delay 0, and exempt from pause, quiet hours and the rate limits ("the only warning that an agent stops in 15 s"). `should_show` suppresses it when the user is looking at that exact block (the banner is visible there), and otherwise shows it even when the app is focused, because Attention passes the unfocused rule. The title is `"{agent} will shut down in 15 s"`.
+- Policy (`crates/srv/src/backend/notify/policy.rs`): `ShutdownPending` is Attention priority, delay 0, and exempt from pause, quiet hours and the rate limits ("the only warning that an agent stops in 15 s"). `should_show` suppresses it when the user is looking at that exact block (the banner is visible there), and otherwise shows it even when the app is focused, because Attention passes the unfocused rule. The title is `"{agent} will shut down in 15 s"`.
 - Router (`router.rs`): `emit_fixed` builds the request. `ack(id, clicked)` retracts the toast and, for a click, publishes `notification:activate` so the window selects the pane. Nothing reads which button was pressed, because there are no buttons.
 - Launcher (`crates/launcher/src/notify/`): `Notification` has `id, kind, priority, title, body, summary, tag`. `UserAction` is `Clicked` or `Dismissed`. The Windows toast skeleton is constant, with text inserted by `CreateTextNode` and `launch="agentmux-notify:<id>"`; the `Activated` handler ignores its arguments and uses the id its closure captured. The Linux backend sends one action, `default`. There is no macOS backend: `NullPresenter` logs and drops (`mod.rs`).
 - The banner (`frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx`) counts down every 250 ms from `deadline_ms` and calls `AgentShutdownKeepCommand`.
@@ -244,7 +244,7 @@ Linux: the same checks 3, 4 and the no-actions fallback, by the Linux tester on 
 
 - **Two PRs (build #1705)**, in agentmux, so each is reviewable. **PR 1** carries this spec and the contract: srv (`CloseTab`, the `Stop pane` refusal, the reason cleaning, `effect`), mcp, the banner wording and the Operator Config entry. **PR 2** is the toast: the payload fields, `Keep running`, the Windows countdown and the Linux button. PR 2 needs PR 1's `effect` and cleaned reason. They ship in one install, so version skew exists only between a dev build and an older peer instance on the same machine, which section 3.1 handles for cross-channel targets.
 - **Changeset:** `minor`, because the tool contract changes (`pane` refuses what it accepted, `agents` closes, two parameters leave).
-- **Operator Config and docs.** The MuxAPI entry in `crates/srv-core/operator-config-seed.json` describes `Stop` and is delivered to agents at launch; it changes in the same PR (`agents` closes, `pane` is for non-agent panes). The agentmux-docs page for the Stop tool gets its own PR with its own changeset; it is not part of this one.
+- **Operator Config and docs.** The MuxAPI entry in `crates/srv/operator-config-seed.json` describes `Stop` and is delivered to agents at launch; it changes in the same PR (`agents` closes, `pane` is for non-agent panes). The agentmux-docs page for the Stop tool gets its own PR with its own changeset; it is not part of this one.
 - **Order inside the PR:** srv first (action, `CloseTab`, the refusal, the payload fields), then mcp, then launcher and frontend. The notification fields are optional in both directions, so each layer works with the old other layer: an old launcher ignores `actions` and `countdown_ms` and shows today's toast; an old srv sends neither and the new launcher shows no button.
 - **Rollback:** reverting the PR restores today's behaviour; no data or settings migrate.
 - **Not in the PR:** a macOS backend; grouping toasts (Q4); a follow-up toast for a too-late Keep (Q7).
@@ -275,11 +275,11 @@ Linux: the same checks 3, 4 and the no-actions fallback, by the Linux tester on 
 - `crates/srv/src/server/ui_shortcuts.rs`: `pane:close` through `close_pane_as`.
 - `crates/srv/src/sagas/self_quit.rs`, `delete_block.rs`, `close_pane.rs`, `agent_teardown.rs` (`Policy::quit`, `Policy::stop`, `Policy::close`), `orphan_reaper.rs` (`Unplaced::is_agent`).
 - `crates/srv/src/server/agent_handlers/fork_slugs.rs`: the migration's use of the stop-and-keep path.
-- `crates/srv-core/src/backend/notify/policy.rs` (kinds, titles, `should_show`, `paused`, `rate_limited`, `Ack`), `router.rs` (`emit_fixed`, `ack`, `block_labels`, `sanitize_name`, `redact_body`), `crates/srv/src/server/notify_handlers.rs` (`notify.ack`).
+- `crates/srv/src/backend/notify/policy.rs` (kinds, titles, `should_show`, `paused`, `rate_limited`, `Ack`), `router.rs` (`emit_fixed`, `ack`, `block_labels`, `sanitize_name`, `redact_body`), `crates/srv/src/server/notify_handlers.rs` (`notify.ack`).
 - `crates/mcp/src/tools/stop_tool.rs`, `tools/fleet.rs` (the `FleetBulkStop` branch), `tool_helpers.rs` (`public_stop`, `close_pane_outcome`, `merge_bulk_stop_outcomes`), `tool_schemas.rs` (`STOP_TOOL`).
 - `crates/launcher/src/notify/mod.rs` (`Notification`, `UserAction`, `Presenter`, `session`, `carry_out_click`, `NullPresenter`), `windows.rs` (`build_xml`, `show`, the `Activated` and `Dismissed` handlers), `linux.rs` (`Notify` actions, `ActionInvoked`).
 - `frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx` and `shutdown-pending.ts`; `frontend/app/window/window-close.ts` (the wording and setting AgentX pointed at).
-- `crates/srv-core/operator-config-seed.json` (the `Stop` description agents receive).
+- `crates/srv/operator-config-seed.json` (the `Stop` description agents receive).
 - `docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md` (sections 0.1, 6.5, 12.4) and the git history for #5071 (`0954231dd`, the one-tab close fix).
 
 I did not build or run anything. The Windows behaviours in 3.8 (the reminder scenario, once-a-second updates, button activation for an unpackaged app) are from the platform's documented API and the existing code, and are the first things section 4's live test confirms.

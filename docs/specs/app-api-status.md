@@ -21,10 +21,10 @@ surfaces. Both, as built:
 | Tier 4: terminals | HTTP only: `/api/v1/shell/*` and `/api/v1/ptyshell/*`. | [`server/routes.rs`](../../crates/srv/src/server/routes.rs) |
 | Phase 3: HTTP gateway | Built: about 100 auth-gated `/api/v1/*` routes. No single reference doc yet; the shell helpers' docs cover the common ones ([docs/MUXSH.md](../MUXSH.md)). | [`server/routes.rs`](../../crates/srv/src/server/routes.rs) |
 | Phase 4: MCP | Built: `agentmux-mcp`, 95 tools, added to every agent's MCP config. | [`crates/mcp/src/tools/`](../../crates/mcp/src/tools) |
-| CLI wrapper | Built as shell helpers, not one binary: `muxsh`, `muxopen`, `muxspect`, `muxlog`. | [`crates/srv-core/src/backend/shellintegration/`](../../crates/srv-core/src/backend/shellintegration) |
+| CLI wrapper | Built as shell helpers, not one binary: `muxsh`, `muxopen`, `muxspect`, `muxlog`. | [`crates/srv/src/backend/shellintegration/`](../../crates/srv/src/backend/shellintegration) |
 
 The WebSocket RPC catalog has 250 commands
-([`rpc_types/commands.rs`](../../crates/srv-core/src/backend/rpc_types/commands.rs)):
+([`rpc_types/commands.rs`](../../crates/srv/src/backend/rpc_types/commands.rs)):
 about 145 flat names from the Wave era, plus dotted namespaces (`agent.*`,
 `skill`, `mcp`, `bundle`, `fleet`, `viewer`, `tower`, `identity`, `account`,
 `layout`, `memory`, `pane`, …) and colon-style session and memory commands
@@ -40,7 +40,7 @@ Changed since the snapshot below:
   key, peer routes only) and a TLS listener for paired devices.
 - **CLI auto-install** is fixed (2026-10): `agent.open` returns
   `CLI_INSTALLING` while it installs, `CLI_NOT_AVAILABLE` if it can't.
-- **Providers:** ten, not three; see [`crates/srv-core/src/backend/providers.rs`](../../crates/srv-core/src/backend/providers.rs).
+- **Providers:** ten, not three; see [`crates/srv/src/backend/providers.rs`](../../crates/srv/src/backend/providers.rs).
 - **Files:** everything moved under [`crates/`](../../crates); `app_api` and `rpc_types` are
   directories now.
 

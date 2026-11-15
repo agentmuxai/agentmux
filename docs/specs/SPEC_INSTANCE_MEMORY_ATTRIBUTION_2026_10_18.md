@@ -25,7 +25,7 @@ With two AgentMux instances running, a stable install beside a `task dev` build,
 
 ## 3. Design
 
-- **`crates/srv-core/src/backend/own_instance.rs`** (not platform-specific): `own_instance_pids(nodes, self_pid)` is a pure function over a process table (`pid`, `parent`, `is_agentmux`). The upward walk is bounded by a seen set, because a parent link can be stale (a parent that exited and whose pid was reused) and loop. Returns an empty set when `self_pid` isn't in the table.
+- **`crates/srv/src/backend/own_instance.rs`** (not platform-specific): `own_instance_pids(nodes, self_pid)` is a pure function over a process table (`pid`, `parent`, `is_agentmux`). The upward walk is bounded by a seen set, because a parent link can be stale (a parent that exited and whose pid was reused) and loop. Returns an empty set when `self_pid` isn't in the table.
 - **Stale parent links:** on Windows a process's recorded parent is never updated and can name a newer process that reused the parent's pid, so a link is trusted only when the named parent could be the parent: it did not start later than the child (the rule `agentmux_procstats::ProcInfo::is_child_of` uses). Each row carries its start time (`started_at_ms`); an unknown start time trusts the pid. Both the walk up from srv and the walk down are held to it, so a reused pid cannot carry the walk into another instance.
 - **`sysinfo.rs` (Windows):** `log_memory_attribution` builds the table from the process list it already has (names and `parent()`, both always available), calls the function with `std::process::id()`, and sets a new `own` flag on each `ProcSample`; `classify_commit_attribution` counts `own && name starts with "agentmux"` in `agentmux_mb`.
 - Nothing else reads `agentmux_mb` (it is a log field).

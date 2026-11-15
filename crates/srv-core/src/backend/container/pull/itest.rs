@@ -1,5 +1,5 @@
 //! Live check of the version-pinned base image against a real Docker daemon and ghcr.io:
-//!   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_version_tag
+//!   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_version_tag
 //!
 //! Pulls the base image, so it needs network access and some disk.
 

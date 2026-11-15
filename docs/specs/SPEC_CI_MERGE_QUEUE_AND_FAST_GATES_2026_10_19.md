@@ -15,7 +15,7 @@ The owner, 2026-10-19, after main went red: "the file size check should be broug
 Every push to main from `7d8ce7111` (#5116) on failed `doc status + grep gates`, including the v0.59.33 release commit `4c16363db`:
 
 ```
-crates/srv-core/src/backend/history/mod.rs: 1900 lines, allowed 1899 (+1)
+crates/srv/src/backend/history/mod.rs: 1900 lines, allowed 1899 (+1)
 ```
 
 - #5115 added a line to `history/mod.rs` and raised its baseline from 1898 to 1899.

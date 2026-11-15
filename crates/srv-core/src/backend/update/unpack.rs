@@ -169,7 +169,7 @@ mod tests {
     }
 
     /// The real release, by hand: `AGENTMUX_TEST_PORTABLE_7Z=<agentmux-X-x64-portable.7z>
-    /// AGENTMUX_TEST_PORTABLE_VERSION=X cargo test -p agentmux-srv real_release -- --ignored`.
+    /// AGENTMUX_TEST_PORTABLE_VERSION=X cargo test -p agentmux-srv-core real_release -- --ignored`.
     #[test]
     #[ignore]
     fn a_real_release_unpacks_into_a_staged_portable() {

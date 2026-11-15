@@ -17,7 +17,7 @@ tracking issue #3338, PR #4428 (graceful window close / app quit).
 
 - **Linux and macOS have no process tracker.** `process_tracker::new_tracker`
   returns `StubTracker` on every non-Windows OS
-  ([`crates/srv-core/src/backend/process_tracker/mod.rs:197-201`](../../crates/srv-core/src/backend/process_tracker/mod.rs)): it lists nothing,
+  ([`crates/srv/src/backend/process_tracker/mod.rs:197-201`](../../crates/srv/src/backend/process_tracker/mod.rs)): it lists nothing,
   kills nothing, and reports confidence `none`. The teardown, the close dialog,
   the Processes panel and the `agent.kill-tree` RPC all sit on top of it.
 - **So on Linux and macOS, ending an agent ends only its CLI.** Close, `/quit`

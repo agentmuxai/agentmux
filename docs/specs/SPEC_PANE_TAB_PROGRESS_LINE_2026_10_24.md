@@ -153,7 +153,7 @@ Unit and component tests (jsdom), each written to fail without its change:
 
 ## 6. Files the build touches
 
-- `frontend/app/store/pane-tab-progress.ts` (new) and its test; `test/fixtures/agent-state-decide.json` (new); a test in `crates/srv-core/src/backend/agent_state.rs` that reads it.
+- `frontend/app/store/pane-tab-progress.ts` (new) and its test; `test/fixtures/agent-state-decide.json` (new); a test in `crates/srv/src/backend/agent_state.rs` that reads it.
 - `frontend/app/element/PaneTabStrip.tsx`, `PaneTabStrip.scss`: the child element, the classes, `aria-busy`; a `getProgress` callback prop and a `collapsed` prop, passed through `PaneHeaderTabStrip.tsx`.
 - `frontend/app/element/PaneChrome.tsx`: passes `getProgress` (from the store), `collapsed`, and the tooltip line.
 - `frontend/app/element/PaneChrome.scss` (or `tilelayout.scss`): the collapsed pane hides the border slot.

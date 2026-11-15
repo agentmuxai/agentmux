@@ -77,7 +77,7 @@ and the latest time.
 ### 4.2 Where it is stored
 
 Two tables in the **channel store** (`objects.db`), next to `db_agents`,
-keyed by agent id (`crates/srv-core/src/backend/storage/agent_input_history.rs`).
+keyed by agent id (`crates/srv/src/backend/storage/agent_input_history.rs`).
 Additive and applied on every open, like `db_agent_bundles`, so no schema
 version bump; no foreign key, also like it: an agent's rows go with it in
 `purge_agent_dependents`.

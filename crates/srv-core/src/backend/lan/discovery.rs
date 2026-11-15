@@ -2397,7 +2397,7 @@ mod tests {
     /// check that would have failed on Area54. Manual, like the neighbouring
     /// test, for the same reason (CI has no reliable multicast).
     #[tokio::test]
-    #[ignore = "real multicast: run by hand, e.g. `cargo test -p agentmux-srv -- --ignored a_started_instance_reports_itself_healthy`"]
+    #[ignore = "real multicast: run by hand, e.g. `cargo test -p agentmux-srv-core -- --ignored a_started_instance_reports_itself_healthy`"]
     async fn a_started_instance_reports_itself_healthy() {
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let discovery = LanDiscovery::start(

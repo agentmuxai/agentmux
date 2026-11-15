@@ -22,11 +22,11 @@ Each finding this report leans on was then read in the code by hand; §8 lists t
 | promotion clock | `frontend/app/view/agent/activity/promotion-clock.ts` | one-shot wake at the next due time | 2 instances per agent pane |
 | `stream-scheduler` | `frontend/app/view/agent/stream-scheduler.ts` | rAF coalescing, aware of user input | 3 |
 | `createDebouncedRefresh` | `frontend/app/view/agent/activity/debounced-refresh.ts` | debounce | 2 (about 25 hand-written debounces exist beside it) |
-| lease scheduler | `crates/srv-core/src/backend/sampler/schedule.rs` | pure, fake-clock, "nothing runs unless someone holds a lease" | sysinfo only |
-| `RefreshScheduler` | `crates/srv-core/src/broker/scheduler.rs` | single-flight credential refresh sweep | the MuxBus credential only |
-| cron scheduler | `crates/srv-core/src/backend/cron/` | persisted user schedules | the Schedule tool |
+| lease scheduler | `crates/srv/src/backend/sampler/schedule.rs` | pure, fake-clock, "nothing runs unless someone holds a lease" | sysinfo only |
+| `RefreshScheduler` | `crates/srv/src/broker/scheduler.rs` | single-flight credential refresh sweep | the MuxBus credential only |
+| cron scheduler | `crates/srv/src/backend/cron/` | persisted user schedules | the Schedule tool |
 | `agentmux_common::time` + `scripts/check-time-helpers.mjs` | `crates/common/src/time.rs` | wall-clock `now_ms`, enforced by a CI gate | all Rust crates |
-| `user_attention::Asking` | `crates/srv-core/src/backend/user_attention.rs` | "this pane is waiting on you" | browser attention, SSH consent, widget install |
+| `user_attention::Asking` | `crates/srv/src/backend/user_attention.rs` | "this pane is waiting on you" | browser attention, SSH consent, widget install |
 
 The pieces don't add up to a system. The counts:
 - **About 40 srv background loops run for the life of the process**, each its own `tokio::spawn` with its own `interval` or `sleep`. More run per agent, per job and per connection.

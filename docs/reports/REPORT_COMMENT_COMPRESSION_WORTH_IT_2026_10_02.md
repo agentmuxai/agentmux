@@ -297,21 +297,21 @@ Comment tokens are chars / 4. "Marker lines" are lines matching a review-history
 
 | File | Lines | Comment lines | Line ratio | Comment tok | Comment share of chars | Marker lines |
 |---|---:|---:|---:|---:|---:|---:|
-| `crates/srv-core/src/backend/storage/agents.rs` | 3,846 | 1,405 | 37% | ~21k | 45% | 46 |
+| `crates/srv/src/backend/storage/agents.rs` | 3,846 | 1,405 | 37% | ~21k | 45% | 46 |
 | [`crates/bashwrap/src/bash_wrap.rs`](../../crates/bashwrap/src/bash_wrap.rs) | 3,627 | 1,341 | 37% | ~20.3k | 48% | 31 |
 | [`frontend/app/view/agent/hooks/useAgentCommands.ts`](../../frontend/app/view/agent/hooks/useAgentCommands.ts) | 1,927 | 1,310 | 68% | ~18.4k | 67% | 111 |
-| [`crates/srv-core/src/backend/storage/migrations.rs`](../../crates/srv-core/src/backend/storage/migrations.rs) | 3,032 | 993 | 33% | ~16k | 40% | 16 |
-| [`crates/srv-core/src/backend/lan/discovery.rs`](../../crates/srv-core/src/backend/lan/discovery.rs) | 3,088 | 972 | 31% | ~15.1k | 42% | 20 |
+| [`crates/srv/src/backend/storage/migrations.rs`](../../crates/srv/src/backend/storage/migrations.rs) | 3,032 | 993 | 33% | ~16k | 40% | 16 |
+| [`crates/srv/src/backend/lan/discovery.rs`](../../crates/srv/src/backend/lan/discovery.rs) | 3,088 | 972 | 31% | ~15.1k | 42% | 20 |
 | [`crates/srv/src/server/reactive.rs`](../../crates/srv/src/server/reactive.rs) | 2,766 | 958 | 35% | ~15k | 47% | 33 |
-| [`crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs`](../../crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs) | 2,829 | 996 | 35% | ~14.8k | 42% | 30 |
+| [`crates/srv/src/backend/blockcontroller/shell/lifecycle.rs`](../../crates/srv/src/backend/blockcontroller/shell/lifecycle.rs) | 2,829 | 996 | 35% | ~14.8k | 42% | 30 |
 | [`crates/common/src/ipc.rs`](../../crates/common/src/ipc.rs) | 2,269 | 1,055 | 46% | ~14.3k | 60% | 11 |
 | [`frontend/app/view/agent/components/AgentComposerStrip.tsx`](../../frontend/app/view/agent/components/AgentComposerStrip.tsx) | 1,529 | 930 | 61% | ~14.2k | 65% | 28 |
 | [`crates/cef/src/commands/window_pool.rs`](../../crates/cef/src/commands/window_pool.rs) | 2,215 | 923 | 42% | ~14k | 55% | 25 |
 | [`frontend/app/view/swarm/swarm-model.ts`](../../frontend/app/view/swarm/swarm-model.ts) | 2,138 | 902 | 42% | ~14k | 52% | 20 |
-| [`crates/srv-core/src/backend/blockcontroller/persistent/mod.rs`](../../crates/srv-core/src/backend/blockcontroller/persistent/mod.rs) | 1,695 | 886 | 52% | ~13.9k | 64% | 19 |
-| [`crates/srv-core/src/backend/agent_config.rs`](../../crates/srv-core/src/backend/agent_config.rs) | 3,190 | 877 | 27% | ~13.7k | 35% | 39 |
-| [`crates/srv-core/src/backend/blockcontroller/persistent/spawn.rs`](../../crates/srv-core/src/backend/blockcontroller/persistent/spawn.rs) | 2,213 | 1,048 | 47% | ~13.7k | 40% | 54 |
-| [`crates/srv-core/src/backend/bundle_import.rs`](../../crates/srv-core/src/backend/bundle_import.rs) | 2,851 | 852 | 30% | ~13.2k | 38% | 99 |
+| [`crates/srv/src/backend/blockcontroller/persistent/mod.rs`](../../crates/srv/src/backend/blockcontroller/persistent/mod.rs) | 1,695 | 886 | 52% | ~13.9k | 64% | 19 |
+| [`crates/srv/src/backend/agent_config.rs`](../../crates/srv/src/backend/agent_config.rs) | 3,190 | 877 | 27% | ~13.7k | 35% | 39 |
+| [`crates/srv/src/backend/blockcontroller/persistent/spawn.rs`](../../crates/srv/src/backend/blockcontroller/persistent/spawn.rs) | 2,213 | 1,048 | 47% | ~13.7k | 40% | 54 |
+| [`crates/srv/src/backend/bundle_import.rs`](../../crates/srv/src/backend/bundle_import.rs) | 2,851 | 852 | 30% | ~13.2k | 38% | 99 |
 
 `agent-view.tsx` has since shrunk to 1,497 lines (672 comment lines, ~10.7k comment tokens) as its split progressed; `store/agent-pane-state/types.ts` is 71% comments (862 of 1,218 lines).
 

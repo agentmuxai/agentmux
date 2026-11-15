@@ -44,7 +44,7 @@ The 2026-08-13 spec ruled "Workspace" out as a user-facing word for this reason 
 
 New Tab · New Window · *(Reopen closed window, #5356)* · Theme · Opacity · **Layouts** (Save layout…, Open layout…, Restore layout from another build…) · Settings · Command Palette · **Connectors** · **Memory** · **Toolchain** · DevTools · Online Docs · Exit.
 
-Widget bar defaults (`crates/srv-core/src/config/widgets.json`): Connectors and Memory are pinned; **Toolchain and Settings are not pinned** (they are in the widget bar's + menu). Settings also has `Ctrl+,` / `Cmd+,` and the palette.
+Widget bar defaults (`crates/srv/src/config/widgets.json`): Connectors and Memory are pinned; **Toolchain and Settings are not pinned** (they are in the widget bar's + menu). Settings also has `Ctrl+,` / `Cmd+,` and the palette.
 
 ## 2. Model
 
@@ -78,7 +78,7 @@ The srv per-window `Workspace` object stays as the runtime container of one wind
 
 ### 3.1 Default pinned widgets
 
-Operator, 2026-10-23: the widget bar's default pins become **Agent, Swarm, Memory, Connectors, Files, Browser, Settings, Help**, in that order (`display:pinned` and `display:order` in `crates/srv-core/src/config/widgets.json`).
+Operator, 2026-10-23: the widget bar's default pins become **Agent, Swarm, Memory, Connectors, Files, Browser, Settings, Help**, in that order (`display:pinned` and `display:order` in `crates/srv/src/config/widgets.json`).
 
 | Widget | Today | New |
 |---|---|---|

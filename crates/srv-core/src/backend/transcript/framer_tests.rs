@@ -254,7 +254,7 @@ fn an_unset_setting_runs_the_framer_and_only_false_turns_it_off() {
 // Multi-process stress (ignored; run by hand): several srv-like processes on one
 // scratch shared store, appending, framing, reading and truncating the WAL, with
 // random SIGKILLs and restarts, and an integrity check while it runs.
-//   STRESS_DIR=/tmp/x STRESS_SECS=60 cargo test -p agentmux-srv --lib stress_parent -- --ignored --nocapture
+//   STRESS_DIR=/tmp/x STRESS_SECS=60 cargo test -p agentmux-srv-core --lib stress_parent -- --ignored --nocapture
 // ---------------------------------------------------------------------------
 
 fn stress_env(name: &str, default: u64) -> u64 {

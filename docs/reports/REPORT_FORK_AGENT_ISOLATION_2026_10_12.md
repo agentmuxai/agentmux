@@ -31,7 +31,7 @@ Ranked by impact. "Live" means seen in the 2026-10-12 logs; the rest are from re
 
 ### F2. Every agent pane wipes its own launch environment when it mounts — all agents, not only forks (live)
 
-`agent-view.tsx:680-686` runs the launch flow on every mount. `flows/launch-flow.ts:276-282` then writes `"cmd:env": effectiveAuthEnv`, only the auth variables. Block meta merges replace a key whole (`crates/srv-core/src/backend/obj.rs` `merge_meta`), so this drops what the launch put there: `AGENTMUX_AGENT_ID`, `AGENTMUX_AGENT_SLUG`, `AGENTMUX_INSTANCE_SLUG`, `AGENTMUX_AGENT_DISPLAY`, `GH_CONFIG_DIR`, the `GIT_*` identity and the agent's own `env` lines. `launch-flow.test.ts:339` asserts exactly the replaced value.
+`agent-view.tsx:680-686` runs the launch flow on every mount. `flows/launch-flow.ts:276-282` then writes `"cmd:env": effectiveAuthEnv`, only the auth variables. Block meta merges replace a key whole (`crates/srv/src/backend/obj.rs` `merge_meta`), so this drops what the launch put there: `AGENTMUX_AGENT_ID`, `AGENTMUX_AGENT_SLUG`, `AGENTMUX_INSTANCE_SLUG`, `AGENTMUX_AGENT_DISPLAY`, `GH_CONFIG_DIR`, the `GIT_*` identity and the agent's own `env` lines. `launch-flow.test.ts:339` asserts exactly the replaced value.
 
 srv restores some of these at spawn (`agent_handlers/input.rs`: the slug from the stored definition, `GH_CONFIG_DIR` via `gh_guard`), but `AGENTMUX_AGENT_ID` falls back to the display name (`input.rs:619-629`). So an agent's MuxBus identity changes from its slug to its display name at its next spawn after any pane mount: fresh launch, picker switch, `agent.open`, restore at startup.
 
@@ -39,7 +39,7 @@ Seen live: Loap #3 was first registered under its slug, `loap-loap-2-loap-3` (be
 
 ### F3. A fork's own name is not a valid agent id, so forks drop out of Swarm and MuxBus (live)
 
-Agent ids allow only `A-Z a-z 0-9 _ -`, up to 64 characters (`crates/srv-core/src/backend/reactive/sanitize.rs:133-140`). A fork's automatic name "*Root* #N" has a space and a `#`. With F2 making the display name the id, every registration by name fails:
+Agent ids allow only `A-Z a-z 0-9 _ -`, up to 64 characters (`crates/srv/src/backend/reactive/sanitize.rs:133-140`). A fork's automatic name "*Root* #N" has a space and a `#`. With F2 making the display name the id, every registration by name fails:
 - the pane's own registration on mount, which is how Swarm sees it (`agent-view.tsx:264` → `termagent.ts`); seen live as an "invalid agent ID: Loap #3" registration failure;
 - the spawn-time MuxBus registration (`persistent/spawn.rs`); seen live failing the same way on both respawns;
 - the per-turn registration (`input.rs:1300-1357`), skipped silently.

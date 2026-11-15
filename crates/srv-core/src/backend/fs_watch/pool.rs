@@ -491,8 +491,8 @@ mod tests {
     /// End to end on a Windows machine with WSL: a file written inside a
     /// distro shows up as an event for its folder watched through the share.
     /// Needs a distro, so it is not run on CI. Run manually with the distro to
-    /// use: `WSL_TEST_DISTRO=Ubuntu cargo test -p agentmux-srv --bin
-    /// agentmux-srv a_change_inside_a_distro_reaches_a_share_watch -- --ignored`
+    /// use: `WSL_TEST_DISTRO=Ubuntu cargo test -p agentmux-srv-core --lib
+    /// a_change_inside_a_distro_reaches_a_share_watch -- --ignored`
     #[cfg(windows)]
     #[tokio::test]
     #[ignore]

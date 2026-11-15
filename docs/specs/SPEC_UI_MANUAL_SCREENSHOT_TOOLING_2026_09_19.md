@@ -267,7 +267,7 @@ crops. Files are `<id>-<size>.png`; `--sizes small,large` limits a run.
 
 `--suite` picks the manifest: `manual` (`shots.mjs`, the default) or `widgets`
 (`widget-shots.mjs`). The widget suite is built from the app's own widget
-config ([`crates/srv-core/src/config/widgets.json`](../../crates/srv-core/src/config/widgets.json)), so a new widget is captured
+config ([`crates/srv/src/config/widgets.json`](../../crates/srv/src/config/widgets.json)), so a new widget is captured
 without editing the suite; `EXCLUDE` lists the ones left out, with a reason.
 A new suite is a new manifest file plus one line in `capture.mjs`'s `SUITES`.
 
@@ -446,7 +446,7 @@ describe changes to the `acme-web` demo project (§8.3).
 
 srv looks for a provider's CLI in `<home>/shared/cli/<provider>/<pinned
 version>/` and uses it only when that folder holds the completion marker
-([`crates/srv-core/src/backend/cli_install.rs`](../../crates/srv-core/src/backend/cli_install.rs)). `install-fake-claude.mjs --home
+([`crates/srv/src/backend/cli_install.rs`](../../crates/srv/src/backend/cli_install.rs)). `install-fake-claude.mjs --home
 <dir>` writes an npm-style `.cmd` shim there, in the shape
 `crates/common/src/cli.rs` resolves to `node <script>`, with the script and
 the marker. It refuses the machine's own `~/.agentmux`: the stand-in must never

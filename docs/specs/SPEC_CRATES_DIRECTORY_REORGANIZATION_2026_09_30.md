@@ -20,7 +20,7 @@ The six workspace crates move from the repo root into [`crates/`](../../crates),
 | `agentmux-bashwrap/` | [`crates/bashwrap/`](../../crates/bashwrap) | `agentmux-bashwrap` | `agentmux-bashwrap` |
 
 The rule for any old path: drop `agentmux-` from the first segment and prefix [`crates/`](../../crates).
-`agentmux-srv/src/backend/x.rs` becomes `crates/srv-core/src/backend/x.rs`.
+`agentmux-srv/src/backend/x.rs` becomes `crates/srv/src/backend/x.rs`.
 
 The top level goes from 23 folders to 18, and the Rust code sits beside [`frontend/`](../../frontend) as one group.
 New crates go under `crates/<short-name>/` with package name `agentmux-<short-name>`.

@@ -186,7 +186,7 @@ async fn an_init_at_spawn_is_not_a_pass() {
 /// a background task that finishes after the turn ended wakes the CLI, and
 /// that pass is reported busy and is a turn of its own. Costs a few cents of
 /// Haiku, so it runs only when asked:
-/// `AGENTMUX_LIVE_CLAUDE=1 cargo test -p agentmux-srv --bins live_claude -- --ignored --nocapture`.
+/// `AGENTMUX_LIVE_CLAUDE=1 cargo test -p agentmux-srv-core --lib live_claude -- --ignored --nocapture`.
 #[tokio::test]
 #[ignore = "runs the real Claude Code CLI; set AGENTMUX_LIVE_CLAUDE=1"]
 async fn live_claude_background_task_wake_up() {

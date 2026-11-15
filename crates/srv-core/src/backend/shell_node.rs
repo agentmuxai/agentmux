@@ -755,7 +755,7 @@ fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, c
 #[cfg(test)]
 mod tests {
     // A real process, so ignored like the other real-process tests in this crate:
-    // run with `cargo test -p agentmux-srv --bin agentmux-srv a_runner_with_a_scrubber -- --ignored`.
+    // run with `cargo test -p agentmux-srv-core --lib a_runner_with_a_scrubber -- --ignored`.
     #[tokio::test]
     #[ignore]
     async fn a_runner_with_a_scrubber_publishes_the_output_without_the_value() {
@@ -788,7 +788,7 @@ mod tests {
         assert!(!text.contains(VALUE), "{text}");
     }
 
-    // A real process too: `cargo test -p agentmux-srv --bin agentmux-srv a_runner_with_a_capture -- --ignored`.
+    // A real process too: `cargo test -p agentmux-srv-core --lib a_runner_with_a_capture -- --ignored`.
     #[tokio::test]
     #[ignore]
     async fn a_runner_with_a_capture_publishes_only_once_the_value_is_in_the_vault() {

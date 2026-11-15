@@ -1,5 +1,5 @@
 //! Live check of the Personal Memory mount against a real Docker daemon:
-//!   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_personal_memory
+//!   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_personal_memory
 //!
 //! A note written natively is read in the container, and one written in the container is on
 //! the host; and the agent can still write its session files beside the mount.
@@ -62,7 +62,7 @@ async fn itest_personal_memory_is_the_same_files_natively_and_in_the_container()
 }
 
 /// The bound credentials file and `~/.claude` are the agent's alone once the container is up:
-///   cargo test -p agentmux-srv --bins -- --ignored --nocapture itest_credentials_are_the_agents_alone
+///   cargo test -p agentmux-srv-core --lib -- --ignored --nocapture itest_credentials_are_the_agents_alone
 #[cfg(unix)]
 #[tokio::test]
 #[ignore]

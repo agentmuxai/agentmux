@@ -636,7 +636,7 @@ mod tests {
     #[ignore = "requires `claude` CLI on PATH; run manually for end-to-end"]
     async fn run_agent_end_to_end_with_real_claude() {
         // Manual smoke: AGENTMUX_CLAUDE_BIN=/path/to/claude
-        // cargo test -p agentmux-srv -- --ignored
+        // cargo test -p agentmux-srv-core -- --ignored
         //     run_agent_end_to_end_with_real_claude
         let (tx, mut rx) = mpsc::unbounded_channel();
         let handle = run_agent(

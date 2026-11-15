@@ -247,7 +247,7 @@ fn incremental_steps_do_nothing_in_a_store_without_auto_vacuum() {
 }
 
 /// Reclaim a snapshot of a real store, for measuring: `AGENTMUX_RECLAIM_COPY=<copy of
-/// filestore.db> cargo test -p agentmux-srv --bin agentmux-srv reclaim_a_real_copy -- --ignored --nocapture`.
+/// filestore.db> cargo test -p agentmux-srv-core --lib reclaim_a_real_copy -- --ignored --nocapture`.
 /// Never point it at a store an AgentMux has open.
 #[test]
 #[ignore]

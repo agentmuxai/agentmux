@@ -60,7 +60,7 @@ The portable's `runtime/` holds exactly seven executables: the five above plus `
 |---|---|---|
 | `agentmux-srv`, `agentmux-mcp`, `agentmux-bashwrap` | generic icon | **yes**: §5 |
 | CEF subprocesses | AgentMux icon already (they run the host exe), all named "AgentMux" | names: §6 |
-| `muxlog`, `muxsh`, `muxspect` | **Node.js**: they're `.mjs` scripts ([`crates/srv-core/src/backend/shellintegration/`](../../crates/srv-core/src/backend/shellintegration)) run by the user's `node.exe` | not without shipping our own executable for them; not proposed |
+| `muxlog`, `muxsh`, `muxspect` | **Node.js**: they're `.mjs` scripts ([`crates/srv/src/backend/shellintegration/`](../../crates/srv/src/backend/shellintegration)) run by the user's `node.exe` | not without shipping our own executable for them; not proposed |
 | `jq.exe`, `rg.exe` (bundled) | bare file name, generic icon (upstream ships none) | **no**: third-party; restamping would mislabel someone else's program and break their published hashes |
 | Agents' processes (`claude.exe`, `codex`, `bash.exe`, `pwsh.exe`, `conhost`) | their vendors' icons | no |
 | Installer and uninstaller | AgentMux icon ([`packaging/windows/agentmux.iss`](../../packaging/windows/agentmux.iss)) | no change needed |

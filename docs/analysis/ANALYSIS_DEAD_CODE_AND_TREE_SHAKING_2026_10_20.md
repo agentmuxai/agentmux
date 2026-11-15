@@ -59,7 +59,7 @@ Realistic removable volume if everything lands:
 Static analysis only. Every item was re-grepped with `rg -w` over the repo (excluding `node_modules` and `docs`). srv, launcher, mcp and bashwrap are bin-only crates, so rustc already warns on unused items. Surviving dead code is almost all under `#[allow(dead_code)]`.
 
 - **R-1 ijson stack (CONFIRMED).**
-  - Files: `crates/srv-core/src/backend/ijson.rs` (791 lines), `storage/filestore/ijson.rs` (125), mod lines `backend/mod.rs:66` and `filestore/mod.rs:18`, and the `FileOpts.ijson` / `ijsonbudget` fields (`filestore/types.rs:19,21`, `rpc_types/misc.rs:111,113`).
+  - Files: `crates/srv/src/backend/ijson.rs` (791 lines), `storage/filestore/ijson.rs` (125), mod lines `backend/mod.rs:66` and `filestore/mod.rs:18`, and the `FileOpts.ijson` / `ijsonbudget` fields (`filestore/types.rs:19,21`, `rpc_types/misc.rs:111,113`).
   - Evidence: only `filestore/tests.rs:599,620` call `append_ijson`; `rg 'append_ijson|compact_ijson' crates` shows no production caller.
   - Action: delete the files, mod lines, fields and tests (`filestore/tests.rs:584-660`). Regenerate the ts-rs types.
   - Risk: low to medium (ts-rs regeneration). Saves ~590 prod + ~400 test lines.

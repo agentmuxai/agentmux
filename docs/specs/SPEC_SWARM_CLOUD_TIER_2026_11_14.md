@@ -162,10 +162,10 @@ machine (Camper):
 
 ## 7. Where each fact lives (for the build)
 
-- `crates/srv-core/src/muxbus/install_presence.rs` (the record, its signature, bounds), `muxbus/wan_presence.rs` (publisher,
+- `crates/srv/src/muxbus/install_presence.rs` (the record, its signature, bounds), `muxbus/wan_presence.rs` (publisher,
   token, `Date` handling, the network and wake signals), `muxbus/cloud_subscriber.rs` (`load_valid_token`),
   `backend/storage/wan_identity.rs` (this install's WAN id).
-- `crates/srv-core/src/backend/swarm_remote.rs` (`RemoteHost`, `snapshot`, `lan_hosts`), `server/app_api/agent_io.rs`
+- `crates/srv/src/backend/swarm_remote.rs` (`RemoteHost`, `snapshot`, `lan_hosts`), `server/app_api/agent_io.rs`
   (`swarm.other-instances`), `backend/lan/discovery.rs` and `lan/discovery/agent_names.rs` (the advertisement and its
   reader), `server/work_facts_handlers.rs` (`remote_agents`).
 - Frontend: `frontend/app/view/swarm/swarm-remote.ts` (`RemoteHost`, `remoteSections`), `swarm-fleet-targets.ts`.

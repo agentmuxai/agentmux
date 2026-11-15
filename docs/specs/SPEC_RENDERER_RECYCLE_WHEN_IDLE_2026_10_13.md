@@ -32,7 +32,7 @@ Today a reload of the main window restores the workspace, layout, agent transcri
 |---|---|---|
 | Composer drafts | in-memory `Map` (`AgentFooter.tsx:87`) | Persist per block in `sessionStorage` on change (debounced 300 ms), restore on mount. Survives a reload, not an app restart, as today. |
 | Up-arrow history | a `let` in the component body (`AgentFooter.tsx:740-743`), lost on every unmount, including a pane-tab switch (`:75-83`) | Move it to a module-level `Map` per block (fixes the tab switch), persisted like drafts. |
-| Attachment drafts | in-memory `Map` (`attachments/attachment-draft.ts:495`) | Persist the ready attachments' ids and names, and bring them back with the existing `restoreRefs`, which shows a file that's gone as an error tile. The files are in srv's attachment store (`:86-95`), kept 30 days after their last use (`crates/srv-core/src/backend/attachments/mod.rs:36`), so a reload is no risk to them. An upload in progress (an XHR, `:129`) can't survive: it blocks a recycle (§4.3). |
+| Attachment drafts | in-memory `Map` (`attachments/attachment-draft.ts:495`) | Persist the ready attachments' ids and names, and bring them back with the existing `restoreRefs`, which shows a file that's gone as an error tile. The files are in srv's attachment store (`:86-95`), kept 30 days after their last use (`crates/srv/src/backend/attachments/mod.rs:36`), so a reload is no risk to them. An upload in progress (an XHR, `:129`) can't survive: it blocks a recycle (§4.3). |
 | Messages queued while the agent is busy | `heldQueue` (`useAgentCommands.ts:301-321`, pushed at `:735-741` and `:779`) | Never recycle while one is non-empty; the predicate exists (`hasHeldMessages`, `:1103`, exposed at `agent-view.tsx:1105`). |
 | Pane state (collapsed, pinned, filter, details) | the 30 s snapshot (`useSnapshotPersistence.ts:43`) is marked dirty only when the document's nodes change (`:128-134`), so a change to this state alone may never be written; Solid's cleanup doesn't run on unload | Mark the snapshot dirty on these changes too, and add `flushBeforeRecycle()`, which writes every pane's snapshot now (§3). |
 | Which row is which | text, message and user rows got counter ids (`node_N`, `msg_N`, `user_N`, `stream-parser.ts` `nextIdOf`) counted from wherever a parse began, which moves as the conversation grows (the restore reads only the last turns) and restarts on every older page | Build a row's id from its transcript line and generation (`node_<gen8>_L<line>_<k>`; the generation keeps a new transcript's line 0, after an archive, apart from the old one's): history reads pass their first line, the live loop each event's line. A message the user sends shows at once under a client id; when its transcript record is placed (the echo ledger, `transcript-cursor.ts`), the row is re-keyed (`RekeyNode`) to the id history gives that record. Known limit: a read that starts partway through a text run (not at a turn boundary; the default tail-of-turns restore always is) anchors that one row on its first line read. Saved collapsed rows and a scroll anchor then find their row after a reload, and an older page's rows no longer collide with the window's (they were dropped: loading older history showed only its tool calls). |
@@ -101,7 +101,7 @@ All of these must hold:
 - No agent pane in it has held messages (`hasHeldMessages`).
 - No attachment upload in progress.
 - No dirty editor, no open modal or menu, no drag in progress (`isAnyUnderway`, `app/drag/drag-session.ts:100`), no native file dialog (`host_dialog_open()`, private today in `crates/cef/src/floating_pane.rs:241-243`).
-- No agent pane in it is waiting for the user (`term:awaiting_user`, `crates/srv-core/src/backend/agent_state.rs:25`; `view/agent/hooks/awaiting-user.ts`). A question panel's timer and focus would be reset.
+- No agent pane in it is waiting for the user (`term:awaiting_user`, `crates/srv/src/backend/agent_state.rs:25`; `view/agent/hooks/awaiting-user.ts`). A question panel's timer and focus would be reset.
 - None of the gaps in §2.1 marked as a blocker: no pending auto-retry countdown, no agent pane scrolled above its restored tail, no queued browser-pane auth prompt, no open transcript search or streaming `/btw` answer.
 
 The host checks what it knows (foreground, minimized, file dialog) before asking; the frontend checks the rest in step 1.
@@ -118,7 +118,7 @@ At most once per window per hour. Never two windows within 60 s of each other.
 
 ### 4.6 Kill switch
 
-`window:autorecycle` (default `true`) turns the governor off; the command stays. It follows the existing `window:` keys: `crates/srv-core/src/backend/wconfig/types.rs:241-286`, `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts`. The host reads it from `settings.json` as it reads `window:transparent` (`crates/cef/src/app/window_settings.rs:257`).
+`window:autorecycle` (default `true`) turns the governor off; the command stays. It follows the existing `window:` keys: `crates/srv/src/backend/wconfig/types.rs:241-286`, `schema/settings.json`, `settings-template.jsonc`, `frontend/types/srv-types.d.ts`. The host reads it from `settings.json` as it reads `window:transparent` (`crates/cef/src/app/window_settings.rs:257`).
 
 ### 4.7 As built
 

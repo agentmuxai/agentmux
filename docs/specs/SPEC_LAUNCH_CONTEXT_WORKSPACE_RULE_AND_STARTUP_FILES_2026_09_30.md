@@ -53,7 +53,7 @@ their own workspace", matching the audit report's convention. See §8 Q1.
   and stores it as the instance's `working_directory`. The agent gets it only
   as its launch cwd; no env var names it.
 - **Host agent:** an agent whose CLI runs as a process on this machine.
-  `AgentDefinition.agent_type` (`crates/srv-core/src/backend/storage/agents.rs:67`)
+  `AgentDefinition.agent_type` (`crates/srv/src/backend/storage/agents.rs:67`)
   takes three values: `"host"`, `"standalone"` (the stored default,
   `:228-230`) and `"container"` (Docker, `:114-129`). **Host = anything
   other than `"container"`.** This is unrelated to the jekt "host tier"
@@ -72,14 +72,14 @@ traced in code:
 | # | Content | How it arrives | Written by | In the card? |
 |---|---|---|---|---|
 | 1 | `~/.agentmux/agents/CLAUDE.md` (jekt security rules, PR identity tag) | Claude Code's ancestor-directory `CLAUDE.md` discovery | **No code.** Hand-maintained; its header calls itself the authoritative agent-facing copy since the repo `CLAUDE.md` was removed (#3403) | no |
-| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` ([`crates/srv-core/src/backend/agent_config.rs:1401`](../../crates/srv-core/src/backend/agent_config.rs)). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
+| 2 | `<workspace>/CLAUDE.md` | Claude's project `CLAUDE.md` | `write_claude_md_respecting_ownership` ([`crates/srv/src/backend/agent_config.rs:1401`](../../crates/srv/src/backend/agent_config.rs)). Rewritten only if it carries `CLAUDE_MD_MANAGED_MARKER` (:936) or doesn't exist | no |
 | 3 | `<workspace>/.claude/AGENTMUX_MEMORY.md` | `@.claude/AGENTMUX_MEMORY.md` import appended to a foreign `CLAUDE.md` (:941, :962, :1509-1523) | same function, every launch | no |
 | 4 | Global Memory (the 3 Operator Config entries, plus any workspace entries) | inside #2 or #3, as `# Memory` | `inject_global_bundles` ([`crates/srv/src/server/editor_handlers.rs:93-116`](../../crates/srv/src/server/editor_handlers.rs)) or `write_agent_config_files` (`app_api/agent_open.rs:1057-1066`), both via `format_global_bundle_block` (`backend/storage/bundles.rs:184`) | no (as a file) |
 | 5 | Global + Personal Memory again | SessionStart hook, `agentmux-bashwrap sessionstart --part 1..8` | `compose_delivery` (`server/memory_delivery_handlers.rs:340`), `global_entries` (:364), `personal_entries_in` (:387) | **yes, the only thing in the card** |
 | 6 | Skills index `# Available Skills` | inside #2/#3 | `build_config_files` (`agent_config.rs:101-117`) | no |
 | 7 | Skill files `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` | Claude's native skill/command listing | `agent_config.rs:139-158` | no |
 | 8 | MCP tools (`agentmux` server) | `.mcp.json` | `write_mcp_json_respecting_user_servers` (`agent_config.rs:1222-1312`) | no |
-| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` ([`crates/srv-core/src/backend/providers.rs:812-869`](../../crates/srv-core/src/backend/providers.rs)) | no |
+| 9 | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` (user-level) | Claude's user memory | placeholder seeded by `seed_claude_md_placeholder_if_missing` ([`crates/srv/src/backend/providers.rs:812-869`](../../crates/srv/src/backend/providers.rs)) | no |
 | 10 | Continuation packet | prefixed to the first user message | `build_continuation_packet` (`backend/continuity.rs:262-337`) | no (label only; #4034 CD4 covers it) |
 
 The card ([`frontend/app/view/agent/components/ContextDeliveryCard.tsx`](../../frontend/app/view/agent/components/ContextDeliveryCard.tsx))
@@ -91,7 +91,7 @@ session it said "3 items" while the agent had been given rows 1-10.
 ### 2.2 No workspace rule anywhere
 
 Nothing the agent receives mentions where to clone or work. The Operator
-Config seed ([`crates/srv-core/operator-config-seed.json`](../../crates/srv-core/operator-config-seed.json), manifest version 5,
+Config seed ([`crates/srv/operator-config-seed.json`](../../crates/srv/operator-config-seed.json), manifest version 5,
 entries `operator-config-app-api`, `-environment-gotchas`,
 `-rich-output`) doesn't. Neither do the shared `agents/CLAUDE.md` or the
 per-agent `CLAUDE.md`. The convention exists only in
@@ -174,7 +174,7 @@ Rejected:
 ### 3.3 The entry's text
 
 Id `operator-config-workspace`, name `AgentMux Operator Config: Your
-workspace`, `agent_types: ["host"]` ([`crates/srv-core/operator-config-seed.json`](../../crates/srv-core/operator-config-seed.json),
+workspace`, `agent_types: ["host"]` ([`crates/srv/operator-config-seed.json`](../../crates/srv/operator-config-seed.json),
 manifest v7). The "host agents" scope is stated in the body rather than
 the name, like the other entries' opening line.
 
@@ -367,7 +367,7 @@ Research by Agent1 (2026-09-30), re-checked against `3fcd1496a`.
 ### 6.1 How a repin reaches an agent today
 
 - **The pin is compiled in.** `ProviderDefinition.pinned_version`
-  ([`crates/srv-core/src/backend/providers.rs:113`](../../crates/srv-core/src/backend/providers.rs); Claude `"2.1.285"` at :295,
+  ([`crates/srv/src/backend/providers.rs:113`](../../crates/srv/src/backend/providers.rs); Claude `"2.1.285"` at :295,
   mirrored in the frontend catalog). A repin reaches a user only with a new
   AgentMux build.
 - **Installs are shared, one directory per version.**

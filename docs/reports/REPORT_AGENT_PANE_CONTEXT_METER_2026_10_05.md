@@ -266,7 +266,7 @@ A report that an accepted prompt contradicts emits `context-window-refuted`, log
 
 ### 9.9 Follow-up: the CLI's own auto-compact point
 
-srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event ([`crates/srv-core/src/backend/agent_context_usage.rs`](../../crates/srv-core/src/backend/agent_context_usage.rs)): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
+srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event ([`crates/srv/src/backend/agent_context_usage.rs`](../../crates/srv/src/backend/agent_context_usage.rs)): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
 
 The pane (`store/agent-pane-state/auto-compact.ts`, subscribed in `useContextReading`) uses the reported threshold when the report is for the reading's model (compared without case, a `[1m]` suffix or a date stamp). When the CLI says auto-compaction is off, it shows no countdown and bands against the window. Until the CLI has answered, it assumes window − 33K, and the tooltip says which. The CLI's reported threshold ignores `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (probed), so with that override the real point is earlier than shown.
 
