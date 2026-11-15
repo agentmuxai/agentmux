@@ -491,7 +491,7 @@ export const TIPS: TipRow[] = [
         gesture: "wheel",
         where: "over the map",
         label: "Zoom in or out around the pointer",
-        source: { file: "frontend/app/view/atlas/atlas-pan-zoom.ts", anchor: "Math.exp(-e.deltaY * 0.0015)" },
+        source: { file: "frontend/app/view/atlas/atlas-pan-zoom.ts", anchor: "wheelFactor(e)" },
     },
     {
         id: "atlas:pan",
