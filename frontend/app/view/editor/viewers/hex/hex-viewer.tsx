@@ -24,7 +24,7 @@ export type { HexViewerProps } from "./hex-viewer-state";
 export function HexViewer(props: HexViewerProps): JSX.Element {
     const t = createHexViewer(props);
     return (
-        <div class="editor-viewer hex-viewer" style={{ "--hex-row-h": `${ROW_H}px` }}>
+        <div class="editor-viewer hex-viewer" style={{ "--hex-row-h": `${ROW_H}px` }} onKeyDown={t.onToolbarKeyDown}>
             <ViewerBar {...props.bar} facts={t.facts()} start={<HexTools t={t} />} />
             <Show when={t.error()}>
                 <div class="hex-viewer-error" role="alert">

@@ -305,4 +305,36 @@ describe("the hex viewer", () => {
         await mount({ memoryKey: "C:/bin/other.bin" });
         expect(rowTexts()[0]).toBe("00000000");
     });
+
+    it("puts the scroller back where the rows are when its pane is shown again", async () => {
+        // A pane that was hidden (maximized past, a tab switched away) comes back with scrollTop 0 and no scroll event.
+        const sizes: Array<() => void> = [];
+        vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { sizes.push(cb); } observe() {} unobserve() {} disconnect() {} });
+        try {
+            await mount();
+            key("g", { ctrlKey: true });
+            const box = screen.getByLabelText("Go to offset") as HTMLInputElement;
+            fireEvent.input(box, { target: { value: "0x2027" } });
+            fireEvent.keyDown(box, { key: "Enter" });
+            await settle();
+            const where = grid().scrollTop;
+            const rows = rowTexts();
+            expect(where).toBeGreaterThan(0);
+            grid().scrollTop = 0;
+            sizes.forEach((cb) => cb());
+            await settle();
+            expect(grid().scrollTop).toBe(where);
+            expect(rowTexts()).toEqual(rows);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("goes to an offset from a toolbar button's focus too", async () => {
+        await mount();
+        const button = screen.getByRole("radio", { name: "32" }) as HTMLElement;
+        button.focus();
+        fireEvent.keyDown(button, { key: "g", ctrlKey: true });
+        expect(document.activeElement).toBe(screen.getByLabelText("Go to offset"));
+    });
 });

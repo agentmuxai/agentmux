@@ -138,7 +138,8 @@ function createHexScroll(size: Accessor<number>, width: Accessor<RowWidth>) {
         if (el) el.scrollTop = to;
     };
     const onScroll = (): void => {
-        if (!el) return;
+        // A pane that is hidden has no height, and its scroller reports 0: not where the user scrolled to.
+        if (!el || el.clientHeight === 0) return;
         const at = el.scrollTop;
         setTop(at);
         if (own != null && Math.abs(at - own) < 1) return;
@@ -155,7 +156,17 @@ function createHexScroll(size: Accessor<number>, width: Accessor<RowWidth>) {
     /** The scroller's `ref`. The header row inside it takes one row of its height. */
     const bind = (node: HTMLDivElement): void => {
         el = node;
-        const measure = () => setViewPx(Math.max(0, node.clientHeight - ROW_H));
+        // The browser puts a scroller's scrollTop back to 0 when its pane is hidden (maximized past, a tab
+        // switched away) and says nothing: the rows stay where they were drawn. A resize is the word that
+        // it is shown again, so put the scroller where the rows are.
+        const measure = () => {
+            setViewPx(Math.max(0, node.clientHeight - ROW_H));
+            const at = top();
+            if (node.clientHeight > 0 && Math.abs(node.scrollTop - at) >= 1) {
+                own = at;
+                node.scrollTop = at;
+            }
+        };
         measure();
         node.addEventListener("wheel", onWheel, { passive: false });
         const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -398,6 +409,12 @@ export function createHexViewer(props: HexViewerProps) {
         layerTop: scroll.layerTop,
         bindScroller: scroll.bind,
         onScroll: scroll.onScroll,
+        // Go to an offset from a toolbar button's focus too (the grid's own handler has taken its key already).
+        onToolbarKeyDown: (e: KeyboardEvent) => {
+            if (e.defaultPrevented || e.altKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "g") return;
+            e.preventDefault();
+            focusOffsetBox();
+        },
         onKeyDown: hexKeyHandler({ size, width, scroll, sel, copy, focusOffsetBox, toggleInspector }),
         ...createHexPointer(sel),
         setRowWidth,
