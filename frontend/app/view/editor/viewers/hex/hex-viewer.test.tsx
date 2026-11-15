@@ -376,7 +376,7 @@ describe("the hex viewer", () => {
         answer({ found: true, offset: 90_000, length: 2, done: false, next_from: 0 });
         await settle();
         expect(selected()).not.toContain(90_000);
-        expect(document.querySelector(".hex-find-status")!.textContent).not.toContain("Found");
+        expect(document.querySelector(".hex-find-status")?.textContent ?? "").not.toContain("Found");
     });
 
     it("leaves a sideways wheel to the browser in a file that scrolls in proportion, and takes the vertical one", async () => {
@@ -397,8 +397,9 @@ describe("the hex viewer", () => {
         await settle();
         const box = screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
         expect(document.activeElement).toBe(box);
-        // Nothing said yet: the tail is just the close button, so it can stay on the controls' line.
-        expect(document.querySelector(".hex-find-tail")!.classList.contains("hex-find-tail-idle")).toBe(true);
+        // Nothing said yet: the close button sits with the arrows, so it can't be left alone on a line.
+        expect(document.querySelector(".hex-find-nav [aria-label='Close find']")).not.toBeNull();
+        expect(document.querySelector(".hex-find-tail")).toBeNull();
         searchBytes.mockResolvedValue({ found: true, offset: 0x41, length: 3, done: false, next_from: 0 });
         fireEvent.input(box, { target: { value: "41 ?? 43" } });
         fireEvent.keyDown(box, { key: "Enter" });
@@ -406,7 +407,8 @@ describe("the hex viewer", () => {
         expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/bin/a.bin", pattern: "41 ?? 43", from: 1, backward: false });
         expect(selected()).toEqual([0x41, 0x42, 0x43]);
         expect(document.querySelector(".hex-find-status")!.textContent).toContain("Found at 0x41");
-        expect(document.querySelector(".hex-find-tail")!.classList.contains("hex-find-tail-idle")).toBe(false);
+        expect(document.querySelector(".hex-find-tail [aria-label='Close find']")).not.toBeNull();
+        expect(document.querySelector(".hex-find-nav [aria-label='Close find']")).toBeNull();
         // The next one starts past the selection; the previous one, before it.
         searchBytes.mockResolvedValue({ found: true, offset: 0x300, length: 3, done: false, next_from: 0 });
         fireEvent.keyDown(box, { key: "Enter" });
