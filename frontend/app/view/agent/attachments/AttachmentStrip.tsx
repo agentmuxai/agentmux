@@ -9,8 +9,11 @@
  * names, so a tile's kind is guessed from the extension.
  */
 
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
 import { AttachmentTile, type TileModel } from "./AttachmentTile";
 import { attachmentNoun, fileKind } from "./file-kind";
@@ -31,16 +34,33 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
     let ro: ResizeObserver | undefined;
     onCleanup(() => ro?.disconnect());
 
+    // The transcript only keeps ids and names; the details (the real kind, a PDF's page count) are fetched once per id,
+    // as the preview does. A signal, not a resource, so a load never suspends the pane's view (#47406).
+    const [infos, setInfos] = createSignal<Record<string, AttachmentInfo>>({});
+    const asked = new Set<string>();
+    createEffect(() => {
+        const ids = props.attachments.map((a) => a.id).filter((id): id is string => !!id && !untrack(() => asked.has(id)));
+        if (!ids.length) return;
+        for (const id of ids) asked.add(id);
+        RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids }).then(
+            (r) => setInfos((prev) => ({ ...prev, ...Object.fromEntries(r.items.map((i) => [i.id, i])) })),
+            () => ids.forEach((id) => asked.delete(id)),
+        );
+    });
     const tiles = createMemo<TileModel[]>(() =>
-        props.attachments.map((a, i) => ({
-            key: `${i}:${a.id ?? a.name}`,
-            number: i + 1,
-            name: a.name,
-            id: a.id,
-            status: a.id ? "ready" : "error",
-            error: a.id ? undefined : "No longer available",
-            kind: fileKind(undefined, a.name),
-        })),
+        props.attachments.map((a, i) => {
+            const info = a.id ? infos()[a.id] : undefined;
+            return {
+                key: `${i}:${a.id ?? a.name}`,
+                number: i + 1,
+                name: a.name,
+                id: a.id,
+                status: a.id ? "ready" : "error",
+                error: a.id ? undefined : "No longer available",
+                kind: fileKind(info?.kind, a.name),
+                pageCount: info?.page_count,
+            };
+        }),
     );
     const noun = (n: number) =>
         attachmentNoun(
@@ -52,6 +72,10 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
         equals: (a, b) => a.visible === b.visible && a.overflow === b.overflow,
     });
     const shown = createMemo(() => (expanded() ? tiles() : tiles().slice(0, layout().visible)));
+    // <For> keys on identity and the models are rebuilt when the details arrive, so iterate the keys and look each
+    // model up, or every tile would mount again (the tray does the same).
+    const shownKeys = createMemo(() => shown().map((t) => t.key));
+    const tileByKey = createMemo(() => new Map(tiles().map((t) => [t.key, t])));
     const items = (): LightboxItem[] =>
         tiles().map((t) => ({ key: t.key, number: t.number, name: t.name, id: t.id, error: t.error }));
 
@@ -72,8 +96,13 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
                     ro.observe(el);
                 }}
             >
-                <For each={shown()}>
-                    {(tile) => <AttachmentTile tile={tile} onOpen={() => setOpen(tile.number - 1)} />}
+                <For each={shownKeys()}>
+                    {(key) => (
+                        <AttachmentTile
+                            tile={tileByKey().get(key)!}
+                            onOpen={() => setOpen(tileByKey().get(key)!.number - 1)}
+                        />
+                    )}
                 </For>
                 <Show when={!expanded() && layout().overflow > 0}>
                     <li class="agent-attachment-tile agent-attachment-tile--more">
