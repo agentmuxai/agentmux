@@ -38,11 +38,15 @@ function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
     return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
 }
 
-/** A promise that gives up (null) after GIVE_UP_MS. */
-function within<T>(work: Promise<T | null>): Promise<T | null> {
+/** The work, told to stop (its signal aborts) and answered null if it takes longer than GIVE_UP_MS. */
+function within<T>(work: (signal: AbortSignal) => Promise<T | null>): Promise<T | null> {
     return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(null), GIVE_UP_MS);
-        work.then(
+        const stop = new AbortController();
+        const timer = setTimeout(() => {
+            stop.abort();
+            resolve(null);
+        }, GIVE_UP_MS);
+        work(stop.signal).then(
             (v) => {
                 clearTimeout(timer);
                 resolve(v);
@@ -56,10 +60,13 @@ function within<T>(work: Promise<T | null>): Promise<T | null> {
 }
 
 /** The first page of a PDF, or null when it can't be opened (a password, a damaged file). */
-async function pdfFirstPage(blob: Blob): Promise<Blob | null> {
+async function pdfFirstPage(blob: Blob, signal: AbortSignal): Promise<Blob | null> {
     const { loadPdfjs, SAFE_DOCUMENT_OPTIONS } = await import("@/app/view/editor/viewers/pdf/pdfjs-runtime");
     const { pdfjs } = await loadPdfjs();
     const task = pdfjs.getDocument({ ...SAFE_DOCUMENT_OPTIONS, data: new Uint8Array(await blob.arrayBuffer()) });
+    // A page that takes too long is let go of: destroying the task ends its worker and what it holds.
+    const stop = () => void task.destroy().catch(() => {});
+    signal.addEventListener("abort", stop, { once: true });
     try {
         const doc = await task.promise;
         const page = await doc.getPage(1);
@@ -76,21 +83,26 @@ async function pdfFirstPage(blob: Blob): Promise<Blob | null> {
         await page.render({ canvas, canvasContext: context, viewport }).promise;
         return await canvasBlob(canvas);
     } finally {
-        void task.destroy().catch(() => {});
+        signal.removeEventListener("abort", stop);
+        stop();
     }
 }
 
 /** The first frame of a video the browser can play, or null. */
-function videoFirstFrame(blob: Blob): Promise<Blob | null> {
+function videoFirstFrame(blob: Blob, signal: AbortSignal): Promise<Blob | null> {
     return new Promise((resolve) => {
         const source = URL.createObjectURL(blob);
         const video = document.createElement("video");
+        // However it ends (a frame, an error, too long), the element stops loading and the file's URL is let go.
         const done = (result: Blob | null) => {
+            signal.removeEventListener("abort", cancel);
             video.removeAttribute("src");
             video.load();
             URL.revokeObjectURL(source);
             resolve(result);
         };
+        const cancel = () => done(null);
+        signal.addEventListener("abort", cancel, { once: true });
         video.muted = true;
         video.preload = "auto";
         video.playsInline = true;
@@ -116,5 +128,5 @@ function videoFirstFrame(blob: Blob): Promise<Blob | null> {
 /** The picture for a stored PDF or video, or null when it has none. */
 export function firstFrame(kind: FrameKind, blob: Blob): Promise<Blob | null> {
     if (blob.size === 0 || blob.size > frameLimit(kind)) return Promise.resolve(null);
-    return within(kind === "pdf" ? pdfFirstPage(blob) : videoFirstFrame(blob));
+    return within((signal) => (kind === "pdf" ? pdfFirstPage(blob, signal) : videoFirstFrame(blob, signal)));
 }

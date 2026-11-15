@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { describe, expect, it, vi } from "vitest";
 import { fitScale, firstFrame, MAX_PDF_BYTES, MAX_VIDEO_BYTES, wantsFrame } from "./first-frame";
 
 describe("wantsFrame", () => {
@@ -34,5 +36,25 @@ describe("firstFrame", () => {
         expect(await firstFrame("pdf", new Blob([]))).toBeNull();
         expect(await firstFrame("video", { size: MAX_VIDEO_BYTES + 1 } as Blob)).toBeNull();
         expect(await firstFrame("pdf", { size: MAX_PDF_BYTES + 1 } as Blob)).toBeNull();
+    });
+});
+
+describe("a video that never gives a frame", () => {
+    it("is let go of when the time is up: its element stops loading and its file's URL is revoked", async () => {
+        vi.useFakeTimers();
+        const revoked: string[] = [];
+        vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:stalled", revokeObjectURL: (u: string) => revoked.push(u) }));
+        const video = document.createElement("video");
+        const load = vi.spyOn(video, "load").mockImplementation(() => {});
+        vi.spyOn(document, "createElement").mockReturnValue(video);
+        const result = firstFrame("video", new Blob(["x"]));
+        await vi.advanceTimersByTimeAsync(9000);
+        expect(await result).toBeNull();
+        expect(revoked).toEqual(["blob:stalled"]);
+        expect(load).toHaveBeenCalled();
+        expect(video.getAttribute("src")).toBeNull();
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
     });
 });
