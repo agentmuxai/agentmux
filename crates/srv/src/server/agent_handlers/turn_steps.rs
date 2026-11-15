@@ -303,8 +303,7 @@ fn rehome_for_container(
             missing.push(item.name);
             continue;
         };
-        let dest = host_root.join(&suffix);
-        match safe_rehome_copy(&item.path, &dest) {
+        match safe_rehome_copy(&host_root, &suffix, &item.path) {
             Ok(()) => {
                 let suffix = suffix.to_string_lossy().replace('\\', "/");
                 item.path = std::path::PathBuf::from(format!("{container_root}/{CONTAINER_ATTACHMENTS_SUBDIR}/{suffix}"));
@@ -319,18 +318,18 @@ fn rehome_for_container(
     (rehomed, missing)
 }
 
-/// Copies `src` to `dest`, refusing to follow a symlink a container agent could have planted anywhere
-/// along the way. The container shares this bind mount, so a compromised agent can pre-create a symlink
-/// at `dest` (or at a directory `dest` lives under) pointing at an arbitrary host path; a plain
-/// `create_dir_all` + `fs::copy` would walk or write through it as the host process (Codex P1, #7434).
-/// Each existing ancestor of `dest` must already be a plain directory, and the write itself lands via a
-/// same-directory rename, which replaces whatever is at `dest` — symlink or not — without ever opening it.
-fn safe_rehome_copy(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
-    let Some(parent) = dest.parent() else {
-        return Err(std::io::Error::other("attachment destination has no parent folder"));
-    };
+/// Copies `src` into `host_root.join(suffix)`, refusing to follow a symlink a container agent could have
+/// planted anywhere under `host_root`. `host_root` is a subfolder of the pane's working folder, which the
+/// bind mount hands the container read-write access to as `/workspace`: a compromised agent can pre-create
+/// a symlink there pointing at an arbitrary host path, and a plain `create_dir_all` + `fs::copy` would walk
+/// or write through it as the host process (#7434). `host_root`'s own ancestors (the working folder and
+/// above) sit outside the mount boundary — the container cannot replace them — so only `host_root` itself
+/// and `suffix`'s directory components are walked and checked; a legitimate symlink elsewhere on the host
+/// (a symlinked home directory, for instance) is left alone. The write itself lands via a same-directory
+/// rename, which replaces whatever is at the destination — symlink or not — without ever opening it.
+fn safe_rehome_copy(host_root: &std::path::Path, suffix: &std::path::Path, src: &std::path::Path) -> std::io::Result<()> {
     let mut built = std::path::PathBuf::new();
-    for component in parent.components() {
+    for component in host_root.components().chain(suffix.parent().into_iter().flat_map(|p| p.components())) {
         built.push(component);
         match std::fs::symlink_metadata(&built) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -341,12 +340,13 @@ fn safe_rehome_copy(src: &std::path::Path, dest: &std::path::Path) -> std::io::R
             Err(_) => std::fs::create_dir(&built)?,
         }
     }
-    let tmp = parent.join(format!(".{}.part", uuid::Uuid::new_v4()));
+    let dest = host_root.join(suffix);
+    let tmp = built.join(format!(".{}.part", uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::copy(src, &tmp) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    std::fs::rename(&tmp, dest)
+    std::fs::rename(&tmp, &dest)
 }
 
 /// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an
