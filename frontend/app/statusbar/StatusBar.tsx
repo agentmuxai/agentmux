@@ -15,6 +15,7 @@ import { InstancePanel } from "./InstancePanel";
 import { AgentCountsStatus } from "./AgentCountsStatus";
 import { LastSoundStatus } from "./LastSoundStatus";
 import { attentionItems } from "@/app/notification/attention-list";
+import { isVaultOnly } from "./summary";
 import { ambientFailingCount } from "@/app/store/ambient-health";
 import { FIT_TIERS, slotDropAt, type DropAt } from "./status-bar-fit";
 import { VaultRequestsStatus } from "./VaultRequestsStatus";
@@ -161,7 +162,7 @@ const StatusBar = (): JSX.Element => {
             data-drop-at={slotDropAt(
                 item.id,
                 item.dropAt ?? (item.id.startsWith("agentmux:") ? undefined : WIDGET_DROP_AT),
-                attentionItems().length > 0,
+                attentionItems().some((i) => !isVaultOnly(i)),
                 ambientFailingCount() > 0
             )}
         >

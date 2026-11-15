@@ -8,6 +8,7 @@ import { useKanbanNeeds } from "@/app/view/kanban/kanban-held";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { AttentionListPopover } from "./AttentionListPopover";
+import { isVaultOnly } from "./summary";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -36,12 +37,16 @@ export function AgentCountsStatus(props: {
     tasks?: Accessor<number>;
 }): JSX.Element {
     const rows = () => (props.rows ?? sharedAttentionRows)();
-    const items = () => (props.items ?? attentionItems)();
+    // A pane that waits only on a Vault request is counted and listed by the Vault item, not here as well.
+    const items = () => (props.items ?? attentionItems)().filter((i) => !isVaultOnly(i));
     const tasks = props.tasks ?? useKanbanNeeds();
     const counts = createMemo(() => {
         const c = runtimeCounts(rows());
+        // The rows count every agent that waits, a Vault wait included: take off those that are in a row, as the Vault item has them.
+        const waitingPanes = new Set(rows().filter((r) => r.state === "waiting_on_user").map((r) => r.waiting_in ?? r.block_id));
+        const vaultOnly = (props.items ?? attentionItems)().filter((i) => isVaultOnly(i) && waitingPanes.has(i.blockId)).length;
         // The list names panes: one that only this window's registry knows (an ask the rows do not carry) counts too.
-        return { running: c.running, waiting: Math.max(c.waiting, items().length) };
+        return { running: c.running, waiting: Math.max(c.waiting - vaultOnly, items().length) };
     });
     // Anything that waits on the person: an agent's ask, or a Kanban task.
     const anything = () => counts().waiting + tasks() > 0;

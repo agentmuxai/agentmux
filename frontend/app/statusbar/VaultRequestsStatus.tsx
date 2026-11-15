@@ -5,20 +5,20 @@ import { openVaultAt } from "@/app/view/vault/open-vault";
 import { vaultRequests, vaultUses } from "@/app/view/vault/vault-store";
 import { Show, type JSX } from "solid-js";
 
-/** The tooltip of `n` Vault requests no pane on screen asks. */
+/** The tooltip of `n` Vault requests that wait on the person. */
 export function vaultRequestsTip(n: number): string {
-    return `${n} Vault ${n === 1 ? "request waits" : "requests wait"} on you with no agent pane on screen. Click to answer in the Vault`;
+    return `${n} Vault ${n === 1 ? "request waits" : "requests wait"} on you. Click to answer in the Vault`;
 }
 
 /**
- * How many Vault requests wait on the person with no agent pane on screen to ask
- * them (a parked agent's, or one whose window closed), and a click opens the
- * Vault pane's Requests list. A request asked as a card in its pane is counted by
- * the agents' "waiting on you" instead
- * (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §6).
+ * How many Vault requests wait on the person, whatever pane asked: every use and every request the Vault holds
+ * (docs/specs/SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md §3). One asked as a card in a pane used to
+ * be counted only as that agent waiting, and one whose pane had closed by neither, so it could wait unseen. A pane that
+ * waits only on a Vault request is not also counted as an agent waiting (`isVaultOnly`). A click opens the Vault pane's
+ * Requests list at the first.
  */
 export function VaultRequestsStatus(): JSX.Element {
-    const unasked = () => [...vaultUses().filter((u) => !u.block_id), ...vaultRequests().filter((r) => !r.block_id)];
+    const unasked = () => [...vaultUses(), ...vaultRequests()];
     const count = () => unasked().length;
     return (
         <Show when={count() > 0}>

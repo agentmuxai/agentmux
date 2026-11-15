@@ -9,6 +9,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { FIT_MAX_K, MIN_READABLE_K, type PaneShape } from "./atlas-layout";
 import { fitView, localPoint, pointerScale, wheelFactor, zoomAt, zoomCentered, type Viewport } from "./atlas-viewport";
 
 /** What the pane needs from the map to fit it. */
@@ -19,6 +20,8 @@ export interface MapSize {
 
 export interface AtlasPanZoom {
     view: Accessor<Viewport>;
+    /** The pane's shape the layout is formed for: its size rounded, and slow to follow a resize. */
+    shape: Accessor<PaneShape>;
     /** The element the pointer events are on. */
     setViewport: (el: HTMLDivElement) => void;
     fit: () => void;
@@ -28,6 +31,12 @@ export interface AtlasPanZoom {
     onPointerMove: (e: PointerEvent) => void;
     onPointerUp: (e: PointerEvent) => void;
 }
+
+const FIT = { min: MIN_READABLE_K, max: FIT_MAX_K };
+/** The size the layout is formed for is rounded to this, so a drag of a pixel or two changes nothing. */
+const SHAPE_STEP = 64;
+/** How long a resize must rest before the layout is formed again for it. */
+const SHAPE_SETTLE_MS = 150;
 
 /** A press on one of these is not on the map's background: it neither pans nor draws a selection box. */
 export const NOT_BACKGROUND = ".atlas-node, .atlas-fold, .atlas-card";
@@ -44,16 +53,29 @@ export function useAtlasPanZoom(
     const [view, setView] = createSignal<Viewport>({ x: 16, y: 16, k: 1 });
     const [paneSize, setPaneSize] = createSignal({ w: 0, h: 0 });
     const [touched, setTouched] = createSignal(false);
+    const [shape, setShape] = createSignal<PaneShape>({ w: 0, h: 0 });
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const settleShape = (w: number, h: number) => {
+        const next = { w: Math.round(w / SHAPE_STEP) * SHAPE_STEP, h: Math.round(h / SHAPE_STEP) * SHAPE_STEP };
+        if (settle) clearTimeout(settle);
+        // The first measure forms the layout at once, so the first paint is fitted; a resize waits to settle.
+        if (shape().w === 0) setShape(next);
+        else
+            settle = setTimeout(
+                () => setShape((cur) => (cur.w === next.w && cur.h === next.h ? cur : next)),
+                SHAPE_SETTLE_MS
+            );
+    };
     let viewport: HTMLDivElement | undefined;
 
     const fit = () => {
         setTouched(false);
-        setView(fitView(size().width, size().height, paneSize().w, paneSize().h));
+        setView(fitView(size().width, size().height, paneSize().w, paneSize().h, FIT));
     };
     createEffect(() => {
         const s = size();
         const p = paneSize();
-        if (!touched() && p.w > 0) setView(fitView(s.width, s.height, p.w, p.h));
+        if (!touched() && p.w > 0) setView(fitView(s.width, s.height, p.w, p.h, FIT));
     });
     let lastMode = mode();
     createEffect(() => {
@@ -64,11 +86,17 @@ export function useAtlasPanZoom(
     });
     onMount(() => {
         if (!viewport) return;
-        const measure = () => setPaneSize({ w: viewport!.clientWidth, h: viewport!.clientHeight });
+        const measure = () => {
+            setPaneSize({ w: viewport!.clientWidth, h: viewport!.clientHeight });
+            settleShape(viewport!.clientWidth, viewport!.clientHeight);
+        };
         measure();
         const ro = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
         ro?.observe(viewport);
-        onCleanup(() => ro?.disconnect());
+        onCleanup(() => {
+            ro?.disconnect();
+            if (settle) clearTimeout(settle);
+        });
     });
 
     const moveView = (next: Viewport) => {
@@ -79,6 +107,7 @@ export function useAtlasPanZoom(
     let pan: { id: number; sx: number; sy: number; ox: number; oy: number; kx: number; ky: number } | null = null;
     return {
         view,
+        shape,
         setViewport: (el) => (viewport = el),
         fit,
         zoomBy: (factor) =>
