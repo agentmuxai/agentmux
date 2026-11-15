@@ -63,7 +63,11 @@ pub fn check(graph: &DroneGraph) -> Result<(), String> {
         if node.id.trim().is_empty() || !ids.insert(node.id.as_str()) {
             return Err(format!("graph.json: node id {:?} is empty or used twice", node.id));
         }
-        kind_of(node)?;
+        // What another drone does is on the machine it is installed on, not in the template, so the
+        // prompt could not list it: a template does not call one.
+        if kind_of(node)? == BlockKind::Drone {
+            return Err(format!("graph.json: node {:?} calls another drone, and a template cannot: what that drone does could not be shown when the template is approved", node.id));
+        }
     }
     for edge in &graph.edges {
         for end in [&edge.source, &edge.target] {
