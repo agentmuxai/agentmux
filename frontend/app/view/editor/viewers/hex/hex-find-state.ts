@@ -32,6 +32,14 @@ export interface HexFindParts {
     call?: SearchCall;
 }
 
+/**
+ * The file was rewritten or cut short: a search in flight finds offsets in the old bytes, so end it.
+ */
+function whenFileChanges(revision: Accessor<number> | undefined, busy: Accessor<boolean>, endSearch: () => void) {
+    if (!revision) return;
+    createEffect(on(revision, () => busy() && endSearch(), { defer: true }));
+}
+
 export function createHexFind(o: HexFindParts) {
     const [open, setOpen] = createSignal(false);
     const [mode, setModeSignal] = createSignal<FindMode>("hex");
@@ -49,20 +57,10 @@ export function createHexFind(o: HexFindParts) {
         run++;
         setBusy(false);
     };
-    // The file was rewritten or cut short: what a search in flight finds is an offset in the old bytes.
-    if (o.revision) {
-        createEffect(
-            on(
-                o.revision,
-                () => {
-                    if (!busy()) return;
-                    stop();
-                    setStatus("");
-                },
-                { defer: true }
-            )
-        );
-    }
+    whenFileChanges(o.revision, busy, () => {
+        stop();
+        setStatus("");
+    });
     const edit = (next: string) => {
         stop();
         setText(next);
