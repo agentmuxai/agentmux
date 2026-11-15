@@ -8,7 +8,7 @@ import { createEffect, createSignal, For, onCleanup, Show, type Accessor, type J
 import type { Summary } from "./summary";
 import { goToSummaryRow } from "./summary-go";
 import type { PartId } from "./summary-kinds";
-import { PART_ICON, partTip, summaryTip } from "./summary-text";
+import { endedTip, PART_ICON, partTip, summaryTip } from "./summary-text";
 import { SummaryPopover } from "./SummaryPopover";
 import { useSummary, type SummaryStatusProps } from "./use-summary";
 
@@ -37,7 +37,7 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
     let root: HTMLDivElement | undefined;
     // The list is for what waits: with nothing left it is closed for good, so the next request does not open it unasked.
     createEffect(() => {
-        if (summary().waiting === 0) setOpen(null);
+        if (summary().waiting === 0 && summary().ended.length === 0) setOpen(null);
     });
     pulseOnNewVaultRequest(summary, () => root);
     // A narrow bar can hide the item while its list is open; the list has no anchor then and would jump to a corner.
@@ -51,8 +51,12 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
         onCleanup(() => watch.disconnect());
     };
     const openSwarm = () => void openOrFocusPaneByView("swarm");
-    const click = (first?: PartId) => (summary().waiting > 0 ? setOpen(open() && open()!.first === first ? null : { first }) : openSwarm());
-    const any = () => summary().parts.some((p) => p.count > 0);
+    // A list to open while something waits, or while an ask that ended is still listed; otherwise the Swarm.
+    const hasList = () => summary().waiting > 0 || summary().ended.length > 0;
+    const click = (first?: PartId) => (hasList() ? setOpen(open() && open()!.first === first ? null : { first }) : openSwarm());
+    // The asks that ended show in the bar only while nothing waits, so a live ask is not crowded; the list has them either way.
+    const recent = () => (summary().waiting === 0 ? summary().ended.length : 0);
+    const any = () => summary().parts.some((p) => p.count > 0) || recent() > 0;
     // Whether an ask, a browser wait or a Vault request is among the parts: a narrow bar sheds the tasks only while one is left to show
     // (`_summary.scss`); with none, the one badge takes over from the tier that would shed them, so a waiting item never goes blank.
     // The badge's label counts the Vault's requests, as the Vault part's does: it is the operator's too while one waits.
@@ -77,7 +81,7 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
                                 data-part={p.id}
                                 data-tip={partTip(p.id, p.count)}
                                 aria-label={partTip(p.id, p.count)}
-                                aria-haspopup={summary().waiting > 0 ? "dialog" : undefined}
+                                aria-haspopup={hasList() ? "dialog" : undefined}
                                 onClick={() => click(p.id === "agents" ? undefined : p.id)}
                                 data-operator-only={p.id === "vault" ? "" : undefined}
                             >
@@ -86,6 +90,20 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
                         </Show>
                     )}
                 </For>
+                <Show when={recent() > 0}>
+                    <Button
+                        variant="chrome"
+                        icon="bell-slash"
+                        class="status-summary__part status-summary__part--recent"
+                        data-part="ended"
+                        data-tip={endedTip(recent())}
+                        aria-label={endedTip(recent())}
+                        aria-haspopup="dialog"
+                        onClick={() => click()}
+                    >
+                        <span class="status-summary__count">{recent()}</span>
+                    </Button>
+                </Show>
                 <Show when={summary().waiting > 0}>
                     <Button
                         variant="chrome"
@@ -101,7 +119,7 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
                     </Button>
                 </Show>
             </div>
-            <Show when={open() && summary().waiting > 0}>
+            <Show when={open() && hasList()}>
                 <SummaryPopover
                     anchor={root}
                     summary={summary}

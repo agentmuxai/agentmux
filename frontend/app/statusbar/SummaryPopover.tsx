@@ -15,7 +15,7 @@ import { attentionTint } from "@/app/notification/attention-list";
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 import type { Summary, SummaryRow } from "./summary";
 import type { PartId } from "./summary-kinds";
-import { goesAheadText, rowButton, rowButtonLabel, SUMMARY_TEXT } from "./summary-text";
+import { endedLine, goesAheadText, rowButton, rowButtonLabel, SUMMARY_TEXT } from "./summary-text";
 import { waitedFor } from "./waited-for";
 
 export interface SummaryPopoverProps {
@@ -65,6 +65,30 @@ function RowView(props: { row: SummaryRow; now: number; go: (row: SummaryRow) =>
     );
 }
 
+function EndedRows(props: { summary: Accessor<Summary>; now: number }): JSX.Element {
+    return (
+        <section class="attention-list-section attention-list-section--ended" aria-label={SUMMARY_TEXT.ended}>
+            <h3 class="attention-list-section-title">{SUMMARY_TEXT.ended}</h3>
+            <ul class="attention-list-rows">
+                <For each={props.summary().ended}>
+                    {(ask) => (
+                        <li class="attention-list-row" data-ended>
+                            <div class="attention-list-text">
+                                <span class="attention-list-name" style={{ color: attentionTint(ask.color) }}>
+                                    {ask.name}
+                                </span>
+                                <span class="attention-list-what">{ask.what}</span>
+                                <span class="attention-list-what">{endedLine(ask)}</span>
+                            </div>
+                            <span class="attention-list-age">{waitedFor(ask.endedAt, props.now)}</span>
+                        </li>
+                    )}
+                </For>
+            </ul>
+        </section>
+    );
+}
+
 export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
     const tick = useTick(1_000);
     const now = createMemo(() => (tick(), Date.now()));
@@ -73,6 +97,7 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
         const parts = props.summary().parts.filter((p) => p.rows.length > 0);
         return [...parts.filter((p) => p.id === props.first), ...parts.filter((p) => p.id !== props.first)];
     });
+    const vaultCount = () => props.summary().parts.find((p) => p.id === "vault")?.count ?? 0;
     const go = (row: SummaryRow) => {
         props.onClose();
         props.go(row);
@@ -89,10 +114,13 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
         >
             <div class="attention-list-header">
                 <span class="attention-list-title">{SUMMARY_TEXT.title}</span>
-                <span class="attention-list-count">{props.summary().waiting}</span>
+                {/* The total includes the Vault's requests: while one waits it is the operator's, as the Vault part is. */}
+                <span class="attention-list-count" data-operator-only={vaultCount() > 0 ? "" : undefined}>
+                    {props.summary().waiting}
+                </span>
             </div>
-            <Show when={sections().length > 0} fallback={<div class="attention-list-empty">{SUMMARY_TEXT.empty}</div>}>
-                <div class="attention-list-sections">
+            <div class="attention-list-sections">
+                <Show when={sections().length > 0} fallback={<div class="attention-list-empty">{SUMMARY_TEXT.empty}</div>}>
                     <For each={sections()}>
                         {(part) => (
                             <section
@@ -107,8 +135,11 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
                             </section>
                         )}
                     </For>
-                </div>
-            </Show>
+                </Show>
+                <Show when={props.summary().ended.length > 0}>
+                    <EndedRows summary={props.summary} now={now()} />
+                </Show>
+            </div>
             <div class="attention-list-footer">
                 <Button
                     density="compact"
