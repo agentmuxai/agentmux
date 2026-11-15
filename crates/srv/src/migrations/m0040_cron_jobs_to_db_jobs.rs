@@ -20,6 +20,8 @@
 //! A frozen copy of the row mapping on purpose (`migrations/mod.rs`): later
 //! changes to `storage::cron` must not change what this writes. `INSERT OR
 //! IGNORE` by id, so a re-run adds nothing twice and keeps later changes.
+//!
+//! Shared store: additive, it runs `INSERT OR IGNORE` into `db_jobs`; the cron rows stay where they are.
 
 use std::path::Path;
 
