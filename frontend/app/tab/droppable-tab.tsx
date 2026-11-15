@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Logger } from "@/util/logger";
+import { guardControlPress } from "@/app/util/press-on-control";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { isWindows } from "@/util/platformutil";
@@ -69,6 +70,32 @@ export interface DroppableTabProps {
     onClose: () => void;
 }
 
+/**
+ * What a press or hover on a window tab starts early, ahead of any drag. Pressing the active tab may start a
+ * tear-off: picture the window now, before the drag starts (tearoff-snapshot.ts); an inactive tab's content isn't
+ * on screen to picture. A sleeping browser pane in the tab starts waking on hover or press
+ * (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §6). Call inside onMount; the cleanups ride on its owner.
+ */
+function bindTabPresses(el: HTMLElement, props: DroppableTabProps): void {
+    const onPointerDown = (e: PointerEvent) => {
+        if (e.button === 0 && props.isActive && isWindows()) prewarmWindowTabSnapshot(props.tabId);
+        if (e.button === 0 && !props.isActive) pressTabPill(props.tabId);
+    };
+    el.addEventListener("pointerdown", onPointerDown);
+    onCleanup(() => el.removeEventListener("pointerdown", onPointerDown));
+    const onPointerEnter = () => {
+        if (!props.isActive) hoverTabPill(props.tabId);
+    };
+    const onPointerLeave = () => leaveTabPill(props.tabId);
+    el.addEventListener("pointerenter", onPointerEnter);
+    el.addEventListener("pointerleave", onPointerLeave);
+    onCleanup(() => {
+        el.removeEventListener("pointerenter", onPointerEnter);
+        el.removeEventListener("pointerleave", onPointerLeave);
+        leaveTabPill(props.tabId);
+    });
+}
+
 export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
     const isDragging = () => draggedWindowTabId() === props.tabId;
@@ -112,32 +139,14 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
 
         tabWrapperRefs.set(props.tabId, tabWrapRef);
 
-        // Pressing the active tab may start a tear-off: picture the window
-        // now, before the drag starts (tearoff-snapshot.ts). An inactive
-        // tab's content isn't on screen to picture.
-        const onPointerDown = (e: PointerEvent) => {
-            if (e.button === 0 && props.isActive && isWindows()) prewarmWindowTabSnapshot(props.tabId);
-            // A sleeping browser pane in this tab starts waking now
-            // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §6).
-            if (e.button === 0 && !props.isActive) pressTabPill(props.tabId);
-        };
-        tabWrapRef.addEventListener("pointerdown", onPointerDown);
-        onCleanup(() => tabWrapRef.removeEventListener("pointerdown", onPointerDown));
-        const onPointerEnter = () => {
-            if (!props.isActive) hoverTabPill(props.tabId);
-        };
-        const onPointerLeave = () => leaveTabPill(props.tabId);
-        tabWrapRef.addEventListener("pointerenter", onPointerEnter);
-        tabWrapRef.addEventListener("pointerleave", onPointerLeave);
-        onCleanup(() => {
-            tabWrapRef.removeEventListener("pointerenter", onPointerEnter);
-            tabWrapRef.removeEventListener("pointerleave", onPointerLeave);
-            leaveTabPill(props.tabId);
-        });
+        bindTabPresses(tabWrapRef, props);
 
+        // A press that began on the tab's close button is never a drag or a tear-off of the tab.
+        const press = guardControlPress(tabWrapRef);
+        onCleanup(press.dispose);
         const cleanupDraggable = draggable({
             element: tabWrapRef,
-            canDrag: () => props.allTabCount > 1 || windowLabel !== "main",
+            canDrag: () => !press.pressedOnControl() && (props.allTabCount > 1 || windowLabel !== "main"),
             getInitialData: () => ({
                 tabId: props.tabId,
                 workspaceId: props.workspaceId,

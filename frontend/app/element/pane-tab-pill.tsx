@@ -7,6 +7,7 @@
  */
 
 import { createMemo, onCleanup, onMount, Show, createSignal, type Accessor, type JSX } from "solid-js";
+import { guardControlPress } from "@/app/util/press-on-control";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -241,9 +242,11 @@ export function usePillDrag<T>(opts: {
         const drag = docTabDrag() ?? paneTabDrag();
         const el = pill();
         if (!drag || !el) return;
+        // A press that began on the pill's close button (or any control in it) is never a drag of the tab.
+        const press = guardControlPress(el);
         const cleanupDraggable = draggable({
             element: el,
-            canDrag: () => drag.canDrag(),
+            canDrag: () => !press.pressedOnControl() && drag.canDrag(),
             getInitialData: () => drag.data(),
             // A release outside every window (a tear-off) would slide the
             // picture back on native Wayland (wayland-drag-image.ts).
@@ -280,6 +283,7 @@ export function usePillDrag<T>(opts: {
         onCleanup(() => {
             cleanupDraggable();
             cleanupDropTarget();
+            press.dispose();
         });
     });
     return dropSide;

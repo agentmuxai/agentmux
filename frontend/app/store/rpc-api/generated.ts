@@ -499,6 +499,8 @@ import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResul
 import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PayloadSchemaReq } from "@/types/rpc/PayloadSchemaReq";
+import type { PayloadSchemaResp } from "@/types/rpc/PayloadSchemaResp";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
@@ -1921,6 +1923,10 @@ export const GeneratedApi = {
   // command "listmemories"
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
+  },
+  // command "getdronepayloadschema"
+  GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {
+    return client.rpcCall("getdronepayloadschema", data, opts);
   },
   // command "listdroneruns"
   ListDroneRunsCommand(client: RpcClient, data: ListRunsReq, opts?: RpcOpts): Promise<Array<DroneRun>> {

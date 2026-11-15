@@ -1,7 +1,7 @@
 # SPEC: Attach any file in the agent composer (PDF, Office, text, code, …)
 
 **Date:** 2026-09-26
-**Status:** active — shipped: #3938 (srv: classification, per-kind processing, text extraction in an isolated child process, `named/` copies, `<attached_files>` delivery, Claude PDF `document` blocks, `attachments.copy-to-workdir`), #3941 (frontend: kind tiles and icons, text/SVG thumbnails, lightbox views, any-file drop and paste, container-pane copy to the working folder). Remaining: the §12 open questions (PDF and video thumbnails). Extends the shipped image attachments (`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md`; #3910, #3917, #3918, #3920). Written against `main` @ `6b7b74ef1`.
+**Status:** active — shipped: #3938 (srv: classification, per-kind processing, text extraction in an isolated child process, `named/` copies, `<attached_files>` delivery, Claude PDF `document` blocks, `attachments.copy-to-workdir`), #3941 (frontend: kind tiles and icons, text/SVG thumbnails, lightbox views, any-file drop and paste, container-pane copy to the working folder). PDF and video thumbnails (§12 questions 1 and 2): #198. Extends the shipped image attachments (`SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md`; #3910, #3917, #3918, #3920). Written against `main` @ `6b7b74ef1`.
 **Author:** Korp@narko
 
 ---
@@ -144,6 +144,6 @@ The user attached 5 files. The numbers match how the user refers to them. …
 
 ## 12. Open questions
 
-1. PDF thumbnails (first page via PDF.js) — worth the ~1 MB renderer bundle? Deferred.
-2. Video first-frame thumbnails — needs a token-authenticated range route. Deferred.
+1. PDF thumbnails (first page via PDF.js): done (#198). The Editor already bundles pdf.js and loads it on first use, so a tile draws page 1 from the stored original, up to 30 MB, with scripting, XFA and eval off. A password-protected or unreadable PDF keeps its icon.
+2. Video first-frame thumbnails: done (#198), with no range route: the stored original (up to 60 MB) is decoded by the browser and one frame is drawn. A file the browser can't play keeps its icon.
 3. Should very large text files (logs) also go inline to Claude as text `document` blocks? This spec says no: the path is enough and keeps the transcript small.
