@@ -231,3 +231,80 @@ async fn the_first_look_is_remembered_past_the_weeks_sweep_of_event_ids() {
     assert!(!rig.store.job_event_claim("j-marker", &marker, "", sweep_at).unwrap(), "the marker went through the sweep");
     assert_eq!(rig.store.job_events_since("j-marker", 0).unwrap(), 0, "and it is not a run the job admitted");
 }
+
+/// A poll of a site outside AgentMux: written out, https, asked at most every few minutes, with no key of the call's own.
+#[test]
+fn a_poll_of_api_writes_its_site_out_and_asks_it_at_most_every_few_minutes() {
+    let ok = json!({ "query": "api", "every_minutes": 15, "url": "https://api.github.com/repos/o/r/actions/runs?per_page=20", "auth": { "vault": "api-key-github", "as": "bearer" }, "headers": { "Accept": "application/vnd.github+json" }, "items": "workflow_runs", "id": "id", "limit": 20 });
+    assert!(poll::validate_filter(&filter(ok.clone())).is_ok());
+    assert!(poll::validate_filter(&filter(json!({ "query": "api", "every_minutes": 5, "url": "https://example.org/list" }))).is_ok(), "no key is fine for a public list");
+    let with = |k: &str, v: serde_json::Value| {
+        let mut f = ok.clone();
+        f[k] = v;
+        poll::validate_filter(&filter(f)).unwrap_err()
+    };
+    assert!(with("every_minutes", json!(4)).contains("every 5 minutes"), "a poll of a site is not every minute");
+    assert!(with("url", json!("http://api.github.com/x")).contains("https"));
+    assert!(with("url", json!("https://{{trigger.host}}/x")).contains("writes its url out"));
+    assert!(with("url", json!("https://u:p@api.github.com/x")).contains("no user name"));
+    assert!(with("url", json!("api.github.com")).contains("not an address"));
+    assert!(with("url", json!("")).contains("has url"));
+    assert!(with("auth", json!("api-key-github")).contains("auth"));
+    assert!(with("auth", json!({ "vault": "" })).contains("names its Vault entry"));
+    assert!(with("auth", json!({ "vault": "{{trigger.entry}}" })).contains("names its Vault entry in vault, written out"));
+    assert!(with("auth", json!({ "vault": "k", "extra": 1 })).contains("takes vault and as"));
+    assert!(with("headers", json!({ "X-A": "{{trigger.x}}" })).contains("no {{reference}}"));
+    assert!(with("headers", json!(["a"])).contains("object"));
+    assert!(with("items", json!(3)).contains("dotted path"));
+    // Only a GET of a list: there is no `method` or `body` to give, and no other query's key.
+    let method = poll::validate_filter(&filter({ let mut f = ok.clone(); f["method"] = json!("POST"); f })).unwrap_err();
+    assert!(method.contains("no filter key \"method\""), "{method}");
+    assert!(poll::validate_filter(&filter({ let mut f = ok.clone(); f["body"] = json!("x"); f })).is_err());
+    assert!(poll::validate_filter(&filter({ let mut f = ok.clone(); f["holder"] = json!("a"); f })).is_err());
+    assert!(poll::validate_filter(&filter({ let mut f = ok.clone(); f["url"] = json!(null); f })).is_err());
+    let no_url = poll::validate_filter(&filter(json!({ "query": "api", "every_minutes": 5 }))).unwrap_err();
+    assert!(no_url.contains("has url"), "{no_url}");
+}
+
+/// The items of a site's list start one run each, once, with the item as the run reads it; the question carries the
+/// drone the job runs, which is who a Vault credential is granted to, and not how often.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_item_in_a_sites_list_starts_one_run_and_the_question_names_the_jobs_drone() {
+    let rig = rig();
+    let inputs = allow_runs(&rig);
+    let job = poll_job(&rig, "j-api", json!({ "query": "api", "every_minutes": 5, "url": "https://api.example.org/runs", "items": "runs" }));
+    let list = |ids: &[u32]| json!({ "items": ids.iter().map(|i| json!({ "id": i.to_string(), "item": { "id": i, "conclusion": "failure" } })).collect::<Vec<_>>() });
+    let answer = Arc::new(Mutex::new(list(&[1, 2])));
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let check = fake(&answer, &asked);
+    let mut state = PollState::default();
+    let all = [job.clone()];
+    let t0 = agentmux_common::time::now_ms();
+
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0).await, 0, "the first poll takes note of what is there");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [json!({ "query": "api", "url": "https://api.example.org/runs", "items": "runs", "limit": 100, "drone_id": "d-1" })],
+        "the question: the site, the path and the drone, never how often"
+    );
+    *answer.lock().unwrap() = list(&[1, 2, 3]);
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 5 * MIN).await, 1);
+    until_runs(&rig, "j-api", 1).await;
+    assert_eq!(*inputs.lock().unwrap(), [json!({ "query": "api", "key": "3", "item": { "id": 3, "conclusion": "failure" } })], "the run reads the item itself");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 10 * MIN).await, 0, "the same list is nothing new");
+}
+
+/// A poll of a site with a credential belongs to a drone job: another kind of job has no drone to grant it to.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_poll_of_api_for_a_job_that_is_not_a_drone_is_asked_with_no_drone() {
+    let rig = rig();
+    let mut job = poll_job(&rig, "j-api-msg", json!({ "query": "api", "every_minutes": 5, "url": "https://api.example.org/runs", "auth": { "vault": "api-key-x" } }));
+    job.action_kind = "message".to_string();
+    job.action = json!({ "kind": "message" });
+    let answer = Arc::new(Mutex::new(json!({ "items": [] })));
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let check = fake(&answer, &asked);
+    let mut state = PollState::default();
+    poll::poll_due(&rig.sched, &[job], &check, &mut state, agentmux_common::time::now_ms()).await;
+    assert_eq!(asked.lock().unwrap()[0]["drone_id"], "", "no drone: the check refuses a credential for it");
+}
