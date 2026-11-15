@@ -5,7 +5,7 @@
  * A pane's colour scope (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7): the custom properties one pane
  * carries on its own element so everything inside it reads its backdrop, not the window's theme. `scopeVars` turns a
  * derived backdrop into those properties; the registry keeps each block's set in a signal so a pane's chrome and its
- * view see the same one; `PaneScope` (scope.tsx) puts them on a div.
+ * view see the same one; `PaneScope` (PaneScope.tsx) puts them on a div.
  *
  * The properties are the backdrop's own (`--surface*`, `--ink-*`, `color-scheme`) and the app's existing tokens,
  * re-pointed at them, so a stylesheet written for the theme works unchanged inside a pane. Aliases built on those

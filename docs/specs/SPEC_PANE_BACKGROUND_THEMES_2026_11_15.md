@@ -1,6 +1,6 @@
 # Spec: Pane backdrops: a background that brings its own readable foreground
 
-Status: Approved by the operator on 2026-11-15 (decisions D1 to D12 as recommended). Task #47695 (spec), build #47696. Author: Agent1@narko, 2026-11-15.
+**Status:** active. Approved by the operator on 2026-11-15 (decisions D1 to D12 as recommended). Building in phases under task #47696 (spec #47695): phase 0 is in PR #7459; phases 1 to 4 are not started. Author: Agent1@narko, 2026-11-15.
 Read against: agentmuxai/agentmux `origin/main` at `09cb71400`. Engine: CEF crate `156.4.0+156.0.26` (Chromium 156), from `Cargo.lock`.
 
 ## 0. The operator's words
@@ -273,7 +273,7 @@ Each phase is a mergeable PR with its tests and macOS and Linux look checks wher
 
 | Phase | Scope | Visible? | Tests and checks |
 |---|---|---|---|
-| **0. Foundations** | the scope map (7.3) and `PaneScope`; the audit script and `check-color-literals` with its baseline; `@property` registrations; `deriveInk` and its tests; the pure parts only, no picker | no | `ink.test.ts`, the sweep, the baseline ratchet |
+| **0. Foundations** | the scope map (7.3) and `PaneScope`; the per-file colour list (`check-ui-primitives.mjs --list`) and the colour ratchet as its rules 10 and 11 (no baseline file, 7.6); the alias generator and `@property` registrations; `deriveInk` and its tests; the pure parts only, no picker | no | `ink.test.ts`, the sweep, the merge-base ratchet |
 | **1. Colour backdrops, agent pane** | the 16 built-ins, custom colour with nudge, the inline picker, live preview, reset, per-pane meta, migration of `bg`; the agent pane and its kit components fixed for the leaks found in phase 0 | yes | scope-coverage for the agent pane; look checks dark and light at 100 and 150 percent zoom |
 | **2. All pane types and overlays** | files, editor chrome, Kanban, Swarm, headers and pills; the portal helper through modal, popover, menus, tooltips and toasts; the widget SDK scope | yes | portal check; scope-coverage for every pane root; widget bridge test |
 | **3. Image backdrops** | import and derived store, the solved scrim, the controls, forced-colors and reduced-transparency handling; the lab runs here (with the operator's yes) and decides the live-image cap | yes | measurement script; look checks with a bright, a dark and a busy mid-tone image |
