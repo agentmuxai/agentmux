@@ -71,6 +71,30 @@ describe("SwatchGrid", () => {
         expect(radios(none.container).map((r) => r.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
     });
 
+    it("never makes a disabled swatch the Tab stop: the first enabled one is, when the first or the chosen one is disabled", () => {
+        const stops = (opts: SwatchOption<string>[], value: string) => radios(grid({ options: opts, value }).container).map((r) => r.tabIndex);
+        const off = (...at: number[]) => options.map((o, i) => (at.includes(i) ? { ...o, disabled: true } : o));
+        expect(stops(off(0), "none")).toEqual([-1, 0, -1, -1, -1, -1, -1, -1]);
+        cleanup();
+        expect(stops(off(0, 1), "none")).toEqual([-1, -1, 0, -1, -1, -1, -1, -1]);
+        cleanup();
+        expect(stops(off(1), "c1")).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
+        cleanup();
+        expect(stops(off(3), "c3")).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
+    });
+
+    it("keeps a Tab stop when the focused swatch becomes disabled", () => {
+        const [opts, setOpts] = createSignal(options);
+        const { container } = render(() => <SwatchGrid ariaLabel="Backdrop" options={opts()} value="none" onChange={() => {}} />);
+        const r = radios(container);
+        r[0].focus();
+        fireEvent.keyDown(r[0], { key: "ArrowRight" });
+        expect(r.map((x) => x.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1, -1]);
+        // New option objects rebuild the buttons, so they are read again.
+        setOpts(options.map((o, i) => (i === 1 ? { ...o, disabled: true } : o)));
+        expect(radios(container).map((x) => x.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
+    });
+
     it("chooses the one pressed", () => {
         const onChange = vi.fn();
         const { container } = grid({ onChange });

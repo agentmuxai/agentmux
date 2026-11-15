@@ -26,6 +26,8 @@ import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
+import { BackdropPicker } from "@/app/backdrop/BackdropPicker";
+import { closeBackdropPicker, isBackdropPickerOpen, openBackdropPicker, releaseBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
@@ -202,7 +204,11 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
-    return [{ type: "separator" as const }, { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems }];
+    return [
+        { type: "separator" as const },
+        { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
+        { label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) },
+    ];
 }
 
 function handleHeaderContextMenu(
@@ -1374,6 +1380,8 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         bg: util.useAtomValueSafe(props.viewModel?.blockBg)?.["bg"],
     }));
     const backdropVars = getPaneScope(nodeModel.blockId);
+    const pickerOpen = isBackdropPickerOpen(nodeModel.blockId);
+    onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
 
     return (
         <div
@@ -1415,6 +1423,13 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             {renderFrameInner(s)}
+            <Show when={pickerOpen() && !props.preview}>
+                <BackdropPicker
+                    blockId={nodeModel.blockId}
+                    meta={() => ({ backdrop: s.blockData()?.meta?.backdrop, bg: util.useAtomValueSafe(props.viewModel?.blockBg)?.["bg"] })}
+                    onClose={() => closeBackdropPicker(nodeModel.blockId)}
+                />
+            </Show>
             {renderFrameOverlays(s)}
         </div>
     );

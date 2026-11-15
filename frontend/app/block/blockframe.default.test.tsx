@@ -62,7 +62,8 @@ import { registerBlockComponentModel, unregisterBlockComponentModel } from "@/ap
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
-import { BlockFrame } from "./blockframe";
+import { closeBackdropPicker, openBackdropPicker } from "@/app/backdrop/picker-state";
+import { BlockFrame, buildPaneColorSubmenu } from "./blockframe";
 
 registerPaneTab({
     apiVersion: 1,
@@ -274,6 +275,32 @@ describe("the backdrop", () => {
         cleanup();
         const gradient = setup({ bg: "linear-gradient(red, blue)" });
         expect(frame(gradient.view.container).hasAttribute("data-backdrop")).toBe(false);
+    });
+
+    it("draws the picker inside the frame while it is open for this pane, and not for another or in a drag preview", () => {
+        const t = setup();
+        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
+        openBackdropPicker(t.blockId);
+        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        closeBackdropPicker(t.blockId);
+        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
+        cleanup();
+        const other = setup();
+        openBackdropPicker("some-other-block");
+        expect(other.view.container.querySelector(".backdrop-picker")).toBeNull();
+        cleanup();
+        const preview = setup({ preview: true });
+        openBackdropPicker(preview.blockId);
+        expect(preview.view.container.querySelector(".backdrop-picker")).toBeNull();
+    });
+
+    it("the pane's menu has a Backdrop… entry, after Pane Color, that opens the picker", () => {
+        const t = setup();
+        const items = buildPaneColorSubmenu({ oid: t.blockId, meta: { view: "term" } } as unknown as Block);
+        const labels = items.map((i) => i.label);
+        expect(labels.indexOf("Backdrop…")).toBe(labels.indexOf("Pane Color") + 1);
+        items.find((i) => i.label === "Backdrop…")!.click!();
+        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
     });
 
     it("a record that can't be read is no backdrop", () => {
