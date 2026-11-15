@@ -80,11 +80,20 @@ export function pointerScale(
 }
 
 /**
- * The view that shows a `width` by `height` map whole in a `w` by `h` pane, no larger than life size, from the
- * top left: the map does not move about as agents come and go and it grows.
+ * The view that shows a `width` by `height` map whole in a `w` by `h` pane, from the top left: the map does not
+ * move about as agents come and go and it grows. It is no larger than `limits.max` (life size when absent) and no
+ * smaller than `limits.min` (a readable floor, where the map then overflows the pane the long way).
  */
-export function fitView(width: number, height: number, w: number, h: number): Viewport {
+export function fitView(
+    width: number,
+    height: number,
+    w: number,
+    h: number,
+    limits: { min?: number; max?: number } = {}
+): Viewport {
     if (width <= 0 || height <= 0 || w <= 0 || h <= 0) return { x: FIT_MARGIN, y: FIT_MARGIN, k: 1 };
-    const k = clampZoom(Math.min((w - FIT_MARGIN * 2) / width, (h - FIT_MARGIN * 2) / height, 1));
+    const fitted = Math.min((w - FIT_MARGIN * 2) / width, (h - FIT_MARGIN * 2) / height, limits.max ?? 1);
+    // `min` is the readable floor: under it the map fills the pane the short way and is panned the other.
+    const k = clampZoom(Math.max(fitted, limits.min ?? 0));
     return { k, x: FIT_MARGIN, y: FIT_MARGIN };
 }

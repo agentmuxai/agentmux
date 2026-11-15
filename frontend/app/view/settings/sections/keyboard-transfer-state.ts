@@ -53,17 +53,26 @@ const platformsOf = (entry: unknown): string[] => {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Why a usable entry must still not be imported: its key is one the system takes before the app (the recorder refuses
- *  it too). An entry with no `platform` counts on both; an unbind is harmless. Keys the desktop only often takes are
- *  allowed, as the recorder allows them once confirmed. */
-function blockedReason(entry: unknown): string | null {
-    const { command, key, platform } = entry as { command: string; key?: string; platform?: string };
+/** Why an entry cannot be imported on `platform`: its key is one the system takes before the app (the recorder refuses
+ *  it too). An unbind is harmless. Keys the desktop only often takes are allowed, as the recorder allows them once
+ *  confirmed. */
+function blockedOn(entry: unknown, platform: string): string | null {
+    const { command, key } = entry as Entry;
     if (command.startsWith("-") || !key) return null;
-    for (const p of platform ? [platform] : ["mac", "other"]) {
-        const r = reservedFor(key, p as KeyPlatform);
-        if (r?.tier === "blocked") return `${key} cannot be used: ${r.reason}`;
-    }
-    return null;
+    const r = reservedFor(key, platform as KeyPlatform);
+    return r?.tier === "blocked" ? `${key} cannot be used: ${r.reason}` : null;
+}
+
+/** The entry to import, or why not. One with no `platform` applies on both, so a key the system takes on only one of
+ *  them (⌘ is the Windows key there) is imported for the other, instead of refusing a key that works where the person
+ *  is; a key blocked on both is refused. */
+function importable(entry: unknown): { entry: unknown } | { why: string } {
+    const platform = (entry as Entry).platform;
+    const blocked = (platform ? [platform] : ["mac", "other"]).map((p) => [p, blockedOn(entry, p)] as const);
+    const refused = blocked.filter(([, why]) => why != null);
+    if (refused.length === 0) return { entry };
+    if (platform || refused.length === blocked.length) return { why: refused[0][1]! };
+    return { entry: { ...(entry as Entry), platform: blocked.find(([, why]) => why == null)![0] } };
 }
 
 /** What importing `incoming` into `current` would do. */
@@ -72,9 +81,10 @@ export function previewImport(current: unknown[], incoming: unknown[]): ImportPr
     const unusable: ImportPreview["unusable"] = [];
     incoming.forEach((e, index) => {
         // The reserved-key check only reads an entry the registry accepts.
-        const message = entryIssue(e) ?? blockedReason(e);
-        if (message == null) usable.push(e);
-        else unusable.push({ index, message });
+        const message = entryIssue(e);
+        const found = message == null ? importable(e) : { why: message };
+        if ("entry" in found) usable.push(found.entry);
+        else unusable.push({ index, message: found.why });
     });
     const have = (e: unknown) => current.some((c) => same(c, e));
     const merged = mergeImport(current, usable);
@@ -83,7 +93,8 @@ export function previewImport(current: unknown[], incoming: unknown[]): ImportPr
     const replaced = commands.filter((command) => {
         const before = valid(current, command);
         const after = valid(merged, command);
-        return before.length > 0 && !(before.length === after.length && before.every((e) => after.some((a) => same(a, e))));
+        // Replaced is an entry of the setting that the merge removes or changes; one it only adds to is not.
+        return !before.every((e) => after.some((a) => same(a, e)));
     }).length;
     return { usable, unusable, already: usable.filter(have).length, replaced };
 }

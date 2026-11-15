@@ -239,7 +239,7 @@ describe("an agent's Vault requests as cards in its pane", () => {
         await waitFor(() => expect(line.textContent).toMatch(/Second · goes ahead in 0:(29|30)/));
     });
 
-    it("shows a parked agent's request on its My agents row and counts it in the status bar", async () => {
+    it("shows a parked agent's request on its My agents row and counts every request in the status bar", async () => {
         uses = [use({ block_id: "", entry_label: "Parked token" }), use({ id: "use-2" })];
         await refreshVault();
         render(() => (
@@ -252,8 +252,9 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(line.hasAttribute("data-operator-only")).toBe(true);
         expect(line.textContent).toMatch(/Waiting for you in the Vault: Parked token · goes ahead in 0:(29|30)/);
         expect(line.textContent, "the one in its pane is asked there").not.toContain("1 more");
-        const status = screen.getByRole("button", { name: /1 Vault request waits/ });
-        expect(status.textContent).toContain("1 Vault request");
+        // The one asked in its pane is counted too: the status bar counts every request, whatever pane asked.
+        const status = screen.getByRole("button", { name: /2 Vault requests wait/ });
+        expect(status.textContent).toContain("2 Vault requests");
         fireEvent.click(within(line).getByRole("button", { name: "Answer" }));
         fireEvent.click(status);
         expect(openedAt.mock.calls, "both open the Vault on the parked request").toEqual([["use-1"], ["use-1"]]);

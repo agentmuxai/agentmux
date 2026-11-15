@@ -14,9 +14,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const calls: string[] = [];
 const layout = vi.hoisted(() => ({
     nodes: new Map<string, { id: string; minimized?: boolean }>(),
+    magnified: undefined as string | undefined,
     model: {
+        get magnifiedNodeId() {
+            return layout.magnified;
+        },
         getNodeByBlockId: (blockId: string) => layout.nodes.get(blockId),
         focusNode: (id: string) => void calls.push(`focus:${id}`),
+        magnifyNodeToggle: (id: string, setState?: boolean, focused?: boolean) => {
+            calls.push(`unmagnify:${id}:${setState}:${focused}`);
+            layout.magnified = undefined;
+        },
     },
 }));
 const createBlock = vi.hoisted(() => vi.fn(async () => "new-block"));
@@ -68,6 +76,7 @@ describe("openOrFocusPaneIdByView", () => {
     });
     afterEach(() => {
         layout.nodes.clear();
+        layout.magnified = undefined;
         unmounted.clear();
         for (const id of ["warden-1", "mem-1", "settings-1"]) unregisterBlockComponentModel(id);
     });
@@ -157,5 +166,50 @@ describe("openOrFocusPaneIdByView", () => {
         expect(calls.filter((c) => c.startsWith("focus:"))).toEqual(["focus:node-s", "focus:node-s"]);
         // The new pane is not flashed from here (it is new, not located); the two shows are.
         expect(calls.filter((c) => c.startsWith("flash:"))).toEqual(['flash:settings-1:{"again":true}', 'flash:settings-1:{"again":true}']);
+    });
+
+    it("goes to a pane mounted in another tab when asked to switch tabs, instead of opening a second one", async () => {
+        register("settings-1", "settings");
+        expect(await openOrFocusPaneIdByView("settings", undefined, undefined, { switchTabs: true })).toBe("settings-1");
+        expect(revealBlock).toHaveBeenCalledWith("settings-1", { source: "widget", localOnly: true });
+        expect(createBlock).not.toHaveBeenCalled();
+    });
+
+    it("goes to an unmounted pane of another tab when asked to switch tabs", async () => {
+        unmounted.set("settings", { id: "settings-far", shown: false });
+        expect(await openOrFocusPaneIdByView("settings", undefined, undefined, { switchTabs: true })).toBe("settings-far");
+        expect(calls).toEqual(["reveal:settings-far"]);
+        expect(createBlock).not.toHaveBeenCalled();
+    });
+
+    it("still prefers the pane in this tab when asked to switch tabs, and opens one only when none is in the window", async () => {
+        register("settings-far", "settings");
+        register("settings-1", "settings");
+        layout.nodes.set("settings-1", { id: "node-s" });
+        expect(await openOrFocusPaneIdByView("settings", undefined, undefined, { switchTabs: true })).toBe("settings-1");
+        expect(revealBlock).not.toHaveBeenCalled();
+        unregisterBlockComponentModel("settings-far");
+        unregisterBlockComponentModel("settings-1");
+        layout.nodes.clear();
+        expect(await openOrFocusPaneIdByView("settings", undefined, undefined, { switchTabs: true })).toBe("new-block");
+    });
+
+    it("un-magnifies the pane a new pane would be hidden behind, once it is made", async () => {
+        layout.magnified = "node-big";
+        expect(await openOrFocusPaneIdByView("memory")).toBe("new-block");
+        expect(calls).toEqual(["unmagnify:node-big:true:false"]);
+    });
+
+    it("leaves a magnified pane alone when the pane asked for is one already open", async () => {
+        register("settings-1", "settings");
+        layout.nodes.set("settings-1", { id: "node-s" });
+        layout.magnified = "node-s";
+        await openOrFocusPaneIdByView("settings");
+        expect(calls.some((c) => c.startsWith("unmagnify:"))).toBe(false);
+    });
+
+    it("does not touch the layout when nothing is magnified", async () => {
+        await openOrFocusPaneIdByView("memory");
+        expect(calls).toEqual([]);
     });
 });
