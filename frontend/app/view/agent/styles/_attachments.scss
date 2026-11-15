@@ -260,6 +260,7 @@ $gap: 6px;
         }
 
         &__pages,
+        &__play,
         &__warn {
             position: absolute;
             bottom: 3px;
@@ -271,6 +272,11 @@ $gap: 6px;
         }
         &__pages {
             right: 3px;
+            color: var(--main-text-color);
+        }
+        // A video's first frame says it is a video.
+        &__play {
+            left: 3px;
             color: var(--main-text-color);
         }
         &__warn {
