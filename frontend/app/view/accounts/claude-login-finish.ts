@@ -3,6 +3,7 @@
 
 /** What the Claude sign-in does once the login reports an outcome: confirm the link, clean up the stale alias, show the result. */
 
+import { notStoredNotice } from "@/app/agent-model/login-store-notice";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
@@ -98,6 +99,10 @@ export function applyOutcome(s: LoginState, outcome: ProviderLoginOutcome, linkC
             break;
         case "inapp-ended":
             s.setError("The sign-in ended before it finished. Try again; if it asks for a code, paste the whole code.");
+            break;
+        case "inapp-no-keychain":
+        case "inapp-unfinished":
+            s.setError(notStoredNotice(outcome === "inapp-no-keychain" ? "no-keychain" : "unfinished"));
             break;
         case "terminal-timeout":
             s.setError("Opened a terminal window, but no login was detected within 5 minutes.");

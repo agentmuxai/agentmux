@@ -20,6 +20,7 @@
 
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { withLoginWindow } from "../../flows/login-window";
+import { notStoredNotice } from "@/app/agent-model/login-store-notice";
 import { logInAndConfirm, resolveProviderCli } from "../../flows/login-and-confirm";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -88,6 +89,11 @@ export const loginCommand: SlashCommand = {
     // comes later), and is closed on every way out if no URL used it
     // (login-window.ts).
     handler: (ctx) => withLoginWindow(ctx.provider(), () => runLogin(ctx)),
+};
+
+const UNAVAILABLE_RESULT: SlashResult = {
+    kind: "error",
+    message: "/login: the CLI produced no login URL, and a terminal window couldn't be opened on this platform.",
 };
 
 /** Never report success for a login that didn't complete
@@ -213,11 +219,10 @@ async function runLogin(ctx: SlashCommandContext): Promise<SlashResult> {
                 // closing the pane): nothing wrong to report.
                 if (ctx.isCancelled()) return { kind: "ok" };
                 return notDetectedResult(result.stage);
+            case "not-stored":
+                return { kind: "error", message: `/login: ${notStoredNotice(result.why)}` };
             case "unavailable":
-                return {
-                    kind: "error",
-                    message: "/login: the CLI produced no login URL, and a terminal window couldn't be opened on this platform.",
-                };
+                return UNAVAILABLE_RESULT;
         }
     } catch (err: any) {
         return { kind: "error", message: `/login failed: ${err?.message ?? String(err)}` };

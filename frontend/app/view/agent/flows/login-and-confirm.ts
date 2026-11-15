@@ -22,6 +22,7 @@ import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
 import { installPackageField } from "../providers/install-request";
+import type { NotStoredWhy } from "@/app/agent-model/login-store-notice";
 import { persistAndLinkAccount, runProviderLogin, type RunProviderLoginParams } from "./run-provider-login";
 
 /** How long a login page or terminal is given to finish: the same window
@@ -107,6 +108,8 @@ export type LoginConfirmation =
     /** Nothing signed in before the window closed, or the user cancelled.
      *  `stage`: what was open at the time. */
     | { kind: "not-detected"; stage: "link" | "inapp" | "terminal" }
+    /** The sign-in got as far as it could, but could not be kept (see login-store-notice.ts). Not "too slow". */
+    | { kind: "not-stored"; why: NotStoredWhy }
     /** No login could even be started on this platform. */
     | { kind: "unavailable" };
 
@@ -170,6 +173,10 @@ export async function logInAndConfirm(p: LogInAndConfirmParams): Promise<LoginCo
         case "inapp-timeout":
         case "inapp-ended":
             return { kind: "not-detected", stage: "inapp" };
+        case "inapp-no-keychain":
+            return { kind: "not-stored", why: "no-keychain" };
+        case "inapp-unfinished":
+            return { kind: "not-stored", why: "unfinished" };
         case "terminal-timeout":
             return { kind: "not-detected", stage: "terminal" };
         case "terminal-unavailable":

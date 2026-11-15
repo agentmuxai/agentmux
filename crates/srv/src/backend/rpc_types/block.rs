@@ -673,6 +673,9 @@ pub struct CheckCliAuthResult {
     pub auth_method: Option<String>,
     /// Raw stdout from auth check command
     pub raw_output: String,
+    /// Why a sign-in could not be stored here, when the check found out (macOS: "no-default-keychain").
+    #[serde(default)]
+    pub store_problem: Option<String>,
 }
 
 /// Request for `provider.ensureauthdir`.

@@ -24,6 +24,7 @@ const hub = vi.hoisted(() => ({
     getCliLoginStatus: vi.fn(),
     openPane: vi.fn(),
     openLoginTerminal: vi.fn(),
+    setProviderAuth: vi.fn(),
     ensureAccountDir: vi.fn(),
     upsertIdentityAccount: vi.fn(),
     identityAccountSignedIn: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("@/app/store/global", () => ({
         cancelCliLogin: hub.cancelCliLogin,
         getCliLoginStatus: hub.getCliLoginStatus,
         openLoginTerminal: hub.openLoginTerminal,
+        setProviderAuth: hub.setProviderAuth,
     }),
 }));
 vi.mock("./open-oauth-pane", () => ({ openOAuthBrowserPane: hub.openPane }));
@@ -60,6 +62,7 @@ vi.mock("@/app/store/mos", () => ({
     getObjectValue: () => ({ meta: { "cmd:env": { AGENTMUX_AGENT_ID: "loap" } } }),
 }));
 
+import { loginBackend } from "./login-backend";
 import { runProviderLogin } from "./run-provider-login";
 
 const claude = {
@@ -86,6 +89,7 @@ beforeEach(() => {
     hub.getCliLoginStatus.mockReset().mockResolvedValue({ active: false, credential_changed: true });
     hub.openPane.mockReset().mockResolvedValue("pane");
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
+    hub.setProviderAuth.mockReset().mockResolvedValue(undefined);
     hub.ensureAccountDir.mockReset().mockResolvedValue(MINTED);
     hub.upsertIdentityAccount.mockReset().mockResolvedValue({});
     hub.identityAccountSignedIn.mockReset().mockResolvedValue({ cleared: 0 });
@@ -1017,5 +1021,85 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
         // The whole point: must NOT reap a login that isn't this attempt's.
         expect(hub.cancelCliLogin).not.toHaveBeenCalled();
+    });
+});
+
+// The sign-in reached the code but the CLI could not keep it (macOS with no login keychain): the person is told
+// what happened, not that they were too slow.
+describe("runProviderLogin — a sign-in that cannot be stored", () => {
+    const URL = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&code_challenge=xyz&state=st";
+    const run = (isCancelled?: () => boolean) =>
+        runProviderLogin({
+            provider: claude,
+            cliPath: "x",
+            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            awaitTier1Completion: true,
+            isCancelled,
+        });
+
+    it("says 'inapp-no-keychain' at once when the first check finds no login keychain, and reaps the child", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: true, credential_changed: false, generation: 1 });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false, store_problem: "no-default-keychain" });
+
+        const promise = run();
+        await vi.advanceTimersByTimeAsync(0);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-no-keychain");
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+    });
+
+    it("says 'inapp-unfinished' when the code was sent and the login is still alive a minute later, not 'timeout'", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: true, credential_changed: false, generation: 1 });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+
+        const promise = run();
+        await vi.advanceTimersByTimeAsync(4_000);
+        await loginBackend().submitCode("claude", "the-code");
+        expect(hub.setProviderAuth).toHaveBeenCalledWith("claude", "the-code");
+        await vi.advanceTimersByTimeAsync(58_000);
+        await vi.advanceTimersByTimeAsync(4_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-unfinished");
+        expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps waiting for a person who has not sent a code, however long the authorize page takes", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: true, credential_changed: false, generation: 1 });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        let cancelled = false;
+
+        const promise = run(() => cancelled);
+        await vi.advanceTimersByTimeAsync(120_000);
+        cancelled = true;
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(await promise).toBe("inapp-timeout");
+    });
+
+    it("forgets a code from an earlier login when a new one starts", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        hub.getCliLoginStatus.mockResolvedValue({ active: true, credential_changed: false, generation: 1 });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
+        await loginBackend().submitCode("claude", "old-code");
+        let cancelled = false;
+
+        const promise = run(() => cancelled);
+        await vi.advanceTimersByTimeAsync(90_000);
+        cancelled = true;
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        expect(await promise).toBe("inapp-timeout");
     });
 });

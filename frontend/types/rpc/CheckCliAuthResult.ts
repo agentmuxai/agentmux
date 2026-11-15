@@ -7,4 +7,8 @@ export type CheckCliAuthResult = { authenticated: boolean, email: string | null,
 /**
  * Raw stdout from auth check command
  */
-raw_output: string, };
+raw_output: string, 
+/**
+ * Why a sign-in could not be stored here, when the check found out (macOS: "no-default-keychain").
+ */
+store_problem: string | null, };

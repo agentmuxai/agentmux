@@ -58,13 +58,36 @@ export interface LoginBackend {
     openTerminal(cliPath: string, loginArgs: string[], env: Record<string, string>): Promise<void>;
 }
 
+/**
+ * When the running login was last handed a code, or null if it has not been. A login finishes by itself once it
+ * has the code, so one that was given a code and still has not finished is stuck after it, not slow to authorize.
+ */
+let codeDeliveredAtMs: number | null = null;
+
+export function codeDeliveredAt(): number | null {
+    return codeDeliveredAtMs;
+}
+
+/** A new login has had no code. */
+function forgetCode(): void {
+    codeDeliveredAtMs = null;
+}
+
+function noteCodeDelivered(): void {
+    codeDeliveredAtMs = Date.now();
+}
+
 /** The desktop host's commands. */
 const hostBackend: LoginBackend = {
     start: async (p) => {
+        forgetCode();
         const url = await getApi().runCliLogin(p.cliPath, p.loginArgs, p.authEnv, p.requiresTty, p.authConfigDirEnvVar);
         return url ? { url } : null;
     },
-    submitCode: (providerId, code) => getApi().setProviderAuth(providerId, code),
+    submitCode: async (providerId, code) => {
+        await getApi().setProviderAuth(providerId, code);
+        noteCodeDelivered();
+    },
     status: () => getApi().getCliLoginStatus(),
     cancel: () => getApi().cancelCliLogin(),
     openTerminal: async (cliPath, loginArgs, env) => {
@@ -103,6 +126,7 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
             // session is cancelled as soon as srv answers.
             const mine = ++attempt;
             generation += 1;
+            forgetCode();
             await stopSession();
             // Not `directAccount`: the flow has already made the account's
             // directory (it's in authEnv) and saves the account itself, as it
@@ -134,6 +158,7 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
             if (!sessionId) throw new Error("no sign-in is running");
             const r = await rpc.AuthSubmitCallbackCommand(client, { sessionId, callbackUrl: code });
             if (!r.success) throw new Error(r.error ?? "the sign-in didn't accept the code");
+            noteCodeDelivered();
         },
         async status() {
             if (!sessionId) return { active: false, credential_changed: false, generation };
