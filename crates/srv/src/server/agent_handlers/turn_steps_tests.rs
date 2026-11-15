@@ -53,50 +53,105 @@ fn resolved(number: usize, name: &str, path: std::path::PathBuf) -> crate::backe
     crate::backend::attachments::prompt::Resolved { number, name: name.to_string(), path, mime: "image/png".into(), page_count: None, note: None }
 }
 
+const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
 #[test]
-fn a_container_attachment_is_copied_into_the_working_folder_and_the_list_points_there() {
+fn an_images_send_copy_keeps_its_id_and_send_suffix_so_reload_and_the_image_counter_still_recognize_it() {
     let host = tempfile::tempdir().unwrap();
-    let send_copy = host.path().join("not-the-cwd.png");
+    let send_copy = host.path().join(format!("{HASH_A}.v1-e2000.send.png"));
     std::fs::write(&send_copy, b"png bytes").unwrap();
     let cwd = tempfile::tempdir().unwrap();
 
     let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", send_copy)], Vec::new(), cwd.path().to_str().unwrap());
 
-    assert!(missing.is_empty());
+    assert!(missing.is_empty(), "{missing:?}");
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].path, std::path::PathBuf::from("/workspace/shot.png"));
-    assert_eq!(std::fs::read(cwd.path().join("shot.png")).unwrap(), b"png bytes");
+    assert_eq!(found[0].path, std::path::PathBuf::from(format!("/workspace/{CONTAINER_ATTACHMENTS_SUBDIR}/{HASH_A}.v1-e2000.send.png")));
+    assert_eq!(std::fs::read(cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join(format!("{HASH_A}.v1-e2000.send.png"))).unwrap(), b"png bytes");
 }
 
 #[test]
-fn two_attachments_with_the_same_display_name_land_as_two_de_conflicted_files() {
+fn a_named_copy_keeps_its_named_hash_realname_shape() {
+    let host = tempfile::tempdir().unwrap();
+    let named_dir = host.path().join("named").join(HASH_B);
+    std::fs::create_dir_all(&named_dir).unwrap();
+    let send_copy = named_dir.join("spec.pdf");
+    std::fs::write(&send_copy, b"pdf bytes").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "spec.pdf", send_copy)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(missing.is_empty(), "{missing:?}");
+    assert_eq!(found[0].path, std::path::PathBuf::from(format!("/workspace/{CONTAINER_ATTACHMENTS_SUBDIR}/named/{HASH_B}/spec.pdf")));
+    assert_eq!(std::fs::read(cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join("named").join(HASH_B).join("spec.pdf")).unwrap(), b"pdf bytes");
+}
+
+#[test]
+fn two_attachments_with_different_ids_land_at_their_own_distinct_paths() {
     let host = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let a = host.path().join("a");
-    let b = host.path().join("b");
+    let a = host.path().join(format!("{HASH_A}.send.png"));
+    let b = host.path().join(format!("{HASH_B}.send.png"));
     std::fs::write(&a, b"first").unwrap();
     std::fs::write(&b, b"second").unwrap();
 
     let (found, missing) = rehome_for_container(
-        vec![resolved(1, "notes.txt", a), resolved(2, "notes.txt", b)],
+        vec![resolved(1, "notes.png", a), resolved(2, "notes.png", b)],
         Vec::new(),
         cwd.path().to_str().unwrap(),
     );
 
-    assert!(missing.is_empty());
+    assert!(missing.is_empty(), "{missing:?}");
     assert_eq!(found.len(), 2);
-    assert_ne!(found[0].path, found[1].path, "the second must not overwrite the first: {found:?}");
+    assert_ne!(found[0].path, found[1].path, "each attachment's own id keeps it distinct: {found:?}");
 }
 
 #[test]
 fn a_send_copy_that_is_gone_joins_missing_instead_of_failing_the_whole_turn() {
     let cwd = tempfile::tempdir().unwrap();
-    let gone = std::env::temp_dir().join("agentmux-test-attachment-never-written.png");
+    let gone = std::env::temp_dir().join(format!("{HASH_A}.send.png"));
 
     let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", gone)], vec!["already-missing.png".to_string()], cwd.path().to_str().unwrap());
 
     assert!(found.is_empty());
     assert_eq!(missing, vec!["already-missing.png".to_string(), "shot.png".to_string()]);
+}
+
+#[test]
+fn a_path_with_no_recognizable_id_joins_missing_rather_than_being_sent_to_the_container_unidentified() {
+    let cwd = tempfile::tempdir().unwrap();
+    let plain = std::env::temp_dir().join("plain-name-no-hash.png");
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", plain)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(found.is_empty());
+    assert_eq!(missing, vec!["shot.png".to_string()]);
+}
+
+#[test]
+fn id_bearing_suffix_reads_a_flat_derived_file_a_named_copy_and_rejects_neither_shape() {
+    assert_eq!(id_bearing_suffix(std::path::Path::new(&format!("/s/{HASH_A}.v1.send.png"))), Some(std::path::PathBuf::from(format!("{HASH_A}.v1.send.png"))));
+    assert_eq!(
+        id_bearing_suffix(std::path::Path::new(&format!("/s/named/{HASH_B}/report.pdf"))),
+        Some(std::path::PathBuf::from("named").join(HASH_B).join("report.pdf"))
+    );
+    assert_eq!(id_bearing_suffix(std::path::Path::new("/s/plain.png")), None);
+    // A 64-char run that isn't hex (e.g. has a 'g') is not mistaken for an id.
+    assert_eq!(id_bearing_suffix(std::path::Path::new(&format!("/s/{}.png", "g".repeat(64)))), None);
+}
+
+#[test]
+fn attachment_destination_is_none_for_a_host_block_some_for_a_container_with_a_cwd_and_an_err_otherwise() {
+    assert_eq!(attachment_destination(&block_with(&[])), Ok(None), "a host block has nothing to rehome");
+    assert_eq!(
+        attachment_destination(&block_with(&[("agentMode", json!("container")), ("cmd:cwd", json!("/work/agent"))])),
+        Ok(Some("/work/agent".to_string()))
+    );
+    assert_eq!(
+        attachment_destination(&block_with(&[("agentMode", json!("container"))])),
+        Err("Attachments need a working folder, and this agent's pane has none yet.")
+    );
 }
 
 #[tokio::test]

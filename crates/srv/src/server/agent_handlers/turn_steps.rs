@@ -186,27 +186,14 @@ pub(super) async fn prepare_attachments(
     let message = if attachments.is_empty() {
         message
     } else {
-        let runtime = RuntimeKind::of_block_meta(&block.meta);
         // Refusals go through surface_refusal like every other early exit
         // here, so the reason survives a pane reload.
-        if !runtime.adapter().accepts_attachments() && !runtime.is_container() {
-            let msg = "Attachments aren't supported for this agent yet.";
-            surface_refusal(deps, block_id, msg);
-            return Err(msg.to_string());
-        }
-        // A container's workspace bind mount is this turn's `cmd:cwd`, host
-        // side (`ContainerMountSpec::for_agent`, container/mounts.rs): with
-        // none set yet there is nowhere on the host to put the copies.
-        let container_cwd = if runtime.is_container() {
-            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-            if cwd.is_empty() {
-                let msg = "Attachments need a working folder, and this agent's pane has none yet.";
+        let container_cwd = match attachment_destination(block) {
+            Ok(cwd) => cwd,
+            Err(msg) => {
                 surface_refusal(deps, block_id, msg);
                 return Err(msg.to_string());
             }
-            Some(cwd)
-        } else {
-            None
         };
         let Some(svc) = crate::backend::attachments::get() else {
             let msg = "Image attachments are unavailable: the attachment service isn't running.";
@@ -263,25 +250,63 @@ pub(super) async fn prepare_attachments(
     Ok((message, inline_images, image_paths))
 }
 
+/// Where this turn's attachments land, or why they can't: `Ok(None)` for a host agent (nothing to
+/// rehome — the host path already means something to it); `Ok(Some(cwd))` for a container agent with a
+/// working folder to copy into; `Err` for a runtime that refuses attachments and isn't a container (none
+/// does today; kept so a future one still refuses cleanly), or a container with no working folder yet.
+fn attachment_destination(block: &Block) -> Result<Option<String>, &'static str> {
+    let runtime = RuntimeKind::of_block_meta(&block.meta);
+    if !runtime.adapter().accepts_attachments() && !runtime.is_container() {
+        return Err("Attachments aren't supported for this agent yet.");
+    }
+    if !runtime.is_container() {
+        return Ok(None);
+    }
+    // A container's workspace bind mount is this turn's `cmd:cwd`, host side (`ContainerMountSpec::for_agent`,
+    // container/mounts.rs): with none set yet there is nowhere on the host to put the copies.
+    let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+    if cwd.is_empty() {
+        return Err("Attachments need a working folder, and this agent's pane has none yet.");
+    }
+    Ok(Some(cwd))
+}
+
+/// The subfolder, under a container's working folder, that rehomed attachments live in.
+const CONTAINER_ATTACHMENTS_SUBDIR: &str = ".agentmux-attachments";
+
 /// Copy each resolved attachment's send-copy from its host path into `host_cwd` (the pane's working
 /// folder) and point it at the container-side path instead (narko #198 piece 2): a container agent can
-/// open a file under its workspace mount, never a bare host path. A copy that fails joins `missing`,
-/// same treatment as a send-copy swept by retention.
+/// open a file under its workspace mount, never a bare host path. The copy keeps the exact trailing path
+/// [`id_bearing_suffix`] finds — `<sha256>.…` for an image/derived file, `named/<sha256>/<realname>` for
+/// any other kind — the same two shapes the composer's reload parser (`ID_RE`, `attached-images.ts`) and
+/// the image counter (`images_in_text`, `transcript/images.rs`) already recognize (#7434): renaming to
+/// the display name instead would make every container attachment unrecognizable to both on reload. A
+/// path with neither shape, or a copy that fails, joins `missing`, the same treatment a send-copy swept
+/// by retention gets.
 fn rehome_for_container(
     found: Vec<crate::backend::attachments::prompt::Resolved>,
     mut missing: Vec<String>,
     host_cwd: &str,
 ) -> (Vec<crate::backend::attachments::prompt::Resolved>, Vec<String>) {
     use crate::backend::runtime_adapter::MountRole;
-    use agentmux_common::copy_into_dir::{copy_into_dir, CopyControl};
-    let container_dir = RuntimeKind::Container.adapter().map_mount(MountRole::Workspace, host_cwd);
-    let dir = std::path::Path::new(host_cwd);
+    let container_root = RuntimeKind::Container.adapter().map_mount(MountRole::Workspace, host_cwd);
+    let host_root = std::path::Path::new(host_cwd).join(CONTAINER_ATTACHMENTS_SUBDIR);
     let mut rehomed = Vec::with_capacity(found.len());
     for mut item in found {
-        match copy_into_dir(&item.path, dir, &item.name, &CopyControl::default()) {
-            Ok(dest) => {
-                let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| item.name.clone());
-                item.path = std::path::PathBuf::from(format!("{container_dir}/{name}"));
+        let Some(suffix) = id_bearing_suffix(&item.path) else {
+            tracing::warn!(name = %item.name, path = %item.path.display(), "container attachment: its host path carries no recognizable id");
+            missing.push(item.name);
+            continue;
+        };
+        let dest = host_root.join(&suffix);
+        let made_room = match dest.parent() {
+            Some(parent) => std::fs::create_dir_all(parent),
+            None => Ok(()),
+        };
+        match made_room.and_then(|()| std::fs::copy(&item.path, &dest)) {
+            Ok(_) => {
+                let suffix = suffix.to_string_lossy().replace('\\', "/");
+                item.path = std::path::PathBuf::from(format!("{container_root}/{CONTAINER_ATTACHMENTS_SUBDIR}/{suffix}"));
                 rehomed.push(item);
             }
             Err(e) => {
@@ -291,6 +316,27 @@ fn rehome_for_container(
         }
     }
     (rehomed, missing)
+}
+
+/// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an
+/// image or other derived file (`prompt.rs`'s module doc), or `named/<sha256>/<realname>` for any other
+/// kind. `None` for a path with neither shape — a send-copy always has one, so this only trips on a path
+/// this function doesn't recognize, which must not be guessed at.
+fn id_bearing_suffix(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let file_name = path.file_name()?;
+    if let Some(hash_dir) = path.parent() {
+        if hash_dir.parent().and_then(|p| p.file_name()).is_some_and(|n| n == "named") {
+            if let Some(hash) = hash_dir.file_name().and_then(|n| n.to_str()).filter(|n| is_sha256_hex(n)) {
+                return Some(std::path::Path::new("named").join(hash).join(file_name));
+            }
+        }
+    }
+    let leading_id = file_name.to_str()?.split('.').next()?;
+    is_sha256_hex(leading_id).then(|| std::path::PathBuf::from(file_name))
+}
+
+fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Dispatch to a persistent controller: it starts (or respawns) the CLI and carries the message on its input.
