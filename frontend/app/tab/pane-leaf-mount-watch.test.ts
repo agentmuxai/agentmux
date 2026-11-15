@@ -18,6 +18,7 @@ function pane(view: string, hasSession: boolean) {
         viewTypeOf: () => viewType(),
         hasSessionOf: () => session(),
         mountedBlockIds: () => [],
+        lands: () => true,
     };
     return { members, setView, setSession };
 }

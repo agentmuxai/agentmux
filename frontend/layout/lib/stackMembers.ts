@@ -46,11 +46,22 @@ export function removeMemberFromStack(data: TabLayoutData, blockId: string): boo
     const nextStack = stack.filter((id) => id !== blockId);
     data.blockStack = nextStack;
     if (data.activeBlockId === blockId || data.blockId === blockId) {
-        const nextActive = nextStack[Math.min(idx, nextStack.length - 1)];
+        const nextActive = memberAfter(stack, blockId)!;
         data.activeBlockId = nextActive;
         data.blockId = nextActive;
     }
     return true;
+}
+
+/**
+ * The tab that comes to the front when the visible tab `blockId` leaves `stack`: its right-hand neighbour,
+ * the new last member when it was rightmost. Nothing when it is not a member or is the only one.
+ */
+export function memberAfter(stack: readonly string[], blockId: string): string | undefined {
+    const idx = stack.indexOf(blockId);
+    if (idx < 0 || stack.length <= 1) return undefined;
+    const rest = stack.filter((id) => id !== blockId);
+    return rest[Math.min(idx, rest.length - 1)];
 }
 
 /**

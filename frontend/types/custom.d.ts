@@ -752,9 +752,18 @@ declare global {
             /** Cursor to the window's top-left. */
             offsetX: number;
             offsetY: number;
-            /** The viewport y below which a window tab's picture shows; none: a pane, shown everywhere from its first move. */
+            /** The viewport y below which a window tab's picture shows; none: a pane. */
             tearLineY?: number;
+            /** A pane: the body of the layout its drag began in (CSS px of a viewport `viewportWidth` wide). The
+             *  picture is not shown while the cursor is over it; none: shown everywhere from its first move. */
+            quiet?: { left: number; top: number; width: number; height: number; viewportWidth: number };
         }) => Promise<void>;
+        /** Turn a pane picture's quiet area on or off: off while the window shows another window tab than the
+         *  one the drag began in. A no-op with no picture. */
+        liveFollowQuiet: (args: { on: boolean }) => Promise<void>;
+        /** Show the picture at `opacity` (0 to 1): faded while a layout shows drop guides, which are in the page,
+         *  under the picture. With no picture yet, the next one starts at it; a drag's end makes it solid again. */
+        liveFollowFade: (args: { opacity: number }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
         /** Give the picture another size (DIP). For a landing rect (`landingKey`) whose own picture the host keeps, it

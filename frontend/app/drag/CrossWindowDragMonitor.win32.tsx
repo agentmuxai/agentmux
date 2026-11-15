@@ -36,7 +36,7 @@ import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
 import { endedByEscape } from "./native-cancel";
-import { paneDragCandidate, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
+import { paneDragCandidate, pressIsOnTab, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
 export type DragItemPayload =
@@ -61,20 +61,23 @@ export function getCurrentDragPayload(): DragItemPayload | null {
     return _currentDragPayload;
 }
 
+/**
+ * A pane about to be dragged: picture it now, while it's still drawn normally, in case the drag tears it off
+ * (tearoff-snapshot.ts). A press on a tab's pill may drag that tab alone; anywhere else on the header, the whole pane.
+ */
+function picturePaneOnPress(e: PointerEvent): void {
+    if (e.button !== 0) return;
+    const blockId = paneDragCandidate(e.target);
+    if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY }, pressIsOnTab(e.target));
+}
+
 function CrossWindowDragMonitor(): JSX.Element {
     let windowLabelRef: string | null = null;
 
     onMount(async () => {
-        // A pane about to be dragged: picture it now, while it's still drawn
-        // normally, in case the drag tears it off (tearoff-snapshot.ts).
         // Registered before the first await, while onCleanup still has an owner.
-        const onPointerDown = (e: PointerEvent) => {
-            if (e.button !== 0) return;
-            const blockId = paneDragCandidate(e.target);
-            if (blockId) prewarmTearOffSnapshot(blockId, { x: e.clientX, y: e.clientY });
-        };
-        document.addEventListener("pointerdown", onPointerDown, true);
-        onCleanup(() => document.removeEventListener("pointerdown", onPointerDown, true));
+        document.addEventListener("pointerdown", picturePaneOnPress, true);
+        onCleanup(() => document.removeEventListener("pointerdown", picturePaneOnPress, true));
 
         windowLabelRef = await getApi().getWindowLabel();
         Logger.debug("dnd:cross", "CrossWindowDragMonitor mounted (win32)", { windowLabel: windowLabelRef });

@@ -45,6 +45,7 @@ import {
     MAX_SNAPSHOT_CHARS,
     paneDragCandidate,
     peekTearOffSnapshot,
+    pressIsOnTab,
     peekWindowTabSnapshot,
     prewarmTearOffSnapshot,
     prewarmWindowTabSnapshot,
@@ -69,7 +70,7 @@ function stubImagePipeline(cropped = "cropped-pane") {
                 public height: number
             ) {}
             getContext() {
-                return { drawImage: (...args: unknown[]) => shots.drawn.push(args.slice(1).map(Number)) };
+                return { fillRect: () => {}, drawImage: (...args: unknown[]) => shots.drawn.push(args.slice(1).map(Number)) };
             }
             async convertToBlob() {
                 return new Blob([cropped], { type: "image/jpeg" });
@@ -457,5 +458,55 @@ describe("paneDragCandidate", () => {
     it("a click on pane content that isn't a drag handle is not a pane drag", () => {
         const root = build(`<div data-blockid="b1"><div id="t">content</div></div>`);
         expect(paneDragCandidate(root.querySelector("#t"))).toBeNull();
+    });
+});
+
+describe("which of a pane's tabs its picture shows", () => {
+    const rectOf = (left: number, top: number, width: number, height: number) => () =>
+        ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} }) as DOMRect;
+
+    /** Pane `blockId` at (10, 20), 300 by 200, with two tabs in its header: `b0`, then `blockId` in front. */
+    function mountTabs(blockId: string) {
+        mountPane(blockId);
+        const header = document.createElement("div");
+        header.setAttribute("data-role", "block-header");
+        header.style.backgroundColor = "rgb(1, 2, 3)";
+        header.getBoundingClientRect = rectOf(10, 20, 300, 30);
+        for (const [id, left] of [["b0", 10], [blockId, 110]] as const) {
+            const pill = document.createElement("div");
+            pill.className = "pane-tab";
+            pill.dataset.tabId = id;
+            pill.getBoundingClientRect = rectOf(left, 20, 100, 30);
+            header.appendChild(pill);
+        }
+        document.querySelector(`[data-blockid="${blockId}"]`)!.appendChild(header);
+    }
+
+    it("a pane dragged by its header is pictured as it stands, with all its tabs", async () => {
+        mountTabs("b1");
+        prewarmTearOffSnapshot("b1", { x: 250, y: 30 });
+        expect(await peekTearOffSnapshot("b1", 500)).toMatchObject({ grab: { x: 240, y: 10 } });
+        // The pane's crop and nothing over it.
+        expect(shots.drawn).toEqual([[20, 40, 600, 400, 0, 0, 600, 400]]);
+    });
+
+    it("a tab's own drag pictures it alone: its pill drawn at the strip's start, held where it was pressed", async () => {
+        mountTabs("b1");
+        prewarmTearOffSnapshot("b1", { x: 150, y: 30 }, true);
+        // The press was 40 px into the pill, which now starts the strip.
+        expect(await peekTearOffSnapshot("b1", 500)).toMatchObject({ grab: { x: 40, y: 10 } });
+        expect(shots.drawn).toEqual([
+            [20, 40, 600, 400, 0, 0, 600, 400],
+            [220, 40, 200, 60, 0, 0, 200, 60],
+        ]);
+    });
+
+    it("reads the press: on a tab's pill it may drag that tab, anywhere else on the header the pane", () => {
+        const root = document.createElement("div");
+        root.innerHTML = `<div data-role="block-header"><div class="pane-tab" data-tab-id="b1"><span id="label">One</span></div><div id="grip"></div></div>`;
+        document.body.appendChild(root);
+        expect(pressIsOnTab(root.querySelector("#label"))).toBe(true);
+        expect(pressIsOnTab(root.querySelector("#grip"))).toBe(false);
+        expect(pressIsOnTab(null)).toBe(false);
     });
 });
