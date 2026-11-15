@@ -1,6 +1,6 @@
 # SPEC: Vault autofill in the Browser pane: Chrome's password manager, recreated for our Vault
 
-**Status:** draft for the operator. Task #47633; the build is #47634 and starts only after the operator approves this.
+**Status:** active - approved by the operator 2026-11-15. Task #47633; the build is #47634. P1 (the list of saved sign-ins under a login field, drawn by the pane's own UI) shipped in PR #7414; P2 to P4 are not started. Verified 2026-11-15.
 **Author:** Agent2-6 (Vault). **Engine side:** Korp (asked 2026-11-14; §P2.2 says what is confirmed and what is still open). **Browser pane:** AgentX (told it exists).
 **Verified on:** `origin/main` `090eefdc8` (2026-11-14).
 **The operator's words, 2026-11-14, verbatim:** "lets write a spec that recreates the chrome password manager in chrome browsers, but for our vault inside of the agentmux browser pane, esscially, auto complete on the password fields, lets research how modern chrome does it and try to replicate as close as possible".
