@@ -150,8 +150,17 @@ fpm -s dir -t rpm \
     --rpm-group root \
     --rpm-compression xz \
     --rpm-compression-level 9 \
+    --directories /opt/agentmux \
     --package "$OUTPUT" \
     -C "$PKGROOT" .
+
+# fpm lists only the files (and the empty folders) of a tree unless it is told to own the folders too, and a remove then
+# leaves every folder that held a file behind (24 under /opt/agentmux). The deb's remove takes the whole tree.
+# `--directories` above makes the rpm own /opt/agentmux and everything under it; this fails the build if it stops doing so.
+if ! rpm -qpl "$OUTPUT" | grep -qx '/opt/agentmux/bin'; then
+    echo "ERROR: $OUTPUT does not own /opt/agentmux/bin: a remove would leave the folders of /opt/agentmux behind" >&2
+    exit 1
+fi
 
 echo ""
 echo "✓ Built .rpm: $OUTPUT"
