@@ -784,6 +784,10 @@ jobs:
       # A shipped build never has the test-only feature: no command asks for it.
       - name: No build command enables the test-only feature
         run: node scripts/check-test-support-off.mjs
+      # The production frontend build (rolldown) rejects a source file that is not valid UTF-8, which
+      # tsc and vitest read past. Not run per PR anywhere else, so this is the PR-time catch.
+      - name: Tracked source files are valid UTF-8
+        run: node scripts/check-utf8.mjs
 
       # The ratchet half of the same rule set. check-doc-status.sh is scoped to
       # CHANGED FILES on purpose (a repo-wide gate would fail every PR on the

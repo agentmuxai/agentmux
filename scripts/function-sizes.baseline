@@ -103,7 +103,7 @@
 150 crates/launcher/src/ipc/mod.rs::ensure_ipc_socket_dir
 282 crates/launcher/src/ipc/server.rs::enforce_register_first
 489 crates/launcher/src/ipc/server.rs::handle_connection
-161 crates/launcher/src/main.rs::launcher_main
+163 crates/launcher/src/main.rs::launcher_main
 111 crates/launcher/src/main.rs::main
 141 crates/launcher/src/notify/linux.rs::run
 109 crates/launcher/src/notify/mod.rs::session

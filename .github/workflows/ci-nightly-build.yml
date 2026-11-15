@@ -382,6 +382,8 @@ jobs:
         run: bash tools/lint/check-input-handler-layout-reads.sh
       - name: muxbus credential store gate
         run: bash scripts/check-muxbus-credential-store.sh
+      - name: Tracked source files are valid UTF-8
+        run: node scripts/check-utf8.mjs
 
   # Plan step 3 of the CI test-speed and DRY follow-ups plan (PR #4534):
   # repo-wide broken doc links and comments naming a missing file, so a break
