@@ -214,6 +214,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_hang_dump.rs", "\"cmd\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/launcher/src/old_versions.rs", "&running_copy", 1,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_spawn.rs", "real_exe", 2,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/host_spawn.rs", "\"sleep\"", 3,
