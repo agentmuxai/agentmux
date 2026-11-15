@@ -353,6 +353,32 @@ describe("the hex viewer", () => {
         expect(cursorAt()).toBe(99_999);
     });
 
+    it("drops a find that was running when the file changed, instead of selecting an offset in the old bytes", async () => {
+        const [revision, setRevision] = createSignal(0);
+        const [size, setSize] = createSignal(FILE.length);
+        render(() => (
+            <HexViewer path="C:/bin/a.bin" revision={revision()} size={size()} memoryKey="C:/bin/a.bin" bar={{ viewer: "hex", options: ["hex"], onReopenWith: () => {} }} />
+        ));
+        await settle();
+        key("f", { ctrlKey: true });
+        await settle();
+        const box = screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
+        let answer: (r: unknown) => void = () => {};
+        searchBytes.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+        fireEvent.input(box, { target: { value: "41 42" } });
+        fireEvent.keyDown(box, { key: "Enter" });
+        await settle();
+        // The file is cut short while srv is still searching the old one.
+        serve(FILE.slice(0, 100));
+        setSize(100);
+        setRevision(1);
+        await settle();
+        answer({ found: true, offset: 90_000, length: 2, done: false, next_from: 0 });
+        await settle();
+        expect(selected()).not.toContain(90_000);
+        expect(document.querySelector(".hex-find-status")!.textContent).not.toContain("Found");
+    });
+
     it("leaves a sideways wheel to the browser in a file that scrolls in proportion, and takes the vertical one", async () => {
         const big = new Uint8Array(8_000_000);
         serve(big);

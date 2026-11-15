@@ -9,7 +9,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { findMatch, patternFor, type FindMode, type SearchCall } from "./hex-find";
 import { offsetText } from "./hex-layout";
 
@@ -19,6 +19,8 @@ export interface HexFindParts {
     /** The file on disk; "" for dropped bytes, which srv cannot search. */
     path: Accessor<string>;
     size: Accessor<number>;
+    /** Bumps when the file on disk changed and the viewer reloaded: a search begun before it read the old bytes. */
+    revision?: Accessor<number>;
     /** The selection: a search starts past its end (before its start, going backward). */
     lo: Accessor<number>;
     hi: Accessor<number>;
@@ -47,6 +49,20 @@ export function createHexFind(o: HexFindParts) {
         run++;
         setBusy(false);
     };
+    // The file was rewritten or cut short: what a search in flight finds is an offset in the old bytes.
+    if (o.revision) {
+        createEffect(
+            on(
+                o.revision,
+                () => {
+                    if (!busy()) return;
+                    stop();
+                    setStatus("");
+                },
+                { defer: true }
+            )
+        );
+    }
     const edit = (next: string) => {
         stop();
         setText(next);
@@ -74,9 +90,13 @@ export function createHexFind(o: HexFindParts) {
                 cancelled: () => mine !== run,
             });
             if (mine !== run || !r) return;
-            if (r.found) {
+            if (r.found && r.offset >= o.size()) {
+                setStatus("The file changed; search again");
+            } else if (r.found) {
                 o.select(r.offset, r.length);
-                setStatus(`Found at 0x${offsetText(r.offset, 1)}${r.wrapped ? ", from the other end of the file" : ""}`);
+                setStatus(
+                    `Found at 0x${offsetText(r.offset, 1)}${r.wrapped ? ", from the other end of the file" : ""}`
+                );
             } else {
                 setStatus("No match");
             }
