@@ -7,6 +7,9 @@ import { rovingTarget } from "./shared";
 
 import "./swatch.scss";
 
+// A type specimen, the same in every language: not text to translate.
+const DEFAULT_SAMPLE = "Aa";
+
 export interface SwatchProps {
     /** The colour the swatch is drawn in: a CSS colour, set as a custom property, so a runtime value never becomes a literal in a stylesheet. */
     color: string;
@@ -53,7 +56,7 @@ export function Swatch(props: SwatchProps): JSX.Element {
             onBlur={() => props.onPreview?.(false)}
         >
             <span class="ui-swatch-sample" aria-hidden="true">
-                {props.sample ?? "Aa"}
+                {props.sample ?? DEFAULT_SAMPLE}
             </span>
         </button>
     );
@@ -84,7 +87,7 @@ export interface SwatchGridProps<T extends string> {
 /**
  * A grid of swatches, one chosen. Arrow keys move focus across the grid, Up and Down by a row; Home and End go to
  * the ends; Enter or Space chooses the focused one; Escape ends a preview. Unlike a segmented control, moving does
- * not choose: a preview is what moving shows. The whole grid is one Tab stop (the chosen swatch, or the first).
+ * not choose: a preview is what moving shows. The whole grid is one Tab stop (the chosen swatch, or the first enabled one).
  */
 export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Element {
     const buttons: HTMLButtonElement[] = [];
@@ -92,7 +95,13 @@ export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Ele
     const isDisabled = (i: number) => !!props.options[i]?.disabled;
     const chosen = () => props.options.findIndex((o) => o.value === props.value);
     const [active, setActive] = createSignal<number | undefined>(undefined);
-    const tabStop = () => active() ?? Math.max(0, chosen());
+    // The one swatch Tab reaches: where focus last was, else the chosen one, else the first; a disabled one is never the
+    // stop, so the grid always has a tabbable swatch while any is enabled.
+    const tabStop = () => {
+        const want = active() ?? Math.max(0, chosen());
+        if (want < props.options.length && !isDisabled(want)) return want;
+        return Math.max(0, props.options.findIndex((_, i) => !isDisabled(i)));
+    };
 
     const move = (to: number | null) => {
         if (to == null || isDisabled(to)) return;
