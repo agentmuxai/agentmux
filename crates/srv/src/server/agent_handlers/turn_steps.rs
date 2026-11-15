@@ -263,12 +263,17 @@ fn attachment_destination(block: &Block) -> Result<Option<String>, &'static str>
         return Ok(None);
     }
     // A container's workspace bind mount is this turn's `cmd:cwd`, host side (`ContainerMountSpec::for_agent`,
-    // container/mounts.rs): with none set yet there is nowhere on the host to put the copies.
+    // container/mounts.rs): with none set yet there is nowhere on the host to put the copies. Expanded
+    // the same way `ContainerMountSpec::for_agent` expands it before binding it as `/workspace`
+    // (mounts.rs:50) — a `~/...` cwd (what `agent.open` records for an agent with no workspace of its
+    // own) must resolve to the exact folder Docker mounted, or the copy lands somewhere nothing reads it
+    // from and the list points at a container path that was never written.
     let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+    let cwd = cwd.trim();
     if cwd.is_empty() {
         return Err("Attachments need a working folder, and this agent's pane has none yet.");
     }
-    Ok(Some(cwd))
+    Ok(Some(crate::backend::base::expand_home_dir_safe(cwd).to_string_lossy().into_owned()))
 }
 
 /// The subfolder, under a container's working folder, that rehomed attachments live in.

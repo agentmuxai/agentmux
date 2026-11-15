@@ -108,6 +108,24 @@ fn two_attachments_with_different_ids_land_at_their_own_distinct_paths() {
 }
 
 #[test]
+fn a_rehomed_image_still_counts_as_one_in_the_transcripts_image_count() {
+    // Round-trips rehome_for_container's own output through the real list-builder and the real
+    // transcript parser (crate::backend::transcript::images::images_in_line, #7434), not just the path
+    // shape, so a change to either side that stops recognizing a container path fails here.
+    let host = tempfile::tempdir().unwrap();
+    let send_copy = host.path().join(format!("{HASH_A}.v1.send.png"));
+    std::fs::write(&send_copy, b"png bytes").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", send_copy)], Vec::new(), cwd.path().to_str().unwrap());
+    assert!(missing.is_empty(), "{missing:?}");
+
+    let list = crate::backend::attachments::prompt::list_block(&found, &missing, &[]);
+    let line = json!({ "type": "user", "message": { "role": "user", "content": format!("look\n\n{list}") } }).to_string();
+    assert_eq!(crate::backend::transcript::images::images_in_line(line.as_bytes()), 1, "{list}");
+}
+
+#[test]
 fn a_send_copy_that_is_gone_joins_missing_instead_of_failing_the_whole_turn() {
     let cwd = tempfile::tempdir().unwrap();
     let gone = std::env::temp_dir().join(format!("{HASH_A}.send.png"));
@@ -152,6 +170,18 @@ fn attachment_destination_is_none_for_a_host_block_some_for_a_container_with_a_c
         attachment_destination(&block_with(&[("agentMode", json!("container"))])),
         Err("Attachments need a working folder, and this agent's pane has none yet.")
     );
+    assert_eq!(
+        attachment_destination(&block_with(&[("agentMode", json!("container")), ("cmd:cwd", json!("   "))])),
+        Err("Attachments need a working folder, and this agent's pane has none yet."),
+        "whitespace alone is no working folder either"
+    );
+}
+
+#[test]
+fn attachment_destination_expands_a_tilde_cwd_the_same_way_the_container_mount_does() {
+    let Some(home) = dirs::home_dir() else { return };
+    let got = attachment_destination(&block_with(&[("agentMode", json!("container")), ("cmd:cwd", json!("~/.agentmux/agents/x-0930a"))]));
+    assert_eq!(got, Ok(Some(home.join(".agentmux/agents/x-0930a").to_string_lossy().into_owned())));
 }
 
 #[tokio::test]
