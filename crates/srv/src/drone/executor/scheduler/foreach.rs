@@ -71,6 +71,7 @@ impl<'a> Scheduler<'a> {
             }
         }
         if let Some(why) = &stopped {
+            self.cap_reached(id, why);
             if cfg.on_cap == OnCap::EndRun {
                 return Err(why.clone());
             }
