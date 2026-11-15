@@ -1,6 +1,6 @@
 # Spec: a Reviews pane, every task's pull request and its review state in one viewer
 
-**Status:** draft for the operator's approval (nothing built). Task Area54 #2581 (spec); the build is #2582, after approval. Written 2026-11-15; read from origin/main 09cb7140026, origin/main was 510907e5239 when it was finished (the files cited were checked there). Owner of the spec: Lazo (events, merge queue). Pane lane: AgentX (agreed 2026-11-15, section 7); Kanban links: Naki-2 (section 4); pane conventions and the code review of the pane: Camper.
+**Status:** active — R1 (the pane and `GET /api/v1/reviews`, no GitHub call) shipped in PR #7435; R2 to R5 not started. Verified 2026-11-15. Approved by the operator 2026-11-15 ("reviews spec looks good, proceed"). Task Area54 #2581 (spec), #2582 (build). Written 2026-11-15; read from origin/main 09cb7140026, origin/main was 510907e5239 when it was finished (the files cited were checked there). Owner of the spec: Lazo (events, merge queue). Pane lane: AgentX (agreed 2026-11-15, section 7); Kanban links: Naki-2 (section 4); pane conventions and the code review of the pane: Camper.
 
 ## 1. What the operator asked for
 
