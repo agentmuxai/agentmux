@@ -10,17 +10,22 @@
  * A run is usable when it still has its windows-portable artifact (`portable`): the run's own conclusion does not
  * matter, because a red macOS leg fails the run while the Windows portable is fine. B is the newest usable run, or
  * `bRunId` when given. A is the newest usable run older than B whose commit differs from B's: two nights with no merge
- * between them are the same build, and comparing a build with itself says nothing. No A is not an error: B is then
- * measured alone.
+ * between them are the same build, and comparing a build with itself says nothing, or `aRunId` when given (to place a
+ * change between two nights that are not neighbours). No A is not an error: B is then measured alone.
  *
  * @param {{id: number, sha: string, createdAt: string, portable: boolean}[]} runs
- * @param {{bRunId?: number|string|null}} [opts]
+ * @param {{bRunId?: number|string|null, aRunId?: number|string|null}} [opts]
  */
-export function pickBuilds(runs, { bRunId = null } = {}) {
+export function pickBuilds(runs, { bRunId = null, aRunId = null } = {}) {
     const usable = runs.filter((r) => r.portable).sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt));
     const b = bRunId ? usable.find((r) => String(r.id) === String(bRunId)) : usable[0];
     if (!b) return { b: null, a: null, reason: bRunId ? `run ${bRunId} has no windows-portable artifact (expired, or never built)` : "no nightly run has a windows-portable artifact" };
     const older = usable.filter((r) => Date.parse(r.createdAt) < Date.parse(b.createdAt));
+    if (aRunId) {
+        const chosen = older.find((r) => String(r.id) === String(aRunId));
+        if (!chosen) return { b, a: null, reason: `run ${aRunId} has no windows-portable artifact, or is not older than B (expired, never built, or newer)` };
+        return chosen.sha === b.sha ? { b, a: null, reason: "A is the same commit as B: nothing to compare with" } : { b, a: chosen, reason: null };
+    }
     const a = older.find((r) => r.sha !== b.sha) ?? null;
     const reason = a ? null : older.length ? "every older nightly is the same commit as B: nothing to compare with" : "no older nightly still has its portable: B is measured alone";
     return { b, a, reason };
