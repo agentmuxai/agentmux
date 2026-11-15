@@ -154,8 +154,7 @@ fn a_missing_text_companion_drops_just_that_part_of_the_note() {
 #[test]
 fn a_failed_text_extraction_note_is_not_mistaken_for_a_path_to_rehome() {
     // file_note's failure note reads "no text version: {e}" (store.rs), which contains the
-    // "text version: " marker as a substring but names no path — this must not match (#2586,
-    // muxreview on #7465).
+    // "text version: " marker as a substring but names no path — this must not match (#2586).
     let host = tempfile::tempdir().unwrap();
     let send_copy = host.path().join(format!("{HASH_A}.send.png"));
     std::fs::write(&send_copy, b"doc bytes").unwrap();
