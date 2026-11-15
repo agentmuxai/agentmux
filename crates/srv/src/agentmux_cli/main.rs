@@ -708,7 +708,7 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         Err(e) => return fail(&e),
     };
     if plan.service {
-        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir), &std::env::var("PATH").unwrap_or_default()));
+        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir)));
         match installed {
             Ok(file) => {
                 println!("The service is installed ({}): AgentMux starts at every login.", file.display());
@@ -723,8 +723,12 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         if !plan.start && cfg!(target_os = "macos") {
             let _ = service::control(&home, &paths.channel, "stop");
         }
-    } else if let Err(e) = service::remove(&home, &paths.channel) {
-        return fail(&e);
+    } else {
+        match service::remove(&home, &paths.channel) {
+            Ok(Some(file)) => println!("The service is removed ({}): AgentMux no longer starts at login.", file.display()),
+            Ok(None) => {}
+            Err(e) => return fail(&e),
+        }
     }
     if plan.start {
         let start = setup_server_args(args);
