@@ -30,6 +30,7 @@ pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod webhook_local;
 pub mod watchdog;
 
 use std::sync::Arc;

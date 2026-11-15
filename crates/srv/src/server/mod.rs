@@ -3,6 +3,7 @@
 
 pub(crate) mod cli_handlers;
 mod file_icons;
+pub(crate) mod hook_handlers;
 mod files;
 pub(crate) mod app_api;
 pub(crate) mod account_episodes;
