@@ -187,8 +187,13 @@ fn copy_window(
     }
     let mut bytes = (data.len() + side.len()) as u64;
     if with_state {
-        let state = crate::backend::continuity_state::STATE_FILE;
-        bytes += gfs.copy_files_to_zone(src_zone, fork, &[state]).map_err(|e| format!("copy summary: {e}"))?.unwrap_or(0);
+        // Each version says how many bytes of the parent's transcript it covers: moved to the copy's
+        // start, or `latest_state` drops it as describing more than the fork holds.
+        if let Some(state) = rebased_state(gfs, src_zone, cut, data.len() as i64)? {
+            if put(crate::backend::continuity_state::STATE_FILE, &state)? {
+                bytes += state.len() as u64;
+            }
+        }
     }
     if last_session(gfs, fork, field)?.as_deref() != Some(session_id) {
         gfs.delete_files(fork, &[OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE]).map_err(|e| format!("undo copy: {e}"))?;
@@ -196,6 +201,23 @@ fn copy_window(
     }
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, zone = %src_zone, bytes, from_byte = cut, "fork: copied the newest part of its parent's history");
     Ok(ForkHistory::Copied { bytes })
+}
+
+/// The newest versions of `zone`'s running summary with their coverage moved to a copy that starts
+/// `cut` bytes into the transcript and is `size` bytes long; `None` when there is no summary.
+fn rebased_state(gfs: &FileStore, zone: &str, cut: i64, size: i64) -> Result<Option<Vec<u8>>, String> {
+    use crate::backend::continuity_state::{rebase_versions, STATE_FILE};
+    /// A summary file is a few KB a version; past this the newest part is not read.
+    const READ_MAX: i64 = 16 << 20;
+    let Some(file) = gfs.stat(zone, STATE_FILE).map_err(|e| format!("stat summary: {e}"))?.filter(|f| f.size > 0) else {
+        return Ok(None);
+    };
+    let from = (file.size - READ_MAX).max(0);
+    let (_, raw) = gfs.read_at(zone, STATE_FILE, from, file.size - from).map_err(|e| format!("read summary: {e}"))?;
+    // A read that began mid-line starts at the next whole one.
+    let raw = if from > 0 { raw.iter().position(|b| *b == b'\n').map_or(&raw[..0], |i| &raw[i + 1..]) } else { &raw[..] };
+    let rebased = rebase_versions(raw, cut, size);
+    Ok((!rebased.is_empty()).then_some(rebased))
 }
 
 /// Where in `window` (read from `at` in its file) the copy starts: the first turn start, after the
