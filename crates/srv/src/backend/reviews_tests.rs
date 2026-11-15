@@ -232,6 +232,22 @@ fn a_verdict_on_the_same_head_or_with_no_head_is_not_stale() {
 }
 
 #[test]
+fn a_newer_verdict_of_another_reviewer_on_a_new_head_makes_the_older_one_stale() {
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![
+            review("r1", "lazo", pr(55, 100), "approved", PrFlowBy::Bot, Some("aaaaaaaaaaaa"), 2_000),
+            review("r2", "lazo", pr(55, 100), "commented", PrFlowBy::Codex, Some("bbbbbbbbbbbb"), 3_000),
+        ],
+        vec![],
+        vec![],
+    );
+    let r = &build(&cards, &f, 5_000).rows[0];
+    let stale: Vec<(PrFlowBy, bool)> = r.reviews.iter().map(|v| (v.by, v.stale)).collect();
+    assert_eq!(stale, vec![(PrFlowBy::Bot, true), (PrFlowBy::Codex, false)]);
+}
+
+#[test]
 fn checks_older_than_the_verdict_do_not_make_it_stale() {
     let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
     let f = flow(

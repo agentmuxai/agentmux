@@ -31,9 +31,13 @@ export interface ReviewsGroup {
     rows: ReviewRow[];
 }
 
-/** A row's identity: its repository and number, or, with no repository, the repository id and number. */
+/**
+ * A row's identity: its repository and number, or, with no repository, the repository id and number; with its task's
+ * ref after it when a task holds it, so two tasks that name one pull request are two rows, each selected on its own.
+ */
 export function rowKey(row: ReviewRow): string {
-    return `${row.repo ?? `id:${row.repo_id ?? 0}`}#${row.number}`;
+    const pr = `${row.repo ?? `id:${row.repo_id ?? 0}`}#${row.number}`;
+    return row.task ? `${pr}@${row.task.ref}` : pr;
 }
 
 /** Words that name a row, for the search box: the number, the task, the agent, the repository, the branch. */

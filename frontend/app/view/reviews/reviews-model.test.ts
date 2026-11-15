@@ -135,5 +135,9 @@ describe("text helpers", () => {
     it("names a row by repository and number, or by the repository id when the repository is unknown", () => {
         expect(rowKey(row({ number: 5, repo: "o/r" }))).toBe("o/r#5");
         expect(rowKey(row({ number: 5, repo_id: 9 }))).toBe("id:9#5");
+        expect(rowKey(row({ number: 5, repo: "o/r", task: task(3, "A") }))).toBe("o/r#5@#3");
+        expect(rowKey(row({ number: 5, repo: "o/r", task: task(4, "B") }))).not.toBe(
+            rowKey(row({ number: 5, repo: "o/r", task: task(3, "A") }))
+        );
     });
 });

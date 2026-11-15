@@ -291,13 +291,21 @@ fn events_of<'a>(flow: &'a PrFlowSnapshot, key: EventKey) -> Events<'a> {
 /// The row for one pull request from its events and, when a task names it, its card.
 fn row_of(ev: &Events<'_>, key: Option<EventKey>, card: Option<&CardIn>, orphan_agent: Option<&str>) -> ReviewRow {
     let checks = ev.checks.iter().copied().max_by_key(|e| e.at_ms).map(|e| ReviewsChecks { state: e.state.clone(), head: e.head.clone(), at_ms: e.at_ms });
-    // Verdicts: the newest of each reviewer kind. Stale when the checks of a newer head came after it.
+    // The newest commit anything named: the latest event of any kind (a verdict of any reviewer, or checks) that carries
+    // a head. A verdict given on another commit, no later than that event, is of an older head.
+    let newest_head: Option<(&str, u64)> = ev
+        .review
+        .iter()
+        .filter_map(|e| e.head.as_deref().map(|h| (h, e.at_ms)))
+        .chain(ev.checks.iter().filter_map(|e| e.head.as_deref().map(|h| (h, e.at_ms))))
+        .max_by_key(|(_, at)| *at);
+    // Verdicts: the newest of each reviewer kind.
     let mut verdicts: Vec<ReviewsVerdict> = Vec::new();
     for by in [PrFlowBy::Bot, PrFlowBy::Codex, PrFlowBy::Person] {
         let mine: Vec<&ReviewFlowEvent> = ev.review.iter().copied().filter(|e| e.by == by).collect();
         if let Some(e) = newest(&mine, |e| e.at_ms) {
-            let moved = match (&e.head, &checks) {
-                (Some(h), Some(c)) => c.head.as_ref().is_some_and(|ch| ch != h) && c.at_ms >= e.at_ms,
+            let moved = match (&e.head, newest_head) {
+                (Some(h), Some((nh, at))) => nh != h.as_str() && at >= e.at_ms,
                 _ => false,
             };
             verdicts.push(ReviewsVerdict { by, state: e.state.clone(), head: e.head.clone(), at_ms: e.at_ms, stale: moved });
