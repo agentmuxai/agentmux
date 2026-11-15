@@ -24,6 +24,63 @@ function pulseOnNewVaultRequest(summary: Accessor<Summary>, root: () => HTMLElem
     });
 }
 
+/** The parts of the item as buttons: one for each count, the asks that ended while nothing waits, and the one badge for a narrow bar. */
+function SummaryButtons(props: { summary: Accessor<Summary>; recent: number; hasList: boolean; click: (first?: PartId) => void }): JSX.Element {
+    // The badge's label counts the Vault's requests, as the Vault part's does: it is the operator's too while one waits.
+    const vaultCount = () => props.summary().parts.find((p) => p.id === "vault")?.count ?? 0;
+    return (
+        <>
+            <For each={props.summary().parts}>
+                {(p) => (
+                    <Show when={p.count > 0}>
+                        <Button
+                            variant="chrome"
+                            icon={PART_ICON[p.id]}
+                            class={p.id === "agents" ? "status-summary__part" : "status-summary__part status-summary__part--waits"}
+                            data-part={p.id}
+                            data-tip={partTip(p.id, p.count)}
+                            aria-label={partTip(p.id, p.count)}
+                            aria-haspopup={props.hasList ? "dialog" : undefined}
+                            onClick={() => props.click(p.id === "agents" ? undefined : p.id)}
+                            data-operator-only={p.id === "vault" ? "" : undefined}
+                        >
+                            <span class="status-summary__count">{p.count}</span>
+                        </Button>
+                    </Show>
+                )}
+            </For>
+            <Show when={props.recent > 0}>
+                <Button
+                    variant="chrome"
+                    icon="bell-slash"
+                    class="status-summary__part status-summary__part--recent"
+                    data-part="ended"
+                    data-tip={endedTip(props.recent)}
+                    aria-label={endedTip(props.recent)}
+                    aria-haspopup="dialog"
+                    onClick={() => props.click()}
+                >
+                    <span class="status-summary__count">{props.recent}</span>
+                </Button>
+            </Show>
+            <Show when={props.summary().waiting > 0}>
+                <Button
+                    variant="chrome"
+                    icon="bell"
+                    class="status-summary__badge"
+                    data-tip={summaryTip(props.summary())}
+                    aria-label={summaryTip(props.summary())}
+                    aria-haspopup="dialog"
+                    onClick={() => props.click()}
+                    data-operator-only={vaultCount() > 0 ? "" : undefined}
+                >
+                    <span class="status-summary__count">{props.summary().waiting}</span>
+                </Button>
+            </Show>
+        </>
+    );
+}
+
 /**
  * Everything that waits on the person, as one item: an icon and a number for agents running, Asks, Browser, Vault and
  * Kanban tasks, each hidden while it is zero (docs/specs/SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md §2).
@@ -59,8 +116,6 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
     const any = () => summary().parts.some((p) => p.count > 0) || recent() > 0;
     // Whether an ask, a browser wait or a Vault request is among the parts: a narrow bar sheds the tasks only while one is left to show
     // (`_summary.scss`); with none, the one badge takes over from the tier that would shed them, so a waiting item never goes blank.
-    // The badge's label counts the Vault's requests, as the Vault part's does: it is the operator's too while one waits.
-    const vaultCount = () => summary().parts.find((p) => p.id === "vault")?.count ?? 0;
     const core = () => summary().parts.some((p) => (p.id === "asks" || p.id === "browser" || p.id === "vault") && p.count > 0);
     return (
         <Show when={any()}>
@@ -71,53 +126,7 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
                 aria-label={summaryTip(summary())}
                 data-core={core() ? "" : undefined}
             >
-                <For each={summary().parts}>
-                    {(p) => (
-                        <Show when={p.count > 0}>
-                            <Button
-                                variant="chrome"
-                                icon={PART_ICON[p.id]}
-                                class={p.id === "agents" ? "status-summary__part" : "status-summary__part status-summary__part--waits"}
-                                data-part={p.id}
-                                data-tip={partTip(p.id, p.count)}
-                                aria-label={partTip(p.id, p.count)}
-                                aria-haspopup={hasList() ? "dialog" : undefined}
-                                onClick={() => click(p.id === "agents" ? undefined : p.id)}
-                                data-operator-only={p.id === "vault" ? "" : undefined}
-                            >
-                                <span class="status-summary__count">{p.count}</span>
-                            </Button>
-                        </Show>
-                    )}
-                </For>
-                <Show when={recent() > 0}>
-                    <Button
-                        variant="chrome"
-                        icon="bell-slash"
-                        class="status-summary__part status-summary__part--recent"
-                        data-part="ended"
-                        data-tip={endedTip(recent())}
-                        aria-label={endedTip(recent())}
-                        aria-haspopup="dialog"
-                        onClick={() => click()}
-                    >
-                        <span class="status-summary__count">{recent()}</span>
-                    </Button>
-                </Show>
-                <Show when={summary().waiting > 0}>
-                    <Button
-                        variant="chrome"
-                        icon="bell"
-                        class="status-summary__badge"
-                        data-tip={summaryTip(summary())}
-                        aria-label={summaryTip(summary())}
-                        aria-haspopup="dialog"
-                        onClick={() => click()}
-                        data-operator-only={vaultCount() > 0 ? "" : undefined}
-                    >
-                        <span class="status-summary__count">{summary().waiting}</span>
-                    </Button>
-                </Show>
+                <SummaryButtons summary={summary} recent={recent()} hasList={hasList()} click={click} />
             </div>
             <Show when={open() && hasList()}>
                 <SummaryPopover

@@ -279,6 +279,8 @@ let installed = false;
 export function installWaitingForYou(): void {
     if (installed) return;
     installed = true;
+    // The asks that end are kept for two minutes for the status bar's list. Loaded when used: it reads this registry's ends.
+    void import("./ended-asks").then((m) => m.installEndedAsks()).catch(() => {});
     onMuxEvent(WpsEvent.UserAttention, (data) => applyUserAttention(data, windowId()));
     // What was already open when this window started.
     void RpcApi.NotifyAttentionCommand(TabRpcClient)

@@ -1187,8 +1187,6 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     void import("@/app/view/agent/components/vault-request-card/vault-request-cards").then((m) => m.startVaultRequestCards());
     // srv's calls to action (browser, SSH consent, widget installs) join the waiting tone and notification.
     void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());
-    // The asks that ended in the last two minutes, for the status bar's list ("what was that sound?").
-    void import("@/app/notification/ended-asks").then((m) => m.installEndedAsks());
 
     // Window services that don't paint. They load alongside the render and
     // install when loaded; initMux doesn't wait for them, because its end is
