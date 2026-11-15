@@ -157,7 +157,10 @@ fpm -s dir -t rpm \
 # fpm lists only the files (and the empty folders) of a tree unless it is told to own the folders too, and a remove then
 # leaves every folder that held a file behind (24 under /opt/agentmux). The deb's remove takes the whole tree.
 # `--directories` above makes the rpm own /opt/agentmux and everything under it; this fails the build if it stops doing so.
-if ! rpm -qpl "$OUTPUT" | grep -qx '/opt/agentmux/bin'; then
+# The listing is read whole first: `grep -q` leaves at the first match, and `rpm` writing a long listing into a closed pipe
+# would end with SIGPIPE, which `pipefail` turns into a failed check on an rpm that is right.
+LISTING="$(rpm -qpl "$OUTPUT")"
+if ! grep -qx '/opt/agentmux/bin' <<<"$LISTING"; then
     echo "ERROR: $OUTPUT does not own /opt/agentmux/bin: a remove would leave the folders of /opt/agentmux behind" >&2
     exit 1
 fi
