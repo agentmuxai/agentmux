@@ -1,5 +1,6 @@
 # Spec: one compact status bar summary, and Vault requests that notify there
 
+**Status:** active (approved by the operator through AgentY, 2026-11-15; PR 1 shipped in #7455: the Vault count and the kind ratchet; PRs 2 to 4 as listed in section 7)
 **Author:** Masty@starpower. **Task:** #43 (build #44). **Read against:** origin/main `b966bedbe`, 2026-11-15.
 **Asked by the operator:** "lets make sure we get value requests a notification area in the status panel, in fact, lets get a condense info part that lets you know 20 agents, 4 tasks, 4 vaults, etc, put it in a compact form, (we already have for agents running and tasks, perhaps others, lets consolidate all those". "Value requests" is read as Vault requests (AgentY's reading).
 **Added by the operator, 2026-11-15, verbatim:** "also, we need pending questions, its often the case I hear the tone requesting a question or a browser permission but I cant find where it is coming from. we need those in the status bar". AgentY's reading (not the operator's words): the rule becomes **no attention tone without a row the person can find**.
