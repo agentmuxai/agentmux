@@ -17,8 +17,9 @@ export const NODE_W = 140;
 export const NODE_H = 48;
 /** How far the dashed frame of a container agent reaches past its node (atlas.scss `.atlas-node--container`). */
 export const CONTAINER_FRAME_OUT = 7;
-const GAP_X = 14;
-const GAP_Y = 40;
+/** The gap between two nodes of a row, and between one level and the next. */
+export const GAP_X = 14;
+export const GAP_Y = 40;
 /** Between the rows a lead's reports are wrapped into. */
 const REPORT_ROW_GAP = 24;
 const PAD = 16;
