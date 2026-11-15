@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { createDisplayWatchdog, OFFER_RELOAD_AFTER_MS, SOFT_AFTER_MS } from "./display-watchdog";
+import { createDisplayWatchdog, NONE_SHOWN_SOFT_AFTER_MS, OFFER_RELOAD_AFTER_MS, SOFT_AFTER_MS } from "./display-watchdog";
 
 function setup(over: { inFlight?: boolean } = {}) {
     let t = 1_000_000;
@@ -48,13 +48,48 @@ describe("the tab display watchdog", () => {
         expect(offerReload).not.toHaveBeenCalled();
     });
 
-    it("does nothing while no tab is shown: a tab closing, opening or being revealed", () => {
+    it("waits out no tab being shown for a few seconds: a tab closing, opening or being revealed", () => {
         const { state, w, advance, repair, offerReload } = setup();
+        state.shown = null;
+        w.check();
+        advance(SOFT_AFTER_MS + OFFER_RELOAD_AFTER_MS);
+        advance(NONE_SHOWN_SOFT_AFTER_MS - SOFT_AFTER_MS - OFFER_RELOAD_AFTER_MS - 1);
+        expect(repair).not.toHaveBeenCalled();
+        expect(offerReload).not.toHaveBeenCalled();
+    });
+
+    it("treats no tab shown for good as stuck: shows the tab, then offers the reload", () => {
+        const { state, w, advance, repair, offerReload, log } = setup();
+        state.shown = null;
+        w.check();
+        advance(NONE_SHOWN_SOFT_AFTER_MS);
+        expect(repair).toHaveBeenCalledWith("B");
+        expect(log.mock.calls[0][0]).toContain("showing no tab for 8000 ms while B is the active tab");
+        // The repair did not take: the page still shows none.
+        state.shown = null;
+        advance(OFFER_RELOAD_AFTER_MS - SOFT_AFTER_MS - 1);
+        expect(offerReload).not.toHaveBeenCalled();
+        advance(1);
+        expect(offerReload).toHaveBeenCalledTimes(1);
+        advance(60_000);
+        expect(offerReload).toHaveBeenCalledTimes(1);
+    });
+
+    it("never acts on no tab shown while a switch is in flight, or once the right tab shows", () => {
+        const { state, w, advance, repair, offerReload, withdrawOffer } = setup({ inFlight: true });
         state.shown = null;
         w.check();
         advance(60_000);
         expect(repair).not.toHaveBeenCalled();
-        expect(offerReload).not.toHaveBeenCalled();
+        state.inFlight = false;
+        w.check();
+        advance(NONE_SHOWN_SOFT_AFTER_MS);
+        state.shown = null;
+        advance(OFFER_RELOAD_AFTER_MS);
+        expect(offerReload).toHaveBeenCalledTimes(1);
+        state.shown = "B";
+        w.check();
+        expect(withdrawOffer).toHaveBeenCalledTimes(1);
     });
 
     it("waits out a mismatch shorter than the soft delay", () => {

@@ -32,11 +32,14 @@ export function TurnAwayDigest(props: {
         if (busy && !wasBusy) setLine(null);
         wasBusy = busy;
     });
+    // Keyed: the line is cleared from effects that a window-focus change runs
+    // in the same flush, and a keyed Show hands the child the value, not an
+    // accessor that throws "Stale read from <Show>" once the line is gone.
     return (
-        <Show when={line()}>
+        <Show when={line()} keyed>
             {(text) => (
                 <div class="agent-away-digest" role="status">
-                    <span class="agent-away-digest-text">{text()}</span>
+                    <span class="agent-away-digest-text">{text}</span>
                     <CloseButton label="Dismiss" class="agent-away-digest-dismiss" onClick={() => setLine(null)} />
                 </div>
             )}

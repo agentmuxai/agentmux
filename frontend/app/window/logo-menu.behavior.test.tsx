@@ -37,6 +37,7 @@ vi.mock("@/store/global", () => ({
     getApi: () => ({
         toggleDevtools: () => log("toggleDevtools"),
         openExternal: (url: string) => log(`openExternal ${url}`),
+        reloadWindow: () => log("reloadWindow"),
     }),
 }));
 vi.mock("@/store/tab-actions", () => ({ createTab: () => log("createTab") }));
@@ -242,7 +243,8 @@ describe("LogoMenu, pinned", () => {
         await press("8");
         await press("9");
         await press("10");
-        await press("12");
+        await press("11");
+        await press("13");
         return snapshot("actions");
     });
 });

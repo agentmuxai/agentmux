@@ -51,6 +51,7 @@ import { loadFonts } from "@/util/fontutil";
 import { primeAccountCache } from "@/app/view/identity/identity-model";
 import { setKeyUtilPlatform } from "@/util/keyutil";
 import { render } from "solid-js/web";
+import { containBindingErrors } from "@/app/util/contain-binding-errors";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
@@ -1222,7 +1223,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     const elem = document.getElementById("main");
-    render(App, elem);
+    render(() => containBindingErrors(App, (message) => { console.error(message); getApi().sendLog(message); }), elem);
     tlog("SolidJS render", t);
 
     for (const [name, loaded] of windowServices) {
