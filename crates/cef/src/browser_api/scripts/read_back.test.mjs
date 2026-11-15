@@ -63,6 +63,11 @@ describe("read_back: a link or a plain button says something a reader can use", 
         const a = el("a", {});
         expect(run.call(a)).toEqual({ tag: "a" });
     });
+
+    it("gives a button its visible text too: its own type (\"submit\" by default) is never enough on its own", () => {
+        const button = el("button", { type: "submit", text: "Create account" });
+        expect(run.call(button)).toEqual({ tag: "button", type: "submit", text: "Create account" });
+    });
 });
 
 describe("read_back: a form field already has something to say, so it keeps its own fields only", () => {
