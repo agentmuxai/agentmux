@@ -134,10 +134,7 @@ pub(super) async fn enqueue_core(state: &AppState, req: EnqueueRequest, filer: F
     if req.title.trim().is_empty() {
         return err(StatusCode::BAD_REQUEST, "title is required");
     }
-    if req.payload.trim().is_empty() {
-        return err(StatusCode::BAD_REQUEST, "payload is required");
-    }
-    if let Some(why) = crate::server::work_tasks::payload_too_long(&req.payload) {
+    if let Some(why) = crate::server::work_tasks::payload_problem(&req.payload) {
         return err(StatusCode::BAD_REQUEST, why);
     }
     // An item targeted at both a specific agent AND a group is ambiguous —

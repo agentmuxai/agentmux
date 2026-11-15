@@ -518,7 +518,7 @@ fn start_text(t: &BoardTask, attempt: i64, by: &Actor) -> String {
     let (name, n) = (t.card.name(), t.card.id_arg());
     let title = quote_in_system_note(&t.item.title);
     // A message holds less than a brief can: say where the rest is rather than hand over half without a word.
-    let cut = sanitize_message(&t.item.payload) != sanitize_text(t.item.payload.trim());
+    let cut = sanitize_message(&t.item.payload) != sanitize_text(&t.item.payload);
     let rest = if cut { format!(" The brief above is cut to fit a message: read all of it with Tasks get (id {n}).") } else { String::new() };
     let report = format!(
         "Report on it with Tasks (id {n}, attempt {attempt}): update at milestones, ask if you need {}, submit when it's done.{rest}",
@@ -742,6 +742,10 @@ mod tests {
         assert!(text.ends_with("read all of it with Tasks get (id 12)."), "{text}");
         let short = start_text(&t("operator", "", "operator", ""), 1, &Actor::operator());
         assert!(!short.contains("Tasks get"), "{short}");
+        // Whitespace around a short brief is not a cut.
+        let mut padded = t("operator", "", "operator", "");
+        padded.item.payload = "Write the spec for X.\n\n".into();
+        assert!(!start_text(&padded, 1, &Actor::operator()).contains("Tasks get"));
     }
 
     #[test]

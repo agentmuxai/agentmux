@@ -515,3 +515,18 @@ async fn card_text_over_the_limit_is_refused_and_nothing_changes() {
     let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
     assert_eq!(t["card"]["note"], exact.as_str(), "a note at the limit is whole");
 }
+
+/// The limit counts what a card would keep: text that sanitizes down to the limit is not refused.
+#[tokio::test]
+async fn card_text_is_counted_after_it_is_cleaned() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    // 4,000 visible characters and 500 invisible ones (zero-width spaces), which are stripped.
+    let note = format!("{}{}", "n".repeat(4_000), "\u{200b}".repeat(500));
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "note": note})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, t) = get(&app, &format!("/agentmux/work/{num}"), "a1").await;
+    assert_eq!(t["card"]["note"], "n".repeat(4_000).as_str());
+}

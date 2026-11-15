@@ -91,6 +91,14 @@ pub(crate) fn payload_too_long(text: &str) -> Option<String> {
     (n > MAX_PAYLOAD).then(|| format!("the payload is {n} characters and a task holds at most {MAX_PAYLOAD}: put the rest in a file and name its full path in the payload"))
 }
 
+/// Why a payload can't be filed: it is empty, or longer than [`MAX_PAYLOAD`].
+pub(crate) fn payload_problem(text: &str) -> Option<String> {
+    if text.trim().is_empty() {
+        return Some("payload is required".into());
+    }
+    payload_too_long(text)
+}
+
 /// A payload as stored: sanitized and whole, or the reason it is refused.
 pub(crate) fn payload_text(text: &str) -> Result<String, String> {
     match payload_too_long(text) {
@@ -102,7 +110,7 @@ pub(crate) fn payload_text(text: &str) -> Result<String, String> {
 /// Why agent text is refused when `clean` would cut it: a note, a question or a result longer than [`MAX_TEXT`]
 /// is said so, not kept cut.
 pub(crate) fn text_too_long(what: &str, text: &str) -> Option<String> {
-    let n = text.trim().chars().count();
+    let n = crate::backend::reactive::sanitize::sanitize_text(text.trim()).chars().count();
     (n > MAX_TEXT).then(|| format!("the {what} is {n} characters and a card keeps at most {MAX_TEXT}: shorten it, or put the detail in a file and link it. Nothing was changed."))
 }
 
