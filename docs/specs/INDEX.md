@@ -251,6 +251,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | [`SPEC_EDITOR_TAB_RENAME_2026_11_14`](SPEC_EDITOR_TAB_RENAME_2026_11_14.md) | SPEC: Rename a file from its Editor document tab | implemented | 2026-11-14 |  |
 | [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) | implemented | 2026-11-14 |  |
 | [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas | active | 2026-11-14 |  |
+| [`SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14`](SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md) | SPEC: Vault autofill in the Browser pane: Chrome's password manager, recreated for our Vault | draft | 2026-11-14 |  |
 | [`SPEC_ATLAS_AGENT_MAP_2026_11_13`](SPEC_ATLAS_AGENT_MAP_2026_11_13.md) | Spec: Atlas, a map of every agent across machines and tiers | active | 2026-11-13 |  |
 | [`SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12`](SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md) | Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523) | active | 2026-11-12 |  |
 | [`SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11`](SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md) | SPEC: Drone as a general automation tool: loops, state, sub-drones, a Run step, durable waits | active | 2026-11-11 |  |
