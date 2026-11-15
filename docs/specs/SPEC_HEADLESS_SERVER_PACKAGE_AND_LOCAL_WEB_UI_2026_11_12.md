@@ -119,7 +119,7 @@ One command, subcommands, a short `--help` each; every subcommand that a script 
 **Service files.** Linux: `~/.config/systemd/user/agentmux.service` (`Restart=on-failure`, the environment above, `loginctl enable-linger` offered, not forced, for a server with no login). macOS: `~/Library/LaunchAgents/ai.agentmux.server.plist`. Both are written from a template that `uninstall` and `doctor` also read. Windows is not in the first package.
 
 **First package versus later.**
-- **First (S2 + S3):** Linux x64/arm64 and macOS arm64/x64; the tarball plus install script; `setup`, `doctor`, `start`, `stop`, `restart`, `status`, `open`, `logout`, `logs`, `update`, `uninstall`, `version`; the systemd user unit and launchd agent; no Browser pane (section 7); loopback only.
+- **First (S2 + S3):** Linux x64/arm64 and macOS arm64 (no Intel Mac server: the release builds none, AgentY 2026-11-15); the tarball plus install script; `setup`, `doctor`, `start`, `stop`, `restart`, `status`, `open`, `logout`, `logs`, `update`, `uninstall`, `version`; the systemd user unit and launchd agent; no Browser pane (section 7); loopback only.
 - **Later:** Windows (with a scheduled-task service); `deb`, `brew`, npm; a reverse proxy in front with TLS (its own design, section 3); `agentmux update` on a schedule; S4.
 
 ## 5. The `headless` channel (answering AgentY's question)
