@@ -639,12 +639,14 @@
 .agent-composer-details-resize-handle--edge {
     position: absolute;
     // The composer footer pads its input box by --space-0-5, so the box's bottom border (1px) sits that far
-    // plus its own width above the drawer's top edge. The strip starts 2px above the border and ends 2px
-    // under the drawer's top: the border is inside it, and only 1px of the text box's own inside is.
-    top: calc(-1 * (var(--space-0-5) + 2px));
+    // plus its own width above the drawer's top edge. The composer is inside the pane's CSS zoom and the
+    // drawer is not, so both the padding and the border are scaled by --agent-pane-zoom (set on .agent-view)
+    // where the drawer is not. The strip starts 1px above the border and ends 2px under the drawer's top:
+    // the border is inside it at every zoom, and only about 1px of the text box's own inside is.
+    top: calc(-1 * (var(--agent-pane-zoom, 1) * (var(--space-0-5) + 1px) + 1px));
     left: 0;
     right: 0;
-    height: 6px;
+    height: calc(var(--agent-pane-zoom, 1) * (var(--space-0-5) + 1px) + 3px);
     z-index: var(--z-layout-resize-handle);
     border-top: 0;
 
@@ -667,7 +669,8 @@
         background: transparent;
 
         &::after {
-            top: 0;
+            // Centred on the border: 3px tall, so its top is 0.5px per unit of zoom above 1 under the strip's top.
+            top: calc(0.5px * (var(--agent-pane-zoom, 1) - 1));
             height: 3px;
             background: var(--accent-color);
         }
