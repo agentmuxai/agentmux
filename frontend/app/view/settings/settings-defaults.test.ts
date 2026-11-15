@@ -371,14 +371,14 @@ function appValues(): Map<string, Found[]> {
 }
 
 // ── The backend ─────────────────────────────────────────────────────────────
-// Literal fallbacks at the read, in crates/srv and crates/launcher:
+// Literal fallbacks at the read, in crates/srv, crates/srv-core and crates/launcher:
 //   `setting_bool(extra, "k", LIT)`, and the `&format!("notify:os:{sfx}")` form per suffix
 //   `"k")` + value conversions + `.unwrap_or(LIT)` / `.unwrap_or_else(|| LIT.to_string())`
 //   `match setting_str(extra, "k") { … _ => Enum::Variant }` → "variant"
 // plus BACKEND_CONSTANTS, and a non-`Option` `SettingsType` field, which takes
 // its type's zero value when the key is unset.
 
-const BACKEND_DIRS = ["crates/srv/src", "crates/launcher/src"];
+const BACKEND_DIRS = ["crates/srv/src", "crates/srv-core/src", "crates/launcher/src"];
 
 /** Defaults the backend keeps in a constant instead of at the read: file, and a pattern capturing the value. */
 const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {

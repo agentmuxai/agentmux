@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Where every kind of call to action srv announces (`userattention`, crates/srv/src/backend/user_attention.rs `KINDS`)
+ * Where every kind of call to action srv announces (`userattention`, crates/srv-core/src/backend/user_attention.rs `KINDS`)
  * lands in the status bar's summary, and where a request that belongs to no pane is answered
  * (docs/specs/SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md §1b, §2). A tone must have a row the
  * person can find, so a kind with no entry here fails the test that reads srv's list.
