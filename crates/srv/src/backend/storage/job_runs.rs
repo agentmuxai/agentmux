@@ -85,6 +85,7 @@ pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError
     conn.execute_batch(super::job_incidents::SCHEMA)?;
     conn.execute_batch(super::job_cloud::SCHEMA)?;
     conn.execute_batch(super::job_events::SCHEMA)?;
+    super::migrations::apply_additive_columns(conn, super::job_events::COLUMNS)?;
     super::migrations::apply_additive_columns(conn, JOB_RUNS_COLUMNS)
 }
 
