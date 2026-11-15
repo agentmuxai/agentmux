@@ -348,18 +348,19 @@ fn rehome_one(workdir: &std::io::Result<crate::backend::workdir_fs::Workdir>, co
 /// Rewrites a `text version: <path>` segment of a document's note to the container-side path
 /// [`rehome_one`] copied it to, keeping the rest of the note (page count, "contains macros") as is.
 /// Drops just that segment, rather than leaving a host path, when the companion carries no
-/// recognizable id or its copy fails. A note with no such segment (an image's note is always `None`;
-/// a document's can read "no text version, …" instead) is returned unchanged.
+/// recognizable id or its copy fails. Matches only a segment that STARTS WITH the marker, never a
+/// bare substring: `file_note`'s failure note reads "no text version: {e}", which contains "text
+/// version: " too but names no path to rehome — matching that would delete the error text instead
+/// (#2586). A note with neither segment shape (an image's note is always `None`) is unchanged.
 fn rehome_text_companion(note: &str, workdir: &std::io::Result<crate::backend::workdir_fs::Workdir>, container_root: &str) -> String {
     const MARKER: &str = "text version: ";
-    let Some(marker_at) = note.find(MARKER) else { return note.to_string() };
-    let path_start = marker_at + MARKER.len();
-    let path_end = note[path_start..].find("; ").map_or(note.len(), |i| path_start + i);
-    let host_path = std::path::Path::new(&note[path_start..path_end]);
-    match rehome_one(workdir, container_root, host_path) {
-        Some(container_path) => format!("{}{container_path}{}", &note[..path_start], &note[path_end..]),
-        None => format!("{}{}", note[..marker_at].trim_end_matches("; "), &note[path_end..]),
-    }
+    note.split("; ")
+        .filter_map(|segment| match segment.strip_prefix(MARKER) {
+            Some(path_str) => rehome_one(workdir, container_root, std::path::Path::new(path_str)).map(|p| format!("{MARKER}{p}")),
+            None => Some(segment.to_string()),
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an

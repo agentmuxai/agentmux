@@ -152,6 +152,23 @@ fn a_missing_text_companion_drops_just_that_part_of_the_note() {
 }
 
 #[test]
+fn a_failed_text_extraction_note_is_not_mistaken_for_a_path_to_rehome() {
+    // file_note's failure note reads "no text version: {e}" (store.rs), which contains the
+    // "text version: " marker as a substring but names no path — this must not match (#2586,
+    // muxreview on #7465).
+    let host = tempfile::tempdir().unwrap();
+    let send_copy = host.path().join(format!("{HASH_A}.send.png"));
+    std::fs::write(&send_copy, b"doc bytes").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let note = "Word document; no text version: permission denied";
+
+    let (found, missing) = rehome_for_container(vec![resolved_with_note(1, "report.docx", send_copy, note)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(missing.is_empty(), "{missing:?}");
+    assert_eq!(found[0].note.as_deref(), Some(note), "an unmatched segment is passed through unchanged");
+}
+
+#[test]
 fn two_attachments_with_different_ids_land_at_their_own_distinct_paths() {
     let host = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
