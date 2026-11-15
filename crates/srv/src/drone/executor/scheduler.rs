@@ -152,6 +152,8 @@ struct Scheduler<'a> {
     decided: HashMap<&'a str, bool>,
     /// Blocks that ran or were skipped this pass of their loop.
     finished: HashSet<&'a str>,
+    /// The blocks that failed this pass of their loop and whose failure the graph handled.
+    failed: HashSet<&'a str>,
     ready: VecDeque<(&'a str, bool)>,
     queued: HashSet<&'a str>,
     /// Edges out of a loop that were not taken, decided when nothing can run.
@@ -310,6 +312,7 @@ impl<'a> Scheduler<'a> {
             outgoing,
             decided: HashMap::new(),
             finished: HashSet::new(),
+            failed: HashSet::new(),
             ready: VecDeque::new(),
             queued: HashSet::new(),
             held: Vec::new(),
@@ -411,6 +414,7 @@ impl<'a> Scheduler<'a> {
         let node = self.node_of[id];
         if !self.will_run(id, forced) {
             self.finished.insert(id);
+            self.failed.remove(id);
             mark_state(self.states, id, BlockState { status: "skipped".to_string(), output: None, error: None, started_at: None, completed_at: Some(now_ms()) }).await;
             for edge in self.outgoing.get(id).cloned().unwrap_or_default() {
                 if !self.plan.back_edges.contains(&edge.id) {
@@ -460,6 +464,11 @@ impl<'a> Scheduler<'a> {
             Err(e) => return Err(e),
         };
         self.finished.insert(id);
+        if failed {
+            self.failed.insert(id);
+        } else {
+            self.failed.remove(id);
+        }
         self.in_flight.retain(|(b, _)| *b != id);
         self.running_ro.retain(|(b, _)| *b != id);
         self.route(node, &output, failed)?;
@@ -739,6 +748,7 @@ impl<'a> Scheduler<'a> {
         let group = self.plan.cycle_of.get(head).cloned().unwrap_or_default();
         for id in &group {
             self.finished.remove(id.as_str());
+            self.failed.remove(id.as_str());
         }
         let inner: Vec<&'a str> = self
             .incoming
