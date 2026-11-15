@@ -1,5 +1,54 @@
 # AgentMux Version History
 
+## 0.60.29 — 2026-11-15
+
+- A Drone run can be cancelled, which stops its Agent block's process, and a block can have its own timeout; a drone job can use a timeout and cancel_other
+- A drone block can retry infrastructure failures, route a failure down an error edge, and a run announces each loop pass and each limit it meets
+- An event-triggered job starts at most max_per_hour runs in any hour (default 30): the events beyond it are one collapsed skipped row with reason rate, and the first raises the usual alert.
+- Compact in the narrow composer strip has its own icon (four arrows in to a dot) instead of the size glyph the tool panel uses.
+- Auto-approve lasts what was asked for or less, a Save or Update click asks in or out of a form, a click answer says when no approval was asked, and the Save prompt marks values the page already had
+- Pane rename takes target "file": an agent renames a file or folder in its folder and every Editor tab open on it follows (spec: docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md, section 14)
+- A drone job can start when AgentMux reports an agent's turn ended or an agent failed (the app_event trigger)
+- Browser generate_password on a password-change form: asks the person every time, keeps the new password beside the saved one until the form is sent, and the old one 7 days
+- A drone job can start when files in a folder change (the file_watch trigger): one run per burst of changes, names only
+- Editor: a hex viewer for any file (offset, bytes and text, go to offset, selection and copy, data inspector), Show As on a tab's menu, and srv serves parts of files past 500 MB
+- A file_watch test no longer expects two folders made in the same clock tick to differ on Windows
+- Drone jobs can start from a local script: a webhook_local trigger runs on a POST to this computer's own address, checked by a secret, and the run reads the JSON body
+- Drone jobs can start when AgentMux starts: an app_event on app.started, with upgraded and the version it came from, so a health check can run after an upgrade
+- A file_watch trigger on Windows notices a folder that was removed and made again at once, by its file id and not its creation time
+- A release tag is built only when the push run of CI on main for its own commit has finished green
+- A Drone template checks the machine after an upgrade: agents running, MuxBus connected, LAN peers answering, then one line to the leader or a task for the steward; the App query block can list all agents
+- Vault: choosing another Vault key for a setting takes the setting off the key it used before, and the Vault's history says so
+- A window whose tab display stops no longer stays blank: the display check repairs it and offers Reload Window, errors in a window-focus handler no longer stop the screen from updating, Reload Window is in the menu and the command palette, and an agent pane that has not started says so with a Reload button
+- The specs index groups by area, shows each spec's status and what replaces it, and lists the history and compaction specs under their areas
+- A job can poll AgentMux's own state: a poll trigger asks the tasks, jobs, agents or LAN peers question every so often and starts one run for each new item.
+- A job can be a dead man's switch: an expect trigger starts a run when a watched job has had no good run within a set time.
+- A poll trigger's first look claims its marker and the items already there in one step, so a crash or a second instance cannot start runs for them.
+- fix(srv): one panic under the message handler's lock no longer stops all agent messaging until a restart; the build-slot idle note is delivered inside the runtime
+- A notification bubble is no longer drawn behind a native browser pane: the toast stack cuts a hole in the pane like a menu does
+- The status panel's channel row is labelled Channel again (it read Data in); the build kind stays
+- A pasted, dropped or picked attachment in the agent composer now always shows its remove (x) button, not only while the mouse is over its tile.
+- The command palette's search row is balanced: the magnifier has the same room on its left as ESC has on its right.
+- Browser capture can save text that has no ref of its own: by the label beside it (near), with a prefix or pattern guard, or from the page's own copy button without the system clipboard; a revealed secret in a secret row is listed as unread with a ref; unnamed icon buttons get a hint from their tooltip or icon
+- Drone runs keep a checkpoint after every block, so a run's state is stored step by step (first step towards resuming a run after a restart)
+- An expect trigger finds a watched job's last good run even behind many newer failed runs, and a gap that lasts past a week does not start a second run.
+- The hex viewer shows full rows again when a file gets shorter while scrolled to its end, and leaves a sideways swipe to the browser in a large file
+- A Drone run notes in its checkpoint that a step with effects is running, so a restart can tell it may already have acted
+- feat(srv): srv counts its own panics and the app shows a storm (status bar dot and notice, a note to agents); /health and app.health report the messaging path as ok or degraded
+- The status bar's backend dot turns amber or red, with a notice, when srv is panicking repeatedly (it can leave agents unable to hear each other)
+- A Drone run left running when AgentMux restarts goes on from its last checkpoint instead of being marked interrupted
+- srv: a panic storm while the message handler's lock is stuck no longer stops the panic reports (the note to the agents is delivered on a thread of its own)
+- The status bar's srv panics warning clears when the backend restarts, instead of staying until AgentMux is restarted
+- A Drone run stopped inside a step with effects waits for an answer: run the step again, skip it with an output, or cancel the run
+- Drone: an API request that times out is no longer retried, and a loop left at its limit no longer takes its guard's error edge
+- Drone: the cost a person or agent supplies when skipping an interrupted step counts against the run's cap
+- Drone: a Wait block stops a run for a time or for an event, keeps where it waits, and goes on after a restart
+- Drone: a Wait block's own time limit is kept across a restart instead of starting over
+- Drone: a Drone block calls another drone as a step, on the caller's remaining budget
+- Drone: an event wait whose limit already passed fails before it opens its key again
+- Drone: a Join block brings branches back together (all, any, n of m), and can leave a failed branch out
+- Drone: branches that are ready together run together, up to four at once with one agent at a time, and a restart asks about each block that was running
+
 ## 0.60.28 — 2026-11-14
 
 - Kanban: pick, create and manage several boards from the pane, move a task to another board, and copy a task's full ref

@@ -119,9 +119,12 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     if let Some(templates) = backend::job_templates::service() {
         backend::jobs::watchdog::start(run_ledger.clone(), std::sync::Arc::new(templates.clone()));
     }
+    // Drone runs that kept checkpoints go on from their newest; the rest of what the
+    // old process left open is closed as interrupted.
+    let resuming = crate::server::drone_resume::resume_runs(state, Some(&run_ledger)).await;
     {
         let ledger = run_ledger.clone();
-        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
+        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart_except(&resuming)).await;
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {

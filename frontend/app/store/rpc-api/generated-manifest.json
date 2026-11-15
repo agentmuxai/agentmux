@@ -1248,6 +1248,10 @@
             "method": "FileProbeCommand"
         },
         {
+            "command": "filesearchbytes",
+            "method": "FileSearchBytesCommand"
+        },
+        {
             "command": "readeditorfile",
             "method": "ReadEditorFileCommand"
         },
@@ -1325,6 +1329,14 @@
         {
             "command": "rundrone",
             "method": "RunDroneCommand"
+        },
+        {
+            "command": "resolvedronerun",
+            "method": "ResolveDroneRunCommand"
+        },
+        {
+            "command": "resumedronewait",
+            "method": "ResumeDroneWaitCommand"
         },
         {
             "command": "layout.save",

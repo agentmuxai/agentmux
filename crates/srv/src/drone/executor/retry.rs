@@ -131,7 +131,7 @@ mod tests {
         assert!(again(one, BlockKind::Api, &api_err("request failed: connection reset"), 1));
         assert!(again(one, BlockKind::Api, &api_err("read body: error decoding"), 1));
         assert!(!again(one, BlockKind::Api, &api_err("host `localhost` is not allowed"), 1), "a refused URL stays refused");
-        assert!(!again(one, BlockKind::Api, &api_err("timed out after 30 seconds"), 1), "a timeout is not retried");
+        assert!(!again(one, BlockKind::Api, &api_err("timed out after 30 seconds: operation timed out"), 1), "a timeout is not retried");
         assert!(again(one, BlockKind::Api, &Ok(json!({ "status": 503 })), 1));
         assert!(again(one, BlockKind::Api, &Ok(json!({ "status": 429 })), 1));
         assert!(!again(one, BlockKind::Api, &Ok(json!({ "status": 404 })), 1), "a 404 is an answer");

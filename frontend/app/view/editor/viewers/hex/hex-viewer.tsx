@@ -15,6 +15,7 @@ import { tip } from "@/app/element/tip";
 import { keyLabel } from "@/app/keybindings";
 import { For, Show, type JSX } from "solid-js";
 import { ViewerBar } from "../viewer-bar";
+import { HexFindBar } from "./hex-find-bar";
 import { contentHeight, hexOf, offsetText, ROW_H, ROW_WIDTHS, type RowWidth } from "./hex-layout";
 import { createHexViewer, type HexViewerProps, type HexViewerState } from "./hex-viewer-state";
 import "./hex-viewer.scss";
@@ -33,6 +34,9 @@ export function HexViewer(props: HexViewerProps): JSX.Element {
                         Try again
                     </Button>
                 </div>
+            </Show>
+            <Show when={t.find.open()}>
+                <HexFindBar find={t.find} />
             </Show>
             <div class="hex-viewer-body">
                 <Show when={t.size() > 0} fallback={<div class="editor-viewer-message">This file is empty.</div>}>

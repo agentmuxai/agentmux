@@ -52,7 +52,7 @@ pub fn cloud_hosts(
         .iter()
         .filter(|c| shown(c, own_wan_id, now_ms))
         .filter(|c| !(same(&c.record.hostname, hostname) && channels_here.iter().any(|ch| same(ch, &c.record.channel))))
-        .filter(|c| !lan.iter().any(|p| on_the_lan(p, &c.record)))
+        .filter(|c| !lan.iter().any(|p| on_the_lan(p, &c.record) || replaced_by(p, c, now_ms)))
         .map(|c| host_of(c, now_ms))
         .collect();
     hosts.sort_by(|a, b| (a.display_name.to_lowercase(), &a.channels[0].channel).cmp(&(b.display_name.to_lowercase(), &b.channels[0].channel)));
@@ -71,6 +71,22 @@ fn on_the_lan(peer: &LanInstance, record: &InstallPresence) -> bool {
         && same(&peer.hostname, &record.hostname)
         && same(&peer.channel, &record.channel)
         && (peer.install_id.is_empty() || peer.install_id == record.instance_id)
+}
+
+/// Whether the LAN peer `peer` is the same machine as the stale record `install`, reinstalled: the host name and channel agree
+/// but the peer's id is another one (a new key), and the record has gone quiet ([`STALE_AFTER_MS`]), as the old install's does
+/// once it is gone. Its row would show for up to [`HIDE_AFTER_MS`] beside the peer's own. A record that is still fresh stays:
+/// it may be a live second machine with the same name. The id never makes a match, as in [`on_the_lan`]: the host name and
+/// channel must agree first.
+fn replaced_by(peer: &LanInstance, install: &CloudInstall, now_ms: u64) -> bool {
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    let record = &install.record;
+    !peer.channel.is_empty()
+        && !peer.install_id.is_empty()
+        && peer.install_id != record.instance_id
+        && same(&peer.hostname, &record.hostname)
+        && same(&peer.channel, &record.channel)
+        && now_ms.saturating_sub(install.seen_at_ms) > STALE_AFTER_MS
 }
 
 /// A record the tier shows at all: not this install's own, and not past [`HIDE_AFTER_MS`].

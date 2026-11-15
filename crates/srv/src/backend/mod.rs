@@ -98,6 +98,7 @@ pub mod codex_models;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
 pub mod editor_probe;
+pub mod editor_search;
 pub mod file_icons;
 pub mod files_watcher;
 pub mod fs_ops;
@@ -242,6 +243,8 @@ pub mod work_claims;
 pub mod prompt_events;
 pub mod drone_run_event;
 pub mod drone_cancel;
+pub mod drone_decision;
+pub mod drone_wait;
 /// Replies that say nothing are not sent (SPEC_CHEAPER_FLEET_MESSAGING_2026_10_30.md).
 pub mod ack_policy;
 pub mod jekt_seal;
