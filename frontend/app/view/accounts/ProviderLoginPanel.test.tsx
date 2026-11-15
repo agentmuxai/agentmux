@@ -83,7 +83,7 @@ afterEach(() => {
     cleanup();
 });
 
-describe("ProviderLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #2414)", () => {
+describe("ProviderLoginPanel — staleAliasProvider cleanup (#2414)", () => {
     it("unlinks the stale alias provider after a successful login, using linkTarget's agentDefinitionId", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
@@ -102,7 +102,7 @@ describe("ProviderLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #2
         await waitFor(() => {
             expect(hub.unlinkAgentIdentity).toHaveBeenCalledWith(
                 {},
-                // silent: true (codex P2 on PR #2414) — this is an alias
+                // silent: true (#2414) — this is an alias
                 // migration, not a real unbind; must not trigger the
                 // user-facing "Credentials revoked" broadcast.
                 { agent_id: "agent-1", provider: "claude-code", silent: true },
@@ -161,7 +161,7 @@ describe("ProviderLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #2
     });
 });
 
-describe("ProviderLoginPanel — re-login link verification (codex P1 on PR #2414)", () => {
+describe("ProviderLoginPanel — re-login link verification (#2414)", () => {
     it("does NOT show success for a linkTarget flow when the account was persisted but the agent link itself never landed", async () => {
         // finalizeAccount (run-provider-login.ts) catches and only logs a
         // LinkAgentIdentityCommand failure — onAccountRegistered still
@@ -276,7 +276,7 @@ describe("ProviderLoginPanel — re-login link verification (codex P1 on PR #241
     });
 });
 
-describe("ProviderLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
+describe("ProviderLoginPanel — unmount cleanup (#2414)", () => {
     it("does NOT cancel the host's login when unmounting after already reaching success (inFlight is false)", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
@@ -309,7 +309,7 @@ describe("ProviderLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => 
     });
 });
 
-describe("ProviderLoginPanel — login-runner rejection (codex P2 on PR #2414)", () => {
+describe("ProviderLoginPanel — login-runner rejection (#2414)", () => {
     it("surfaces a retryable error instead of leaving the panel stuck when runProviderLogin rejects outright", async () => {
         hub.runProviderLogin.mockRejectedValue(new Error("PTY spawn failed"));
 
