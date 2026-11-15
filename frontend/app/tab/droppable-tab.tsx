@@ -74,7 +74,7 @@ export interface DroppableTabProps {
  * What a press or hover on a window tab starts early, ahead of any drag. Pressing the active tab may start a
  * tear-off: picture the window now, before the drag starts (tearoff-snapshot.ts); an inactive tab's content isn't
  * on screen to picture. A sleeping browser pane in the tab starts waking on hover or press
- * (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md ง6). Call inside onMount; the cleanups ride on its owner.
+ * (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md ยง6). Call inside onMount; the cleanups ride on its owner.
  */
 function bindTabPresses(el: HTMLElement, props: DroppableTabProps): void {
     const onPointerDown = (e: PointerEvent) => {

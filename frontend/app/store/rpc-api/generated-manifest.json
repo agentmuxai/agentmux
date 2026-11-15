@@ -907,6 +907,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getdronepayloadschema",
+            "method": "GetDronePayloadSchemaCommand"
+        },
+        {
             "command": "listdroneruns",
             "method": "ListDroneRunsCommand"
         },

@@ -23,6 +23,7 @@
 pub mod checkpoint;
 pub mod data_flow;
 pub mod executor;
+pub mod payload_schema;
 pub(crate) mod host;
 pub mod recorder;
 pub mod replay;
