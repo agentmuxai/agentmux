@@ -363,6 +363,20 @@ fn parse_sentinel(buf: &str) -> Option<String> {
     }
 }
 
+/// The well-known toolchain directories of this user that exist (`nvm`'s current Node, Homebrew,
+/// `~/.local/bin`, `~/.cargo/bin`, ...), for a PATH that is written down rather than inherited, such
+/// as a service file's. Empty off Unix.
+pub fn well_known_tool_dirs() -> Vec<String> {
+    #[cfg(unix)]
+    {
+        wellknown_dirs()
+    }
+    #[cfg(not(unix))]
+    {
+        Vec::new()
+    }
+}
+
 /// Well-known toolchain directories, existence-checked and de-duplicated. An
 /// absent directory costs nothing (filtered out), so the list can be generous.
 #[cfg(unix)]
