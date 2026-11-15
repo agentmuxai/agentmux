@@ -108,6 +108,8 @@ events! {
     MergeFlow: super::mps::EVENT_MERGE_FLOW => crate::backend::pr_flow::MergeFlowEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
+    /// srv is panicking, or stopped (`panic_watch`): its level, counts and the places that panicked most; no message text.
+    SrvPanics: super::mps::EVENT_SRV_PANICS => crate::backend::panic_watch::SrvPanicsEvent,
     /// A Claude CLI request is being retried, or no longer is.
     AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).

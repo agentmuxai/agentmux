@@ -40,6 +40,7 @@ pub fn spawn_background_subsystems(
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
+    backend::panic_watch::start_reporter(broker.clone());
 
     // Bridge MPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());

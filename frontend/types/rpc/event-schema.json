@@ -944,6 +944,15 @@
     }
   },
   {
+    "event": "srv-panics",
+    "payloadTs": {
+      "imports": [
+        "SrvPanicsEvent"
+      ],
+      "name": "SrvPanicsEvent"
+    }
+  },
+  {
     "event": "srvinfo",
     "payloadTs": {
       "imports": [
