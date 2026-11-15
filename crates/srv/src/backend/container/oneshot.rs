@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use bollard::container::{Config, CreateContainerOptions, LogOutput, LogsOptions, RemoveContainerOptions, StartContainerOptions, WaitContainerOptions};
+use bollard::container::{AttachContainerOptions, Config, CreateContainerOptions, LogOutput, RemoveContainerOptions, StartContainerOptions, WaitContainerOptions};
 use bollard::models::{HostConfig, HostConfigLogConfig};
 use bollard::Docker;
 use futures_util::StreamExt as _;
@@ -79,11 +79,8 @@ pub fn oneshot_config(spec: &OneShot) -> Config<String> {
             init: Some(true),
             // The only place it can write, and gone with the container.
             tmpfs: Some(HashMap::from([("/tmp".to_string(), "rw,noexec,nosuid,size=64m".to_string())])),
-            // The output is read back from the log, so the log is small.
-            log_config: Some(HostConfigLogConfig {
-                typ: Some("json-file".to_string()),
-                config: Some(HashMap::from([("max-size".to_string(), "1m".to_string()), ("max-file".to_string(), "1".to_string())])),
-            }),
+            // The output is read through an attach, not from a log: no log is written or rotated.
+            log_config: Some(HostConfigLogConfig { typ: Some("none".to_string()), config: None }),
             ..Default::default()
         }),
         ..Default::default()
@@ -100,8 +97,9 @@ struct Remove {
 
 impl Remove {
     async fn now(mut self) {
-        self.done = true;
         remove(&self.docker, &self.name).await;
+        // Only once it is gone: a stop that lands while the removal is awaited still drops an armed guard.
+        self.done = true;
     }
 }
 
@@ -136,12 +134,21 @@ impl ContainerManager {
             .await
             .map_err(|e| format!("couldn't create the container: {e}"))?;
         let remove = Remove { docker: docker.clone(), name: name.clone(), done: false };
+        // Attached before it starts, so every byte it says comes through, however much it says: a log
+        // read afterwards, or followed, can lose what a command that is loud writes faster than it is read.
+        let attached = docker
+            .attach_container(
+                &name,
+                Some(AttachContainerOptions::<String> { stream: Some(true), stdout: Some(true), stderr: Some(true), logs: Some(false), ..Default::default() }),
+            )
+            .await
+            .map_err(|e| format!("couldn't attach to the container: {e}"))?;
         let started = Instant::now();
         docker.start_container(&name, None::<StartContainerOptions<String>>).await.map_err(|e| format!("couldn't start the container: {e}"))?;
-        let exit_code = wait(docker, &name).await?;
+        let (ended, logs) = tokio::join!(wait(docker, &name), read_output(attached.output));
         let duration_ms = started.elapsed().as_millis() as u64;
-        let logs = read_logs(docker, &name).await;
         remove.now().await;
+        let exit_code = ended?;
         let (stdout, stderr, truncated) = logs?;
         Ok(OneShotOutcome { exit_code, stdout, stderr, truncated, duration_ms })
     }
@@ -159,9 +166,8 @@ async fn wait(docker: &Docker, name: &str) -> Result<i64, String> {
     }
 }
 
-/// What the container wrote to stdout and stderr, each cut at [`OUTPUT_CAP`].
-async fn read_logs(docker: &Docker, name: &str) -> Result<(String, String, bool), String> {
-    let mut logs = docker.logs(name, Some(LogsOptions::<String> { stdout: true, stderr: true, follow: false, ..Default::default() }));
+/// What the container wrote to stdout and stderr, each cut at [`OUTPUT_CAP`]; reads until it ends.
+async fn read_output(mut logs: impl futures_util::Stream<Item = Result<LogOutput, bollard::errors::Error>> + Unpin) -> Result<(String, String, bool), String> {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut truncated = false;
     while let Some(line) = logs.next().await {
@@ -245,5 +251,10 @@ mod tests {
         let big = run(&["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' a"]).await;
         assert_eq!(big.stdout.len(), OUTPUT_CAP);
         assert!(big.truncated);
+        // More than the container's own log keeps: the first line, said before it, is not lost.
+        let loud = run(&["sh", "-c", "echo first >&2; head -c 3000000 /dev/zero | tr '\\0' a"]).await;
+        assert_eq!(loud.stderr.trim(), "first");
+        assert_eq!(loud.stdout.len(), OUTPUT_CAP);
+        assert!(loud.truncated);
     }
 }
