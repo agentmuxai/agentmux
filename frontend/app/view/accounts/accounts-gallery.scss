@@ -147,6 +147,11 @@
     box-shadow: none;
 }
 
+// A sign-in, its error or its done line, hosted inline: inset like the section's other rows.
+.accounts-chooser.accounts-chooser--login {
+    padding: var(--space-2) var(--space-3);
+}
+
 .accounts-add-section {
     display: flex;
     flex-direction: column;

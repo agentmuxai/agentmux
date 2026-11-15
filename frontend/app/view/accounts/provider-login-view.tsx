@@ -21,7 +21,7 @@ function LoginShell(p: {
     onClose: () => void;
     children: JSX.Element;
 }): JSX.Element {
-    if (p.inline) return <div class="accounts-chooser accounts-chooser--inline">{p.children}</div>;
+    if (p.inline) return <div class="accounts-chooser accounts-chooser--inline accounts-chooser--login">{p.children}</div>;
     return (
         <Modal
             open={true}
