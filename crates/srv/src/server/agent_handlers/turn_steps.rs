@@ -36,6 +36,8 @@ pub(super) struct Turn<'a> {
     pub joins_turn: Option<u64>,
     pub record: RecordOrigin,
     pub inline_images: Vec<serde_json::Value>,
+    /// The send-copies of the message's pictures, by path, for a provider that takes a picture that way.
+    pub image_paths: Vec<String>,
 }
 
 /// Re-read the spawn config from block metadata.
@@ -171,7 +173,7 @@ pub(super) async fn prepare_attachments(
     block_id: &str,
     message: String,
     attachments: Vec<AttachmentRef>,
-) -> Result<(String, Vec<serde_json::Value>), String> {
+) -> Result<(String, Vec<serde_json::Value>, Vec<String>), String> {
     // Attachments (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6,
     // SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md §7): every provider gets
     // a numbered list of the files appended to the text; Claude's persistent
@@ -180,6 +182,7 @@ pub(super) async fn prepare_attachments(
     // working folder instead), so they refuse rather than send a list the
     // agent can't open.
     let mut inline_images: Vec<serde_json::Value> = Vec::new();
+    let mut image_paths: Vec<String> = Vec::new();
     let message = if attachments.is_empty() {
         message
     } else {
@@ -214,11 +217,13 @@ pub(super) async fn prepare_attachments(
         for a in &attachments {
             svc.ensure_derived(&a.id).await;
         }
-        let prepared = tokio::task::spawn_blocking(move || {
+        let by_path = ctrl.as_any().downcast_ref::<blockcontroller::app_server_controller::AppServerController>().is_some();
+        let (prepared, pictures) = tokio::task::spawn_blocking(move || {
             use crate::backend::attachments::prompt;
             let (found, missing) = prompt::resolve(&svc, &attachments);
+            let pictures = if by_path { prompt::image_paths(&found) } else { Vec::new() };
             // Read, spend and record the session budget as one locked step.
-            svc.with_session_inline_budget(
+            let prepared = svc.with_session_inline_budget(
                 &session_key,
                 Some(&new_session_key),
                 limits.claude_session_inline_bytes,
@@ -227,19 +232,21 @@ pub(super) async fn prepare_attachments(
                     let spent = prompt::inline_bytes(&prepared.inline);
                     (prepared, spent)
                 },
-            )
+            );
+            (prepared, pictures)
         })
         .await
         .map_err(|e| format!("attachments: {e}"))?;
         inline_images = prepared.inline;
+        image_paths = pictures;
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
-    Ok((message, inline_images))
+    Ok((message, inline_images, image_paths))
 }
 
 /// Dispatch to a persistent controller: it starts (or respawns) the CLI and carries the message on its input.
 pub(super) fn dispatch_persistent(turn: Turn<'_>, persistent_ctrl: &blockcontroller::persistent::PersistentSubprocessController) -> Result<(), String> {
-    let Turn { deps, block, block_id, base, env_vars, session_id_field, message, message_id, from, joins_turn, record, inline_images } = turn;
+    let Turn { deps, block, block_id, base, env_vars, session_id_field, message, message_id, from, joins_turn, record, inline_images, .. } = turn;
     let SpawnBase { cli_command, cli_args, working_dir } = base;
     // Container agents use per-turn docker exec — incompatible with a
     // long-lived persistent subprocess. Fail loudly instead of silently
@@ -460,7 +467,7 @@ pub(super) fn dispatch_app_server(
     tracker: Option<Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>,
 ) -> Result<(), String> {
     let hint = ArmedJoinHint::arm(turn.joins_turn, tracker);
-    app_server_ctrl.send_message_from(turn.message, turn.message_id.is_some(), Some(&turn.record))?;
+    app_server_ctrl.send_message_from(turn.message, turn.image_paths, turn.message_id.is_some(), Some(&turn.record))?;
     hint.keep();
     Ok(())
 }

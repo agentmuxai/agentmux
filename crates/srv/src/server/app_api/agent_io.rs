@@ -613,7 +613,7 @@ pub(crate) async fn agent_send(state: &AppState, cmd: CommandAgentSendData) -> R
         .as_any()
         .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message_from(cmd.message, false, Some(&record))?;
+        app_server_ctrl.send_message_from(cmd.message, Vec::new(), false, Some(&record))?;
     } else if let Some(persistent_ctrl) = ctrl
         .as_any()
         .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()

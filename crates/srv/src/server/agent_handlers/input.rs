@@ -212,10 +212,10 @@ pub async fn run_agent_turn_joining(
     let session_id_field =
         crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
 
-    let (message, inline_images) = steps::prepare_attachments(deps, &ctrl, &block, &block_id, message, attachments).await?;
+    let (message, inline_images, image_paths) = steps::prepare_attachments(deps, &ctrl, &block, &block_id, message, attachments).await?;
     let (message, held_notes) = crate::backend::reactive::held_notes::attach_for_turn(&block_id, &message, origin);
     let record = crate::backend::message_origin::RecordOrigin { origin: from.clone(), notes: held_notes.note_texts() };
-    let turn = steps::Turn { deps, block: &block, block_id: &block_id, base, env_vars, session_id_field, message, message_id, from, joins_turn, record, inline_images };
+    let turn = steps::Turn { deps, block: &block, block_id: &block_id, base, env_vars, session_id_field, message, message_id, from, joins_turn, record, inline_images, image_paths };
 
     if let Some(app_server_ctrl) =
         ctrl.as_any()

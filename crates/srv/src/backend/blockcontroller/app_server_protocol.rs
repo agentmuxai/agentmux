@@ -12,6 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::app_server_input::{turn_input, UserInput};
 use serde::Serialize;
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -194,7 +195,7 @@ struct ThreadResumeParams {
 #[serde(rename_all = "camelCase")]
 struct TurnStartParams {
     thread_id: String,
-    input: Vec<TextUserInput>,
+    input: Vec<UserInput>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -257,12 +258,6 @@ pub enum AccountLoginOptions {
     ApiKey { api_key: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct TextUserInput {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    text: String,
-}
 
 pub struct CodexAppServerSession {
     transport: Arc<AppServerTransport>,
@@ -383,6 +378,7 @@ impl CodexAppServerSession {
     pub async fn start_turn(
         &self,
         text: String,
+        images: Vec<String>,
         timeout: Duration,
     ) -> Result<String, CodexAppServerProtocolError> {
         let thread_id = {
@@ -424,7 +420,7 @@ impl CodexAppServerSession {
                     "turn/start",
                     serde_json::to_value(TurnStartParams {
                         thread_id,
-                        input: vec![TextUserInput { kind: "text", text }],
+                        input: turn_input(text, images),
                     })
                     .map_err(|error| AppServerError::Protocol(error.to_string()))?,
                     timeout,
@@ -1238,6 +1234,7 @@ mod tests {
     use super::*;
     use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+
     fn session() -> (
         Arc<CodexAppServerSession>,
         tokio::io::ReadHalf<tokio::io::DuplexStream>,
@@ -1306,7 +1303,7 @@ mod tests {
         );
         assert_eq!(
             session
-                .start_turn("hello".to_string(), Duration::from_secs(1))
+                .start_turn("hello".to_string(), Vec::new(), Duration::from_secs(1))
                 .await
                 .unwrap(),
             "turn-1"
@@ -1810,7 +1807,7 @@ mod tests {
         let session_for_turn = session.clone();
         let start_turn_task = tokio::spawn(async move {
             session_for_turn
-                .start_turn("hello".to_string(), Duration::from_secs(1))
+                .start_turn("hello".to_string(), Vec::new(), Duration::from_secs(1))
                 .await
         });
 
@@ -1924,7 +1921,7 @@ mod tests {
             .await
             .unwrap();
         session
-            .start_turn("hello".to_string(), Duration::from_secs(1))
+            .start_turn("hello".to_string(), Vec::new(), Duration::from_secs(1))
             .await
             .unwrap();
         assert_eq!(session.snapshot().phase, SessionPhase::Running);
@@ -2077,8 +2074,8 @@ mod tests {
         let session_a = session.clone();
         let session_b = session.clone();
         let (result_a, result_b) = tokio::join!(
-            session_a.start_turn("hello".to_string(), Duration::from_secs(1)),
-            session_b.start_turn("world".to_string(), Duration::from_secs(1)),
+            session_a.start_turn("hello".to_string(), Vec::new(), Duration::from_secs(1)),
+            session_b.start_turn("world".to_string(), Vec::new(), Duration::from_secs(1)),
         );
 
         let results = [result_a, result_b];
