@@ -82,6 +82,8 @@ interface Request {
 const pending = new Map<string, Request>();
 let rafId: number | null = null;
 let timerId: ReturnType<typeof setTimeout> | null = null;
+/** When the pending wake-up timer fires, on the `now()` clock. */
+let timerDueAt = 0;
 let drainId: ReturnType<typeof setTimeout> | null = null;
 let lastInputAt = Number.NEGATIVE_INFINITY;
 let inputListening = false;
@@ -126,7 +128,10 @@ function clearDrain(): void {
 
 /** Wake the scheduler when the earliest request is due: on a frame if that is within one, else on a timer. */
 function arm(): void {
-    if (rafId != null || pending.size === 0) return;
+    if (pending.size === 0) return;
+    // Before the pending-frame return: a frame requested before the page was hidden never fires.
+    armDrain();
+    if (rafId != null) return;
     const t = now();
     let soonest = Number.POSITIVE_INFINITY;
     for (const req of pending.values()) {
@@ -135,13 +140,17 @@ function arm(): void {
     if (soonest <= FRAME_MS) {
         clearTimer();
         rafId = requestAnimationFrame(runFrame);
-    } else if (timerId == null) {
-        timerId = setTimeout(() => {
-            timerId = null;
-            arm();
-        }, soonest - FRAME_MS);
+        return;
     }
-    armDrain();
+    // A pending wake-up that is later than this one is replaced, so a background pane is not left behind a hidden one's timer.
+    const wakeAt = t + soonest - FRAME_MS;
+    if (timerId != null && timerDueAt <= wakeAt) return;
+    clearTimer();
+    timerDueAt = wakeAt;
+    timerId = setTimeout(() => {
+        timerId = null;
+        arm();
+    }, soonest - FRAME_MS);
 }
 
 /** A page that draws no frames still flushes, slowly, so its panes' work does not all land when it is shown. */

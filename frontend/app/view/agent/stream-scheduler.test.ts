@@ -424,6 +424,23 @@ describe("flush rates", () => {
         expect(streamSchedulerStats().drained).toBe(2);
     });
 
+    it("a background request is not left behind the later wake-up a hidden pane had set", () => {
+        const order: string[] = [];
+        requestStreamFlush("hid", () => order.push("hid"), () => "hidden");
+        requestStreamFlush("bg", () => order.push("bg"), () => "background");
+        advance(BACKGROUND_DELAY_MS);
+        expect(order).toEqual(["bg"]);
+    });
+
+    it("drains a page that was hidden after its frame was already requested", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a")); // a frame is now pending and will never fire
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        requestStreamFlush("b", () => order.push("b"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS);
+        expect(order).toEqual(["a"]);
+    });
+
     it("counts what it did", () => {
         for (const id of ["a", "b", "c", "d"]) requestStreamFlush(id, () => {});
         frame();
