@@ -86,12 +86,19 @@ fn package_bin_dir(exe: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The PATH a service runs with: the package's own folder first, then the system's, and nothing of the shell
-/// that ran `setup` (its PATH can name another install's helpers, such as the desktop app's tools, ahead of this
-/// package's, and changes with the shell).
-pub fn service_path(manager: Manager, exe: &Path) -> String {
-    let mut dirs: Vec<String> = package_bin_dir(exe).or_else(|| exe.parent().map(Path::to_path_buf)).into_iter().map(|d| d.to_string_lossy().into_owned()).collect();
-    dirs.extend(system_dirs(manager).iter().map(|d| (*d).to_string()));
+/// The PATH a service runs with: the package's own folder first, then the folders the person's tools are known to
+/// live in (`tool_dirs`: their nvm Node, Homebrew, `~/.local/bin`), then the system's. Nothing of the shell that ran
+/// `setup`: its PATH can name another install's helpers, such as the desktop app's tools, ahead of this package's, and
+/// changes with the shell. The server finds a login shell's extra tools itself only when it is started with launchd's
+/// bare PATH, which this one is not, so the tool folders are written here, as of `setup`.
+pub fn service_path(manager: Manager, exe: &Path, tool_dirs: &[String]) -> String {
+    let package = package_bin_dir(exe).or_else(|| exe.parent().map(Path::to_path_buf)).map(|d| d.to_string_lossy().into_owned());
+    let mut dirs: Vec<String> = Vec::new();
+    for dir in package.into_iter().chain(tool_dirs.iter().cloned()).chain(system_dirs(manager).iter().map(|d| (*d).to_string())) {
+        if !dir.is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
     dirs.join(":")
 }
 
@@ -198,7 +205,7 @@ fn uid() -> u32 {
 pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path) -> Result<PathBuf, String> {
     let manager = manager().ok_or_else(|| "a service is for Linux and macOS in this release".to_string())?;
     let path = file_path(manager, user_home, channel);
-    let path_env = service_path(manager, exe);
+    let path_env = service_path(manager, exe, &agentmux_common::toolchain_path::well_known_tool_dirs());
     let text = match manager {
         Manager::Systemd => render_unit(exe, channel, log, &path_env, user_home),
         Manager::Launchd => render_plist(exe, channel, log, &path_env, user_home),
@@ -360,7 +367,7 @@ mod tests {
         std::os::unix::fs::symlink(server.join("current").join("bin").join("agentmux"), local.join("agentmux")).unwrap();
 
         for manager in [Manager::Launchd, Manager::Systemd] {
-            let by_link = service_path(manager, &local.join("agentmux"));
+            let by_link = service_path(manager, &local.join("agentmux"), &[]);
             let dirs: Vec<&str> = by_link.split(':').collect();
             assert_eq!(dirs[0], server.join("current").join("bin").to_string_lossy(), "the stable name, so an update does not strand the service: {by_link}");
             assert_eq!(&dirs[1..], system_dirs(manager), "then the system's folders, in order: {by_link}");
@@ -369,10 +376,21 @@ mod tests {
         }
         // Without a `current` link the folder this command resolves to is used.
         std::fs::remove_file(server.join("current")).unwrap();
-        let bare = service_path(Manager::Launchd, &bin.join("agentmux"));
+        let bare = service_path(Manager::Launchd, &bin.join("agentmux"), &[]);
         assert!(bare.starts_with(&format!("{}:", bin.display())), "{bare}");
         // A program that is not there still gets its own folder first.
-        assert!(service_path(Manager::Systemd, Path::new("/nowhere/bin/agentmux")).starts_with("/nowhere/bin:/usr/local/bin:"));
+        assert!(service_path(Manager::Systemd, Path::new("/nowhere/bin/agentmux"), &[]).starts_with("/nowhere/bin:/usr/local/bin:"));
+    }
+
+    #[test]
+    fn the_persons_tool_folders_come_after_the_package_and_before_the_systems_without_repeats() {
+        let tools = vec!["/Users/u/.nvm/versions/node/v22.1.0/bin".to_string(), "/opt/homebrew/bin".to_string(), "/Users/u/.local/bin".to_string()];
+        let path = service_path(Manager::Launchd, Path::new("/nowhere/bin/agentmux"), &tools);
+        let dirs: Vec<&str> = path.split(':').collect();
+        assert_eq!(dirs[0], "/nowhere/bin");
+        assert_eq!(&dirs[1..4], ["/Users/u/.nvm/versions/node/v22.1.0/bin", "/opt/homebrew/bin", "/Users/u/.local/bin"], "{path}");
+        assert_eq!(dirs.iter().filter(|d| **d == "/opt/homebrew/bin").count(), 1, "a folder in both lists is named once: {path}");
+        assert_eq!(*dirs.last().unwrap(), "/sbin");
     }
 
     #[test]
