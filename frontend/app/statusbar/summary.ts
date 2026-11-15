@@ -66,12 +66,18 @@ export interface SummaryInput {
     tasks: number;
 }
 
+/** Whether a pane waits only on Vault requests: the Vault's own lists count those, so it is not also an agent waiting. */
+export function isVaultOnly(item: Pick<AttentionItem, "kinds">): boolean {
+    const kinds = item.kinds ?? [];
+    return kinds.length > 0 && kinds.every((k) => KIND_PLACES[k]?.part === "vault");
+}
+
 /** The part of a pane that waits: all Vault, and the Vault's lists have it; all Browser; or an ask. */
 function paneRows(items: AttentionItem[]): SummaryRow[] {
     const rows: SummaryRow[] = [];
     for (const item of items) {
+        if (isVaultOnly(item)) continue;
         const parts = (item.kinds ?? []).map((k) => KIND_PLACES[k]?.part);
-        if (parts.length > 0 && parts.every((p) => p === "vault")) continue;
         const part = parts.length > 0 && parts.every((p) => p === "browser") ? "browser" : "asks";
         rows.push({ key: `pane:${item.blockId}`, part, name: item.name, color: item.color, what: item.what, since: item.since, click: { to: "pane", item } });
     }

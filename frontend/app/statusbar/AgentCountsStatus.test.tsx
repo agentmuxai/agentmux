@@ -29,6 +29,7 @@ const item = (blockId: string, over: Partial<AttentionItem> = {}): AttentionItem
     name: `Agent-${blockId}`,
     what: "asks you a question",
     since: Date.now() - 125_000,
+    kinds: [],
     local: true,
     ...over,
 });
@@ -222,5 +223,15 @@ describe("AgentCountsStatus", () => {
             setItems([item("b3")]);
             expect(screen.queryByRole("dialog")).toBeNull();
         });
+    });
+
+    it("leaves a pane that waits only on a Vault request to the Vault item: not counted, not listed", () => {
+        render(() => <AgentCountsStatus rows={() => [agent("a", "waiting_on_user"), agent("b", "working")]} items={() => [item("a", { kinds: ["vault"] })]} />);
+        expect(screen.queryByText(/waiting on you/)).toBeNull();
+    });
+
+    it("still counts a pane that waits on a question as well as a Vault request", () => {
+        render(() => <AgentCountsStatus rows={() => [agent("a", "waiting_on_user")]} items={() => [item("a", { kinds: ["vault", "consent"] })]} />);
+        expect(screen.getByText("1 waiting on you")).toBeTruthy();
     });
 });
