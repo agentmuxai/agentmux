@@ -638,10 +638,13 @@
 
 .agent-composer-details-resize-handle--edge {
     position: absolute;
-    top: -3px;
+    // The composer footer pads its input box by --space-0-5, so the box's bottom border (1px) sits that far
+    // plus its own width above the drawer's top edge. The strip starts 2px above the border and ends 2px
+    // under the drawer's top: the border is inside it, and only 1px of the text box's own inside is.
+    top: calc(-1 * (var(--space-0-5) + 2px));
     left: 0;
     right: 0;
-    height: 7px;
+    height: 6px;
     z-index: var(--z-layout-resize-handle);
     border-top: 0;
 
@@ -650,7 +653,7 @@
         position: absolute;
         left: 0;
         right: 0;
-        top: 3px;
+        top: 1px;
         height: 1px;
         background: transparent;
         transition:
@@ -664,7 +667,7 @@
         background: transparent;
 
         &::after {
-            top: 2px;
+            top: 0;
             height: 3px;
             background: var(--accent-color);
         }
