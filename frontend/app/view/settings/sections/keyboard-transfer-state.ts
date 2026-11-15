@@ -83,7 +83,8 @@ export function previewImport(current: unknown[], incoming: unknown[]): ImportPr
     const replaced = commands.filter((command) => {
         const before = valid(current, command);
         const after = valid(merged, command);
-        return before.length > 0 && !(before.length === after.length && before.every((e) => after.some((a) => same(a, e))));
+        // Replaced is an entry of the setting that the merge removes or changes; one it only adds to is not.
+        return !before.every((e) => after.some((a) => same(a, e)));
     }).length;
     return { usable, unusable, already: usable.filter(have).length, replaced };
 }
