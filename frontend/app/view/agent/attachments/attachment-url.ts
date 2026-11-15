@@ -16,9 +16,13 @@
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
+import { firstFrame, type FrameKind } from "./first-frame";
 
 /** `text` is the extracted text version of a document. */
 export type AttachmentFileKind = "thumb" | "send" | "original" | "text";
+
+/** What an entry holds: a stored file, or the picture drawn from a PDF's first page or a video's first frame. */
+export type EntryKind = AttachmentFileKind | "pdf-frame" | "video-frame";
 
 interface Entry {
     refs: number;
@@ -35,12 +39,14 @@ interface Entry {
 const REVOKE_AFTER_MS = 30_000;
 const entries = new Map<string, Entry>();
 
-function load(id: string, kind: AttachmentFileKind, setUrl: Entry["setUrl"]): Promise<Blob | null> {
-    return fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${kind}`, {
+function load(id: string, kind: EntryKind, setUrl: Entry["setUrl"]): Promise<Blob | null> {
+    const frame: FrameKind | null = kind === "pdf-frame" ? "pdf" : kind === "video-frame" ? "video" : null;
+    return fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${frame ? "original" : kind}`, {
         headers: authHeaders(),
     })
         .then((r) => (r.ok ? r.blob() : null))
         .catch(() => null)
+        .then((blob) => (blob && frame ? firstFrame(frame, blob) : blob))
         .then((blob) => {
             setUrl(blob ? URL.createObjectURL(blob) : null);
             return blob;
@@ -59,7 +65,7 @@ function textOf(entry: Entry): Accessor<string | null | undefined> {
     return entry.text;
 }
 
-function acquire(id: string, kind: AttachmentFileKind): Entry {
+function acquire(id: string, kind: EntryKind): Entry {
     const key = `${id}:${kind}`;
     let entry = entries.get(key);
     if (!entry) {
@@ -75,7 +81,7 @@ function acquire(id: string, kind: AttachmentFileKind): Entry {
     return entry;
 }
 
-function release(id: string, kind: AttachmentFileKind): void {
+function release(id: string, kind: EntryKind): void {
     const key = `${id}:${kind}`;
     const entry = entries.get(key);
     if (!entry) return;
@@ -95,14 +101,14 @@ function release(id: string, kind: AttachmentFileKind): void {
  */
 export function useAttachmentUrl(
     id: Accessor<string | undefined>,
-    kind: AttachmentFileKind,
+    kind: EntryKind,
 ): Accessor<string | null | undefined> {
     const entry = useEntry(id, kind);
     return () => entry()?.url();
 }
 
 /** The shared entry for attachment `id`, held while this owner lives. */
-function useEntry(id: Accessor<string | undefined>, kind: AttachmentFileKind): Accessor<Entry | null> {
+function useEntry(id: Accessor<string | undefined>, kind: EntryKind): Accessor<Entry | null> {
     const [current, setCurrent] = createSignal<Entry | null>(null);
     createEffect(() => {
         const value = id();
