@@ -623,6 +623,53 @@ function useTileStyle(props: DisplayNodeProps, nodeModel: NodeModelOf) {
     return { skipsLayout, tileStyle, entering };
 }
 
+/** The drag preview of a tile: its pane drawn off screen at the preview's size, for the picture a drag carries. */
+function tilePreview(
+    layoutModel: DisplayNodeProps["layoutModel"],
+    nodeModel: NodeModelOf,
+    previewSize: () => { width: number; height: number },
+    ref: (el: HTMLDivElement) => void
+): JSX.Element {
+    const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+    return (
+        <div class="tile-preview-container">
+            <div
+                class="tile-preview"
+                ref={ref}
+                style={{
+                    width: `${previewSize().width}px`,
+                    height: `${previewSize().height}px`,
+                    transform: `scale(${1 / dpr})`,
+                }}
+            >
+                {layoutModel.renderPreview?.(nodeModel)}
+            </div>
+        </div>
+    );
+}
+
+/** Where a tile offers the tear-off during a drag: the pane's own place, or the place under its header for one of its tabs. */
+function useTearOffOffer(props: DisplayNodeProps, isDragging: () => boolean, tileNode: () => HTMLDivElement | undefined) {
+    // This pane is a browser pane and a page is still on screen at the drag's start (page-cut-gate.ts).
+    const ownPageUncut = () => pageCutsPending() && !movesWithReflow(props.node);
+    // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
+    const tearOffOffered = () =>
+        isDragging() && !paneCaptureInFlight() && !ownPageUncut() && props.layoutModel.tearOffOffered();
+    // One of the pane's tabs dragged out of it (tabTearOff.ts): its place under the header offers the
+    // tear-off. Not while the tab's picture is still being taken. Once the tab has left, the pane itself
+    // shows the tab that takes its place (app/tab/pane-leaf-state.ts).
+    const tabTearOffOffered = () => !paneCaptureInFlight() && tabTearOffOfferedIn(props.layoutModel, props.node.id);
+    // Where the pane's body starts under its header, from the tile's top.
+    const bodyTop = createMemo(() => {
+        if (!tabTearOffOffered()) return 0;
+        const node = tileNode();
+        const header = node?.querySelector('[data-role="block-header"]');
+        if (!node || !header) return 0;
+        return Math.max(0, header.getBoundingClientRect().bottom - node.getBoundingClientRect().top);
+    });
+    return { tearOffOffered, tabTearOffOffered, bodyTop };
+}
+
 /**
  * The draggable and displayable portion of a leaf node in a layout tree.
  */
@@ -640,8 +687,6 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
     // reparented into the magnify overlay, outside the tile nodes.
     const magnifyActive = () => !!props.layoutModel.magnifiedNodeIdAtom();
     const [isDragging, setIsDragging] = createSignal(false);
-    // This pane is a browser pane and a page is still on screen at the drag's start (page-cut-gate.ts).
-    const ownPageUncut = () => pageCutsPending() && !movesWithReflow(props.node);
 
     // Clear isDragging when activeDrag goes false without onDrop having
     // fired — see `TileLayoutPlatform.clearDraggingWhenInactive`.
@@ -667,40 +712,10 @@ function displayNode(platform: TileLayoutPlatform, props: DisplayNodeProps): JSX
 
     useMagnifiedLeafMount(props.layoutModel, isMagnified, () => leafRef, () => tileNodeRef);
 
-    const previewElement = () => {
-        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-        return (
-            <div class="tile-preview-container">
-                <div
-                    class="tile-preview"
-                    ref={previewRef}
-                    style={{
-                        width: `${previewSize().width}px`,
-                        height: `${previewSize().height}px`,
-                        transform: `scale(${1 / dpr})`,
-                    }}
-                >
-                    {props.layoutModel.renderPreview?.(nodeModel)}
-                </div>
-            </div>
-        );
-    };
+    const previewElement = () => tilePreview(props.layoutModel, nodeModel, previewSize, (el) => (previewRef = el));
 
     const { skipsLayout, tileStyle, entering } = useTileStyle(props, nodeModel);
-    // The pane's own place until the layout first shows a drop or the tear-off: a release tears it off.
-    const tearOffOffered = () =>
-        isDragging() && !paneCaptureInFlight() && !ownPageUncut() && props.layoutModel.tearOffOffered();
-    // One of the pane's tabs dragged out of it (tabTearOff.ts): its place under the header offers the
-    // tear-off. Not while the tab's picture is still being taken. Once the tab has left, the pane itself
-    // shows the tab that takes its place (app/tab/pane-leaf-state.ts).
-    const tabTearOffOffered = () => !paneCaptureInFlight() && tabTearOffOfferedIn(props.layoutModel, props.node.id);
-    // Where the pane's body starts under its header, from the tile's top.
-    const bodyTop = createMemo(() => {
-        if (!tabTearOffOffered()) return 0;
-        const header = tileNodeRef?.querySelector('[data-role="block-header"]');
-        if (!tileNodeRef || !header) return 0;
-        return Math.max(0, header.getBoundingClientRect().bottom - tileNodeRef.getBoundingClientRect().top);
-    });
+    const { tearOffOffered, tabTearOffOffered, bodyTop } = useTearOffOffer(props, isDragging, () => tileNodeRef);
 
     return (
         <div
