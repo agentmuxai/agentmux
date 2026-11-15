@@ -11,7 +11,7 @@
 import { pushNotification } from "@/app/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatBytes } from "@/util/format-bytes";
-import { createComputed, createEffect, createMemo, createSignal, createUniqueId, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { createComputed, createEffect, createMemo, createSignal, createUniqueId, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import type { ViewerBarProps } from "../viewer-bar";
 import { ChunkCache, fileReaderOf, rangeReaderOf } from "./hex-chunks";
 import { COPY_MAX_BYTES, copyText, type CopyAs } from "./hex-copy";
@@ -148,7 +148,8 @@ function createHexScroll(size: Accessor<number>, width: Accessor<RowWidth>) {
     };
     const onWheel = (e: WheelEvent): void => {
         // Ctrl+wheel stays pane zoom; a file that scrolls by pixels scrolls natively.
-        if (e.ctrlKey || e.metaKey || !isScaled(rows())) return;
+        // Sideways (a trackpad's horizontal swipe) is the browser's, for a narrow pane's other columns.
+        if (e.ctrlKey || e.metaKey || !isScaled(rows()) || e.deltaY === 0) return;
         e.preventDefault();
         const lines = e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * rowsInView(viewPx()) : e.deltaY / ROW_H;
         if (lines) showRow(first() + Math.sign(lines) * Math.max(1, Math.round(Math.abs(lines))));
@@ -176,6 +177,9 @@ function createHexScroll(size: Accessor<number>, width: Accessor<RowWidth>) {
             observer?.disconnect();
         });
     };
+    // The file got shorter (truncated) or longer: the first row and the scroller are put right for the new row
+    // count, which no scroll event does when the scrolled height comes out the same.
+    createEffect(on(rows, () => showRow(first()), { defer: true }));
     /** Scroll as little as shows `row`. */
     const reveal = (row: number): void => {
         const fits = rowsInView(viewPx());
