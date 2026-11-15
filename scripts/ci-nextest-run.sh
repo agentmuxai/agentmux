@@ -230,6 +230,12 @@ attempt() {
     fi
     # Two LLVM threads in the srv test compile instead of four: see 4. in the header.
     export CARGO_BUILD_JOBS="$CARGO_JOBS"
+    # The core's test harness first, alone: it is the biggest compile (about 9 GB), and cargo would otherwise run it beside
+    # the server layer's test harness (another 8 GB) on a 16 GB runner (2026-11-15, the PR that split the core into its own
+    # package: both at once, the machine paging, the sampler starved 879 s). The two packages are named together so the
+    # core is built with the `test-support` feature the server layer's tests turn on, which is the build the run below
+    # reuses; `--lib` leaves the server layer's own targets for the build after it.
+    cargo nextest run --no-run -p agentmux-srv-core -p agentmux-srv --lib 2>&1 | tee -a "$BUILD_LOG" || return $?
     if [ "${IN_QUEUE:-}" = true ]; then
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
