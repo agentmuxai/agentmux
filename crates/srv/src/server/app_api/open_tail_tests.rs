@@ -205,6 +205,20 @@ fn a_transcript_without_an_epoch_is_counted_and_opens_in_the_same_call() {
 }
 
 #[test]
+fn a_missing_or_empty_transcript_is_not_counting() {
+    // A new agent's block: no output file at all, then an empty one. Neither is counted or waited for.
+    let dir = std::env::temp_dir().join(format!("open-tail-missing-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fs = Arc::new(FileStore::open(&dir.join("t.db")).unwrap());
+    let r = run(&fs, cmd(None));
+    assert!(r.counting.is_none() && r.lines.is_empty() && r.gen.is_none());
+    fs.make_file(BLOCK, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    let r = run(&fs, cmd(None));
+    assert!(r.counting.is_none(), "an empty file has nothing to count");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_transcript_still_being_counted_answers_counting_with_no_lines() {
     let (fs, dir) = file_store("counting");
     seed(&fs, &[line(0, 10), line(1, 10)]);

@@ -193,7 +193,8 @@ fn read_stamps(r: &SnapshotReader<'_>, zone: &str, offsets: &[i64]) -> Result<Op
 fn read_slice(r: &SnapshotReader<'_>, zone: &str, cmd: &CommandAgentOpenTailData) -> Result<Read, StoreError> {
     let Some(state) = r.tail_state(zone, "output", MAX_CATCH_UP_BYTES)? else {
         let size = r.file(zone, "output")?.map(|f| f.size).unwrap_or(0);
-        return Ok(Read::NoEpoch { size });
+        // Nothing to count in a file that is missing or empty (a new agent's block): the usual open answers it.
+        return Ok(if size > 0 { Read::NoEpoch { size } } else { Read::Uncounted { size } });
     };
     if let Some(expected) = &cmd.expect_gen {
         if *expected != state.gen {
