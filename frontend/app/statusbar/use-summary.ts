@@ -31,8 +31,9 @@ export function useSummary(props: SummaryStatusProps): Accessor<Summary> {
             running: runtimeCounts((props.rows ?? sharedAttentionRows)()).running,
             items: (props.items ?? attentionItems)(),
             apps: (props.apps ?? waitingApps)(),
-            uses: (props.uses ?? vaultUses)(),
-            requests: (props.requests ?? vaultRequests)(),
+            // A reply that leaves a list out must not stop the summary: it is where a waiting request is found.
+            uses: (props.uses ?? vaultUses)() ?? [],
+            requests: (props.requests ?? vaultRequests)() ?? [],
             tasks: tasks(),
         })
     );

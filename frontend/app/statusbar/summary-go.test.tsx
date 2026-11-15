@@ -10,10 +10,12 @@ const openPane = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: openPane }));
 const openSettingsAt = vi.hoisted(() => vi.fn());
 vi.mock("@/app/view/settings/open-settings", () => ({ openSettingsAt }));
+const openVersionPanel = vi.hoisted(() => vi.fn());
+vi.mock("@/app/store/app-update", () => ({ openVersionPanel }));
 const openVaultAt = vi.hoisted(() => vi.fn());
 vi.mock("@/app/view/vault/open-vault", () => ({ openVaultAt }));
 
-import { goToSummaryRow, OPEN_VERSION_PANEL_EVENT } from "./summary-go";
+import { goToSummaryRow } from "./summary-go";
 
 afterEach(() => vi.clearAllMocks());
 
@@ -33,13 +35,12 @@ describe("goToSummaryRow", () => {
         expect(openSettingsAt).toHaveBeenCalledWith("widgets");
         await goToSummaryRow({ to: "app", kind: "consent", key: "k" });
         expect(openSettingsAt).toHaveBeenCalledWith("devices");
+        // A desktop request is answered in its own prompt, not in Settings: the Swarm is where its agent is.
         await goToSummaryRow({ to: "app", kind: "desktop", key: "k" });
-        expect(openSettingsAt).toHaveBeenCalledWith("agents");
-        const heard = vi.fn();
-        window.addEventListener(OPEN_VERSION_PANEL_EVENT, heard);
+        expect(openSettingsAt).not.toHaveBeenCalledWith("agents");
+        expect(openPane).toHaveBeenCalledWith("swarm");
         await goToSummaryRow({ to: "app", kind: "upgrade", key: "k" });
-        expect(heard).toHaveBeenCalledTimes(1);
-        window.removeEventListener(OPEN_VERSION_PANEL_EVENT, heard);
+        expect(openVersionPanel).toHaveBeenCalledTimes(1);
         await goToSummaryRow({ to: "app", kind: "vault", key: "u9" });
         expect(openVaultAt).toHaveBeenCalledWith("u9");
     });

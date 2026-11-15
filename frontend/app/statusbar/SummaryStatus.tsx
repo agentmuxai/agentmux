@@ -55,6 +55,8 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
     const any = () => summary().parts.some((p) => p.count > 0);
     // Whether an ask, a browser wait or a Vault request is among the parts: a narrow bar sheds the tasks only while one is left to show
     // (`_summary.scss`); with none, the one badge takes over from the tier that would shed them, so a waiting item never goes blank.
+    // The badge's label counts the Vault's requests, as the Vault part's does: it is the operator's too while one waits.
+    const vaultCount = () => summary().parts.find((p) => p.id === "vault")?.count ?? 0;
     const core = () => summary().parts.some((p) => (p.id === "asks" || p.id === "browser" || p.id === "vault") && p.count > 0);
     return (
         <Show when={any()}>
@@ -93,6 +95,7 @@ export function SummaryStatus(props: SummaryStatusProps): JSX.Element {
                         aria-label={summaryTip(summary())}
                         aria-haspopup="dialog"
                         onClick={() => click()}
+                        data-operator-only={vaultCount() > 0 ? "" : undefined}
                     >
                         <span class="status-summary__count">{summary().waiting}</span>
                     </Button>

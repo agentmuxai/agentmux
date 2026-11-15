@@ -140,6 +140,21 @@ describe("SummaryStatus", () => {
         expect(c.container.querySelector(".status-summary__badge")?.textContent).toBe("2");
     });
 
+    it("keeps counting when the Vault's store has no list yet: a reply that leaves one out does not stop it", () => {
+        const none = (() => undefined) as never;
+        const { container } = render(() => <SummaryStatus {...base} uses={none} requests={none} items={() => [item("q1")]} />);
+        expect(part(container, "asks")?.textContent).toBe("1");
+        expect(part(container, "vault")).toBeNull();
+    });
+
+    it("keeps the one badge to the operator while a Vault request waits, as its part is", () => {
+        const a = render(() => <SummaryStatus {...base} items={() => [item("q1")]} uses={() => [use("u1")]} />);
+        expect(a.container.querySelector(".status-summary__badge")?.hasAttribute("data-operator-only")).toBe(true);
+        cleanup();
+        const b = render(() => <SummaryStatus {...base} items={() => [item("q1")]} />);
+        expect(b.container.querySelector(".status-summary__badge")?.hasAttribute("data-operator-only")).toBe(false);
+    });
+
     it("keeps the Vault part to the operator: a widget cannot read or click it", () => {
         const { container } = render(() => <SummaryStatus {...base} uses={() => [use("u1")]} items={() => [item("q1")]} />);
         expect(part(container, "vault")?.hasAttribute("data-operator-only")).toBe(true);

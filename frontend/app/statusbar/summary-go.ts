@@ -8,27 +8,25 @@
  */
 
 import { goToAttention } from "@/app/notification/attention-go";
+import { openVersionPanel } from "@/app/store/app-update";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { openSettingsAt } from "@/app/view/settings/open-settings";
 import { openVaultAt } from "@/app/view/vault/open-vault";
 import type { SummaryClick } from "./summary";
 import { KIND_PLACES, type AnswerPlace } from "./summary-kinds";
 
-/** The event the version chip listens for to open the instance panel, where an upgrade is offered. */
-export const OPEN_VERSION_PANEL_EVENT = "agentmux:open-version-panel";
-
-/** The Settings section that answers a request of each kind; the upgrade and the Vault have their own place. */
+/** The Settings section that answers a request of each kind; the upgrade and the Vault have their own place, and a desktop request
+ *  is answered in its own prompt (Settings holds only the global switch), so it goes to the Swarm until srv names its pane. */
 const SETTINGS_SECTION: Partial<Record<AnswerPlace, string>> = {
     connections: "devices",
     widgets: "widgets",
-    desktop: "agents",
 };
 
 /** Where a request with no pane of its own is answered. */
 async function goToAnswerPlace(kind: string, key: string): Promise<void> {
     const place = KIND_PLACES[kind]?.answer ?? "pane";
     if (place === "upgrade") {
-        window.dispatchEvent(new Event(OPEN_VERSION_PANEL_EVENT));
+        openVersionPanel();
         return;
     }
     if (place === "vault") return openVaultAt(key);
