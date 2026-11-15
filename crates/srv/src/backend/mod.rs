@@ -98,6 +98,7 @@ pub mod codex_models;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
 pub mod editor_probe;
+pub mod editor_search;
 pub mod file_icons;
 pub mod files_watcher;
 pub mod fs_ops;
