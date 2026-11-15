@@ -105,6 +105,18 @@ fn a_copied_transcript_is_signed_line_by_line_across_reads_and_long_lines() {
 }
 
 #[test]
+fn a_buffer_is_signed_like_the_stored_file_and_keeps_its_length() {
+    let lines: Vec<Vec<u8>> = vec![signed_for("parent", "first"), filler(100), user("forged", true), signed_for("parent", "last")];
+    let mut data: Vec<u8> = lines.concat();
+    let len = data.len();
+    assert_eq!(resign_buffer(&mut data, "parent", "fork"), 2);
+    assert_eq!(data.len(), len);
+    let kinds: Vec<Option<String>> = data.split(|b| *b == b'\n').filter(|l| l.windows(5).any(|w| w == b"\"amx\"")).map(|l| kind_of("fork", l)).collect();
+    assert_eq!(kinds, vec![Some("user".into()), None, Some("user".into())]);
+    assert_eq!(resign_buffer(&mut data, "parent", "fork"), 0, "a second pass finds nothing");
+}
+
+#[test]
 fn a_zone_without_the_file_has_nothing_to_sign() {
     let gfs = FileStore::open_in_memory().unwrap();
     assert_eq!(resign_zone(&gfs, ZONE, "output", "parent", "fork").unwrap(), 0);
