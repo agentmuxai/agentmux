@@ -34,6 +34,7 @@ export { Notice, type NoticeProps, type NoticeTone } from "./Notice";
 export { PaneBody, PaneScroll, type PaneBodyProps, type PaneScrollProps } from "./PaneBody";
 export { Pill, type PillProps, type PillTone } from "./Pill";
 export { SectionHeader, type SectionHeaderProps } from "./SectionHeader";
+export { Swatch, SwatchGrid, type SwatchGridProps, type SwatchOption, type SwatchProps } from "./Swatch";
 export { SidePanel, type SidePanelProps } from "./SidePanel";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
 export { densityClass, type UiDensity, type UiTone } from "./shared";
