@@ -128,6 +128,8 @@ pub(super) struct Layout {
     pub unknown: bool,
     /// What responds to a click (`clickable.rs`).
     pub clickable: HashSet<i64>,
+    /// What each control the page gives no name looks like (`icon_hints.rs`).
+    pub hints: HashMap<i64, String>,
 }
 
 /// The layout, or an empty one when it can't be read (then nothing is left out and nothing is
@@ -136,7 +138,12 @@ pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
     match cdp.call("DOMSnapshot.captureSnapshot", json!({ "computedStyles": STYLES, "includeDOMRects": false })).await {
         Ok(r) => {
             let hidden = hidden_ids(&r);
-            Layout { unknown: hidden.is_none(), hidden: hidden.unwrap_or_default(), clickable: super::clickable::clickable_backend_ids(&r) }
+            Layout {
+                unknown: hidden.is_none(),
+                hidden: hidden.unwrap_or_default(),
+                clickable: super::clickable::clickable_backend_ids(&r),
+                hints: super::icon_hints::hints(&r),
+            }
         }
         Err(_) => Layout { unknown: true, ..Layout::default() },
     }
@@ -146,13 +153,20 @@ pub(super) async fn capture(cdp: &mut CdpSession) -> Layout {
 /// `include_hidden`) out of `nodes`; how many were cut.
 pub(super) fn apply(nodes: &mut [Value], layout: &Layout, include_hidden: bool) -> usize {
     super::clickable::mark(nodes, &layout.clickable, &layout.hidden);
-    // Whatever is left of the hidden text (all of it with `include_hidden`) never carries a secret.
-    super::hidden_secrets::withhold(nodes, &layout.hidden, layout.unknown);
+    guard(nodes, layout);
     if include_hidden {
         0
     } else {
         prune(nodes, &layout.hidden)
     }
+}
+
+/// What every read of a page's tree does before an agent sees it, in a frame as on the top page: whatever is
+/// left of the hidden text (all of it with `include_hidden`) never carries a secret, and a control the page
+/// gives no name is named for what it looks like.
+pub(super) fn guard(nodes: &mut [Value], layout: &Layout) {
+    super::hidden_secrets::withhold(nodes, &layout.hidden, layout.unknown);
+    super::icon_hints::mark(nodes, &layout.hints);
 }
 
 /// The line a snapshot ends with when it left hidden text out.

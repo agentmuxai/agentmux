@@ -1079,7 +1079,7 @@ async fn vault_fill(
 
 async fn browser_capture(cx: &ToolCtx<'_>, auth: agentmux_common::api_types::UiAutomationAuth, pane: Option<String>, arguments: &Value) -> Result<String> {
     let mut body = json!({ "auth": auth, "pane": pane });
-    for k in ["ref", "as", "entry", "download", "reason", "card"] {
+    for k in ["ref", "as", "entry", "download", "reason", "card", "near", "prefix", "pattern", "copy"] {
         if let Some(v) = arguments.get(k).filter(|v| !v.is_null()) {
             body[k] = v.clone();
         }
@@ -1158,6 +1158,8 @@ fn capture_text(body: &Value) -> String {
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
     let page = if let Some(file) = body.get("file").and_then(Value::as_str) {
         format!("The file ({file}) was never written to disk: give it to a command with Terminal run's secret_files.")
+    } else if body.get("copied").and_then(Value::as_bool).unwrap_or(false) {
+        "It was taken from the page's own copy action: the system clipboard was never written, so nothing is left on it.".to_string()
     } else if body.get("marked").and_then(Value::as_bool).unwrap_or(false) {
         "While it is on the page, screenshots black it out and eval is refused on this tab.".to_string()
     } else {

@@ -41,7 +41,7 @@ use serde_json::Value;
 
 use super::snapshot::str_of;
 
-pub use agentmux_common::secret_shape::WITHHELD;
+pub use agentmux_common::secret_shape::{UNREAD, WITHHELD};
 pub(super) use agentmux_common::secret_shape::scrub;
 use agentmux_common::secret_shape::{has_key_shape, token_like};
 
@@ -232,19 +232,35 @@ fn clean_echoes(nodes: &mut [Value], chosen: &HashSet<usize>, above: &HashMap<us
     }
 }
 
+/// Whether a text node holds one odd token or a key's shape: what a page shows as a secret.
+fn looks_secret(node: &Value) -> bool {
+    is_text(node) && FIELDS.iter().any(|f| has_key_shape(str_of(node, f)) || token_like(str_of(node, f)))
+}
+
 /// Replace, in `nodes`, the text the page hides (`hidden`: backend ids; every text node when `unknown`) that
 /// has a secret's shape or sits in a row named like a secret, and what repeats it in another node's name,
-/// value or description. Returns how many text nodes were withheld.
+/// value or description; and the text the page shows plainly (a secret revealed with an eye button) when it
+/// is one odd token or has a key's shape and sits in such a row, as [`UNREAD`]. Returns how many text nodes
+/// were withheld.
 pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool) -> usize {
-    if hidden.is_empty() && !unknown {
+    if hidden.is_empty() && !unknown && !nodes.iter().any(looks_secret) {
         return 0;
     }
     let by_id: HashMap<String, usize> = nodes.iter().enumerate().filter_map(|(i, n)| Some((n.get("nodeId")?.as_str()?.to_string(), i))).collect();
+    // The chosen nodes the page shows (the rest are hidden).
+    let mut shown: HashSet<usize> = HashSet::new();
     let (chosen, pieces_of) = {
         let tree = Tree { nodes, by_id: by_id.clone(), hidden, unknown };
         let mut chosen: Vec<usize> = Vec::new();
         for (i, node) in nodes.iter().enumerate() {
-            if ignored(node) || !tree.is_hidden(node) {
+            if ignored(node) {
+                continue;
+            }
+            if !tree.is_hidden(node) {
+                if looks_secret(node) && tree.in_secret_row(i) {
+                    chosen.push(i);
+                    shown.insert(i);
+                }
                 continue;
             }
             let shaped = FIELDS.iter().any(|f| has_key_shape(str_of(node, f)));
@@ -290,9 +306,10 @@ pub(super) fn withhold(nodes: &mut [Value], hidden: &HashSet<i64>, unknown: bool
     }
     let chosen_set: HashSet<usize> = chosen.iter().copied().collect();
     for i in chosen.iter().copied() {
+        let marker = if shown.contains(&i) { UNREAD } else { WITHHELD };
         for field in FIELDS {
             if !str_of(&nodes[i], field).trim().is_empty() {
-                nodes[i][field]["value"] = Value::String(WITHHELD.to_string());
+                nodes[i][field]["value"] = Value::String(marker.to_string());
             }
         }
         if str_of(&nodes[i], "role") == "StaticText" {
