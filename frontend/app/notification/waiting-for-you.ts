@@ -122,7 +122,11 @@ export function endWaitingForYou(blockId: string, source: string, reason: "submi
     watches.delete(key);
     const sources = waiting.get(blockId);
     if (!sources?.delete(source)) return;
-    if (sources.size > 0) return;
+    if (sources.size > 0) {
+        // What the pane still waits on changed (its kinds), though it still waits.
+        bump();
+        return;
+    }
     waiting.delete(blockId);
     since.delete(blockId);
     bump();

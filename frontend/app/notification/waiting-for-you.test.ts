@@ -5,7 +5,7 @@
  *  action does, and srv's announcements count only in the windows they name
  *  (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2). */
 
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The pane's block object, which the registry watches: present until deleted.
@@ -171,5 +171,18 @@ describe("what the status bar's summary reads of the registry", () => {
         startWaitingForYou("b9", "question", "Which branch?");
         applyUserAttention({ key: "v9", block_id: "b9", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
         expect(waitingPanes()[0].kinds?.slice().sort()).toEqual(["own", "vault"]);
+    });
+
+    it("lists the pane again, with its remaining kinds, when one of two waits ends", () => {
+        __resetWaitingForYou();
+        startWaitingForYou("b8", "question", "Which branch?");
+        applyUserAttention({ key: "v8", block_id: "b8", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        const seen: string[][] = [];
+        createRoot((dispose) => {
+            createEffect(() => seen.push(waitingPanes()[0]?.kinds?.slice().sort() ?? []));
+            return dispose;
+        });
+        endWaitingForYou("b8", "question");
+        expect(seen[seen.length - 1]).toEqual(["vault"]);
     });
 });
