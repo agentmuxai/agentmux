@@ -223,7 +223,7 @@ impl RunLedger {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
                 if let Some(drone_run) = run.links["drone_run_id"].as_str() {
-                    crate::drone::executor::cancel_run(drone_run, summary);
+                    crate::backend::drone_cancel::cancel_run(drone_run, summary);
                 }
                 self.reap_worker(&run.id);
                 self.run_changed(&run.id);

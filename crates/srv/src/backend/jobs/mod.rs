@@ -598,7 +598,7 @@ impl RunLedger {
     pub fn drone_stopped(
         &self,
         run_id: &str,
-        block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
         reason: &str,
     ) {
         self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
