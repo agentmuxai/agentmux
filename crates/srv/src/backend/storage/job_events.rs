@@ -33,6 +33,12 @@ pub(crate) const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_ids_job_event_inputs_at ON db_job_event_inputs(at_ms);";
 
+/// Columns added to `db_job_trigger_events` after its first shape, run on every open with [`SCHEMA`] (a table an earlier
+/// build created gains them; a default needs no schema version bump). `seen_ms` is the last time a look saw the event
+/// again ([`Store::job_event_touch`]): the sweep keeps an id until a week after the later of `at_ms` and `seen_ms`, while
+/// `at_ms` stays the time the job heard it, which is what the hourly limit counts.
+pub(crate) const COLUMNS: [&str; 1] = ["ALTER TABLE db_job_trigger_events ADD COLUMN seen_ms INTEGER NOT NULL DEFAULT 0"];
+
 /// How long a job remembers an event id.
 pub const KEEP_MS: i64 = 7 * 24 * 3600 * 1000;
 /// How long a run's input is kept, from the event: a run may be held back by a delay of up to a week and then wait
@@ -69,21 +75,22 @@ impl Store {
         Ok(true)
     }
 
-    /// Move the time `job_id` heard `event_id` forward to `now_ms`, so the retention sweep keeps it. Nothing else about
-    /// the row changes, in particular not whether it counts as an event the job admitted. `Ok(true)` when it moved.
+    /// Note that `job_id` saw `event_id` again at `now_ms`, so the retention sweep keeps it a week from now. The time
+    /// the job heard it (`at_ms`) is left alone, so a touch neither makes the row an event the job admitted nor counts it
+    /// again toward the hourly limit. `Ok(true)` when it moved.
     pub fn job_event_touch(&self, job_id: &str, event_id: &str, now_ms: i64) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
         let n = conn.execute(
-            "UPDATE db_job_trigger_events SET at_ms = ?3 WHERE job_id = ?1 AND event_id = ?2 AND at_ms < ?3",
+            "UPDATE db_job_trigger_events SET seen_ms = ?3 WHERE job_id = ?1 AND event_id = ?2 AND MAX(at_ms, seen_ms) < ?3",
             params![job_id, event_id, now_ms],
         )?;
         Ok(n > 0)
     }
 
-    /// Forget the ids heard before `before_ms`. How many went.
+    /// Forget the ids neither heard nor seen again since `before_ms`. How many went.
     pub fn job_events_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE at_ms < ?1", params![before_ms])?)
+        Ok(conn.execute("DELETE FROM db_job_trigger_events WHERE MAX(at_ms, seen_ms) < ?1", params![before_ms])?)
     }
 
     /// Let go of the inputs kept before `before_ms` (event time). How many went. A run still waiting that long after
@@ -150,7 +157,10 @@ mod tests {
 
     fn store() -> Store {
         let store = Store::open_in_memory().unwrap();
-        store.conn().lock().unwrap().execute_batch(SCHEMA).unwrap();
+        let conn = store.conn().lock().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        drop(conn);
         store
     }
 
@@ -192,6 +202,46 @@ mod tests {
         assert_eq!(s.job_events_forget_before(300).unwrap(), 0, "it was touched, so it is not old");
         assert_eq!(s.job_events_since("job-a", 0).unwrap(), 0, "a marker with no run is not an admitted event");
         assert!(!s.job_event_claim("job-a", "marker", "", 600).unwrap());
+    }
+
+    #[test]
+    fn touching_an_old_admitted_event_does_not_count_it_again_toward_the_hour() {
+        // An expect's gap, heard days ago and admitted (it started a run), is seen again now and touched to keep it.
+        let s = store();
+        let hour = 3_600_000;
+        let day = 24 * hour;
+        let now = 10 * day;
+        assert!(s.job_event_claim("job-a", "gap-old", "run-1", now - 3 * day).unwrap());
+        assert!(s.job_event_touch("job-a", "gap-old", now).unwrap());
+        assert_eq!(s.job_events_since("job-a", now - hour).unwrap(), 0, "the touch is not an event admitted this hour");
+
+        // The watched job recovers, then a new gap opens within the hour: with a limit of one an hour it is the first.
+        assert!(s.job_event_claim("job-a", "gap-new", "run-2", now + 20 * 60_000).unwrap());
+        assert_eq!(s.job_events_since("job-a", now + 20 * 60_000 - hour).unwrap(), 1, "only the new gap counts");
+
+        // The touch still keeps the old gap's id past the week from when it was heard.
+        assert_eq!(s.job_events_forget_before(now - 1).unwrap(), 0);
+        assert!(!s.job_event_claim("job-a", "gap-old", "run-3", now + hour).unwrap(), "still heard: the same gap is nothing");
+        assert_eq!(s.job_events_forget_before(now + 1).unwrap(), 1, "a week after the last look it goes");
+    }
+
+    #[test]
+    fn the_seen_column_is_added_to_a_table_an_earlier_build_made() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn().lock().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_job_trigger_events (job_id TEXT NOT NULL, event_id TEXT NOT NULL, run_id TEXT NOT NULL DEFAULT '', \
+             at_ms INTEGER NOT NULL, PRIMARY KEY (job_id, event_id));
+             INSERT INTO db_job_trigger_events VALUES ('job-a', 'e1', 'run-1', 100);",
+        )
+        .unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        crate::backend::storage::migrations::apply_additive_columns(&conn, COLUMNS).unwrap();
+        drop(conn);
+        assert!(store.job_event_touch("job-a", "e1", 500).unwrap());
+        assert_eq!(store.job_events_since("job-a", 200).unwrap(), 0, "the old row keeps its own time");
+        assert_eq!(store.job_events_forget_before(300).unwrap(), 0);
     }
 
     #[test]

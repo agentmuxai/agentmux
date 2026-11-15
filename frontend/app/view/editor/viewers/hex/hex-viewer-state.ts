@@ -15,6 +15,7 @@ import { createComputed, createEffect, createMemo, createSignal, createUniqueId,
 import type { ViewerBarProps } from "../viewer-bar";
 import { ChunkCache, fileReaderOf, rangeReaderOf } from "./hex-chunks";
 import { COPY_MAX_BYTES, copyText, type CopyAs } from "./hex-copy";
+import { createHexFind } from "./hex-find-state";
 import { inspect, INSPECT_BYTES, type Inspected } from "./hex-inspector";
 import {
     charOf,
@@ -232,11 +233,16 @@ function createHexSelection(size: Accessor<number>, width: Accessor<RowWidth>, s
         const row = Math.floor(offset / width());
         if (row < scroll.first() || row > scroll.first() + rowsInView(scroll.viewPx()) - 1) scroll.showRow(row - 2);
     };
+    /** A match: its bytes selected, scrolled into view. */
+    const select = (offset: number, length: number): void => {
+        goTo(offset);
+        if (length > 1) place(offset + length - 1, true);
+    };
     const selectAll = (): void => {
         setAnchor(0);
         setCursor(Math.max(0, size() - 1));
     };
-    return { cursor, anchor, column, setColumn, lo, hi, place, moveTo, goTo, selectAll };
+    return { cursor, anchor, column, setColumn, lo, hi, place, moveTo, goTo, select, selectAll };
 }
 
 type HexSelection = ReturnType<typeof createHexSelection>;
@@ -265,12 +271,14 @@ function hexKeyHandler(o: {
     sel: HexSelection;
     copy: (as: CopyAs) => Promise<void>;
     focusOffsetBox: () => void;
+    openFind: () => void;
     toggleInspector: () => void;
 }): (e: KeyboardEvent) => void {
     const act = (e: KeyboardEvent): boolean => {
         const mod = e.ctrlKey || e.metaKey;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
         if (mod && key === "g") o.focusOffsetBox();
+        else if (mod && key === "f") o.openFind();
         else if (mod && key === "c") void o.copy(o.sel.column() === "text" ? "text" : "hex");
         else if (mod && key === "a") o.sel.selectAll();
         else if (!mod && key === "i") o.toggleInspector();
@@ -343,6 +351,18 @@ function createHexReadouts(source: HexSource, sel: HexSelection, littleEndian: A
     return { inspected, facts };
 }
 
+/** Go to an offset, or find, from a toolbar button's focus too (the grid's own handler has taken its key already). */
+function toolbarKeyHandler(o: { focusOffsetBox: () => void; openFind: () => void }): (e: KeyboardEvent) => void {
+    return (e) => {
+        if (e.defaultPrevented || e.altKey || !(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key !== "g" && key !== "f") return;
+        e.preventDefault();
+        if (key === "g") o.focusOffsetBox();
+        else o.openFind();
+    };
+}
+
 export function createHexViewer(props: HexViewerProps) {
     const was = remembered.get(props.memoryKey);
     const source = createHexSource(props);
@@ -384,6 +404,7 @@ export function createHexViewer(props: HexViewerProps) {
         offsetInput?.focus();
         offsetInput?.select();
     };
+    const find = createHexFind({ path: () => props.path, size, lo: sel.lo, hi: sel.hi, select: sel.select, focusGrid: scroll.focus });
     const goToTyped = (text: string): void => {
         const offset = parseOffset(text, size());
         setBadOffset(offset == null);
@@ -413,13 +434,9 @@ export function createHexViewer(props: HexViewerProps) {
         layerTop: scroll.layerTop,
         bindScroller: scroll.bind,
         onScroll: scroll.onScroll,
-        // Go to an offset from a toolbar button's focus too (the grid's own handler has taken its key already).
-        onToolbarKeyDown: (e: KeyboardEvent) => {
-            if (e.defaultPrevented || e.altKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "g") return;
-            e.preventDefault();
-            focusOffsetBox();
-        },
-        onKeyDown: hexKeyHandler({ size, width, scroll, sel, copy, focusOffsetBox, toggleInspector }),
+        onToolbarKeyDown: toolbarKeyHandler({ focusOffsetBox, openFind: find.openStrip }),
+        find,
+        onKeyDown: hexKeyHandler({ size, width, scroll, sel, copy, focusOffsetBox, openFind: find.openStrip, toggleInspector }),
         ...createHexPointer(sel),
         setRowWidth,
         setLittleEndian,

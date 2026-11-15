@@ -1,7 +1,7 @@
 # SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it
 
 **Date:** 2026-10-15
-**Status:** active — phase 1 built in #5016, phase 2 (PDF) in #5025 (see "Phase 1 as built" and "Phase 2 as built" at the end); of phase 3, the hex viewer is built ("Phase 3 as built, the hex viewer"); of phase 5, the video and audio extras (#6187). The rest of phases 3–5 is to follow. Written against `main` @ `521daa2ad`.
+**Status:** active — phase 1 built in #5016, phase 2 (PDF) in #5025 (see "Phase 1 as built" and "Phase 2 as built" at the end); of phase 3, the hex viewer and its find are built ("Phase 3 as built, the hex viewer"); of phase 5, the video and audio extras (#6187). The rest of phases 3–5 is to follow. Written against `main` @ `521daa2ad`.
 **Author:** Korp@narko
 **Requested by:** the repo owner:
 > *"does agentmux editor support pdf? lets write a quick spec to support pdfs and images in the editor. we need to get the editor wide-ranging editor access, including binary if it detects it, images, etc. we want wide coverage, research latest best practices."*
@@ -827,4 +827,5 @@ The hex viewer (`frontend/app/view/editor/viewers/hex/`), §4.4.5. Built as desi
 5. **The keys.** As §4.5, and: Shift with a move key extends the selection, Ctrl+Home and Ctrl+End go to the file's ends, Ctrl+A selects everything, Ctrl+C copies the selection (hex in the hex column, the text in the text column). Tab goes from the hex column to the text column and then on out of the grid, Shift+Tab the other way, so the grid is no keyboard trap. A modified arrow is left to the app.
 6. **Copy** takes a megabyte at most (its text is three to six times as long), and says so past it.
 7. **Where a tab was** (the rows on screen, the cursor and selection, the row width, the inspector) is kept while the app runs, so coming back to the tab doesn't start at 0. Not saved with the tab.
-8. **Not in this slice:** find (`filesearchbytes`, the hex pattern and text search), `editor:viewer.associations`, and `OpenEditor {offset}`. Editing stays out of this spec's phases.
+8. **Find** (a later slice, built): `Ctrl+F` opens a strip over the grid with a pattern, a mode (Hex, UTF-8, UTF-16) and next and previous (Enter, Shift+Enter; Escape closes). Hex takes bytes with `??` for any byte (`DE AD ?? EF`, 1 to 256 bytes, not all `??`); text is encoded to its bytes first. The search is srv's `filesearchbytes {path, pattern, from, backward}`: it reads the file in 1 MB blocks, local files only, and each call is bounded (256 MB or 1.5 s), so a long search is a run of calls, each handing back `next_from`, ended by a newer search, an edit or closing the strip. A match is selected and scrolled to; past the end of the file the search goes on from the other end and says so. A file dropped in with no path on disk cannot be searched.
+9. **Not in this slice:** `editor:viewer.associations`, and `OpenEditor {offset}`. Editing stays out of this spec's phases.
