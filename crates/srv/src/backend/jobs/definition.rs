@@ -189,6 +189,9 @@ impl EventTrigger {
         if self.source == event_source::FILE_WATCH {
             super::file_watch::validate_filter(&self.filter)?;
         }
+        if self.source == event_source::WEBHOOK_LOCAL {
+            super::webhook_local::validate_filter(&self.filter)?;
+        }
         Ok(())
     }
 }
