@@ -125,6 +125,7 @@ impl<'a> Scheduler<'a> {
             elapsed_ms: self.elapsed_before_ms + ms(&self.started),
             deadlines: self.deadlines.clone(),
             resume_on: self.resume_on.clone(),
+            wait_timeouts: self.wait_timeouts.clone(),
             graph: self.recorder.as_ref().map(|(_, g)| g.clone()).unwrap_or(GraphRef { version: 0, hash: String::new() }),
             drone_id: self.scope.drone_id.clone(),
             trigger: self.scope.trigger.clone(),
@@ -203,6 +204,7 @@ impl<'a> Scheduler<'a> {
         }
         self.deadlines = c.deadlines.clone();
         self.resume_on = c.resume_on.clone();
+        self.wait_timeouts = c.wait_timeouts.clone();
         self.in_flight = in_flight;
         self.ready = ready;
         self.queued = queued;

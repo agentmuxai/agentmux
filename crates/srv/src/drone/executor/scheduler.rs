@@ -147,6 +147,8 @@ struct Scheduler<'a> {
     waiting: Option<(&'a str, bool)>,
     deadlines: BTreeMap<String, i64>,
     resume_on: BTreeMap<String, String>,
+    /// When the Wait block runs out of its own `timeout_seconds`.
+    wait_timeouts: BTreeMap<String, i64>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -256,6 +258,7 @@ impl<'a> Scheduler<'a> {
             waiting: None,
             deadlines: BTreeMap::new(),
             resume_on: BTreeMap::new(),
+            wait_timeouts: BTreeMap::new(),
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -417,7 +420,9 @@ impl<'a> Scheduler<'a> {
 
     /// One run of a block's code, within its time limit.
     async fn attempt(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        // A wait keeps its own time out in the checkpoint, so a restart does not start it over.
         let limit = match schedule::timeout_seconds(node)? {
+            _ if kind == BlockKind::Wait => None,
             Some(secs) => Some(Duration::from_secs(secs)),
             None => default_timeout(kind),
         };

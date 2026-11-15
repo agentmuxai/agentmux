@@ -15,6 +15,7 @@
 use serde_json::{json, Value};
 
 use super::Scheduler;
+use crate::drone::executor::schedule;
 use crate::backend::drone_wait;
 use crate::drone::executor::blocks::wait::{self as config, Wait};
 use crate::drone::executor::engine::RunEvent;
@@ -41,6 +42,10 @@ impl<'a> Scheduler<'a> {
         let restored_at = self.deadlines.get(id).copied();
         let restored_key = self.resume_on.get(id).cloned();
         let restored = restored_at.is_some() || restored_key.is_some();
+        // The block's own limit, kept so a restart finds how much of it is left.
+        let limit_s = schedule::timeout_seconds(node)?;
+        let timeout_at = self.wait_timeouts.get(id).copied().or_else(|| limit_s.map(|s| now.saturating_add(i64::try_from(s).unwrap_or(i64::MAX) * 1000)));
+        let timed_out = || Err(format!("timed out after {}", super::plain_duration(std::time::Duration::from_secs(limit_s.unwrap_or(0)))));
 
         // What it waits for, and the way to be told.
         let (at, event) = match &wait {
@@ -59,6 +64,9 @@ impl<'a> Scheduler<'a> {
         if let Some((_, key, _)) = &event {
             self.resume_on.insert(id.to_string(), key.clone());
         }
+        if let Some(t) = timeout_at {
+            self.wait_timeouts.insert(id.to_string(), t);
+        }
         if !restored {
             // The run cannot be taken up again where it waits unless this is kept.
             self.checkpoint_required(id)?;
@@ -71,7 +79,14 @@ impl<'a> Scheduler<'a> {
             key: event.as_ref().map(|(_, key, _)| key.clone()),
         });
 
+        // How long until the block's limit, if it has one: it may already be past.
+        let until_timeout = || timeout_at.map(|t| u64::try_from(t - now_ms()).unwrap_or(0));
         if let Some(at) = at {
+            // The limit comes first when it is earlier than the time: even after a restart that found both past.
+            if let Some(t) = timeout_at.filter(|t| *t < at) {
+                tokio::time::sleep(std::time::Duration::from_millis(u64::try_from(t - now_ms()).unwrap_or(0))).await;
+                return timed_out();
+            }
             let left = at - now_ms();
             if left > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(u64::try_from(left).unwrap_or(0))).await;
@@ -81,7 +96,14 @@ impl<'a> Scheduler<'a> {
             return Ok(json!({ "resume_at": at, "late": late_ms > 0, "late_ms": late_ms }));
         }
         let Some((label, _, rx)) = event else { return Err("the wait has nothing to wait for".to_string()) };
-        let payload = rx.await.map_err(|_| "the run stopped waiting for its event".to_string())?;
+        let payload = match until_timeout() {
+            Some(t) => tokio::select! {
+                payload = rx => payload,
+                () = tokio::time::sleep(std::time::Duration::from_millis(t)) => return timed_out(),
+            },
+            None => rx.await,
+        }
+        .map_err(|_| "the run stopped waiting for its event".to_string())?;
         Ok(json!({ "on": label, "payload": payload, "late": false, "late_ms": 0 }))
     }
 
@@ -90,6 +112,7 @@ impl<'a> Scheduler<'a> {
         self.waiting = None;
         self.deadlines.remove(id);
         self.resume_on.remove(id);
+        self.wait_timeouts.remove(id);
         let _ = self.tx.send(RunEvent::WaitEnded { run_id: self.run_id.to_string(), block_id: id.to_string(), late });
     }
 }
