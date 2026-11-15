@@ -32,7 +32,9 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::drone::executor::{run_drone, RunEvent};
 use crate::drone::storage::DroneStore;
 use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
-use crate::drone::versions::DroneVersionStore;
+use crate::drone::checkpoint::GraphRef;
+use crate::drone::recorder::Persist;
+use crate::drone::versions::{graph_hash, DroneVersionStore, Pin};
 
 /// Request for `listdrones`, which ignores its payload.
 ///
@@ -337,6 +339,19 @@ pub(crate) async fn start_job_drone_run(
     launch_run(state, drone_id, trigger, Some(job_run_id), run_cap_usd).await
 }
 
+/// The graph a run starts on: its hash, and the number of the saved version
+/// that has it (the newest, when the definition has not changed since its
+/// save). A drone saved before versions existed, or one whose version could not
+/// be saved, has number 0; its hash still says which graph the run had.
+fn graph_ref_of(state: &AppState, wf: &DroneDefinition) -> GraphRef {
+    let hash = graph_hash(&wf.graph);
+    let version = match state.id_store.version_resolve(&wf.id, Pin::Latest) {
+        Ok(Some(v)) if v.hash == hash => v.version,
+        _ => 0,
+    };
+    GraphRef { version, hash }
+}
+
 /// Start a run of `drone_id` with `trigger` as its input. With a
 /// `job_run_id` the ledger row is that job run's; without one the run
 /// gets a `manual` row of its own.
@@ -360,7 +375,9 @@ async fn launch_run(
             format!("rundrone: drone {drone_id} not found")
         })?;
     let started_at = now_ms();
-    let handle = run_drone(wf.id.clone(), wf.graph.clone(), trigger.clone(), run_cap_usd)
+    // The run keeps its checkpoints beside its row, and the graph version it started on.
+    let persist = Persist { sink: state.mstore.clone(), graph: graph_ref_of(state, &wf) };
+    let handle = run_drone(wf.id.clone(), wf.graph.clone(), trigger.clone(), (run_cap_usd, Some(persist)))
         .await
         .map_err(|e| format!("rundrone: {e}"))?;
     let run_id = handle.run_id.clone();

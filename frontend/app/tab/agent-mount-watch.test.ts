@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentMountForgotten, agentMountSettled, expectAgentMount, MOUNT_WATCH_MS, mountWatchEnv } from "./agent-mount-watch";
+import { agentMountForgotten, agentMountSettled, agentMountStalled, expectAgentMount, MOUNT_WATCH_MS, mountWatchEnv } from "./agent-mount-watch";
 
 describe("agent mount watch", () => {
     let lines: string[];
@@ -79,5 +79,40 @@ describe("agent mount watch", () => {
         expectAgentMount("", () => "x");
         run(MOUNT_WATCH_MS * 2);
         expect(lines).toEqual([]);
+    });
+});
+
+describe("a pane whose agent view has not started", () => {
+    const id = "5c5c5c5c-3333";
+    afterEach(() => agentMountForgotten(id));
+
+    it("is marked stalled when the wait runs out, and not before", () => {
+        vi.useFakeTimers();
+        try {
+            expectAgentMount(id, () => "");
+            expect(agentMountStalled(id)).toBe(false);
+            vi.advanceTimersByTime(MOUNT_WATCH_MS);
+            expect(agentMountStalled(id)).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("is unmarked once the view mounts after all, or the block leaves its pane", () => {
+        vi.useFakeTimers();
+        try {
+            expectAgentMount(id, () => "");
+            vi.advanceTimersByTime(MOUNT_WATCH_MS);
+            agentMountSettled(id);
+            expect(agentMountStalled(id)).toBe(false);
+            agentMountForgotten(id);
+            expectAgentMount(id, () => "");
+            vi.advanceTimersByTime(MOUNT_WATCH_MS);
+            expect(agentMountStalled(id)).toBe(true);
+            agentMountForgotten(id);
+            expect(agentMountStalled(id)).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

@@ -41,6 +41,15 @@ pub fn upsert_definition(conn: &rusqlite::Connection, wf: &DroneDefinition) -> R
     Ok(())
 }
 
+/// One stored checkpoint of a run: step 0 is `full`, every later step a `diff`
+/// from the one before (`drone::checkpoint`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckpointRow {
+    pub step: u32,
+    pub kind: String,
+    pub body: Vec<u8>,
+}
+
 pub trait DroneStore {
     fn drone_list(&self) -> Result<Vec<DroneDefinition>, StoreError>;
     fn drone_get(&self, id: &str) -> Result<Option<DroneDefinition>, StoreError>;
@@ -68,6 +77,11 @@ pub trait DroneStore {
     /// and end it at `now_ms`: its drain task died with the old process.
     /// Returns rows changed.
     fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64) -> Result<usize, StoreError>;
+    /// Keep checkpoint `step` of `run_id` (`kind` is `full` or `diff`). Writing a step that
+    /// is already there is an error: a checkpoint is never rewritten.
+    fn drone_checkpoint_put(&self, run_id: &str, step: u32, kind: &str, body: &[u8], now_ms: i64) -> Result<(), StoreError>;
+    /// The checkpoints of `run_id`, oldest step first.
+    fn drone_checkpoints_for(&self, run_id: &str) -> Result<Vec<CheckpointRow>, StoreError>;
 }
 
 impl DroneStore for Store {
@@ -229,11 +243,18 @@ impl DroneStore for Store {
 
     fn drone_runs_delete_for(&self, drone_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
+        // A run's checkpoints go with it (no FK ties them, m0050), and first:
+        // they are found through the run rows that are about to go.
+        conn.execute(
+            "DELETE FROM db_drone_checkpoints WHERE run_id IN (SELECT id FROM db_drone_runs WHERE drone_id = ?1)",
+            params![drone_id],
+        )?;
         Ok(conn.execute("DELETE FROM db_drone_runs WHERE drone_id = ?1", params![drone_id])?)
     }
 
     fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
+        conn.execute("DELETE FROM db_drone_checkpoints WHERE run_id = ?1", params![run_id])?;
         Ok(conn.execute("DELETE FROM db_drone_runs WHERE id = ?1", params![run_id])?)
     }
 
@@ -245,5 +266,27 @@ impl DroneStore for Store {
               WHERE status = 'running'",
             params![status, now_ms],
         )?)
+    }
+
+    fn drone_checkpoint_put(&self, run_id: &str, step: u32, kind: &str, body: &[u8], now_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_drone_checkpoints (run_id, step, kind, body, written_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![run_id, step, kind, body, now_ms],
+        )?;
+        Ok(())
+    }
+
+    fn drone_checkpoints_for(&self, run_id: &str) -> Result<Vec<CheckpointRow>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare("SELECT step, kind, body FROM db_drone_checkpoints WHERE run_id = ?1 ORDER BY step")?;
+        let rows = stmt.query_map(params![run_id], |row| {
+            Ok(CheckpointRow { step: row.get(0)?, kind: row.get(1)?, body: row.get(2)? })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 }

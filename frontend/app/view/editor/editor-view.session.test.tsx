@@ -1026,7 +1026,9 @@ describe("renaming a file from its tab", () => {
             fireEvent.contextMenu(tabEl(v, id));
             return resolveContextMenuRegion(tabEl(v, id))!.items!();
         };
-        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", "Move to New Pane", "Close Tab"]);
+        // A file on disk can be shown in another viewer; an Untitled document has only its text.
+        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", "Show As", "Move to New Pane", "Close Tab"]);
+        expect(menuOf(fileTab)[1].submenu!.map((i) => i.label)).toEqual(["Text", "File info", "Hex"]);
         expect(menuOf(scratchTab).map((i) => i.label)).toEqual(["Save As…", "Move to New Pane", "Close Tab"]);
 
         // Ctrl+S on the Untitled tab opens its Save As box; Rename on the other tab closes it.

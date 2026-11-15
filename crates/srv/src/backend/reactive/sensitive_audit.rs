@@ -109,7 +109,7 @@ impl ReactiveHandler {
         level: Option<&str>,
         standing: bool,
     ) {
-        self.inner.lock().unwrap().log_audit_sensitive(
+        self.inner.lock().log_audit_sensitive(
             source_agent, target_agent, action, success, error_message, request_id, reason, prompt, answer, level, standing,
         );
     }

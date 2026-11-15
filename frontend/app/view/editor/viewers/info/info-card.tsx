@@ -42,6 +42,8 @@ export interface InfoCardProps {
     bar: Omit<ViewerBarProps, "start" | "facts">;
     /** Absent when the file can't be shown as text (too large). */
     onOpenAsText?: () => void;
+    /** Show the file's bytes: any file, whatever its size. */
+    onOpenAsHex?: () => void;
     onOpenWithSystem?: () => void;
     onReveal?: () => void;
     onCopyPath?: () => void;
@@ -103,6 +105,11 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                     <Show when={props.onOpenAsText && (size() ?? 0) <= TEXT_MAX_BYTES}>
                         <Button icon="file-lines" onClick={() => props.onOpenAsText!()}>
                             Open as text anyway
+                        </Button>
+                    </Show>
+                    <Show when={props.onOpenAsHex}>
+                        <Button icon="table-cells" onClick={() => props.onOpenAsHex!()}>
+                            Open as hex
                         </Button>
                     </Show>
                     <Show when={props.onReveal}>
