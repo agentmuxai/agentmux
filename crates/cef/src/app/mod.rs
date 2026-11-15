@@ -128,7 +128,7 @@ wrap_window_delegate! {
 
             // Position: use explicit bounds if provided, else 70% centered.
             // A test build (AGENTMUX_TEST_OFFSCREEN) creates every window off-screen, here for all of them.
-            let bounds = self.initial_bounds.or_else(|| get_monitor_centered_70pct(window)).or_else(|| agentmux_common::test_offscreen::initial_rect(1200, 800));
+            let bounds = self.initial_bounds.or_else(|| get_monitor_centered_70pct(window)).or_else(|| agentmux_common::test_offscreen::initial_rect(None));
             if let Some((x, y, w, h)) = bounds.map(agentmux_common::test_offscreen::place_rect) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
@@ -419,8 +419,7 @@ wrap_window_delegate! {
         // CEF places a window whose initial bounds are empty at (0, 0), where the first frame shows. A test
         // build (AGENTMUX_TEST_OFFSCREEN) starts every window off-screen instead; any other build keeps the default.
         fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
-            let (_, _, w, h) = self.initial_bounds.unwrap_or((0, 0, 1200, 800));
-            let (x, y, width, height) = agentmux_common::test_offscreen::initial_rect(w, h).unwrap_or((0, 0, 0, 0));
+            let (x, y, width, height) = agentmux_common::test_offscreen::initial_rect(self.initial_bounds).unwrap_or((0, 0, 0, 0));
             Rect { x, y, width, height }
         }
 

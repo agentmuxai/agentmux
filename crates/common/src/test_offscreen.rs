@@ -36,13 +36,22 @@ pub fn active() -> bool {
     *ACTIVE.get_or_init(|| requested_by(build_kind(), std::env::var(ENV).ok().as_deref()))
 }
 
-/// `(x, y)` for a window that is off-screen, or `pos` when this process is not.
-pub fn place(pos: (i32, i32)) -> (i32, i32) {
-    if active() {
+/// A spare pool window waits parked with its left edge under this (the host's
+/// `OFFSCREEN_POOL_THRESHOLD_X`): it is already off-screen and stays there until it is promoted.
+pub const PARKED_BELOW_X: i32 = -20000;
+
+/// Where a window goes: `pos` unless `off_screen`; and then [`ORIGIN`], except a parked pool window.
+fn placed(off_screen: bool, pos: (i32, i32)) -> (i32, i32) {
+    if off_screen && pos.0 >= PARKED_BELOW_X {
         ORIGIN
     } else {
         pos
     }
+}
+
+/// `(x, y)` for a window that is off-screen, or `pos` when this process is not.
+pub fn place(pos: (i32, i32)) -> (i32, i32) {
+    placed(active(), pos)
 }
 
 /// A window rect `(x, y, width, height)` with its origin moved off-screen when this process is.
@@ -51,10 +60,11 @@ pub fn place_rect((x, y, w, h): (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
     (x, y, w, h)
 }
 
-/// The rect a window of `width` x `height` is created at when this process is off-screen: CEF
+/// The rect a window is created at when this process is off-screen, `None` when it is not: CEF
 /// places a window whose initial bounds are empty at (0, 0), so the window must say where it starts.
-pub fn initial_rect(width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
-    active().then_some((ORIGIN.0, ORIGIN.1, width, height))
+/// `bounds` are the ones the window was asked for, if any (a spare pool window keeps its parking place).
+pub fn initial_rect(bounds: Option<(i32, i32, i32, i32)>) -> Option<(i32, i32, i32, i32)> {
+    active().then(|| place_rect(bounds.unwrap_or((0, 0, 1200, 800))))
 }
 
 /// Log [`start_line`] for `process`, if there is one.
@@ -105,8 +115,22 @@ mod tests {
     #[test]
     fn a_process_that_is_not_off_screen_gives_no_initial_rect() {
         // The tests run without the variable set.
-        assert_eq!(initial_rect(1200, 800), None);
+        assert_eq!(initial_rect(None), None);
+        assert_eq!(initial_rect(Some((5, 6, 7, 8))), None);
         assert_eq!(place_rect((10, 20, 30, 40)), (10, 20, 30, 40));
+    }
+
+    #[test]
+    fn a_spare_pool_window_keeps_its_parking_place() {
+        // The pool parks at (-32000, -32000), or that scaled by the display (-25600 at 80%).
+        for pos in [(-32000, -32000), (-25600, -25600), (-20001, 0)] {
+            assert_eq!(placed(true, pos), pos);
+        }
+        // Everything else goes to the origin, including a window at 0,0 and on a display left of the primary.
+        for pos in [(0, 0), (500, 300), (-1920, 0), (-20000, 0), (-19999, 0)] {
+            assert_eq!(placed(true, pos), ORIGIN, "{pos:?}");
+        }
+        assert_eq!(placed(false, (500, 300)), (500, 300));
     }
 
     #[test]
