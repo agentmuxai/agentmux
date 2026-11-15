@@ -43,7 +43,8 @@ export function computeAccountBindCandidates(
     agentProviderId: string,
     accounts: Account[],
     /** The account already linked to this agent for this provider, if any —
-     *  excluded (nothing to adopt). */
+     *  excluded (nothing to adopt). A signed-out agent passes none: it never started on its link
+     *  (linked after its start, #47722), so binding the linked account is how it starts. */
     excludeAccountId?: string,
 ): Account[] {
     const provider = resolveProviderAlias(agentProviderId);
