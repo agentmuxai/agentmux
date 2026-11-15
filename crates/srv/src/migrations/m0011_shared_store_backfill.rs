@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+//! Shared store: additive, it inserts rows into the shared store from the channel stores.
+
 use crate::backend::storage::store::Store;
 use crate::backend::storage::muxbus::MuxBusCredentials;
 use crate::backend::storage::drone_store::DroneStore;

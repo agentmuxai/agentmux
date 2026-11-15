@@ -32,6 +32,8 @@
 //! land at the END of that pair's chain (this migration runs after normal
 //! startup writes are already possible) with content that's actually
 //! OLDER than what's already recorded, corrupting the chain's chronology.
+//!
+//! Shared store: additive, it inserts version rows only; no existing row or column changes.
 
 use std::sync::Arc;
 

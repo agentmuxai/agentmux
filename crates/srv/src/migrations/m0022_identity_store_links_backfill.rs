@@ -50,6 +50,8 @@
 //! when isolated so a disposable test account store starts empty): this
 //! migration's destination has no isolation concept at all — see the design
 //! doc §2.3 — so there is no "keep this run's view empty" case to preserve.
+//!
+//! Shared store: additive, it inserts links into the identity store; no existing row or column changes.
 
 use crate::backend::storage::store::Store;
 use crate::registry;
