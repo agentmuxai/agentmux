@@ -51,6 +51,7 @@ impl<'a> Scheduler<'a> {
         let mut errors = Vec::new();
         let mut stopped: Option<String> = None;
         for (index, item) in items.into_iter().enumerate() {
+            self.settle_late_spend().await;
             if let Some(why) = self.item_limit(&cfg, id, (index, total), (started, spent_before)) {
                 stopped = Some(why);
                 break;

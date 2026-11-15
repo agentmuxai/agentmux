@@ -27,6 +27,7 @@ use tokio::sync::mpsc;
 use super::{Limits, Scheduler};
 use crate::drone::executor::blocks::call as config;
 use crate::drone::executor::engine::{Cancel, RunEnd, RunEvent};
+use crate::backend::storage::drone_types::BlockState;
 use crate::drone::types::FlowNode;
 
 /// The deepest a chain of calls may go, the first drone counted.
@@ -90,6 +91,7 @@ impl<'a> Scheduler<'a> {
         let (parent_tx, run_id, block_id) = (self.tx.clone(), self.run_id.to_string(), id.to_string());
         let (drone, callee_run) = (spec.drone.clone(), child_id.clone());
         let late = Arc::clone(&self.late_spend);
+        late.start(&child_id, id);
         let task = tokio::spawn(async move {
             let (tx, rx) = mpsc::unbounded_channel();
             drop(rx);
@@ -102,13 +104,13 @@ impl<'a> Scheduler<'a> {
             };
             // What it spent is the caller, and if the caller has gone on without waiting (the call ran out
             // of its time) it is counted from here, at its next block.
-            late.lock().unwrap_or_else(|e| e.into_inner()).insert(callee_run.clone(), (block_id.clone(), spent));
+            late.finish(&callee_run, spent);
             let _ = parent_tx.send(RunEvent::ChildEnded { run_id, block_id, child_run_id: callee_run, status: status.to_string(), cost_usd: spent });
             (ended, spent)
         });
         let (ended, spent) = task.await.map_err(|e| format!("{id}: the called drone stopped unexpectedly: {e}"))?;
         // Counted here, so it is not counted again from the late list.
-        self.late_spend.lock().unwrap_or_else(|e| e.into_inner()).remove(&child_id);
+        self.late_spend.forget(&child_id);
         match ended {
             // The cost of a block that finished is counted from its output, as for any block.
             Ok(value) => Ok(json!({ "value": value, "run_id": child_id, "version": version, "cost_usd": spent })),
@@ -128,16 +130,103 @@ impl<'a> Scheduler<'a> {
     }
 }
 
+/// Callees whose call was given up on: they were stopped, but are still ending, and what
+/// they spent in the meantime is the caller's.
+#[derive(Default)]
+pub(super) struct LateSpend {
+    inner: std::sync::Mutex<LateInner>,
+    ended: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct LateInner {
+    /// Callees still running, by child run: the block that called each.
+    running: HashMap<String, String>,
+    /// Callees that ended, by child run: the block and what it spent.
+    spent: HashMap<String, (String, f64)>,
+}
+
+impl LateSpend {
+    fn inner(&self) -> std::sync::MutexGuard<'_, LateInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn start(&self, child: &str, block: &str) {
+        self.inner().running.insert(child.to_string(), block.to_string());
+    }
+
+    fn finish(&self, child: &str, spent: f64) {
+        {
+            let mut inner = self.inner();
+            if let Some(block) = inner.running.remove(child) {
+                inner.spent.insert(child.to_string(), (block, spent));
+            }
+        }
+        self.ended.notify_waiters();
+    }
+
+    /// The caller took what the callee spent itself.
+    fn forget(&self, child: &str) {
+        let mut inner = self.inner();
+        inner.running.remove(child);
+        inner.spent.remove(child);
+    }
+
+    fn idle(&self) -> bool {
+        self.inner().running.is_empty()
+    }
+
+    fn take(&self) -> Vec<(String, f64)> {
+        self.inner().spent.drain().map(|(_, v)| v).collect()
+    }
+}
+
+/// The most the caller waits for callees it stopped to end.
+const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 impl Scheduler<'_> {
-    /// Count what callees spent after the call that started them was given up on.
-    pub(super) fn count_late_spend(&mut self) {
-        let late: Vec<(String, f64)> = self.late_spend.lock().unwrap_or_else(|e| e.into_inner()).drain().map(|(_, v)| v).collect();
-        for (block, spent) in late {
+    /// Before more work starts: wait for the callees that were stopped when their call was
+    /// given up on, and count what they spent, so the cap and the next callee's allowance see it.
+    /// The spend is also put on the calling block's state, which is what the ledger sums.
+    pub(super) async fn settle_late_spend(&mut self) {
+        let late = Arc::clone(&self.late_spend);
+        if !late.idle() {
+            let ended = async {
+                loop {
+                    let notified = late.ended.notified();
+                    tokio::pin!(notified);
+                    notified.as_mut().enable();
+                    if late.idle() {
+                        break;
+                    }
+                    notified.await;
+                }
+            };
+            let _ = tokio::time::timeout(SETTLE_LIMIT, ended).await;
+        }
+        for (block, spent) in late.take() {
             self.spent += spent;
             if let Some((id, _)) = self.node_of.get_key_value(block.as_str()) {
                 *self.spent_by.entry(id).or_default() += spent;
             }
+            add_cost(self.states, &block, spent).await;
         }
+    }
+}
+
+/// Put `spent` on a block's state as its `cost_usd`, which is what the run's ledger row sums.
+pub(super) async fn add_cost(states: &Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>, block: &str, spent: f64) {
+    if spent <= 0.0 {
+        return;
+    }
+    let mut states = states.lock().await;
+    let Some(state) = states.get_mut(block) else { return };
+    match state.output.as_mut().and_then(Value::as_object_mut) {
+        Some(out) => {
+            let had = out.get("cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
+            out.insert("cost_usd".to_string(), json!(had + spent));
+        }
+        None => state.output = Some(json!({ "cost_usd": spent })),
     }
 }
 

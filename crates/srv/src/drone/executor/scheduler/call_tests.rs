@@ -203,6 +203,52 @@ async fn a_call_that_runs_out_of_its_own_time_stops_the_drone_it_called() {
 }
 
 #[tokio::test]
+async fn what_a_stopped_callee_spent_is_taken_before_the_next_block_starts() {
+    let waits = DroneGraph { nodes: vec![node("hold", json!({ "kind": "wait", "on": "never" }))], edges: vec![] };
+    let graph = DroneGraph {
+        nodes: vec![node("call", json!({ "kind": "drone", "drone": "waits", "timeout_seconds": 1 })), response("handler", "went on")],
+        edges: vec![edge("e1", "call", "handler", Some("error"))],
+    };
+    let ran = run_as("main", graph, Value::Null, saved(vec![("waits", waits)])).await;
+    assert_eq!(ran.result, Ok(json!("went on")));
+    let at = |f: &dyn Fn(&RunEvent) -> bool| ran.events.iter().position(f).unwrap();
+    let ended = at(&|e| matches!(e, RunEvent::ChildEnded { .. }));
+    let next = at(&|e| matches!(e, RunEvent::BlockStarted { block_id, .. } if block_id == "handler"));
+    assert!(ended < next, "the stopped callee ended ({ended}) before the next block started ({next})");
+}
+
+#[test]
+fn what_a_stopped_callee_spent_waits_for_it_to_end_and_is_taken_once() {
+    let late = super::LateSpend::default();
+    late.start("c1", "call");
+    assert!(!late.idle());
+    late.finish("c1", 0.5);
+    assert!(late.idle());
+    assert_eq!(late.take(), [("call".to_string(), 0.5)]);
+    assert!(late.take().is_empty());
+    // A caller that took the spend itself leaves nothing to take twice.
+    late.start("c2", "call");
+    late.finish("c2", 1.0);
+    late.forget("c2");
+    assert!(late.take().is_empty());
+}
+
+#[tokio::test]
+async fn spend_that_was_not_in_a_blocks_output_is_added_to_its_state() {
+    use crate::backend::storage::drone_types::BlockState;
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let state = |output| BlockState { status: "error".to_string(), output, error: Some("x".to_string()), started_at: None, completed_at: None };
+    states.lock().await.insert("a".to_string(), state(None));
+    states.lock().await.insert("b".to_string(), state(Some(json!({ "cost_usd": 0.25, "value": 1 }))));
+    super::add_cost(&states, "a", 0.5).await;
+    super::add_cost(&states, "b", 0.5).await;
+    super::add_cost(&states, "ghost", 0.5).await;
+    let g = states.lock().await;
+    assert_eq!(g["a"].output, Some(json!({ "cost_usd": 0.5 })));
+    assert_eq!(g["b"].output, Some(json!({ "cost_usd": 0.75, "value": 1 })));
+}
+
+#[tokio::test]
 async fn a_call_set_wrongly_is_refused_before_the_run_starts() {
     let none = DroneGraph { nodes: vec![node("call", json!({ "kind": "drone" }))], edges: vec![] };
     let why = run_as("main", none, Value::Null, saved(vec![])).await.result.unwrap_err();

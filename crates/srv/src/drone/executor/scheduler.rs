@@ -160,7 +160,7 @@ struct Scheduler<'a> {
     chain: Vec<String>,
     lookup: Option<Arc<dyn DroneLookup>>,
     /// What callees spent that nobody was waiting for any more, by child run: counted at the next block.
-    late_spend: Arc<std::sync::Mutex<HashMap<String, (String, f64)>>>,
+    late_spend: Arc<call::LateSpend>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -368,7 +368,7 @@ impl<'a> Scheduler<'a> {
             }
             return Ok(());
         }
-        self.count_late_spend();
+        self.settle_late_spend().await;
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
             self.cap_reached(id, &stopped);
             return Err(stopped);
@@ -499,6 +499,7 @@ impl<'a> Scheduler<'a> {
     async fn run_block(&mut self, node: &'a FlowNode) -> Result<Value, String> {
         let id = node.id.as_str();
         let kind = kind_of(node)?;
+        self.settle_late_spend().await;
         let _ = self.tx.send(RunEvent::BlockStarted { run_id: self.run_id.to_string(), block_id: id.to_string() });
         // Captured once so the running, done and error states carry the same start.
         let started_at = now_ms();
@@ -510,7 +511,11 @@ impl<'a> Scheduler<'a> {
             completed_at: done.then(now_ms),
         };
         mark_state(self.states, id, state("running", None, None, false)).await;
+        let spent_before = self.spent;
         let result = self.guarded(node, kind).await;
+        // What a block spent and then failed (a callee that ran, then failed) was still spent: it
+        // is on the block's state, which is what the ledger sums.
+        let failed_cost = ((self.spent - spent_before) > 0.0).then(|| json!({ "cost_usd": self.spent - spent_before }));
         match result {
             Ok(mut output) => {
                 self.keep_history(id, &mut output);
@@ -529,12 +534,12 @@ impl<'a> Scheduler<'a> {
                 Ok(output)
             }
             Err(e) if self.cancelled => {
-                mark_state(self.states, id, state("cancelled", None, Some(e.clone()), true)).await;
+                mark_state(self.states, id, state("cancelled", failed_cost, Some(e.clone()), true)).await;
                 Err(e)
             }
             Err(e) => {
                 let _ = self.tx.send(RunEvent::BlockError { run_id: self.run_id.to_string(), block_id: id.to_string(), error: e.clone() });
-                mark_state(self.states, id, state("error", None, Some(e.clone()), true)).await;
+                mark_state(self.states, id, state("error", failed_cost, Some(e.clone()), true)).await;
                 Err(format!("block {id} failed: {e}"))
             }
         }
