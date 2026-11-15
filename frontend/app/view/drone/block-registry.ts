@@ -139,7 +139,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "api",
         emoji: "🌐",
         label: "API",
-        description: "Make an HTTP request. Headers and body support {{...}}.",
+        description: "Make an HTTP request. Headers and body support {{...}}. A Vault entry can supply the Authorization header.",
         color: "#10b981",
         defaultData: {
             method: "GET",
