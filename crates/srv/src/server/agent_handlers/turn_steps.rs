@@ -304,12 +304,8 @@ fn rehome_for_container(
             continue;
         };
         let dest = host_root.join(&suffix);
-        let made_room = match dest.parent() {
-            Some(parent) => std::fs::create_dir_all(parent),
-            None => Ok(()),
-        };
-        match made_room.and_then(|()| std::fs::copy(&item.path, &dest)) {
-            Ok(_) => {
+        match safe_rehome_copy(&item.path, &dest) {
+            Ok(()) => {
                 let suffix = suffix.to_string_lossy().replace('\\', "/");
                 item.path = std::path::PathBuf::from(format!("{container_root}/{CONTAINER_ATTACHMENTS_SUBDIR}/{suffix}"));
                 rehomed.push(item);
@@ -321,6 +317,36 @@ fn rehome_for_container(
         }
     }
     (rehomed, missing)
+}
+
+/// Copies `src` to `dest`, refusing to follow a symlink a container agent could have planted anywhere
+/// along the way. The container shares this bind mount, so a compromised agent can pre-create a symlink
+/// at `dest` (or at a directory `dest` lives under) pointing at an arbitrary host path; a plain
+/// `create_dir_all` + `fs::copy` would walk or write through it as the host process (Codex P1, #7434).
+/// Each existing ancestor of `dest` must already be a plain directory, and the write itself lands via a
+/// same-directory rename, which replaces whatever is at `dest` — symlink or not — without ever opening it.
+fn safe_rehome_copy(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    let Some(parent) = dest.parent() else {
+        return Err(std::io::Error::other("attachment destination has no parent folder"));
+    };
+    let mut built = std::path::PathBuf::new();
+    for component in parent.components() {
+        built.push(component);
+        match std::fs::symlink_metadata(&built) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(std::io::Error::other("refusing to create the attachments folder through a symlink"));
+            }
+            Ok(meta) if meta.is_dir() => continue,
+            Ok(_) => return Err(std::io::Error::other("attachments folder path is blocked by a non-directory")),
+            Err(_) => std::fs::create_dir(&built)?,
+        }
+    }
+    let tmp = parent.join(format!(".{}.part", uuid::Uuid::new_v4()));
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    std::fs::rename(&tmp, dest)
 }
 
 /// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an
