@@ -87,6 +87,13 @@ async fn all_does_not_hold_with_a_branch_left_out_and_n_of_m_counts_the_ones_tha
 }
 
 #[tokio::test]
+async fn a_join_that_every_branch_failed_into_says_so_and_is_not_skipped() {
+    let g = fan(vec![breaks("b1"), breaks("b2")], join(json!({ "mode": "any", "on_branch_error": "skip" })), "never");
+    let why = run(g).await.unwrap_err();
+    assert!(why.contains("no branch arrived") && why.contains("b1") && why.contains("b2"), "{why}");
+}
+
+#[tokio::test]
 async fn a_branch_that_did_not_run_is_pruned_and_does_not_count_against_the_join() {
     // A Condition sends the run down one of two branches; both lead into the join.
     let graph = DroneGraph {

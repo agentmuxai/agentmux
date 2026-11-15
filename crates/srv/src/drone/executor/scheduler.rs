@@ -359,7 +359,7 @@ impl<'a> Scheduler<'a> {
         }
         let node = self.node_of[id];
         let ins = self.incoming.get(id).cloned().unwrap_or_default();
-        let runs = ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true));
+        let runs = ins.is_empty() || forced || ins.iter().any(|e| self.decided.get(e.id.as_str()) == Some(&true)) || self.join_has_failed_branch(id);
         if !runs {
             self.finished.insert(id);
             mark_state(self.states, id, BlockState { status: "skipped".to_string(), output: None, error: None, started_at: None, completed_at: Some(now_ms()) }).await;

@@ -51,6 +51,12 @@ impl<'a> Scheduler<'a> {
         (tainted, !tainted && bits.iter().any(|(_, d)| *d))
     }
 
+    /// Whether `id` is a Join that a branch failed into: it runs then even when no branch arrived,
+    /// so the failures are said and not hidden by a join that was skipped.
+    pub(super) fn join_has_failed_branch(&self, id: &str) -> bool {
+        self.node_of.get(id).is_some_and(|n| super::kind_of(n).is_ok_and(|k| k == BlockKind::Join)) && !self.branches_of(id).failed.is_empty()
+    }
+
     /// Whether a failure of block `id` is the graph's to handle: it has an error edge,
     /// or every way out of it is into a Join that leaves failed branches out.
     pub(super) fn handles_failure(&self, id: &str) -> bool {
