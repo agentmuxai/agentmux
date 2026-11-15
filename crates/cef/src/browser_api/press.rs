@@ -182,6 +182,7 @@ async fn press(root: &mut super::cdp::CdpSession, req: &PressReq) -> Result<Valu
         refuse_typing_into_secret_field(root).await?;
         let before = facts_of(root, focused).await;
         insert_text(root, " ").await?;
+        super::filled::mark(root, focused).await;
         // Without the field's facts nothing is shown of it: it could hold a secret.
         let after = match before {
             Some(before) => read_back(root, focused, &before).await,

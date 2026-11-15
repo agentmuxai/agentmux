@@ -131,13 +131,28 @@ fn form_leaves_the_site(ask: &serde_json::Value, page_origin: &str) -> bool {
     agentmux_common::allowed_origins::target_origin(action).as_deref() != Some(page_origin)
 }
 
+/// A grant that was already there answers a request for it. It lasts what was asked or less: an ask for fewer
+/// minutes cuts it, and the answer says so.
+fn granted_asked_for(state: &AppState, pane: &str, agent: &str, asked: Option<u64>, g: bypass::Grant) -> Response {
+    match asked.and_then(|m| bypass::shorten(state, pane, agent, bypass::clamp_minutes(Some(m)))) {
+        Some((cut, was)) => granted_cut(&cut, Some(was)),
+        None => granted(&g),
+    }
+}
+
 /// The answer to a request that was granted.
 fn granted(g: &bypass::Grant) -> Response {
+    granted_cut(g, None)
+}
+
+/// A grant, and (when an earlier one was cut to what was asked) the minutes it had left before.
+fn granted_cut(g: &bypass::Grant, cut_from: Option<u64>) -> Response {
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "data": {
             "answer": "granted", "origins": g.origins, "minutes": g.minutes, "powers": browser_powers::names(&g.powers),
             "minutes_left": g.minutes_left(), "expires_at": g.expires_at_ms, "always": g.standing.is_some(),
+            "cut_from": cut_from,
         } })),
     )
         .into_response()
@@ -173,7 +188,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     // lacks a power the agent now asks for is not widened by asking: the
     // person is shown the banner for the larger set.
     if let Some(g) = bypass::active_for(&pane, &agent).filter(|g| powers.iter().all(|p| g.satisfies(*p))) {
-        return granted(&g);
+        return granted_asked_for(&state, &pane, &agent, req.minutes, g);
     }
     let (banner_at, in_window) = banner_for(&block_id);
     if !is_browser_pane(&state, &banner_at) || crate::server::browser_owner::owner_of(&pane).is_none() {

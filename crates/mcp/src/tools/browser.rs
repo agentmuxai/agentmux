@@ -715,7 +715,7 @@ fn log_text(data: &Value) -> String {
                 line.push_str(&v);
             }
         }
-        out.push_str(&line);
+        out.push_str(&agentmux_common::secret_shape::scrub(&line));
         out.push('\n');
     }
     out
@@ -1011,7 +1011,9 @@ fn act_result_text(name: &str, r: &str, body: &serde_json::Value) -> String {
         let secs = body.pointer("/data/waited_ms").and_then(|v| v.as_u64()).unwrap_or(0) as f64 / 1000.0;
         return format!("{name} {r}: done; the user approved this click in the pane after {secs:.0} s. The element now: {after}{}", page_now_text(body));
     }
-    format!("{name} {r}: done. The element now: {after}{}", page_now_text(body))
+    // A click that asked for no approval says so in its answer.
+    let asked = if name.ends_with("click") { " No approval was asked: it submits no form and its name says nothing that commits." } else { "" };
+    format!("{name} {r}: done.{asked} The element now: {after}{}", page_now_text(body))
 }
 
 /// Where the page is after an action: its address and title, and that the
@@ -1433,6 +1435,8 @@ mod tests {
             assert!(!said.contains("5256000"), "{said}");
             let plain = json!({ "data": { "after": { "value": "x" } } });
             assert_eq!(act_result_text("Browser fill", "e1", &plain), r#"Browser fill e1: done. The element now: {"value":"x"}"#);
+            let click = act_result_text("Browser click", "e1", &plain);
+            assert!(click.starts_with("Browser click e1: done. No approval was asked: it submits no form"), "{click}");
         }
 
         #[test]

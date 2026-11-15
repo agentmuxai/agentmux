@@ -106,6 +106,22 @@ impl Grant {
         true
     }
 
+    /// Cut the time left to `minutes` when it is longer: a grant lasts what an agent asked for, or less. A
+    /// grant with no time limit (a standing row) is never cut. Returns the minutes it had left, when cut.
+    fn shorten(&mut self, minutes: u64, now: Instant) -> Option<u64> {
+        let dur = Duration::from_secs(minutes * 60);
+        if self.standing.is_some() || self.left(now) <= dur {
+            return None;
+        }
+        let was = self.minutes_left();
+        self.expires = self.paused_at.unwrap_or(now) + dur;
+        // The clock stands at the pause; resuming moves the end later by the time paused so far.
+        let paused_for = self.paused_at.map_or(Duration::ZERO, |at| now.saturating_duration_since(at));
+        self.expires_at_ms = chrono::Utc::now().timestamp_millis() - paused_for.as_millis() as i64 + dur.as_millis() as i64;
+        self.minutes = minutes;
+        Some(was)
+    }
+
     pub(crate) fn allows(&self, power: Power) -> bool {
         self.powers.contains(&power)
     }
@@ -167,6 +183,27 @@ pub(crate) fn clamp_minutes(asked: Option<u64>) -> u64 {
         .find(|m| **m <= asked)
         .copied()
         .unwrap_or(CHOICES_MINUTES[0])
+}
+
+/// An agent asked for `minutes` while `pane` already holds its live grant: cut the grant to that when it has
+/// longer left, so it lasts what was asked or less. Returns the grant as it is now and the minutes it had
+/// left, when it was cut.
+pub(crate) fn shorten(state: &AppState, pane: &str, agent: &str, minutes: u64) -> Option<(Grant, u64)> {
+    let (g, was) = {
+        let mut t = table();
+        let live = t.grants.get_mut(pane)?;
+        if !live.grant.live() || !live.grant.agent.eq_ignore_ascii_case(agent) {
+            return None;
+        }
+        let was = live.grant.shorten(minutes, Instant::now())?;
+        (live.grant.clone(), was)
+    };
+    publish(state, pane, strip_value(&g));
+    let detail = format!("cut from {was} to {minutes} min, as the agent asked");
+    crate::server::browser_actions::note(pane, agent, Kind::AutoApproveOn).detail(&detail).how(How::Allowed).record(state);
+    // The watcher sleeps until the old end: a new one wakes at the new end (the old one finds the grant gone).
+    tokio::spawn(watch(state.clone(), pane.to_string(), g.id.clone(), IDLE_LIMIT));
+    Some((g, was))
 }
 
 /// The live grant on `pane` for `agent`, if any. An expired one is dropped
@@ -807,6 +844,47 @@ mod tests {
         assert_eq!(clamp_minutes(Some(90)), 60);
         assert_eq!(clamp_minutes(Some(10_000)), 240);
         assert_eq!(clamp_minutes(Some(1)), 15);
+    }
+
+    fn bare_grant(minutes: u64, standing: Option<String>) -> Grant {
+        let now = Instant::now();
+        let dur = if standing.is_some() { NO_LIMIT } else { Duration::from_secs(minutes * 60) };
+        Grant {
+            id: "g".into(),
+            agent: "a".into(),
+            origins: vec![],
+            powers: vec![Power::Clicks],
+            minutes,
+            expires: now + dur,
+            expires_at_ms: 0,
+            last_active: now,
+            paused_at: None,
+            standing,
+        }
+    }
+
+    #[test]
+    fn an_ask_for_less_cuts_a_longer_grant_and_an_ask_for_more_does_not_stretch_it() {
+        let now = Instant::now();
+        let mut g = bare_grant(60, None);
+        assert_eq!(g.shorten(15, now), Some(60), "a 60 minute grant asked for 15 is cut to 15");
+        assert_eq!(g.minutes, 15);
+        assert!((14..=15).contains(&g.minutes_left()), "{}", g.minutes_left());
+        assert_eq!(g.shorten(60, now), None, "asking for more never stretches it");
+        assert_eq!(g.shorten(15, now), None, "nor does asking for what is left");
+        let mut always = bare_grant(0, Some("row".into()));
+        assert_eq!(always.shorten(15, now), None, "a standing grant has no clock to cut");
+        let mut paused = bare_grant(60, None);
+        let ten_minutes_ago = now.checked_sub(Duration::from_secs(600)).unwrap_or(now);
+        paused.paused_at = Some(ten_minutes_ago);
+        // Paused ten minutes ago with sixty minutes then left: its clock stands at the pause.
+        paused.expires = ten_minutes_ago + Duration::from_secs(3600);
+        assert_eq!(paused.shorten(15, now), Some(60));
+        assert!((14..=15).contains(&paused.minutes_left()));
+        // The header's end is 15 minutes after the pause, which resuming moves later by the time paused.
+        let end_in_ms = paused.expires_at_ms - chrono::Utc::now().timestamp_millis();
+        let expected = 15 * 60_000 - now.saturating_duration_since(ten_minutes_ago).as_millis() as i64;
+        assert!((end_in_ms - expected).abs() < 5_000, "{end_in_ms} vs {expected}");
     }
 
     #[test]

@@ -43,6 +43,7 @@ pub mod pii_mask;
 pub mod quit_question;
 pub mod redact;
 pub mod runtime_mode;
+pub mod secret_shape;
 pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;

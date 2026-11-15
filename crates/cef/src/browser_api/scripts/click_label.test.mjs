@@ -79,6 +79,29 @@ describe("clickLabel: whether a click commits, and why", () => {
         expect(clickLabel(null, "", "Billing history\nPay an invoice", link).committing).toBe(false);
     });
 
+    it("a Save or Update button asks whether it is in a form or not, and a plain link does not", () => {
+        // In a form (it submits), and outside one (a script saves): both ask.
+        expect(clickLabel(null, "", "Save", { submits: true })).toMatchObject({ committing: true, why: "it submits a form" });
+        expect(clickLabel(null, "", "Save", button)).toMatchObject({ committing: true, why: 'its name says "Save"' });
+        expect(clickLabel(null, "", "Update", button).committing).toBe(true);
+        expect(clickLabel(null, "", "Enable two-step sign-in", button).committing).toBe(true);
+        expect(clickLabel(null, "", "Save changes", link)).toMatchObject({ committing: true, why: 'its name says "Save"' });
+        // A link named for what it opens, and a name that only contains the letters of a verb, do not.
+        expect(clickLabel(null, "", "Billing history", link).committing).toBe(false);
+        expect(clickLabel(null, "", "Saved drafts", button).committing).toBe(false);
+        expect(clickLabel(null, "", "Updates", button).committing).toBe(false);
+        expect(clickLabel(null, "", "Back to settings", link).committing).toBe(false);
+        // A sentence in a description holds these words without asking.
+        expect(clickLabel(null, "", "Notifications\nUpdated 3 days ago. Terms apply.", button).committing).toBe(false);
+    });
+
+    it("a link the page gives a button's role is judged as a button", () => {
+        // act.rs passes `link: false` for <a role="button">: its name is judged as a button's, anywhere in it.
+        const long = "Review and save the details of your account before the end of the month";
+        expect(clickLabel(null, "", long, { link: false }).committing).toBe(true);
+        expect(clickLabel(null, "", long, link).committing).toBe(false);
+    });
+
     it("a download link or a file: link never commits", () => {
         expect(clickLabel(null, "", "Delete log.txt", { link: true, download: true }).committing).toBe(false);
         expect(clickLabel(null, "", "Submit form.pdf", { link: true, fileHref: true }).committing).toBe(false);
