@@ -91,6 +91,7 @@ fn an_event_trigger_is_a_source_and_a_plain_filter_on_a_drone_job() {
             event_source::APP_EVENT => json!({ "event": "agent.crashed" }),
             event_source::FILE_WATCH => json!({ "path": project_folder() }),
             event_source::WEBHOOK_LOCAL => json!({ "secret_sha256": "0".repeat(64) }),
+            event_source::POLL => json!({ "query": "tasks", "every_minutes": 15 }),
             _ => json!({}),
         };
         assert!(JobDefinition::parse(&with_trigger(json!({ "kind": "event", "source": source, "filter": filter })), create()).is_ok(), "{source}");

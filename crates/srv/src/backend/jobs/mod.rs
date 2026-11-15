@@ -26,6 +26,7 @@ pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
+pub mod poll;
 pub mod remote;
 pub mod reporters;
 pub mod reservation;

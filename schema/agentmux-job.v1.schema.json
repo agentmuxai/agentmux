@@ -83,12 +83,12 @@
           "description": "Something that happened on this computer starts a drone run with the event as its input, so the action must be a drone.",
           "properties": {
             "kind": { "const": "event" },
-            "source": { "enum": ["app_event", "file_watch", "webhook_local"] },
+            "source": { "enum": ["app_event", "file_watch", "webhook_local", "poll"] },
             "filter": {
               "type": "object",
               "maxProperties": 8,
               "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 200 },
-              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason; app.started: version, upgraded, upgraded_from). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed). A webhook_local filter holds only secret_sha256, the SHA-256 (64 lowercase hex) of the secret a local script sends in the X-AgentMux-Hook-Secret header to POST /agentmux/hook/<job id>; the definition never holds the secret."
+              "description": "Plain values the source matches an event against; each source says which keys it reads. Never an expression. An app_event filter names its event (agent.turn_ended: agent, outcome, cost_usd; agent.crashed: agent, reason; app.started: version, upgraded, upgraded_from). A file_watch filter names a project folder as path, and optionally glob (like **/*.rs) and change (created, modified or removed). A webhook_local filter holds only secret_sha256, the SHA-256 (64 lowercase hex) of the secret a local script sends in the X-AgentMux-Hook-Secret header to POST /agentmux/hook/<job id>; the definition never holds the secret. A poll filter names a query (tasks, jobs, agents or lan_peers) and every_minutes (1 to 1440), and may add include_existing (true runs for what is already there on the first poll) and the query's own filters (tasks: holder, state, pr, limit; jobs: job, limit); each new item starts one run reading trigger.query, trigger.key and trigger.item."
             },
             "delay": {
               "type": "integer",
