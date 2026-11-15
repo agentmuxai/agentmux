@@ -10,6 +10,7 @@
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
 import type { AttachmentDraft } from "../attachments/attachment-draft";
+import { rememberPastedCopies } from "./pasted-copies";
 import { isContainerPane, spliceComposerTokens } from "./useAgentDropAttach";
 
 export function useComposerPaste(opts: {
@@ -46,13 +47,16 @@ export function useComposerPaste(opts: {
     const pasteToWorkdir = () => inContainer() || attachmentsSetting() === false;
     // The same copy a drop makes, notices and @mentions included. Paste
     // ignores `dnd:*`.
-    const pasteIntoWorkdir = (source: CopySource) =>
-        copyIntoWorkdir(blockId!, source, {
+    const pasteIntoWorkdir = async (source: CopySource) => {
+        const dests = await copyIntoWorkdir(blockId!, source, {
             paneKind: "agent pane",
             // Any ancestor holding the composer's textarea will do.
             mentionIn: opts.textarea()?.parentElement ?? null,
             splice: spliceComposerTokens,
         });
+        // A copy whose mention is gone by the next send is trashed then (pasted-copies.ts).
+        rememberPastedCopies(blockId!, dests);
+    };
 
     const pasteAttachmentsFromMenu = (paths: string[]) => {
         if (!draft) return;
