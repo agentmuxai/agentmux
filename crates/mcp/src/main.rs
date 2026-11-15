@@ -40,7 +40,7 @@ use agentmux_common::api_types::{
     UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest,
     UiBrowserOpenRequest, UiClickRequest, UiPressKeysRequest, UiQueryRequest, UiResetShortcutsRequest, UiRunCommandRequest, UiSetShortcutRequest,
     UiRecordRequest, UiRecordResponse, UiScreenshotRequest, UiScreenshotResponse, UiShortcutsListRequest, WindowFocusRequest,
-    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, FileRenameRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
 use agentmux_common::AUTH_KEY_HEADER;
@@ -104,7 +104,7 @@ async fn run() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
     let block_id = scope_block_id();
-    let client = reqwest::Client::builder()
+    let client = agentmux_common::local_http::builder()
         .timeout(std::time::Duration::from_secs(10))
         .default_headers(agent_token_headers(std::env::var("AGENTMUX_AGENT_TOKEN").ok()))
         .build()

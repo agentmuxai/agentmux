@@ -51,6 +51,9 @@ pub fn redact_full_config_for_renderer(v: &mut Value) {
         let is_set = settings
             .get(*key)
             .map(|existing| match existing {
+                // A reference to a Vault entry (`vault:<id>`) holds no secret, and Settings needs it to say
+                // which entry the key is in.
+                Value::String(s) if crate::backend::vault::setting_key::entry_of(s).is_some() => false,
                 Value::String(s) => !s.is_empty(),
                 Value::Null => false,
                 _ => true,
@@ -66,6 +69,16 @@ pub fn redact_full_config_for_renderer(v: &mut Value) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A key kept in the Vault is a reference, not a secret: Settings reads it to name the entry. The
+    /// plain key it replaced is still redacted, whatever the other keys hold.
+    #[test]
+    fn a_vault_reference_reaches_the_renderer_and_a_plain_key_beside_it_does_not() {
+        let mut v = json!({ "settings": { "voice:groqApiKey": "vault:entry-1", "messaging:discord:token": "plain-token" } });
+        redact_full_config_for_renderer(&mut v);
+        assert_eq!(v["settings"]["voice:groqApiKey"], "vault:entry-1");
+        assert_eq!(v["settings"]["messaging:discord:token"], REDACTED_PLACEHOLDER);
+    }
 
     #[test]
     fn redacts_a_set_secret_key() {

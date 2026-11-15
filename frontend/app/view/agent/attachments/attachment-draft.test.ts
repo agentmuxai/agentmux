@@ -213,6 +213,19 @@ describe("AttachmentDraft.uploadFiles", () => {
         expect(d.items().map((i) => i.status)).toEqual(["ready", "ready"]);
     });
 
+    it("a pasted image removed before it is sent is not part of the send", () => {
+        const d = new AttachmentDraft("u3");
+        d.uploadFiles(files(2), 2);
+        FakeXhr.made[0].succeed("d".repeat(64));
+        FakeXhr.made[1].succeed("e".repeat(64));
+        expect(d.refs().map((r) => r.name)).toEqual(["f0.png", "f1.png"]);
+        d.remove(d.items()[0].key);
+        expect(d.refs().map((r) => r.name)).toEqual(["f1.png"]);
+        d.remove(d.items()[0].key);
+        expect(d.refs()).toEqual([]);
+        expect(d.items()).toEqual([]);
+    });
+
     it("cancel drops the queue along with what's in flight", () => {
         const d = new AttachmentDraft("u3");
         d.uploadFiles(files(3), 1);

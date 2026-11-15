@@ -3,7 +3,7 @@
 
 /**
  * The Editor's body for a tab whose viewer isn't text: the image, audio and
- * video, or info card viewer, with the shared toolbar. Only the tab in
+ * video, PDF, hex or info card viewer, with the shared toolbar. Only the tab in
  * front is mounted (a video behind another tab stops), and a tab's viewer
  * remounts when the tab or its viewer changes, not on a follow-folder swap.
  * docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.1, §4.3.
@@ -18,6 +18,7 @@ import type { EditorViewModel } from "../editor-model";
 import { createFollowFolder } from "./follow-folder";
 import { AvViewer } from "./media/av-viewer";
 import { ImageViewer } from "./image/image-viewer";
+import { HexViewer } from "./hex/hex-viewer";
 import { InfoCard } from "./info/info-card";
 import { PdfViewer } from "./pdf/pdf-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
@@ -64,6 +65,20 @@ export function TextViewerSwitch(props: { model: EditorViewModel }): JSX.Element
     );
 }
 
+/** Open the file with the system's app for it, and say so when that fails. */
+function openWithTheSystemsApp(path: string): void {
+    void RpcApi.FsOpenCommand(TabRpcClient, { path }).catch((e) =>
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: "Couldn't open the file",
+            message: e instanceof Error ? e.message : String(e),
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        })
+    );
+}
+
 function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: ViewerId }): JSX.Element {
     const model = props.model;
     const tab = () => model.tabsAtom().find((t) => t.id === props.tabId);
@@ -72,17 +87,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
     const file = () => (dropped() ? droppedFileOf(path()) : undefined);
     const probe = () => model.viewerTabs.probe(props.tabId);
     const revision = () => model.viewerTabs.revision(props.tabId);
-    const openWithSystem = () =>
-        void RpcApi.FsOpenCommand(TabRpcClient, { path: path() }).catch((e) =>
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "Couldn't open the file",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            })
-        );
+    const openWithSystem = () => openWithTheSystemsApp(path());
     const follows = () => !!tab()?.followFolder;
     const canFollow = () => !dropped() && (props.viewer === "image" || props.viewer === "media");
 
@@ -96,7 +101,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
 
     const bar = (): Omit<ViewerBarProps, "start" | "facts"> => ({
         viewer: props.viewer,
-        options: model.viewerTabs.options(props.tabId, props.viewer),
+        options: model.viewerTabs.options(props.tabId, props.viewer, file()),
         onReopenWith: (v) => model.reopenWith(props.tabId, v),
         followFolder: canFollow() ? { on: follows(), toggle: () => model.setFollowFolder(props.tabId, !follows()) } : undefined,
         onReveal: dropped() ? undefined : () => void model.revealInExplorer(path()),
@@ -145,12 +150,16 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     zoom={model.zoomAtom}
                 />
             </Match>
+            <Match when={props.viewer === "hex"}>
+                <HexViewer path={dropped() ? "" : path()} file={file()} revision={revision()} size={probe()?.size} blockId={model.blockId} memoryKey={path()} bar={bar()} />
+            </Match>
             <Match when={props.viewer === "info"}>
                 <InfoCard
                     path={path()}
                     file={file()}
                     probe={probe()}
                     bar={bar()}
+                    onOpenAsHex={() => model.reopenWith(props.tabId, "hex")}
                     note={
                         probe()?.kind === "text" && (probe()?.size ?? 0) > TEXT_MAX_BYTES
                             ? "This text file is larger than the editor opens (10 MB)."

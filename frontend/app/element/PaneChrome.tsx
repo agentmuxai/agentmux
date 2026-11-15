@@ -19,6 +19,7 @@
  */
 
 import { Show, createEffect, createMemo, type JSX } from "solid-js";
+import { MessagesUnreadChip } from "@/app/block/MessagesUnreadChip";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { isLightThemeActive } from "@/app/block/pane-identity";
@@ -127,6 +128,8 @@ function renderTabLabel(id: string, look: ShellLook, t: ShellTabs): JSX.Element 
             {/* Turns that finished unseen in this tab: on its own
                 pill, so it stays visible after switching tabs. */}
             <UnseenTurnsDot blockId={id} />
+            {/* Messages in its panel you have not seen, the same number as its header button. */}
+            <MessagesUnreadChip blockId={id} />
         </>
     );
 }

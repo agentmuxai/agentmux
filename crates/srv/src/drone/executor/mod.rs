@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod blocks;
+pub mod effect;
 pub mod engine;
+mod retry;
 pub mod schedule;
 mod scheduler;
 mod writers;
 
-pub use engine::{run_drone, RunEvent};
+pub use engine::{cancel_run, run_drone, RunEvent};

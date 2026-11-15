@@ -14,20 +14,25 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod admission;
+pub mod app_events;
 pub mod cap_alert;
 pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
 pub mod definition;
+pub mod expect;
+pub mod file_watch;
 pub mod follower;
 pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;
+pub mod poll;
 pub mod remote;
 pub mod reporters;
 pub mod reservation;
 pub mod verdict;
+pub mod webhook_local;
 pub mod watchdog;
 
 use std::sync::Arc;
@@ -51,10 +56,13 @@ pub const TRIGGER_SCHEDULE: &str = "schedule";
 pub const TRIGGER_CATCH_UP: &str = "catch_up";
 pub const TRIGGER_MANUAL: &str = "manual";
 pub const TRIGGER_RETRY: &str = "retry";
+pub const TRIGGER_EVENT: &str = "event";
 
 /// `triggered_by` for runs the scheduler starts, and for the operator.
 pub const BY_SCHEDULER: &str = "scheduler";
 pub const BY_OPERATOR: &str = "operator";
+/// `triggered_by` for an event's run is this, then `:` and the source (`event:app_event`).
+pub const BY_EVENT: &str = "event";
 
 /// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
 pub const CATCH_UP_SKIP: &str = "skip";
@@ -586,6 +594,17 @@ impl RunLedger {
     ) {
         let infra_status = if ok { infra::OK } else { infra::ERROR };
         self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
+    }
+
+    /// A Drone run was cancelled: its row closes `interrupted` with the reason,
+    /// unless whoever stopped it (a timeout, `cancel_other`) closed it already.
+    pub fn drone_stopped(
+        &self,
+        run_id: &str,
+        block_states: &std::collections::HashMap<String, crate::backend::storage::drone_types::BlockState>,
+        reason: &str,
+    ) {
+        self.turn_finished(run_id, infra::INTERRUPTED, Some(drone_cost(block_states)), reason);
     }
 
     /// After a restart: close what this channel left open (§3.2). Cron runs

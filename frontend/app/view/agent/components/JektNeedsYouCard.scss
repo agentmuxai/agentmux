@@ -36,8 +36,13 @@
 .jekt-needs-you-trust {
     color: var(--success-text-color);
 
-    &[data-proven="false"] {
+    &[data-trust="unproven"] {
         color: var(--warning-text-color);
+    }
+
+    // A late notice, not a forged or unsigned one: muted, not a warning.
+    &[data-trust="expired"] {
+        color: var(--secondary-text-color);
     }
 }
 

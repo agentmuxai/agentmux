@@ -27,10 +27,45 @@ import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
+/**
+ * A right-click on a tab adds its items to the pane menu (blockframe's body
+ * menu reads the region): the pane's own (`own`), then the strip's. The tab
+ * is noted as the click starts, so the items, built a moment later, act on
+ * it. Returns the strip row's `ref`.
+ */
+function tabMenuBinder<P>(ctl: DocTabsModel<P>, blockId: string, own: (tab: DocTab<P>) => ContextMenuItem[]): (el: HTMLDivElement) => void {
+    let rightClicked: string | null = null;
+    const noteTab = (e: MouseEvent) => {
+        rightClicked = (e.target as Element | null)?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null;
+    };
+    const tabMenu = (): ContextMenuItem[] => {
+        const id = rightClicked;
+        const tab = id ? ctl.tabs().find((t) => t.id === id) : undefined;
+        if (!id || !tab) return [];
+        return [
+            ...own(tab),
+            { label: "Move to New Pane", icon: MENU_ICON.open, click: () => void moveDocTabToNewPane(blockId, id, blockId, "right") },
+            { label: "Close Tab", icon: MENU_ICON.close, click: () => void ctl.close(id) },
+        ];
+    };
+    return (el) => {
+        onMount(() => {
+            el.addEventListener("contextmenu", noteTab, true);
+            const off = registerContextMenuRegion(el, { items: tabMenu });
+            onCleanup(() => {
+                el.removeEventListener("contextmenu", noteTab, true);
+                off();
+            });
+        });
+    };
+}
+
 export function DocTabStrip<P>(props: {
     ctl: DocTabsModel<P>;
     /** Tooltip per tab (a full path); the title when omitted. */
     tooltipOf?: (tab: DocTab<P>) => string;
+    /** No tooltip for this tab now: its label is a text box (`renderLabel`). */
+    tooltipOff?: (tab: DocTab<P>) => boolean;
     addTitle?: string;
     /** The pane type ("media"): tabs move only between panes of one type. */
     docType: string;
@@ -47,33 +82,14 @@ export function DocTabStrip<P>(props: {
     renderLabel?: (tab: DocTab<P>) => JSX.Element | undefined;
     /** Classes a pane adds to a tab. */
     tabClass?: (tab: DocTab<P>) => Record<string, boolean>;
+    /** A double-click on a kept tab (the Editor renames its file). A preview
+     *  tab's double-click keeps it open instead, as before. */
+    onRename?: (tab: DocTab<P>) => void;
+    /** A pane's own items for a tab's menu, above the strip's. */
+    menuItems?: (tab: DocTab<P>) => ContextMenuItem[];
 }): JSX.Element {
     const ctl = props.ctl;
-    // A right-click on a tab adds its items to the pane menu (blockframe's
-    // body menu reads the region). The tab is noted as the click starts, so
-    // the items, built a moment later, act on it.
-    let rightClicked: string | null = null;
-    const noteTab = (e: MouseEvent) => {
-        rightClicked = (e.target as Element | null)?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null;
-    };
-    const tabMenu = (): ContextMenuItem[] => {
-        const id = rightClicked;
-        if (!id || !ctl.tabs().some((t) => t.id === id)) return [];
-        return [
-            { label: "Move to New Pane", icon: MENU_ICON.open, click: () => void moveDocTabToNewPane(props.blockId, id, props.blockId, "right") },
-            { label: "Close Tab", icon: MENU_ICON.close, click: () => void ctl.close(id) },
-        ];
-    };
-    const bindMenu = (el: HTMLDivElement) => {
-        onMount(() => {
-            el.addEventListener("contextmenu", noteTab, true);
-            const off = registerContextMenuRegion(el, { items: tabMenu });
-            onCleanup(() => {
-                el.removeEventListener("contextmenu", noteTab, true);
-                off();
-            });
-        });
-    };
+    const bindMenu = tabMenuBinder(ctl, props.blockId, (tab) => props.menuItems?.(tab) ?? []);
     return (
         <Show when={props.show?.() ?? ctl.showStrip()}>
             <div class="doc-tab-strip" role="presentation" ref={bindMenu}>
@@ -90,6 +106,7 @@ export function DocTabStrip<P>(props: {
                             const base = props.tooltipOf?.(t) ?? t.title;
                             return t.preview ? `${base} (preview, double-click to keep)` : base;
                         }}
+                        getTooltipOff={props.tooltipOff}
                         getAttention={(t) => !!t.dirty}
                         getTabClass={(t) => ({
                             "doc-tab--preview": t.preview,
@@ -101,6 +118,7 @@ export function DocTabStrip<P>(props: {
                         onClose={(id) => void ctl.close(id)}
                         onTabDoubleClick={(t) => {
                             if (t.preview) ctl.promote(t.id);
+                            else props.onRename?.(t);
                         }}
                         renderLabel={
                             props.renderLabel

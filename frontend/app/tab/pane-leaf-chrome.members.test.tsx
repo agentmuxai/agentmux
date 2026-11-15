@@ -65,6 +65,7 @@ vi.mock("@/app/tab/agent-mount-watch", () => ({
     expectAgentMount: (id: string, describe: () => string) => log(`expectAgentMount ${id} :: ${untrack(describe)}`),
     agentMountSettled: (id: string) => log(`agentMountSettled ${id}`),
     agentMountForgotten: (id: string) => log(`agentMountForgotten ${id}`),
+    agentMountStalled: () => false,
 }));
 vi.mock("@/app/block/pane-minimized", () => ({
     setBlockMinimized: (id: string, minimized: boolean) => log(`setBlockMinimized ${id} ${minimized}`),

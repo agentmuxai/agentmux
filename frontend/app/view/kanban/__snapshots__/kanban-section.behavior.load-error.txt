@@ -6,11 +6,13 @@ subscribe agents:changed
 <div class="kanban-container">
 <div class="warden-manager-body kanban">
 <div class="kanban-toolbar">
+<div class="kanban-toolbar__find">
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
 <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
 </span>
+</div>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
 <option value="operator">Reports to the operator</option>
@@ -56,11 +58,13 @@ subscribe agents:changed
 <div class="kanban-container">
 <div class="warden-manager-body kanban">
 <div class="kanban-toolbar">
+<div class="kanban-toolbar__find">
 <span class="ui-filter">
 <i aria-hidden="true" class="fa-solid fa-magnifying-glass ui-search-icon">
 </i>
 <input type="text" class="ui-filter-input" data-pane-focus="" placeholder="Find a task, #number, agent or repository" aria-label="Find a task">
 </span>
+</div>
 <select class="ui-input ui-density-compact kanban-toolbar__reports" aria-label="Reports to">
 <option value="">Reports to anyone</option>
 <option value="operator">Reports to the operator</option>

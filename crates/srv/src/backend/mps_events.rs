@@ -108,6 +108,8 @@ events! {
     MergeFlow: super::mps::EVENT_MERGE_FLOW => crate::backend::pr_flow::MergeFlowEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
+    /// srv is panicking, or stopped (`panic_watch`): its level, counts and the places that panicked most; no message text.
+    SrvPanics: super::mps::EVENT_SRV_PANICS => crate::backend::panic_watch::SrvPanicsEvent,
     /// A Claude CLI request is being retried, or no longer is.
     AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).
@@ -143,6 +145,8 @@ events! {
     FilesChanged: crate::backend::files_watcher::EVENT_FILES_CHANGED => FilesChangedEvent,
     /// A copy/move/delete job's progress (`fs_ops::jobs`).
     FilesOp: crate::backend::fs_ops::jobs::EVENT_FILES_OP => crate::backend::rpc_types::FsOpEvent,
+    /// A file or folder got a new name through `fs.rename`: documents open on it follow.
+    FileRenamed: "fs:renamed" => FileRenamedEvent,
     /// One line of an install's output, or its end (`install.start`, `system.install`).
     InstallChunk: "install_chunk" => crate::backend::install_events::InstallChunkEvent,
     /// A Shell command started (`server::http_shell`).
@@ -405,6 +409,18 @@ pub struct SingletonClaimEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct PathChangedEvent {
     pub path: String,
+}
+
+/// `fs:renamed`: a file or folder renamed through `fs.rename`, whoever asked (a document tab, the Editor's
+/// tree, the Files pane). Sent to every window, so each Editor moves its tabs on the old path to the new one.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileRenamedEvent {
+    /// The path before: resolved on this machine, as the caller gave it on a host.
+    pub old_path: String,
+    pub new_path: String,
+    /// The SSH connection both paths are on, or `null` for this machine.
+    pub connection: Option<String>,
 }
 
 /// An event about one pane: `background-task-updated`, `mcp:observed`, `agent:reactive-(un)registered`.

@@ -542,7 +542,7 @@ pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
     let current = env!("CARGO_PKG_VERSION");
     let _ = STATUS.set(RwLock::new(AppUpdateStatus::initial(current)));
     let _ = EVENT_BUS.set(event_bus);
-    match reqwest::Client::builder()
+    match crate::http_client::builder()
         .user_agent(format!("AgentMux/{current}"))
         .timeout(REQUEST_TIMEOUT)
         .build()
@@ -552,7 +552,7 @@ pub fn init(event_bus: Arc<crate::backend::eventbus::EventBus>) {
         }
         Err(e) => tracing::warn!(error = %e, "update check: no HTTP client, can't check"),
     }
-    if let Ok(c) = reqwest::Client::builder()
+    if let Ok(c) = crate::http_client::builder()
         .user_agent(format!("AgentMux/{current}"))
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())

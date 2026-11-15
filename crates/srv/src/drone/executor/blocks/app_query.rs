@@ -7,6 +7,7 @@
 //! Block config (`node.data`):
 //!   * `query`   required, one of:
 //!       - `muxbus`  whether cloud messages are reaching this machine.
+//!       - `agents`  every agent this machine has: how many it wants running, and which of them are not.
 //!       - `agent`   one agent's availability. Needs `agent`, its name, written in the graph.
 //!       - `tasks`   Kanban tasks, filtered by `holder`, `state` and `pr` (each optional).
 //!       - `lan_peers`  the other machines this one sees on the LAN, and whether each answered lately.
@@ -19,6 +20,10 @@
 //!
 //! Output, by query:
 //!   * `muxbus`: `{ "state", "connected", "signed_in", "since_ms", "last_ok_ms"?, "last_error"? }`.
+//!   * `agents`: `{ "count": N, "wanted_running": W, "up": U, "all_up": bool, "problem_count": P, "problems": [{ "agent",
+//!               "state", "detail"? }], "problem_names": "<name (state), ...>" }`. An agent is `up` when it is wanted
+//!               running and idle, working or waiting on the person; a wanted-running agent that is stopped, starting,
+//!               limited, signed out or in error is a problem (at most 20 listed). `all_up` is true with no problem.
 //!   * `agent`:  `{ "found": bool, "ambiguous"?: true, "state"?, "would"?, "reason"?, ... }`, the
 //!               availability the Agents tool shows. `found` is false for a name no agent here has.
 //!   * `tasks`:  `{ "count": N, "tasks": [{ "num", "title", "state", "holder", "pr", "branch" }] }`.
@@ -27,8 +32,9 @@
 //!               answered this machine's own poll (asked every 30 s) in the last two minutes: it is up and
 //!               reachable from here. It is not a signature check.
 //!   * `jobs`:   (scheduled, Drone and cloud jobs alike, as the run ledger holds them) `{ "found": bool, "count": N, "runs": [{ "id", "job_id", "job", "state", "outcome", "trigger",
-//!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }] }`; `found` is false for a `job` that
-//!               matches none.
+//!               "summary", "started_ms", "ended_ms"?, "cost_usd"? }], "last_ok"? }`; `found` is false for a `job` that
+//!               matches none. With a `job`, `last_ok` is that job's newest run that finished with outcome `ok` or
+//!               `findings` (a run row, or null when there is none), found whatever `limit` cuts `runs` to.
 
 use serde_json::{json, Value};
 
@@ -58,6 +64,7 @@ const RUN_SUMMARY_CHARS: usize = 200;
 #[derive(Debug, PartialEq)]
 pub(crate) enum Query {
     MuxBus,
+    Agents,
     Agent(String),
     Tasks(TaskFilter),
     LanPeers,
@@ -83,6 +90,13 @@ pub(crate) struct TaskFilter {
 pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, String> {
     match plan(node, scope)? {
         Query::MuxBus => Ok(muxbus_answer(&crate::muxbus::delivery_status::status())),
+        Query::Agents => {
+            let state = crate::drone::host::state()?.clone();
+            let now = agentmux_common::time::now_ms_u64();
+            tokio::task::spawn_blocking(move || agents_answer(&crate::server::agent_runtime::list(&state, now)))
+                .await
+                .map_err(|e| format!("app query: {e}"))
+        }
         Query::Agent(name) => {
             let state = crate::drone::host::state()?;
             Ok(agent_answer(crate::server::availability_view::view_of_agent(state, &name).await))
@@ -115,11 +129,23 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     }
 }
 
+/// The question a `poll` trigger asks (`backend::jobs::poll`): the App query named by the filter's `query`, with
+/// the filter's own keys as its config and no references to resolve.
+pub(crate) fn poll_check() -> crate::backend::jobs::poll::Check {
+    std::sync::Arc::new(|filter| {
+        Box::pin(async move {
+            let node = FlowNode { id: "poll".to_string(), position: Default::default(), data: Value::Object(filter), node_type: None };
+            run(&node, &ExecutionScope::new()).await
+        })
+    })
+}
+
 /// What the node asks, with the filters' references resolved. Pure, so it is testable without a server.
 pub(crate) fn plan(node: &FlowNode, scope: &ExecutionScope) -> Result<Query, String> {
     let text = |key: &str| node.data.get(key).and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
     match text("query") {
         "muxbus" => Ok(Query::MuxBus),
+        "agents" => Ok(Query::Agents),
         "agent" => {
             let name = text("agent");
             if name.is_empty() {
@@ -151,7 +177,7 @@ pub(crate) fn plan(node: &FlowNode, scope: &ExecutionScope) -> Result<Query, Str
             Ok(Query::Jobs(JobsFilter { job: job.to_string(), limit }))
         }
         "" => Err("app query block missing `query`".to_string()),
-        other => Err(format!("app query: unknown query {other:?}; this AgentMux has muxbus, agent, tasks, lan_peers and jobs")),
+        other => Err(format!("app query: unknown query {other:?}; this AgentMux has muxbus, agents, agent, tasks, lan_peers and jobs")),
     }
 }
 
@@ -185,6 +211,32 @@ fn agent_answer(known: crate::server::availability_view::Known) -> Value {
         Known::Ambiguous => json!({ "found": false, "ambiguous": true }),
         Known::Unknown => json!({ "found": false }),
     }
+}
+
+/// The most agents `agents` lists as a problem.
+const MAX_PROBLEMS: usize = 20;
+
+/// `agents`: how many agents the machine wants running and which of those are not up. Pure, so a test can hand it rows.
+pub(crate) fn agents_answer(rows: &[crate::backend::agent_runtime_state::AgentRuntime]) -> Value {
+    use crate::backend::agent_runtime_state::{AgentDesiredState, AgentRuntimeState as S};
+    let wanted: Vec<_> = rows.iter().filter(|r| r.desired == AgentDesiredState::Running).collect();
+    let is_up = |r: &crate::backend::agent_runtime_state::AgentRuntime| matches!(r.state, S::Idle | S::Working | S::WaitingOnUser);
+    let up = wanted.iter().filter(|r| is_up(r)).count();
+    let down: Vec<_> = wanted.iter().filter(|r| !is_up(r)).collect();
+    let state_name = |r: &crate::backend::agent_runtime_state::AgentRuntime| serde_json::to_value(r.state).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+    let problems: Vec<Value> = down
+        .iter()
+        .take(MAX_PROBLEMS)
+        .map(|r| {
+            let mut p = json!({ "agent": r.name, "state": state_name(r) });
+            if let Some(d) = &r.detail {
+                p["detail"] = json!(d);
+            }
+            p
+        })
+        .collect();
+    let names = down.iter().take(MAX_PROBLEMS).map(|r| format!("{} ({})", r.name, state_name(r))).collect::<Vec<_>>().join(", ");
+    json!({ "count": rows.len(), "wanted_running": wanted.len(), "up": up, "all_up": down.is_empty(), "problem_count": down.len(), "problems": problems, "problem_names": names })
 }
 
 /// `tasks`: the tasks that match, newest first as the board lists them, cut to the limit.
@@ -277,7 +329,8 @@ pub(crate) fn jobs_answer(jobs: &crate::backend::storage::store::Store, ledger: 
         [] => Ok(json!({ "found": false, "count": 0, "runs": [] })),
         [id] => {
             let rows: Vec<Value> = ledger.job_runs_for_job(id, f.limit as i64, None).map_err(read)?.iter().map(run_row).collect();
-            Ok(json!({ "found": true, "count": rows.len(), "runs": rows }))
+            let last_ok = ledger.job_run_last_good(id).map_err(read)?.map(|r| run_row(&r)).unwrap_or(Value::Null);
+            Ok(json!({ "found": true, "count": rows.len(), "runs": rows, "last_ok": last_ok }))
         }
         _ => Ok(json!({ "found": false, "ambiguous": true, "count": 0, "runs": [] })),
     }
@@ -308,7 +361,7 @@ mod tests {
         let s = ExecutionScope::new();
         assert_eq!(plan(&node(json!({ "query": "muxbus" })), &s).unwrap(), Query::MuxBus);
         let err = plan(&node(json!({ "query": "weather" })), &s).unwrap_err();
-        assert!(err.contains("muxbus, agent, tasks, lan_peers and jobs"), "{err}");
+        assert!(err.contains("muxbus, agents, agent, tasks, lan_peers and jobs"), "{err}");
         assert!(plan(&node(json!({})), &s).is_err());
     }
 
@@ -415,6 +468,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_named_job_says_its_last_good_run_even_when_newer_runs_failed_and_the_limit_hides_it() {
+        use crate::backend::storage::job_runs::JobRun;
+        let state = ledger_with(&[("j1", "Nightly")], &[]);
+        let run = |id: &str, outcome: &str, at: i64| {
+            let mut r = JobRun::new(id, "j1", "cron", "Nightly", "schedule", "finished", at);
+            r.outcome = outcome.to_string();
+            r.ended_at_ms = Some(at + 10);
+            state.mstore.job_run_insert(&r).unwrap();
+        };
+        run("old-ok", "ok", 100);
+        run("fail-1", "failed", 200);
+        run("fail-2", "failed", 300);
+        let a = jobs_answer(&state.mstore, &state.mstore, &JobsFilter { job: "Nightly".to_string(), limit: 2 }).unwrap();
+        let ids: Vec<&str> = a["runs"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["fail-2", "fail-1"], "the listing is cut to the two newest, both failed");
+        assert_eq!(a["last_ok"]["id"], json!("old-ok"), "the last good run is not in it, and is still said");
+        assert_eq!(a["last_ok"]["ended_ms"], json!(110));
+        let none = ledger_with(&[("j2", "Never")], &[]);
+        let n = jobs_answer(&none.mstore, &none.mstore, &JobsFilter { job: "Never".to_string(), limit: 20 }).unwrap();
+        assert!(n["last_ok"].is_null(), "no good run: null");
+    }
+
+    #[tokio::test]
     async fn a_named_job_gives_its_own_runs_by_name_or_id_and_an_unknown_one_is_not_found() {
         let state = ledger_with(&[("j1", "Nightly"), ("j2", "Backup")], &[("r1", "j1", 100), ("r2", "j1", 300), ("r3", "j2", 200)]);
         for who in ["Nightly", "j1"] {
@@ -452,5 +528,38 @@ mod tests {
         assert_eq!(agent_answer(Known::Unknown), json!({ "found": false }));
         assert_eq!(agent_answer(Known::Ambiguous), json!({ "found": false, "ambiguous": true }));
         assert_eq!(agent_answer(Known::Live(json!({ "state": "idle", "would": "deliver" }))), json!({ "state": "idle", "would": "deliver", "found": true }));
+    }
+
+    #[test]
+    fn agents_say_how_many_are_up_and_which_wanted_running_ones_are_not() {
+        use crate::backend::agent_runtime_state::{AgentDesiredState as D, AgentRuntime, AgentRuntimeState as S};
+        let row = |name: &str, state: S, desired: D, detail: Option<&str>| AgentRuntime {
+            agent_id: format!("uid-{name}"),
+            state,
+            detail: detail.map(str::to_string),
+            resets_at: None,
+            block_id: None,
+            waiting_in: None,
+            desired,
+            name: name.to_string(),
+            provider: "claude".to_string(),
+            icon: String::new(),
+            color: None,
+            blocked: None,
+            runtime: Default::default(),
+        };
+        let healthy = agents_answer(&[row("a", S::Idle, D::Running, None), row("b", S::Working, D::Running, None), row("c", S::WaitingOnUser, D::Running, None), row("off", S::Stopped, D::Stopped, None)]);
+        assert_eq!((healthy["count"].clone(), healthy["wanted_running"].clone(), healthy["up"].clone(), healthy["all_up"].clone()), (json!(4), json!(3), json!(3), json!(true)), "an agent wanted stopped is no problem");
+        assert_eq!(healthy["problems"], json!([]));
+        let sick = agents_answer(&[row("a", S::Idle, D::Running, None), row("lost", S::Stopped, D::Running, None), row("out", S::SignedOut, D::Running, Some("needs_login")), row("slow", S::Starting, D::Running, None)]);
+        assert_eq!((sick["wanted_running"].clone(), sick["up"].clone(), sick["all_up"].clone(), sick["problem_count"].clone()), (json!(4), json!(1), json!(false), json!(3)));
+        assert_eq!(sick["problems"][1], json!({ "agent": "out", "state": "signed_out", "detail": "needs_login" }));
+        assert_eq!(sick["problem_names"], json!("lost (stopped), out (signed_out), slow (starting)"));
+        assert_eq!(agents_answer(&[])["all_up"], json!(true), "no agent wanted running is nothing wrong");
+    }
+
+    #[test]
+    fn the_agents_query_has_no_filter() {
+        assert_eq!(plan(&node(json!({ "query": "agents" })), &ExecutionScope::new()).unwrap(), Query::Agents);
     }
 }

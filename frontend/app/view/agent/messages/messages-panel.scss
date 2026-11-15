@@ -166,6 +166,7 @@
 .messages-row__actions {
     display: flex;
     justify-content: flex-end;
+    gap: var(--space-3);
 }
 
 // The Messages button in the pane's header: the envelope, the unread count and a dot while something waits.

@@ -13,6 +13,7 @@ import {
     middleTruncate,
     shortContextText,
 } from "./composer-forms";
+import { computeComposerRows, rowsCost } from "./composer-row-layout";
 
 // The strip at about 420 px: the runtime trigger, the account, the context reading with Compact, and Shell.
 const FULL = { runtime: 168, auth: 152, ctx: 256, hostShell: 72 };
@@ -62,6 +63,20 @@ describe("chooseCompactKeys", () => {
         const compact = { auth: 32, ctx: 112, hostShell: 32, view: 24 };
         // 686 in 640: the account (72) or the context reading (48) or the chip (126) alone each do it.
         expect([...chooseCompactKeys(COMPACT_ORDER, full, compact, rowsAt(640))]).toEqual(["auth"]);
+    });
+
+    it("counts the anchor row's own wrap: Shell goes compact when that brings the runtime trigger and Shell inside the strip", () => {
+        // The real layout, not a stand-in: the runtime trigger and Shell stay in one anchor row that CSS wraps when it is
+        // wider than the strip. At 320 px that row is 280 + 8 + 64 = 352 with Shell full and 312 with it compact.
+        const full = { runtime: 280, auth: 80, ctx: 100, hostShell: 64 };
+        const compact = { auth: 24, ctx: 40, hostShell: 24 };
+        const cost = (widths: Record<string, number>) => {
+            const slots = Object.entries(widths).map(([key, width]) => ({ key, width }));
+            const rows = computeComposerRows(slots, "hostShell", 320, 8, "runtime", [{ leftKey: "auth", rightKey: "ctx" }]);
+            return rowsCost(rows, widths, 8, 320);
+        };
+        expect(cost({ ...full, hostShell: 24 })).toBeLessThan(cost(full));
+        expect([...chooseCompactKeys(COMPACT_ORDER, full, compact, cost)]).toEqual(["hostShell"]);
     });
 
     it("never touches a slot with no compact form", () => {

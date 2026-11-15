@@ -80,7 +80,7 @@ pub struct CronJob {
     /// (§3.4). Empty: its creator ([`Self::owner_uid`]).
     #[serde(default)]
     pub owner: String,
-    /// `cron` (also when empty), `every`, `once` or `manual`.
+    /// `cron` (also when empty), `every`, `once`, `manual` or `event`.
     #[serde(default)]
     pub trigger_kind: String,
     /// The cron trigger's IANA zone; empty is UTC.
@@ -90,6 +90,9 @@ pub struct CronJob {
     pub every_secs: Option<i64>,
     #[serde(default)]
     pub once_at_ms: Option<i64>,
+    /// An `event` trigger's source and filter (`definition::EventTrigger`); null for any other trigger.
+    #[serde(default)]
+    pub trigger_event: Value,
     /// `message` (also when empty), `task` or `spawn`.
     #[serde(default)]
     pub action_kind: String,
@@ -134,13 +137,15 @@ fn default_catch_up() -> String {
 /// `db_cron_jobs.catch_up` defaults to `latest` so every job from before it
 /// keeps the startup catch-up. `db_cron_jobs` is no longer written; older
 /// builds still use it.
-pub(super) const JOB_TABLES: [&str; 5] = [
+pub(super) const JOB_TABLES: [&str; 6] = [
     "ALTER TABLE db_cron_jobs ADD COLUMN catch_up TEXT NOT NULL DEFAULT 'latest'",
     // The miss record (`CronJob::missed_count`).
     "ALTER TABLE db_cron_jobs ADD COLUMN missed_count INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE db_cron_jobs ADD COLUMN last_missed_at INTEGER",
     "ALTER TABLE db_cron_jobs ADD COLUMN last_miss_reason TEXT NOT NULL DEFAULT ''",
     JOBS_SCHEMA,
+    // An event trigger's source and filter (`CronJob::trigger_event`).
+    "ALTER TABLE db_jobs ADD COLUMN trigger_event TEXT NOT NULL DEFAULT ''",
 ];
 
 /// `db_jobs` and its index. Columns added later go after it in
@@ -177,14 +182,15 @@ const JOBS_SCHEMA: &str = "
         catch_up         TEXT NOT NULL DEFAULT 'skip',
         missed_count     INTEGER NOT NULL DEFAULT 0,
         last_missed_at   INTEGER,
-        last_miss_reason TEXT NOT NULL DEFAULT ''
+        last_miss_reason TEXT NOT NULL DEFAULT '',
+        trigger_event    TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_enabled ON db_jobs(enabled);
 ";
 
 const COLS: &str = "id, name, expression, prompt, target, created_by, enabled, last_fired, fire_count, max_fires, \
      created_at, max_age_secs, target_uid, created_by_uid, catch_up, missed_count, last_missed_at, last_miss_reason, \
-     owner, trigger_kind, tz, every_secs, once_at_ms, action_kind, action, policy, template, params, outputs, secrets";
+     owner, trigger_kind, tz, every_secs, once_at_ms, action_kind, action, policy, template, params, outputs, secrets, trigger_event";
 
 fn json_text<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| "null".to_string())
@@ -196,7 +202,7 @@ impl Store {
         conn.execute(
             &format!(
                 "INSERT INTO db_jobs ({COLS}) VALUES \
-                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)"
+                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)"
             ),
             params![
                 job.id,
@@ -229,6 +235,7 @@ impl Store {
                 json_text(&job.params),
                 json_text(&job.outputs),
                 json_text(&job.secrets),
+                json_text(&job.trigger_event),
             ],
         )?;
         Ok(())
@@ -241,7 +248,7 @@ impl Store {
         let n = conn.execute(
             "UPDATE db_jobs SET name = ?2, expression = ?3, prompt = ?4, target = ?5, target_uid = ?6, enabled = ?7,
                 catch_up = ?8, owner = ?9, trigger_kind = ?10, tz = ?11, every_secs = ?12, once_at_ms = ?13,
-                action_kind = ?14, action = ?15, policy = ?16, template = ?17, params = ?18, outputs = ?19, secrets = ?20
+                action_kind = ?14, action = ?15, policy = ?16, template = ?17, params = ?18, outputs = ?19, secrets = ?20, trigger_event = ?21
              WHERE id = ?1",
             params![
                 job.id,
@@ -264,6 +271,7 @@ impl Store {
                 json_text(&job.params),
                 json_text(&job.outputs),
                 json_text(&job.secrets),
+                json_text(&job.trigger_event),
             ],
         )?;
         Ok(n > 0)
@@ -378,5 +386,6 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         params:        json_col(row, 27)?,
         outputs:       json_col(row, 28)?,
         secrets:       json_col(row, 29)?,
+        trigger_event: json_col(row, 30)?,
     })
 }

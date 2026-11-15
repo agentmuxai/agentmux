@@ -110,8 +110,8 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
         Some(false) => out.push(check(
             "certificates",
             Level::Fail,
-            "no system certificates found: every https request the server makes (models, updates, connected accounts) would fail",
-            Some("install the ca-certificates package (Debian and Ubuntu: `apt install ca-certificates`; Fedora: `dnf install ca-certificates`; Alpine: `apk add ca-certificates`), or point SSL_CERT_FILE at a bundle"),
+            agentmux_common::system_certs::NO_SYSTEM_CERTS,
+            Some(agentmux_common::system_certs::NO_SYSTEM_CERTS_FIX),
         )),
         None => {}
     }

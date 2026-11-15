@@ -275,6 +275,29 @@ fn check_foreach(sorted: &[&FlowNode], edges: &[(usize, usize, &FlowEdge)], plan
     }
 }
 
+/// The longest a block may be given to run: a day.
+const MAX_TIMEOUT_SECONDS: u64 = 86_400;
+
+/// A block's own `timeout_seconds`, when it has one: a whole number from 1 to a day.
+pub(super) fn timeout_seconds(node: &FlowNode) -> Result<Option<u64>, String> {
+    match node.data.get("timeout_seconds") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|s| (1..=MAX_TIMEOUT_SECONDS).contains(s))
+            .map(Some)
+            .ok_or_else(|| format!("{}: timeout_seconds must be a whole number from 1 to {MAX_TIMEOUT_SECONDS}", node.id)),
+    }
+}
+
+/// Each block's own `timeout_seconds` and `retry` are well formed.
+fn check_block_limits(sorted: &[&FlowNode], issues: &mut Vec<Issue>) {
+    for node in sorted {
+        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err());
+        issues.extend(bad.map(|message| Issue { node: Some(node.id.clone()), message }));
+    }
+}
+
 /// Check the graph's loops and say how the scheduler should run it. A graph
 /// with no cycle gets an empty plan.
 pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
@@ -330,6 +353,7 @@ pub fn analyze(graph: &DroneGraph) -> Result<Plan, Vec<Issue>> {
     }
 
     check_foreach(&sorted, &edges, &mut plan, &mut issues);
+    check_block_limits(&sorted, &mut issues);
     super::writers::check(&sorted, &edges, &all, &plan, &mut issues);
 
     let (back_edges, unreached) = walk_back_edges(&ids, &edges);

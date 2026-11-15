@@ -74,7 +74,7 @@ impl Handler {
 impl ReactiveHandler {
     /// Audit one state of a CLI-native message.
     pub fn audit_cli_native(&self, ev: &Event) {
-        self.inner.lock().unwrap().log_cli_native(ev);
+        self.inner.lock().log_cli_native(ev);
     }
 }
 

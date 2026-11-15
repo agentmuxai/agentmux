@@ -934,6 +934,12 @@ jobs:
       - name: Function size ratchet
         run: node scripts/check-function-sizes.mjs
 
+      # srv builds every HTTP client through crates/srv/src/http_client.rs: reqwest 0.13 refuses to build one on a
+      # Linux machine with no system certificates, and a direct `reqwest::Client::new()` panics there, so the server
+      # died at start. The helper builds a client that trusts nothing in that case.
+      - name: srv HTTP clients
+        run: node scripts/check-srv-http-clients.mjs
+
       # What the living docs say about the code is in the code: a cited path, a symbol next to
       # it, no line numbers (the 2026-11-01 architecture audit, finding 6). Today's findings
       # are in scripts/doc-references.baseline and may only shrink; scripts/RATCHETS.md says

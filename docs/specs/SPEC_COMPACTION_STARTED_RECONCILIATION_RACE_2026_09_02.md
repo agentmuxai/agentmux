@@ -1,5 +1,7 @@
 # Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently
 
+**Area:** compaction
+
 **Date:** 2026-09-02
 **Status:** implemented — shipped in PR #2928.
 **Repo:** agentmuxai/agentmux

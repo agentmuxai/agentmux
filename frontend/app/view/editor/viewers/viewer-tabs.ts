@@ -14,7 +14,7 @@ import { AUDIO_EXTENSIONS, basenameOf, dirnameOf, extOf, IMAGE_EXTENSIONS, VIDEO
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createSignal } from "solid-js";
-import { viewerOptions, type FileProbe, type ViewerId } from "./viewer-choice";
+import { droppedViewerOptions, viewerOptions, type FileProbe, type ViewerId } from "./viewer-choice";
 
 /** Probes and revisions, by tab id. Not persisted: a restore probes again. */
 export class ViewerTabs {
@@ -47,8 +47,10 @@ export class ViewerTabs {
         this.bump();
     }
 
-    /** The viewers the tab can be shown in, its own first. */
-    options(tabId: string | null, current: ViewerId): ViewerId[] {
+    /** The viewers the tab can be shown in, its own first. `dropped` is the
+     *  tab's bytes when it has no file on disk (and so no probe). */
+    options(tabId: string | null, current: ViewerId, dropped?: File): ViewerId[] {
+        if (dropped) return droppedViewerOptions(dropped.name, dropped.type);
         const probe = this.probe(tabId);
         return probe ? viewerOptions(probe) : [current];
     }

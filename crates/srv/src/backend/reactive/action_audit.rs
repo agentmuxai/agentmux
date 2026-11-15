@@ -55,7 +55,7 @@ impl ReactiveHandler {
     /// running in it. Runs on the reply path, so a poisoned lock is recovered rather than
     /// allowed to stop the reply.
     pub fn audit_action(&self, rec: &ActionRecord) {
-        let mut handler = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut handler = self.inner.lock();
         // A pane's own registration says whom it acts on; an agent field in the request is only a
         // claim (a command may ignore it), so it is used when no pane is named or registered.
         let target = rec
@@ -91,7 +91,7 @@ mod tests {
     fn a_burst_of_calls_does_not_push_the_other_events_out_of_the_ring() {
         let handler = ReactiveHandler::new();
         {
-            let mut inner = handler.inner.lock().unwrap();
+            let mut inner = handler.inner.lock();
             for i in 0..AUDIT_LOG_MAX {
                 let mut e = entry(&rec(i), String::new());
                 e.event_kind = "delivery".to_string();
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn the_panes_registration_names_the_target_not_an_agent_field_in_the_request() {
         let handler = ReactiveHandler::new();
-        handler.inner.lock().unwrap().register_agent("victim", "blk-1", None).unwrap();
+        handler.inner.lock().register_agent("victim", "blk-1", None).unwrap();
         let mut r = rec(1);
         r.target = Target { agent: Some("someone-else".into()), block_id: Some("blk-1".into()), subject: None };
         handler.audit_action(&r);

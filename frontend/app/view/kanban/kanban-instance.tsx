@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // A Kanban pane's instance, loaded with the first one (kanban.tsx). The board is the same one the Swarm
-// showed in its Kanban section, with the same pane meta: `kanban:open` (a task to open), `kanban:lanes`
-// and `kanban:collapsed`.
+// showed in its Kanban section, with the same pane meta: `kanban:open` (a task to open), `kanban:lanes`,
+// `kanban:collapsed` and `kanban:board` (the board shown).
 
 import { createMemo, createSignal } from "solid-js";
 
@@ -35,6 +35,8 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
                     onNeedsCount={setNeeds}
                     lanes={ctx.meta()?.["kanban:lanes"] === true}
                     onLanes={(on) => void ctx.setMeta({ "kanban:lanes": on })}
+                    board={typeof ctx.meta()?.["kanban:board"] === "string" ? (ctx.meta()?.["kanban:board"] as string) : null}
+                    onBoard={(slug) => void ctx.setMeta({ "kanban:board": slug })}
                     collapsed={parseCollapsed(ctx.meta()?.["kanban:collapsed"])}
                     onCollapsed={(ids) => void ctx.setMeta({ "kanban:collapsed": ids })}
                 />

@@ -610,6 +610,29 @@ pub(super) fn pick_board(
     Ok(board)
 }
 
+/// Where the agent a task is aimed at stands, as words after its name: its state when it runs here, else
+/// that it is not running (stopped, parked or gone), which no claim of its own will end.
+fn target_state_words(state: &AppState, item: &WorkItem) -> String {
+    if item.target_agent.is_empty() && item.target_agent_uid.is_empty() {
+        return String::new();
+    }
+    let regs = state.reactive_handler.list_agents();
+    let reg = regs.iter().find(|r| {
+        if item.target_agent_uid.is_empty() {
+            r.agent_id.eq_ignore_ascii_case(&item.target_agent)
+        } else {
+            r.uid.as_deref() == Some(item.target_agent_uid.as_str())
+        }
+    });
+    match reg {
+        Some(r) => match crate::backend::agent_state::current_state(&state.mstore, &r.block_id) {
+            Some(s) => format!(" ({})", s.as_str()),
+            None => " (running)".to_string(),
+        },
+        None => " (not running: stopped, parked or gone)".to_string(),
+    }
+}
+
 /// Who a waiting task is for, as an answer says it.
 fn waiting_for(item: &WorkItem) -> String {
     if !item.target_agent.is_empty() {
@@ -771,7 +794,11 @@ pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, 
         item.target_agent.is_empty() || item.target_agent == agent_id
     };
     if !mine {
-        return format!("{name} is for {}, not you", waiting_for(&item));
+        return format!(
+            "{name} is for {}{}, not you. A task aimed at someone is theirs to claim; to take it yourself, move it to you first (Tasks move with id and target_agent set to your own id), or ask its filer or a leader. One aimed at an agent that is not working waits until someone moves it.",
+            waiting_for(&item),
+            target_state_words(state, &item)
+        );
     }
     if !item.target_group.is_empty() && !groups.contains(&item.target_group) {
         return format!("{name} is for group {}, which you aren't in", item.target_group);

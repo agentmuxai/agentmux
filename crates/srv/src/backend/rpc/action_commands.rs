@@ -48,7 +48,7 @@ pub const ALWAYS: &[&str] = &[
     "mcp.probe", "mcp.unbind", "mcp.upsert", "memory.write", "movescratchfile", "muxbus.cloudconfig",
     "muxbus.disconnect", "muxbus.login", "muxbus.login.cancel", "openinshell", "pins.adopt", "pins.forget",
     "provider.ensureauthdir", "remoteadd", "remoteagentrevoke", "remoteforget", "remotehelperremove",
-    "remotesetconfig", "remotetest", "renameagentdefinitiontitle", "renameeditorfile", "reorderglobalbrain",
+    "remotesetconfig", "remotetest", "renameagentdefinitiontitle", "reorderglobalbrain",
     "reseedagents", "routeannounce", "routeunannounce", "runclilogin", "rundrone", "sensitive.decide", "session:archive",
     "session:restore", "setagentbundles", "setagentcontent", "setconfig", "shellexec", "shellstop", "skill.bind",
     "skill.catalog.app_script", "skill.catalog.bind", "skill.catalog.bind_all", "skill.catalog.bind_to_bundle", "skill.catalog.delete", "skill.catalog.export",

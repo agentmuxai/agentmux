@@ -325,7 +325,7 @@ pub fn http_outcome(result: &Result<reqwest::Response, reqwest::Error>) -> Optio
     match result {
         Ok(_) => Some(Outcome::Answered),
         Err(e) if e.is_builder() => None,
-        Err(e) => Some(Outcome::Unreachable(e.to_string())),
+        Err(e) => Some(Outcome::Unreachable(crate::http_client::explain(e))),
     }
 }
 

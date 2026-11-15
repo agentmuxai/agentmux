@@ -41,6 +41,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
+import type { FileRenamedEvent } from "@/types/rpc/FileRenamedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
@@ -88,6 +89,7 @@ import type { ShutdownLineEvent } from "@/types/rpc/ShutdownLineEvent";
 import type { SigninLinkEvent } from "@/types/rpc/SigninLinkEvent";
 import type { SingletonClaimEvent } from "@/types/rpc/SingletonClaimEvent";
 import type { SrvInfo } from "@/types/rpc/SrvInfo";
+import type { SrvPanicsEvent } from "@/types/rpc/SrvPanicsEvent";
 import type { SubagentAbandonedEvent } from "@/types/rpc/SubagentAbandonedEvent";
 import type { SubagentActivityEvent } from "@/types/rpc/SubagentActivityEvent";
 import type { SubagentBackfillStatusEvent } from "@/types/rpc/SubagentBackfillStatusEvent";
@@ -171,6 +173,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "fs:renamed": FileRenamedEvent;
   "google:notice": GoogleNoticeEvent;
   "history:sessions:changed": null;
   "identity:no-direct-links": NoDirectLinksEvent;
@@ -212,6 +215,7 @@ export type MuxEventPayloads = {
   shell_node_create: ShellNodeCreateEvent;
   "singleton:claim": SingletonClaimEvent;
   "skills:changed": null;
+  "srv-panics": SrvPanicsEvent;
   srvinfo: SrvInfo;
   "subagent:abandoned": SubagentAbandonedEvent;
   "subagent:activity": SubagentActivityEvent;
@@ -306,6 +310,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "fs:renamed",
   "google:notice",
   "history:sessions:changed",
   "identity:no-direct-links",
@@ -347,6 +352,7 @@ export const TYPED_MUX_EVENTS = [
   "shell_node_create",
   "singleton:claim",
   "skills:changed",
+  "srv-panics",
   "srvinfo",
   "subagent:abandoned",
   "subagent:activity",

@@ -141,5 +141,7 @@ fn a_stored_job_reads_its_trigger_by_kind() {
     job.trigger_kind = "manual".into();
     assert_eq!(JobSchedule::of(&job).unwrap().next_after(0), None);
     job.trigger_kind = "event".into();
+    assert_eq!(JobSchedule::of(&job).unwrap().next_after(0), None, "an event job has no time of its own");
+    job.trigger_kind = "bogus".into();
     assert!(JobSchedule::of(&job).unwrap_err().contains("can't be scheduled"));
 }

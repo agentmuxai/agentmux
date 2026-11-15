@@ -87,6 +87,9 @@ impl Act<'_> {
 
     pub(super) fn edit(&self) -> Result<Value, String> {
         let Act { state, req, actor, now, .. } = *self;
+        if req.agent.is_some() {
+            return Err("edit doesn't change who a task is for: use move with a target agent. Nothing was changed.".into());
+        }
         let store = &state.work_store;
         let t = self.task()?;
         let id = &t.item.id;

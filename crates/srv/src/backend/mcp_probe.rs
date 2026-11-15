@@ -254,7 +254,7 @@ async fn probe_http(config: &Value) -> ProbeResult {
             }
         }
     }
-    let client = match reqwest::Client::builder().default_headers(headers).timeout(PROBE_TIMEOUT).build() {
+    let client = match crate::http_client::builder().default_headers(headers).timeout(PROBE_TIMEOUT).build() {
         Ok(c) => c,
         Err(e) => return ProbeResult::invalid(format!("failed to build http client: {e}")),
     };

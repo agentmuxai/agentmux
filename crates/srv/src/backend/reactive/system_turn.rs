@@ -13,7 +13,7 @@ impl ReactiveHandler {
     /// its stdin, a one-shot or not-yet-started one gets a turn started. Not a jekt: no marker, no hold, no
     /// audit row. The sender is cloned out of the lock first, since starting a turn can wait for a process.
     pub fn send_system_turn(&self, block_id: &str, text: &str) -> Result<SenderDelivery, String> {
-        let sender = self.inner.lock().unwrap().message_sender.clone().ok_or_else(|| "no message sender is installed".to_string())?;
+        let sender = self.inner.lock().message_sender.clone().ok_or_else(|| "no message sender is installed".to_string())?;
         sender(block_id, text, &[], &crate::backend::message_origin::MessageOrigin::system(), None)
     }
 }

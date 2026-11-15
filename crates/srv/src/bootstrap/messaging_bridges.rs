@@ -29,7 +29,7 @@ fn start_discord_bridge(config_watcher: &Arc<wconfig::ConfigState>) {
                         target_agent: settings.messaging_discord_target.clone(),
                         guild_id: settings.messaging_discord_guild.clone(),
                     },
-                    reqwest::Client::new(),
+                    crate::http_client::client(),
                 );
             }
             _ => {
@@ -64,7 +64,7 @@ fn start_telegram_bridge(config_watcher: &Arc<wconfig::ConfigState>) {
                         default_chat_id,
                         target_agent: settings.messaging_telegram_target.clone(),
                     },
-                    reqwest::Client::new(),
+                    crate::http_client::client(),
                 );
             }
             _ => {
@@ -96,7 +96,7 @@ fn start_slack_bridge(config_watcher: &Arc<wconfig::ConfigState>) {
                         channel_id: settings.messaging_slack_channel.clone(),
                         target_agent: settings.messaging_slack_target.clone(),
                     },
-                    reqwest::Client::new(),
+                    crate::http_client::client(),
                 );
             }
             _ => {
@@ -144,7 +144,7 @@ fn start_whatsapp_bridge(config_watcher: &Arc<wconfig::ConfigState>) {
                             .clone()
                             .unwrap_or_else(|| "en_US".to_string()),
                     },
-                    reqwest::Client::new(),
+                    crate::http_client::client(),
                 );
                 if settings.messaging_whatsapp_tunnel_domain.is_empty() {
                     tracing::warn!(

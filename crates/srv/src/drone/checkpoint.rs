@@ -34,6 +34,10 @@ pub const MAX_STEPS: u32 = 1_000;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Frontier {
     pub ready: Vec<String>,
+    /// The ready blocks a loop sent round again: they run whatever their edges
+    /// say, so a restored run must still know which they were.
+    #[serde(default)]
+    pub forced: Vec<String>,
     pub running: Vec<String>,
     /// A waiting node and what it waits for is in `Checkpoint::deadlines` and `resume_on`.
     pub waiting: Vec<String>,
@@ -45,6 +49,27 @@ pub struct Frontier {
 pub struct GraphRef {
     pub version: i64,
     pub hash: String,
+}
+
+/// Where the scheduler stands inside the graph, besides the frontier: which
+/// edges are decided, which blocks are done this pass of their loop, what each
+/// block has spent. Small, so a diff carries it whole when it changed.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Position {
+    /// Edges decided this pass of their loop, by id: `true` when they carry the run on.
+    pub decided: BTreeMap<String, bool>,
+    /// Blocks that ran or were skipped this pass of their loop.
+    pub finished: Vec<String>,
+    /// Edges out of a loop that were not taken, decided when nothing else can run, in order.
+    pub held: Vec<String>,
+    /// What each block has spent, in dollars.
+    pub spent_by: BTreeMap<String, f64>,
+    /// How long each loop guard's loop has been running, in ms. A restart does
+    /// not count: the time the app was off is not the loop's.
+    pub loop_elapsed_ms: BTreeMap<String, u64>,
+    /// What the run's Response block said, once it has run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,6 +89,29 @@ pub struct Checkpoint {
     /// The event key each waiting node resumes on, by node id.
     pub resume_on: BTreeMap<String, String>,
     pub graph: GraphRef,
+    /// The drone the run belongs to.
+    #[serde(default)]
+    pub drone_id: String,
+    /// What started the run (`{{trigger.*}}`); `Null` when nothing did. Never changes inside a run.
+    #[serde(default)]
+    pub trigger: serde_json::Value,
+    /// The run's dollar cap, from the job that started it. Never changes inside a run.
+    #[serde(default)]
+    pub run_cap_usd: Option<f64>,
+    /// The latest output of each block that ran (`{{block.path}}`), with its
+    /// `history` when a loop ran it again.
+    #[serde(default)]
+    pub outputs: BTreeMap<String, serde_json::Value>,
+    /// Each block's output bits `(tainted, derived)`. A restore never clears one.
+    #[serde(default)]
+    pub bits: BTreeMap<String, (bool, bool)>,
+    /// What each block that a loop ran again has said before, newest last (at
+    /// most 50): what `{{block.history}}` reads. Saved as it is, because it
+    /// cannot be told apart from the outputs.
+    #[serde(default)]
+    pub history: BTreeMap<String, Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub position: Position,
 }
 
 /// What changed from one checkpoint to the next. Fields that did not change
@@ -90,6 +138,15 @@ pub struct CheckpointDiff {
     pub deadlines: Option<BTreeMap<String, i64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_on: Option<BTreeMap<String, String>>,
+    /// Outputs that are new or different. A block's output is never taken back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub changed_outputs: BTreeMap<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub changed_bits: BTreeMap<String, (bool, bool)>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub changed_history: BTreeMap<String, Vec<serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Position>,
 }
 
 impl StateSnapshot {
@@ -208,6 +265,12 @@ pub fn diff(prev: &Checkpoint, next: &Checkpoint) -> Result<CheckpointDiff, Chec
     if prev.resume_on != next.resume_on {
         d.resume_on = Some(next.resume_on.clone());
     }
+    d.changed_outputs = changed_map(&prev.outputs, &next.outputs);
+    d.changed_bits = changed_map(&prev.bits, &next.bits);
+    d.changed_history = changed_map(&prev.history, &next.history);
+    if prev.position != next.position {
+        d.position = Some(next.position.clone());
+    }
     // A diff that cannot rebuild `next` would let a restored run differ from
     // the one that was saved, with no error anywhere. The format cannot express
     // a loop counter that vanished, a reducer declaration that was dropped, or
@@ -276,6 +339,12 @@ pub fn apply(prev: &Checkpoint, d: &CheckpointDiff) -> Result<Checkpoint, Checkp
     if let Some(resume_on) = &d.resume_on {
         out.resume_on = resume_on.clone();
     }
+    out.outputs.extend(d.changed_outputs.iter().map(|(id, v)| (id.clone(), v.clone())));
+    out.bits.extend(d.changed_bits.iter().map(|(id, b)| (id.clone(), *b)));
+    out.history.extend(d.changed_history.iter().map(|(id, h)| (id.clone(), h.clone())));
+    if let Some(position) = &d.position {
+        out.position = position.clone();
+    }
     Ok(out)
 }
 
@@ -293,6 +362,11 @@ fn changed_state(prev: &StateSnapshot, next: &StateSnapshot) -> StateSnapshot {
         }
     }
     changed
+}
+
+/// The entries of `next` that are new or different from `prev`'s.
+fn changed_map<V: Clone + PartialEq>(prev: &BTreeMap<String, V>, next: &BTreeMap<String, V>) -> BTreeMap<String, V> {
+    next.iter().filter(|(id, v)| prev.get(*id) != Some(*v)).map(|(id, v)| (id.clone(), v.clone())).collect()
 }
 
 /// The loop counters that changed. A counter for a loop guard never disappears
@@ -321,13 +395,24 @@ pub(crate) fn sample(step: u32) -> Checkpoint {
         run_id: "run-1".into(),
         step,
         state,
-        frontier: Frontier { ready: vec!["n3".into()], running: vec![], waiting: vec!["w1".into()] },
+        frontier: Frontier { ready: vec!["n3".into()], forced: vec![], running: vec![], waiting: vec!["w1".into()] },
         loop_counters: BTreeMap::from([("guard".to_string(), 2)]),
         cost_usd: 0.25,
         elapsed_ms: 1_500,
         deadlines: BTreeMap::from([("w1".to_string(), 1_800_000_000_000)]),
         resume_on: BTreeMap::new(),
         graph: GraphRef { version: 3, hash: "abc".into() },
+        drone_id: "drone-1".into(),
+        trigger: serde_json::json!({ "pr": 12 }),
+        run_cap_usd: Some(5.0),
+        outputs: BTreeMap::from([("n1".to_string(), serde_json::json!({ "value": "x" }))]),
+        bits: BTreeMap::from([("n1".to_string(), (true, false))]),
+        history: BTreeMap::new(),
+        position: Position {
+            decided: BTreeMap::from([("e1".to_string(), true)]),
+            finished: vec!["n1".into()],
+            ..Position::default()
+        },
     }
 }
 

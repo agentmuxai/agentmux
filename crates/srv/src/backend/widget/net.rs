@@ -234,7 +234,7 @@ pub async fn fetch(pkg_name: &str, granted: &[String], req: FetchRequest) -> Res
         if left.is_zero() {
             return Err(AccessError::network("the request timed out"));
         }
-        let client = reqwest::Client::builder()
+        let client = crate::http_client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .resolve_to_addrs(&host, &addrs)

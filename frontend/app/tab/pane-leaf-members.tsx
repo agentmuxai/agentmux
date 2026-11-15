@@ -11,6 +11,7 @@
 import { Block } from "@/app/block/block";
 import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
+import { AgentStalledBanner } from "@/app/tab/agent-stalled-banner";
 import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import type { NodeModel } from "@/layout/index";
 import { registerTabMember, tabLandingMountOf } from "@/layout/lib/tabLanding";
@@ -120,6 +121,7 @@ function renderKeepAliveSlot(id: string, input: PaneMembersInput): JSX.Element {
                     <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
                 </PaneStackMemberActiveProvider>
             </div>
+            <AgentStalledBanner blockId={id} />
         </div>
     );
 }
@@ -143,7 +145,12 @@ export function renderPaneMembers(input: PaneMembersInput): JSX.Element {
             when={input.keepAlive()}
             fallback={
                 <Key each={[input.scopedNodeModel()]} by={(nm) => nm.blockId}>
-                    {(nm) => <Block nodeModel={nm()} preview={false} />}
+                    {(nm) => (
+                        <>
+                            <Block nodeModel={nm()} preview={false} />
+                            <AgentStalledBanner blockId={nm().blockId} />
+                        </>
+                    )}
                 </Key>
             }
         >

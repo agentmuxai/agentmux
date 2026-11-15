@@ -236,7 +236,7 @@ impl Srv {
     fn from_env() -> Option<Self> {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         Some(Self {
-            client: reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?,
+            client: agentmux_common::local_http::builder().timeout(Duration::from_secs(10)).build().ok()?,
             url: var("AGENTMUX_LOCAL_URL")?,
             auth_key: var("AGENTMUX_AUTH_KEY")?,
             token: var("AGENTMUX_AGENT_TOKEN")?,

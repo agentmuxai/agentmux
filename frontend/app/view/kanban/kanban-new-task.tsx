@@ -14,7 +14,8 @@ import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent } from "./kanban-types";
 import { tip } from "@/app/element/tip";
 
-export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]; onDone: () => void }): JSX.Element {
+/** `board` is the slug of the board the pane shows: the task is filed there, not on the default board. */
+export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]; board?: string; onDone: () => void }): JSX.Element {
     const [title, setTitle] = createSignal("");
     const [payload, setPayload] = createSignal("");
     const [agent, setAgent] = createSignal("");
@@ -36,6 +37,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
             hold: hold() || undefined,
             after: parseAfter(after()).length ? parseAfter(after()) : undefined,
             first: specFirst() ? "spec" : undefined,
+            board: props.board || undefined,
         });
         setBusy(false);
         if (res) props.onDone();

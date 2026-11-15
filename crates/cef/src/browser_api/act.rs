@@ -151,6 +151,7 @@ pub(super) const PREPARE_FILL: &str = r#"function () {
   if (this.readOnly) return { error: "the field is read-only" };
   this.scrollIntoView({ block: "center", inline: "center" });
   this.focus();
+  this.setAttribute("data-agentmux-filled", "1");
   if (typeof this.select === "function") {
     this.select();
   } else if (this.isContentEditable) {
@@ -175,6 +176,7 @@ pub(super) const SET_VALUE: &str = r#"function (v) {
   const proto = Object.getPrototypeOf(this);
   const d = Object.getOwnPropertyDescriptor(proto, "value");
   if (d && d.set) { d.set.call(this, v); } else if (this.isContentEditable) { this.textContent = v; } else { this.value = v; }
+  this.setAttribute("data-agentmux-filled", "1");
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
@@ -189,6 +191,7 @@ const SET_DATE: &str = r#"function (v) {
   this.scrollIntoView({ block: "center", inline: "center" });
   this.focus();
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(this, v);
+  this.setAttribute("data-agentmux-filled", "1");
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
@@ -208,6 +211,7 @@ const SELECT_OPTION: &str = r#"function (want) {
   // value would pick the first of them, not the one matched by its label.
   this.selectedIndex = opts.indexOf(hit);
   if (this.selectedOptions[0] !== hit) return { error: "the page didn't take that option" };
+  this.setAttribute("data-agentmux-filled", "1");
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
@@ -244,12 +248,18 @@ const COMMIT_INFO: &str = concat!(
   }
   // A link fetches unless its name says it commits; a download or a file:
   // link never does (scripts/click_label.js).
+  // A link the page gives a button's role (<a role="button">) acts as a button: its name is judged as a button's.
+  const roleOf = String(this.getAttribute("role") || (this.closest && this.closest("[role=button]") ? "button" : "")).toLowerCase();
+  const buttonLike = ["button", "menuitem", "switch", "checkbox", "radio", "tab"].includes(roleOf);
   const { name, description, committing, why, unreadable } = clickLabel(this.getAttribute("aria-label"), labelledBy, this.innerText || this.value || "", {
     submits,
-    link: !!link,
+    link: !!link && !buttonLike,
     download: !!link && link.hasAttribute("download"),
     fileHref: /^file:/i.test(action),
   }, axName);
+  const fieldChanged = "#,
+    include_str!("scripts/field_changed.js"),
+    r#";
   const fields = [];
   const secret = el => {
     const ty = (el.type || "").toLowerCase();
@@ -299,7 +309,7 @@ const COMMIT_INFO: &str = concat!(
         labelText = c.textContent.replace(/\s+/g, " ").trim();
       }
       const label = labelText || el.getAttribute("aria-label") || el.name || el.id || ty;
-      fields.push([String(label).replace(/\s+/g, " ").slice(0, 80), String(v).slice(0, 200)]);
+      fields.push([String(label).replace(/\s+/g, " ").slice(0, 80), String(v).slice(0, 200), fieldChanged(el, ty)]);
       if (fields.length >= 40) break;
     }
   }
@@ -468,7 +478,7 @@ pub(super) async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFa
         .call("Accessibility.getPartialAXTree", json!({ "backendNodeId": backend, "fetchRelatives": false }))
         .await
         .ok()
-        .and_then(|t| t.pointer("/nodes/0/name/value").and_then(|n| n.as_str()).map(str::to_string))
+        .and_then(|t| t.pointer("/nodes/0/name/value").and_then(|n| n.as_str()).map(super::hidden_secrets::scrub))
         .unwrap_or_default();
     Some(facts.with_label(&label))
 }
@@ -951,7 +961,7 @@ pub async fn act_route(
     };
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after: super::hidden_secrets::scrub_answer(after), page }))),
         Err(e) => fail(e),
     }
 }
@@ -1095,7 +1105,7 @@ async fn act(
                 return Ok(redact_secret(before, &facts));
             }
             click_element(cdp, root, frame, &obj).await?;
-            let after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
+            let after = super::filled::mark_then_read(cdp, &obj).await?;
             if after.get("checked").and_then(|v| v.as_bool()) != Some(want) {
                 return Err(format!(
                     "clicked {}, but it is still {}checked; it may be controlled by another element (a label or a custom switch): take a new snapshot",
@@ -1453,7 +1463,7 @@ pub async fn set_files_route(
     let result = set_files(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
     match result {
-        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after, page: None }))),
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after: super::hidden_secrets::scrub_answer(after), page: None }))),
         Err(e) => fail(e),
     }
 }

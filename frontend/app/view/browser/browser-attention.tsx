@@ -175,9 +175,12 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
                     <tbody>
                         <For each={a().fields}>
                             {(f) => (
-                                <tr>
+                                <tr classList={{ "browser-attention-field-kept": f[2] === false }}>
                                     <td>{f[0]}</td>
-                                    <td>{f[1]}</td>
+                                    <td>
+                                        {f[1]}
+                                        {f[2] === false ? <span class="browser-attention-field-note"> already on the page</span> : null}
+                                    </td>
                                 </tr>
                             )}
                         </For>

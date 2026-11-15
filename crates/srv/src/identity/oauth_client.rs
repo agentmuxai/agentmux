@@ -616,11 +616,7 @@ use crate::util::open_browser;
 pub(crate) fn http() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .user_agent("AgentMux")
-            .build()
-            .expect("reqwest client build failed")
+        crate::http_client::client_with(|b| b.timeout(Duration::from_secs(20)).user_agent("AgentMux"))
     })
 }
 

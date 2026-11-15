@@ -70,8 +70,8 @@ export interface SigninPending {
     origin: string;
     /** Masked, e.g. `al***`. */
     user: string;
-    /** `account`: an agent making a new account; otherwise signing in. */
-    kind: "signin" | "account";
+    /** `account`: an agent making a new account; `change`: an agent changing a saved password; otherwise signing in. */
+    kind: "signin" | "account" | "change";
     deadlineMs: number;
 }
 
@@ -80,12 +80,13 @@ export function readSigninPending(meta: Record<string, unknown> | undefined): Si
     if (!v || typeof v !== "object") return undefined;
     const { id, agent, origin, user, deadline_ms } = v;
     if (typeof id !== "string" || typeof agent !== "string" || typeof origin !== "string" || typeof deadline_ms !== "number") return undefined;
-    return { id, agent, origin, user: typeof user === "string" ? user : "", kind: v.kind === "account" ? "account" : "signin", deadlineMs: deadline_ms };
+    return { id, agent, origin, user: typeof user === "string" ? user : "", kind: v.kind === "account" || v.kind === "change" ? v.kind : "signin", deadlineMs: deadline_ms };
 }
 
 export function signinPendingText(p: SigninPending, nowMs: number): string {
     const left = Math.max(0, Math.ceil((p.deadlineMs - nowMs) / 1000));
     if (p.kind === "account") return `${p.agent} is creating an account on ${p.origin}: the password comes from your Vault (${left} s)`;
+    if (p.kind === "change") return `${p.agent} is changing your password on ${p.origin}: the new one comes from your Vault and the old one is kept for 7 days (${left} s)`;
     const as = p.user ? ` as ${p.user}` : "";
     return `${p.agent} is signing in to ${p.origin}${as} with your saved sign-in (${left} s)`;
 }

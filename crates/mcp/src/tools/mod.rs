@@ -13,6 +13,7 @@ mod agents_tool;
 mod app_tool;
 mod browser;
 mod browser_account;
+mod browser_key_text;
 mod browser_tool;
 mod browser_waiting;
 mod browser_zoom;

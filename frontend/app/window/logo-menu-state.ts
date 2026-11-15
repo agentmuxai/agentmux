@@ -197,6 +197,13 @@ function buildMenuItems(openWorkspaceItems: () => MenuItem[]): MenuItem[] {
             icon: "book",
             onClick: () => getApi().openExternal("https://docs.agentmux.ai"),
         },
+        // A way out when the window shows nothing or stops following its tabs
+        // (the stuck-window offer in workspace.tsx is not always there).
+        {
+            label: "Reload Window",
+            icon: "rotate-right",
+            onClick: () => getApi().reloadWindow(),
+        },
         { label: "", divider: true },
         {
             label: "Exit",

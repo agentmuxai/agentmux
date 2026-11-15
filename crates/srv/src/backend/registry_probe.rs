@@ -162,7 +162,7 @@ async fn read_capped(mut resp: reqwest::Response, max: usize) -> Option<Vec<u8>>
 /// addresses, so the name cannot resolve differently between the check and the
 /// connection. Never follows redirects. `None` when the host is refused.
 async fn guarded_client(url: &Url, strict: bool) -> Option<Client> {
-    let mut builder = Client::builder()
+    let mut builder = crate::http_client::builder()
         .timeout(REQUEST_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none());
     if strict {

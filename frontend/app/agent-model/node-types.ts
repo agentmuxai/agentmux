@@ -4,6 +4,7 @@
 
 import type { ResumePreflightStep } from "@/app/store/rpc-api";
 import type { MessageOrigin } from "@/types/rpc/MessageOrigin";
+import type { OriginSig } from "@/types/rpc/OriginSig";
 import type { ToolNode, ToolStreamingLog } from "./tool-types";
 
 /**
@@ -133,6 +134,9 @@ export interface JektMessageNode {
     tier: JektTier;
     deliveryTier: JektDeliveryTier;
     trust: JektTrust;
+    /** The marker's `SIG=`: `expired` is a genuine signature that failed only the age rules (a late notice). Absent
+     *  when the marker carried none or an unrecognised value. */
+    sig?: OriginSig;
     msgId: string;
     priority: "normal" | "urgent";
     direction: "incoming" | "outgoing";

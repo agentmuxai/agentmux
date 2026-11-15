@@ -421,7 +421,7 @@ async fn download(asset: &ReleaseAsset, dest: &Path, version: &str) -> Result<()
     if !asset.url.starts_with(RELEASE_DOWNLOAD_PREFIX) {
         return Err("the release file isn't on AgentMux's GitHub releases".into());
     }
-    let client = reqwest::Client::builder()
+    let client = crate::http_client::builder()
         .user_agent(format!("AgentMux/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .build()

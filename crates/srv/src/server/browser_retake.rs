@@ -151,6 +151,7 @@ pub(crate) async fn handle_ui_browser_handoff_status(
                 "status": s.state.as_str(),
                 "started_secs_ago": s.started_secs_ago,
                 "ended_secs_ago": s.ended_secs_ago,
+                "open_secs": s.open_secs,
             });
             (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
         }

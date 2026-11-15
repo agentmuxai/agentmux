@@ -20,7 +20,7 @@ pub(super) async fn of(cdp: &mut CdpSession, object_id: &str) -> Option<String> 
 /// The name of the first node of a `getPartialAXTree` answer (the element's own).
 fn in_partial_tree(tree: &Value) -> Option<String> {
     let node = tree.pointer("/nodes/0")?;
-    Some(node.pointer("/name/value").and_then(|n| n.as_str()).unwrap_or("").to_string())
+    Some(super::hidden_secrets::scrub(node.pointer("/name/value").and_then(|n| n.as_str()).unwrap_or("")))
 }
 
 #[cfg(test)]

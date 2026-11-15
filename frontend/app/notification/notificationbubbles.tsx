@@ -75,6 +75,8 @@ const NotificationBubbles = (): JSX.Element => {
                     ref={setStack}
                     style={floatingStyles() as any}
                     class="notification-bubbles"
+                    // Over a browser pane's native window too: the clip cuts a hole in it for the stack.
+                    data-pane-overlay
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div
