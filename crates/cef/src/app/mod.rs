@@ -127,9 +127,9 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut view));
 
             // Position: use explicit bounds if provided, else 70% centered.
-            if let Some((x, y, w, h)) = self.initial_bounds {
-                window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
-            } else if let Some((x, y, w, h)) = get_monitor_centered_70pct(window) {
+            // A test build (AGENTMUX_TEST_OFFSCREEN) creates every window off-screen, here for all of them.
+            let bounds = self.initial_bounds.or_else(|| get_monitor_centered_70pct(window));
+            if let Some((x, y, w, h)) = bounds.map(agentmux_common::test_offscreen::place_rect) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
             // The main window was maximized when it last ran: its rect above is where

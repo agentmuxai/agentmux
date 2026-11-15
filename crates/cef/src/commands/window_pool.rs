@@ -1715,6 +1715,7 @@ pub fn promote_pool_window(
             }
             None => (pos_x, pos_y, win_w, win_h),
         };
+    let (pos_x, pos_y) = agentmux_common::test_offscreen::place((pos_x, pos_y));
 
     // FIX — Stage 0 (RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21,
     // cef#3638): position the window at its final ON-SCREEN rect while it is still
@@ -2046,6 +2047,7 @@ pub fn promote_pool_window(
     );
 
     // Reposition + emit pool:promote on the CEF UI thread.
+    let (x, y) = agentmux_common::test_offscreen::place((x, y));
     crate::ui_tasks::post_promote_pool_window(state, &label, workspace_id, x, y, w, h);
 
     // Refill the pool asynchronously.
