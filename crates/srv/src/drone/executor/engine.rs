@@ -58,7 +58,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        let limits = super::scheduler::Limits { run_cap_usd, cancel, persist };
+        let limits = super::scheduler::Limits { run_cap_usd, cancel, persist, chain: Vec::new(), lookup: crate::drone::host::lookup() };
         let ended = super::scheduler::execute(&run_id_for_task, (&graph, trigger, limits, &drone_id), &tx_for_task, &states_for_task).await;
         crate::backend::drone_cancel::forget_run(&run_id_for_task);
         let _ = tx_for_task.send(end_event(run_id_for_task, ended));
@@ -95,7 +95,7 @@ pub async fn resume_drone(graph: DroneGraph, checkpoint: Checkpoint, persist: Pe
     let id = run_id.clone();
     tokio::spawn(async move {
         let _ = tx.send(RunEvent::Resumed { run_id: id.clone(), step: checkpoint.step });
-        let limits = super::scheduler::Limits { run_cap_usd: checkpoint.run_cap_usd, cancel, persist: Some(persist) };
+        let limits = super::scheduler::Limits { run_cap_usd: checkpoint.run_cap_usd, cancel, persist: Some(persist), chain: Vec::new(), lookup: crate::drone::host::lookup() };
         let ended = super::scheduler::resume((&graph, &checkpoint, limits), &tx, &states).await;
         crate::backend::drone_cancel::forget_run(&id);
         let _ = tx.send(end_event(id, ended));

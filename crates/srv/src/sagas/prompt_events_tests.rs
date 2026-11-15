@@ -142,6 +142,14 @@ fn a_drone_run_event_is_tagged_by_its_kind() {
         json!({ "kind": "waiting", "run_id": "r", "block_id": "w", "on": "e", "key": "k" })
     );
     assert_eq!(run(RunEvent::WaitEnded { run_id: "r".into(), block_id: "w".into(), late: true }), json!({ "kind": "wait_ended", "run_id": "r", "block_id": "w", "late": true }));
+    assert_eq!(
+        run(RunEvent::ChildStarted { run_id: "r".into(), block_id: "c".into(), child_run_id: "k".into(), drone_id: "d".into(), version: 3 }),
+        json!({ "kind": "child_started", "run_id": "r", "block_id": "c", "child_run_id": "k", "drone_id": "d", "version": 3 })
+    );
+    assert_eq!(
+        run(RunEvent::ChildEnded { run_id: "r".into(), block_id: "c".into(), child_run_id: "k".into(), status: "done".into(), cost_usd: 0.5 }),
+        json!({ "kind": "child_ended", "run_id": "r", "block_id": "c", "child_run_id": "k", "status": "done", "cost_usd": 0.5 })
+    );
     assert_eq!(run(RunEvent::Resumed { run_id: "r".into(), step: 4 }), json!({ "kind": "resumed", "run_id": "r", "step": 4 }));
     assert_eq!(
         run(RunEvent::StepCheckpointed { run_id: "r".into(), step: 3, block_id: Some("b".into()) }),

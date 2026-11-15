@@ -30,6 +30,7 @@ use super::retry;
 use super::schedule::{self, Guard, OnCap, Plan};
 use crate::drone::checkpoint::{Checkpoint, GraphRef};
 use crate::drone::data_flow::ExecutionScope;
+use crate::drone::host::DroneLookup;
 use crate::drone::recorder::{Persist, Recorder};
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
@@ -47,6 +48,10 @@ pub(super) struct Limits {
     pub(super) run_cap_usd: Option<f64>,
     pub(super) cancel: Cancel,
     pub(super) persist: Option<Persist>,
+    /// The drones above this one when it was called by a Drone block, outermost first.
+    pub(super) chain: Vec<String>,
+    /// Where a Drone block finds the drone it calls.
+    pub(super) lookup: Option<Arc<dyn DroneLookup>>,
 }
 
 /// How long a block may run when its graph does not say (`timeout_seconds`): an
@@ -58,6 +63,8 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
         // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
         BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait => None,
+        // The callee has the limits of its own blocks, and the caller may set one for the whole call.
+        BlockKind::Drone => None,
     }
 }
 
@@ -149,6 +156,9 @@ struct Scheduler<'a> {
     resume_on: BTreeMap<String, String>,
     /// When the Wait block runs out of its own `timeout_seconds`.
     wait_timeouts: BTreeMap<String, i64>,
+    /// The drones above this one (a Drone block called it), and where to find a drone to call.
+    chain: Vec<String>,
+    lookup: Option<Arc<dyn DroneLookup>>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -160,20 +170,32 @@ struct Scheduler<'a> {
 
 pub(super) async fn execute(
     run_id: &str,
-    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
+    args: (&DroneGraph, Value, Limits, &str),
     tx: &mpsc::UnboundedSender<RunEvent>,
     states: &States,
 ) -> Result<Value, RunEnd> {
+    execute_costed(run_id, args, tx, states).await.0
+}
+
+/// [`execute`], and with it what the run spent, which a caller counts against its own budget.
+pub(super) async fn execute_costed(
+    run_id: &str,
+    (graph, trigger, limits, drone_id): (&DroneGraph, Value, Limits, &str),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> (Result<Value, RunEnd>, f64) {
     if graph.nodes.is_empty() {
-        return Err(RunEnd::Failed("drone has no blocks".to_string()));
+        return (Err(RunEnd::Failed("drone has no blocks".to_string())), 0.0);
     }
-    let plan = schedule::analyze(graph).map_err(|issues| {
-        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
-    })?;
+    let plan = match schedule::analyze(graph) {
+        Ok(plan) => plan,
+        Err(issues) => return (Err(RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))), 0.0),
+    };
     let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), limits, tx, states);
     s.seed_roots();
     let started = s.checkpoint(None);
-    finish(&mut s, started).await
+    let ended = finish(&mut s, started).await;
+    (ended, s.spent)
 }
 
 /// Take up a run from its newest checkpoint, `c`, and run it to its end: the
@@ -259,6 +281,8 @@ impl<'a> Scheduler<'a> {
             deadlines: BTreeMap::new(),
             resume_on: BTreeMap::new(),
             wait_timeouts: BTreeMap::new(),
+            chain: limits.chain,
+            lookup: limits.lookup,
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -447,6 +471,9 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::Wait {
             return self.run_wait(node).await;
         }
+        if kind == BlockKind::Drone {
+            return self.run_call(node).await;
+        }
         let scope = &mut self.scope;
         match kind {
             BlockKind::Variables => blocks::variables::run(node, scope).await,
@@ -460,7 +487,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
             BlockKind::Spawn => blocks::spawn::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach | BlockKind::Wait => unreachable!("handled above"),
+            BlockKind::ForEach | BlockKind::Wait | BlockKind::Drone => unreachable!("handled above"),
         }
     }
 
@@ -526,6 +553,8 @@ impl<'a> Scheduler<'a> {
             // What an event brought is outside text; a wait for a time brings nothing.
             BlockKind::Wait if node.data.get("on").is_some() => (true, false),
             BlockKind::Wait => (false, false),
+            // What a callee said is outside text: nothing yet promises its outputs are clean.
+            BlockKind::Drone => (true, false),
             BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -644,6 +673,7 @@ impl<'a> Scheduler<'a> {
 }
 
 mod attention;
+mod call;
 mod checkpoint;
 mod foreach;
 mod wait;

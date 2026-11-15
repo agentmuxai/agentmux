@@ -33,6 +33,8 @@ pub enum BlockKind {
     Spawn,
     /// Stops the run for a time or for an event.
     Wait,
+    /// Calls another drone as a step.
+    Drone,
 }
 
 impl BlockKind {
@@ -51,6 +53,7 @@ impl BlockKind {
             "foreach" => Some(Self::ForEach),
             "spawn" => Some(Self::Spawn),
             "wait" => Some(Self::Wait),
+            "drone" => Some(Self::Drone),
             _ => None,
         }
     }
