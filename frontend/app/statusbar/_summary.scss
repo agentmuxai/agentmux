@@ -89,3 +89,8 @@
         overflow: visible;
     }
 }
+
+// The asks that already ended: quiet, as the agents part is, and its rows say how they ended.
+.status-summary .status-summary__part--recent {
+    opacity: 0.8;
+}

@@ -12,17 +12,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hub = vi.hoisted(() => ({
     redock: vi.fn(async () => ({ redocked: true })),
     tabs: {} as Record<string, string[]>,
+    pinned: [] as string[],
 }));
 
-vi.mock("@/store/global", () => ({ atoms: { workspace: () => ({ oid: "ws-1", tabids: Object.keys(hub.tabs) }) } }));
+vi.mock("@/store/global", () => ({
+    atoms: { workspace: () => ({ oid: "ws-1", tabids: Object.keys(hub.tabs).filter((id) => !hub.pinned.includes(id)), pinnedtabids: hub.pinned }) },
+}));
 vi.mock("@/app/store/mos", () => ({
     makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
     getObjectValue: (oref: string) => ({ blockids: hub.tabs[oref.replace("tab:", "")] }),
 }));
 vi.mock("@/app/store/services", () => ({ WorkspaceService: { RedockFloatingPane: hub.redock } }));
-vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: () => undefined }));
+vi.mock("@/layout/lib/layoutModelHooks", () => ({
+    getLayoutModelForTabById: () => undefined,
+}));
 vi.mock("@/layout/lib/layoutNode", () => ({ findNodeByBlockId: () => undefined }));
-vi.mock("./layoutModelHooks", () => ({ getLayoutModelForTabById: () => undefined }));
+vi.mock("./layoutModelHooks", () => ({
+    getLayoutModelForTabById: () => undefined,
+}));
 vi.mock("./layoutIntents", () => ({ reconcileWithStoredLayout: () => {} }));
 
 import { stackMovePlan } from "./stackMembers";
@@ -33,6 +40,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 beforeEach(() => {
     hub.redock.mockClear();
     hub.tabs = { "tab-a": ["a", "b", "c"], "tab-b": ["d"] };
+    hub.pinned = [];
 });
 
 describe("moveBlocksToTab", () => {
@@ -77,6 +85,11 @@ describe("tabOfBlock", () => {
         expect(tabOfBlock("c")).toBe("tab-a");
         expect(tabOfBlock("d")).toBe("tab-b");
         expect(tabOfBlock("nope")).toBeUndefined();
+    });
+
+    it("finds it in a pinned window tab too", () => {
+        hub.pinned = ["tab-b"];
+        expect(tabOfBlock("d")).toBe("tab-b");
     });
 });
 

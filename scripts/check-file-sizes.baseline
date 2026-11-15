@@ -5,8 +5,8 @@
 3234 crates/bashwrap/src/bash_wrap.rs
 1969 crates/cef/src/client/lifecycle.rs
 1519 crates/cef/src/commands/cli_login.rs
-2210 crates/cef/src/commands/window_pool.rs
-1514 crates/cef/src/lib.rs
+2213 crates/cef/src/commands/window_pool.rs
+1515 crates/cef/src/lib.rs
 1602 crates/cef/src/state/mod.rs
 2069 crates/cef/src/ui_tasks/window.rs
 1848 crates/common/src/jekt_sign.rs

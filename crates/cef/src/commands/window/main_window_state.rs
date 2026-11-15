@@ -246,6 +246,10 @@ mod live {
     /// keeps the last normal rect and records that it is maximized. Written once
     /// the window has been still for a moment.
     pub fn note_position(maximized: bool, rect: agentmux_common::ipc::Rect) {
+        // A test build's windows are off-screen on purpose: that place is never the person's.
+        if agentmux_common::test_offscreen::active() {
+            return;
+        }
         let mut normal = NORMAL.lock().unwrap();
         let next = if maximized {
             // Nothing normal seen yet this run (it started maximized without a saved

@@ -132,6 +132,14 @@ export function attentionRows(rows: AgentRuntime[], browserWaits: boolean): Agen
 /** srv's runtime rows for the list and the status bar's counts; reactive. */
 export const sharedAttentionRows = (): AgentRuntime[] => attentionRows(sharedAgentRuntime().rows(), browserWaitsShown());
 
+/** Who owns pane `blockId`, by name and colour: its agent, or the pane's own name; for a request that names no pane, "AgentMux". */
+export function attentionWho(blockId: string): { name: string; color?: string } {
+    const row = sharedAgentRuntime()
+        .rows()
+        .find((r) => r.block_id === blockId);
+    return { name: row?.name || ownPaneName(blockId) || "An agent", color: row?.color };
+}
+
 /** The panes that wait on the person, anywhere on this machine; reactive. */
 export function attentionItems(): AttentionItem[] {
     const rows = sharedAttentionRows();
