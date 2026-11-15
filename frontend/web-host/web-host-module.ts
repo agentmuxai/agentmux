@@ -7,6 +7,7 @@
 // page's own origin, through a proxy that adds its key.
 
 import type { HostModule } from "@/app/host/host-module";
+import { requireSignIn } from "./not-signed-in";
 import { buildWebApi } from "./web-api";
 
 /** srv's HTTP and WebSocket endpoints for a page served from `origin`. */
@@ -26,5 +27,7 @@ export const hostModule: HostModule = {
         window.__WAVE_SERVER_WEB_ENDPOINT__ = web;
         window.__WAVE_SERVER_WS_ENDPOINT__ = ws;
         window.api = buildWebApi();
+        // A browser that was never signed in gets one plain card, not a reconnect loop that ends in "Press Restore".
+        await requireSignIn(!!window.api.getSessionToken?.());
     },
 };
