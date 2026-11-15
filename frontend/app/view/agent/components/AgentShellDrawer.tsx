@@ -42,17 +42,23 @@ export const AgentShellDrawer = (props: {
 }): JSX.Element => (
     <Show when={props.open}>
         <div class="agent-composer-details" id={`agent-composer-details-${props.blockId}`}>
-            {/* One line: what this shell is, and what the agent
-                    has left running. Takes the slot AgentControlBar
-                    used to occupy with session UI — see
-                    SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4. */}
-            <AgentShellInfoPanel blockId={props.blockId} shellSubBlockId={props.shellSubBlockId} cwd={props.cwd} />
             {/* Drag-to-height drawer wrapping the terminal — the actual
-                    scrollable/resizable content. */}
+                    scrollable/resizable content. Its handle sits on the drawer's top edge, over the
+                    composer's bottom border, above the one-line header (what this shell is, and what
+                    the agent has left running; takes the slot AgentControlBar used to occupy with
+                    session UI, SPEC_AGENT_SHELL_DRAWER_INFO_PANEL_2026_09_19.md §4). */}
             <ResizableDetailsDrawer
                 blockId={props.blockId}
                 persistedHeight={props.persistedHeight}
                 defaultHeight={SHELL_DRAWER_DEFAULT_HEIGHT}
+                handleOnEdge
+                header={
+                    <AgentShellInfoPanel
+                        blockId={props.blockId}
+                        shellSubBlockId={props.shellSubBlockId}
+                        cwd={props.cwd}
+                    />
+                }
             >
                 {/* Phase 0 spike (#1945):
                         real xterm+PTY terminal, spawned lazily on first

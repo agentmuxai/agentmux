@@ -629,6 +629,48 @@
     }
 }
 
+// The shell drawer's handle sits on its outer top edge, a thin overlay centred on the composer's bottom
+// border: the hover cursor, the hit area and the accent line are all on that one visible line, with the
+// header row below it clear of the handle (ResizableDetailsDrawer `handleOnEdge`).
+.agent-composer-details {
+    position: relative;
+}
+
+.agent-composer-details-resize-handle--edge {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 7px;
+    z-index: var(--z-layout-resize-handle);
+    border-top: 0;
+
+    &::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 3px;
+        height: 1px;
+        background: transparent;
+        transition:
+            background var(--duration-decorative-fast),
+            top var(--duration-decorative-fast),
+            height var(--duration-decorative-fast);
+    }
+
+    &:hover,
+    &.agent-composer-details-resize-handle--active {
+        background: transparent;
+
+        &::after {
+            top: 2px;
+            height: 3px;
+            background: var(--accent-color);
+        }
+    }
+}
+
 .agent-composer-details-body {
     display: flex;
     flex-direction: column;
