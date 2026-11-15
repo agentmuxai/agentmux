@@ -44,6 +44,7 @@ import { notifyPaneReflow } from "@/app/platform/pane-anim";
 import { holdPaneSizes } from "@/app/platform/pane-size-hold";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { getObjectValue, makeORef } from "@/app/store/mos";
+import { dropHeldIn } from "./heldDrop";
 import type { LayoutModel } from "./layoutModel";
 import { pillReflowIn } from "./pillDragState";
 import type { SettlingPass } from "./settlingPass";
@@ -130,6 +131,15 @@ export function movesWithReflow(leaf: LayoutNode): boolean {
 /** Whether panes glide at all: unless the `layout:livereflow` setting is false. Reactive. */
 export function liveReflowEnabled(): boolean {
     return getSettingsKeyAtom("layout:livereflow")() !== false;
+}
+
+/**
+ * Whether `model`'s layout shows a drop by its reflow now: a pane is dragged over it, a tab pill is placed in
+ * it, or a drop is released that srv has still to commit (heldDrop.ts). The one reading of it, for the reflow
+ * and for what must not run over it (settlingPass.ts). Reactive.
+ */
+export function reflowDragIn(model: LayoutModel): boolean {
+    return model.activeDrag() || pillReflowIn(model) || dropHeldIn(model);
 }
 
 /** `rect` in the whole px the layout's own transform uses: the corner rounded down, the size up (`setTransform`). */
@@ -283,7 +293,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
     const targets = createMemo((): Targets | undefined => {
         if (!liveReflowEnabled()) return undefined;
         const tearOff = model.tearOffLayout();
-        const dragging = model.activeDrag() || pillReflowIn(model);
+        const dragging = reflowDragIn(model);
         if (!dragging && !tearOff) return settlingTargets(model.settlingPass());
         const leafs = model.leafs();
         if (leafs.length > REFLOW_MAX_PANES) return undefined;
@@ -358,7 +368,7 @@ export function createLiveReflow(model: LayoutModel): LiveReflow {
         reflowFor: (nodeId) => entries().get(nodeId),
         liveReflowActive: () => !!targets()?.showing,
         liveReflowExpected: () =>
-            liveReflowEnabled() && (model.activeDrag() || pillReflowIn(model)) && model.leafs().length <= REFLOW_MAX_PANES,
+            liveReflowEnabled() && reflowDragIn(model) && model.leafs().length <= REFLOW_MAX_PANES,
         landingSettled,
     };
 }

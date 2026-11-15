@@ -8,6 +8,7 @@ const hub = vi.hoisted(() => ({
     shot: undefined as unknown,
     begun: [] as unknown[],
     quiets: [] as boolean[],
+    fades: [] as boolean[],
 }));
 
 vi.mock("@/store/global", () => ({ getApi: () => ({ marker: "api" }) }));
@@ -15,9 +16,11 @@ vi.mock("./tearoff-snapshot", () => ({ peekTearOffSnapshot: async () => hub.shot
 vi.mock("./live-follow", () => ({
     beginLiveFollow: async (_api: unknown, spec: unknown) => void hub.begun.push(spec),
     quietLiveFollow: async (_api: unknown, on: boolean) => void hub.quiets.push(on),
+    fadeLiveFollow: async (_api: unknown, on: boolean) => void hub.fades.push(on),
 }));
 
-import { followPaneDrag } from "./pane-live-follow";
+import { setPlatform } from "@/util/platformutil";
+import { fadeFollowedPane, followPaneDrag } from "./pane-live-follow";
 
 const BODY = { left: 0, top: 33, width: 1200, height: 744 };
 const PICTURE = { sourceWindowLabel: "main", picture: "jpeg", windowWidth: 300, windowHeight: 200, offsetX: 50, offsetY: 15 };
@@ -76,5 +79,19 @@ describe("followPaneDrag", () => {
     it("turns the area off at once for a layout that already shows no pane when the picture is up", async () => {
         await followPaneDrag("b1", "main", { body: () => BODY, holdsPane: () => false, active: () => true });
         expect(hub.quiets).toEqual([false]);
+    });
+});
+
+describe("fadeFollowedPane", () => {
+    it("fades the picture while a layout shows drop guides, on Windows, where there is a picture", () => {
+        hub.fades = [];
+        setPlatform("win32");
+        fadeFollowedPane(true);
+        fadeFollowedPane(false);
+        expect(hub.fades).toEqual([true, false]);
+        setPlatform("linux");
+        fadeFollowedPane(true);
+        expect(hub.fades).toEqual([true, false]);
+        setPlatform("darwin");
     });
 });

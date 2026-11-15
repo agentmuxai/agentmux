@@ -6,7 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/util/logger", () => ({ Logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 import { setPlatform } from "@/util/platformutil";
-import { beginLiveFollow, captureLiveFollow, endLiveFollow, quietLiveFollow, resizeLiveFollow, type LiveFollowSpec } from "./live-follow";
+import {
+    beginLiveFollow,
+    captureLiveFollow,
+    endLiveFollow,
+    fadeLiveFollow,
+    GUIDED_OPACITY,
+    quietLiveFollow,
+    resizeLiveFollow,
+    type LiveFollowSpec,
+} from "./live-follow";
 
 const spec: LiveFollowSpec = {
     sourceWindowLabel: "main",
@@ -25,6 +34,7 @@ function fakeApi() {
         liveFollowResize: vi.fn(async (_args: unknown) => {}),
         liveFollowCapture: vi.fn(async (_args: unknown) => ({ staged: true })),
         liveFollowQuiet: vi.fn(async (_args: { on: boolean }) => {}),
+        liveFollowFade: vi.fn(async (_args: { opacity: number }) => {}),
     };
 }
 
@@ -147,6 +157,22 @@ describe("live follow", () => {
         expect(api.liveFollowQuiet).toHaveBeenCalledTimes(2);
     });
 
+    it("fades the picture over drop guides and shows it solid again, in the order asked", async () => {
+        const api = fakeApi();
+        void fadeLiveFollow(api, true);
+        await fadeLiveFollow(api, false);
+        expect(api.liveFollowFade.mock.calls).toEqual([[{ opacity: GUIDED_OPACITY }], [{ opacity: 1 }]]);
+        expect(GUIDED_OPACITY).toBe(0.3);
+    });
+
+    it("a refused fade is only left as it was: the next one still goes out", async () => {
+        const api = fakeApi();
+        api.liveFollowFade.mockRejectedValueOnce(new Error("no host"));
+        await fadeLiveFollow(api, true);
+        await fadeLiveFollow(api, false);
+        expect(api.liveFollowFade).toHaveBeenCalledTimes(2);
+    });
+
     it("does nothing off Windows", async () => {
         setPlatform("linux");
         const api = fakeApi();
@@ -154,6 +180,8 @@ describe("live follow", () => {
         endLiveFollow(api);
         await resizeLiveFollow(api, { width: 1, height: 1 });
         await quietLiveFollow(api, false);
+        await fadeLiveFollow(api, true);
+        expect(api.liveFollowFade).not.toHaveBeenCalled();
         expect(api.liveFollowQuiet).not.toHaveBeenCalled();
         expect(api.liveFollowBegin).not.toHaveBeenCalled();
         expect(api.liveFollowEnd).not.toHaveBeenCalled();

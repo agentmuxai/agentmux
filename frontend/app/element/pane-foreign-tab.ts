@@ -12,6 +12,7 @@ import { moveBlocksToTab, tabOfBlock } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId } from "@/layout/lib/layoutNode";
 import type { DropDirection } from "@/layout/lib/types";
+import { Logger } from "@/util/logger";
 
 /** How the pill lands: as a tab of the pane it was dropped on, or as a pane beside it. */
 export type ForeignLanding = { asTab: true } | { direction: DropDirection };
@@ -30,6 +31,9 @@ export function foreignTabMoves(layoutModel: LayoutModel, paneBlockId: () => str
             const targetBlockId = paneBlockId();
             if (sourceTabId && targetTabId && targetBlockId) {
                 moveBlocksToTab({ blockIds, activeBlockId: grabbed, sourceTabId, targetTabId, targetBlockId, ...landing });
+            } else {
+                // Nothing moves, and the tab goes back to its pane: say which part was missing.
+                Logger.warn("dnd", "cross-tab tab move skipped", { blockIds, sourceTabId, targetTabId, targetBlockId, landing });
             }
             return false;
         },

@@ -27,6 +27,8 @@ vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
     setCurrentDragPayload: () => void h.payloadCleared++,
     getCurrentDragPayload: () => null,
 }));
+// The picture the cursor carries is the host's: the guides shown here have none to fade.
+vi.mock("@/app/drag/pane-live-follow", () => ({ fadeFollowedPane: () => {} }));
 vi.mock("@/app/store/rpc-util", () => ({
     TabRpcClient: { rpcCall: async () => ({ applied: true, version: Number.MAX_SAFE_INTEGER }) },
 }));
@@ -57,10 +59,15 @@ vi.mock("@/app/store/focusManager", () => ({
 }));
 
 const leaf = (id: string, size = 10): LayoutNode => ({ id, size, data: { blockId: id } }) as LayoutNode;
-const row = (id: string, size: number, ...children: LayoutNode[]): LayoutNode =>
-    ({ id, size, flexDirection: FlexDirection.Row, children }) as LayoutNode;
-const col = (id: string, size: number, ...children: LayoutNode[]): LayoutNode =>
-    ({ id, size, flexDirection: FlexDirection.Column, children }) as LayoutNode;
+// A pane carries the axis it would split along, the other one than its group's, as the tree gives it
+// (`addChildAt`, layoutNode.ts): it is what makes a side of a pane a split of it and not a place in its group.
+const group = (flexDirection: FlexDirection, id: string, size: number, children: LayoutNode[]): LayoutNode => {
+    const across = flexDirection === FlexDirection.Row ? FlexDirection.Column : FlexDirection.Row;
+    for (const child of children) if (!child.children?.length) child.flexDirection = across;
+    return { id, size, flexDirection, children } as LayoutNode;
+};
+const row = (id: string, size: number, ...children: LayoutNode[]): LayoutNode => group(FlexDirection.Row, id, size, children);
+const col = (id: string, size: number, ...children: LayoutNode[]): LayoutNode => group(FlexDirection.Column, id, size, children);
 
 let dispose: (() => void) | undefined;
 
@@ -84,10 +91,13 @@ function layout(tabs = false): LayoutModel {
 
 const own = (m: LayoutModel, id: string) => shownPx(m.additionalProps()[id].rect);
 const blocksOf = (m: LayoutModel) => m.leafs().map((n) => n.data?.blockId);
-/** Near the left edge of pane b, and in its middle. */
-const LEFT_OF_B = { x: 640, y: 200 };
+/**
+ * The spots of pane b's guide (dropGuides.ts) a tab is placed from, and the middle one, where it joins b. Pane b
+ * is 600 by 400 at 600,0: its middle is 900,200, and a spot is 56 wide with 5 between two.
+ */
+const LEFT_OF_B = { x: 839, y: 200 };
 const MIDDLE_OF_B = { x: 900, y: 200 };
-const RIGHT_OF_B = { x: 1160, y: 200 };
+const RIGHT_OF_B = { x: 961, y: 200 };
 /** Longer than the pending action's throttle holds a clearing back. */
 const CLEARED_MS = 100;
 
@@ -153,7 +163,7 @@ describe("a tab that leaves other tabs behind", () => {
         vi.useFakeTimers();
         const now = vi.spyOn(performance, "now");
         const m = layout(true);
-        // In by b's left edge, where the first drop is shown at once, and straight on to its right edge.
+        // In by b's left spot, where the first drop is shown at once, and straight on to its right spot.
         now.mockReturnValue(1000);
         beginPillPlacement(m, "a2", LEFT_OF_B);
         expect(pillDragIn(m)!.armed).toMatchObject({ targetId: "b" });
@@ -287,7 +297,7 @@ describe("a release the layout's catcher gets", () => {
         expect(h.payloadCleared).toBe(1);
     });
 
-    it("goes to the pane that stands there where the tab would join it: the pointer had just left the edge", () => {
+    it("goes to the pane that stands there where the tab would join it: the pointer had just left the spot", () => {
         vi.useFakeTimers();
         const m = layout(true);
         const [b, c] = [vi.fn(), vi.fn()];
@@ -346,7 +356,7 @@ describe("a pane reading the pointer itself", () => {
         beginPillPlacement(m, "a2", LEFT_OF_B);
         followPill(m, MIDDLE_OF_B);
         expect(pillPlacingIn(m)).toBe(false);
-        // By the header on screen this point is the body's left edge, where the tab would be placed.
+        // By the header on screen this point is in the body, not the header.
         expect(panePillZone(input(m, "b", HEADER_OF_B))).toEqual({ kind: "join" });
         // And only the pane that stands there reads it.
         expect(panePillZone(input(m, "c", HEADER_OF_B))).toEqual({ kind: "none" });
@@ -355,8 +365,9 @@ describe("a pane reading the pointer itself", () => {
     it("reads its own header once nothing glides", () => {
         const m = layout(true);
         registerPillPane(m, "b", pane);
-        expect(panePillZone(input(m, "b", HEADER_OF_B))).toMatchObject({ kind: "place" });
-        expect(panePillZone({ ...input(m, "b", HEADER_OF_B), headerRect: { left: 600, top: 0, right: 1200, bottom: 33 } })).toEqual({ kind: "join" });
+        // The header it is given, wherever the layout has the pane's: over it the tab joins, even on a spot.
+        expect(panePillZone(input(m, "b", LEFT_OF_B))).toMatchObject({ kind: "place", side: "left" });
+        expect(panePillZone({ ...input(m, "b", LEFT_OF_B), headerRect: { left: 600, top: 180, right: 1200, bottom: 220 } })).toEqual({ kind: "join" });
     });
 });
 

@@ -23,12 +23,11 @@
 import { batch } from "solid-js";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { onSessionEnded } from "@/app/drag/drag-session";
-import { findNodeByBlockId } from "./layoutNode";
+import { nearestPane } from "./dropOptions";
 import type { LayoutModel } from "./layoutModel";
-import { effectiveStack } from "./layoutStack";
 import { reflowSettleMs } from "./liveReflow";
 import { landingPictureOf } from "./paneLandingPicture";
-import { pillStandIn, pillZone, placePill, type PillZone, type PillZoneInput } from "./paneBodyDrop";
+import { pillSubject, pillZone, placePill, type PillZone, type PillZoneInput } from "./paneBodyDrop";
 import { currentPillDrag, pillDragIn, pillReflowIn, setPillDrag, type PillDrag } from "./pillDragState";
 import { tabTearOffShown } from "./tabTearOff";
 import { clearPlacement, previewPlacement, resetDropIntent, settleDropIntent, sideOfDirection } from "./placementPreview";
@@ -76,25 +75,8 @@ function paneAt(model: LayoutModel, client: { x: number; y: number }): Hit | und
     const container = model.displayContainerRef?.current;
     if (!container) return undefined;
     const box = container.getBoundingClientRect();
-    const [x, y] = [client.x - box.x, client.y - box.y];
-    let best: { nodeId: string; rect: Dimensions; dist: number } | undefined;
-    for (const leaf of model.leafs()) {
-        const rect = model.getNodeRectById(leaf.id);
-        if (!rect) continue;
-        const dx = Math.max(rect.left - x, 0, x - (rect.left + rect.width));
-        const dy = Math.max(rect.top - y, 0, y - (rect.top + rect.height));
-        const dist = dx * dx + dy * dy;
-        if (!best || dist < best.dist) best = { nodeId: leaf.id, rect, dist };
-    }
-    if (!best) return undefined;
-    const r = best.rect;
-    return {
-        nodeId: best.nodeId,
-        pointer: {
-            x: box.x + Math.max(r.left, Math.min(r.left + r.width, x)),
-            y: box.y + Math.max(r.top, Math.min(r.top + r.height, y)),
-        },
-    };
+    const near = nearestPane(model, { x: client.x - box.x, y: client.y - box.y });
+    return near && { nodeId: near.nodeId, pointer: { x: box.x + near.offset.x, y: box.y + near.offset.y } };
 }
 
 /**
@@ -134,7 +116,7 @@ export function panePillZone(input: PillZoneInput): PillZone {
 }
 
 /** What the tab would do if released at `client`, by the layout's own rects. */
-function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; zone: PillZone } | undefined {
+function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; zone: PillZone; ownPane: boolean } | undefined {
     const { model } = pill;
     const hit = paneAt(model, client);
     const container = model.displayContainerRef?.current;
@@ -142,7 +124,7 @@ function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; z
     if (!hit || !container || !rect) return undefined;
     const ownPane = hit.nodeId === pill.sourceNodeId;
     // A pane's only tab has nowhere to go inside its own pane.
-    if (ownPane && pill.lone) return { hit, zone: { kind: "none" } };
+    if (ownPane && pill.lone) return { hit, zone: { kind: "none" }, ownPane };
     const zone = pillZone({
         model,
         nodeId: hit.nodeId,
@@ -152,7 +134,7 @@ function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; z
         ownPane,
         hasBody: panes.get(model)?.get(hit.nodeId)?.hasBody() ?? true,
     });
-    return { hit, zone };
+    return { hit, zone, ownPane };
 }
 
 /**
@@ -165,11 +147,8 @@ function zoneAt(pill: PillDrag, client: { x: number; y: number }): { hit: Hit; z
  */
 export function beginPillPlacement(model: LayoutModel, blockId: string, client: { x: number; y: number }): boolean {
     if (pillDragIn(model)) return true;
-    const root = model.treeState.rootNode;
-    if (!root) return false;
-    const source = findNodeByBlockId(root, blockId);
-    const lone = !!source?.data && effectiveStack(source.data).length <= 1;
-    const standIn = pillStandIn(blockId);
+    if (!model.treeState.rootNode) return false;
+    const { sourceNodeId, lone, standIn, draggedId } = pillSubject(model, blockId);
     resetDropIntent(model);
     // A tab that leaves others behind has no pane to stand in its landing place: its picture does. It was
     // taken when the drag began (app/drag/pane-tab-drag.ts); a drag that began elsewhere takes it now, while
@@ -178,7 +157,7 @@ export function beginPillPlacement(model: LayoutModel, blockId: string, client: 
     // The layout shows a drop for the tab: its own place no longer offers the tear-off.
     tabTearOffShown();
     batch(() => {
-        setPillDrag({ model, blockId, sourceNodeId: source?.id ?? "", lone, standIn, draggedId: lone && source ? source.id : standIn.id });
+        setPillDrag({ model, blockId, sourceNodeId, lone, standIn, draggedId });
         model.showOverlay._set(true);
     });
     followPill(model, client);
@@ -204,6 +183,8 @@ export function followPill(model: LayoutModel, client: { x: number; y: number })
         draggedId: pill.draggedId,
         foreignNode: pill.lone ? undefined : pill.standIn,
         pill: true,
+        // As the pane itself reads it (`pillZone`): the same drops, so the same spots.
+        center: at.ownPane ? "none" : "join",
     });
 }
 

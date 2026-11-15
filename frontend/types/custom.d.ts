@@ -761,6 +761,9 @@ declare global {
         /** Turn a pane picture's quiet area on or off: off while the window shows another window tab than the
          *  one the drag began in. A no-op with no picture. */
         liveFollowQuiet: (args: { on: boolean }) => Promise<void>;
+        /** Show the picture at `opacity` (0 to 1): faded while a layout shows drop guides, which are in the page,
+         *  under the picture. With no picture yet, the next one starts at it; a drag's end makes it solid again. */
+        liveFollowFade: (args: { opacity: number }) => Promise<void>;
         /** Drop the picture now. Idempotent. */
         liveFollowEnd: () => Promise<void>;
         /** Give the picture another size (DIP). For a landing rect (`landingKey`) whose own picture the host keeps, it

@@ -66,6 +66,7 @@ import {
     Placeholder,
 } from "./tilelayout-shared";
 import { PillCatcher } from "./PillCatcher";
+import { DropGuides } from "./DropGuideLayer";
 import { tabTearOffOfferedIn } from "./tabTearOff";
 import { TearOffPlace } from "./TearOffPlace";
 import { tileItemType } from "@/app/drag/drag-types";
@@ -265,6 +266,7 @@ function tileLayout(
             <Placeholder layoutModel={layoutModel} style={{ top: "10000px", ...(layoutModel.overlayTransform() as JSX.CSSProperties) }} />
             <OverlayNodeWrapper layoutModel={layoutModel} />
             <PillCatcher layoutModel={layoutModel} />
+            <DropGuides layoutModel={layoutModel} />
         </div>
     );
 }

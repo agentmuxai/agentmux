@@ -26,7 +26,8 @@
 
 import { createEffect, createRoot } from "solid-js";
 import { getApi } from "@/store/global";
-import { beginLiveFollow, quietLiveFollow } from "./live-follow";
+import { isWindows } from "@/util/platformutil";
+import { beginLiveFollow, fadeLiveFollow, quietLiveFollow } from "./live-follow";
 import { peekTearOffSnapshot } from "./tearoff-snapshot";
 
 /** How long the drag waits for the pane's picture; without one the pane tears off as before. */
@@ -63,6 +64,17 @@ export async function followPaneDrag(blockId: string, windowLabel: string, home?
         ...(body ? { quiet: { ...body, viewportWidth: window.innerWidth } } : {}),
     });
     if (home && body) followHome(home);
+}
+
+/**
+ * Fade the picture while a layout shows drop guides (`on`), and show it solid again when none does
+ * (dropGuides.ts). The guides are in the page and the picture is over the page, at the pane's own size, so over
+ * another window tab's layout it covered the spots a drop is chosen by. Faded, both are seen (the operator,
+ * 2026-11-15: "when the follow pane is over the guide, can you make the follow pane 70% transparent?").
+ */
+export function fadeFollowedPane(on: boolean): void {
+    if (!isWindows()) return;
+    void fadeLiveFollow(getApi(), on);
 }
 
 /** Keep the quiet area on only while the home layout shows the pane, until the drag ends. */

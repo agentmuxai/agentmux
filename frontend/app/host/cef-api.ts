@@ -604,6 +604,9 @@ function crossWindowDragApi() {
         liveFollowQuiet: async (args) => {
             await invokeCommand("live_follow_quiet", args);
         },
+        liveFollowFade: async (args) => {
+            await invokeCommand("live_follow_fade", args);
+        },
     } satisfies Partial<AppApi>;
 }
 

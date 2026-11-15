@@ -119,6 +119,85 @@
         z-index: var(--z-layout-overlay);
     }
 
+    // The drop guides (DropGuideLayer.tsx): a hot spot per drop over the hovered pane, each a small picture of the
+    // layout the drop leaves, with the dragged pane filled in. Visual only; the pointer is read from their
+    // geometry.
+    .drop-guides {
+        position: absolute;
+        inset: 0;
+        z-index: var(--z-layout-overlay);
+        pointer-events: none;
+        overflow: hidden;
+    }
+
+    .drop-guide {
+        position: absolute;
+        top: 0;
+        left: 0;
+        box-sizing: border-box;
+        padding: 3px;
+        border-radius: var(--radius-sm);
+        // A spot has to be seen the moment it appears, over whatever the pane under it shows (a terminal in
+        // its own colours, a page, an image), in every theme. Its edge is the theme's text colour, the
+        // strongest contrast a theme has against its own surfaces: light on a dark theme, dark on a light one.
+        // Around it, a thin ring of the surface colour, the opposite tone, so the edge still stands out over
+        // content that happens to be the text colour itself. Tokens only, so each theme sets both.
+        background-color: var(--modal-bg-color);
+        border: 2px solid var(--main-text-color);
+        box-shadow:
+            0 0 0 1.5px var(--modal-bg-color),
+            0 3px 10px rgba(0, 0, 0, 0.45);
+        transition: background-color var(--duration-quick) ease;
+
+        // The spot whose drop is shown: filled with the accent, its picture drawn in the surface colour (dark
+        // on a dark theme's bright accent, light on a light theme's deep one). The edge keeps its contrast.
+        &.active {
+            background-color: rgb(var(--accent-color-rgb));
+
+            .drop-guide-pane {
+                box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--modal-bg-color) 60%, transparent);
+
+                &.moved,
+                &.joined {
+                    background-color: var(--modal-bg-color);
+                    box-shadow: none;
+                }
+
+                &.joined {
+                    border-top-color: var(--main-text-color);
+                }
+            }
+        }
+    }
+
+    // The layout the drop leaves, drawn small.
+    .drop-guide-map {
+        position: relative;
+        width: 100%;
+        height: 100%;
+    }
+
+    // A pane of it: an outline. The dragged pane, where the drop leaves it, is filled.
+    .drop-guide-pane {
+        position: absolute;
+        box-sizing: border-box;
+        border: 0.5px solid transparent;
+        background-clip: padding-box;
+        box-shadow: inset 0 0 0 1px rgba(var(--accent-color-rgb), 0.45);
+
+        &.moved {
+            background-color: rgba(var(--accent-color-rgb), 0.9);
+            box-shadow: none;
+        }
+
+        // A tab that joins the pane's tabs: the pane itself, filled lighter, under a tab bar.
+        &.joined {
+            background-color: rgba(var(--accent-color-rgb), 0.4);
+            border-top: 3px solid rgba(var(--accent-color-rgb), 0.95);
+            box-shadow: none;
+        }
+    }
+
     .overlay-node {
         display: flex;
         flex: 0 1 auto;
@@ -187,6 +266,8 @@
         &.tear-off-offered,
         &.tab-tear-off-offered {
             .tear-off-place {
+                // The two reds of the checkerboard: the error red, and a lighter one.
+                --tear-off-red: var(--error-color);
                 --tear-off-light: color-mix(in srgb, var(--error-color) 68%, var(--button-color));
                 --tear-off-square: 24px;
                 position: absolute;
@@ -196,8 +277,8 @@
                 display: grid;
                 place-items: center;
                 overflow: hidden;
-                background-color: var(--error-color);
-                background-image: repeating-conic-gradient(var(--tear-off-light) 0 25%, var(--error-color) 0 50%);
+                background-color: var(--tear-off-red);
+                background-image: repeating-conic-gradient(var(--tear-off-light) 0 25%, var(--tear-off-red) 0 50%);
                 background-size: calc(2 * var(--tear-off-square)) calc(2 * var(--tear-off-square));
                 pointer-events: none;
             }

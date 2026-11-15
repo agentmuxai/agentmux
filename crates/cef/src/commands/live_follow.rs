@@ -59,7 +59,7 @@ pub(crate) fn picture_wanted(
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, capture, end, landing, on_cursor, on_escape, on_session_end, picture_held, picture_shown, quiet, resize};
+pub use win::{begin, capture, end, fade, landing, on_cursor, on_escape, on_session_end, picture_held, picture_shown, quiet, resize};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -82,18 +82,24 @@ pub fn quiet(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn fade(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub async fn capture(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "staged": false }))
 }
 
 /// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`,
-/// `live_follow_quiet`, and `live_follow_end` for any other.
+/// `live_follow_quiet`, `live_follow_fade`, and `live_follow_end` for any other.
 pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     match cmd {
         "live_follow_begin" => begin_blocking(state, args).await,
         "live_follow_resize" => resize_blocking(args).await,
         "live_follow_capture" => capture(state, args).await,
         "live_follow_quiet" => quiet(args),
+        "live_follow_fade" => fade(args),
         _ => end(),
     }
 }
@@ -114,6 +120,28 @@ pub async fn resize_blocking(args: &serde_json::Value) -> Result<serde_json::Val
         .map_err(|e| format!("live_follow_resize join error: {}", e))?
 }
 
+/// The alpha (0 to 255) of a picture shown at `opacity` (0 to 1). Never under `MIN_ALPHA`: a picture the page
+/// asked to fade is still a picture, and one that cannot be seen would read as the drag having dropped it.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn alpha_of(opacity: f64) -> u8 {
+    const MIN_ALPHA: f64 = 26.0;
+    if opacity.is_nan() {
+        return 255;
+    }
+    (opacity * 255.0).round().clamp(MIN_ALPHA, 255.0) as u8
+}
+
+/// The next alpha of a fade from `shown` to `target`: one step of `FADE_STEP` toward it, never past it.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn fade_step(shown: u8, target: u8) -> u8 {
+    const FADE_STEP: u8 = 24;
+    if shown < target {
+        shown.saturating_add(FADE_STEP).min(target)
+    } else {
+        shown.saturating_sub(FADE_STEP).max(target)
+    }
+}
+
 /// Where the cursor holds a picture of `size`, made from one of `source_size` that was pressed at `grab`: the
 /// same spot of the pane, so the grab scales with the picture, and is kept inside it. Always from the original
 /// grab, never from a previous size's offset, so the pane's own size has the original alignment back.
@@ -128,7 +156,7 @@ pub(crate) fn offset_within(grab: (i32, i32), source_size: (i32, i32), size: (i3
 
 #[cfg(target_os = "windows")]
 mod win {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::{Arc, Mutex};
 
     use windows_sys::Win32::Foundation::{
@@ -143,7 +171,7 @@ mod win {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW, PostMessageW,
         PostQuitMessage,
-        RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage, UpdateLayeredWindow, HWND_TOP, MSG, SWP_ASYNCWINDOWPOS,
+        KillTimer, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage, UpdateLayeredWindow, HWND_TOP, MSG, SWP_ASYNCWINDOWPOS,
         SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, ULW_ALPHA, WM_APP,
         WM_ERASEBKGND, WM_DESTROY, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
         WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
@@ -159,7 +187,12 @@ mod win {
     const WM_FOLLOW_GRACE: u32 = WM_APP + 0x62;
     /// Sent to the picture's window: paint the picture waiting in `PENDING_REPAINT`, at its size.
     const WM_FOLLOW_RESIZE: u32 = WM_APP + 0x63;
+    /// Sent to the picture's window: fade to the opacity in `TARGET_ALPHA`.
+    const WM_FOLLOW_FADE: u32 = WM_APP + 0x64;
     const TIMER_ID: usize = 1;
+    /// The timer of a fade: a step of `fade_step` every `FADE_TICK_MS`, about 120 ms from solid to faded.
+    const FADE_TIMER_ID: usize = 2;
+    const FADE_TICK_MS: u32 = 15;
     /// The longest a picture lives if nothing ends it (a drag that never reports its end).
     const FAILSAFE_MS: u32 = 120_000;
     /// How long a picture stays after the drag ends: the real window is promoted at its place meanwhile.
@@ -218,6 +251,11 @@ mod win {
     /// Whether a pane's picture is held out of sight over its own layout at times (`quiet`): the drag then
     /// shows no picture there at all, not the shell's either (`picture_held`).
     static PICTURE_HELD: AtomicBool = AtomicBool::new(false);
+    /// The opacity the page asked for (`fade`), as an alpha. It is the page's to set and outlives a picture: a
+    /// drop guide can show before the picture of its drag is made. Solid again when a drag ends.
+    static TARGET_ALPHA: AtomicU8 = AtomicU8::new(255);
+    /// The alpha the picture is painted with now: on its way to `TARGET_ALPHA` during a fade.
+    static SHOWN_ALPHA: AtomicU8 = AtomicU8::new(255);
     /// The picture `resize` composed, for the window's thread to paint (`WM_FOLLOW_RESIZE`); a newer one
     /// replaces an unpainted one, and the end of the picture clears it.
     static PENDING_REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
@@ -293,6 +331,8 @@ mod win {
         let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
+        // A new picture starts at the opacity asked for, with no fade to it.
+        SHOWN_ALPHA.store(TARGET_ALPHA.load(Ordering::Acquire), Ordering::Release);
         let hwnd = spawn_overlay(bgra.clone(), size)?;
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
@@ -330,6 +370,7 @@ mod win {
     /// Drop the picture now (the page's drag is over and its real window is up, or the drag was cancelled).
     pub fn end() -> Result<serde_json::Value, String> {
         end_now();
+        TARGET_ALPHA.store(255, Ordering::Release);
         Ok(serde_json::Value::Null)
     }
 
@@ -434,6 +475,19 @@ mod win {
         f.quiet_on = on;
         if let Some((x, y)) = f.cursor {
             track(f, x, y, false);
+        }
+        Ok(serde_json::Value::Null)
+    }
+
+    /// Show the picture at `opacity` (0 to 1, 1 is solid): the page fades it while its layout shows drop guides,
+    /// which are drawn in the page, under the picture (the operator, 2026-11-15: "when the follow pane is over
+    /// the guide, can you make the follow pane 70% transparent?"). The picture fades to it over a few frames,
+    /// where it is, shown or not. With no picture yet, the next one starts at it.
+    pub fn fade(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        TARGET_ALPHA.store(super::alpha_of(num(args, "opacity")?), Ordering::Release);
+        let hwnd = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?.as_ref().map(|f| f.hwnd);
+        if let Some(hwnd) = hwnd {
+            unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_FADE, 0, 0) };
         }
         Ok(serde_json::Value::Null)
     }
@@ -597,11 +651,14 @@ mod win {
     /// Escape: the tear-off is cancelled, so the picture goes at once.
     pub fn on_escape() {
         end_now();
+        TARGET_ALPHA.store(255, Ordering::Release);
     }
 
     /// The drag's hook session is over (release, Escape, or stopped). A hidden picture goes now; a shown one
     /// stays for its grace time, under the window about to be promoted at its place.
     pub fn on_session_end() {
+        // The drag is over, and its guides with it: the next drag's picture is solid until the page says otherwise.
+        TARGET_ALPHA.store(255, Ordering::Release);
         let state = FOLLOWER.lock().ok().and_then(|g| g.as_ref().map(|f| (f.hwnd, f.shown)));
         match state {
             Some((hwnd, true)) => {
@@ -718,7 +775,7 @@ mod win {
             let old = SelectObject(mem, dib as _);
             let dest_size = SIZE { cx: w, cy: h };
             let src = POINT { x: 0, y: 0 };
-            let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 0 };
+            let blend = blend_at(SHOWN_ALPHA.load(Ordering::Acquire));
             let dest = at.map(|(x, y)| POINT { x, y });
             let dest_ptr = dest.as_ref().map_or(std::ptr::null(), |p| p as *const POINT);
             let ok = UpdateLayeredWindow(hwnd, screen, dest_ptr, &dest_size, mem, &src, 0, &blend, ULW_ALPHA);
@@ -733,6 +790,34 @@ mod win {
         result
     }
 
+    fn blend_at(alpha: u8) -> BLENDFUNCTION {
+        BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: 0 }
+    }
+
+    /// One step of the picture's fade toward `TARGET_ALPHA`: the picture it holds, blended at the next alpha
+    /// (no source: the picture and its place stay as they are). True when the fade has arrived.
+    unsafe fn fade_tick(hwnd: HWND) -> bool {
+        let target = TARGET_ALPHA.load(Ordering::Acquire);
+        let next = super::fade_step(SHOWN_ALPHA.load(Ordering::Acquire), target);
+        SHOWN_ALPHA.store(next, Ordering::Release);
+        let blend = blend_at(next);
+        let ok = UpdateLayeredWindow(
+            hwnd,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            0,
+            &blend,
+            ULW_ALPHA,
+        );
+        if ok == 0 {
+            tracing::warn!(target: "dnd:tearoff", error = GetLastError(), "[live-follow] the picture could not be faded");
+        }
+        next == target
+    }
+
     unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         match msg {
             // -1 is HTTRANSPARENT: the point belongs to whatever is beneath.
@@ -740,6 +825,18 @@ mod win {
             // MA_NOACTIVATE.
             WM_MOUSEACTIVATE => 3,
             WM_ERASEBKGND => 1,
+            WM_FOLLOW_FADE => {
+                if !fade_tick(hwnd) {
+                    SetTimer(hwnd, FADE_TIMER_ID, FADE_TICK_MS, None);
+                }
+                0
+            }
+            WM_TIMER if wp == FADE_TIMER_ID => {
+                if fade_tick(hwnd) {
+                    KillTimer(hwnd, FADE_TIMER_ID);
+                }
+                0
+            }
             WM_FOLLOW_END | WM_TIMER => {
                 DestroyWindow(hwnd);
                 0
@@ -802,7 +899,37 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{follow_origin, offset_within, picture_wanted, place_within};
+    use super::{alpha_of, fade_step, follow_origin, offset_within, picture_wanted, place_within};
+
+    #[test]
+    fn a_faded_picture_is_never_solid_or_gone_by_accident() {
+        assert_eq!(alpha_of(1.0), 255);
+        assert_eq!(alpha_of(0.3), 77);
+        // Out of range, or not a number: solid, or the least a picture is shown at.
+        assert_eq!(alpha_of(7.0), 255);
+        assert_eq!(alpha_of(0.0), 26);
+        assert_eq!(alpha_of(-1.0), 26);
+        assert_eq!(alpha_of(f64::NAN), 255);
+    }
+
+    #[test]
+    fn a_fade_steps_to_its_target_both_ways_and_stops_on_it() {
+        let run = |from: u8, to: u8| {
+            let (mut at, mut steps) = (from, 0);
+            while at != to {
+                let next = fade_step(at, to);
+                assert!(if from < to { next > at && next <= to } else { next < at && next >= to });
+                at = next;
+                steps += 1;
+            }
+            steps
+        };
+        assert_eq!(run(255, 77), 8);
+        assert_eq!(run(77, 255), 8);
+        assert_eq!(fade_step(77, 77), 77);
+        assert_eq!(fade_step(250, 255), 255);
+        assert_eq!(fade_step(5, 0), 0);
+    }
 
     #[test]
     fn a_panes_picture_stops_whole_at_the_edge_of_its_monitor_while_the_cursor_goes_on() {

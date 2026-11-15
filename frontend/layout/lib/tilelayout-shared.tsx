@@ -34,8 +34,10 @@ import {
 import { ELEMENT_DRAG_KINDS, isAnyUnderway } from "@/app/drag/drag-session";
 import { paneCaptureInFlight } from "@/app/drag/pane-capture-gate";
 import { shouldReduceMotion } from "@/app/motion/motion";
+import { dropHeldIn } from "./heldDrop";
 import { PaneLanding } from "./PaneLanding";
 import { pillDragIn } from "./pillDragState";
+import { nearestPane } from "./dropOptions";
 import { clearPlacement, leavePlacement, previewPlacement, showStay, ZONE_EXIT_MS, type PlacementInput } from "./placementPreview";
 import { commitTearOff, leaveOwnPane, restOverOwnPane } from "./tearOffPreview";
 import {
@@ -97,8 +99,10 @@ function commitPlacement(model: LayoutModel): void {
         model.onDrop();
         return;
     }
-    clearPlacement(model);
+    // The move first: it holds the drop that is shown until srv brings the pane (heldDrop.ts), and the clearing
+    // then takes down only what the drag itself kept.
     moveBlocksToTab(crossTabDrop);
+    clearPlacement(model);
 }
 
 /**
@@ -352,42 +356,12 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             return;
         }
 
-        let bestLeafId: string | null = null;
-        let bestRect: { top: number; left: number; width: number; height: number } | null = null;
-        let bestDist = Infinity;
-        for (const leaf of props.layoutModel.leafs()) {
-            if (leaf.id === dragNodeId) continue;
-            const rect = props.layoutModel.getNodeRectById(leaf.id);
-            if (!rect) continue;
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top + rect.height / 2;
-            const dx = offset.x - cx;
-            const dy = offset.y - cy;
-            const dist = dx * dx + dy * dy;
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestLeafId = leaf.id;
-                bestRect = rect;
-            }
-        }
-        if (!bestLeafId || !bestRect) return;
-
-        // Clamp the cursor offset to the chosen rect — by definition
-        // the cursor is OUTSIDE every pane rect when this fallback
-        // runs (dead spot). determineDropDirection returns undefined
-        // for any point outside the supplied dimensions, which would
-        // make this fallback a no-op without clamping. Clamping
-        // resolves the cursor to the nearest edge of the chosen rect,
-        // which gives the natural quadrant for the drop: drag-into-
-        // gutter-right-of-paneA → clamps to paneA.right → returns
-        // Right quadrant of paneA → pane lands between A and B.
-        // (codex P2 on PR #838.)
-        const clampedOffset = {
-            x: Math.max(bestRect.left, Math.min(bestRect.left + bestRect.width, offset.x)),
-            y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
-        };
-
-        samplePlacement(props.layoutModel, dragNodeId, { targetId: bestLeafId, rect: bestRect, offset: clampedOffset });
+        // The nearest pane by its rect, with the pointer brought inside it: by definition the pointer is
+        // outside every pane's rect when this fallback runs (a gap, the layout's edge), and a point outside
+        // a pane has no drop there. The same reading a tab pill's drag uses (dropOptions.ts).
+        const near = nearestPane(props.layoutModel, offset, dragNodeId);
+        if (!near) return;
+        samplePlacement(props.layoutModel, dragNodeId, { targetId: near.nodeId, rect: near.rect, offset: near.offset });
     });
 
     onMount(() => {
@@ -572,10 +546,13 @@ export const Placeholder = (props: PlaceholderProps) => {
 
     // A tab pill that leaves other tabs behind has no pane in the layout to stand in its landing place: the
     // place holds its picture (PaneLanding.tsx). A pane's only tab moves the pane itself.
-    const landingTab = () => {
+    // Kept through a drop that is held for the pane srv brings (heldDrop.ts): the place is not emptied
+    // between the release and the pane.
+    const landingTab = createMemo<string | undefined>((was) => {
         const pill = pillDragIn(props.layoutModel);
-        return pill && !pill.lone ? pill.blockId : undefined;
-    };
+        if (pill) return pill.lone ? undefined : pill.blockId;
+        return dropHeldIn(props.layoutModel) ? was : undefined;
+    });
 
     return (
         <div class={clsx("placeholder-container", reflowing() && "live-reflow")} style={props.style}>
