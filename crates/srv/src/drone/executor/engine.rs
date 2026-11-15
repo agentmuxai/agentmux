@@ -10,6 +10,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::drone::recorder::Persist;
 use crate::drone::types::{BlockState, DroneGraph};
 
 pub use crate::backend::drone_run_event::RunEvent;
@@ -32,12 +33,13 @@ pub struct RunHandle {
 /// snapshot for the run-history record. `trigger` is what started the run
 /// (`{{trigger.*}}`); `Null` when nothing did. `run_cap_usd` ends the run
 /// before its next block once its Agent blocks have spent that much (a job's
-/// per-run cap); `None` is no cap, as for a run started by hand.
+/// per-run cap); `None` is no cap, as for a run started by hand. `persist` says
+/// where to keep the run's checkpoints; `None` keeps none.
 pub async fn run_drone(
     drone_id: String,
     graph: DroneGraph,
     trigger: Value,
-    run_cap_usd: Option<f64>,
+    (run_cap_usd, persist): (Option<f64>, Option<Persist>),
 ) -> Result<RunHandle, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::unbounded_channel();
@@ -55,7 +57,7 @@ pub async fn run_drone(
             run_id: run_id_for_task.clone(),
             drone_id: drone_id_for_evt,
         });
-        let limits = super::scheduler::Limits { run_cap_usd, cancel };
+        let limits = super::scheduler::Limits { run_cap_usd, cancel, persist };
         let ended = super::scheduler::execute(&run_id_for_task, (&graph, trigger, limits, &drone_id), &tx_for_task, &states_for_task).await;
         crate::backend::drone_cancel::forget_run(&run_id_for_task);
         let _ = tx_for_task.send(match ended {
@@ -144,7 +146,7 @@ mod tests {
             edges: vec![e("e1", "v1", "r1")],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, (None, None)).await.unwrap();
         let mut rx = handle.events;
         while let Some(ev) = rx.recv().await {
             if matches!(ev, RunEvent::RunDone { .. } | RunEvent::RunFailed { .. }) {
@@ -205,7 +207,7 @@ mod tests {
         resp.data = json!({ "kind": "response", "template": "done" });
         for cap in [None, Some(5.0), Some(0.0)] {
             let g = DroneGraph { nodes: vec![resp.clone()], edges: vec![] };
-            let mut handle = run_drone("wf1".to_string(), g, Value::Null, cap).await.unwrap();
+            let mut handle = run_drone("wf1".to_string(), g, Value::Null, (cap, None)).await.unwrap();
             let mut out = None;
             while let Some(ev) = handle.events.recv().await {
                 if let RunEvent::RunDone { output, .. } = ev {
@@ -223,7 +225,7 @@ mod tests {
         resp.data = json!({ "kind": "response", "template": "{{trigger.repo}}#{{trigger.pr.number}} {{trigger.none}}" });
         let g = DroneGraph { nodes: vec![resp], edges: vec![] };
         let input = json!({ "repo": "agentmux", "pr": { "number": 12 } });
-        let mut handle = run_drone("wf1".to_string(), g, input, None).await.unwrap();
+        let mut handle = run_drone("wf1".to_string(), g, input, (None, None)).await.unwrap();
         let mut out = None;
         while let Some(ev) = handle.events.recv().await {
             match ev {
@@ -276,7 +278,7 @@ mod tests {
             ],
         };
 
-        let handle = run_drone("wf1".to_string(), g, Value::Null, None).await.unwrap();
+        let handle = run_drone("wf1".to_string(), g, Value::Null, (None, None)).await.unwrap();
         // Drain events to completion.
         let mut rx = handle.events;
         let mut got_done_ids: Vec<String> = Vec::new();
