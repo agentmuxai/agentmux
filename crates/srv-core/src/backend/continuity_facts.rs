@@ -79,7 +79,7 @@ pub(crate) fn render(facts: &Facts, now_ms: i64) -> String {
         if facts.tasks.len() > MAX_LISTED {
             parts.push(format!("and {} more", facts.tasks.len() - MAX_LISTED));
         }
-        lines.push(format!("- Kanban tasks you hold (claimed): {}", parts.join("; ")));
+        lines.push(format!("- Kanban tasks you hold (claimed): {}. Re-read a task's brief with Tasks get (id), not from a summary.", parts.join("; ")));
     }
     if !facts.background.is_empty() {
         let mut parts: Vec<String> = facts

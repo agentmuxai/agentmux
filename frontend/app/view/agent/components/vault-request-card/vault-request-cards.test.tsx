@@ -30,7 +30,7 @@ import { __resetPaneRequests, paneRequests } from "@/app/store/pane-requests";
 import { PaneRequestDock } from "@/app/view/agent/pane-requests/PaneRequestDock";
 import { refreshVault } from "@/app/view/vault/vault-store";
 import { VaultRequestsList } from "@/app/view/vault/vault-requests-list";
-import { VaultRequestsStatus } from "@/app/statusbar/VaultRequestsStatus";
+import { SummaryStatus } from "@/app/statusbar/SummaryStatus";
 import { VaultRowAsks } from "./vault-row-asks";
 import { startVaultRequestCards } from "./vault-request-cards";
 
@@ -245,7 +245,7 @@ describe("an agent's Vault requests as cards in its pane", () => {
         render(() => (
             <>
                 <VaultRowAsks agent="builder" />
-                <VaultRequestsStatus />
+                <SummaryStatus rows={() => []} items={() => []} apps={() => []} tasks={() => 0} />
             </>
         ));
         const line = await screen.findByTestId("vault-row-asks");
@@ -253,10 +253,13 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(line.textContent).toMatch(/Waiting for you in the Vault: Parked token · goes ahead in 0:(29|30)/);
         expect(line.textContent, "the one in its pane is asked there").not.toContain("1 more");
         // The one asked in its pane is counted too: the status bar counts every request, whatever pane asked.
-        const status = screen.getByRole("button", { name: /2 Vault requests wait/ });
-        expect(status.textContent).toContain("2 Vault requests");
+        const status = screen.getByRole("button", { name: "2 Vault requests wait on you" });
+        expect(status.textContent).toBe("2");
         fireEvent.click(within(line).getByRole("button", { name: "Answer" }));
+        // The status bar lists them: one list with a row for each, and a button that opens the Vault on it.
         fireEvent.click(status);
+        const list = screen.getByRole("dialog", { name: "Waiting on you" });
+        fireEvent.click(within(list).getAllByRole("button", { name: /^Answer/ })[0]);
         expect(openedAt.mock.calls, "both open the Vault on the parked request").toEqual([["use-1"], ["use-1"]]);
         fireEvent.click(within(line).getByRole("button", { name: "Deny" }));
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));

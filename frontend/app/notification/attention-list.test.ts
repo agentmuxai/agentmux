@@ -139,10 +139,8 @@ describe("mergeAttention", () => {
         ]);
     });
 
-    it("reads a wait that only srv's row reports as a Vault wait when the Vault holds a request from that pane", () => {
+    it("keeps a wait that only srv's row reports as an ask: it does not say what it waits on", () => {
         const asks = row({ name: "Korp", block_id: "far", state: "waiting_on_user" });
-        const items = mergeAttention([], [asks], seen, () => false, () => undefined, (b) => b === "far");
-        expect(items.map((i) => i.kinds)).toEqual([["vault"]]);
-        expect(mergeAttention([], [asks], seen).map((i) => i.kinds)).toEqual([[]]);
+        expect(mergeAttention([], [asks], seen, () => false).map((i) => i.kinds)).toEqual([[]]);
     });
 });
