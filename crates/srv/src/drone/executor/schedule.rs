@@ -293,7 +293,8 @@ pub(super) fn timeout_seconds(node: &FlowNode) -> Result<Option<u64>, String> {
 /// Each block's own `timeout_seconds` and `retry` are well formed.
 fn check_block_limits(sorted: &[&FlowNode], issues: &mut Vec<Issue>) {
     for node in sorted {
-        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err());
+        let wait = (kind_of(node) == "wait").then(|| super::blocks::wait::check(node).err()).flatten();
+        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err()).chain(wait);
         issues.extend(bad.map(|message| Issue { node: Some(node.id.clone()), message }));
     }
 }

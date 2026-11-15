@@ -32,6 +32,12 @@ impl<'a> Scheduler<'a> {
         self.keep(after, false)
     }
 
+    /// The checkpoint a run keeps before it stops at `id`: without it a restart could not
+    /// take the wait up again, so a run that cannot keep it ends.
+    pub(super) fn checkpoint_required(&mut self, id: &str) -> Result<(), String> {
+        self.keep(Some(id), true)
+    }
+
     /// What `node` does to the world, which a for-each takes from its body.
     fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
         let resolve = |template: &str| self.scope.resolve(template);
@@ -82,7 +88,7 @@ impl<'a> Scheduler<'a> {
                 Err(why)
             }
             Err(e) if required => {
-                Err(format!("stopped: the run could not keep its place before {}, which has effects, so it did not start it ({e})", after.unwrap_or_default()))
+                Err(format!("stopped: the run could not keep its place before {}, so it did not start it ({e})", after.unwrap_or_default()))
             }
             Err(e) => {
                 tracing::warn!(run_id = %self.run_id, error = %e, "drone: a checkpoint was not kept");
@@ -109,15 +115,16 @@ impl<'a> Scheduler<'a> {
                     .filter(|(_, forced)| *forced)
                     .map(|(id, _)| id.to_string())
                     .chain(self.in_flight.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
+                    .chain(self.waiting.filter(|(_, forced)| *forced).map(|(id, _)| id.to_string()))
                     .collect(),
                 running: self.in_flight.iter().map(|(id, _)| id.to_string()).collect(),
-                waiting: Vec::new(),
+                waiting: self.waiting.iter().map(|(id, _)| id.to_string()).collect(),
             },
             loop_counters: self.rounds.iter().map(|(id, n)| (id.to_string(), *n)).collect(),
             cost_usd: self.spent,
             elapsed_ms: self.elapsed_before_ms + ms(&self.started),
-            deadlines: BTreeMap::new(),
-            resume_on: BTreeMap::new(),
+            deadlines: self.deadlines.clone(),
+            resume_on: self.resume_on.clone(),
             graph: self.recorder.as_ref().map(|(_, g)| g.clone()).unwrap_or(GraphRef { version: 0, hash: String::new() }),
             drone_id: self.scope.drone_id.clone(),
             trigger: self.scope.trigger.clone(),
@@ -186,6 +193,16 @@ impl<'a> Scheduler<'a> {
             [id] => Some((node(id)?, c.frontier.forced.iter().any(|f| f == id))),
             _ => return Err("the saved run has more than one block running, which this build does not run".to_string()),
         };
+        // A block that was waiting is run again from its start, and takes the wait it finds.
+        let mut ready = ready;
+        for id in c.frontier.waiting.iter().rev() {
+            let id = node(id)?;
+            if queued.insert(id) {
+                ready.push_front((id, c.frontier.forced.iter().any(|f| f == id)));
+            }
+        }
+        self.deadlines = c.deadlines.clone();
+        self.resume_on = c.resume_on.clone();
         self.in_flight = in_flight;
         self.ready = ready;
         self.queued = queued;

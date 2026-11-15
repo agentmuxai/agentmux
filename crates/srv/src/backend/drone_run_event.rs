@@ -38,6 +38,25 @@ pub enum RunEvent {
     /// running: the run waits, `needs_attention`, for it to be run again, skipped
     /// (with an output) or the run cancelled (`resolvedronerun`).
     NeedsAttention { run_id: String, block_id: String, reason: String },
+    /// The run stopped at a Wait block and holds no process while it waits.
+    /// `resume_at` is the time it goes on (milliseconds since 1970); `on` and
+    /// `key` are for a wait on an event: what it is for, and the key that ends it
+    /// (`resumedronewait`). A restart sends it again for the wait it took up.
+    Waiting {
+        run_id: String,
+        block_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        resume_at: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        on: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        key: Option<String>,
+    },
+    /// The wait at `block_id` is over; `late` when the run was taken up after its time.
+    WaitEnded { run_id: String, block_id: String, late: bool },
     /// The run's wait was answered: `choice` is `run_again` or `skip`. (A run that
     /// is cancelled ends with `RunCancelled`.)
     AttentionAnswered { run_id: String, block_id: String, choice: String },

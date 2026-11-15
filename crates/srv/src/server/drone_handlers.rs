@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
-    COMMAND_LIST_DRONE_RUNS, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
+    COMMAND_LIST_DRONE_RUNS, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -228,7 +228,7 @@ fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, starte
 }
 
 /// A run's row follows its wait: `needs_attention` with the reason when a step needs an
-/// answer, `running` again once it has one. Any other event leaves the row alone.
+/// answer, `waiting` at a Wait block, `running` again once either is over. Any other event leaves the row alone.
 async fn note_attention(
     mstore: &crate::backend::storage::store::Store,
     (run_id, drone_id, started_at): (&str, &str, i64),
@@ -237,7 +237,8 @@ async fn note_attention(
 ) {
     let (status, error) = match ev {
         RunEvent::NeedsAttention { reason, .. } => (RunStatus::NeedsAttention, reason.clone()),
-        RunEvent::AttentionAnswered { .. } => (RunStatus::Running, String::new()),
+        RunEvent::AttentionAnswered { .. } | RunEvent::WaitEnded { .. } => (RunStatus::Running, String::new()),
+        RunEvent::Waiting { .. } => (RunStatus::Waiting, String::new()),
         _ => return,
     };
     let row = DroneRun {
@@ -480,6 +481,35 @@ pub(crate) fn resolve_drone_run(cmd: ResolveRunReq) -> Result<ResolveRunResp, St
     Ok(ResolveRunResp { run_id, action })
 }
 
+/// What `resumedronewait` brings to a run waiting on an event.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ResumeWaitReq {
+    /// The key the run's `Waiting` event gave. Whoever holds it can end the wait, once.
+    pub key: String,
+    /// What the event says, at most 64 KB. The run reads it as outside text (tainted).
+    #[serde(default)]
+    #[ts(type = "unknown", optional)]
+    pub payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ResumeWaitResp {
+    pub resumed: bool,
+}
+
+/// `resumedronewait`: end a Wait block that waits on an event.
+pub(crate) fn resume_drone_wait(cmd: ResumeWaitReq) -> Result<ResumeWaitResp, String> {
+    let payload = cmd.payload.unwrap_or(serde_json::Value::Null);
+    let size = payload.to_string().len();
+    if size > MAX_INPUT_BYTES {
+        return Err(format!("resumedronewait: the payload is {size} bytes; at most {MAX_INPUT_BYTES}"));
+    }
+    crate::backend::drone_wait::signal(&cmd.key, payload).map_err(|e| format!("resumedronewait: {e}"))?;
+    Ok(ResumeWaitResp { resumed: true })
+}
+
 /// `listdroneruns`.
 pub(crate) fn list_drone_runs(state: &AppState, cmd: ListRunsReq) -> Result<Vec<DroneRun>, String> {
     let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
@@ -527,6 +557,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, _ctx| async move { resolve_drone_run(cmd) });
+    engine.register_typed(COMMAND_RESUME_DRONE_WAIT, move |cmd: ResumeWaitReq, _ctx| async move { resume_drone_wait(cmd) });
 
     let s = state.clone();
     engine.register_typed(COMMAND_LIST_DRONE_RUNS, move |cmd: ListRunsReq, _ctx| {
@@ -566,6 +597,7 @@ mod tests {
             (COMMAND_DELETE_DRONE, "DeleteDroneReq", "DeleteResp"),
             (COMMAND_RUN_DRONE, "RunDroneReq", "RunResp"),
             (COMMAND_RESOLVE_DRONE_RUN, "ResolveRunReq", "ResolveRunResp"),
+            (COMMAND_RESUME_DRONE_WAIT, "ResumeWaitReq", "ResumeWaitResp"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

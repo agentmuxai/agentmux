@@ -178,6 +178,18 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],
     },
+    wait: {
+        kind: "wait",
+        emoji: "⏳",
+        label: "Wait",
+        description: "Stop the run for a time (for: 30m, until: 2026-12-01T09:00:00Z) or for an event (on: a name; the run's Waiting event gives the key that ends it). It holds no process while it waits.",
+        color: "#64748b", // colour: fixed (the block's identity colour)
+        defaultData: {
+            for: "30m",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
     foreach: {
         kind: "foreach",
         emoji: "🔁",
