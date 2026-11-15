@@ -157,6 +157,7 @@ Further sources are added as typed sources on `cloud_event` (a store submission'
 
 - A payload is at most 64 KB, stored with the run (the Drone run's `trigger` field), and hashed into the ledger row (`payload_hash`, the column the Jobs spec reserves).
 - Every trigger kind publishes a **payload schema** that marks each field typed-clean or tainted. The canvas uses it to autocomplete `{{trigger.…}}` and to colour tainted references.
+- **As built (phase 3):** `drone/payload_schema.rs` holds the schema of every local trigger (the framing every run has, each app event's fields, each poll query's item, file watch, webhook, expect, and what a hand run gives), and `getdronepayloadschema` answers it per job that runs the drone. A node that reads `{{trigger.…}}` shows each field as *typed* or *outside text* (underlined and said in words), judged by the drone's jobs. It is a hint for the person: the engine still treats the whole trigger as outside text until phase 4's taint rules read these schemas, because a hand run or an agent's `fire` gives the run whatever it likes, so a wrong mark here can't let a value through.
 - Free text is truncated at the trigger (a log to its last 200 lines, a body to 2,000 characters) before it reaches the graph. The full thing stays at its source, behind a link.
 
 ### 3.7 Delivery
