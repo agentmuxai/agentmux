@@ -128,6 +128,17 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
     }
 }
 
+/// The question a `poll` trigger asks (`backend::jobs::poll`): the App query named by the filter's `query`, with
+/// the filter's own keys as its config and no references to resolve.
+pub(crate) fn poll_check() -> crate::backend::jobs::poll::Check {
+    std::sync::Arc::new(|filter| {
+        Box::pin(async move {
+            let node = FlowNode { id: "poll".to_string(), position: Default::default(), data: Value::Object(filter), node_type: None };
+            run(&node, &ExecutionScope::new()).await
+        })
+    })
+}
+
 /// What the node asks, with the filters' references resolved. Pure, so it is testable without a server.
 pub(crate) fn plan(node: &FlowNode, scope: &ExecutionScope) -> Result<Query, String> {
     let text = |key: &str| node.data.get(key).and_then(|v| v.as_str()).map(str::trim).unwrap_or("");
