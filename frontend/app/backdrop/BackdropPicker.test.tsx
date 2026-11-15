@@ -1,0 +1,172 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/** The backdrop picker: what it offers, what choosing writes, and the preview that comes and goes. */
+
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const h = vi.hoisted(() => ({ set: vi.fn(async (..._a: unknown[]) => {}), light: false }));
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (...a: unknown[]) => h.set(...a) }));
+vi.mock("../block/pane-identity", () => ({ isLightThemeActive: () => h.light }));
+
+import { BackdropPicker } from "./BackdropPicker";
+import { BUILTINS, deriveBuiltin } from "./builtins";
+import { deriveInk } from "./ink";
+import { getPaneScope, registerPaneScope, releasePaneScope, scopeVars } from "./scope";
+
+afterEach(() => {
+    cleanup();
+    h.set.mockClear();
+    h.light = false;
+    releasePaneScope("pk");
+});
+
+type Meta = { backdrop?: unknown; bg?: unknown };
+function mount(meta: Meta = {}) {
+    const [m, setM] = createSignal<Meta>(meta);
+    const onClose = vi.fn();
+    const view = render(() => <BackdropPicker blockId="pk" meta={m} onClose={onClose} />);
+    return { ...view, onClose, setMeta: setM };
+}
+const radios = (c: HTMLElement) => [...c.querySelectorAll<HTMLButtonElement>("[role=radiogroup][aria-label='Backdrop colours'] [role=radio]")];
+const button = (c: HTMLElement, name: string) => [...c.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name)!;
+const written = () => h.set.mock.calls.map((c) => (c[1] as { backdrop: unknown }).backdrop);
+const teal = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+
+describe("BackdropPicker", () => {
+    it("is a panel named Backdrop with the 16 built-ins as swatches, each named and carrying its contrast readout", () => {
+        const { container } = mount();
+        expect(container.querySelector("[role=dialog]")?.getAttribute("aria-label")).toBe("Backdrop");
+        const r = radios(container);
+        expect(r.map((x) => x.getAttribute("aria-label"))).toEqual(BUILTINS.map((b) => b.name));
+        expect(r[0].getAttribute("aria-description")).toMatch(/^text \d+\.\d:1, muted \d+\.\d:1$/);
+    });
+
+    it("draws each swatch as the surface and ink the app theme gives it, and the other side's when the app theme is light", () => {
+        const dark = mount();
+        const d = deriveBuiltin(BUILTINS[0].id, "dark")!;
+        expect(radios(dark.container)[0].style.getPropertyValue("--swatch-surface")).toBe(d.surfaces.surface);
+        expect(radios(dark.container)[0].style.getPropertyValue("--swatch-ink")).toBe(d.ink.text);
+        cleanup();
+        h.light = true;
+        const light = mount();
+        expect(radios(light.container)[0].style.getPropertyValue("--swatch-surface")).toBe(deriveBuiltin(BUILTINS[0].id, "light")!.surfaces.surface);
+    });
+
+    it("marks the pane's built-in as checked", () => {
+        const { container } = mount({ backdrop: teal });
+        const checked = radios(container).filter((x) => x.getAttribute("aria-checked") === "true");
+        expect(checked.map((x) => x.getAttribute("aria-label"))).toEqual(["Teal"]);
+    });
+
+    it("writes a built-in record when one is chosen, with the polarity as set", () => {
+        const { container } = mount();
+        fireEvent.click(radios(container)[2]);
+        expect(written()).toEqual([{ kind: "builtin", id: BUILTINS[2].id, polarity: "follow", version: 1 }]);
+        expect(h.set.mock.calls[0][0]).toBe("pk");
+    });
+
+    it("rewrites the record with the new polarity when the polarity changes, and only changes the setting when there is no record", () => {
+        const withRecord = mount({ backdrop: teal });
+        fireEvent.click(button(withRecord.container, "Dark"));
+        expect(written()).toEqual([{ ...teal, polarity: "dark" }]);
+        cleanup();
+        h.set.mockClear();
+        const none = mount();
+        fireEvent.click(button(none.container, "Light"));
+        expect(written()).toEqual([]);
+        fireEvent.click(radios(none.container)[0]);
+        expect(written()).toEqual([{ kind: "builtin", id: BUILTINS[0].id, polarity: "light", version: 1 }]);
+    });
+
+    it("under a fixed polarity draws the swatches for that side whatever the app theme", () => {
+        const { container } = mount({ backdrop: { ...teal, polarity: "light" } });
+        expect(radios(container)[0].style.getPropertyValue("--swatch-surface")).toBe(deriveBuiltin(BUILTINS[0].id, "light")!.surfaces.surface);
+    });
+
+    it("writes a typed colour on Enter, lower-cased and with #rrggbb, and says so when it isn't one", () => {
+        const { container } = mount();
+        const input = container.querySelector<HTMLInputElement>("input[placeholder='#rrggbb']")!;
+        fireEvent.input(input, { target: { value: "ABC" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+        expect(written()).toEqual([{ kind: "color", hex: "#aabbcc", polarity: "follow", version: 1 }]);
+        h.set.mockClear();
+        fireEvent.input(input, { target: { value: "teal" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+        expect(written()).toEqual([]);
+        expect(container.textContent).toContain("Use #rrggbb or #rgb.");
+    });
+
+    it("writes the colour picked in the native colour input", () => {
+        const { container } = mount();
+        const color = container.querySelector<HTMLInputElement>("input[type=color]")!;
+        fireEvent.change(color, { target: { value: "#336699" } });
+        expect(written()).toEqual([{ kind: "color", hex: "#336699", polarity: "follow", version: 1 }]);
+    });
+
+    it("tells the user when a custom colour was adjusted to read, and not otherwise", () => {
+        const mid = "#7a7a7a";
+        expect(deriveInk(mid).nudged).toBe(true);
+        const nudged = mount({ backdrop: { kind: "color", hex: mid, polarity: "follow", version: 1 } });
+        expect(nudged.container.textContent).toContain("Adjusted a little so the text reads.");
+        cleanup();
+        expect(deriveInk("#101820").nudged).toBe(false);
+        const fine = mount({ backdrop: { kind: "color", hex: "#101820", polarity: "follow", version: 1 } });
+        expect(fine.container.textContent).not.toContain("Adjusted a little");
+    });
+
+    it("shows the contrast of what the pane has, and nothing when it has none", () => {
+        expect(mount().container.querySelector(".backdrop-picker-readout")).toBeNull();
+        cleanup();
+        const { container } = mount({ backdrop: teal });
+        expect(container.querySelector(".backdrop-picker-readout")?.textContent).toMatch(/^text \d+\.\d:1, muted \d+\.\d:1$/);
+        expect(container.querySelector(".backdrop-picker-readout")?.classList.contains("is-missed")).toBe(false);
+    });
+
+    it("resets by clearing the record, and has nothing to reset on a pane without one", () => {
+        const none = mount();
+        expect(button(none.container, "Reset").disabled).toBe(true);
+        cleanup();
+        const { container } = mount({ backdrop: teal });
+        fireEvent.click(button(container, "Reset"));
+        expect(written()).toEqual([null]);
+    });
+
+    it("follows the record when it changes elsewhere", () => {
+        const t = mount({ backdrop: teal });
+        t.setMeta({ backdrop: { ...teal, id: "crimson", polarity: "dark" } });
+        expect(radios(t.container).filter((x) => x.getAttribute("aria-checked") === "true").map((x) => x.getAttribute("aria-label"))).toEqual(["Crimson"]);
+        expect(button(t.container, "Dark").getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("previews a swatch on the pane while it is looked at, and puts the pane's own back after", () => {
+        const { container } = mount();
+        const r = radios(container);
+        fireEvent.focus(r[1]);
+        expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin(BUILTINS[1].id, "dark")!.surfaces.surface);
+        fireEvent.blur(r[1]);
+        expect(getPaneScope("pk")()).toBeUndefined();
+        // With a backdrop already set, leaving puts that one back.
+        cleanup();
+        const own = mount({ backdrop: teal });
+        registerPaneScope("pk", scopeVars(deriveBuiltin("teal", "dark")!));
+        fireEvent.mouseEnter(radios(own.container)[5]);
+        expect(getPaneScope("pk")()?.["--surface"]).not.toBe(deriveBuiltin("teal", "dark")!.surfaces.surface);
+        fireEvent.mouseLeave(radios(own.container)[5]);
+        expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin("teal", "dark")!.surfaces.surface);
+    });
+
+    it("closes on Escape and on its close button, ending any preview, and leaves the click inside the pane's frame alone", () => {
+        const esc = mount();
+        fireEvent.focus(radios(esc.container)[1]);
+        fireEvent.keyDown(radios(esc.container)[1], { key: "Escape" });
+        expect(esc.onClose).toHaveBeenCalledTimes(1);
+        expect(getPaneScope("pk")()).toBeUndefined();
+        cleanup();
+        const x = mount();
+        fireEvent.click(x.container.querySelector("button[aria-label='Close the backdrop picker']")!);
+        expect(x.onClose).toHaveBeenCalledTimes(1);
+    });
+});

@@ -652,5 +652,20 @@
     "reviews.fact.noChecks": "not reported",
     "reviews.open.github": "Open on GitHub",
     "reviews.open.task": "Open the task",
-    "kanban.openPrs": "Open PRs"
+    "kanban.openPrs": "Open PRs",
+    "backdrop.title": "Backdrop",
+    "backdrop.close": "Close the backdrop picker",
+    "backdrop.colours": "Backdrop colours",
+    "backdrop.custom.label": "Custom colour",
+    "backdrop.custom.pick": "Pick a custom colour",
+    "backdrop.custom.placeholder": "#rrggbb",
+    "backdrop.custom.invalid": "Use #rrggbb or #rgb.",
+    "backdrop.nudged": "Adjusted a little so the text reads. Your colour is kept for the other theme.",
+    "backdrop.polarity.label": "Polarity",
+    "backdrop.polarity.hint": "Dark or light keeps a built-in's side under either app theme.",
+    "backdrop.polarity.follow": "Follow",
+    "backdrop.polarity.dark": "Dark",
+    "backdrop.polarity.light": "Light",
+    "backdrop.readout": "text {{text}}, muted {{muted}}",
+    "backdrop.reset": "Reset"
 }

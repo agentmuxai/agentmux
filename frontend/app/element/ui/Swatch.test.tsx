@@ -132,6 +132,35 @@ describe("SwatchGrid", () => {
         expect(r.map((x) => x.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1, -1]);
     });
 
+    it("moves focus to the right swatch after the options change: the first removed, then the keys still follow the buttons on screen", () => {
+        const [opts, setOpts] = createSignal(options);
+        const { container } = render(() => <SwatchGrid ariaLabel="Backdrop" options={opts()} value="none" columns={4} onChange={() => {}} />);
+        // The same option objects without the first: `For` keeps their buttons and does not run their refs again.
+        setOpts(options.slice(1));
+        const r = radios(container);
+        expect(r.map((x) => x.getAttribute("aria-label"))).toEqual(options.slice(1).map((o) => o.label));
+        r[1].focus();
+        fireEvent.keyDown(r[1], { key: "ArrowRight" });
+        expect(document.activeElement).toBe(r[2]);
+        fireEvent.keyDown(r[2], { key: "ArrowDown" });
+        expect(document.activeElement).toBe(r[6]);
+        fireEvent.keyDown(r[6], { key: "End" });
+        expect(document.activeElement).toBe(r[r.length - 1]);
+        fireEvent.keyDown(r[r.length - 1], { key: "Home" });
+        expect(document.activeElement).toBe(r[0]);
+    });
+
+    it("follows a reorder too", () => {
+        const [opts, setOpts] = createSignal(options);
+        const { container } = render(() => <SwatchGrid ariaLabel="Backdrop" options={opts()} value="none" onChange={() => {}} />);
+        setOpts([...options].reverse());
+        const r = radios(container);
+        expect(r[0].getAttribute("aria-label")).toBe(options[options.length - 1].label);
+        r[0].focus();
+        fireEvent.keyDown(r[0], { key: "ArrowRight" });
+        expect(document.activeElement).toBe(r[1]);
+    });
+
     it("skips a disabled swatch", () => {
         const withDisabled = options.map((o, i) => (i === 1 ? { ...o, disabled: true } : o));
         const { container } = grid({ options: withDisabled, value: "none" });
