@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Logger } from "@/util/logger";
+import { guardControlPress } from "@/app/util/press-on-control";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { isWindows } from "@/util/platformutil";
@@ -135,9 +136,12 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             leaveTabPill(props.tabId);
         });
 
+        // A press that began on the tab's close button is never a drag or a tear-off of the tab.
+        const press = guardControlPress(tabWrapRef);
+        onCleanup(press.dispose);
         const cleanupDraggable = draggable({
             element: tabWrapRef,
-            canDrag: () => props.allTabCount > 1 || windowLabel !== "main",
+            canDrag: () => !press.pressedOnControl() && (props.allTabCount > 1 || windowLabel !== "main"),
             getInitialData: () => ({
                 tabId: props.tabId,
                 workspaceId: props.workspaceId,
