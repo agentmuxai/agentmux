@@ -154,10 +154,13 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     const missed = () => (resolved()?.derived.unmet.length ?? 0) > 0 || resolved()?.derived.level === "readable";
 
     let panel: HTMLDivElement | undefined;
+    // The picker is the pane's own overlay: a click or focus inside it must not run the pane's click and focus handlers,
+    // which hand focus to the composer or the terminal and would take it from the swatch being used.
+    const stop = (e: Event) => e.stopPropagation();
     useDialogKeys(() => panel, close);
 
     return (
-        <div ref={panel} class="backdrop-picker" role="dialog" aria-label={t("backdrop.title")} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+        <div ref={panel} class="backdrop-picker" role="dialog" aria-label={t("backdrop.title")} tabIndex={-1} onClick={stop} onMouseDown={stop} onFocusIn={stop}>
             <div class="backdrop-picker-head">
                 <SectionHeader variant="title" level={3} title={t("backdrop.title")} />
                 <CloseButton size="header" label={t("backdrop.close")} onClick={close} />
