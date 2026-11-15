@@ -25,6 +25,31 @@
     border-bottom: 1px solid var(--border-color);
 }
 
+.hex-find {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.hex-find-input {
+    flex: 1 1 14em;
+    min-width: 10em;
+}
+
+.hex-find-status {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.hex-find-error {
+    color: var(--error-text-color);
+}
+
 .hex-viewer-offset-input {
     width: 9em;
     padding: 1px var(--space-1);
