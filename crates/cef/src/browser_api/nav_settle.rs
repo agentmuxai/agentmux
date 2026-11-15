@@ -48,11 +48,11 @@ fn frame_of(event: &Value) -> Option<&str> {
     event.pointer("/params/frameId").and_then(Value::as_str)
 }
 
-/// Whether a load that ended is the end of the navigation asked for: the same frame, and not an attached frame's own
-/// session (a frame from another site loads on its own session and says nothing of this page). An event that names no
-/// frame, or a request that named none, is taken as the navigation's.
+/// Whether a load that ended is the end of the navigation asked for: the same session (a frame from another site loads
+/// on its own, and a load there says nothing of the page) and the same frame. An event that names no frame, or a
+/// request that named none, is taken as the navigation's.
 fn ends(stop: &Value, request: &Value) -> bool {
-    if stop.get("sessionId").is_some() {
+    if stop.get("sessionId") != request.get("sessionId") {
         return false;
     }
     match (frame_of(stop), frame_of(request)) {
@@ -148,6 +148,25 @@ mod tests {
         assert!(settle_after(&mut req, &mut stop, SHORT, Duration::from_secs(5)).await);
         assert!(started.elapsed() >= Duration::from_millis(140), "the embedded frame's load must not have ended it");
         drop(ends.await);
+    }
+
+    #[tokio::test]
+    async fn a_navigation_in_an_attached_frame_ends_on_that_frames_own_session() {
+        let (req_tx, mut req) = unbounded_channel::<Value>();
+        let (stop_tx, mut stop) = unbounded_channel::<Value>();
+        req_tx.send(json!({ "sessionId": "s1", "params": { "frameId": "child" } })).unwrap();
+        let sender = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            stop_tx.send(json!({ "sessionId": "s2", "params": { "frameId": "child" } })).unwrap();
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            stop_tx.send(json!({ "sessionId": "s1", "params": { "frameId": "child" } })).unwrap();
+            stop_tx
+        });
+        let started = std::time::Instant::now();
+        assert!(settle_after(&mut req, &mut stop, SHORT, Duration::from_secs(5)).await);
+        assert!(started.elapsed() >= Duration::from_millis(70), "the other session's load must not have ended it");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(sender.await);
     }
 
     #[tokio::test]
