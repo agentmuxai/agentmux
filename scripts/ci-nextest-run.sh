@@ -236,6 +236,9 @@ attempt() {
     # core is built with the `test-support` feature the server layer's tests turn on, which is the build the run below
     # reuses; `--lib` leaves the server layer's own targets for the build after it.
     cargo nextest run --no-run -p agentmux-srv-core -p agentmux-srv --lib 2>&1 | tee -a "$BUILD_LOG" || return $?
+    # Then the server layer's own test harness, alone: with the other crates' tests beside it the build held 13.9 GB of
+    # a 14 GB ceiling (a 9 GB rustc and a second one) and the machine paged for 15 minutes (run 43768804420).
+    cargo nextest run --no-run -p agentmux-srv-core -p agentmux-srv --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
     if [ "${IN_QUEUE:-}" = true ]; then
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
