@@ -246,13 +246,27 @@ fn record(info: &PanicHookInfo<'_>) {
     watch().record(&place, agentmux_common::time::now_ms_u64());
 }
 
-/// Holds `text` for every agent that is registered: it waits for each agent's next turn and starts none.
-fn hold_for_agents(text: &str) {
-    let handler = crate::backend::reactive::get_global_handler();
+/// Holds `text` for every agent that is registered: it waits for each agent's next turn and starts none. Takes the handler's lock,
+/// which can be stuck: never call it from the reporter's own thread (see [`hand_to_agents`]).
+fn hold_for_agents(handler: &crate::backend::reactive::ReactiveHandler, text: &str) {
     for agent in handler.list_agents() {
         if let Err(e) = handler.hold_system_note(&agent.agent_id, NOTE_KEY, text) {
             tracing::debug!(agent = %agent.agent_id, error = %e, "srv panics: an agent was not told");
         }
+    }
+}
+
+/// Runs `deliver` on a thread of its own and returns at once. Delivering the note needs the handler's lock, and a stuck lock is one of
+/// the things this watch exists to report: on the reporter's thread the wait would stop every later look (the worse levels and the
+/// clearing event). A note is sent at most once an hour, so a thread left waiting is at most one an hour.
+fn hand_to_agents(text: String, deliver: impl FnOnce(&str) + Send + 'static) {
+    let spawned = std::thread::Builder::new().name("srv-panic-note".into()).spawn(move || {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| deliver(&text))).is_err() {
+            tracing::warn!("srv panics: telling the agents failed");
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "srv panics: the agents were not told");
     }
 }
 
@@ -271,7 +285,7 @@ pub fn start_reporter(broker: Arc<crate::backend::mps::Broker>) {
         }
         if let Some(text) = &step.note {
             tracing::warn!(note = %text, "srv panics: telling the agents");
-            let _ = std::panic::catch_unwind(|| hold_for_agents(text));
+            hand_to_agents(text.clone(), |text| hold_for_agents(crate::backend::reactive::get_global_handler(), text));
         }
     });
     if let Err(e) = spawned {
@@ -318,6 +332,60 @@ mod tests {
         storm(&mut c, 4, T0);
         storm(&mut c, 2, T0 + 60_000); // the same ring slot, a minute later
         assert_eq!(c.last_minute(T0 + 60_000), 2, "the old second is gone");
+    }
+
+    #[test]
+    fn a_note_stuck_on_the_handler_lock_does_not_stop_the_looks() {
+        use crate::backend::reactive::ReactiveHandler;
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let handler: &'static ReactiveHandler = Box::leak(Box::new(ReactiveHandler::new()));
+        handler.try_register_agent_with_nonce("panic-watch-test-agent", "panic-watch-test-block", None, 1, None).expect("an agent to tell");
+        // The lock is held on a thread of its own for the whole storm: the delivery of the note cannot get in.
+        let (held_tx, held_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let holder = std::thread::spawn(move || {
+            let _guard = handler.hold_lock_for_test();
+            held_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        held_rx.recv().unwrap();
+
+        let mut counts = Counts::default();
+        storm(&mut counts, WARN_ABOVE + 1, T0);
+        let first = counts.look(T0, 0);
+        let text = first.note.expect("the storm starts with a note");
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let started = Instant::now();
+        hand_to_agents(text, move |text| {
+            hold_for_agents(handler, text);
+            let _ = done_tx.send(());
+        });
+        assert!(started.elapsed() < Duration::from_secs(1), "handing the note over does not wait for the lock");
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err(), "the note is stuck behind the lock");
+
+        // The reporter goes on: the storm worsens and clears while the note still waits.
+        storm(&mut counts, CRITICAL_ABOVE, T0 + 5_000);
+        let worse = counts.look(T0 + 5_000, 0);
+        assert_eq!(worse.publish.map(|e| e.level), Some("critical".to_string()));
+        let cleared = counts.look(T0 + 5_000 + 61_000, 0);
+        assert_eq!(cleared.publish.map(|e| e.level), Some("normal".to_string()), "and the clearing event is published");
+
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        done_rx.recv_timeout(Duration::from_secs(5)).expect("the note is delivered once the lock is free");
+    }
+
+    #[test]
+    fn a_note_that_panics_costs_only_that_note() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (tx, rx) = mpsc::channel::<&'static str>();
+        hand_to_agents("a storm".to_string(), |_| panic!("the delivery went wrong"));
+        let tx2 = tx.clone();
+        hand_to_agents("a storm".to_string(), move |_| tx2.send("delivered").unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok("delivered"), "the next note is handed over as usual");
     }
 
     #[test]
