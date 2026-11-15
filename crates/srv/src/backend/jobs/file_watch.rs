@@ -247,7 +247,7 @@ struct Live {
     batches: Batches,
 }
 
-/// What tells one folder from another of the same path: the device and inode where there are such, and when it was made.
+/// What tells one folder from another of the same path: the device and inode (on Windows the volume and file id), and when it was made.
 pub type Identity = (u64, u64, Option<std::time::SystemTime>);
 
 pub fn identity_of(path: &Path) -> Option<Identity> {
@@ -258,7 +258,24 @@ pub fn identity_of(path: &Path) -> Option<Identity> {
         use std::os::unix::fs::MetadataExt;
         Some((meta.dev(), meta.ino(), made))
     }
-    #[cfg(not(unix))]
+    // NTFS keeps a folder's creation time when one of the same name is made again within a few seconds (file name
+    // tunneling), so the time alone cannot tell the new folder from the old: the volume and file id can.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS};
+        let file = std::fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path).ok()?;
+        // SAFETY: `info` is a plain struct of integers and the handle stays open for the call.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } != 0;
+        if ok {
+            let id = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+            return Some((u64::from(info.dwVolumeSerialNumber), id, made));
+        }
+        Some((0, 0, made))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         Some((0, 0, made))
     }
