@@ -31,6 +31,10 @@ on:
         description: 'Run of "CI — nightly artifacts" to test as A (blank: the newest nightly before B with another commit)'
         required: false
         default: ''
+      b-frontend-from-a:
+        description: 'EXPERIMENT: measure B with the frontend folder of A (all) or only its stylesheet (css), to place a change in the frontend or behind it'
+        required: false
+        default: ''
       runs:
         description: 'Runs of the lab per side (the nightly does 4)'
         required: false
@@ -129,6 +133,22 @@ jobs:
           extract b
           [ -d archive-a ] && extract a
           exit 0
+
+      - name: Put A's frontend in B (experiment, only when asked)
+        if: ${{ inputs.b-frontend-from-a != '' }}
+        shell: bash
+        env:
+          SWAP: ${{ inputs.b-frontend-from-a }}
+        run: |
+          fa=$(dirname "$(find portable-a -name index.html -path '*frontend*' | head -n 1)")
+          fb=$(dirname "$(find portable-b -name index.html -path '*frontend*' | head -n 1)")
+          echo "A frontend: $fa; B frontend: $fb"
+          case "$SWAP" in
+            all) rm -rf "$fb" && cp -r "$fa" "$fb" ;;
+            css) cssa=$(ls "$fa"/assets/style-*.css | head -n 1); cssb=$(ls "$fb"/assets/style-*.css | head -n 1); cp "$cssa" "$cssb" ;;
+            *) echo "::error::b-frontend-from-a is all or css"; exit 1 ;;
+          esac
+          echo "B now has A's frontend ($SWAP)"
 
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
