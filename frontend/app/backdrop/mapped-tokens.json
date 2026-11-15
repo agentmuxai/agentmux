@@ -2,7 +2,11 @@
     "surface": {
         "--main-bg-color": "color-mix(in srgb, var(--surface) calc(var(--window-opacity, 1) * 100%), transparent)",
         "--block-bg-color": "color-mix(in srgb, var(--surface) calc(var(--window-opacity, 1) * 100%), transparent)",
-        "--elevated-bg-color": "var(--surface-raised)"
+        "--elevated-bg-color": "var(--surface-raised)",
+        "--modal-bg-color": "var(--surface-overlay)",
+        "--panel-bg-color": "color-mix(in srgb, var(--surface-raised) 50%, transparent)",
+        "--block-bg-solid-color": "var(--surface)",
+        "--tab-strip-bg": "color-mix(in srgb, var(--ink-text) 3%, transparent)"
     },
     "ink": {
         "--main-text-color": "--ink-text",
@@ -17,7 +21,11 @@
         "--warning-color": "--ink-warning",
         "--warning-text-color": "--ink-warning",
         "--success-color": "--ink-success",
-        "--success-text-color": "--ink-success"
+        "--success-text-color": "--ink-success",
+        "--hover-bg-color": "--ink-hover",
+        "--grey-text-color": "--ink-faint"
     },
-    "channels": ["--accent-color-rgb"]
+    "channels": [
+        "--accent-color-rgb"
+    ]
 }
