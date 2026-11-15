@@ -34,6 +34,7 @@ pub mod cli_release;
 pub mod upload;
 pub mod credential;
 pub mod image;
+mod image_tools;
 pub mod listener;
 pub mod routes;
 pub mod runtime;
@@ -340,6 +341,10 @@ pub enum ContainerError {
     /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
     #[error("no login for the container: {0}")]
     NoLogin(String),
+    /// The image lacks what an AgentMux agent needs to talk to AgentMux (`agentmux-bashwrap`, `agentmux-mcp`): a
+    /// container made from it starts and cannot reach its tools, its startup memory or anyone.
+    #[error("the image {image} has no {}", missing.join(" or "))]
+    ImageIncomplete { image: String, missing: Vec<String> },
 }
 
 impl ContainerError {
@@ -361,6 +366,12 @@ impl ContainerError {
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
             Self::NoLogin(reason) => keychain_credentials::no_login_message(reason),
+            Self::ImageIncomplete { image, missing } => format!(
+                "This agent's container image ({image}) has no {}, so the agent could not reach its tools or its startup \
+                 memory, or message anyone. Set its image to one AgentMux ships (`Agents update_container` with \
+                 container_image, or the agent's definition in the window), or build yours from ghcr.io/agentmuxai/agent-base.",
+                missing.join(" or ")
+            ),
             Self::VolumeRefused { path } => format!(
                 "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
             ),
