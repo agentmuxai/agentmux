@@ -91,6 +91,8 @@ export function signinPendingText(p: SigninPending, nowMs: number): string {
     return `${p.agent} is signing in to ${p.origin}${as} with your saved sign-in (${left} s)`;
 }
 
+/** The accessible name of the list of saved sign-ins under a login field. */
+export const SIGNIN_LIST_LABEL = "Saved sign-ins for this page";
 export const MANAGE_PASSWORDS_LABEL = "Manage passwords";
 
 /** The list of saved sign-ins under a login field the person is in, as srv writes `browser:signin-list`

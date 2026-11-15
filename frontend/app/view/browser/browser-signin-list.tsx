@@ -17,7 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { openVault } from "@/app/view/vault/open-vault";
 import clsx from "clsx";
 import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
-import { listRowLabel, MANAGE_PASSWORDS_LABEL, readSigninList, STRONG_PASSWORD_LABEL } from "./browser-signin-offer-model";
+import { listRowLabel, MANAGE_PASSWORDS_LABEL, readSigninList, SIGNIN_LIST_LABEL, STRONG_PASSWORD_LABEL } from "./browser-signin-offer-model";
 
 export function BrowserSigninList(props: { blockId: string; meta: () => Record<string, unknown> | undefined }): JSX.Element {
     const list = createMemo(() => readSigninList(props.meta()));
@@ -47,7 +47,7 @@ export function BrowserSigninList(props: { blockId: string; meta: () => Record<s
                                 shellClass="anchored-popover--menu"
                                 class="menu ui-menu browser-signin-list"
                                 role="listbox"
-                                aria-label="Saved sign-ins for this page"
+                                aria-label={SIGNIN_LIST_LABEL}
                                 ref={(el: HTMLElement) => {
                                     el.setAttribute("data-operator-only", "");
                                     el.dataset.testid = "browser-signin-list";
