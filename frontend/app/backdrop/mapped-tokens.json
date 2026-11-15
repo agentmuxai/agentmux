@@ -27,5 +27,16 @@
     },
     "channels": [
         "--accent-color-rgb"
+    ],
+    "ansi": [
+        "--term-blue",
+        "--term-bright-blue",
+        "--term-bright-cyan",
+        "--term-bright-green",
+        "--term-bright-magenta",
+        "--term-cyan",
+        "--term-green",
+        "--term-magenta",
+        "--term-yellow"
     ]
 }

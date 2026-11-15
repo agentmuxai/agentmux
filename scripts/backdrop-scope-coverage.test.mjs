@@ -28,19 +28,6 @@ const KEEPS = {
     "--window-close-press-bg": "the Windows close-button red, fixed by the platform",
 };
 
-/** Tokens waiting on the transcript's tone-moved palette (the next PR); each leaves this list when it is mapped. */
-const PENDING_TRANSCRIPT_PALETTE = [
-    "--term-blue",
-    "--term-bright-blue",
-    "--term-bright-cyan",
-    "--term-bright-green",
-    "--term-bright-magenta",
-    "--term-cyan",
-    "--term-green",
-    "--term-magenta",
-    "--term-yellow",
-];
-
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
 function agentSources(dir = AGENT_DIR, out = []) {
@@ -79,7 +66,7 @@ function fixedColourUses() {
 
 describe("the agent pane inside a backdrop", () => {
     const uses = fixedColourUses();
-    const named = new Set([...Object.keys(KEEPS), ...PENDING_TRANSCRIPT_PALETTE]);
+    const named = new Set(Object.keys(KEEPS));
 
     it("reads no fixed-colour token that a pane scope does not reach, other than those named above", () => {
         const stray = [...uses].filter(([token]) => !named.has(token)).map(([token, files]) => `${token} (${[...files].join(", ")})`);
@@ -88,15 +75,15 @@ describe("the agent pane inside a backdrop", () => {
 
     it("lists only tokens it still reads, so the list can't go stale", () => {
         const unused = [...named].filter((token) => !uses.has(token));
-        expect(unused, "remove them from KEEPS or PENDING_TRANSCRIPT_PALETTE").toEqual([]);
+        expect(unused, "remove them from KEEPS").toEqual([]);
     });
 
     it("keeps a reason for every token it keeps", () => {
         for (const [token, why] of Object.entries(KEEPS)) expect(why.length, token).toBeGreaterThan(10);
     });
 
-    it("reaches the tokens the agent pane paints with most: the panel, modal, hover, strip and grey colours", () => {
-        for (const token of ["--panel-bg-color", "--modal-bg-color", "--hover-bg-color", "--tab-strip-bg", "--block-bg-solid-color", "--grey-text-color"]) {
+    it("reaches the tokens the agent pane paints with most: the panel, modal, hover, strip and grey colours, and the terminal palette its transcript reads", () => {
+        for (const token of ["--panel-bg-color", "--modal-bg-color", "--hover-bg-color", "--tab-strip-bg", "--block-bg-solid-color", "--grey-text-color", ...mapped.ansi]) {
             expect(mappedSet.has(token), token).toBe(true);
         }
     });

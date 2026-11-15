@@ -4,6 +4,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLightThemeActive } from "../block/pane-identity";
 import { currentWindowTheme } from "../store/window-appearance";
+import { themeAnsi } from "./ansi";
 import { resolveBackdrop, type ResolvedBackdrop } from "./meta";
 import { registerPaneScope, releasePaneScope, scopeVars } from "./scope";
 
@@ -50,7 +51,8 @@ export function usePaneBackdrop(
     if (owner) {
         createEffect(() => {
             const r = resolved();
-            registerPaneScope(blockId, r ? scopeVars(r.derived) : undefined);
+            // The theme's terminal palette is read only for a pane that has a backdrop, once per theme change.
+            registerPaneScope(blockId, r ? scopeVars(r.derived, themeAnsi()) : undefined);
         });
         onCleanup(() => releasePaneScope(blockId));
     }

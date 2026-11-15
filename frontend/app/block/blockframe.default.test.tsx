@@ -62,6 +62,7 @@ import { registerBlockComponentModel, unregisterBlockComponentModel } from "@/ap
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
+import { resetThemeAnsi } from "@/app/backdrop/ansi";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { BlockFrame } from "./blockframe";
 
@@ -255,9 +256,10 @@ describe("the frame's markup", () => {
 describe("the backdrop", () => {
     const style = (c: HTMLElement) => frame(c).style;
 
-    it("a pane with none carries no data-backdrop and none of the scope's properties", () => {
+    it("a pane with none carries no data-backdrop and none of the scope's properties, nor any terminal-palette override", () => {
         const t = setup();
         expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
+        expect(style(t.view.container).getPropertyValue("--term-green")).toBe("");
         expect(style(t.view.container).getPropertyValue("--surface")).toBe("");
         expect(style(t.view.container).getPropertyValue("--main-text-color")).toBe("");
     });
@@ -269,6 +271,13 @@ describe("the backdrop", () => {
         expect(el.style.getPropertyValue("--surface")).toMatch(/^#[0-9a-f]{6}$/);
         expect(el.style.getPropertyValue("--main-text-color")).toBe("var(--ink-text)");
         expect(el.style.getPropertyValue("--block-agent-color")).not.toBe("");
+        // The transcript's terminal palette is set again on the pane when the theme gives one.
+        resetThemeAnsi();
+        document.documentElement.style.setProperty("--term-green", "#4e9a06");
+        const withPalette = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        expect(frame(withPalette.view.container).style.getPropertyValue("--term-green")).toMatch(/^#[0-9a-f]{6}$/);
+        document.documentElement.style.removeProperty("--term-green");
+        resetThemeAnsi();
     });
 
     it("a plain colour in the block's own bg meta is a legacy backdrop; a gradient is left untouched", () => {
