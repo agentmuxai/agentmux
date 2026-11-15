@@ -3,11 +3,16 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../attention-list", () => ({ attentionWho: (blockId: string) => (blockId === "b1" ? { name: "Korp", color: "#e8a33d" } : { name: "An agent" }) }));
+vi.mock("../attention-list", () => ({
+    UNKNOWN_NAME: "An agent",
+    attentionItems: () => [],
+    attentionWho: (blockId: string) => (blockId === "b1" ? { name: "Korp", color: "#e8a33d" } : { name: "An agent" }),
+}));
 const listeners = vi.hoisted(() => new Set<(e: unknown) => void>());
-vi.mock("../waiting-for-you", () => ({ onWaitingEnded: (cb: (e: unknown) => void) => (listeners.add(cb), () => listeners.delete(cb)) }));
+vi.mock("../waiting-for-you", () => ({ waitingPanes: () => [], onWaitingEnded: (cb: (e: unknown) => void) => (listeners.add(cb), () => listeners.delete(cb)) }));
 
-import { __resetEndedAsks, ENDED_RING, ENDED_WINDOW_MS, endedAskOf, endedAsks, installEndedAsks, noteEndedAsk } from "../ended-asks";
+import type { AttentionItem } from "../attention-list";
+import { __resetEndedAsks, ENDED_RING, ENDED_WINDOW_MS, endedAskOf, endedAsks, installEndedAsks, noteAttention, noteEndedAsk } from "../ended-asks";
 
 afterEach(() => __resetEndedAsks());
 
@@ -59,5 +64,53 @@ describe("the ring", () => {
         expect(endedAsks(Date.now()).map((e) => e.name)).toEqual(["Korp"]);
         listeners.forEach((cb) => cb(ended({ since: now - 1_000 })));
         expect(endedAsks(Date.now()), "a brief one is not kept").toHaveLength(1);
+    });
+});
+
+describe("the requester's name", () => {
+    const item = (over: Partial<AttentionItem> = {}): AttentionItem => ({ blockId: "b2", name: "Alpha", color: "#d99a1e", what: "asks you a question", since: 1_000, local: true, ...over });
+
+    it("is kept from while the ask waited, for a pane that closed before the ask ended", () => {
+        noteAttention([item()], new Set(["b2"]), 10_000);
+        const got = endedAskOf(ended({ blockId: "b2", what: "asks you a question", reason: "closed" }), 61_000);
+        expect(got).toMatchObject({ name: "Alpha", color: "#d99a1e", how: "closed" });
+    });
+
+    it("does not override a name the window still knows", () => {
+        noteAttention([item({ blockId: "b1", name: "Old" })], new Set(["b1"]), 10_000);
+        expect(endedAskOf(ended(), 61_000)?.name).toBe("Korp");
+    });
+});
+
+describe("an ask only srv's rows report (an agent of another window)", () => {
+    const remote = (over: Partial<AttentionItem> = {}): AttentionItem => ({ blockId: "r1", name: "Zed", color: "#4aa3ff", what: "is waiting for you", since: 1_000, local: false, ...over });
+
+    it("ends when its pane stops being listed, and is kept as answered", () => {
+        noteAttention([remote()], new Set(), 20_000);
+        expect(endedAsks(30_000), "still waits").toHaveLength(0);
+        noteAttention([], new Set(), 31_000);
+        expect(endedAsks(31_000)).toMatchObject([{ blockId: "r1", name: "Zed", what: "is waiting for you", since: 1_000, endedAt: 31_000, how: "answered" }]);
+        noteAttention([], new Set(), 32_000);
+        expect(endedAsks(32_000), "recorded once").toHaveLength(1);
+    });
+
+    it("leaves out one that waited under five seconds", () => {
+        noteAttention([remote({ since: 28_000 })], new Set(), 28_500);
+        noteAttention([], new Set(), 31_000);
+        expect(endedAsks(31_000)).toHaveLength(0);
+    });
+
+    it("leaves it to the registry when this window's registry took the pane over", () => {
+        noteAttention([remote()], new Set(), 20_000);
+        noteAttention([], new Set(["r1"]), 31_000);
+        expect(endedAsks(31_000)).toHaveLength(0);
+    });
+
+    it("does not count an ask the registry already ended as a second one", () => {
+        installEndedAsks();
+        noteAttention([remote({ blockId: "b1" })], new Set(), 20_000);
+        listeners.forEach((cb) => cb(ended({ since: 1_000, reason: "submitted" })));
+        noteAttention([], new Set(), Date.now() + 1_000);
+        expect(endedAsks(Date.now() + 1_000)).toHaveLength(1);
     });
 });
