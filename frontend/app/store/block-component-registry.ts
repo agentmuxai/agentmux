@@ -184,6 +184,18 @@ export function refocusNode(blockId: string) {
 }
 
 /**
+ * `createBlock`, then un-magnify the pane that was magnified when it was asked: a new pane made under a magnified
+ * one is hidden behind it, so the click would answer with nothing on screen.
+ */
+async function createVisibleBlock(def: BlockDef): Promise<string> {
+    const model = getLayoutModelForStaticTab();
+    const magnified = model?.magnifiedNodeId;
+    const blockId = await createBlock(def);
+    if (magnified && model.magnifiedNodeId === magnified) model.magnifyNodeToggle(magnified, true, false);
+    return blockId;
+}
+
+/**
  * Open or focus a pane by view type.
  * If a block with the given viewType already exists in the current tab's layout,
  * show and focus it (restoring a minimized pane and switching to its tab in a stack),
@@ -199,11 +211,16 @@ export async function openOrFocusPaneByView(
     await openOrFocusPaneIdByView(viewType, blockDef, focusMeta);
 }
 
-/** `openOrFocusPaneByView`, resolving to the id of the block it focused or created. */
+/**
+ * `openOrFocusPaneByView`, resolving to the id of the block it focused or created.
+ * `switchTabs`: a pane of the view open in another tab of this window is gone to (the tab switches) instead of a
+ * second one being opened here. For an ask that is "show me that pane" (Help's Show), not a widget click.
+ */
 export async function openOrFocusPaneIdByView(
     viewType: string,
     blockDef?: BlockDef,
-    focusMeta?: MetaType
+    focusMeta?: MetaType,
+    opts: { switchTabs?: boolean } = {}
 ): Promise<string | undefined> {
     // A Ctrl+click (Cmd on macOS) on a way to open it: a floating window of its own, even where one is
     // already open (float-modifier.ts).
@@ -227,7 +244,7 @@ export async function openOrFocusPaneIdByView(
     // Read only to tell an agent's, a document's or a profile's pane from another of the view.
     const MOS = paneIdentity(viewType, blockDef?.meta) ? (await import("./global")).MOS : undefined;
     const outcome = await revealOrOpen(
-        { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta), currentTabOnly: true },
+        { view: viewType, blockDef, focusMeta, source: "widget", scope: paneScope(viewType, blockDef?.meta), currentTabOnly: !opts.switchTabs },
         {
             recordOpened: recordBlockOpened,
             findMounted(view, identity) {
@@ -268,7 +285,7 @@ export async function openOrFocusPaneIdByView(
             setMeta: setBlockMeta,
             // This window only: the pane is in one of its tabs.
             revealInWindow: (blockId) => revealBlock(blockId, { source: "widget", localOnly: true }),
-            create: createBlock,
+            create: createVisibleBlock,
             app: appRevealDeps,
         }
     );
