@@ -84,6 +84,15 @@ pub(super) async fn read_page(
     }
 }
 
+/// A shape is a question about a value the agent can't read: each capture with one is counted, match or miss,
+/// and refused when the agent has used its budget. A capture with no shape is never counted.
+pub(super) fn begin(shape: Option<&CaptureShape>, agent: &str) -> Result<(), String> {
+    if shape.is_some() {
+        super::browser_capture_shape::start(agent)?;
+    }
+    Ok(())
+}
+
 /// The value has the shape the agent gave, or nothing is saved. The answer says only that it did not.
 pub(super) fn check_shape(shape: Option<&CaptureShape>, value: &str, agent: &str) -> Result<(), String> {
     match shape {

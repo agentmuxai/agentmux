@@ -37,7 +37,7 @@ use crate::backend::vault::capture::{self, Found, Target};
 use crate::backend::vault::uses::{Ended, UseRequest};
 
 use super::browser_actions::{note, How, Kind};
-use super::browser_capture_read::{check_shape, read_page, what_to_read};
+use super::browser_capture_read::{begin, check_shape, read_page, what_to_read};
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
@@ -203,11 +203,8 @@ async fn handle_browser_capture(
         Err((code, e)) => return err_response(code, e),
     };
     let agent: String = req.auth.agent_id.chars().take(64).collect();
-    // A shape is a question about a value the agent can't read: each one is counted, match or miss.
-    if shape.is_some() {
-        if let Err(e) = super::browser_capture_shape::start(&agent) {
-            return err_response(StatusCode::TOO_MANY_REQUESTS, e);
-        }
+    if let Err(e) = begin(shape.as_ref(), &agent) {
+        return err_response(StatusCode::TOO_MANY_REQUESTS, e);
     }
     let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let rule = match rule_of(&req) {
