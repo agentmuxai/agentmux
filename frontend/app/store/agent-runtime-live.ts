@@ -5,11 +5,11 @@
 // and a timer. One store serves the window (the status bar, My Agents and the Swarm read it), so
 // srv is asked once and each agent's event is followed once.
 
-import { isWorkspaceClosedFailure, revealFailureText } from "@/app/selection/reveal-failure";
+import { isSlowShow, isWorkspaceClosedFailure, revealFailureText, slowShowText } from "@/app/selection/reveal-failure";
 import { isFailure } from "@/app/selection/selection-machine";
 import { noteOpenedByPerson } from "@/app/store/agent-open-note";
 import { reopenParkedWhereItWas, type ParkedReopenDeps } from "@/app/store/agent-parked";
-import { atoms, MOS } from "@/app/store/global";
+import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -58,7 +58,7 @@ export async function openAgentInActiveTab(
             .find((r) => r.agent_id === agent.agent_id)?.block_id;
         const open = (tabId: string) =>
             RpcApi.AgentOpenCommand(TabRpcClient, { agent_id: agent.agent_id, tab_id: tabId, focus: true });
-        if (await reopenParkedWhereItWas(blockId, parkedDeps(open))) return undefined;
+        if (await reopenParkedWhereItWas(blockId, parkedDeps(open, agent.name))) return undefined;
         await open(atoms.activeTabId());
         return undefined;
     } catch (e) {
@@ -68,7 +68,23 @@ export async function openAgentInActiveTab(
 }
 
 /** What reopening a parked agent reads and does; `open` is agent.open for this agent in the given tab. */
-const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps => ({
+/** How long the notice for a pane that is open and not yet shown stays. */
+const SLOW_SHOW_NOTICE_MS = 8000;
+
+/** One neutral, temporary notice: the pane is open, and the window is slow to show it. Not an error. */
+function noteSlowShow(name: string): void {
+    pushNotification({
+        id: `slow-show:${name}`,
+        icon: "fa-hourglass-half",
+        title: name,
+        message: slowShowText(name),
+        timestamp: new Date().toISOString(),
+        type: "info",
+        expiration: Date.now() + SLOW_SHOW_NOTICE_MS,
+    });
+}
+
+const parkedDeps = (open: (tabId: string) => Promise<unknown>, name: string): ParkedReopenDeps => ({
     // A parked agent's block is the one this window is least likely to have: load it rather than read an empty cache.
     blockMeta: async (blockId) => {
         const oref = MOS.makeORef("block", blockId);
@@ -98,6 +114,12 @@ const parkedDeps = (open: (tabId: string) => Promise<unknown>): ParkedReopenDeps
         if (!isFailure(result)) return { ok: true };
         // A newer reveal took over: it shows the pane, and says why itself when it cannot.
         if (result.reason === "superseded") return { ok: false, superseded: true };
+        // The attach worked, so the pane is back; the reveal only ran out of time waiting for a slow window. Not a
+        // failure of the open, and not an error on anyone's row: one neutral notice, and the pane shows when it can.
+        if (isSlowShow(result)) {
+            noteSlowShow(name);
+            return { ok: true };
+        }
         if (isWorkspaceClosedFailure(result)) return { ok: false, workspaceClosed: true };
         return { ok: false, failure: revealFailureText(result) };
     },

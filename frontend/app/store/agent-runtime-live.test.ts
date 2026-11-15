@@ -11,7 +11,9 @@ const reload = vi.fn(async (id: string) => {
     order.push(`reload:${id}`);
     return { meta: blockMeta };
 });
+const pushNotification = vi.fn();
 vi.mock("@/app/store/global", () => ({
+    pushNotification: (...a: unknown[]) => pushNotification(...a),
     atoms: { activeTabId: () => "active" },
     MOS: {
         makeORef: (_t: string, id: string) => id,
@@ -71,6 +73,7 @@ describe("openAgentInActiveTab", () => {
     beforeEach(() => {
         order.length = 0;
         reveal.mockClear();
+        pushNotification.mockClear();
         tabs = new Set();
         blockMeta = undefined;
         blockCached = true;
@@ -146,17 +149,42 @@ describe("openAgentInActiveTab", () => {
             expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
         });
 
+        // The attach worked, so the pane is back: a reveal that only ran out of time waiting for a slow window is not a
+        // failure of the open. Open says one neutral, temporary notice, and no caller shows an error (the Swarm row's red
+        // note, "Couldn't open" in the palette and the attention list). The pane shows when the window catches up.
+        it("whose reveal ran out of time waiting for the page succeeds, with one neutral notice", async () => {
+            for (const reason of ["layout-timeout", "tab-timeout", "resolve-timeout"]) {
+                pushNotification.mockClear();
+                revealResult = { ok: false, reason };
+                expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
+                expect(pushNotification).toHaveBeenCalledTimes(1);
+                const note = pushNotification.mock.calls[0][0];
+                expect(note.type).toBe("info");
+                expect(note.icon).not.toContain("exclamation");
+                expect(note.message).toBe("Ada is open. Its tab is still loading, and it will show when the window is ready.");
+                expect(note.expiration).toBeGreaterThan(Date.now());
+                expect(note.expiration).toBeLessThanOrEqual(Date.now() + 10_000);
+            }
+        });
+
+        it("whose reveal a newer request took over says nothing at all", async () => {
+            revealResult = { ok: false, reason: "superseded" };
+            expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBeUndefined();
+            expect(pushNotification).not.toHaveBeenCalled();
+        });
+
         // Every other failure is still said, but in the reveal's own words: never "the workspace could not
         // be opened in a window" unless that is what happened. Silent would leave Open doing nothing.
         it("whose reveal fails another way says why in the reveal's words, not the workspace's", async () => {
             for (const [reason, text] of [
-                ["layout-timeout", "its tab is still loading"],
                 ["mismatch", "it did not come to the front"],
                 ["not-found", "it is no longer open"],
+                ["stuck", "it did not respond in time"],
             ] as const) {
                 revealResult = { ok: false, reason };
                 expect(await openAgentInActiveTab({ agent_id: "a1", name: "Ada" })).toBe(text);
             }
+            expect(pushNotification).not.toHaveBeenCalled();
         });
 
         it("still says why when srv refuses to put it back", async () => {
