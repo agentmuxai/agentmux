@@ -26,6 +26,8 @@ import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
+import { getPaneScope } from "@/app/backdrop/scope";
+import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
 import { FaviconImage } from "@/app/element/FaviconImage";
 import clsx from "clsx";
@@ -1365,6 +1367,13 @@ function renderFrameOverlays(s: FrameState): JSX.Element {
 function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const s = createFrameState(props);
     const nodeModel = props.nodeModel;
+    // A pane's backdrop (spec SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.3): its properties go on this frame, so the
+    // header, the body and everything in them read the pane's colours. A pane with none sets nothing.
+    const backdrop = usePaneBackdrop(nodeModel.blockId, () => ({
+        backdrop: s.blockData()?.meta?.backdrop,
+        bg: util.useAtomValueSafe(props.viewModel?.blockBg)?.["bg"],
+    }));
+    const backdropVars = getPaneScope(nodeModel.blockId);
 
     return (
         <div
@@ -1377,6 +1386,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 magnified: s.isMagnified(),
             })}
             data-blockid={nodeModel.blockId}
+            data-backdrop={backdropVars() ? (backdrop()?.id ?? "preview") : undefined}
             onClick={props.blockModel?.onClick}
             onFocusIn={props.blockModel?.onFocusCapture}
             onContextMenu={s.onBodyContextMenu}
@@ -1392,6 +1402,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     "--magnified-block-blur": `${s.magnifiedBlockBlur()}px`,
                     "--block-agent-color": s.blockAgentColor() ?? "transparent",
                     "--block-identity-color": s.blockIdentityColor(),
+                    ...backdropVars(),
                 } as JSX.CSSProperties
             }
             inert={props.preview || undefined}
