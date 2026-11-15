@@ -161,7 +161,7 @@ export function tokenForCode(code: string): string | null {
     return Object.keys(PUNCT_CODE).find((ch) => PUNCT_CODE[ch] === code) ?? null;
 }
 
-/** "Ctrl+Shift+T" elsewhere, "⇧⌘T" on macOS (Apple's modifier order). */
+/** "Ctrl+Shift+T" elsewhere, "⇧⌘T" on macOS (Apple's modifier order); the Meta key is "Super" on Linux, "Win" on Windows. */
 export function formatKey(spec: string, platform: KeyPlatform): string {
     return spec
         .split(" ")
@@ -170,7 +170,7 @@ export function formatKey(spec: string, platform: KeyPlatform): string {
             if (platform === "mac") {
                 return `${k.ctrl ? "⌃" : ""}${k.alt ? "⌥" : ""}${k.shift ? "⇧" : ""}${k.meta ? "⌘" : ""}${keyLabel(k)}`;
             }
-            const mods = [k.ctrl && "Ctrl", k.alt && "Alt", k.shift && "Shift", k.meta && "Win"].filter(Boolean);
+            const mods = [k.ctrl && "Ctrl", k.alt && "Alt", k.shift && "Shift", k.meta && (platform === "linux" ? "Super" : "Win")].filter(Boolean);
             return [...mods, keyLabel(k)].join("+");
         })
         .join(" then ");

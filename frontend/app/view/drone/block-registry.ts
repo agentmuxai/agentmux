@@ -139,7 +139,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         kind: "api",
         emoji: "🌐",
         label: "API",
-        description: "Make an HTTP request. Headers and body support {{...}}.",
+        description: "Make an HTTP request. Headers and body support {{...}}. A Vault entry can supply the Authorization header.",
         color: "#10b981",
         defaultData: {
             method: "GET",
@@ -198,6 +198,19 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         color: "#64748b", // colour: fixed (the block's identity colour)
         defaultData: {
             mode: "all",
+        },
+        inputs: [{ id: "in", label: "in", type: "any" }],
+        outputs: [{ id: "out", label: "out", type: "object" }],
+    },
+    run: {
+        kind: "run",
+        emoji: "⚙️",
+        label: "Run",
+        description: "Run a fixed command in a container with no network and no mounts. command is a list: the program, then its arguments (no shell). Values from outside the drone (an event, a web response, an agent's answer) are refused in command, env and cwd. What it printed is {{this.stdout}}, {{this.stderr}} and {{this.exit_code}}. A non-zero exit fails the block unless it is in ok_exit_codes. timeout_seconds is at most 3600 (5 minutes when absent).",
+        color: "#a16207", // colour: fixed (the block's identity colour)
+        defaultData: {
+            command: [],
+            timeout_seconds: 300,
         },
         inputs: [{ id: "in", label: "in", type: "any" }],
         outputs: [{ id: "out", label: "out", type: "object" }],

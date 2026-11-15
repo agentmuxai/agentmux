@@ -45,6 +45,8 @@
 //! against a superseded id returns `None`, which every read path already
 //! handles as "this bound skill no longer exists"), not a new regression —
 //! but it is a real, acknowledged incompleteness worth a second look.
+//!
+//! Shared store: not additive (grandfathered in `additive_guard_tests`): it swaps a unique index and deletes duplicate skill rows. Do not copy this shape; expand now, remove after an `UPGRADE_FLOOR` raise.
 
 use rusqlite::Connection;
 

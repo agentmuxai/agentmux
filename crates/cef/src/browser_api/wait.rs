@@ -62,15 +62,21 @@ fn has_text_expression(text: &str) -> String {
 }
 
 /// What a wait for the page to settle looks at: the document's state, the
-/// address, and a size that changes whenever elements or text come or go.
+/// address, a size that changes whenever elements or text come or go, and
+/// whether the page itself says a region is still being updated.
 #[derive(Debug, Clone, PartialEq)]
 struct Probe {
     ready: String,
     url: String,
     size: i64,
+    busy: bool,
 }
 
-const PROBE: &str = "({ ready: document.readyState, url: location.href, size: document.getElementsByTagName('*').length + (document.body ? document.body.innerText.length : 0) })";
+/// `aria-busy="true"` is the standard way a page says a region (a form it is validating, a list it is
+/// loading) is still changing even though the document finished loading and nothing has grown in size yet
+/// (a spinner that replaces, rather than adds to, its container; a "Processing..." label with no new
+/// elements). A page that sets it is not idle, however still its DOM measures (#47641, kink 1).
+const PROBE: &str = "({ ready: document.readyState, url: location.href, size: document.getElementsByTagName('*').length + (document.body ? document.body.innerText.length : 0), busy: !!document.querySelector('[aria-busy=\"true\"]') })";
 
 async fn probe(cdp: &mut CdpSession) -> Option<Probe> {
     let v = cdp.call("Runtime.evaluate", json!({ "expression": PROBE, "returnByValue": true })).await.ok()?;
@@ -79,14 +85,19 @@ async fn probe(cdp: &mut CdpSession) -> Option<Probe> {
         ready: r.get("ready")?.as_str()?.to_string(),
         url: r.get("url")?.as_str()?.to_string(),
         size: r.get("size")?.as_i64()?,
+        busy: r.get("busy")?.as_bool()?,
     })
 }
 
-/// Has the page settled at this look? `load` is a complete document; `idle` is
-/// also the same address and size across three looks in a row (about half a
-/// second), so a page that is still drawing, or has just navigated, is not.
+/// Has the page settled at this look? `load` is a complete document; `idle` is also not `aria-busy`, and
+/// the same address and size across three looks in a row (about half a second), so a page that is still
+/// drawing, has just navigated, or says so itself, is not.
 fn settled(idle: bool, prev: Option<&Probe>, now: &Probe, quiet_looks: &mut u32) -> bool {
     if now.ready != "complete" {
+        *quiet_looks = 0;
+        return false;
+    }
+    if idle && now.busy {
         *quiet_looks = 0;
         return false;
     }
@@ -251,7 +262,11 @@ mod tests {
     }
 
     fn probe_of(ready: &str, url: &str, size: i64) -> Probe {
-        Probe { ready: ready.into(), url: url.into(), size }
+        Probe { ready: ready.into(), url: url.into(), size, busy: false }
+    }
+
+    fn busy_probe_of(ready: &str, url: &str, size: i64) -> Probe {
+        Probe { busy: true, ..probe_of(ready, url, size) }
     }
 
     #[test]
@@ -281,6 +296,30 @@ mod tests {
         assert!(!settled(true, Some(&a), &grown, &mut quiet) && quiet == 0);
         assert!(!settled(true, Some(&grown), &moved, &mut quiet) && quiet == 0);
         assert!(!settled(true, Some(&moved), &probe_of("loading", "http://a.test/next", 3), &mut quiet) && quiet == 0);
+    }
+
+    #[test]
+    fn a_page_that_says_it_is_busy_is_not_idle_even_with_a_steady_size() {
+        // A spinner that replaces its container's content, rather than adding to it (#47641, kink 1): the
+        // DOM size alone never moves, so only aria-busy says the page has not settled.
+        let mut quiet = 0;
+        let busy = busy_probe_of("complete", "http://a.test/", 10);
+        assert!(!settled(true, None, &busy, &mut quiet));
+        assert!(!settled(true, Some(&busy), &busy, &mut quiet) && quiet == 0, "busy holds the quiet count at 0, however many identical looks");
+        assert!(!settled(true, Some(&busy), &busy, &mut quiet) && quiet == 0);
+        // aria-busy clears: the usual three-look rule starts counting from here.
+        let done = probe_of("complete", "http://a.test/", 10);
+        assert!(!settled(true, Some(&busy), &done, &mut quiet));
+        assert!(!settled(true, Some(&done), &done, &mut quiet));
+        assert!(settled(true, Some(&done), &done, &mut quiet));
+    }
+
+    #[test]
+    fn being_busy_does_not_stop_the_narrower_load_state_from_being_met() {
+        // `load` means only "the document finished loading"; a page that is still updating a region after
+        // that is a question for `idle`, not for `load`.
+        let mut quiet = 0;
+        assert!(settled(false, None, &busy_probe_of("complete", "http://a.test/", 10), &mut quiet));
     }
 
     #[test]

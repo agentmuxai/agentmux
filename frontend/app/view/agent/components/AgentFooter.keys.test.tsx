@@ -119,6 +119,17 @@ describe("AgentFooter slash dropdown", () => {
         expect(ta.value).toBe("/h");
     });
 
+    it("an arrow with Shift, Ctrl, Alt or Cmd leaves the list alone", () => {
+        const { ta } = setup();
+        typeInto(ta, "/");
+        const before = selected();
+        for (const mod of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+            expect(key(ta, "ArrowDown", mod).defaultPrevented).toBe(false);
+            expect(key(ta, "ArrowUp", mod).defaultPrevented).toBe(false);
+        }
+        expect(selected()).toEqual(before);
+    });
+
     it("Tab fills the selected command in for further editing; Enter fills it in and sends it", () => {
         const { ta, onSendMessage, onTyping } = setup();
         typeInto(ta, "/h");
@@ -241,6 +252,41 @@ describe("AgentFooter with an agent of its own history", () => {
         key(ta, "ArrowUp");
         expect(ta.value).toBe("old two");
         expect(hub.loadOlder).toHaveBeenCalledWith("uid-1");
+    });
+
+    it("an arrow key held with Shift, Ctrl, Alt or Cmd selects or moves by word or line and never recalls a message", () => {
+        hub.history = ["old one", "old two"];
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-history-selection", { agentId: "uid-1" })} />);
+        const ta = composer();
+        key(ta, "ArrowUp");
+        expect(ta.value).toBe("old two");
+        hub.loadOlder.mockClear();
+        ta.setSelectionRange(0, 0);
+        // The reported case: the caret lands at the front after a recall, and Shift+Down must highlight.
+        for (const k of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]) {
+            for (const mod of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }, { shiftKey: true, ctrlKey: true }]) {
+                const ev = key(ta, k, mod);
+                expect(ev.defaultPrevented, `${k} ${JSON.stringify(mod)}`).toBe(false);
+                expect(ta.value, `${k} ${JSON.stringify(mod)}`).toBe("old two");
+            }
+        }
+        // Shift+Up at the end of a recalled message extends the selection too.
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        expect(key(ta, "ArrowUp", { shiftKey: true }).defaultPrevented).toBe(false);
+        expect(ta.value).toBe("old two");
+        expect(hub.loadOlder).not.toHaveBeenCalled();
+    });
+
+    it("a bare ArrowUp and ArrowDown still walk the history", () => {
+        hub.history = ["old one", "old two"];
+        render(() => <AgentFooter agentName="Test" viewModel={viewModel("keys-history-bare", { agentId: "uid-1" })} />);
+        const ta = composer();
+        expect(key(ta, "ArrowUp").defaultPrevented).toBe(true);
+        expect(ta.value).toBe("old two");
+        expect(key(ta, "ArrowUp").defaultPrevented).toBe(true);
+        expect(ta.value).toBe("old one");
+        expect(key(ta, "ArrowDown").defaultPrevented).toBe(true);
+        expect(ta.value).toBe("old two");
     });
 
     it("restores the agent's own draft into an empty composer, but not over text already typed", async () => {

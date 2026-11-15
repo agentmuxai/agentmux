@@ -59,6 +59,7 @@ function page({ vw = 800, vh = 600, topmost } = {}) {
             position: opts.position,
             innerText: opts.text || "",
             labels: opts.labels || [],
+            control: opts.control || null,
             getAttribute: () => null,
             getClientRects: () => [r],
             getBoundingClientRect: () => r,
@@ -112,6 +113,25 @@ describe("click_point: where the click goes", () => {
         const spans = el("span", rect(100, 100, 300, 140), { parent: label });
         expect(clickPoint.call(box)).toEqual({ x: 110, y: 120 });
         expect(spans).toBeTruthy();
+    });
+});
+
+describe("click_point: a label's own input is related to it, not something covering it", () => {
+    it("counts a click on a label's own input, named by `for` rather than nesting, as a click on the label", () => {
+        // A toggle switch: the native input sits as a sibling of the label it is `for`, positioned over it by
+        // CSS. click_point.js can't see the `for` relationship by walking the DOM, only HTMLLabelElement.control.
+        const { el } = page({ topmost: (x, y, els) => els[1] });
+        const label = el("label", rect(100, 100, 300, 140), { text: "Notifications" });
+        const input = el("input", rect(100, 100, 300, 140));
+        label.control = input;
+        expect(clickPoint.call(label)).toEqual({ x: 200, y: 120 });
+    });
+
+    it("still reports an unrelated covering element over a label, even with no control set", () => {
+        const { el } = page({ topmost: (x, y, els) => els[1] });
+        const label = el("label", rect(100, 100, 300, 140), { text: "Terms" });
+        el("div", rect(0, 0, 800, 200), { text: "Banner" });
+        expect(clickPoint.call(label).error).toContain('<label "Terms"> is covered by <div "Banner">');
     });
 });
 
