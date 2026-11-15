@@ -130,16 +130,23 @@ fn icon_of(pieces: &[String]) -> Option<String> {
     Some(found.to_string())
 }
 
-/// A tooltip's text, trimmed and cut, with a card or ID number, a code or a token masked first.
+/// A tooltip's text, trimmed and cut, with a card or ID number, a code or a token masked first. It is cut at
+/// the end of a word, never inside one: a token cut in two shows its first part, which no later cleanup (a
+/// secret withheld in the same row is taken out of every name that repeats it) can know was a secret's.
 fn tip(text: &str) -> Option<String> {
     let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if clean.is_empty() {
         return None;
     }
-    // A secret's shape is found in the whole text, before any of it is cut: a cut through a token hides its shape.
-    let clean = agentmux_common::secret_shape::scrub(&clean);
-    let masked = agentmux_common::pii_mask::mask_bounded(&clean, MAX_TIP + 1);
-    Some(if masked.chars().count() > MAX_TIP { format!("{}…", masked.chars().take(MAX_TIP).collect::<String>()) } else { masked })
+    // A secret's shape is found in the whole text, before any of it is cut.
+    let masked = agentmux_common::pii_mask::mask_bounded(&agentmux_common::secret_shape::scrub(&clean), usize::MAX);
+    if masked.chars().count() <= MAX_TIP {
+        return Some(masked);
+    }
+    let head: String = masked.chars().take(MAX_TIP + 1).collect();
+    // One long word with no end inside the limit is not quoted at all.
+    let end = head.rfind(' ')?;
+    Some(format!("{}…", head[..end].trim_end()))
 }
 
 /// What one element of a `DOMSnapshot` document says it is: its tooltip text, else its icon words.

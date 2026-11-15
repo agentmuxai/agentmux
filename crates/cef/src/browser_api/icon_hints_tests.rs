@@ -117,3 +117,15 @@ fn a_secret_near_the_cut_of_a_long_tooltip_is_scrubbed_before_it_is_cut() {
     let hint = hints(&page).get(&11).cloned().unwrap();
     assert!(!hint.contains("Xy8Q"), "no piece of it: {hint}");
 }
+
+#[test]
+fn a_long_tooltip_is_cut_at_a_word_end_so_no_token_is_cut_in_two() {
+    // The token is short and has no key shape, so only a whole-word cut keeps a piece of it out of the hint.
+    let page = dom(&[el(-1, "div", &[]), el(0, "button", &[("data-tooltip", Box::leak(format!("{}q7Zp-93xaLm2Rt", "word ".repeat(10)).into_boxed_str()))])]);
+    let hint = hints(&page).get(&11).cloned().unwrap();
+    assert!(!hint.contains("q7Zp"), "{hint}");
+    assert!(hint.contains("word") && hint.ends_with("…\""), "the words that fit are kept, whole: {hint}");
+    // One word longer than the limit has no end to cut at: nothing is quoted, and the icon is the hint.
+    let long = dom(&[el(-1, "div", &[]), el(0, "button", &[("data-tooltip", Box::leak("x".repeat(80).into_boxed_str())), ("class", "icon-copy")])]);
+    assert_eq!(hints(&long).get(&11).map(String::as_str), Some("icon: copy"));
+}
