@@ -166,6 +166,24 @@ fn poll_line_due(drone_id: &str, entry_id: &str, now_ms: i64) -> Option<u32> {
     Some(polls)
 }
 
+/// What to say when the entry was saved for another site than `origin`; `None` when it fits or says no site.
+async fn site_mismatch(state: &AppState, target: &FillTarget, drone_id: &str, origin: &str) -> Option<String> {
+    let (store, id) = (state.identity_store.clone(), target.id.clone());
+    let fields = tokio::task::spawn_blocking(move || store.vault_get(&id).ok().flatten().map(|r| r.fields).unwrap_or_default()).await.unwrap_or_default();
+    match binding(&recorded_of(target.kind, &fields), origin) {
+        Binding::Differs { recorded } => Some(format!("This key was saved for {recorded}; the drone {drone_id} sends it to {}", host_of(origin))),
+        _ => None,
+    }
+}
+
+/// Why a poll, which can't ask a person, is not sent the key: no "Always" yet, or the key is for another site.
+fn poll_cannot_ask(mismatch: Option<&str>, drone_id: &str, label: &str, origin: &str) -> String {
+    match mismatch {
+        Some(why) => format!("{why}: a poll can't ask, so it doesn't send it; run the drone by hand and choose Allow once"),
+        None => format!("the drone {drone_id} has no \"Always\" for {label} at {origin}, and a poll can't ask: run the drone by hand once, answer \"Always\", then the poll goes ahead"),
+    }
+}
+
 /// Resolves, asks for and reads the entry `entry` for a call to `origin` by drone `drone_id`.
 /// Nothing is read and nothing is sent unless this returns `Ok`.
 pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origin: &str) -> Result<Resolved, String> {
@@ -183,13 +201,7 @@ pub(crate) async fn resolve_with(state: &AppState, drone_id: &str, entry: &str, 
     part_allowed(target.kind, target.part)?;
 
     // The site or service the entry says it was saved for, against the one this call goes to.
-    let (store, id) = (state.identity_store.clone(), target.id.clone());
-    let fields = tokio::task::spawn_blocking(move || store.vault_get(&id).ok().flatten().map(|r| r.fields).unwrap_or_default()).await.unwrap_or_default();
-    let bound = binding(&recorded_of(target.kind, &fields), origin);
-    let mismatch = match &bound {
-        Binding::Differs { recorded } => Some(format!("This key was saved for {recorded}; the drone {drone_id} sends it to {}", host_of(origin))),
-        _ => None,
-    };
+    let mismatch = site_mismatch(state, &target, drone_id, origin).await;
 
     let note = mismatch.clone().unwrap_or_default();
     let record = |outcome: &str| {
@@ -211,13 +223,7 @@ pub(crate) async fn resolve_with(state: &AppState, drone_id: &str, entry: &str, 
     };
     if !granted && asking == Asking::Never {
         // Nothing is asked and nothing is written to the Activity: a poll that runs every few minutes would fill it.
-        return Err(match &mismatch {
-            Some(why) => format!("{why}: a poll can't ask, so it doesn't send it; run the drone by hand and choose Allow once"),
-            None => format!(
-                "the drone {drone_id} has no \"Always\" for {} at {origin}, and a poll can't ask: run the drone by hand once, answer \"Always\", then the poll goes ahead",
-                target.label
-            ),
-        });
+        return Err(poll_cannot_ask(mismatch.as_deref(), drone_id, &target.label, origin));
     }
     if !granted {
         let request = UseRequest {
@@ -270,9 +276,10 @@ pub(crate) async fn resolve_with(state: &AppState, drone_id: &str, entry: &str, 
     if asking == Asking::Never {
         // One line an hour for a poll, with the number of polls it stands for; never the value.
         if let Some(polls) = poll_line_due(drone_id, &target.id, agentmux_common::time::now_ms()) {
+            let reason = format!("a poll, {polls} time(s) since the last line");
             vault::record_line(
                 &state.identity_store,
-                vault::Line { entry_id: &target.id, label: &target.label, actor: &who, action: CALLED, target: origin, outcome: "done", reason: &format!("a poll, {polls} time(s) since the last line") },
+                vault::Line { entry_id: &target.id, label: &target.label, actor: &who, action: CALLED, target: origin, outcome: "done", reason: &reason },
             );
             super::vault_handlers::publish(state);
         }
