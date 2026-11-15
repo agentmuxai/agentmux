@@ -57,8 +57,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/maps-out/AgentMux_0.0.0-check_windows-frontend-maps.tar.xz"
-          dest="$RUNNER_TEMP/maps-unpacked"
+          # tar reads "D:\a\..." as a file on a host called D, so tar and find get the archive and its folder as
+          # Git Bash paths (/d/a/...); node gets the Windows form.
+          tmp="$(cd "$RUNNER_TEMP" && pwd)"
+          archive="$tmp/maps-out/AgentMux_0.0.0-check_windows-frontend-maps.tar.xz"
+          dest="$tmp/maps-unpacked"
           mkdir -p "$dest"
           tar -xJf "$archive" -C "$dest"
           packed=$(find "$dest" -name '*.map' | wc -l | tr -d ' ')
@@ -74,7 +77,7 @@ jobs:
           for col in 1 10 50 100 256 500; do
             printf '    at f (http://127.0.0.1:1/assets/%s:1:%s)\n' "$chunk" "$col" >> "$RUNNER_TEMP/stack.txt"
           done
-          out=$(node scripts/source-maps.mjs resolve "$dest" "$RUNNER_TEMP/stack.txt")
+          out=$(node scripts/source-maps.mjs resolve "$RUNNER_TEMP/maps-unpacked" "$RUNNER_TEMP/stack.txt")
           echo "$out"
           if echo "$out" | grep -Eq '\.tsx?:[0-9]+:[0-9]+\)'; then
             echo "decoded."
