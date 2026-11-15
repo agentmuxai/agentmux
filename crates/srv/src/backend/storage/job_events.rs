@@ -51,6 +51,17 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Move the time `job_id` heard `event_id` forward to `now_ms`, so the retention sweep keeps it. Nothing else about
+    /// the row changes, in particular not whether it counts as an event the job admitted. `Ok(true)` when it moved.
+    pub fn job_event_touch(&self, job_id: &str, event_id: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_trigger_events SET at_ms = ?3 WHERE job_id = ?1 AND event_id = ?2 AND at_ms < ?3",
+            params![job_id, event_id, now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Forget the ids heard before `before_ms`. How many went.
     pub fn job_events_forget_before(&self, before_ms: i64) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -132,6 +143,18 @@ mod tests {
         assert!(!s.job_event_claim("job-a", "e1", "run-2", 200).unwrap(), "the same event again is nothing");
         assert!(s.job_event_claim("job-a", "e2", "run-3", 300).unwrap());
         assert!(s.job_event_claim("job-b", "e1", "run-4", 400).unwrap(), "another job hears the same id as new");
+    }
+
+    #[test]
+    fn touching_an_id_keeps_it_through_the_sweep_without_making_it_an_admitted_event() {
+        let s = store();
+        assert!(s.job_event_claim("job-a", "marker", "", 100).unwrap());
+        assert!(s.job_event_touch("job-a", "marker", 500).unwrap());
+        assert!(!s.job_event_touch("job-a", "marker", 400).unwrap(), "never backwards");
+        assert!(!s.job_event_touch("job-a", "nothing", 500).unwrap());
+        assert_eq!(s.job_events_forget_before(300).unwrap(), 0, "it was touched, so it is not old");
+        assert_eq!(s.job_events_since("job-a", 0).unwrap(), 0, "a marker with no run is not an admitted event");
+        assert!(!s.job_event_claim("job-a", "marker", "", 600).unwrap());
     }
 
     #[test]

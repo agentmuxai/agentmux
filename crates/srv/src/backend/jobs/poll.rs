@@ -25,7 +25,8 @@
 //!
 //! The run reads `{{trigger.query}}`, `{{trigger.key}}` (the item's id) and `{{trigger.item}}` (the item as the
 //! query lists it). An item is never reported twice: the job's event ids (`backend::storage::job_events`) remember
-//! it for a week, and an item that is still in the answer is remembered for as long as it is there. A poll that finds
+//! it for a week, and an item that is still in the answer is remembered for as long as it is there. (An item that is
+//! still there when srv restarts more than a week after it was reported is reported again: its id has been forgotten.) A poll that finds
 //! more than [`MAX_NEW_PER_POLL`] new items starts that many and leaves the rest for the next poll. A poll whose
 //! question fails (the ledger is not ready yet, say) is skipped and asked again at the next time.
 
@@ -194,6 +195,16 @@ pub(crate) fn items_of_for_test(query: &str, answer: &Value) -> Vec<(String, Val
     items_of(query, answer)
 }
 
+/// The id under which a job's first look is kept with its event ids.
+fn baseline_marker(signature: &str) -> String {
+    format!("poll:baseline:{signature}")
+}
+
+#[cfg(test)]
+pub(crate) fn marker_of_for_test(job: &CronJob) -> Option<String> {
+    plan_of(job).map(|p| baseline_marker(&p.signature))
+}
+
 fn event_id(query: &str, id: &str) -> String {
     format!("poll:{query}:{id}")
 }
@@ -215,7 +226,11 @@ pub struct PollState {
 
 /// Asks the question of every poll job that is due and starts a run for each new item. Returns how many runs it
 /// started or queued. `now` is a parameter so a test can step the clock.
-pub async fn poll_due(scheduler: &CronScheduler, store: &Store, all: &[CronJob], check: &Check, state: &mut PollState, now: i64) -> usize {
+pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check, state: &mut PollState, now: i64) -> usize {
+    // The job's event ids live with the run ledger (what the scheduler admits events against), which is not always the
+    // store the jobs are listed from: the baseline and the items are claimed where `fire_event` looks.
+    let Some(ledger) = scheduler.runs().cloned() else { return 0 };
+    let store = ledger.store().clone();
     let polling: Vec<(&CronJob, Plan)> = all.iter().filter_map(|j| plan_of(j).map(|p| (j, p))).collect();
     state.jobs.retain(|id, _| polling.iter().any(|(j, _)| &j.id == id));
     let mut offered = 0;
@@ -237,10 +252,15 @@ pub async fn poll_due(scheduler: &CronScheduler, store: &Store, all: &[CronJob],
         };
         let items = items_of(&plan.query, &answer);
         let present: HashSet<String> = items.iter().map(|(id, _)| id.clone()).collect();
+        let marker = baseline_marker(&plan.signature);
+        if !plan.include_existing {
+            // The marker is an id like the others and would go with the week's sweep: each look moves it forward, so
+            // a restart after a long stop still knows this is not the first look.
+            let _ = store.job_event_touch(&job.id, &marker, now);
+        }
         if !st.baselined {
             if !plan.include_existing {
-                // The first poll of a job takes note of what is there, once: the marker is kept with the job's event ids.
-                let marker = format!("poll:baseline:{}", plan.signature);
+                // The first poll of a job takes note of what is there, once.
                 match store.job_event_claim(&job.id, &marker, "", now) {
                     Ok(true) => {
                         for (id, _) in &items {
@@ -291,7 +311,7 @@ pub fn spawn(jobs: Arc<Store>, scheduler: Arc<CronScheduler>, check: Check) {
             tokio::time::sleep(TICK).await;
             let listing = jobs.clone();
             let all = tokio::task::spawn_blocking(move || listing.cron_list_enabled()).await.ok().and_then(Result::ok).unwrap_or_default();
-            poll_due(&scheduler, &jobs, &all, &check, &mut state, agentmux_common::time::now_ms()).await;
+            poll_due(&scheduler, &all, &check, &mut state, agentmux_common::time::now_ms()).await;
         }
     });
 }

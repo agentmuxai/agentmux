@@ -95,15 +95,15 @@ async fn a_new_item_starts_one_run_and_what_was_already_there_starts_none() {
     let all = [job.clone()];
     let t0 = agentmux_common::time::now_ms();
 
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0).await, 0, "the first poll only takes note");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0).await, 0, "the first poll only takes note");
     assert_eq!(*asked.lock().unwrap(), [json!({ "query": "tasks", "state": "todo", "limit": 200 })], "it asks the query with its own filters and the most it gives, not how often");
     assert!(rig.runs("j-poll").is_empty());
 
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + MIN).await, 0, "not due yet: nothing asked");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + MIN).await, 0, "not due yet: nothing asked");
     assert_eq!(asked.lock().unwrap().len(), 1);
 
     *answer.lock().unwrap() = tasks(&[1, 2, 3]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + 5 * MIN).await, 1);
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 5 * MIN).await, 1);
     until_runs(&rig, "j-poll", 1).await;
     let run = rig.runs("j-poll").remove(0);
     assert_eq!((run.trigger.as_str(), run.triggered_by.as_str()), ("event", "event:poll"));
@@ -113,11 +113,11 @@ async fn a_new_item_starts_one_run_and_what_was_already_there_starts_none() {
         "the run reads the item"
     );
 
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + 10 * MIN).await, 0, "the same answer is nothing new");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 10 * MIN).await, 0, "the same answer is nothing new");
     *answer.lock().unwrap() = tasks(&[1, 2]);
-    poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + 15 * MIN).await;
+    poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 15 * MIN).await;
     *answer.lock().unwrap() = tasks(&[1, 2, 3]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + 20 * MIN).await, 0, "an item that leaves and comes back is not new: its id is remembered");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 20 * MIN).await, 0, "an item that leaves and comes back is not new: its id is remembered");
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert_eq!(rig.runs("j-poll").len(), 1);
 }
@@ -144,13 +144,13 @@ async fn after_a_restart_what_was_reported_is_not_again_and_what_came_meanwhile_
     let all = [job];
     let t0 = agentmux_common::time::now_ms();
     let mut before = PollState::default();
-    poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut before, t0).await;
+    poll::poll_due(&rig.sched, &all, &check, &mut before, t0).await;
     *answer.lock().unwrap() = tasks(&[1, 2]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut before, t0 + 5 * MIN).await, 1);
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut before, t0 + 5 * MIN).await, 1);
 
     *answer.lock().unwrap() = tasks(&[1, 2, 3]);
     let mut after = PollState::default();
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut after, t0 + 60 * MIN).await, 1, "only the task that came meanwhile");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut after, t0 + 60 * MIN).await, 1, "only the task that came meanwhile");
     until_runs(&rig, "j-restart", 2).await;
 }
 
@@ -165,9 +165,9 @@ async fn include_existing_runs_for_what_is_there_and_a_flood_is_taken_a_few_at_a
     let all = [job];
     let t0 = agentmux_common::time::now_ms();
     let mut state = PollState::default();
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0).await, poll::MAX_NEW_PER_POLL);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + MIN).await, 5, "the rest at the next poll");
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &all, &check, &mut state, t0 + 2 * MIN).await, 0);
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0).await, poll::MAX_NEW_PER_POLL);
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + MIN).await, 5, "the rest at the next poll");
+    assert_eq!(poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + 2 * MIN).await, 0);
     until_runs(&rig, "j-all", 25).await;
 }
 
@@ -180,20 +180,20 @@ async fn a_question_that_fails_is_skipped_and_an_edited_question_starts_from_wha
     let check = fake(&answer, &Arc::default());
     let t0 = agentmux_common::time::now_ms();
     let mut state = PollState::default();
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &[job.clone()], &check, &mut state, t0).await, 0, "a failed question is not an empty answer");
+    assert_eq!(poll::poll_due(&rig.sched, &[job.clone()], &check, &mut state, t0).await, 0, "a failed question is not an empty answer");
     *answer.lock().unwrap() = tasks(&[1]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &[job.clone()], &check, &mut state, t0 + MIN).await, 0, "the first answer is the one taken note of");
+    assert_eq!(poll::poll_due(&rig.sched, &[job.clone()], &check, &mut state, t0 + MIN).await, 0, "the first answer is the one taken note of");
 
     let mut edited = job.clone();
     edited.trigger_event = json!({ "source": "poll", "filter": { "query": "tasks", "every_minutes": 1, "holder": "agent2" }, "max_per_hour": 1000 });
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &[edited.clone()], &check, &mut state, t0 + 2 * MIN).await, 0, "a new question takes note again");
+    assert_eq!(poll::poll_due(&rig.sched, &[edited.clone()], &check, &mut state, t0 + 2 * MIN).await, 0, "a new question takes note again");
     *answer.lock().unwrap() = tasks(&[1, 2]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &[edited.clone()], &check, &mut state, t0 + 3 * MIN).await, 1);
+    assert_eq!(poll::poll_due(&rig.sched, &[edited.clone()], &check, &mut state, t0 + 3 * MIN).await, 1);
 
     let mut off = edited;
     off.enabled = false;
     *answer.lock().unwrap() = tasks(&[1, 2, 3]);
-    assert_eq!(poll::poll_due(&rig.sched, &rig.store, &[off], &check, &mut state, t0 + 4 * MIN).await, 0, "a job that is off asks nothing");
+    assert_eq!(poll::poll_due(&rig.sched, &[off], &check, &mut state, t0 + 4 * MIN).await, 0, "a job that is off asks nothing");
 }
 
 #[test]
@@ -206,4 +206,28 @@ fn each_query_names_its_items_and_a_problem_is_new_when_the_agent_goes_down_anot
     let peers = json!({ "peers": [{ "host": "narko" }] });
     assert_eq!(poll::items_of_for_test("lan_peers", &peers)[0].0, "narko");
     assert!(poll::items_of_for_test("tasks", &json!({ "count": 0 })).is_empty());
+}
+
+/// The first look is kept with the job's event ids, which a week's sweep forgets: each look moves it forward, so a
+/// restart after a long stop is still not a first look.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_first_look_is_remembered_past_the_weeks_sweep_of_event_ids() {
+    use crate::backend::storage::job_events::KEEP_MS;
+    let rig = rig();
+    allow_runs(&rig);
+    let job = poll_job(&rig, "j-marker", json!({ "query": "tasks", "every_minutes": 1 }));
+    let marker = poll::marker_of_for_test(&job).unwrap();
+    let answer = Arc::new(Mutex::new(tasks(&[1])));
+    let check = fake(&answer, &Arc::default());
+    let all = [job];
+    let mut state = PollState::default();
+    let t0 = agentmux_common::time::now_ms();
+    poll::poll_due(&rig.sched, &all, &check, &mut state, t0).await;
+    for day in [3, 6] {
+        poll::poll_due(&rig.sched, &all, &check, &mut state, t0 + day * 24 * 60 * MIN).await;
+    }
+    let sweep_at = t0 + 8 * 24 * 60 * MIN;
+    rig.store.job_events_forget_before(sweep_at - KEEP_MS).unwrap();
+    assert!(!rig.store.job_event_claim("j-marker", &marker, "", sweep_at).unwrap(), "the marker went through the sweep");
+    assert_eq!(rig.store.job_events_since("j-marker", 0).unwrap(), 0, "and it is not a run the job admitted");
 }
