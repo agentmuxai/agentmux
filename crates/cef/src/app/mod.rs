@@ -128,7 +128,7 @@ wrap_window_delegate! {
 
             // Position: use explicit bounds if provided, else 70% centered.
             // A test build (AGENTMUX_TEST_OFFSCREEN) creates every window off-screen, here for all of them.
-            let bounds = self.initial_bounds.or_else(|| get_monitor_centered_70pct(window));
+            let bounds = self.initial_bounds.or_else(|| get_monitor_centered_70pct(window)).or_else(|| agentmux_common::test_offscreen::initial_rect(1200, 800));
             if let Some((x, y, w, h)) = bounds.map(agentmux_common::test_offscreen::place_rect) {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
