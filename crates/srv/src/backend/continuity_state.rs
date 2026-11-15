@@ -46,6 +46,8 @@ const STATE_MAX_CHARS: usize = 12_000;
 /// A state version is well under this; reading the file's last window finds
 /// the newest without reading every version.
 const LATEST_WINDOW_BYTES: i64 = 64 * 1024;
+/// The most [`latest_state`] reads to find the newest version.
+const LATEST_WINDOW_MAX_BYTES: i64 = 4 * 1024 * 1024;
 /// The heading the summarizer must produce. Output without it is rejected
 /// rather than stored.
 const REQUIRED_HEADING: &str = "## Last user request";
@@ -83,20 +85,46 @@ pub(crate) fn latest_state(fs: &FileStore, zone: &str) -> Option<StateVersion> {
     if file.size <= 0 {
         return None;
     }
-    let offset = (file.size - LATEST_WINDOW_BYTES).max(0);
-    let (_, data) = match fs.read_at(zone, STATE_FILE, offset, file.size - offset) {
-        Ok(read) => read,
-        Err(e) => {
-            damage::note_if_shared(fs, zone, "tail read", &e);
-            return None;
+    // The newest version is the file's last line. Most are a few KB; one whose protected
+    // sections were kept whole can pass the window, so the window grows until a line parses.
+    let mut window = LATEST_WINDOW_BYTES;
+    let latest = loop {
+        let offset = (file.size - window).max(0);
+        let (_, data) = match fs.read_at(zone, STATE_FILE, offset, file.size - offset) {
+            Ok(read) => read,
+            Err(e) => {
+                damage::note_if_shared(fs, zone, "tail read", &e);
+                return None;
+            }
+        };
+        let found = String::from_utf8_lossy(&data)
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str::<StateVersion>(line.trim()).ok());
+        if found.is_some() || offset == 0 || window >= LATEST_WINDOW_MAX_BYTES {
+            break found?;
         }
+        window *= 4;
     };
-    let latest = String::from_utf8_lossy(&data)
-        .lines()
-        .rev()
-        .find_map(|line| serde_json::from_str::<StateVersion>(line.trim()).ok())?;
     let output_size = fs.stat(zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size);
     (latest.based_on <= output_size).then_some(latest)
+}
+
+/// `raw`, a state file, with each version's `based_on` moved to a transcript that starts `cut`
+/// bytes into the one the versions described and is `size` bytes long (a fork's copy of the newest
+/// part of its parent's). A version that covered only what was cut away covers none of the copy,
+/// so its summary is still offered and the next update folds the whole copy in.
+pub(crate) fn rebase_versions(raw: &[u8], cut: i64, size: i64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(raw).lines() {
+        let Ok(mut version) = serde_json::from_str::<StateVersion>(line.trim()) else { continue };
+        version.based_on = (version.based_on - cut).clamp(0, size);
+        if let Ok(bytes) = serde_json::to_vec(&version) {
+            out.extend(bytes);
+            out.push(b'\n');
+        }
+    }
+    out
 }
 
 fn append_version(fs: &FileStore, zone: &str, version: &StateVersion) -> Result<(), String> {
@@ -452,6 +480,31 @@ mod tests {
             .unwrap();
         let latest = latest_state(&fs, ZONE).unwrap();
         assert_eq!((latest.version, latest.tokens), (2, None));
+    }
+
+    #[test]
+    fn a_version_bigger_than_the_read_window_is_still_found() {
+        let fs = store_with_output(1_000);
+        append_version(&fs, ZONE, &version(1, 100, 1)).unwrap();
+        // Protected sections are kept whole, so one version can pass the window.
+        let mut big = version(2, 500, 2);
+        big.text = format!("## Last user request\n{}", "あ".repeat(100_000));
+        append_version(&fs, ZONE, &big).unwrap();
+        assert!(fs.stat(ZONE, STATE_FILE).unwrap().unwrap().size > 3 * LATEST_WINDOW_BYTES);
+        let latest = latest_state(&fs, ZONE).expect("the newest version, read whole");
+        assert_eq!((latest.version, latest.text.chars().count()), (2, big.text.chars().count()));
+    }
+
+    #[test]
+    fn versions_are_rebased_to_a_transcript_that_starts_later() {
+        let raw: Vec<u8> = [version(1, 100, 1), version(2, 5_000, 2), version(3, 9_000, 3)]
+            .iter()
+            .flat_map(|v| serde_json::to_vec(v).unwrap().into_iter().chain([b'\n']))
+            .chain(b"not json\n".iter().copied())
+            .collect();
+        let out = rebase_versions(&raw, 4_000, 3_000);
+        let based: Vec<i64> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<StateVersion>(l).unwrap().based_on).collect();
+        assert_eq!(based, vec![0, 1_000, 3_000], "before the cut: none; inside: moved; past the end: the whole copy");
     }
 
     #[test]
