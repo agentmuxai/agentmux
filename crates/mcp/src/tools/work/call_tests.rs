@@ -183,6 +183,47 @@ fn cases() -> Vec<Case> {
             ],
         ),
         c("WorkList", json!({}), json!({ "items": [] }), "/agentmux/work?state=&limit=50", json!({}), &["Queue is empty."]),
+        // One task whole: the payload as filed, who has it, its links and card, what it starts after, its history.
+        c(
+            "WorkGet",
+            json!({ "id": "47738" }),
+            json!({
+                "title": "Tasks get", "payload": "The whole brief.\nSecond paragraph.", "state": "claimed", "claimed_by": "naki-2",
+                "target_agent": "naki-2", "kind": "build",
+                "card": {
+                    "num": 47738, "task_ref": "#47738", "repo": "agentmuxai/agentmux", "branch": "naki-2/tasks-get",
+                    "pr_url": "https://github.com/agentmuxai/agentmux/pull/9", "doc": "C:/specs/S.md", "note": "half done", "question": "",
+                    "checklist": [{ "text": "srv", "status": "completed" }, { "text": "mcp", "status": "in_progress" }, { "text": "tests", "status": "pending" }],
+                    "after": [{ "num": 47723, "title": "Spec", "state": "done", "doc": "C:/specs/P.md" }],
+                },
+                "history": [{ "at": 1, "actor": "AgentY", "kind": "created", "from_state": "", "to_state": "open", "body": "" }],
+            }),
+            "/agentmux/work/47738",
+            json!({}),
+            &[
+                "task #47738 (claimed, held by naki-2)",
+                "Title: Tasks get",
+                "Links: repo: agentmuxai/agentmux; branch: naki-2/tasks-get; PR: https://github.com/agentmuxai/agentmux/pull/9; document: C:/specs/S.md",
+                "Kind: build",
+                "Holder's last note: half done",
+                "  [x] srv",
+                "  [~] mcp",
+                "  [ ] tests",
+                "The task as it was filed (its payload):\nThe whole brief.\nSecond paragraph.",
+                "- #47723 \"Spec\" (done, document: C:/specs/P.md)",
+                "History (last 1):",
+                "AgentY created open",
+            ],
+        ),
+        // A task on another board is asked for by its ref, and one for someone else says who.
+        c(
+            "WorkGet",
+            json!({ "id": "5", "board": "work" }),
+            json!({ "title": "T", "payload": "P", "state": "open", "target_agent": "Dax", "card": { "num": 5, "task_ref": "work#5" } }),
+            "/agentmux/work/work%235",
+            json!({}),
+            &["task work#5 (open, for Dax)", "P"],
+        ),
         // Several boards.
         c(
             "WorkEnqueue",
@@ -307,6 +348,7 @@ async fn a_tool_missing_what_it_needs_refuses_before_it_asks_srv() {
         ("WorkAsk", json!({ "id": "7", "attempt": 1 }), "Tasks ask needs a question"),
         ("WorkSubmit", json!({ "id": "7", "attempt": 1 }), "Tasks submit needs a result"),
         ("WorkComplete", json!({ "id": "7", "attempt": 1 }), "Tasks complete requires a non-empty 'result'"),
+        ("WorkGet", json!({}), "missing required parameter: id"),
         ("WorkHold", json!({}), "missing required parameter: id"),
         ("WorkAccept", json!({}), "missing required parameter: id"),
         ("WorkSendBack", json!({ "id": "7" }), "reason is required"),
@@ -391,6 +433,7 @@ async fn a_refusal_from_srv_names_the_tool_and_the_status() {
         ("WorkAccept", json!({ "id": "7" }), "Tasks accept:"),
         ("WorkEdit", json!({ "id": "7" }), "Tasks edit:"),
         ("WorkList", json!({}), "Tasks list failed: HTTP 500 Internal Server Error"),
+        ("WorkGet", json!({ "id": "7" }), "Tasks get failed: HTTP 500 Internal Server Error"),
     ];
     for (tool, args, wanted) in failures {
         let srv = stub_srv("500 Internal Server Error", json!({ "error": "boom" }));
@@ -398,6 +441,15 @@ async fn a_refusal_from_srv_names_the_tool_and_the_status() {
         let err = call(tool, &args, &fx.cx()).await.expect_err(&format!("{tool} should fail")).to_string();
         assert!(err.contains(wanted), "{tool} {args}: {err:?}, wanted {wanted:?}");
     }
+}
+
+#[tokio::test]
+async fn a_task_the_agent_cannot_see_is_said_so_with_the_way_out() {
+    let srv = stub_srv("404 Not Found", json!({ "error": "no such task" }));
+    let fx = Fixture::new(&srv);
+    let err = call("WorkGet", &json!({ "id": "99" }), &fx.cx()).await.unwrap_err().to_string();
+    assert!(err.contains("no task #99 that you can see"), "{err}");
+    assert!(err.contains("Tasks list"), "{err}");
 }
 
 #[tokio::test]

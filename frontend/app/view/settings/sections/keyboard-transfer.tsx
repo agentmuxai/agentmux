@@ -5,7 +5,7 @@
 // Export copies the `keybindings` array; Import takes pasted text, says what it would change, and merges it or
 // replaces the setting with it. The rules are in keyboard-transfer-state.ts.
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, TextArea } from "@/app/element/ui";
 import { writeText } from "@/util/clipboard";
@@ -68,12 +68,26 @@ function ImportPanel(p: { edit: KeyboardEdit; onDone: (note: string) => void; on
 export function KeyboardTransfer(p: { edit: KeyboardEdit }): JSX.Element {
     const [open, setOpen] = createSignal(false);
     const [note, setNote] = createSignal("");
+    // The text itself, when the clipboard did not take it (Linux with none of wl-copy, xclip or xsel, and no copy the page
+    // may make): shown selected so the person can copy it by hand, which needs no tool.
+    const [manual, setManual] = createSignal<string | null>(null);
+    let manualBox: HTMLTextAreaElement | undefined;
+    createEffect(() => {
+        if (manual() == null) return;
+        manualBox?.focus();
+        manualBox?.select();
+    });
     const exportNow = () => {
         const entries = p.edit.entries();
+        setManual(null);
         if (entries.length === 0) return setNote("Nothing to export: you have no changes.");
-        void writeText(exportText(entries)).then(
+        const text = exportText(entries);
+        void writeText(text).then(
             () => setNote(`Copied ${entries.length} ${entries.length === 1 ? "entry" : "entries"}.`),
-            () => setNote("Could not copy to the clipboard.")
+            () => {
+                setManual(text);
+                setNote(`Could not copy to the clipboard (on Linux it needs wl-clipboard, xclip or xsel). The ${entries.length === 1 ? "entry is" : "entries are"} selected below: copy from there.`);
+            }
         );
     };
     return (
@@ -91,6 +105,9 @@ export function KeyboardTransfer(p: { edit: KeyboardEdit }): JSX.Element {
             <span class="kb-transfer-note" role="status" aria-live="polite">
                 {note()}
             </span>
+            <Show when={manual() != null}>
+                <TextArea ref={manualBox} mono readOnly rows={6} aria-label="Exported keybindings" value={manual() ?? ""} />
+            </Show>
             <Show when={open()}>
                 <ImportPanel
                     edit={p.edit}

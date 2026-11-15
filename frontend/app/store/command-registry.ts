@@ -242,6 +242,13 @@ function registerOpenViewCommands(): void {
         execute: () => openPane({ meta: { view: "help" } }, true),
     });
     commandRegistry.register({
+        id: "open:reviews",
+        label: "Open Reviews",
+        category: "Open",
+        icon: "code-pull-request",
+        execute: (opts) => openPane({ meta: { view: "reviews" } }, opts?.forceNew),
+    });
+    commandRegistry.register({
         id: "open:atlas",
         label: "Open Atlas",
         category: "Open",

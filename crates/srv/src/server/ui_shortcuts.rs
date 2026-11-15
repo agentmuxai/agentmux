@@ -122,6 +122,16 @@ pub(crate) async fn handle_ui_press_keys(
     .await
 }
 
+/// What the person calls the agent: the name it was given, not the lowercase id it signs its requests with. The id
+/// stands in for an agent the registry does not know.
+fn agent_name(agent_id: &str) -> String {
+    name_or_id(crate::server::native_memory_handlers::find_active_registry_record_by_slug(agent_id).map(|r| r.data.instance_name), agent_id)
+}
+
+fn name_or_id(name: Option<String>, agent_id: &str) -> String {
+    name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| agent_id.to_string())
+}
+
 /// The most keys, and the longest key or `when`, a request may carry: a command has a handful of keys.
 const MAX_BINDINGS: usize = 8;
 const MAX_KEY_LEN: usize = 64;
@@ -152,7 +162,7 @@ pub(crate) async fn handle_ui_set_shortcut(
     proxy_data(
         &state,
         "set_shortcut",
-        json!({ "block_id": block_id, "command": req.command, "bindings": req.bindings, "when": req.when, "agent": req.auth.agent_id }),
+        json!({ "block_id": block_id, "command": req.command, "bindings": req.bindings, "when": req.when, "agent": agent_name(&req.auth.agent_id) }),
         std::time::Duration::from_secs(10),
     )
     .await
@@ -179,7 +189,7 @@ pub(crate) async fn handle_ui_reset_shortcuts(
     proxy_data(
         &state,
         "reset_shortcuts",
-        json!({ "block_id": block_id, "command": command, "all": req.all, "agent": req.auth.agent_id }),
+        json!({ "block_id": block_id, "command": command, "all": req.all, "agent": agent_name(&req.auth.agent_id) }),
         std::time::Duration::from_secs(10),
     )
     .await
@@ -218,6 +228,14 @@ async fn close_pane(state: &AppState, req: &UiRunCommandRequest) -> axum::respon
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_person_is_told_the_agents_name_and_falls_back_to_its_id() {
+        assert_eq!(super::name_or_id(Some("Opaz".into()), "opaz"), "Opaz");
+        assert_eq!(super::name_or_id(Some(" Loap-3 ".into()), "loap-loap-2-loap-3"), "Loap-3");
+        assert_eq!(super::name_or_id(Some("".into()), "opaz"), "opaz");
+        assert_eq!(super::name_or_id(None, "opaz"), "opaz");
+    }
+
     use super::{refused_command, shortcut_target};
     use axum::http::StatusCode;
 

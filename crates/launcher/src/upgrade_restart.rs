@@ -76,7 +76,7 @@ fn version_core(v: &str) -> Option<(u64, u64, u64)> {
 
 /// Whether `dir` holds Inno Setup's uninstaller (`unins000.exe`, …): a
 /// `setup.exe` install.
-fn has_uninstaller(dir: &Path) -> bool {
+pub(crate) fn has_uninstaller(dir: &Path) -> bool {
     std::fs::read_dir(dir).is_ok_and(|entries| {
         entries.filter_map(|e| e.ok()).any(|e| {
             let name = e.file_name().to_string_lossy().to_ascii_lowercase();

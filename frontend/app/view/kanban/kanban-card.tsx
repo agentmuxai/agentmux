@@ -11,6 +11,7 @@ import { seatTooltipLine } from "@/app/agent-model/seat-format";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
+import { guardControlPress } from "@/app/util/press-on-control";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { tip } from "@/app/element/tip";
@@ -171,11 +172,16 @@ function makeDraggable(s: CardState) {
         const el = s.el.current;
         // Only a waiting task moves by drag: to another agent, to Anyone, or onto an agent to start it.
         if (!el || (column() !== "backlog" && column() !== "specd")) return;
+        const press = guardControlPress(el);
         const cleanup = draggable({
             element: el,
+            canDrag: () => !press.pressedOnControl(),
             getInitialData: () => ({ type: kanbanCardItemType, id: t().id, num: t().card.num }),
         });
-        onCleanup(cleanup);
+        onCleanup(() => {
+            cleanup();
+            press.dispose();
+        });
     });
 }
 

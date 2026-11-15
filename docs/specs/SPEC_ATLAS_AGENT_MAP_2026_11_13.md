@@ -257,6 +257,38 @@ Decision 4's second half and the cloud tier, on the data three srv builds added:
   the Swarm, whose confirmation says what a broadcast or a stop cannot reach. When srv's last read of them failed,
   the map says so in its bottom left corner.
 
+### 6.5 After v1: the map fills its pane (#47702)
+
+**The problem (the operator, 2026-11-15, 0.60.28).** In a tall narrow pane (about 640 by 1,700 px) the whole map sat in the top quarter as a wide, short strip with cards too small to read. The cause is in `atlas-layout.ts`: machines wrap into rows at a fixed `ROW_MAX_W` of 1,400 px whatever the pane is, and the agents with no lead stand in a grid of a fixed five columns. The fitted view then scales that strip down to the pane's width, and the height is left empty.
+
+**What is measured.** For a layout and a pane, the fit scale `k = min(paneW / contentW, paneH / contentH)`. At a fixed card size the share of the pane the content covers is `k² x content area / pane area`, so for one packing a bigger `k` is both a larger card and more of the pane covered. The other two measures: how stable the picture is when one agent is added or changes state, and how the lead and message lines read.
+
+**What the literature offers, and what it means for a map of five to eight machines holding about 35 agents.**
+
+| Approach | What it gives | Why it is or isn't the answer here |
+|---|---|---|
+| Aspect-ratio-aware layered layout: [ELK](https://eclipse.dev/elk/reference/options/org-eclipse-elk-aspectRatio.html) `org.eclipse.elk.aspectRatio` (the desired width divided by height, set on the parent), [dagre](https://github.com/dagrejs/dagre) | Layered graph drawing for the lead lines; ELK can steer a drawing toward a target ratio, dagre has no such option (rank direction and separations only) | Our lead lines are trees of at most three levels inside one machine. A layered engine would re-route everything on any change, and ELK is a large dependency (a worker and about a megabyte; not measured here) for something three small steps do. Not chosen. |
+| Rectangle packing: [ELK rectpacking](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-rectpacking.html) (keeps the given box order, approximates a width, places boxes in rows, compacts; options `widthApproximation.targetWidth` and `aspectRatio`) | Packs unconnected boxes toward a target aspect ratio | The right shape of answer for the machines (unconnected boxes in a fixed order). The idea is taken, the library is not: row packing with a searched width is about thirty lines. |
+| Squarified [treemaps](https://vanwijk.win.tue.nl/stm.pdf) (Bruls, Huizing, van Wijk 2000) | Fills a rectangle exactly, with near-square children | It fills by stretching boxes; for cards of a fixed size that means empty space inside each box instead of outside. The nodes are not areas. Not chosen; it would be the tool if a machine's box ever sized by agent count. |
+| Strip and skyline packing; the "fit view" of flow editors ([React Flow `fitView`](https://reactflow.dev/api-reference/types/fit-view-options)) | Shelf (row) packing with a width choice; fit view is "scale and centre the bounding box, with a minimum zoom" | What is built: shelf packing of the machine boxes, then a fit that never goes under a readable card size. |
+| Compact tree layouts: Reingold and Tilford, and the non-layered [tidy tree](https://onlinelibrary.wiley.com/doi/10.1002/spe.2213) of van der Ploeg (2014); radial and balloon layouts | Tight trees, a parent centred over its reports, linear time | `layoutRegion` already is a Reingold-Tilford style tree (a lead centred over its reports). Radial and balloon layouts fill a disc, which a rectangular pane does not, and they turn labels. Kept as it is. |
+| Wrapping a wide level into rows | A level of 12 reports needs no 12 columns | Used for the grid of agents with no lead: its columns follow the pane (below) instead of being five. |
+| Force and constraint layouts with a bounding box (d3-force with a box force, [cola](https://ialab.it.monash.edu/webcola/)) | Fill any box and find good aspect ratios | Not stable: one agent changing state can move many nodes, and the map must not jump. Rejected. |
+
+**The choice: aspect-aware shelf packing of the machine boxes, with the grid's columns chosen, scored by fit.**
+
+1. The machine boxes keep their order and their inner layout (the lead trees and the grid). What changes is two numbers that were constants: the width the row of boxes wraps at, and the columns of the grid of agents with no lead.
+2. For a pane of `w` by `h`, the layout tries a short list of candidates: grid columns from 2 to 6 (a box's width follows) and, for each, wrap widths at which the row breaks after one, two, three ... boxes. Each candidate is packed in order (cheap: tens of boxes) and scored by its fit scale `k`. The best `k` wins; a tie goes to the candidate with the fewest rows. About thirty candidates, so well under a millisecond.
+3. **A readable floor.** A card is 140 by 48 px; under a scale of `MIN_READABLE_K` (0.6, that is 84 by 29 px, the smallest where a name and a state still read) the map is not shrunk further: the view stops at 0.6, fills the pane in the shorter direction and the person pans along the longer. The candidate with the best `k` is still the one used, so the overflow is as small as it can be.
+4. **The first paint is already fitted.** The pane is measured before the first draw (the viewport is measured in `onMount`, which runs before the browser paints) and the layout is made for it, so there is no frame of a default view that then jumps.
+5. **Stability.** The layout is deterministic and keeps no state: the same graph and the same pane shape give the same picture. The pane shape it is given is rounded (its aspect to a quarter of an octave, its size to 64 px), so dragging a splitter reflows only when the shape really changed, and a resize is debounced (150 ms). The order of the boxes never changes. Adding one agent changes only its own box, and only if the box has no free grid slot: when it fits a free slot, or an agent only changes state, no box moves (the picture is the same input to the same scoring). When a box does grow, the scoring runs again and may pick another wrap or grid, so boxes can reflow, but their order never changes.
+6. **By seat** (one picture, no boxes) has no wrapping to choose: the same scoring picks the columns of its grid of agents with no lead, and the trees stay as they are.
+7. **The lead lines and message lines** are drawn between whatever positions the layout gives, as today. The review bot and CI keep their row of their own under the machines; they are packed last and counted in the fit.
+
+**What it does not do.** It does not re-pack the agents inside a machine by the pane's shape, only the machines and the no-lead grid, because a lead stands above its reports whatever the pane is.
+
+**Checks.** A layout test for a tall (640 by 1,700), a square (1,000 by 1,000) and a wide (1,600 by 700) pane with a fleet like the operator's (five machines, about 35 agents): the content covers at least a stated share of each pane at a `k` at or above the floor (the old layout covered about a quarter of the tall one). Adding one agent moves no box when its box has a free slot, and keeps the order of the boxes when its box grows. A change of state moves nothing.
+
 ## 7. Risks and notes
 
 - **"Steward" is not a stored seat role** (`ROLES` is leader, worker, specialist, platform_tester, analyst, super), so a
