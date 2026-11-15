@@ -17,6 +17,7 @@ const hub = vi.hoisted(() => ({
     upload: vi.fn(),
     copy: vi.fn(),
     attachFailed: vi.fn(),
+    have: 0,
 }));
 
 vi.mock("@/app/store/global", () => ({
@@ -36,7 +37,7 @@ vi.mock("@/app/drag/file-drop-actions", () => ({
     paneWorkdir: () => hub.meta["cmd:cwd"],
 }));
 vi.mock("../attachments/attachment-draft", () => ({
-    getAttachmentDraft: () => ({ ingestPaths: hub.ingest, uploadFiles: hub.upload }),
+    getAttachmentDraft: () => ({ ingestPaths: hub.ingest, uploadFiles: hub.upload, count: () => hub.have, maxFiles: () => 30 }),
 }));
 
 import type { FileDropHook } from "@/app/drag/file-drop";
@@ -57,11 +58,35 @@ const file = (name: string) => new File(["x"], name);
 beforeEach(() => {
     hub.settings = {};
     hub.meta = {};
+    hub.have = 0;
     hub.registered.clear();
     for (const f of [hub.ingest, hub.upload, hub.copy, hub.attachFailed]) f.mockReset();
     hub.ingest.mockResolvedValue([]);
 });
 afterEach(() => cleanup());
+
+describe("the overlay over the composer says how many of the dropped files fit", () => {
+    it("names the count when they all fit", () => {
+        expect(mount().accept(drag)).toEqual({ ok: true, message: "Drop 2 files to attach", icon: "fa-paperclip" });
+    });
+
+    it("says how many will attach and how many are over the limit", () => {
+        hub.have = 29;
+        expect(mount().accept(drag)).toEqual({
+            ok: true,
+            message: "Drop 2 files: 1 will attach, 1 over the limit of 30",
+            icon: "fa-triangle-exclamation",
+        });
+    });
+
+    it("refuses the whole drop when the message is full", () => {
+        hub.have = 30;
+        expect(mount().accept(drag)).toEqual({
+            ok: false,
+            reason: "This message already has the most attachments it can carry (30)",
+        });
+    });
+});
 
 describe("agent pane file drop", () => {
     it("registers while mounted and unregisters on cleanup", () => {

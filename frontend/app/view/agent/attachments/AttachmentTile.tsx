@@ -12,6 +12,7 @@ import clsx from "clsx";
 import { Button, CloseButton, Tag } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
+import type { TileReorder } from "./attachment-tile-reorder";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, hasThumbnail, kindIcon, type FileKind } from "./file-kind";
 import { tip } from "@/app/element/tip";
@@ -47,6 +48,8 @@ interface Props {
     flash?: boolean;
     caption?: boolean;
     ref?: (el: HTMLLIElement) => void;
+    /** Present in the composer's tray, where tiles can be dragged into a new order. */
+    reorder?: TileReorder;
 }
 
 export function tileTooltip(t: TileModel): string {
@@ -91,6 +94,25 @@ function TextThumb(props: { id: string; fallback: JSX.Element }) {
     );
 }
 
+/** The ring over a tile while it is copying, uploading or decoding; an arc that spins when the progress is not known. */
+function ProgressRing(props: { progress?: number }) {
+    return (
+        <span class="agent-attachment-tile__progress" aria-hidden="true">
+            <svg viewBox="0 0 32 32" class={clsx({ "is-indeterminate": props.progress == null })}>
+                <circle class="track" cx="16" cy="16" r={RING_R} />
+                <circle
+                    class="bar"
+                    cx="16"
+                    cy="16"
+                    r={RING_R}
+                    stroke-dasharray={`${RING_C}`}
+                    stroke-dashoffset={`${RING_C * (1 - (props.progress ?? 0.25))}`}
+                />
+            </svg>
+        </span>
+    );
+}
+
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
@@ -122,7 +144,15 @@ export function AttachmentTile(props: Props) {
                 "is-processing": props.tile.status === "processing",
                 "is-error": props.tile.status === "error",
                 "is-flash": props.flash,
+                "is-dragging": props.reorder?.dragging,
+                "is-drop-before": props.reorder?.drop === "before",
+                "is-drop-after": props.reorder?.drop === "after",
             })}
+            draggable={props.reorder ? true : undefined}
+            onDragStart={props.reorder?.onDragStart}
+            onDragOver={props.reorder?.onDragOver}
+            onDrop={props.reorder?.onDrop}
+            onDragEnd={props.reorder?.onDragEnd}
             onKeyDown={props.onKeyDown}
         >
             <Button
@@ -142,19 +172,7 @@ export function AttachmentTile(props: Props) {
                     <TextThumb id={props.tile.id!} fallback={icon()} />
                 </Show>
                 <Show when={props.tile.status === "processing"}>
-                    <span class="agent-attachment-tile__progress" aria-hidden="true">
-                        <svg viewBox="0 0 32 32" class={clsx({ "is-indeterminate": props.tile.progress == null })}>
-                            <circle class="track" cx="16" cy="16" r={RING_R} />
-                            <circle
-                                class="bar"
-                                cx="16"
-                                cy="16"
-                                r={RING_R}
-                                stroke-dasharray={`${RING_C}`}
-                                stroke-dashoffset={`${RING_C * (1 - (props.tile.progress ?? 0.25))}`}
-                            />
-                        </svg>
-                    </span>
+                    <ProgressRing progress={props.tile.progress} />
                 </Show>
                 <span class="agent-attachment-tile__badge-wrap" aria-hidden="true"><Tag kind="count" corner="top-left" class="agent-attachment-tile__badge">{props.tile.number}</Tag></span>
                 <Show when={props.tile.pageCount && !hasThumbnail(props.tile.kind)}>
