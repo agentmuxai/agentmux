@@ -43,7 +43,7 @@ use crate::backend::storage::store::Store;
 /// user-facing error-message decision the spec (§4) flags as needing UX input
 /// rather than a choice to make here. Nothing about this function's shape
 /// prevents adding it later.
-pub(crate) fn resolve_agent_id(store: &Store, slug_or_id: &str) -> Result<String, String> {
+pub fn resolve_agent_id(store: &Store, slug_or_id: &str) -> Result<String, String> {
     if slug_or_id.is_empty() {
         return Err("cannot resolve an empty agent id".to_string());
     }
@@ -92,7 +92,7 @@ static UID_FALLBACK_COUNTS: std::sync::OnceLock<
 /// (`handle_reactive_register`), which does not trust the name it is sent
 /// (spec §0.1) and resolves identity by block instead. A synchronous store
 /// read: call it on `spawn_blocking` from async handlers.
-pub(crate) fn uid_for_block(store: &Store, block_id: &str) -> Option<String> {
+pub fn uid_for_block(store: &Store, block_id: &str) -> Option<String> {
     match store.instance_get_active_for_block(block_id) {
         Ok(Some(instance)) if !instance.id.trim().is_empty() => Some(instance.id),
         Ok(_) => None,
@@ -106,7 +106,7 @@ pub(crate) fn uid_for_block(store: &Store, block_id: &str) -> Option<String> {
 /// Bump the counter for `site` (spec §9.2). Shared by the resolver's
 /// dual-write misses and, since identity M2, the registry's own
 /// registration/delivery/lookup counters — one snapshot for all of them.
-pub(crate) fn record_uid_fallback(site: &'static str) {
+pub fn record_uid_fallback(site: &'static str) {
     let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
     let mut guard = counts.lock().unwrap_or_else(|e| e.into_inner());
     *guard.entry(site).or_insert(0) += 1;
@@ -114,7 +114,7 @@ pub(crate) fn record_uid_fallback(site: &'static str) {
 
 /// Snapshot of every fallback counter, for the exit-criterion check (spec
 /// §9.2). Sorted by site so output is stable.
-pub(crate) fn uid_fallback_counts() -> Vec<(&'static str, u64)> {
+pub fn uid_fallback_counts() -> Vec<(&'static str, u64)> {
     let counts = UID_FALLBACK_COUNTS.get_or_init(Default::default);
     let guard = counts.lock().unwrap_or_else(|e| e.into_inner());
     let mut out: Vec<(&'static str, u64)> = guard.iter().map(|(k, v)| (*k, *v)).collect();

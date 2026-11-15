@@ -802,3 +802,12 @@ mod policy_runs;
 
 #[path = "caps_runs_tests.rs"]
 mod caps_runs;
+
+#[path = "event_runs_tests.rs"]
+mod event_runs;
+
+#[path = "app_event_runs_tests.rs"]
+mod app_event_runs;
+
+#[path = "file_watch_runs_tests.rs"]
+mod file_watch_runs;

@@ -19,7 +19,8 @@
 //! - tells srv when the person focuses a field for a new password
 //!   (`credential.Signup`, §6), so the pane's key button offers a strong
 //!   password, and hands it a sign-up form when one is sent
-//!   (`credential.SignupSent`).
+//!   (`credential.SignupSent`) and a password-change form when one is sent
+//!   (`credential.ChangeSent`, §7.3).
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -192,6 +193,9 @@ enum Notice {
     },
     /// A sign-up form was sent (§6.2).
     Signup { username: Secret, password: Secret },
+    /// A password-change form was sent (§7.3): the account's user name and the new password. The current
+    /// password is never read.
+    Change { username: Secret, password: Secret },
 }
 
 /// Take our binding's call out of the DevTools event stream: true when `message`
@@ -212,7 +216,7 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
         return true;
     };
     let Ok(notice) = serde_json::from_str::<Notice>(&params.payload.0) else { return true };
-    if matches!(notice, Notice::Signin { .. } | Notice::Signup { .. }) {
+    if matches!(notice, Notice::Signin { .. } | Notice::Signup { .. } | Notice::Change { .. }) {
         if let Some(frame) = frame_of(browser_id, called.session.as_deref(), params.context) {
             SIGNIN_FRAME.lock().insert(browser_id, (frame, Instant::now()));
         }
@@ -242,6 +246,11 @@ pub(crate) fn take(browser_id: i32, message: &[u8]) -> bool {
             // Like a sign-in: a password typed by hand is offered "Save to Vault?" once the page moves on.
             NOTICED.lock().insert(browser_id, Instant::now());
             ("SignupSent", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str(), "password": password.0.as_str() }))
+        }
+        Notice::Change { username, password } => {
+            // Like a sign-up: the password an agent changed it to confirms it; one typed by hand is offered "Update password?".
+            NOTICED.lock().insert(browser_id, Instant::now());
+            ("ChangeSent", serde_json::json!({ "block_id": block_id, "origin": origin, "username": username.0.as_str(), "password": password.0.as_str() }))
         }
     };
     send(state, browser_id, method, args);

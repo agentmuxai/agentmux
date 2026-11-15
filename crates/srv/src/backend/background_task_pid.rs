@@ -48,7 +48,7 @@ pub(crate) fn pid_in(event: &str, scopes: &[String], data: Option<&Value>) -> Op
 
 /// Record `pid` on the row `tool_id`, or keep it in the pen until that row exists. Tells the pane to re-read when
 /// `broker` is given. Blocking: a store write.
-pub(crate) fn file_pid(store: &Store, broker: Option<&Broker>, block_id: &str, tool_id: &str, pid: i64, now_ms: i64) {
+pub fn file_pid(store: &Store, broker: Option<&Broker>, block_id: &str, tool_id: &str, pid: i64, now_ms: i64) {
     let filed = PendingBackgroundPids::global().set_or_stash(tool_id, pid, now_ms, |pid| store.background_task_set_pid(tool_id, pid));
     match filed {
         Ok(()) => {
@@ -61,7 +61,7 @@ pub(crate) fn file_pid(store: &Store, broker: Option<&Broker>, block_id: &str, t
 }
 
 /// The row `tool_id` now exists: give it the pid that came before it, if one did. Blocking: a store write.
-pub(crate) fn apply_stashed(store: &Store, tool_id: &str, now_ms: i64) {
+pub fn apply_stashed(store: &Store, tool_id: &str, now_ms: i64) {
     let applied = PendingBackgroundPids::global().observe_and_apply(tool_id, now_ms, |pid| store.background_task_set_pid(tool_id, pid));
     if let Err(e) = applied {
         tracing::warn!(target: "background_tasks", node_id = %tool_id, error = %e, "failed to apply a pid stashed ahead of this task's registry row");
@@ -69,7 +69,7 @@ pub(crate) fn apply_stashed(store: &Store, tool_id: &str, now_ms: i64) {
 }
 
 /// Start listening. Called once, with the app's broker and store.
-pub(crate) fn install(broker: Arc<Broker>, store: Arc<Store>) {
+pub fn install(broker: Arc<Broker>, store: Arc<Store>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PidReport>();
     // Observers run inside `Broker::publish`, under its locks: parse and hand off only.
     broker.add_observer(Arc::new(move |ev: &MuxEvent| {

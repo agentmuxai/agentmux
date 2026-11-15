@@ -9,11 +9,11 @@ use crate::backend::storage::store::Store;
 
 /// Block meta that marks a parked block, one in no tab (`Command::ParkBlock`): boot loads such a
 /// block into the reducer's state (`persist::bootstrap`) instead of dropping it as an orphan.
-pub(crate) const PARKED_META_KEY: &str = "agent:parked";
+pub const PARKED_META_KEY: &str = "agent:parked";
 
 /// Block meta on a parked block: the tab it was parked from, so a parked agent that spawns or opens
 /// panes puts them in its own tab, not the one the user happens to be looking at.
-pub(crate) const PARKED_FROM_TAB_META_KEY: &str = "agent:parkedFromTab";
+pub const PARKED_FROM_TAB_META_KEY: &str = "agent:parkedFromTab";
 
 /// A parked block (`Command::ParkBlock`): out of the tab's `blockids`, its row and meta kept,
 /// its parent cleared and `agent:parked` set, which boot reads to load it (`persist::bootstrap`).

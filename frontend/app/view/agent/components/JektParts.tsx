@@ -11,6 +11,7 @@ import { Tag } from "@/app/element/ui/Tag";
 import { Show, type JSX } from "solid-js";
 import type { JektMessageNode } from "../../../agent-model/types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../../../agent-model/types";
+import { SIG_EXPIRED_TEXT } from "./jekt-trust-wording";
 
 /** Nothing proved a jekt's sender (anything but a `*-verified` trust): shown as a warning. */
 export const unproven = (trust: string): boolean => !trust.endsWith("-verified");
@@ -37,8 +38,8 @@ export function JektTags(props: { node: JektMessageNode }): JSX.Element {
                 {JEKT_TIER_ICONS[props.node.tier]} {props.node.tier}
             </Tag>
             <Tag
-                tone={unproven(props.node.trust) ? "warn" : "neutral"}
-                detail={`Delivery: ${props.node.deliveryTier} (${props.node.trust})`}
+                tone={unproven(props.node.trust) && props.node.sig !== "expired" ? "warn" : "neutral"}
+                detail={`Delivery: ${props.node.deliveryTier} (${props.node.trust})${props.node.sig === "expired" ? `, ${SIG_EXPIRED_TEXT}` : ""}`}
             >
                 {JEKT_DELIVERY_ICONS[props.node.deliveryTier]} {props.node.deliveryTier}
             </Tag>
@@ -54,6 +55,9 @@ export function JektMeta(props: { node: JektMessageNode }): JSX.Element {
             <span class="agent-origin-meta-item">To: {props.node.to}</span>
             <span class="agent-origin-meta-item">MSGID: {props.node.msgId || "—"}</span>
             <span class="agent-origin-meta-item">Trust: {props.node.trust}</span>
+            <Show when={props.node.sig === "expired"}>
+                <span class="agent-origin-meta-item">Signature: {SIG_EXPIRED_TEXT}</span>
+            </Show>
             <span class="agent-origin-meta-item">Priority: {props.node.priority}</span>
             <span class="agent-origin-meta-item">{formatTimestamp(props.node.timestamp)}</span>
             <Show when={props.node.heldForSecs !== undefined}>

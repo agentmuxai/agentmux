@@ -20,10 +20,10 @@ use crate::backend::reactive::handler::ReactiveHandler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 
-pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The server-side steps of delivering a relayed message.
-pub(crate) trait ServerHooks: Send + Sync {
+pub trait ServerHooks: Send + Sync {
     /// Verified and its agent can't work now: keep it here until it can. `true` when it is kept.
     fn hold_wan_for_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, req: &InjectionRequest) -> bool;
 
@@ -57,7 +57,7 @@ pub(crate) trait ServerHooks: Send + Sync {
 static HOOKS: OnceLock<&'static dyn ServerHooks> = OnceLock::new();
 
 /// Register the server's steps. Later calls change nothing.
-pub(crate) fn install(hooks: &'static dyn ServerHooks) {
+pub fn install(hooks: &'static dyn ServerHooks) {
     let _ = HOOKS.set(hooks);
 }
 
@@ -65,11 +65,11 @@ pub(crate) fn install(hooks: &'static dyn ServerHooks) {
 /// claims nothing, so the relay offers the same messages again on the next pull. Under test, steps that leave
 /// every message alone stand in until something registers (the server's own are tested in the server layer).
 pub(crate) fn installed() -> Option<&'static dyn ServerHooks> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         Some(HOOKS.get().copied().unwrap_or(&PlainSteps))
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         HOOKS.get().copied()
     }
@@ -111,10 +111,10 @@ impl ServerHooks for NotReady {
 }
 
 /// What a delivery test gets when nothing registered: no hold, no files, no transcript request.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 struct PlainSteps;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl ServerHooks for PlainSteps {
     fn hold_wan_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
         false

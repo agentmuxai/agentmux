@@ -14,22 +14,22 @@
 //! password-protected exports, come with their own passwords); `Imported`
 //! says so, and the pane then offers to delete the file.
 
-mod bitwarden;
-mod bitwarden_encrypted;
-mod dashlane;
-mod enpass;
-mod env;
-mod kdbx;
-mod keeper;
+pub mod bitwarden;
+pub mod bitwarden_encrypted;
+pub mod dashlane;
+pub mod enpass;
+pub mod env;
+pub mod kdbx;
+pub mod keeper;
 pub use kdbx::{MAX_ARGON_ITERATIONS, MAX_ARGON_MEMORY, MAX_ARGON_PARALLELISM, MAX_KEY_FILE};
-mod logins;
-mod nordpass;
-mod onepux;
-mod proton;
-mod roboform;
-mod shared;
-mod sticky;
-mod zoho;
+pub mod logins;
+pub mod nordpass;
+pub mod onepux;
+pub mod proton;
+pub mod roboform;
+pub mod shared;
+pub mod sticky;
+pub mod zoho;
 
 use std::collections::BTreeMap;
 

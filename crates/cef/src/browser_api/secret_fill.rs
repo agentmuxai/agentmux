@@ -66,6 +66,7 @@ const SET_SECRET: &str = r#"function (origin, v, attr) {
   const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), "value");
   const rich = !(d && d.set) && this.isContentEditable;
   if (!(d && d.set) && !rich) return { error: "this element can't be filled; click it, or fill the text field inside it" };
+  this.setAttribute("data-agentmux-filled", "1");
   if (rich) { this.textContent = v; } else { d.set.call(this, v); }
   this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));

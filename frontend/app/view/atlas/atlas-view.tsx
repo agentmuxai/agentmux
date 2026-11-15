@@ -7,7 +7,8 @@
  * background pans, Fit shows it all. A node opens a card; the card's Open and Start are the Swarm row's own actions.
  * A box dragged with Shift held (or with Select on) selects the agents it touches, for the Swarm's own Broadcast,
  * Stop and Supervisor mode (atlas-fleet-bar.tsx). A message between two agents draws a line from its sender to its
- * receiver as it happens, and a task one agent hands another a dotted one (atlas-flow-layer.tsx).
+ * receiver as it happens, and a task one agent hands another a dotted one (atlas-flow-layer.tsx). A container agent
+ * has its container as a frame round it, and the review bot and CI are nodes of their own (atlas-extras.tsx).
  */
 
 import { seatBadgeText, seatTooltipLine } from "@/app/agent-model/seat-format";
@@ -19,8 +20,10 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
+import { inContainer } from "./atlas-containers";
+import { ExtraCard, ExtraNodes, ServicesRegion } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
-import { flowEndResolver } from "./atlas-flow";
+import { flowEndResolver, labelKeepOut } from "./atlas-flow";
 import { AtlasFlowLayer } from "./atlas-flow-layer";
 import type { AtlasAgent, AtlasRegion, AtlasState } from "./atlas-graph";
 import {
@@ -29,6 +32,7 @@ import {
     layoutBySeat,
     NODE_H,
     NODE_W,
+    SERVICES_REGION,
     type AtlasLayout,
     type RegionBox as RegionBoxLayout,
 } from "./atlas-layout";
@@ -82,12 +86,14 @@ function Node(props: {
                 "atlas-node--selected": props.selected,
                 "atlas-node--picked": props.picked,
                 "atlas-node--stale": a().stale,
+                "atlas-node--container": inContainer(a()),
             }}
             data-tint={props.tint ?? undefined}
+            data-container={a().container?.state}
             data-testid="atlas-node"
             style={{ left: `${props.x}px`, top: `${props.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }}
             aria-pressed={props.selected}
-            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${props.picked ? ", selected" : ""}`}
+            aria-label={`${a().name}, ${STATE_LABELS[a().state]}${inContainer(a()) ? ", in a container" : ""}${props.picked ? ", selected" : ""}`}
             {...tip(a().line ?? STATE_LABELS[a().state])}
             onClick={(e) => props.onSelect(a().key, e)}
             onKeyDown={(e) => {
@@ -99,6 +105,9 @@ function Node(props: {
             <span class="atlas-node__top">
                 <span class="atlas-node__dot" />
                 <span class="atlas-node__name">{a().name}</span>
+                <Show when={inContainer(a())}>
+                    <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
+                </Show>
                 <Show when={props.picked}>
                     <i class="fa-solid fa-check atlas-node__check" aria-hidden="true" />
                 </Show>
@@ -255,6 +264,8 @@ function AtlasMap(props: {
     const shownAgents = createMemo(() => regions().flatMap((r) => r.shown));
     const machineIndex = (machine: string) => regions().findIndex((r) => r.key === machine);
     const flowEnd = createMemo(() => flowEndResolver(shownAgents(), props.data.machines()));
+    const framed = createMemo(() => new Set(shownAgents().filter(inContainer).map((a) => a.key)));
+    const keepOut = createMemo(() => labelKeepOut(props.layout));
     return (
         <div
             class="atlas-world"
@@ -273,6 +284,9 @@ function AtlasMap(props: {
                     </Show>
                 )}
             </For>
+            <Show when={props.layout.regions.find((box) => box.key === SERVICES_REGION)}>
+                {(box) => <ServicesRegion box={box()} />}
+            </Show>
             <svg class="atlas-edges" width={props.layout.width} height={props.layout.height} aria-hidden="true">
                 <For each={props.data.graph().edges}>
                     {(edge) => {
@@ -294,6 +308,8 @@ function AtlasMap(props: {
                 flows={props.data.flows()}
                 resolve={flowEnd()}
                 nodes={props.layout.nodes}
+                framed={framed()}
+                avoid={keepOut()}
                 width={props.layout.width}
                 height={props.layout.height}
             />
@@ -314,6 +330,7 @@ function AtlasMap(props: {
                     </Show>
                 )}
             </For>
+            <ExtraNodes graph={props.data.graph()} nodes={props.layout.nodes} selected={props.selected} onSelect={props.onSelect} />
         </div>
     );
 }
@@ -326,16 +343,20 @@ function RegionBox(props: { box: RegionBoxLayout; region: AtlasRegion; open: boo
         <>
             <section
                 class="atlas-region"
-                classList={{ "atlas-region--stale": r().stale }}
+                classList={{ "atlas-region--stale": r().stale, "atlas-region--cloud": !!r().cloud }}
                 data-testid="atlas-region"
                 style={{ left: `${box().x}px`, top: `${box().y}px`, width: `${box().w}px`, height: `${box().h}px` }}
             >
                 <header class="atlas-region__head">
                     <span class="atlas-region__title">{r().title}</span>
                     <span class="atlas-region__badge">
+                        <Show when={r().cloud}>
+                            <i class="fa-solid fa-cloud" aria-hidden="true" />{" "}
+                        </Show>
                         {r().badge}
                         {r().platform ? ` · ${r().platform}` : ""}
                         {r().stale ? " · stale" : ""}
+                        {r().note ? ` · ${r().note}` : ""}
                     </span>
                 </header>
             </section>
@@ -422,7 +443,7 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     const [selected, setSelected] = createSignal<string | null>(null);
     const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
     const sel = useAtlasSelection(data, zoom, layout);
-    const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length, 0));
+    const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));
     const stoppedCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.folded.length, 0));
     const selectedAgent = () => {
         const key = selected();
@@ -480,10 +501,15 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
                         />
                     )}
                 </Show>
-                <Show when={mode() === "seat" && stoppedCount() > 0}>
-                    <div class="atlas-stopped-count">{stoppedCount()} stopped, not drawn</div>
-                </Show>
-                <Show when={selectedAgent()}>
+                <div class="atlas-notes">
+                    <Show when={data.cloudUnavailable()}>
+                        <div data-testid="atlas-cloud-note">The account's other machines could not be read just now.</div>
+                    </Show>
+                    <Show when={mode() === "seat" && stoppedCount() > 0}>
+                        <div>{stoppedCount()} stopped, not drawn</div>
+                    </Show>
+                </div>
+                <Show when={selectedAgent()} fallback={<ExtraCard graph={data.graph()} selected={selected()} onClose={() => setSelected(null)} />}>
                     {(agent) => (
                         <Card
                             agent={agent()}

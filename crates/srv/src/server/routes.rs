@@ -547,6 +547,9 @@ fn agent_api_routes() -> Router<AppState> {
         .route("/api/v1/tab/name", post(handle_tab_name))
         .route("/api/v1/pane/title", post(handle_pane_title))
         .route("/api/v1/workspace/name", post(handle_workspace_name))
+        // A file or folder renamed in its folder, so Editor tabs open on it follow
+        // (agentmux-mcp's Pane rename with target "file").
+        .route("/api/v1/file/rename", post(handle_file_rename))
         // Introspection verbs (SPEC §4.6): read-only views of the UI tree so an
         // agent can see what's around it. agentmux-mcp's GetLayout / ListWindows
         // / ListWorkspaces / ListTabs tools GET these.
@@ -600,6 +603,8 @@ fn muxspect_routes() -> Router<AppState> {
         .route("/api/v1/message-stats", get(message_stats_handler::handle_message_stats))
         // The recent messages between agents, ids and times only, for the Atlas map on open (`backend::message_flow`). Read-only.
         .route("/api/v1/message-flow", get(message_flow_handler::handle_message_flow))
+        // This machine's agent containers and the container runtime's state, names and states only (`backend::container_status`). Read-only.
+        .route("/api/v1/containers", get(containers_handler::handle_containers))
         // The recent task filings and hand-overs on the boards the caller sees, names and numbers only (`backend::task_flow`). Read-only.
         .route("/api/v1/task-flow", get(task_flow_handler::handle_task_flow))
         // The recent reviews, check results and merges of agents' PRs, ids, states and times only, for the Atlas map's review bot and

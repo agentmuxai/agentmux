@@ -1379,7 +1379,7 @@ fn signed_agent_on(state: &AppState, block_id: &str) -> (String, serde_json::Val
 }
 
 async fn post_json(app: &axum::Router, uri: &str, body: serde_json::Value) -> (axum::http::StatusCode, serde_json::Value) {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let req = axum::http::Request::builder()
         .uri(uri)
         .method("POST")
@@ -1511,7 +1511,7 @@ async fn post_json_headers(
     body: serde_json::Value,
     extra: &[(&str, &str)],
 ) -> (axum::http::StatusCode, serde_json::Value) {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let mut b = axum::http::Request::builder()
         .uri(uri)
         .method("POST")
@@ -1600,6 +1600,11 @@ async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
     let (s, body) = waiting.await.unwrap();
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["answer"], "done");
+    // How long the banner was up is in the answer, and the Log says what the person did and how soon.
+    assert!(body["data"]["open_secs"].is_u64(), "{body}");
+    let (_, log) = crate::server::browser_actions::entries(&pane);
+    let detail = log.iter().rev().find(|e| e.kind == crate::server::browser_actions::Kind::Handoff).and_then(|e| e.detail.clone());
+    assert!(detail.is_some_and(|d| d.starts_with("the person clicked Done after ")), "the hand-off's Log line names the person's Done");
 
     // The banner is gone, the pane is the agent's again, and the answer was single use.
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
@@ -3029,7 +3034,7 @@ async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
 /// token in the key header, opens a pane in a jar of its own (never the user's Personal profile) and says so.
 #[tokio::test]
 async fn a_container_agents_browser_open_gets_its_own_incognito_jar() {
-    use tower::ServiceExt;
+    use ::tower::ServiceExt;
     let state = test_state();
     let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
         .await

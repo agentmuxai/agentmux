@@ -5,8 +5,8 @@ use agentmux_common::ipc::{ErrorCode, Event};
 
 use crate::state::State;
 
-mod heal;
-mod intent;
+pub mod heal;
+pub mod intent;
 pub(crate) use heal::heal_loaded_layout;
 pub(super) use intent::handle_layout_apply_intent;
 #[allow(unused_imports)]

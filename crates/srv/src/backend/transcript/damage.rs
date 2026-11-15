@@ -132,7 +132,7 @@ pub fn global_for(zone: &str) -> Option<std::sync::Arc<crate::backend::storage::
     if is_damaged(zone) {
         return None;
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         if let Some(fs) = test_support::global_override() {
             return Some(fs);
@@ -188,7 +188,7 @@ pub fn note_if_shared(fs: &crate::backend::storage::filestore::FileStore, zone: 
 }
 
 fn is_shared(fs: &crate::backend::storage::filestore::FileStore) -> bool {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         if test_support::registered(fs) {
             return true;
@@ -333,14 +333,14 @@ fn publish_to(broker: &crate::backend::mps::Broker, incident: &agentmux_common::
 /// Ask for the shared store to be rebuilt at the next start that finds no other srv running
 /// (`filestore::repair`). Not from a unit test: it would write beside the real store.
 fn request_repair(zone: &str, op: &str) {
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     if let Some(dir) = crate::registry::resolve_shared_transcripts_dir() {
         let zone = (zone != FRAMES_ZONE).then_some(zone);
         if let Err(e) = crate::backend::storage::filestore::repair::request(&dir.join("filestore.db"), op, zone, agentmux_common::time::now_ms_u64()) {
             tracing::warn!(error = %e, "shared transcript store: couldn't ask for a repair");
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let _ = (zone, op);
 }
 
@@ -375,8 +375,8 @@ fn announce(zone: &str, op: &str) {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use crate::backend::storage::filestore::FileStore;
     use std::sync::Mutex;
 
@@ -384,14 +384,14 @@ pub(crate) mod test_support {
     /// in a process that starts on a damaged file: the schema's root pages are
     /// pointed past the end of the file, which is what a damaged page looks like
     /// to a query that walks it.
-    pub(crate) fn corrupt(fs: &FileStore) {
+    pub fn corrupt(fs: &FileStore) {
         fs.drop_cache_for_test();
         break_tables(fs);
     }
 
     /// [`corrupt`] for a process that already holds the zone's file in its cache
     /// (`stat` answers from it): the damage shows on the first read of the database.
-    pub(crate) fn corrupt_behind_the_cache(fs: &FileStore) {
+    pub fn corrupt_behind_the_cache(fs: &FileStore) {
         break_tables(fs);
     }
 
@@ -445,9 +445,9 @@ pub(crate) mod test_support {
 
     /// Stands in for the process-global shared store while it lives: stores the
     /// index code is given are recognised as the shared one by address.
-    pub(crate) struct Shared(usize);
+    pub struct Shared(usize);
 
-    pub(crate) fn register(fs: &FileStore) -> Shared {
+    pub fn register(fs: &FileStore) -> Shared {
         let addr = fs as *const FileStore as usize;
         SHARED.lock().unwrap().push(addr);
         Shared(addr)

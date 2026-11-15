@@ -124,6 +124,19 @@ describe("the attention banner", () => {
         await expect(markup(v.banner())).toMatchFileSnapshot(snap(name));
     });
 
+    it("marks the values the page already had when it lists what a click sends", () => {
+        const fields: [string, string, boolean][] = [["Business name", "Acme", true], ["Country", "US", false], ["Language", "en", false]];
+        const v = mount({ attention: att({ kind: "approval", agent: "Korp", what: 'Click "Save"', why: "it submits a form", fields }) });
+        const rows = [...v.container.querySelectorAll(".browser-attention-fields tr")];
+        expect(rows).toHaveLength(3);
+        expect(rows[0].classList.contains("browser-attention-field-kept")).toBe(false);
+        expect(rows[0].textContent).not.toContain("already on the page");
+        for (const r of rows.slice(1)) {
+            expect(r.classList.contains("browser-attention-field-kept")).toBe(true);
+            expect(r.textContent).toContain("already on the page");
+        }
+    });
+
     it("sends the answer each button stands for", () => {
         const v = mount({ attention: att({ kind: "bypass", agent: "Korp", origins: ["https://a.example"], minutes: 60 }) });
         const buttons = [...v.container.querySelectorAll(".browser-attention-actions button")];

@@ -180,7 +180,7 @@ describe("DEFAULT_TAB_PRESET mirrors default_three_pane_tree", () => {
      *  is a split (Row lays them side by side, the preset's "horizontal");
      *  a leaf is named by its `<view>_block_id` parameter. */
     function rustShape(): string {
-        const fnStart = wcore.indexOf("pub(crate) fn default_three_pane_tree(");
+        const fnStart = wcore.indexOf("fn default_three_pane_tree(");
         expect(fnStart, "default_three_pane_tree in wcore/mod.rs").toBeGreaterThanOrEqual(0);
         const fn = wcore.slice(fnStart);
         const body = fn.slice(fn.indexOf("let rootnode = LayoutNode {"), fn.indexOf("(rootnode, agent_node_id)"));

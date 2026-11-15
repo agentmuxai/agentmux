@@ -167,7 +167,7 @@ pub fn restore_paths(targets: &[std::path::PathBuf]) -> Vec<Result<(), String>> 
 }
 
 #[cfg(target_os = "macos")]
-mod macos {
+pub mod macos {
     use std::collections::HashMap;
     use std::os::unix::fs::MetadataExt;
     use std::path::{Path, PathBuf};

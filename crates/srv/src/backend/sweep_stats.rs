@@ -20,7 +20,7 @@ static REAPED_CUMULATIVE: AtomicU64 = AtomicU64::new(0);
 
 /// `(candidates found this sweep, first_seen entries carried across sweeps,
 /// cumulative blocks reaped since process start)`.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub fn last_sweep_stats() -> (usize, usize, u64) {
     (
         LAST_CANDIDATES.load(Ordering::Relaxed),
@@ -31,7 +31,7 @@ pub fn last_sweep_stats() -> (usize, usize, u64) {
 
 /// One sweep's result: the candidates it found, the `first_seen` entries it carries into the next sweep, and
 /// how many blocks it reaped (added to the running total).
-pub(crate) fn record(candidates: usize, first_seen: usize, reaped: usize) {
+pub fn record(candidates: usize, first_seen: usize, reaped: usize) {
     LAST_CANDIDATES.store(candidates, Ordering::Relaxed);
     LAST_FIRST_SEEN_LEN.store(first_seen, Ordering::Relaxed);
     if reaped > 0 {

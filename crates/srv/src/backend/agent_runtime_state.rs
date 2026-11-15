@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::runtime_adapter::RuntimeKind;
+
 /// The state of one agent as a viewer sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -75,4 +77,8 @@ pub struct AgentRuntime {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub blocked: Option<String>,
+    /// Where it runs: from its pane's `agentMode` when it has a block, else from its definition's
+    /// `agent_type`, so a stopped agent says it too. Anything unknown is `host`.
+    #[serde(default)]
+    pub runtime: RuntimeKind,
 }

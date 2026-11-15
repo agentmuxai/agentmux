@@ -21,8 +21,8 @@ use tracing::warn;
 
 use super::error::StoreError;
 
-mod object_schema;
-mod store_schema;
+pub mod object_schema;
+pub mod store_schema;
 
 pub(in crate::backend::storage) use object_schema::apply_additive_columns;
 

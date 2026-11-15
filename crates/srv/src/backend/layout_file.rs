@@ -1213,11 +1213,11 @@ pub fn is_trusted(doc: &LayoutDoc, path: &Path, own_instance: Option<&str>, layo
 }
 
 /// The stand-in for the block at position `idx` in a saved snapshot (`server/service/session_restore.rs`).
-pub(crate) fn placeholder(idx: usize) -> String {
+pub fn placeholder(idx: usize) -> String {
     format!("__snap_block_{idx}__")
 }
 
-pub(crate) fn placeholder_idx(s: &str) -> Option<usize> {
+pub fn placeholder_idx(s: &str) -> Option<usize> {
     s.strip_prefix("__snap_block_")?.strip_suffix("__")?.parse().ok()
 }
 

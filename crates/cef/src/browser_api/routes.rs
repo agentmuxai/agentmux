@@ -809,10 +809,7 @@ pub async fn dispatch_key(
     if let Some(text) = &req.text {
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
-        if let Err(e) = cdp
-            .call("Input.insertText", json!({ "text": text }))
-            .await
-        {
+        if let Err(e) = cdp.call("Input.insertText", json!({ "text": text })).await {
             let _ = cdp.close().await;
             return ok_body(ApiResponse::err(format!("CDP Input.insertText: {e}")));
         }
@@ -858,19 +855,15 @@ pub async fn dispatch_key(
         }
     }
 
+    if writes { super::filled::mark_active(&mut cdp).await; }
     let after = match before {
         Some(_) => Some(super::page_state::focused_state(&mut cdp).await),
         None => None,
     };
     let _ = cdp.close().await;
-    let (changed, focus_moved) = match (&before, &after) {
-        (Some(b), Some(a)) if !a.is_null() => (
-            Some(b.get("value") != a.get("value") || b.get("checked") != a.get("checked")),
-            Some(b.get("element") != a.get("element")),
-        ),
-        _ => (None, None),
-    };
-    ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved }))
+    let effect = before.as_ref().zip(after.as_ref()).and_then(|(b, a)| super::page_state::key_effect(b, a));
+    let (changed, focus_moved, was) = effect.map_or((None, None, None), |e| (Some(e.changed), Some(e.focus_moved), e.was));
+    ok_body(ApiResponse::ok(DispatchKeyData { ok: true, after, changed, focus_moved, was }))
 }
 
 /// `POST /agentmux/browser/navigate` — navigate the pane to a new

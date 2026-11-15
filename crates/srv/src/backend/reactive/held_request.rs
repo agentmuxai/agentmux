@@ -10,7 +10,7 @@ use crate::backend::storage::jekt_held::HeldJekt;
 /// The request a held row is delivered as: addressed by the target's UID,
 /// with the verdicts it was accepted with — never re-verified (a signature
 /// is valid for five minutes) and never raised — and its original send time.
-pub(crate) fn request_from_held(row: &HeldJekt) -> InjectionRequest {
+pub fn request_from_held(row: &HeldJekt) -> InjectionRequest {
     let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_string());
     let mut req = InjectionRequest {
         target_agent: row.target_uid.clone(),

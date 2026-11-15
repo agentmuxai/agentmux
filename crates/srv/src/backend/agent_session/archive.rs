@@ -454,13 +454,13 @@ fn read_archive_preview(filestore: &FileStore, zone: &str) -> (String, usize) {
 
 /// Snapshots larger than this are not parsed for a preview, so a corrupted one
 /// can't stall a listing.
-pub(crate) const MAX_PREVIEW_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_PREVIEW_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
 
 /// `(preview, node_count)` from an `output.state.json` snapshot's bytes, or
 /// `("", 0)` when they don't parse or have no `nodes` array. The preview is
 /// the first `user_message`, skipping a leading "# Session Context" bootstrap
 /// message when a later one exists, collapsed to one line of at most 240 chars.
-pub(crate) fn snapshot_preview(bytes: &[u8]) -> (String, usize) {
+pub fn snapshot_preview(bytes: &[u8]) -> (String, usize) {
     let json: serde_json::Value = match serde_json::from_slice(bytes) {
         Ok(v) => v,
         Err(_) => return (String::new(), 0),
@@ -497,7 +497,7 @@ pub(crate) fn snapshot_preview(bytes: &[u8]) -> (String, usize) {
 
 /// Collapse newlines + extra whitespace, cap at 240 chars. Output is
 /// safe to render inline in a single-line preview row.
-pub(crate) fn collapse_preview(s: &str) -> String {
+pub fn collapse_preview(s: &str) -> String {
     const MAX_CHARS: usize = 240;
     let mut buf = String::with_capacity(s.len().min(MAX_CHARS + 4));
     let mut prev_space = false;

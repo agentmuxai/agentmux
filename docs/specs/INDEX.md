@@ -351,6 +351,7 @@ partial list.
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
 | [`SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10`](SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md) | Spec: Splitting an editor or media pane opens an empty one |
 | [`SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30`](SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md) | Spec: An agent opening a file shows the Editor pane it lands in |
+| [`SPEC_EDITOR_TAB_RENAME_2026_11_14`](SPEC_EDITOR_TAB_RENAME_2026_11_14.md) | SPEC: Rename a file from its Editor document tab |
 | [`SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04`](SPEC_EDITOR_TREE_TOGGLE_IN_DOC_TAB_BAR_2026_10_04.md) | SPEC: The Editor's file-tree toggle moves into its document tab bar |
 | [`SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17`](SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17.md) | SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle |
 | [`SPEC_EXTERNAL_HOST_BUILD_2026_10_09`](SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md) | SPEC: Build the frontend for a host other than the desktop app |
@@ -835,6 +836,7 @@ partial list.
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SUPER_AGENT_2026_10_25`](SPEC_SUPER_AGENT_2026_10_25.md) | Spec: the super agent, one place for sensitive operations |
+| [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas |
 | [`SPEC_SWARM_FILTER_BAR_2026_10_29`](SPEC_SWARM_FILTER_BAR_2026_10_29.md) | The Swarm filter bar: narrow the agent list by name and by what an agent is working on |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
@@ -1153,6 +1155,7 @@ partial list.
 | [`SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05`](SPEC_COMPUTER_USE_SKILLS_PRACTICE_VOICEMEETER_CANTABILE_2026_11_05.md) | SPEC: Practice time for building computer-use skills, and two new ones: Voicemeeter and Cantabile |
 | [`SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13`](SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md) | SPEC — Consolidate Forge + Identity into the Agent Pane |
 | [`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11`](SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md) | SPEC: Container Pane Support |
+| [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers |
 | [`SPEC_CONTEXT_VISIBILITY_2026_06_17`](SPEC_CONTEXT_VISIBILITY_2026_06_17.md) | SPEC: Context & Token Visibility — what we can show the user, and how |
 | [`SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25`](SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md) | Cron & Loop Robustness — Research + Design |
 | [`SPEC_CROSS_PROCESS_DISPATCH_2026-05-01`](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-Process Dispatch — Launcher → Host Command Pipe |

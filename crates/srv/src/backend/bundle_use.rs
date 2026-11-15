@@ -18,9 +18,9 @@ const FILE_NAME: &str = "bundle-transport-use.jsonl";
 /// Note that `op` ("export", "export_for_agent", "import_commit", ...) was called.
 pub fn note(op: &str) {
     // A test must not write into the home of whoever runs it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let _ = op;
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     if let Some(paths) = agentmux_common::DataPaths::from_env() {
         if let Some(total) = note_at(&paths.instance_dir.join(FILE_NAME), op, agentmux_common::time::now_ms()) {
             tracing::info!(op, total, "bundle transport used");

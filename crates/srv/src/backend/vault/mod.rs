@@ -11,6 +11,7 @@
 
 pub mod aws_import;
 pub mod capture;
+pub mod changes;
 pub mod card;
 pub mod card_fill;
 pub mod card_target;
@@ -29,6 +30,7 @@ pub mod endpoint_key;
 pub mod route_key;
 pub mod scrub;
 pub mod seal;
+pub mod setting_key;
 pub mod signins;
 pub mod signups;
 pub mod slots;
@@ -36,7 +38,7 @@ pub mod transfer;
 pub mod uses;
 pub mod vaults;
 pub mod versions;
-mod wordlist;
+pub mod wordlist;
 
 use std::collections::BTreeMap;
 

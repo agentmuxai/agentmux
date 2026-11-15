@@ -10,7 +10,7 @@ use super::file_io;
 use super::scratch;
 use crate::backend::rpc_types::{
     CommandWriteEditorFileData, CreateEditorDirReq, CreateEditorFileReq, CreateScratchFileReq, DeleteEditorFileReq,
-    ListEditorDirReq, MoveScratchFileReq, RenameEditorFileReq,
+    ListEditorDirReq, MoveScratchFileReq,
 };
 
 fn write_cmd(path: &Path, content: &str) -> CommandWriteEditorFileData {
@@ -101,26 +101,6 @@ fn a_listing_puts_folders_first_then_names_without_regard_to_case() {
     assert_eq!(names, ["Alpha", "zeta", "Apple.txt", "beta.txt"]);
     assert_eq!(listing.entries[0].size, None);
     assert_eq!(listing.entries[3].size, Some(2));
-}
-
-#[test]
-fn a_rename_changes_the_name_only_and_keeps_to_the_rules() {
-    let home = tempfile::tempdir().unwrap();
-    let old = home.path().join("old.txt");
-    std::fs::write(&old, "x").unwrap();
-    std::fs::write(home.path().join("taken.txt"), "y").unwrap();
-    let req = |old_path: &Path, new_name: &str| RenameEditorFileReq {
-        old_path: old_path.to_string_lossy().into_owned(),
-        new_name: new_name.to_string(),
-    };
-
-    assert!(file_io::rename_file(home.path(), &req(&old, "../escape")).unwrap_err().contains("plain filename"));
-    assert!(file_io::rename_file(home.path(), &req(&old, "taken.txt")).unwrap_err().contains("already exists"));
-    assert!(file_io::rename_file(home.path(), &req(home.path(), "x")).unwrap_err().contains("outside or is the home"));
-
-    let done = file_io::rename_file(home.path(), &req(&old, "new.txt")).unwrap();
-    assert!(done.new_path.ends_with("new.txt"));
-    assert!(!old.exists() && home.path().join("new.txt").exists());
 }
 
 #[test]
@@ -273,8 +253,56 @@ fn saving_a_scratch_buffer_refuses_a_bad_id_a_dotdot_path_and_a_place_outside_ho
     assert!(scratch::move_scratch_file(home.path(), &req("nope", &home.path().join("d"))).unwrap_err().contains("not found"));
     assert!(scratch::move_scratch_file(home.path(), &req(&made.scratch_id, &outside.path().join("d")))
         .unwrap_err()
-        .contains("outside home"));
+        .contains("only inside your home folder"));
     let dotdot = home.path().join("a").join("..").join("..").join("evil");
-    assert!(scratch::move_scratch_file(home.path(), &req(&made.scratch_id, &dotdot)).unwrap_err().contains("'..'"));
+    assert!(scratch::move_scratch_file(home.path(), &req(&made.scratch_id, &dotdot)).unwrap_err().contains("“..”"));
     assert!(Path::new(&made.file_path).exists(), "a refused save leaves the buffer in place");
+}
+
+#[test]
+fn saving_a_scratch_buffer_never_replaces_a_file_and_follows_the_name_rules() {
+    let home = tempfile::tempdir().unwrap();
+    let made = scratch::create_scratch_file(home.path(), CreateScratchFileReq::default()).unwrap();
+    std::fs::write(&made.file_path, "draft").unwrap();
+    let req = |dest: &Path| MoveScratchFileReq { scratch_id: made.scratch_id.clone(), destination_path: dest.to_string_lossy().into_owned() };
+
+    let taken = home.path().join("taken.md");
+    std::fs::write(&taken, "keep").unwrap();
+    let err = scratch::move_scratch_file(home.path(), &req(&taken)).unwrap_err();
+    assert_eq!(err, "Something named “taken.md” already exists here.");
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
+
+    // A name rule is refused before any folder is made for it.
+    let err = scratch::move_scratch_file(home.path(), &req(&home.path().join("new-folder").join(".."))).unwrap_err();
+    assert!(err.contains("“..”"), "{err}");
+    #[cfg(windows)]
+    {
+        let err = scratch::move_scratch_file(home.path(), &req(&home.path().join("new-folder").join("nul.txt"))).unwrap_err();
+        assert!(err.contains("reserved by Windows"), "{err}");
+        assert!(!home.path().join("new-folder").exists());
+    }
+    assert_eq!(std::fs::read_to_string(&made.file_path).unwrap(), "draft", "every refusal leaves the buffer in place");
+}
+
+#[test]
+fn a_save_that_fails_part_way_leaves_no_file_and_one_that_meets_a_file_leaves_it() {
+    struct Fails;
+    impl std::io::Read for Fails {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("out.md");
+    let err = scratch::copy_to_new_file(&mut Fails, &dest).unwrap_err();
+    assert_eq!(scratch::save_error(&err, "out.md"), "There isn't enough space to save it there.");
+    assert!(!dest.exists(), "nothing half-written is left");
+
+    std::fs::write(&dest, "keep").unwrap();
+    let err = scratch::copy_to_new_file(&mut "new".as_bytes(), &dest).unwrap_err();
+    assert_eq!(scratch::save_error(&err, "out.md"), "Something named “out.md” already exists here.");
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "keep", "created exclusively: never replaced, never removed");
+
+    let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    assert_eq!(scratch::save_error(&denied, "out.md"), "You don't have permission to save there.");
 }

@@ -133,6 +133,16 @@
     &--stale {
         opacity: 0.6;
     }
+
+    // The review bot and CI: not a machine.
+    &--services {
+        border-style: dashed;
+    }
+
+    // One of the account's other machines, known through the cloud only: an outline, no surface.
+    &--cloud {
+        background: transparent;
+    }
 }
 
 .atlas-region__head {
@@ -200,8 +210,22 @@
         color: var(--warning-text-color);
     }
 
-    &--task {
+    &--task,
+    &--passed {
         color: var(--success-text-color);
+    }
+
+    &--failed {
+        color: var(--warning-text-color);
+    }
+
+    &--neutral {
+        color: var(--secondary-text-color);
+    }
+
+    // A pull request's line past its first minutes: still true, no longer news.
+    &--dim {
+        opacity: 0.4;
     }
 
     &--leaving {
@@ -220,6 +244,14 @@
     // A task's line is dotted, so it fades in whole.
     .atlas-flow--task > & {
         stroke-dasharray: 2 5;
+        animation: am-fade-in var(--duration-moderate) var(--ease-out) both;
+    }
+
+    // A pull request's review or checks: dashed, so it reads apart from a message and from a task.
+    .atlas-flow[data-kind="review"] > &,
+    .atlas-flow[data-kind="checks"] > & {
+        stroke-width: 1.5;
+        stroke-dasharray: 7 4;
         animation: am-fade-in var(--duration-moderate) var(--ease-out) both;
     }
 
@@ -324,6 +356,48 @@
         opacity: 0.7;
     }
 
+    // A container agent: its container is a dashed frame round the node, in the colour of the container's state
+    // (muted when it runs or is not listed, the accent while it starts, the warning colour when it has stopped
+    // under a running agent).
+    &--container::after {
+        content: "";
+        position: absolute;
+        // The same distance from each edge: the left border is 2 px wider than the others.
+        inset: -5px -5px -5px -7px;
+        border: 1px dashed var(--secondary-text-color);
+        pointer-events: none;
+    }
+
+    &--container[data-container="starting"]::after {
+        border-color: var(--accent-color);
+    }
+
+    &--container[data-container="stopped"]::after {
+        border-color: var(--warning-text-color);
+    }
+
+    // A container no agent uses: the frame with nothing in it.
+    &--orphan {
+        border-style: dashed;
+        border-left-width: 1px;
+        border-color: var(--secondary-text-color);
+    }
+
+    // The review bot and CI: a pill, so they read apart from the agents.
+    &--service {
+        padding: 0 calc(var(--space-2) * 2);
+        border-left-width: 1px;
+        border-radius: var(--radius-full);
+    }
+
+    &--service-warn {
+        border-color: var(--warning-text-color);
+    }
+
+    &--service-paused > * {
+        opacity: 0.6;
+    }
+
     // In the By seat layout a node carries its machine as a tint along its top.
     $tints: var(--accent-color), var(--success-color), var(--warning-color), var(--error-color), var(--info-color), var(--secondary-text-color);
     @for $i from 1 through 6 {
@@ -347,6 +421,13 @@
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+// What a node is when it is not a plain agent on its machine: a box for a container, the service's own icon.
+.atlas-node__kind {
+    flex: none;
+    color: var(--secondary-text-color);
+    font-size: var(--text-2xs);
 }
 
 .atlas-node__check {
@@ -396,6 +477,14 @@
     background: var(--warning-text-color);
 }
 
+.atlas-node--service-ok > .atlas-node__top > .atlas-node__dot {
+    background: var(--success-text-color);
+}
+
+.atlas-node--service-warn > .atlas-node__top > .atlas-node__dot {
+    background: var(--warning-text-color);
+}
+
 .atlas-fold {
     position: absolute;
     z-index: var(--z-map-fold);
@@ -433,12 +522,16 @@
     white-space: nowrap;
 }
 
-.atlas-stopped-count {
+// What the map leaves out or could not read, in its bottom left corner.
+.atlas-notes {
     position: absolute;
     left: var(--space-2);
     bottom: var(--space-2);
+    display: grid;
+    gap: 2px;
     color: var(--secondary-text-color);
     font-size: var(--text-2xs);
+    pointer-events: none;
 }
 
 // The card is a sheet over the map's right edge, and the whole pane's width in a narrow pane.
@@ -510,6 +603,19 @@
         flex-wrap: wrap;
         align-items: baseline;
         gap: var(--space-1);
+    }
+}
+
+// A pull request on a service's card: its number in the colour of what became of it.
+.atlas-card__pr {
+    display: block;
+
+    &--passed > strong {
+        color: var(--success-text-color);
+    }
+
+    &--failed > strong {
+        color: var(--warning-text-color);
     }
 }
 

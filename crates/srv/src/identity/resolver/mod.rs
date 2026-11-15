@@ -42,16 +42,16 @@
 //!     test exercising that function moved WITH it into `inject.rs` as
 //!     one atomic unit.
 
-mod cli_sign_in_files;
-mod effective_links;
-mod errors;
-mod inject;
-mod oauth_probe;
-mod provider;
-mod secret;
+pub mod cli_sign_in_files;
+pub mod effective_links;
+pub mod errors;
+pub mod inject;
+pub mod oauth_probe;
+pub mod provider;
+pub mod secret;
 
 pub use errors::SpawnGateError;
-pub(crate) use inject::block_agent_id;
+pub use inject::block_agent_id;
 pub use inject::{
     inject_identity_env, inject_identity_env_async, resolve_account,
     agent_has_identity_binding, resolve_bound_claude_config_dir_for_agent, resolve_bound_oauth_config_dir,

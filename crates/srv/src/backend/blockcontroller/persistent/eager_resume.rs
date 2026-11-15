@@ -8,7 +8,7 @@
 use super::*;
 
 #[path = "eager_resume_steps.rs"]
-mod steps;
+pub mod steps;
 
 /// Whether the pane's last failure says it was closed for an agent open in another pane (`open_in_other_pane`).
 fn closed_for_another_pane(block_meta: &super::super::super::obj::MetaMapType) -> bool {

@@ -12,7 +12,8 @@
 //! field the page's rules take for a new password, and marks it with a fresh
 //! token (`data-agentmux-signup`) that `signup_fill` fills by. A form that also
 //! holds a `current-password` field is a password change (§7.3): the answer
-//! says so and no token is made. The answer never holds a value.
+//! says so, and the token goes on the form's field for the new password (never
+//! on the current one). The answer never holds a password.
 
 use std::sync::Arc;
 
@@ -39,10 +40,13 @@ pub struct SignupProbeReq {
 pub struct SignupProbeData {
     /// The origin of the frame the field is in.
     pub origin: String,
-    /// The token `signup_fill` finds the field by; empty for a password change.
+    /// The token `signup_fill` finds the field by.
     pub field: String,
-    /// The form also asks for the current password: a password change.
+    /// The form also asks for the current password: a password change (§7.3). `field` is then the form's
+    /// field for the new password, never the current one.
     pub change: bool,
+    /// On a password change: the account's user name, when the form carries it for the password manager.
+    pub username: Option<String>,
     pub passwordrules: Option<String>,
     pub minlength: Option<usize>,
     pub maxlength: Option<usize>,
@@ -65,7 +69,22 @@ fn probe_js() -> String {
   if (!visible(this)) return {{ error: "that password field isn't visible and enabled, so no password was made" }};
   const group = this.form || this.closest("form");
   const passwords = [...(group || document).querySelectorAll("input[type=password]")].filter(shown);
-  if (passwords.some((i) => ac(i).includes("current-password"))) return {{ change: true }};
+  // A form that also holds a `current-password` field is a password change (§7.3): the field for the new
+  // password is the other one marked `new-password`, else the first password field after the current one
+  // (signin_notice.js and signup_fill.rs say the same). Naming the current one is an error, never marked.
+  const current = passwords.find((i) => ac(i).includes("current-password"));
+  if (current) {{
+    if (ac(this).includes("current-password")) return {{ error: "that is the field for the current password: name the field for the new one" }};
+    const others = passwords.filter((i) => !ac(i).includes("current-password"));
+    const next = others.find((i) => ac(i).includes("new-password")) || others.find((i) => passwords.indexOf(i) > passwords.indexOf(current));
+    if (!next || !visible(next)) return {{ error: "this form changes a password but has no visible field for the new one, so no password was made" }};
+    const account = [...(group || document).querySelectorAll("input")].find((i) => i.type !== "password" && /\b(username|email)\b/.test(ac(i)) && i.value);
+    const key = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${{Date.now().toString(36)}}-${{Math.random().toString(36).slice(2)}}`;
+    for (const other of document.querySelectorAll("[data-agentmux-signup]")) other.removeAttribute("data-agentmux-signup");
+    next.setAttribute("data-agentmux-signup", key);
+    const bound = (n) => (n > 0 ? n : undefined);
+    return {{ change: true, field: key, username: account ? account.value : undefined, passwordrules: next.getAttribute("passwordrules") || undefined, minlength: bound(next.minLength), maxlength: bound(next.maxLength) }};
+  }}
   const fresh =
     ac(this).includes("new-password") ||
     (passwords.length === 2 && this === passwords[0] && confirmWords.test(described(passwords[1]))) ||
@@ -111,15 +130,13 @@ async fn probe(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &S
     if let Some(e) = found.get("error").and_then(serde_json::Value::as_str) {
         return Err(format!("{}: {e}", req.ref_));
     }
-    if found.get("change").and_then(serde_json::Value::as_bool) == Some(true) {
-        return Ok(SignupProbeData { origin: located.origin, change: true, ..Default::default() });
-    }
     let text = |k: &str| found.get(k).and_then(serde_json::Value::as_str).map(str::to_string);
     let number = |k: &str| found.get(k).and_then(serde_json::Value::as_u64).map(|n| n as usize);
     Ok(SignupProbeData {
         origin: located.origin,
         field: text("field").unwrap_or_default(),
-        change: false,
+        change: found.get("change").and_then(serde_json::Value::as_bool) == Some(true),
+        username: text("username"),
         passwordrules: text("passwordrules"),
         minlength: number("minlength"),
         maxlength: number("maxlength"),
@@ -131,12 +148,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_password_change_is_told_before_any_token_is_made() {
+    fn a_password_change_marks_the_field_for_the_new_password_and_never_the_current_one() {
         let js = probe_js();
         let at = |needle: &str| js.find(needle).unwrap_or_else(|| panic!("{needle}"));
-        assert!(at(r#"ac(i).includes("current-password")"#) < at("randomUUID"), "a change form gets no token");
+        assert!(at(r#"if (ac(this).includes("current-password")) return"#) < at("randomUUID"), "the current-password field gets no token");
+        assert!(at("const next = others.find") < at("next.setAttribute"), "the token goes on the field for the new password");
+        assert!(at("visible(next)") < at("next.setAttribute"), "a hidden field for the new password gets none");
         assert!(at("visible(this)") < at("randomUUID"), "a hidden field gets no token");
-        assert!(at("const fresh") < at("setAttribute"), "only a field for a new password is marked");
+        assert!(at("const fresh") < at("this.setAttribute"), "only a field for a new password is marked");
     }
 
     #[test]
@@ -147,6 +166,10 @@ mod tests {
             assert!(script.contains(words) && js.contains(words), "{words}");
         }
         assert!(js.contains(".filter(shown)") && js.contains(r#"setAttribute("data-agentmux-signup", token)"#));
+        // The password change's field for the new password: one rule in the listener, here and in the filler.
+        let rule = r#"others.find((i) => ac(i).includes("new-password")) || others.find((i) => passwords.indexOf(i) > passwords.indexOf(current))"#;
+        assert!(js.contains(rule) && super::super::signup_fill::CHANGE_NEW_RULE.contains(rule));
+        assert!(script.contains(r#"others.find((p) => autocomplete(p).includes("new-password")) || others.find((p) => passwords.indexOf(p) > passwords.indexOf(current))"#));
         assert!(script.contains(r#"const SIGNUP_ATTR = "data-agentmux-signup";"#));
     }
 }

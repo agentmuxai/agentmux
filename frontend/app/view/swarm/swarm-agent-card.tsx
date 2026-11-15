@@ -4,6 +4,7 @@
 /** The two parts of an agent's Swarm card: its header row (select, chevron, name, marks, chip) and the lines under it. */
 
 import { Show, type Accessor, type JSX } from "solid-js";
+import { MessagesUnreadChip } from "@/app/block/MessagesUnreadChip";
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import { Tag } from "@/app/element/ui/Tag";
 import { tip } from "@/app/element/tip";
@@ -107,6 +108,8 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
             {/* Turns this agent didn't get from you that finished
                 unseen: the same mark as its pane header (UnseenTurnsDot). */}
             <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
+            {/* Messages in its panel you have not seen: the number its header button shows. */}
+            <Show when={node().blockId}>{(blockId) => <MessagesUnreadChip blockId={blockId()} />}</Show>
             <Show when={collapsed() && hasChildren()}>
                 <span class="swarm-agent-collapsed-count">{totalRows()}</span>
             </Show>

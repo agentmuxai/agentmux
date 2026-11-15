@@ -144,11 +144,11 @@ pub fn codex_dirs(identities_dir: &Path, auth_dir_name: &str) -> Vec<PathBuf> {
 /// list yet, when data paths can't be resolved, and always in tests, so a test
 /// never reads this machine's real accounts.
 pub fn installed_common_model_ids() -> Vec<String> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         Vec::new()
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         let Some(paths) = agentmux_common::DataPaths::from_env() else {
             return Vec::new();

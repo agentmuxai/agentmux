@@ -109,7 +109,7 @@ impl RefreshErrorKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Register { id: String },
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     Unregister { id: String },
     /// `ensure_fresh` or a sweep tick wants to know/ensure this credential
     /// is fresh.
@@ -202,7 +202,7 @@ pub fn update(
             states.insert(id, CredentialState::Fresh);
             Vec::new()
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         Command::Unregister { id } => {
             // Removing the entry here is just memory hygiene, not a
             // correctness requirement — next_generation never reuses a

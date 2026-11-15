@@ -49,7 +49,7 @@ pub(crate) fn deferred() -> bool {
 
 /// The account-wide shared folder for the files srv keeps there itself (bookmarks, browser profiles,
 /// layouts, task media), or `None` while this srv has given the folder up, as with the shared stores.
-pub(crate) fn shared_dir() -> Option<PathBuf> {
+pub fn shared_dir() -> Option<PathBuf> {
     if deferred() {
         return None;
     }
@@ -248,7 +248,7 @@ fn record(incident: &agentmux_common::incidents::Incident) {
 }
 
 /// A shared store that did not open: when it is because the files are newer than this build, say so.
-pub(crate) fn note_open_failure(e: &StoreError) {
+pub fn note_open_failure(e: &StoreError) {
     if let StoreError::SchemaTooNew { db, found, expected } = e {
         // Up to three stores fail the same way in one start; one notice says it.
         if TOLD_TOO_NEW.swap(true, Ordering::Relaxed) {
@@ -261,7 +261,7 @@ pub(crate) fn note_open_failure(e: &StoreError) {
 
 /// Claim the shared folder for this srv, or give it up to an earlier srv of another version.
 /// Before any shared store is opened. A srv with no shared folder (a bare run) has nothing to claim.
-pub(crate) fn claim_at_boot(version: &str) {
+pub fn claim_at_boot(version: &str) {
     let Some((me, claim)) = claim_this_process(version) else { return };
     match claim {
         Claim::Owner => tracing::info!(version, "shared guard: this srv uses the shared folder"),

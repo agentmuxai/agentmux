@@ -137,7 +137,7 @@ fn try_lock_file(path: &Path) -> Option<std::fs::File> {
 }
 
 /// [`may_clean`] for this process.
-pub(crate) fn this_srv_may_clean() -> bool {
+pub fn this_srv_may_clean() -> bool {
     let channel = agentmux_common::DataPaths::from_env().map(|p| p.channel);
     may_clean(&Start {
         own_home: std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty()),
@@ -346,7 +346,7 @@ const ASKED_LOCK_WAIT: Duration = Duration::from_secs(5 * 60);
 /// policy's `stale` days), over every workspace, skipping a clone with a build running in it. Only an
 /// srv that cleans the real agents' folder does it, as on a schedule; it blocks, so call it from
 /// `spawn_blocking`. Says what it removed, in words, or why it did not run.
-pub(crate) fn clean_when_asked(config: &ConfigState) -> Result<String, String> {
+pub fn clean_when_asked(config: &ConfigState) -> Result<String, String> {
     if !this_srv_may_clean() {
         return Err("this AgentMux is not the one that cleans build folders on this computer (a development, headless or test instance, or cleaning is turned off for it)".to_string());
     }

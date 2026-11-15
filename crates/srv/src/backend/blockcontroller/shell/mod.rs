@@ -26,35 +26,35 @@
 //! (`shell::<item>`) that callers elsewhere in the crate already import, so the
 //! reorganization changed no call site.
 
-mod agent_identity;
-mod container_pane;
-mod controller;
-mod file_ops;
-mod indexing;
-mod lifecycle;
-mod post_spawn;
-mod pty;
-mod pty_tasks;
-mod spawn_command;
-mod spawn_cwd;
-mod ssh_pane;
-pub(crate) mod stamps;
-mod start_io;
-mod start_steps;
-pub(crate) mod term_cap;
-mod translation;
-mod wait_task;
+pub mod agent_identity;
+pub mod container_pane;
+pub mod controller;
+pub mod file_ops;
+pub mod indexing;
+pub mod lifecycle;
+pub mod post_spawn;
+pub mod pty;
+pub mod pty_tasks;
+pub mod spawn_command;
+pub mod spawn_cwd;
+pub mod ssh_pane;
+pub mod stamps;
+pub mod start_io;
+pub mod start_steps;
+pub mod term_cap;
+pub mod translation;
+pub mod wait_task;
 
 // Flat re-exports preserving the pre-split `shell::<item>` call sites used
 // elsewhere in the crate (blockcontroller/mod.rs, acp, persistent, subprocess,
 // watchdog, agent_handlers/input, blockfile, app_api).
 pub use controller::ShellController;
 pub use file_ops::handle_append_block_file;
-pub(crate) use indexing::{extend_output_idx, lines_before_byte, output_index, output_now, read_via_index, read_via_stale_index};
+pub use indexing::{extend_output_idx, lines_before_byte, output_index, output_now, read_via_index, read_via_stale_index};
 // A full rebuild from byte 0: the readers extend instead (`extend_output_idx`
 // falls back to one itself), so only tests call it directly.
-#[cfg(test)]
-pub(crate) use indexing::rebuild_output_idx;
+#[cfg(any(test, feature = "test-support"))]
+pub use indexing::rebuild_output_idx;
 
 #[cfg(test)]
 mod tests;

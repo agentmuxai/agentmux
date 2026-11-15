@@ -1,5 +1,87 @@
 # AgentMux Version History
 
+## 0.60.28 — 2026-11-14
+
+- Kanban: pick, create and manage several boards from the pane, move a task to another board, and copy a task's full ref
+- the release builds the AgentMux server package: a tarball per platform for Linux and macOS, x64 and arm64
+- Comment density Phase 1: condense most of the second half of server/reactive.rs (code unchanged)
+- Importing a Chrome or Google Password Manager export makes its logins usable in the browser: each site becomes an exact origin, you pick the browser profile, and the logins go to that profile's sign-in Vault
+- Drone Condition: tests pin that a {{reference | filter}} reads its filters in the expression and simple forms
+- Comment density Phase 1: condense the schema version history comments in storage/migrations.rs, second part (code unchanged)
+- Core tests: route_credits and worker_notes tests run commands through the core fixture's reducer state instead of server::AppState, and the worker-of content type comes from backend::agent_seat (prep for the srv-core split)
+- Internal: the transcript tail reader moves from the server to backend::transcript::tail so the modules below the server can use it (prep for the srv-core split)
+- Update the HTTP client (reqwest) from 0.12 to 0.13: outbound HTTPS now checks server certificates against the operating system's trusted roots instead of a bundled list, on the same ring crypto
+- Comment density Phase 1: condense the last comments in swarm-model.ts (code unchanged)
+- srv: the identity and ambient code reach the sign-in hook, the CLI locator and the auth-dir helper through the core, not the server layer
+- Browser address bar: the completion shown after what you type stays highlighted while you type its next letters, instead of blinking off and on at every key
+- task dev's Vite file watcher skips every directory it never serves (crates, docs, any target-<name> build dir) instead of holding a handle per file in them
+- Skill cards and details show the installed version of the app and flag drift from the version the skill was last tested on
+- Atlas: select agents on the map (Shift and drag a box, or the Select toggle) and Broadcast, Stop or set the Supervisor mode on them, with the Swarm's own confirmation and results
+- srv: the agent message route and the headless start flag live in the core, so the supervisor and the build cache cleaner no longer reach into the startup code
+- the .deb and .rpm require ca-certificates, and agentmux doctor says plainly when a Linux machine has no system certificates
+- Atlas: a message between two agents draws a line from its sender to its receiver as it happens, and a task one agent hands another a dotted, numbered line
+- Internal: the container listener's router tests and the Docker listener and turn checks move from backend::container to the server's tests, since they build the whole router (prep for the srv-core split)
+- muxspect instances lists the AgentMux instances running on this machine, and muxspect --channel <name> reads another one's list, describe, dock, layout and verify-sender
+- srv: the held-jekt request, the session snapshot and two RPC request types live in the core, and the route-table tests live in the server layer
+- scripts/release.sh reads every pending changeset in one awk process instead of two per file, so a release with 150 changesets no longer spends minutes starting processes on Windows (output unchanged, pinned by a new byte-for-byte test)
+- Run test on an installed computer-use skill files its test task for an agent you pick
+- Comment density Phase 1: condense the last comments in server/reactive.rs (code unchanged)
+- Internal: the Tower viewer-pairing test and the move-here tests move to the server's tests, with test-only helpers on the persistent controller and the peers module (prep for the srv-core split)
+- Comment density: move the storage schema version history out of migrations.rs into docs/architecture/STORAGE_SCHEMA_VERSION_HISTORY.md (code unchanged)
+- Host: the browser pane label format is read and written in one place (no change in behaviour)
+- The Vault imports Proton Pass (zip, JSON, CSV), Enpass (JSON, CSV) and Sticky Password (XML) exports
+- A computer-use skill's reference crops are checked against the installed app version, not only the last test
+- Comment density: move the reasoning behind agent-pane-state fields, commands and events out of types.ts into docs/architecture/AGENT_PANE_STATE_NOTES.md (code unchanged)
+- Atlas: an agent's card shows host or container, its branch, the tasks it holds with their pull requests, and for an agent on another machine its account and who else is on it
+- srv: the relay delivery and controller teardown tests get plain stand-in hooks defined in the core, not the server layer's
+- Tests: the page's new-password rules and the agent's signup probe are run on the same forms and must agree
+- Memory > Skills: a computer-use skill's detail can show each reference crop image
+- A pane dropped on, or opened in, a tab whose panes are all minimized now arrives expanded there; before, the drop was refused and the pane went back
+- Agents and the other instances' agents now say whether they run on the host or in a container (the Atlas map and the Swarm read it)
+- Internal: a release builds the server package only for Linux x64, Linux arm64 and macOS arm64, so it never waits on a scarce runner; the Linux build runs under the memory guard, the no-certificates check pulls from Amazon's public mirror by digest, and the programs carry a build time stamp
+- Vault: an agent's new account can be allowed with Always for that agent on that site, kept in Settings > Browser with Revoke
+- Atlas: two task numbers that would land on the same spot (two tasks handed to one agent, or a task and one handed back) now sit next to each other instead of one hiding the other
+- Release builds no longer restore or save a build cache; they use their own
+- Atlas: reviews, check results and merges of agents' PRs arrive as review-flow, checks-flow and merge-flow events and GET /api/v1/pr-flow (ids, states and times only)
+- Swarm: in a narrow pane a row no longer pushes its Supervisor button past the pane's edge when the status chip is long (a question, with its seconds); the context size, then the name, give way first
+- A late notice (SIG=expired) reads 'signature expired (arrived late)' in muted tone on the Needs-you card and the message tags, not 'Sender not proven'
+- Memory > Skills: a skill card's facts wrap instead of cutting off the installed version
+- Hand-started builds build main's history only, as the macOS build already does
+- This machine's agent containers and the container runtime's state reach the frontend: a container-status and a container-runtime event, and GET /api/v1/containers (names and states only)
+- Atlas: a review, CI or merge notice may carry a short list of flow objects, so a ready-to-merge notice shows both the approval and the passing checks
+- Swarm: a seat badge sits right after the agent's name, and a wide row's parts give way so its Supervisor button stays inside the pane
+- The release is uploaded as a draft and published in one step
+- srv: the server's core is its own library target, so the core's tests and the server layer's tests are compiled apart (no behaviour change)
+- A resumed agent is told truthfully that a tool it loaded before an upgrade keeps its old description until a new session (loading it again returns the old one), instead of being told to load it again
+- Swarm: a seat badge with too little room is cut with an ellipsis, then not shown at all, never as a stub that costs the status word its room
+- The Swarm lists the account's other machines that are not on this network as a cloud tier (read from the relay, verified, display only), and Presence who reports their agents' states
+- The updater's install-kind test no longer fails on a host whose umask makes new folders group-writable
+- Release builds print a phase table and a memory line
+- CI: a shipped build never has the test-only feature (a check on the build commands, a check on the resolved features, and a release build with it on does not compile)
+- Pane header: focusing a pane or working in it brings its active tab back into view after the header was scrolled away, and a revealed tab no longer lands under the edge fade
+- Atlas: a container agent has its container as a frame round it, the review bot and CI are nodes with a line to each agent whose pull request they worked on, and the account's other machines are marked as the cloud tier
+- A LAN peer's advertised WAN instance id tells apart two machines with one name and channel in the Swarm's cloud tier
+- Fix: the server and the MCP server no longer crash at start on a Linux machine with no system certificates; https requests fail with a message that says to install ca-certificates
+- Browser hand-off: the answer, handoff_status and the pane Log say how long the banner was up and who answered, and a Done within 5 seconds tells the agent to check the page really changed
+- The status bar's last-sound click now pages back to the sound's row when 50 or more entries were written since it
+- Tasks: an edit that names who a task is for is refused, a refused claim by id says where its target stands and how to go on, and the list says who a task is for and who holds it
+- Browser snapshot: the text of a label that no field is named by (a sentence beside a Yes, update button) is shown, not hidden
+- Jobs can now be triggered by events: a job definition accepts an event trigger (source and filter), and a firing event starts the job's drone run once per event id through the normal admission checks.
+- Browser: a click on a brand or plan with Pay in its name (Kakao Pay, Apple Pay, Pay-as-you-go) no longer asks as a payment; a real payment under auto-approve says why it asks
+- Files: renaming on an SSH host can no longer replace a file made at the new name at the same moment; the rename itself now refuses a taken name
+- Browser key: the answer says when a custom list closed or took an option, instead of reporting that the focused field did not change
+- Editor: double-click a document tab to rename its file in place (also F2 and the tab's menu); an untitled document is saved under the typed name. Every Editor tab on a renamed file follows, in any pane or window. Spec: docs/specs/SPEC_EDITOR_TAB_RENAME_2026_11_14.md
+- Internal: the HTTP client's certificate tests run on Linux only, where the SSL_CERT_FILE variable names the certificates
+- An event-triggered job can carry a delay of up to a week: its run waits as a scheduled row and starts when due, and an event's data is now kept with its run, so a delay, a wait for its turn or a restart does not lose it.
+- Voice input reads its Groq key from a Vault entry instead of plain text in settings.json; a key already there moves into the Vault
+- Test: the agent pane's first-screen history tests run on fake timers, so a loaded CI runner can no longer time them out
+- Browser snapshot no longer repeats a label's text when the label wraps a field that has a value
+- Browser reads never return secret-shaped or secret-labelled hidden text; capture saves it
+- Status bar: the Kanban's Needs-you tasks show in the waiting count and as a row in the list of what waits on you
+- Test: the composer strip's compact-form choice counts the anchor row's own wrap
+- The Messages panel's unread count now also shows on the pane's Swarm row and its tab, and a message in the panel has an Open in Audit link that opens the Audit at its row.
+- Vault import from AWS no longer fails on Windows when a secret's fields hold characters outside the console code page
+
 ## 0.60.27 — 2026-11-13
 
 - ci(release): the winget job opens the AgentMux.AI version-bump PR in winget-pkgs per release, off until WINGET_SUBMIT_ENABLED is set

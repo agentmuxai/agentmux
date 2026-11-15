@@ -128,6 +128,11 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
         backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
+    // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::app_events::spawn(&state.broker, state.mstore.clone(), jobs_store.clone(), state.cron_scheduler.clone());
+        backend::jobs::file_watch::spawn(&state.broker, state.fs_watch_pool.clone(), jobs_store, state.cron_scheduler.clone());
+    }
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
@@ -191,6 +196,18 @@ fn install_message_brokers(state: &AppState) {
     backend::message_flow::install(Arc::clone(&state.broker));
     backend::task_flow::install(Arc::clone(&state.broker));
     backend::pr_flow::install(Arc::clone(&state.broker));
+    start_container_status(state);
+}
+
+/// The Atlas map and the Swarm show this machine's agent containers as they change (`backend::container_status`).
+/// A machine with no container runtime is looked at once.
+fn start_container_status(state: &AppState) {
+    let mstore = Arc::clone(&state.mstore);
+    let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
+        mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
+    });
+    let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
+    tokio::spawn(backend::container_status::run(source, hub, Default::default()));
 }
 
 /// Lists this instance for the other AgentMux instances on this machine (`muxspect instances`).
@@ -442,6 +459,7 @@ pub fn spawn_serving_loops(
     // while signed in (`muxbus::wan_presence`). Here rather than beside
     // `wan_publish::spawn` because the feed exists only once AppState does.
     // A headless srv doesn't publish unless forced (`wan_presence::policy`).
+    crate::muxbus::cloud_installs::install(Arc::clone(&state.id_store), state.http_client.clone());
     crate::muxbus::wan_presence::spawn(
         Arc::clone(&state.fleet_feed),
         Arc::clone(&state.id_store),

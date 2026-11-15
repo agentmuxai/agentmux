@@ -751,7 +751,7 @@ impl PersistentSubprocessController {
 /// archives) is never picked up, and a subagent's transcript can't pass for
 /// the agent's own. No reachability check; callers decide what an
 /// unreachable id means.
-pub(crate) fn pane_history_session_id(
+pub fn pane_history_session_id(
     filestore: Option<&FileStore>,
     mstore: Option<&Store>,
     block_id: &str,

@@ -27,9 +27,23 @@ export function toneClass(tone: UiTone | undefined): string {
     return `ui-tone-${tone ?? "neutral"}`;
 }
 
-/** A Font Awesome icon by bare name (`"plus"`), decorative only. */
+/**
+ * A Font Awesome icon by bare name (`"plus"`), decorative only. `"custom@name"` is one of the app's own glyphs
+ * (custom-glyphs.scss), by the convention `makeIconClass` already follows.
+ */
 export function UiIcon(props: { name: string; spin?: boolean }): JSX.Element {
-    return <i class={clsx("fa-solid", `fa-${props.name}`, props.spin && "fa-spin")} aria-hidden="true" />;
+    // Read in the class expression, not once up here: the icon follows `name` when a button's icon changes.
+    const own = () => props.name.startsWith("custom@");
+    return (
+        <i
+            class={clsx(
+                own() ? "fa-kit" : "fa-solid",
+                `fa-${own() ? props.name.slice("custom@".length) : props.name}`,
+                props.spin && "fa-spin"
+            )}
+            aria-hidden="true"
+        />
+    );
 }
 
 /**

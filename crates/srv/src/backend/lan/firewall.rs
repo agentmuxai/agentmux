@@ -232,7 +232,7 @@ impl LocalScope {
 /// One firewall rule, with the fields that decide whether it affects us.
 #[derive(Debug, Clone)]
 pub struct FwRule {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub name: String,
     pub enabled: bool,
     pub inbound: bool,
@@ -473,7 +473,7 @@ pub fn coverage_with(
 #[derive(Debug, Clone)]
 pub struct Adapter {
     /// The adapter GUID (`if_addrs::Interface::adapter_name` on Windows).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub id: String,
     pub name: String,
     pub ipv4: Vec<Ipv4Addr>,

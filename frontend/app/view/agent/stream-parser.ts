@@ -1121,6 +1121,7 @@ export class ClaudeCodeStreamParser {
             tier,
             deliveryTier,
             trust,
+            ...(fields.SIG === "verified" || fields.SIG === "invalid" || fields.SIG === "expired" ? { sig: fields.SIG } : {}),
             msgId: fields.MSGID || "",
             priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
             direction,

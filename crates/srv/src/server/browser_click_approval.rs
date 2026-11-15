@@ -41,9 +41,14 @@ pub(crate) fn raise_approval(
 ) -> Result<(super::browser_attention::Raised, Asked), ClickRefused> {
     let (banner_at, in_window) = banner_for(block_id);
     let mut banner = ask.clone();
+    let exception = super::browser_bypass_routes::payment_exception(block_id, agent, ask);
     if let Some(b) = banner.as_object_mut() {
         b.remove("fingerprint");
         b.insert("window".to_string(), json!(in_window));
+        if let Some(note) = exception {
+            let why = ask.get("why").and_then(|v| v.as_str()).unwrap_or("");
+            b.insert("why".to_string(), json!(if why.is_empty() { note.to_string() } else { format!("{why}; {note}") }));
+        }
     }
     let (owner_before, asked_at) = (super::browser_owner::owner_of(&banner_at), std::time::Instant::now());
     let raised = super::browser_attention::raise(state, &banner_at, agent, super::browser_attention::Kind::Approval, banner)
@@ -111,11 +116,14 @@ pub(crate) async fn approve_click(
 /// The question the agent is told it waits on: the click's own words and its page.
 fn question_of(ask: &serde_json::Value) -> String {
     let s = |k: &str| ask.get(k).and_then(|v| v.as_str()).unwrap_or("");
-    match (s("what"), s("page")) {
+    let question = match (s("what"), s("page")) {
         ("", "") => "a committing click".to_string(),
         (what, "") => what.to_string(),
         (what, page) => format!("{what} on {page}"),
-    }
+    };
+    // This is the agent's copy (the waiting notice and the request's status): the person's prompt has the
+    // click's own words, the agent gets them without anything shaped like a secret.
+    agentmux_common::secret_shape::scrub(&question)
 }
 
 /// Where the approved click left the page, for the agent's note.

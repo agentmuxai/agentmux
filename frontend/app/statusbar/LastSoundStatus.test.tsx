@@ -31,6 +31,7 @@ const agent = (name: string, block_id: string): AgentRuntime => ({
     name,
     provider: "claude",
     icon: "",
+    runtime: "host",
 });
 
 describe("LastSoundStatus", () => {

@@ -79,11 +79,11 @@ fn write(path: &Path, agents: &HashMap<String, SeenAgent>) {
 
 /// Where the record lives; none under test, so a test never reads or writes the real one.
 fn record_path() -> Option<PathBuf> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     {
         None
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     {
         Some(crate::backend::base::get_mux_data_dir().join("lan-seen-agents.json"))
     }

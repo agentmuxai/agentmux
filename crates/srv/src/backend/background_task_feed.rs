@@ -424,7 +424,7 @@ fn observe(
 /// invalidation signal): the list query is the single source of truth for the
 /// actual rows. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
-pub(crate) fn publish_background_task_updated(broker: &Broker, block_id: &str) {
+pub fn publish_background_task_updated(broker: &Broker, block_id: &str) {
     broker.publish_event::<crate::backend::mps_events::BackgroundTaskUpdated>(&crate::backend::mps_events::BlockRefEvent { block_id: block_id.to_string() }, vec![format!("block:{block_id}")], 0);
 }
 

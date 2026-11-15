@@ -212,7 +212,7 @@ async fn tunnel(proxy: &Proxy, host: &str, port: u16) -> io::Result<TcpStream> {
 }
 
 /// Connects the WebSocket for `request`, through the environment's proxy when it names one for the request's host.
-pub(crate) async fn connect(request: impl IntoClientRequest + Unpin) -> Result<(Socket, Response), Error> {
+pub async fn connect(request: impl IntoClientRequest + Unpin) -> Result<(Socket, Response), Error> {
     connect_with_env(request, |name| std::env::var(name).ok()).await
 }
 

@@ -32,6 +32,8 @@ import type { CompactionStarted } from "@/types/rpc/CompactionStarted";
 import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
+import type { ContainerRuntimeStatus } from "@/types/rpc/ContainerRuntimeStatus";
+import type { ContainerStatus } from "@/types/rpc/ContainerStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
 import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
@@ -39,6 +41,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { EndpointNoticeEvent } from "@/types/rpc/EndpointNoticeEvent";
 import type { EventsDroppedEvent } from "@/types/rpc/EventsDroppedEvent";
+import type { FileRenamedEvent } from "@/types/rpc/FileRenamedEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
 import type { GoogleNoticeEvent } from "@/types/rpc/GoogleNoticeEvent";
@@ -158,6 +161,8 @@ export type MuxEventPayloads = {
   config: ConfigEvent;
   connchange: ConnStatus;
   "connectivity:changed": ConnectivityStatus;
+  "container-runtime": ContainerRuntimeStatus;
+  "container-status": ContainerStatus;
   controllerstatus: BlockControllerRuntimeStatus;
   cron_changed: null;
   "dispatch:activity": DispatchActivityEvent;
@@ -167,6 +172,7 @@ export type MuxEventPayloads = {
   "editor:file_changed": PathChangedEvent;
   "files:changed": FilesChangedEvent;
   "files:op": FsOpEvent;
+  "fs:renamed": FileRenamedEvent;
   "google:notice": GoogleNoticeEvent;
   "history:sessions:changed": null;
   "identity:no-direct-links": NoDirectLinksEvent;
@@ -291,6 +297,8 @@ export const TYPED_MUX_EVENTS = [
   "config",
   "connchange",
   "connectivity:changed",
+  "container-runtime",
+  "container-status",
   "controllerstatus",
   "cron_changed",
   "dispatch:activity",
@@ -300,6 +308,7 @@ export const TYPED_MUX_EVENTS = [
   "editor:file_changed",
   "files:changed",
   "files:op",
+  "fs:renamed",
   "google:notice",
   "history:sessions:changed",
   "identity:no-direct-links",

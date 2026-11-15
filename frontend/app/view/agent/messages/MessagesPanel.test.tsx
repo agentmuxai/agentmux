@@ -17,7 +17,11 @@ vi.mock("../hooks/useJektsAwaitingYou", () => ({
     dismissAwaiting: (...a: unknown[]) => dismissed(...a),
 }));
 
+const openAudit = vi.hoisted(() => vi.fn());
+vi.mock("@/app/view/audit/open-audit", () => ({ openAuditAtMessage: openAudit }));
+
 import type { DocumentNode, JektMessageNode } from "@/app/agent-model/node-types";
+import { messagesUnreadFor, resetMessagesUnread } from "@/app/store/messages-unread";
 import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import {
     DEFAULT_MESSAGES_STATE,
@@ -96,6 +100,8 @@ afterEach(() => {
     waitingNow.ids = [];
     waitingNow.reads = 0;
     dismissed.mockClear();
+    openAudit.mockClear();
+    resetMessagesUnread();
 });
 
 describe("MessagesPanel", () => {
@@ -278,6 +284,48 @@ describe("MessagesPanel", () => {
         controls.patch({ seen: 99_999 });
         await Promise.resolve();
         expect(document.activeElement).toBe(head);
+    });
+
+    it("opens the Audit at a message by its MSGID, from the open row", () => {
+        const m = jekt({ msgId: "1794686210090-123796-20", timestamp: 50_000, heldForSecs: 3 });
+        const { view } = mount([m]);
+        expect(screen.queryByText("Open in Audit")).toBeNull();
+        fireEvent.click(view.container.querySelector(".messages-row__head")!);
+        fireEvent.click(screen.getByText("Open in Audit"));
+        // `at` is when it reached the pane (a held message waited), which is how far back the Audit has to reach.
+        expect(openAudit).toHaveBeenCalledWith("1794686210090-123796-20", 53_000);
+    });
+
+    it("offers Open in Audit also for a message the conversation leaves out, and none for one with no MSGID", () => {
+        const c = controlsFor();
+        const { view } = mount([jekt({ msgId: "" }), jekt()], { ...c, hidden: () => true });
+        for (const head of view.container.querySelectorAll(".messages-row__head")) fireEvent.click(head);
+        expect(screen.queryByText("Show in conversation")).toBeNull();
+        expect(screen.getAllByText("Open in Audit")).toHaveLength(1);
+    });
+
+    it("publishes the unread count for the Swarm row and the tab, and takes it away with the panel", () => {
+        const { controls, setDoc, view } = mount([jekt(), jekt()], controlsFor({ open: false }));
+        expect(messagesUnreadFor("p1")).toEqual({ unread: 2, needsYou: false });
+        setDoc([jekt(), jekt(), jekt()]);
+        expect(messagesUnreadFor("p1")?.unread).toBe(3);
+        controls.patch({ seen: 1e12 });
+        expect(messagesUnreadFor("p1")).toBeNull();
+        controls.patch({ seen: 0 });
+        expect(messagesUnreadFor("p1")?.unread).toBe(3);
+        controls.patch({ enabled: false });
+        expect(messagesUnreadFor("p1")).toBeNull();
+        controls.patch({ enabled: true });
+        expect(messagesUnreadFor("p1")?.unread).toBe(3);
+        view.unmount();
+        expect(messagesUnreadFor("p1")).toBeNull();
+    });
+
+    it("says in the published count that something needs the person", () => {
+        const m = jekt();
+        waitingNow.ids = [m.id];
+        mount([m], controlsFor({ open: false }));
+        expect(messagesUnreadFor("p1")).toEqual({ unread: 1, needsYou: true });
     });
 
     it("does not offer Show in conversation for a message the conversation leaves out", () => {

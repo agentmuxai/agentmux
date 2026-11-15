@@ -16,8 +16,9 @@ vi.mock("@/app/store/mps", () => ({
 vi.mock("@/app/store/auth-headers", () => ({ authHeaders: () => ({ "X-AuthKey": "k" }) }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://srv" }));
 
-import { LEAVING_MS, MESSAGE_SHOWN_MS } from "./atlas-flow";
-import { useAtlasFlows } from "./atlas-flow-store";
+import { acceptMuxbusDelivery, RECONNECTING_QUIET_MS } from "@/app/store/muxbus-delivery";
+import { LEAVING_MS, MESSAGE_SHOWN_MS, PR_FRESH_MS } from "./atlas-flow";
+import { useAtlasFlows, useCloudPaused } from "./atlas-flow-store";
 
 const NOW = 1_000_000;
 const message = (id: string, atMs: number, to = "bo") => ({
@@ -36,18 +37,32 @@ const task = (number: number, atMs: number) => ({
     kind: "filed",
 });
 
-/** srv's two recent lists, as its routes answer them. */
-function serve(messages: unknown[], events: unknown[]) {
+const review = (id: string, atMs: number, number = 64, state = "approved") => ({
+    id,
+    at_ms: atMs,
+    agent: "ann",
+    pr: { repo_id: 9, number },
+    state,
+    by: "bot",
+});
+const checks = (id: string, atMs: number, number = 64, state = "passing") => ({ id, at_ms: atMs, agent: "ann", pr: { repo_id: 9, number }, state });
+const merge = (id: string, atMs: number, number = 64) => ({ id, at_ms: atMs, agent: "ann", pr: { repo_id: 9, number }, state: "merged" });
+
+/** srv's recent lists, as its routes answer them. */
+function serve(messages: unknown[], events: unknown[], pr: unknown = {}) {
     const fetched = vi.fn(async (url: string) => ({
         ok: true,
-        json: async () => (url.endsWith("/message-flow") ? { messages } : { events }),
+        json: async () => (url.endsWith("/message-flow") ? { messages } : url.endsWith("/pr-flow") ? pr : { events }),
     }));
     vi.stubGlobal("fetch", fetched);
     return fetched;
 }
 
 function mount() {
-    return createRoot((dispose) => ({ flows: useAtlasFlows(), dispose }));
+    return createRoot((dispose) => {
+        const live = useAtlasFlows();
+        return { flows: live.flows, lastPrNoticeAtMs: live.lastPrNoticeAtMs, dispose };
+    });
 }
 
 beforeEach(() => {
@@ -68,7 +83,7 @@ describe("useAtlasFlows", () => {
         const { flows, dispose } = mount();
         await vi.advanceTimersByTimeAsync(0);
         expect(fetched).toHaveBeenCalledWith("http://srv/api/v1/message-flow", { headers: { "X-AuthKey": "k" } });
-        expect(flows().map((f) => `${f.kind}:${f.label ?? f.to.agent}`)).toEqual(["message:cy", "task:#12"]);
+        expect(flows().map((f) => `${f.kind}:${f.label ?? ("agent" in f.to ? f.to.agent : "")}`)).toEqual(["message:cy", "task:#12"]);
         dispose();
     });
 
@@ -110,7 +125,82 @@ describe("useAtlasFlows", () => {
         await vi.advanceTimersByTimeAsync(0);
         bus.handlers.get("message-flow")!(message("m1", NOW));
         dispose();
-        expect(bus.off).toHaveBeenCalledTimes(2);
+        expect(bus.off).toHaveBeenCalledTimes(5);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+});
+
+describe("a pull request's review and checks", () => {
+    it("start from srv's recent list: dim when past their first minutes, and nothing for a pull request that has merged", async () => {
+        const fetched = serve([], [], {
+            review: [review("r1", NOW - PR_FRESH_MS - 1), review("r2", NOW - 1_000, 65), review("r3", NOW - 1_000, 66)],
+            checks: [checks("c1", NOW - 1_000, 65, "failing")],
+            merge: [merge("m1", NOW - 500, 66)],
+            bot: { last_notice_at_ms: NOW - 500 },
+        });
+        const { flows, lastPrNoticeAtMs, dispose } = mount();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetched).toHaveBeenCalledWith("http://srv/api/v1/pr-flow", { headers: { "X-AuthKey": "k" } });
+        expect(flows().map((f) => `${f.kind} ${f.label} ${f.tone}${f.dim ? " dim" : ""}`)).toEqual([
+            "review #64 passed dim",
+            "review #65 passed",
+            "checks #65 failed",
+        ]);
+        expect(lastPrNoticeAtMs()).toBe(NOW - 500);
+        dispose();
+    });
+
+    it("a new review replaces the one before for the same pull request, and its merge takes its lines away", async () => {
+        serve([], []);
+        const { flows, lastPrNoticeAtMs, dispose } = mount();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(lastPrNoticeAtMs()).toBeNull();
+        bus.handlers.get("review-flow")!(review("r1", NOW, 64, "changes_requested"));
+        bus.handlers.get("checks-flow")!(checks("c1", NOW));
+        bus.handlers.get("review-flow")!(review("r2", NOW + 10));
+        bus.handlers.get("review-flow")!(review("r3", NOW + 20, 65));
+        expect(flows().map((f) => `${f.id} ${f.state}`)).toEqual(["checks:c1 passing", "review:r2 approved", "review:r3 approved"]);
+        expect(lastPrNoticeAtMs()).toBe(NOW + 20);
+        bus.handlers.get("merge-flow")!(merge("m1", NOW + 30));
+        expect(flows().map((f) => f.id)).toEqual(["review:r3"]);
+        // A notice about the merged pull request that comes late draws nothing.
+        bus.handlers.get("checks-flow")!(checks("c2", NOW + 40));
+        expect(flows().map((f) => f.id)).toEqual(["review:r3"]);
+        expect(lastPrNoticeAtMs()).toBe(NOW + 40);
+        dispose();
+    });
+
+    it("stay, dimmed, long after a message's line has gone", async () => {
+        serve([], []);
+        const { flows, dispose } = mount();
+        await vi.advanceTimersByTimeAsync(0);
+        bus.handlers.get("review-flow")!(review("r1", NOW));
+        bus.handlers.get("message-flow")!(message("m1", NOW));
+        await vi.advanceTimersByTimeAsync(PR_FRESH_MS + 1_000);
+        expect(flows().map((f) => `${f.kind}${f.dim ? " dim" : ""}`)).toEqual(["review dim"]);
+        dispose();
+    });
+});
+
+describe("useCloudPaused", () => {
+    const status = (state: string, sinceMs: number) => ({ state, since_ms: sinceMs });
+
+    it("is so while MuxBus needs a sign-in, and after it has been out of reach for longer than a passing reconnect", async () => {
+        acceptMuxbusDelivery(status("connected", NOW));
+        const { paused, dispose } = createRoot((d) => ({ paused: useCloudPaused(), dispose: d }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(paused()).toBe(false);
+        acceptMuxbusDelivery(status("needs_sign_in", NOW));
+        expect(paused()).toBe(true);
+        acceptMuxbusDelivery(status("reconnecting", NOW));
+        await vi.advanceTimersByTimeAsync(RECONNECTING_QUIET_MS - 1_000);
+        expect(paused()).toBe(false);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(paused()).toBe(true);
+        acceptMuxbusDelivery(status("connected", NOW));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(paused()).toBe(false);
+        dispose();
         expect(vi.getTimerCount()).toBe(0);
     });
 });

@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
 use crate::fsproto::{self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE};
+use crate::rename::rename_no_replace;
 
 /// Serve requests from `input`, answering on `output`, until `input` ends.
 /// `home` is the user's home directory ([`home_dir`]).
@@ -185,17 +186,14 @@ pub fn handle(home: &Path, req: Request) -> Reply {
             if let Err(e) = fs::symlink_metadata(&from) {
                 return err(e);
             }
-            // Never over something already there: a rename that would
-            // replace a file says so instead. The same file under another
-            // spelling (a case-only rename on a case-insensitive disk) is
-            // not something else.
-            if fs::symlink_metadata(&to).is_ok() && !same_file(&from, &to) {
-                return Reply::Err {
+            return match rename(&from, &to) {
+                Ok(()) => Reply::Done,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Reply::Err {
                     kind: ErrKind::AlreadyExists,
                     message: format!("{} already exists", to.display()),
-                };
-            }
-            fs::rename(&from, &to).map(|()| Reply::Done)
+                },
+                Err(e) => err(e),
+            };
         }
         Request::Replace { from, to } => {
             let (from, to) = (resolve(home, &from), resolve(home, &to));
@@ -284,6 +282,34 @@ pub fn handle(home: &Path, req: Request) -> Reply {
         }
     };
     result.unwrap_or_else(err)
+}
+
+/// `Rename`: never over something already there. The rename itself refuses a
+/// taken name (`rename_no_replace`), in the one step that would take it: with
+/// a check first and a rename after, a file made in between was replaced.
+///
+/// The same file under another spelling (a case-only rename on a
+/// case-insensitive disk) is not something else at the new name. It goes by
+/// way of a name nothing has, each step refusing a taken name, and comes back
+/// if the new name turns out to be taken after all (a second hard link to the
+/// file, on a disk that tells the two spellings apart).
+fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    static N: AtomicU64 = AtomicU64::new(0);
+    if from == to {
+        return Ok(());
+    }
+    if !same_file(from, to) {
+        return rename_no_replace(from, to);
+    }
+    let between = to.with_file_name(format!(
+        ".amx-rename-{}-{}.tmp",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    rename_no_replace(from, &between)?;
+    rename_no_replace(&between, to).inspect_err(|_| {
+        let _ = rename_no_replace(&between, from);
+    })
 }
 
 /// A file's permission bits (`mode`, when not 0, on Unix) and modification
@@ -1013,5 +1039,126 @@ mod tests {
             assert_eq!(r[0], Reply::Done);
             assert!(h.join("a").exists() && h.join("x").exists() && !h.join("to-home2").exists());
         }
+    }
+
+    fn already_exists(r: &Reply) -> bool {
+        matches!(r, Reply::Err { kind: ErrKind::AlreadyExists, .. })
+    }
+
+    #[test]
+    fn two_renames_to_one_name_started_together_have_one_winner_and_lose_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        for round in 0..100 {
+            fs::write(h.join("a"), b"one").unwrap();
+            fs::write(h.join("b"), b"two").unwrap();
+            let to = format!("to{round}");
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let ask = |from: &str| {
+                let (start, home, from, to) = (start.clone(), h.to_path_buf(), from.to_string(), to.clone());
+                std::thread::spawn(move || {
+                    start.wait();
+                    handle(&home, Request::Rename { from, to })
+                })
+            };
+            let (a, b) = (ask("a"), ask("b"));
+            let (a, b) = (a.join().unwrap(), b.join().unwrap());
+            let (won, lost, kept) = match (&a, &b) {
+                (Reply::Done, lost) if already_exists(lost) => (&b"one"[..], "b", &b"two"[..]),
+                (lost, Reply::Done) if already_exists(lost) => (&b"two"[..], "a", &b"one"[..]),
+                other => panic!("round {round}: exactly one must win: {other:?}"),
+            };
+            assert_eq!(fs::read(h.join(&to)).unwrap(), won, "round {round}");
+            // The one that was refused is where it was, with what it held.
+            assert_eq!(fs::read(h.join(lost)).unwrap(), kept, "round {round}");
+            fs::remove_file(h.join(lost)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_file_made_at_the_new_name_while_a_rename_is_under_way_is_never_replaced() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        for round in 0..100 {
+            fs::write(h.join("a"), b"renamed").unwrap();
+            let to = format!("to{round}");
+            let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let renamer = {
+                let (start, home, to) = (start.clone(), h.to_path_buf(), to.clone());
+                std::thread::spawn(move || {
+                    start.wait();
+                    handle(&home, Request::Rename { from: "a".into(), to })
+                })
+            };
+            let maker = {
+                let (start, at) = (start.clone(), h.join(&to));
+                std::thread::spawn(move || {
+                    start.wait();
+                    fs::OpenOptions::new().write(true).create_new(true).open(at)?.write_all(b"made")
+                })
+            };
+            let (renamed, made) = (renamer.join().unwrap(), maker.join().unwrap());
+            match (&renamed, &made) {
+                (Reply::Done, Err(e)) => {
+                    assert_eq!(e.kind(), io::ErrorKind::AlreadyExists, "round {round}: {e}");
+                    assert_eq!(fs::read(h.join(&to)).unwrap(), b"renamed", "round {round}");
+                }
+                (lost, Ok(())) if already_exists(lost) => {
+                    assert_eq!(fs::read(h.join(&to)).unwrap(), b"made", "round {round}");
+                    assert_eq!(fs::read(h.join("a")).unwrap(), b"renamed", "round {round}");
+                }
+                other => panic!("round {round}: exactly one must get the name: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_rename_is_refused_by_an_empty_folder_and_by_a_dangling_link() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("a"), b"a").unwrap();
+        fs::create_dir(h.join("d")).unwrap();
+        fs::create_dir(h.join("empty")).unwrap();
+        // A plain rename replaces an empty folder with a folder.
+        let r = exchange(h, &[Request::Rename { from: "d".into(), to: "empty".into() }]);
+        assert!(already_exists(&r[0]), "{r:?}");
+        assert!(h.join("d").is_dir() && h.join("empty").is_dir());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(h.join("nowhere"), h.join("dangling")).unwrap();
+            let r = exchange(h, &[Request::Rename { from: "a".into(), to: "dangling".into() }]);
+            assert!(already_exists(&r[0]), "{r:?}");
+            assert!(fs::symlink_metadata(h.join("dangling")).unwrap().file_type().is_symlink());
+            assert_eq!(fs::read(h.join("a")).unwrap(), b"a");
+        }
+    }
+
+    // Where the helper runs. Windows takes a move onto another name of the same file as done, by its own
+    // rule; nothing is lost there either, the two names being one file.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_name_of_the_same_file_is_a_taken_name() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("a"), b"a").unwrap();
+        fs::hard_link(h.join("a"), h.join("b")).unwrap();
+        // Not the other spelling of one name: both names stay, and the answer says the new one is taken
+        // (a plain rename answers "done" and leaves the old name where it was).
+        let r = exchange(h, &[Request::Rename { from: "a".into(), to: "b".into() }]);
+        assert!(already_exists(&r[0]), "{r:?}");
+        let mut names: Vec<String> =
+            fs::read_dir(h).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_rename_to_its_own_name_changes_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("a"), b"a").unwrap();
+        let r = exchange(h, &[Request::Rename { from: "a".into(), to: "~/a".into() }]);
+        assert_eq!(r[0], Reply::Done);
+        assert_eq!(fs::read(h.join("a")).unwrap(), b"a");
     }
 }

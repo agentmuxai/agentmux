@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    mod on_linux {
+    pub mod on_linux {
         use super::super::SCRIPT;
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         use std::process::Command;

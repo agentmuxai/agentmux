@@ -44,7 +44,7 @@ const SLOW_CONN: std::time::Duration = std::time::Duration::from_millis(500);
 /// the process waits for this one lock — on the global transcript store, every
 /// agent's appends and every pane's history reads — so a long hold stalls
 /// them all (REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
-pub(crate) struct TimedConn<'a> {
+pub struct TimedConn<'a> {
     guard: std::sync::MutexGuard<'a, Connection>,
     site: &'static std::panic::Location<'static>,
     got: std::time::Instant,
@@ -253,7 +253,7 @@ impl FileStore {
     /// the caller's location. `#[track_caller]` on the store methods that take
     /// it carries the site out to the code that called the store.
     #[track_caller]
-    pub(crate) fn lock_conn(&self) -> TimedConn<'_> {
+    pub fn lock_conn(&self) -> TimedConn<'_> {
         self.lock_conn_at(std::panic::Location::caller())
     }
 
@@ -277,14 +277,14 @@ impl FileStore {
 
     /// Raw connection access for tests that need to force a specific
     /// failure mode (e.g. dropping a table) — mirrors `Store::conn()`.
-    #[cfg(test)]
-    pub(crate) fn conn(&self) -> &Mutex<Connection> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn conn(&self) -> &Mutex<Connection> {
         &self.conn
     }
 
     /// Forgets every cached file, so the next read goes to the database: a test that
     /// damages the database file under a store that has just written to it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn drop_cache_for_test(&self) {
         self.cache.lock().unwrap().clear();
         *self.cache_total_bytes.lock().unwrap() = 0;

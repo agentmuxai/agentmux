@@ -5,7 +5,7 @@
 
 pub mod access;
 #[cfg(unix)]
-pub(crate) mod beneath;
+pub mod beneath;
 pub mod catalog;
 pub mod net;
 pub mod packages;

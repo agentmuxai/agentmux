@@ -78,12 +78,12 @@ pub(super) struct NetProber {
 
 impl NetProber {
     pub(super) fn new() -> Self {
-        let http = reqwest::Client::builder()
+        let http = crate::http_client::builder()
             .user_agent(crate::muxbus::relay::USER_AGENT)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(HEAD_TIMEOUT)
             .build()
-            .unwrap_or_default();
+            .unwrap_or_else(|_| crate::http_client::client());
         Self { http }
     }
 }

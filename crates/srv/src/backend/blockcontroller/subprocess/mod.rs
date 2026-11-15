@@ -54,15 +54,15 @@ use crate::backend::mps;
 // the `/btw` side-question turn builder in
 // `server/agent_handlers/side_question.rs`, outside this module. Every
 // other item in `argv` keeps its own narrower visibility.
-pub(crate) mod argv;
-mod codex_compact;
-mod codex_context;
-mod codex_mcp;
-mod codex_fresh;
-mod gemini_mcp;
-mod container_spawn;
-mod host_spawn;
-mod session;
+pub mod argv;
+pub mod codex_compact;
+pub mod codex_context;
+pub mod codex_mcp;
+pub mod codex_fresh;
+pub mod gemini_mcp;
+pub mod container_spawn;
+pub mod host_spawn;
+pub mod session;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

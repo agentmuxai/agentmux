@@ -270,6 +270,6 @@ impl Runner for HostRunner {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[path = "mint_tests.rs"]
-pub(crate) mod tests;
+pub mod tests;

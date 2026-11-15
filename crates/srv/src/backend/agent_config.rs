@@ -732,7 +732,7 @@ fn truncate_utf16_units(s: &str, max_units: usize) -> String {
 /// correctly-escaped YAML value — this avoids hand-rolling YAML escaping or
 /// adding a yaml crate dependency (this workspace has neither today) just
 /// for two scalar fields.
-pub(crate) fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
+pub fn render_skill_md(slug: &str, description: &str, body: &str) -> String {
     let owned_description;
     let description = if description.trim().is_empty() {
         "No description provided."

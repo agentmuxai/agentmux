@@ -48,9 +48,27 @@ pub fn now_secs_u64() -> u64 {
     since_epoch().as_secs()
 }
 
+/// A span of seconds in words an agent can read: `7 s`, and from 90 s whole minutes, `3 min`.
+pub fn span_words(secs: u64) -> String {
+    if secs < 90 {
+        format!("{secs} s")
+    } else {
+        format!("{} min", secs / 60)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_span_reads_in_seconds_then_minutes() {
+        assert_eq!(span_words(0), "0 s");
+        assert_eq!(span_words(7), "7 s");
+        assert_eq!(span_words(89), "89 s");
+        assert_eq!(span_words(90), "1 min");
+        assert_eq!(span_words(15 * 60 + 20), "15 min");
+    }
 
     /// Sanity bounds rather than an exact value: after 2020-01-01 (so the
     /// epoch math isn't off by a factor of 1000) and the two widths agree.

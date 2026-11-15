@@ -179,6 +179,7 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         icon: String::new(),
         color: None,
         blocked: None,
+        runtime: crate::backend::runtime_adapter::RuntimeKind::Host,
     }
 }
 

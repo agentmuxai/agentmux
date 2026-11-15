@@ -46,7 +46,7 @@ fn after_read(last: &mut (u64, u64), rows: Option<Vec<IfRow>>) -> (u64, u64) {
 }
 
 #[cfg(windows)]
-mod imp {
+pub mod imp {
     use super::{after_read, IfRow};
     use windows_sys::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
     use windows_sys::Win32::NetworkManagement::Ndis::MediaConnectStateDisconnected;
@@ -102,7 +102,7 @@ mod imp {
 }
 
 #[cfg(not(windows))]
-mod imp {
+pub mod imp {
     pub struct NetCounters(sysinfo::Networks);
 
     impl NetCounters {

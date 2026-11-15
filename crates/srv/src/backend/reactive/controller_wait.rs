@@ -50,8 +50,8 @@ pub fn controller_registered() {
 /// For tests: blocks a test says have no controller yet. The probe this
 /// installs answers "has one" for every other block, so tests running beside
 /// it see no difference.
-#[cfg(test)]
-pub(crate) mod testing {
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing {
     use std::collections::HashSet;
     use std::sync::{Arc, LazyLock, Mutex};
 
@@ -62,13 +62,13 @@ pub(crate) mod testing {
     }
 
     /// `block_id` has no controller from now on.
-    pub(crate) fn without_controller(block_id: &str) {
+    pub fn without_controller(block_id: &str) {
         super::set_has_controller(Arc::new(|block_id: &str| !waiting().contains(block_id)));
         waiting().insert(block_id.to_string());
     }
 
     /// `block_id`'s controller registered.
-    pub(crate) fn controller_arrived(block_id: &str) {
+    pub fn controller_arrived(block_id: &str) {
         waiting().remove(block_id);
         super::controller_registered();
     }

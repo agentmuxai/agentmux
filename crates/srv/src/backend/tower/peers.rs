@@ -32,7 +32,7 @@ use crate::backend::viewer::client::pinned_client;
 /// `TowerSampleReq::connection` for a paired computer: `peer:<id>`.
 pub const PEER_PREFIX: &str = "peer:";
 
-pub(crate) const FILE: &str = "tower-peers.json";
+pub const FILE: &str = "tower-peers.json";
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// One paired computer, as kept on disk (no secret here).
@@ -393,15 +393,15 @@ pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<St
     Err(last_err)
 }
 
-#[cfg(test)]
-pub(crate) mod test_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::*;
 
-    pub(crate) const FP: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    pub const FP: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     /// Tokens in memory: tests never touch the user's keychain.
     #[derive(Default)]
-    pub(crate) struct MemTokens(pub(crate) std::sync::Mutex<std::collections::HashMap<String, String>>);
+    pub struct MemTokens(pub std::sync::Mutex<std::collections::HashMap<String, String>>);
 
     impl Tokens for std::sync::Arc<MemTokens> {
         fn put(&self, key: &str, token: &str) -> Result<(), String> {
@@ -419,7 +419,7 @@ pub(crate) mod test_support {
 
     /// Peers for one test, kept for the test binary's life (`pair` and
     /// `sample` take `'static`, as the app's `Peers::global()` is).
-    pub(crate) fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
+    pub fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
         let tokens = std::sync::Arc::new(MemTokens::default());
         (Box::leak(Box::new(Peers::with_tokens(Some(dir.to_path_buf()), Box::new(tokens.clone())))), tokens)
     }

@@ -96,83 +96,12 @@ pub fn is_os_blocked(err: &io::Error) -> bool {
 ///
 /// `std::fs::rename` replaces an existing destination on every platform, so
 /// checking first and renaming after would let a file created in between be
-/// silently overwritten. Each OS has an atomic no-replace rename; where the
-/// filesystem doesn't support it, this falls back to check-then-rename.
+/// silently overwritten. The one implementation is the remote helper's
+/// (`agentmux_remote::rename`), so this computer and an SSH host follow one
+/// rule: each OS's atomic no-replace rename, and where the filesystem has
+/// none, steps whose first one takes the new name and fails if it is taken.
 pub fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(std::iter::once(0)).collect() };
-        let (f, t) = (wide(from), wide(to));
-        // Flags 0: without MOVEFILE_REPLACE_EXISTING an existing destination
-        // fails with ERROR_ALREADY_EXISTS, which std maps to AlreadyExists.
-        // SAFETY: both buffers are NUL-terminated UTF-16 that outlive the call.
-        let ok = unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(f.as_ptr(), t.as_ptr(), 0) };
-        if ok == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        let f = std::ffi::CString::new(from.as_os_str().as_bytes())?;
-        let t = std::ffi::CString::new(to.as_os_str().as_bytes())?;
-        // The raw syscall rather than glibc's wrapper, which only exists from
-        // glibc 2.28 on.
-        // SAFETY: both pointers are NUL-terminated strings that outlive the call.
-        let r = unsafe {
-            libc::syscall(
-                libc::SYS_renameat2,
-                libc::AT_FDCWD,
-                f.as_ptr(),
-                libc::AT_FDCWD,
-                t.as_ptr(),
-                libc::RENAME_NOREPLACE,
-            )
-        };
-        if r == 0 {
-            return Ok(());
-        }
-        let err = io::Error::last_os_error();
-        match err.raw_os_error() {
-            // An old kernel, or a filesystem without RENAME_NOREPLACE.
-            Some(libc::ENOSYS) | Some(libc::EINVAL) => rename_checked(from, to),
-            _ => Err(err),
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        let f = std::ffi::CString::new(from.as_os_str().as_bytes())?;
-        let t = std::ffi::CString::new(to.as_os_str().as_bytes())?;
-        // SAFETY: both pointers are NUL-terminated strings that outlive the call.
-        let r = unsafe { libc::renamex_np(f.as_ptr(), t.as_ptr(), libc::RENAME_EXCL) };
-        if r == 0 {
-            return Ok(());
-        }
-        let err = io::Error::last_os_error();
-        match err.raw_os_error() {
-            // A filesystem without RENAME_EXCL (some network volumes).
-            Some(libc::ENOTSUP) | Some(libc::EINVAL) => rename_checked(from, to),
-            _ => Err(err),
-        }
-    }
-    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-    {
-        rename_checked(from, to)
-    }
-}
-
-/// Check-then-rename, for filesystems with no atomic no-replace rename.
-/// `symlink_metadata` rather than `exists`, so a dangling link at `to`
-/// still counts as taken.
-#[cfg_attr(windows, allow(dead_code))]
-fn rename_checked(from: &Path, to: &Path) -> io::Result<()> {
-    if std::fs::symlink_metadata(to).is_ok() {
-        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "destination exists"));
-    }
-    std::fs::rename(from, to)
+    agentmux_remote::rename::rename_no_replace(from, to)
 }
 
 /// Permanently remove the entry at `path` without following it: a symlink

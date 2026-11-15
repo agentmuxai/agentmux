@@ -266,7 +266,7 @@ async fn a_definition_is_created_with_its_time_zone_and_listed_on_both_routes() 
 async fn refused_definitions_say_why() {
     let (state, owner, _) = state();
     let cases = [
-        (definition(json!({ "trigger": { "kind": "event", "source": "github" } })), "trigger kind event is available in a later version"),
+        (definition(json!({ "trigger": { "kind": "event", "source": "github" } })), "event source \"github\" is not one of app_event, file_watch, webhook_local"),
         (definition(json!({ "action": { "kind": "drone", "drone_id": " " } })), "action: drone needs a drone_id"),
         (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
         (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),

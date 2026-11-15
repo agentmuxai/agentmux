@@ -8,8 +8,7 @@
 //!
 //! [`JobDefinition::parse`] is the strict reading, for definitions a caller
 //! sends: unknown fields are refused, and so are the kinds reserved for later
-//! phases (§6): `trigger.kind: event` and any
-//! `policy.approval` but `none`. A stored row is read leniently
+//! phases (§6): any `policy.approval` but `none`. A stored row is read leniently
 //! (`storage::cron`), so a newer build's extra field doesn't lose the row.
 
 use serde::{Deserialize, Serialize};
@@ -37,11 +36,31 @@ pub mod trigger_kind {
     pub const EVERY: &str = "every";
     pub const ONCE: &str = "once";
     pub const MANUAL: &str = "manual";
-    /// Reserved, P5.
+    /// Something that happened on this computer starts a drone run (Drone real-world jobs spec §3.2).
     pub const EVENT: &str = "event";
     #[cfg(test)]
     pub const ALL: [&str; 5] = [CRON, EVERY, ONCE, MANUAL, EVENT];
 }
+
+/// The sources an `event` trigger may name (Drone real-world jobs spec §3.2).
+pub mod event_source {
+    /// Something inside AgentMux happened (an agent's turn ended, a job finished, a task changed).
+    pub const APP_EVENT: &str = "app_event";
+    /// A path in a workspace changed.
+    pub const FILE_WATCH: &str = "file_watch";
+    /// A POST arrived on this computer's loopback hook address.
+    pub const WEBHOOK_LOCAL: &str = "webhook_local";
+    pub const ALL: [&str; 3] = [APP_EVENT, FILE_WATCH, WEBHOOK_LOCAL];
+}
+
+/// The most entries an event trigger's filter holds, and the longest a filter key or text value may be.
+pub const MAX_EVENT_FILTER: usize = 8;
+pub const MAX_EVENT_FILTER_TEXT: usize = 200;
+/// The longest an event's run may be held back by `delay`: a week.
+pub const MAX_EVENT_DELAY_MINUTES: u32 = 7 * 24 * 60;
+/// How many runs an event job starts in an hour when its trigger does not say.
+pub const DEFAULT_EVENT_RATE_PER_HOUR: u32 = 30;
+pub const MAX_EVENT_RATE_PER_HOUR: u32 = 1000;
 
 /// Action kinds (`action.kind`).
 pub mod action_kind {
@@ -103,8 +122,75 @@ pub enum Trigger {
     /// ms epoch.
     Once { at: i64 },
     Manual,
-    /// Reserved, P5: refused by [`JobDefinition::parse`].
-    Event(Map<String, Value>),
+    /// A source's event: what fires, and a small filter on it (each source says which keys it reads).
+    Event(EventTrigger),
+}
+
+/// What an `event` trigger waits for: the source, and a filter of plain values (text, numbers, true or false) the
+/// source matches an event against. A filter value is never an expression and never read as one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventTrigger {
+    pub source: String,
+    #[serde(default)]
+    pub filter: Map<String, Value>,
+    /// Minutes between the event and the run: the run is a `scheduled` row due at event time + delay, so a restart
+    /// does not lose it. 0 starts the run at once.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub delay: u32,
+    /// The most runs the trigger starts in any hour: a stuck source or a loop of events cannot run away. The events
+    /// beyond it are one collapsed `skipped (rate)` row, and the first raises the cap alert.
+    #[serde(default = "default_rate", skip_serializing_if = "is_default_rate")]
+    pub max_per_hour: u32,
+}
+
+fn default_rate() -> u32 {
+    DEFAULT_EVENT_RATE_PER_HOUR
+}
+
+fn is_default_rate(n: &u32) -> bool {
+    *n == DEFAULT_EVENT_RATE_PER_HOUR
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+impl EventTrigger {
+    /// The source is one this build has, and the filter is small and plain.
+    pub fn validate(&self) -> Result<(), String> {
+        if !event_source::ALL.contains(&self.source.as_str()) {
+            return Err(format!("trigger: event source {:?} is not one of {}", self.source, event_source::ALL.join(", ")));
+        }
+        if self.delay > MAX_EVENT_DELAY_MINUTES {
+            return Err(format!("trigger: delay is at most {MAX_EVENT_DELAY_MINUTES} minutes (a week)"));
+        }
+        if !(1..=MAX_EVENT_RATE_PER_HOUR).contains(&self.max_per_hour) {
+            return Err(format!("trigger: max_per_hour is 1 to {MAX_EVENT_RATE_PER_HOUR}"));
+        }
+        if self.filter.len() > MAX_EVENT_FILTER {
+            return Err(format!("trigger: an event filter has at most {MAX_EVENT_FILTER} entries"));
+        }
+        for (key, value) in &self.filter {
+            if key.is_empty() || key.chars().count() > MAX_EVENT_FILTER_TEXT {
+                return Err(format!("trigger: an event filter key is 1 to {MAX_EVENT_FILTER_TEXT} characters"));
+            }
+            let plain = match value {
+                Value::String(text) => text.chars().count() <= MAX_EVENT_FILTER_TEXT,
+                Value::Number(_) | Value::Bool(_) => true,
+                _ => false,
+            };
+            if !plain {
+                return Err(format!("trigger: event filter {key:?} is text of at most {MAX_EVENT_FILTER_TEXT} characters, a number, or true or false"));
+            }
+        }
+        if self.source == event_source::APP_EVENT {
+            super::app_events::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::FILE_WATCH {
+            super::file_watch::validate_filter(&self.filter)?;
+        }
+        Ok(())
+    }
 }
 
 impl Trigger {
@@ -290,6 +376,7 @@ fn trigger_keys(kind: &str) -> &'static [&'static str] {
         trigger_kind::CRON => &["kind", "cron", "tz"],
         trigger_kind::EVERY => &["kind", "seconds"],
         trigger_kind::ONCE => &["kind", "at"],
+        trigger_kind::EVENT => &["kind", "source", "filter", "delay", "max_per_hour"],
         _ => &["kind"],
     }
 }
@@ -334,9 +421,6 @@ impl JobDefinition {
         known_keys(Some(value), TOP_KEYS, "")?;
         let kind = |field: &str| value.get(field).and_then(|v| v.get("kind")).and_then(Value::as_str).unwrap_or("");
         let (trigger, action) = (kind("trigger"), kind("action"));
-        if trigger == trigger_kind::EVENT {
-            return Err(format!("trigger kind event is {LATER}"));
-        }
         known_keys(value.get("trigger"), trigger_keys(trigger), "trigger.")?;
         known_keys(value.get("action"), action_keys(action), "action.")?;
         known_keys(value.get("policy"), POLICY_KEYS, "policy.")?;
@@ -410,7 +494,13 @@ impl JobDefinition {
                 None
             }
             Trigger::Manual => None,
-            Trigger::Event(_) => return Err(format!("trigger kind event is {LATER}")),
+            Trigger::Event(event) => {
+                event.validate()?;
+                if !matches!(self.action, Action::Drone { .. }) {
+                    return Err("trigger: an event starts a drone run with the event as its input, so the action is a drone".to_string());
+                }
+                None
+            }
         };
         match interval {
             Some(secs) if check.fresh && self.action.starts_an_agent() && secs < MIN_UNATTENDED_INTERVAL_SECS => Err(format!(
@@ -441,6 +531,11 @@ impl JobDefinition {
             trigger_kind::EVERY => Trigger::Every { seconds: job.every_secs.unwrap_or(0) },
             trigger_kind::ONCE => Trigger::Once { at: job.once_at_ms.unwrap_or(0) },
             trigger_kind::MANUAL => Trigger::Manual,
+            trigger_kind::EVENT => match serde_json::from_value::<EventTrigger>(job.trigger_event.clone()) {
+                Ok(event) => Trigger::Event(event),
+                // A row this build can't read as an event trigger runs nothing: manual is the trigger that fires only when asked.
+                Err(_) => Trigger::Manual,
+            },
             _ => Trigger::Cron { cron: job.expression.clone(), tz: if job.tz.is_empty() { default_tz() } else { job.tz.clone() } },
         };
         let message = || Action::Message {
@@ -480,6 +575,7 @@ impl JobDefinition {
         job.params = self.params.clone();
         job.enabled = self.enabled;
         (job.expression, job.tz, job.every_secs, job.once_at_ms) = (String::new(), String::new(), None, None);
+        job.trigger_event = Value::Null;
         job.trigger_kind = match &self.trigger {
             Trigger::Cron { cron, tz } => {
                 (job.expression, job.tz) = (cron.trim().to_string(), if tz.trim().is_empty() { default_tz() } else { tz.trim().to_string() });
@@ -493,7 +589,11 @@ impl JobDefinition {
                 job.once_at_ms = Some(at);
                 trigger_kind::ONCE
             }
-            Trigger::Manual | Trigger::Event(_) => trigger_kind::MANUAL,
+            Trigger::Manual => trigger_kind::MANUAL,
+            Trigger::Event(event) => {
+                job.trigger_event = serde_json::to_value(event).unwrap_or(Value::Null);
+                trigger_kind::EVENT
+            }
         }
         .to_string();
         job.action_kind = self.action.kind().to_string();

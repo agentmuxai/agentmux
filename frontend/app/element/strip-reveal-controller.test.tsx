@@ -13,7 +13,7 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
-import { revealPaneStrips } from "./pane-strip-registry";
+import { installPaneInteractionReveal, revealPaneStrips } from "./pane-strip-registry";
 import { cancelStripScroll, revealInStrip, STRIP_EDGE_FADE_PX } from "./strip-reveal";
 import { createStripReveal, registerStripWithPane, type StripReveal } from "./strip-reveal-controller";
 
@@ -72,6 +72,9 @@ interface Options {
     marked?: { id: string; cls: string };
     /** Run the mount reveal and forget it. */
     settle?: boolean;
+    /** A box around the strip scrolls it with other content: its fade's width, and the last tab is not its end. */
+    edgeClearance?: number;
+    lastTabEndsStrip?: boolean;
 }
 
 function setup(options: Options = {}) {
@@ -103,6 +106,8 @@ function setup(options: Options = {}) {
             tabIds,
             shown,
             overflows,
+            ...(options.edgeClearance === undefined ? {} : { edgeClearance: () => options.edgeClearance! }),
+            ...(options.lastTabEndsStrip === undefined ? {} : { lastTabEndsStrip: () => options.lastTabEndsStrip! }),
         });
     });
     disposers.push(dispose);
@@ -172,6 +177,14 @@ describe("createStripReveal — what a reveal asks for", () => {
         const [, , isLast, options] = reveals.mock.calls[0];
         expect(isLast).toBe(last);
         expect((options as { isFirst: boolean }).isFirst).toBe(first);
+    });
+
+    it("in a box that holds more after the tabs, the last tab is not the box's end, and the box's own fade is kept clear", () => {
+        setup({ active: "c", settle: false, edgeClearance: 20, lastTabEndsStrip: false });
+        flush();
+        const [, , isLast, options] = reveals.mock.calls[0];
+        expect(isLast).toBe(false);
+        expect((options as { edgeClearance: number }).edgeClearance).toBe(20);
     });
 
     it("queues one frame however many requests come before it runs", () => {
@@ -288,6 +301,55 @@ describe("createStripReveal — smooth or instant", () => {
         setOverflows(true);
         reveal.request("interaction");
         expect(frames.size).toBe(1);
+    });
+});
+
+describe("createStripReveal — the keyboard focus is in the strip's box", () => {
+    function focusInside(strip: HTMLElement): HTMLButtonElement {
+        const control = document.createElement("button");
+        strip.appendChild(control);
+        control.focus();
+        expect(document.activeElement).toBe(control);
+        return control;
+    }
+
+    it.each(["interaction", "focus"] as const)("a %s alone does not move the box from under it", (reason) => {
+        const { strip, reveal } = setup();
+        focusInside(strip);
+        reveal.request(reason);
+        flush();
+        expect(reveals).not.toHaveBeenCalled();
+    });
+
+    it("moves it again once the focus has left the box", () => {
+        const { strip, reveal } = setup();
+        focusInside(strip).blur();
+        reveal.request("interaction");
+        flush();
+        expect(reveals).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["selected", "layout", "visible"] as const)("a %s reveals all the same, also when an interaction came with it", (reason) => {
+        const { strip, reveal } = setup();
+        focusInside(strip);
+        reveal.request("interaction");
+        reveal.request(reason);
+        reveal.request("focus");
+        flush();
+        expect(reveals).toHaveBeenCalledTimes(1);
+    });
+
+    it("a selection that waited out a landing tab still reveals", () => {
+        const { strip, reveal, tabEls } = setup();
+        focusInside(strip);
+        tabEls.get("b")!.classList.add("pane-tab--landing");
+        reveal.request("selected");
+        flush();
+        expect(reveals).not.toHaveBeenCalled();
+        tabEls.get("b")!.classList.remove("pane-tab--landing");
+        vi.runAllTimers();
+        flush();
+        expect(reveals).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -714,6 +776,31 @@ describe("registerStripWithPane", () => {
 
     it("registers nothing without a strip", () => {
         expect(() => createRoot(() => registerStripWithPane(() => undefined, fake()))).not.toThrow();
+    });
+
+    it("a focus that follows a press on the strip's own box is that press's: the box is not revealed", () => {
+        const { root, strip, inside, outside } = pane();
+        const reveal = fake();
+        createRoot(() => registerStripWithPane(() => strip, reveal));
+        const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+        const off = installPaneInteractionReveal(root);
+        inside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(reveal.request).not.toHaveBeenCalled();
+        now.mockReturnValue(1_200);
+        revealPaneStrips(root, "focus");
+        expect(reveal.request).not.toHaveBeenCalled();
+        // A focus long after it is its own, and so is one that follows a press elsewhere in the pane.
+        now.mockReturnValue(2_000);
+        revealPaneStrips(root, "focus");
+        expect(reveal.request).toHaveBeenCalledTimes(1);
+        expect(reveal.request).toHaveBeenLastCalledWith("focus");
+        outside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(reveal.request).toHaveBeenLastCalledWith("interaction");
+        revealPaneStrips(root, "focus");
+        expect(reveal.request).toHaveBeenCalledTimes(3);
+        expect(reveal.request).toHaveBeenLastCalledWith("focus");
+        off();
+        now.mockRestore();
     });
 });
 

@@ -77,7 +77,7 @@ pub(crate) async fn check(version: &str, asset: &ReleaseAsset) -> Outcome {
     let Some(dir) = asset.url.strip_suffix(asset.name.as_str()).filter(|d| d.starts_with(RELEASE_DOWNLOAD_PREFIX)) else {
         return Outcome::Failed("the release file isn't on AgentMux's GitHub releases".into());
     };
-    let client = match reqwest::Client::builder()
+    let client = match crate::http_client::builder()
         .user_agent(format!("AgentMux/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(10))
         .build()

@@ -69,6 +69,9 @@ pub struct UseRequest {
     /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
     /// Vault makes the password. There is no entry yet; `origin` is the site.
     pub account: bool,
+    /// With `account`: the form changes the password of an account that already exists (a
+    /// `current-password` field, §7.3), so the Vault keeps the old one and the question has no "Always".
+    pub change: bool,
     #[ts(type = "number")]
     pub requested_ms: u64,
     /// When silence decides: it goes ahead then if `goes_ahead`, else it is

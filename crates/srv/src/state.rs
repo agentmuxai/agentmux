@@ -25,7 +25,7 @@ pub enum ProcessState {
 #[derive(Debug, Clone)]
 pub struct ProcessRecord {
     pub state: ProcessState,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub version: String,
 }
 

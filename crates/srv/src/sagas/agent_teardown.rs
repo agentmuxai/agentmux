@@ -896,7 +896,9 @@ mod tests {
                 }
                 let text = std::fs::read_to_string(&path).unwrap();
                 // Code only: skip comment lines and everything from a test module on.
-                let code = text.split("#[cfg(test)]").next().unwrap_or("");
+                // (A test-only item the core also builds for the server's tests carries the feature form.)
+                let cut = ["#[cfg(test)]", "#[cfg(any(test, feature = \"test-support\"))]"].iter().filter_map(|m| text.find(m)).min();
+                let code = &text[..cut.unwrap_or(text.len())];
                 for (i, line) in code.lines().enumerate() {
                     let t = line.trim_start();
                     if t.starts_with("//") {

@@ -61,6 +61,7 @@ import { CredentialApprovalWindow } from "./view/credential-approval/CredentialA
 import { SshApprovalWindow } from "./view/ssh-approval/SshApprovalWindow";
 
 import "./app.scss";
+import "./element/custom-glyphs.scss";
 
 setupDprTracking();
 // Vite-evaluated build-time flag — no API/IPC dependency, safe at module load.

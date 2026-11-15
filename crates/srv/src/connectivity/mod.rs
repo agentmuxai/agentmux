@@ -21,10 +21,10 @@
 //! `connectivity.status` for a window that opens later; both carry a rising
 //! `revision`, since they can arrive out of order.
 
-mod endpoint;
-mod netchange;
-mod probe;
-mod tracker;
+pub mod endpoint;
+pub mod netchange;
+pub mod probe;
+pub mod tracker;
 
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
@@ -325,7 +325,7 @@ pub fn http_outcome(result: &Result<reqwest::Response, reqwest::Error>) -> Optio
     match result {
         Ok(_) => Some(Outcome::Answered),
         Err(e) if e.is_builder() => None,
-        Err(e) => Some(Outcome::Unreachable(e.to_string())),
+        Err(e) => Some(Outcome::Unreachable(crate::http_client::explain(e))),
     }
 }
 

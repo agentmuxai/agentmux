@@ -9,7 +9,7 @@ use crate::backend;
 use crate::backend::reactive;
 
 /// Where a message for an agent block goes.
-pub(crate) enum AgentRoute {
+pub enum AgentRoute {
     /// Taken on the controller's own channel — persistent stdin, ACP
     /// `session/prompt`, App Server — either now (`Delivered`) or queued for when
     /// the process can take it (`Deferred`). `Pty`: the controller is PTY-based,
@@ -35,7 +35,7 @@ pub(crate) enum AgentRoute {
 /// Saying who the input is from: the Swarm broadcast
 /// labels its delivery to a running persistent agent as the user's
 /// (`deliver_agent_message_from`). `None` is the plain text route the tests use.
-pub(crate) fn route_agent_message_from(
+pub fn route_agent_message_from(
     block_id: &str,
     message: &str,
     origin: Option<backend::blockcontroller::health::TurnInput>,

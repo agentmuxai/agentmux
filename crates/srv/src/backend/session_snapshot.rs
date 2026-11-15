@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::backend::obj::Client;
 use crate::backend::storage::store::Store;
 
-pub(crate) const SNAPSHOT_META_KEY: &str = "session:last_topology";
+pub const SNAPSHOT_META_KEY: &str = "session:last_topology";
 
 /// Persist a snapshot as the durable "last session" record, overwriting
 /// whatever was there before. Best-effort: a write failure is logged, never
@@ -33,7 +33,7 @@ pub(crate) const SNAPSHOT_META_KEY: &str = "session:last_topology";
 /// below) is different: it has nothing else to do after this call, so it
 /// uses the result to report whether the flush actually succeeded rather
 /// than reporting success unconditionally.
-pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) -> bool {
+pub fn save_last_session_snapshot(store: &Store, snapshot: Value) -> bool {
     let result = store.with_tx(|tx| {
         let clients = tx.get_all::<Client>()?;
         let Some(mut client) = clients.into_iter().next() else {
@@ -59,7 +59,7 @@ pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) -> bool
     }
 }
 
-pub(crate) fn load_last_session_snapshot(store: &Store) -> Option<Value> {
+pub fn load_last_session_snapshot(store: &Store) -> Option<Value> {
     let clients = store.get_all::<Client>().ok()?;
     let client = clients.into_iter().next()?;
     client.meta.get(SNAPSHOT_META_KEY).cloned()

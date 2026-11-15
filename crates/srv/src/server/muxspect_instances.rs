@@ -73,11 +73,7 @@ fn forward_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     // Loopback only: a proxy in the environment must never see these requests.
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .no_proxy()
-            .timeout(FORWARD_TIMEOUT)
-            .build()
-            .expect("a plain HTTP client builds")
+        crate::http_client::client_with(|b| b.no_proxy().timeout(FORWARD_TIMEOUT))
     })
 }
 

@@ -253,7 +253,7 @@ impl JobTemplates {
 
     /// The process-wide service for tests, in a temp folder that lives as
     /// long as the process; each test uses its own template ids.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests() -> &'static Arc<JobTemplates> {
         static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
         let dir = DIR.get_or_init(|| tempfile::tempdir().unwrap());

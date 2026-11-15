@@ -235,7 +235,7 @@ attempt() {
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
         # build).
         cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
-        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
+        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
     # shellcheck disable=SC2086 # CRATES is a list of arguments

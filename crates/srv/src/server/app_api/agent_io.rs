@@ -115,6 +115,7 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 .await
                 .unwrap_or_default();
                 let own_addrs = crate::backend::lan::listeners::cached_local_addresses();
+                let own_wan_id = crate::backend::swarm_cloud::own_wan_id();
                 let own_channel = crate::backend::reactive::registry::local_channel_id();
                 let now_ms = agentmux_common::time::now_ms_u64();
                 let targets = crate::backend::swarm_remote::channel_status_targets(&entries, &own_channel, &own_url, now_ms);
@@ -131,6 +132,8 @@ fn register_swarm_other_instances(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 );
                 crate::backend::swarm_remote::fill_defined_providers(&mut snapshot, &entries, &defined);
                 crate::backend::swarm_remote::fill_account_labels(&mut snapshot, &account_labels);
+                let cloud = crate::muxbus::cloud_installs::view().await;
+                crate::backend::swarm_cloud::add_cloud(&mut snapshot, cloud.as_ref(), own_wan_id.as_deref(), &lan_peers, now_ms);
                 serde_json::to_value(&snapshot).map_err(|e| format!("swarm.other-instances: {e}"))
         }
     });
