@@ -10,6 +10,7 @@ import { deriveBuiltin } from "./builtins";
 import type { DerivedBackdrop } from "./ink";
 import { parseBackdrop, resolveBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
 import { builtinOptions, builtinRecord, colorRecord, contrastReadout, parseHexInput, schemeFor } from "./picker-model";
+import { useDialogKeys } from "./picker-state";
 import { registerPaneScope, scopeVars } from "./scope";
 
 import "./backdrop-picker.scss";
@@ -72,14 +73,26 @@ function PolarityField(props: { value: BackdropPolarity; onChange: (next: Backdr
     );
 }
 
-/** What the pane's backdrop reads like in numbers, in the warning colour when a target was missed; nothing without a backdrop. */
+/**
+ * What the pane's backdrop reads like in numbers. When a target was missed it is a warning notice (an icon and a tinted
+ * box, so it does not rest on the warning colour alone, which a backdrop tones to near white or black); nothing without a backdrop.
+ */
 function ContrastReadout(props: { derived: DerivedBackdrop | undefined; missed: boolean }): JSX.Element {
     return (
         <Show when={props.derived}>
             {(d) => (
-                <p class="backdrop-picker-readout" classList={{ "is-missed": props.missed }} aria-live="polite">
-                    {contrastReadout(d())}
-                </p>
+                <Show
+                    when={props.missed}
+                    fallback={
+                        <p class="backdrop-picker-readout" aria-live="polite">
+                            {contrastReadout(d())}
+                        </p>
+                    }
+                >
+                    <Notice tone="warning" icon="triangle-exclamation" class="backdrop-picker-readout is-missed">
+                        <span aria-live="polite">{contrastReadout(d())}</span>
+                    </Notice>
+                </Show>
             )}
         </Show>
     );
@@ -140,21 +153,15 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
 
     const missed = () => (resolved()?.derived.unmet.length ?? 0) > 0 || resolved()?.derived.level === "readable";
 
+    let panel: HTMLDivElement | undefined;
+    useDialogKeys(() => panel, close);
+
     return (
-        <div
-            class="backdrop-picker"
-            role="dialog"
-            aria-label={t("backdrop.title")}
-            onKeyDown={(e) => {
-                if (e.key !== "Escape") return;
-                e.stopPropagation();
-                close();
-            }}
-            onClick={(e) => e.stopPropagation()}
-        >
-            <SectionHeader variant="title" level={3} title={t("backdrop.title")}>
+        <div ref={panel} class="backdrop-picker" role="dialog" aria-label={t("backdrop.title")} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+            <div class="backdrop-picker-head">
+                <SectionHeader variant="title" level={3} title={t("backdrop.title")} />
                 <CloseButton size="header" label={t("backdrop.close")} onClick={close} />
-            </SectionHeader>
+            </div>
 
             <SwatchGrid
                 ariaLabel={t("backdrop.colours")}

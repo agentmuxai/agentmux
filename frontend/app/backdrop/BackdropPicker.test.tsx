@@ -27,7 +27,13 @@ type Meta = { backdrop?: unknown; bg?: unknown };
 function mount(meta: Meta = {}) {
     const [m, setM] = createSignal<Meta>(meta);
     const onClose = vi.fn();
-    const view = render(() => <BackdropPicker blockId="pk" meta={m} onClose={onClose} />);
+    // The pane's frame is what the picker's Esc is scoped to; a composer stands in for what a swatch click hands focus to.
+    const view = render(() => (
+        <div class="block-frame-default">
+            <input data-testid="composer" />
+            <BackdropPicker blockId="pk" meta={m} onClose={onClose} />
+        </div>
+    ));
     return { ...view, onClose, setMeta: setM };
 }
 const radios = (c: HTMLElement) => [...c.querySelectorAll<HTMLButtonElement>("[role=radiogroup][aria-label='Backdrop colours'] [role=radio]")];
@@ -158,13 +164,61 @@ describe("BackdropPicker", () => {
         expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin("teal", "dark")!.surfaces.surface);
     });
 
-    it("closes on Escape and on its close button, ending any preview, and leaves the click inside the pane's frame alone", () => {
-        const esc = mount();
-        fireEvent.focus(radios(esc.container)[1]);
-        fireEvent.keyDown(radios(esc.container)[1], { key: "Escape" });
-        expect(esc.onClose).toHaveBeenCalledTimes(1);
-        expect(getPaneScope("pk")()).toBeUndefined();
+    it("takes focus when it opens, so Esc works at once", () => {
+        const { container } = mount();
+        expect(document.activeElement).toBe(container.querySelector("[role=dialog]"));
+    });
+
+    it("closes on Escape from anywhere in its own pane, ending any preview: a swatch, the panel, or the composer a click handed focus to", () => {
+        for (const from of ["swatch", "panel", "composer"] as const) {
+            const t = mount();
+            fireEvent.focus(radios(t.container)[1]);
+            const el =
+                from === "swatch" ? radios(t.container)[1] : from === "panel" ? t.container.querySelector("[role=dialog]")! : t.container.querySelector("[data-testid=composer]")!;
+            fireEvent.keyDown(el, { key: "Escape" });
+            expect(t.onClose, from).toHaveBeenCalledTimes(1);
+            expect(getPaneScope("pk")(), from).toBeUndefined();
+            cleanup();
+        }
+    });
+
+    it("leaves an Escape pressed in another pane, or one another handler used, alone", () => {
+        const t = mount();
+        const outside = document.createElement("input");
+        document.body.appendChild(outside);
+        fireEvent.keyDown(outside, { key: "Escape" });
+        expect(t.onClose).not.toHaveBeenCalled();
+        const composer = t.container.querySelector("[data-testid=composer]")!;
+        composer.addEventListener("keydown", (e) => e.preventDefault());
+        fireEvent.keyDown(composer, { key: "Escape" });
+        expect(t.onClose).not.toHaveBeenCalled();
+        outside.remove();
+    });
+
+    it("stops listening for Escape when it closes: the keydown listener it added to the document is removed", () => {
+        const added = vi.spyOn(document, "addEventListener");
+        const removed = vi.spyOn(document, "removeEventListener");
+        const t = mount();
+        const keydowns = added.mock.calls.filter((c) => c[0] === "keydown").map((c) => c[1]);
+        expect(keydowns.length).toBeGreaterThan(0);
+        t.unmount();
+        const gone = removed.mock.calls.filter((c) => c[0] === "keydown").map((c) => c[1]);
+        for (const listener of keydowns) expect(gone).toContain(listener);
+        added.mockRestore();
+        removed.mockRestore();
+    });
+
+    it("says in a warning notice, with an icon, when the readout missed a target, and in plain text when it did not", () => {
+        const fine = mount({ backdrop: teal });
+        expect(fine.container.querySelector(".ui-notice")).toBeNull();
         cleanup();
+        const hard = mount({ backdrop: { kind: "color", hex: "#336699", polarity: "follow", version: 1 } });
+        const notice = hard.container.querySelector(".ui-notice--warning");
+        expect(notice?.textContent).toMatch(/text \d+\.\d:1, muted \d+\.\d:1/);
+        expect(notice?.querySelector("svg, i, .ui-icon, [class*=fa-]")).not.toBeNull();
+    });
+
+    it("closes on its close button, ending any preview", () => {
         const x = mount();
         fireEvent.click(x.container.querySelector("button[aria-label='Close the backdrop picker']")!);
         expect(x.onClose).toHaveBeenCalledTimes(1);
