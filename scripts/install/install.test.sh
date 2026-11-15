@@ -78,7 +78,9 @@ for SH in sh bash dash; do
     AGENTMUX_INSTALL_PM=apt expect "server dry run, linux x64" 0 "agentmux-server-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
     AGENTMUX_INSTALL_ARCH=aarch64 expect "server dry run, linux arm64" 0 "agentmux-server-0.60.14-linux-arm64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
     AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=arm64 expect "server dry run, macos arm64" 0 "agentmux-server-0.60.14-macos-arm64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "server dry run, macos x64" 0 "agentmux-server-0.60.14-macos-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the server has no Intel Mac package: refused up front" 1 "no Intel Mac server package" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 refuses_to_contain "the Intel Mac refusal comes before any download or plan" "+ " "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the Intel Mac refusal needs no network (no version given)" 1 "no Intel Mac server package" "$SH" "$SCRIPT" --server --dry-run
     expect "server dry run links the program under both names" 0 "/.local/bin/agentmux-server" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
     expect "server dry run with --setup runs setup" 0 "agentmux-server setup --yes --no-open" "$SH" "$SCRIPT" --server --setup --dry-run --version 0.60.14
     AGENTMUX_INSTALL_ROOT="$W/root-linux" AGENTMUX_INSTALL_PM=apt expect "an installed desktop app does not stop the server install" 0 "agentmux-server-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
@@ -218,6 +220,45 @@ else
     make_server_release "$W/sunlisted" "v$VER"; sign_release "$W/sunlisted" "v$VER" "Other.tar.gz" "$SNAME"
     expect "a server package the signed manifest does not list is refused" 1 "does not list $SNAME" run_server_install "$W/sunlisted"
     expect "a release with no package for this system says so" 1 "has no server package for this system" run_server_install "$W/sunlisted"
+
+    # ---- a system whose openssl cannot check Ed25519 (a stock Mac's LibreSSL 3.3.6): which check ran, and what --require-signature does ----
+    mkdir -p "$W/libre"
+    printf '#!/bin/sh\ncase "$1" in\n    version) echo "LibreSSL 3.3.6" ;;\n    pkeyutl) echo "usage: pkeyutl [-in file] [-inkey file] [-sign] [-verify]" >&2; exit 1 ;;\n    *) exit 1 ;;\nesac\n' > "$W/libre/openssl"
+    chmod +x "$W/libre/openssl"
+    run_libre() { PATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="${PLACES:-$W/nowhere}" run_install "$@"; }
+    expect "LibreSSL: installs on the hashes and says the signature was NOT checked" 0 "signature NOT checked" run_libre "$W/good"
+    expect "LibreSSL: names the openssl that cannot" 0 "LibreSSL 3.3.6" run_libre "$W/good"
+    expect "LibreSSL: says what was checked instead" 0 "size and SHA-256" run_libre "$W/good"
+    expect "LibreSSL: the final line does not claim a signed manifest" 0 "the manifest's signature was not checked" run_libre "$W/good"
+    refuses_to_contain "LibreSSL: never says the signature was checked" "signature of the release checked" run_libre "$W/good"
+    expect "LibreSSL: --require-signature refuses" 1 "cannot be checked here (LibreSSL 3.3.6" run_libre "$W/good" --require-signature
+    expect "LibreSSL: a changed file is still refused" 1 "does not match the manifest's SHA-256" run_libre "$W/badhash"
+    PLACES="$(command -v openssl)" expect "LibreSSL first on the PATH, an OpenSSL 3 in the usual places: the signature is checked" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_libre "$W/good"
+    PLACES="$(command -v openssl)" expect "that check is also what --require-signature wants" 0 "signature of the release checked" run_libre "$W/good" --require-signature
+    PLACES="$(command -v openssl)" expect "and a wrong signature is refused there" 1 "signature does not match" run_libre "$W/badsig"
+    expect "the real openssl: the message names Ed25519 and the version" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_install "$W/good"
+
+    # ---- curl with no CA certificates ----
+    for code in 60 77 6; do mkdir -p "$W/curl$code"; printf '#!/bin/sh\nexit %s\n' "$code" > "$W/curl$code/curl"; chmod +x "$W/curl$code/curl"; done
+    run_nonet() { # <dir with a fake curl first on the PATH> [args...]
+        d="$1"; shift
+        HOME="$W/h2" PATH="$d:$PATH" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none \
+            sh "$SCRIPT" --no-launch --method download "$@"
+    }
+    expect "curl error 77 looking up the release: install ca-certificates" 1 "ca-certificates package is not installed" run_nonet "$W/curl77"
+    expect "curl error 77 names the lookup that failed" 1 "could not look up the latest release" run_nonet "$W/curl77"
+    expect "curl error 60 looking up the release: install ca-certificates" 1 "sudo apt-get install ca-certificates" run_nonet "$W/curl60"
+    expect "curl error 77 while downloading: install ca-certificates" 1 "ca-certificates package is not installed" run_nonet "$W/curl77" --version "$VER"
+    expect "curl error 60 while downloading names the file" 1 "could not download https://github.com/agentmuxai/agentmux/releases/download/v$VER/AgentMux-$VER-manifest.json" run_nonet "$W/curl60" --version "$VER"
+    refuses_to_contain "another curl failure (6, no such host) is not blamed on certificates" "ca-certificates" run_nonet "$W/curl6"
+    expect "another curl failure keeps its plain message" 1 "could not look up the latest release" run_nonet "$W/curl6"
+
+    # ---- after an install into ~/.local/bin: where it is, how to run it now, how to put it on the PATH ----
+    expect "the portable install gives the full path to run now" 0 "run it now with the full path:  $W/h/.local/bin/agentmux" run_install "$W/good"
+    expect "the portable install gives the line that adds it to this shell's PATH" 0 'export PATH="$HOME/.local/bin:$PATH"' run_install "$W/good"
+    PATH="$W/h/.local/bin:$PATH" refuses_to_contain "no PATH hint when the folder is already on the PATH" "export PATH" run_install "$W/good"
+    expect "the server install gives the full path to run now" 0 "run it now with the full path:  $W/hs/.local/bin/agentmux" run_server_install "$W/sgood"
+    expect "the server install gives the PATH line too" 0 'export PATH="$HOME/.local/bin:$PATH"' run_server_install "$W/sgood"
 
     # With the app's real key the test signature must not verify.
     expect "another key's signature is refused" 1 "signature does not match" env AGENTMUX_INSTALL_TEST_KEYS="k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE=" HOME="$W/h" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none AGENTMUX_INSTALL_RELEASE_BASE="$W/good" sh "$SCRIPT" --no-launch --method download --version "$VER"
