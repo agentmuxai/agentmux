@@ -12,6 +12,11 @@ trap 'rm -rf "$W"' EXIT
 FAILS=0
 
 pass() { echo "ok   - $1"; }
+# Portable: GNU sed -i and sha256sum are not on a stock Mac (BSD sed reads the next word as a backup suffix).
+sha256_hex() { if command -v sha256sum > /dev/null 2>&1; then sha256sum | cut -d ' ' -f 1; else shasum -a 256 | cut -d ' ' -f 1; fi; }
+sed_inplace() { # <sed expression> <file>
+    sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
+}
 fail() { echo "FAIL - $1"; FAILS=$((FAILS + 1)); }
 # expect <name> <expected exit> <must contain, or empty> <command...>
 expect() {
@@ -130,10 +135,10 @@ else
     sign_release() {
         d="$1"; tag="$2"; listed="$3"; file="$4"
         size="$(wc -c < "$d/$file" | tr -d ' ')"
-        sha="$(sha256sum < "$d/$file" | cut -d ' ' -f 1)"
+        sha="$(sha256_hex < "$d/$file")"
         # The same shape release-manifest.mjs writes: indented JSON, each file as name, size, sha256.
         printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$listed" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
-        msha="$(sha256sum < "$d/AgentMux-$VER-manifest.json" | cut -d ' ' -f 1)"
+        msha="$(sha256_hex < "$d/AgentMux-$VER-manifest.json")"
         printf '{\n  "format": 1,\n  "tag": "%s",\n  "manifest_sha256": "%s",\n  "created_at": "2026-11-04T00:00:00Z"\n}\n' "$tag" "$msha" > "$d/AgentMux-$VER-envelope.json"
         printf 't1 %s\n' "$(openssl pkeyutl -sign -inkey "$W/priv.pem" -rawin -in "$d/AgentMux-$VER-envelope.json" | openssl base64 -A)" > "$d/AgentMux-$VER-envelope.json.sig"
     }
@@ -155,10 +160,10 @@ else
     expect "a same-size different file is refused" 1 "does not match the manifest's SHA-256" run_install "$W/badhash"
 
     cp -r "$W/good" "$W/badsig"; first="$(cut -c4 "$W/badsig/AgentMux-$VER-envelope.json.sig" | head -n 1)"; swap=A; [ "$first" = A ] && swap=B
-    sed -i "s/^t1 ./t1 $swap/" "$W/badsig/AgentMux-$VER-envelope.json.sig"
+    sed_inplace "s/^t1 ./t1 $swap/" "$W/badsig/AgentMux-$VER-envelope.json.sig"
     expect "a wrong signature is refused" 1 "signature does not match" run_install "$W/badsig"
 
-    cp -r "$W/good" "$W/badmanifest"; sed -i 's/"format": 1/"format":  1/' "$W/badmanifest/AgentMux-$VER-manifest.json"
+    cp -r "$W/good" "$W/badmanifest"; sed_inplace 's/"format": 1/"format":  1/' "$W/badmanifest/AgentMux-$VER-manifest.json"
     expect "a changed manifest is refused" 1 "not the one the envelope names" run_install "$W/badmanifest"
 
     make_release "$W/othertag" "v1.2.3"
@@ -288,10 +293,13 @@ else
         VER="$OLDVER"; NAME="$OLDNAME"
         # Below the floor (a release from before the first one that carries it): today's behaviour, said plainly.
         AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, hashes only, and it says so" 0 "signature NOT checked" run_ssh "$W/good"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, it says the release is older than the first with an SSH signature, not that ssh-keygen is missing" 0 "is older than 99.0.0, the first with an SSH signature" run_ssh "$W/good"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 refuses_to_contain "SSH signature: below the floor it does not blame ssh-keygen" "no ssh-keygen of OpenSSH 8.0 or newer" run_ssh "$W/good"
         AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, --require-signature refuses" 1 "cannot be checked here" run_ssh "$W/good" --require-signature
         # An ssh-keygen with no -Y (OpenSSH before 8.0) cannot check: hashes only, and --require-signature refuses.
         run_oldssh() { KEYS="$KEYA" PATH="$W/oldssh:$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" run_install "$@"; }
         expect "SSH signature: an old OpenSSH (no -Y) falls back to hashes and says so" 0 "signature NOT checked" run_oldssh "$W/good"
+        expect "SSH signature: an old OpenSSH is named as the reason" 0 "no ssh-keygen of OpenSSH 8.0 or newer" run_oldssh "$W/good"
         expect "SSH signature: an old OpenSSH is not blamed for a missing .sshsig" 0 "matches the manifest" run_oldssh "$W/good"
         expect "SSH signature: an old OpenSSH with --require-signature is refused" 1 "OpenSSH 8.0 or newer" run_oldssh "$W/good" --require-signature
         # With OpenSSL 3 the existing check is used first and needs no .sshsig.
