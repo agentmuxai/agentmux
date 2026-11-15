@@ -6,7 +6,7 @@
  * Kept out of the components so each sentence is a test and the literal-text ratchet counts none.
  */
 
-import type { Summary, SummaryClick, SummaryPart } from "./summary";
+import type { Summary, SummaryClick } from "./summary";
 import type { PartId } from "./summary-kinds";
 
 export const PART_ICON: Record<PartId, string> = {
@@ -80,6 +80,3 @@ export function goesAheadText(atMs: number, nowMs: number): string {
     const left = Math.max(0, Math.ceil((atMs - nowMs) / 1000));
     return `goes ahead in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} unless you deny`;
 }
-
-/** Whether a part is drawn in the item: running agents while any run, the others while they have a count. */
-export const partShown = (p: SummaryPart): boolean => p.count > 0;

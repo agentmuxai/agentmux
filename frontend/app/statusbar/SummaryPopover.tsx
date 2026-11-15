@@ -95,7 +95,11 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
                 <div class="attention-list-sections">
                     <For each={sections()}>
                         {(part) => (
-                            <section class="attention-list-section" aria-label={SUMMARY_TEXT.section[part.id]}>
+                            <section
+                                class="attention-list-section"
+                                aria-label={SUMMARY_TEXT.section[part.id]}
+                                data-operator-only={part.id === "vault" ? "" : undefined}
+                            >
                                 <h3 class="attention-list-section-title">{SUMMARY_TEXT.section[part.id]}</h3>
                                 <ul class="attention-list-rows">
                                     <For each={part.rows}>{(row) => <RowView row={row} now={now()} go={go} />}</For>

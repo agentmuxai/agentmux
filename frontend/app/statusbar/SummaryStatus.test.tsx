@@ -168,6 +168,18 @@ describe("SummaryStatus", () => {
             expect(within(list).getAllByText(/1? ?min/).length).toBeGreaterThan(0);
         });
 
+        it("keeps the Vault's rows to the operator too: their agents, entries and Answer buttons are not for a widget to read or click", () => {
+            const { container } = render(() => <SummaryStatus {...base} items={() => [item("b1")]} uses={() => [use("u1")]} />);
+            fireEvent.click(part(container, "vault")!);
+            const list = screen.getByRole("dialog");
+            const sections = [...list.querySelectorAll("section")];
+            expect(sections.map((x) => [x.getAttribute("aria-label"), x.hasAttribute("data-operator-only")])).toEqual([
+                ["Vault", true],
+                ["Asks", false],
+            ]);
+            expect(within(sections[0] as HTMLElement).getByText("asks to use Token")).toBeTruthy();
+        });
+
         it("lists the part that was clicked first", () => {
             const { container } = render(() => <SummaryStatus {...base} items={() => [item("b1")]} uses={() => [use("u1")]} tasks={() => 1} />);
             fireEvent.click(part(container, "vault")!);
