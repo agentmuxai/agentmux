@@ -13,7 +13,13 @@ FAILS=0
 
 pass() { echo "ok   - $1"; }
 # Portable: GNU sed -i and sha256sum are not on a stock Mac (BSD sed reads the next word as a backup suffix).
-sha256_hex() { if command -v sha256sum > /dev/null 2>&1; then sha256sum | cut -d ' ' -f 1; else shasum -a 256 | cut -d ' ' -f 1; fi; }
+sha256_hex() { # the file on stdin
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum | cut -d ' ' -f 1
+    else
+        shasum -a 256 | cut -d ' ' -f 1
+    fi
+}
 sed_inplace() { # <sed expression> <file>
     sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
 }
