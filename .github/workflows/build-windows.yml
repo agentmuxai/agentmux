@@ -388,4 +388,5 @@ jobs:
             "$OUT"/agentmux-*-x64-portable.7z \
             "$OUT"/AgentMux-*-x64-setup.exe \
             "$OUT"/msix/AgentMux_*_x64.msix \
+            "$OUT"/AgentMux_*_windows-frontend-maps.tar.xz \
             --repo agentmuxai/agentmux --clobber

@@ -35,5 +35,6 @@ if [ "$COUNT" -eq 0 ]; then
     echo "ERROR: no source maps under $FRONTEND to pack." >&2
     exit 1
 fi
-(cd "$FRONTEND" && tar -cJf "$ARCHIVE" -T "$LIST")
+# --verbatim-files-from: a name in the list is a name, never an option (GNU tar reads `-x` lines as options otherwise).
+(cd "$FRONTEND" && tar --verbatim-files-from -cJf "$ARCHIVE" -T "$LIST")
 echo "  maps    : packed $COUNT source maps into $(basename "$ARCHIVE") ($(du -h "$ARCHIVE" | cut -f1))"
