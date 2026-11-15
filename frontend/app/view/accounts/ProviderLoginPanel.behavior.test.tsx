@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ClaudeLoginPanel, pinned as a whole before it was split into a state object, a session runner and view parts:
+ * ProviderLoginPanel, pinned as a whole before it was split into a state object, a session runner and view parts:
  * each scenario drives the sign-in (the phases the login reports, the terminal fallback, every way it ends, the
  * link check, the stale-alias cleanup, Cancel, Retry, and unmounting mid-login) and logs, in order, the whole
  * page as a tree, every outward call and every option the login was started with. The logs are snapshots
@@ -62,11 +62,11 @@ vi.mock("@/app/view/identity/identity-model", () => ({
     refreshAccountCache: (...args: unknown[]) => hub.refreshAccountCache(...args),
 }));
 
-import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { ProviderLoginPanel } from "./ProviderLoginPanel";
 
 const T: string[] = [];
 const log = (line: string) => T.push(line);
-const SNAP = (name: string) => `./__snapshots__/ClaudeLoginPanel.behavior.${name}.txt`;
+const SNAP = (name: string) => `./__snapshots__/ProviderLoginPanel.behavior.${name}.txt`;
 const snapshot = (name: string) => expect(T.join("\n") + "\n").toMatchFileSnapshot(SNAP(name));
 
 const ATTRS = /^(class|role|aria-.*|data-.*|title|disabled|type)$/;
@@ -153,9 +153,9 @@ function deferLogins() {
 }
 const registered = (run: Run, id = "acct-new") => run.opts.onAccountRegistered?.(id, `/tmp/${id}`);
 
-type Props = Parameters<typeof ClaudeLoginPanel>[0];
+type Props = Parameters<typeof ProviderLoginPanel>[0];
 function mount(props: Partial<Props> = {}) {
-    return render(() => <ClaudeLoginPanel onClose={handlers.onClose} {...props} />);
+    return render(() => <ProviderLoginPanel onClose={handlers.onClose} {...props} />);
 }
 
 beforeEach(() => {
@@ -180,7 +180,7 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
-describe("ClaudeLoginPanel behavior", () => {
+describe("ProviderLoginPanel behavior", () => {
     it("walks the phases of a sign-in and ends signed in, in a dialog", async () => {
         deferLogins();
         mount();

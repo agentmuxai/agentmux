@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { JSX } from "solid-js";
-import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
+import { ProviderLoginPanel } from "@/app/view/accounts/ProviderLoginPanel";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
 
 /**
@@ -12,5 +12,5 @@ import type { PaneRequestProps } from "@/app/store/pane-requests";
  * covers the agent's pane only (SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md row 1).
  */
 export function AnotherAccountLogin(props: PaneRequestProps & { onSignedIn: (accountId: string) => void }): JSX.Element {
-    return <ClaudeLoginPanel onClose={props.close} onSignedIn={props.onSignedIn} scope="pane" />;
+    return <ProviderLoginPanel onClose={props.close} onSignedIn={props.onSignedIn} scope="pane" />;
 }

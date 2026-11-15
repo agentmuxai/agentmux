@@ -35,7 +35,7 @@
 //  1. AccountsGallery.tsx's own OAuth-vs-Key mode picker — a small, still
 //     hand-rolled overlay+dialog (`.accounts-chooser-overlay` provides its
 //     backdrop; `.accounts-chooser` its box chrome). Unrelated to Modal.
-//  2. ClaudeLoginPanel.tsx's dialog — now wrapped in the canonical <Modal>
+//  2. ProviderLoginPanel.tsx's dialog — now wrapped in the canonical <Modal>
 //     via `panelClass="accounts-chooser"`, which just adds this class
 //     alongside `modal-panel` on the same element. Outer chrome (backdrop,
 //     z-index, scroll lock, inert) comes from Modal there; the bare
@@ -48,7 +48,7 @@
 //
 // Live-verified 2026-08-05: an earlier version of this fix replaced the bare
 // `.accounts-chooser`/`.accounts-chooser-overlay` rules outright (assuming
-// only ClaudeLoginPanel used them), which broke AccountsGallery's own picker
+// only ProviderLoginPanel used them), which broke AccountsGallery's own picker
 // — it rendered unstyled (position: static, transparent backdrop) since it's
 // a plain div, never wrapped by Modal.
 .accounts-chooser-overlay {
@@ -117,7 +117,7 @@
     }
 }
 
-// ClaudeLoginPanel's Modal-wrapped case only: beat
+// ProviderLoginPanel's Modal-wrapped case only: beat
 // `.modal-panel[data-size="md"]`'s equal-specificity width rule. Only `width`/
 // `max-width` are needed here — `.modal-panel` already supplies background,
 // border, border-radius, box-shadow, and overflow for this element.
@@ -185,5 +185,54 @@
         flex-direction: column;
         padding: var(--space-2);
         gap: var(--space-2);
+    }
+
+    // "Which one should I pick?": each way to connect, its plans, cost, key and when to choose it
+    // (ProviderGuideDetails).
+    .accounts-guide {
+        padding: var(--space-2) var(--space-3);
+        font-size: var(--text-sm);
+        border-top: 1px solid var(--border-color);
+    }
+
+    .accounts-guide-summary {
+        cursor: pointer;
+        color: var(--secondary-text-color);
+    }
+
+    .accounts-guide-option {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        padding-top: var(--space-2);
+    }
+
+    .accounts-guide-title {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: 600;
+    }
+
+    .accounts-guide-line {
+        display: flex;
+        gap: var(--space-2);
+        align-items: baseline;
+    }
+
+    .accounts-guide-label {
+        flex: 0 0 6.5em;
+        color: var(--secondary-text-color);
+    }
+
+    .accounts-guide-value {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .accounts-guide-pointers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1);
+        padding-top: var(--space-2);
     }
 }

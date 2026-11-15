@@ -11,7 +11,7 @@ const mkAccount = (overrides: Partial<Account> = {}): Account => ({
     name: "work-claude",
     // CLI-OAuth accounts (claude/codex/gemini/…) store the canonical AGENT
     // provider-catalog id here, not one of `AccountProvider`'s narrower
-    // service-account literals — see `ClaudeLoginPanel.tsx`'s "successful
+    // service-account literals — see `ProviderLoginPanel.tsx`'s "successful
     // login here links the CANONICAL 'claude' provider" and
     // `bind-to-agent-menu.ts`'s identical `resolveProviderAlias(account.provider)`
     // usage, both of which only make sense against real CLI ids. Cast past

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for ClaudeLoginPanel — specifically the staleAliasProvider
+ * Tests for ProviderLoginPanel — specifically the staleAliasProvider
  * cleanup (#2414): a successful login here always links
  * the CANONICAL "claude" provider (finalizeAccount's
  * ON CONFLICT(agent_id, provider) key), so opening this panel from a
@@ -12,7 +12,7 @@
  * canonical "claude" link now exists right alongside it.
  *
  * Uses `screen.findByText` (document-wide), not `render()`'s own bound
- * `findByText` — ClaudeLoginPanel now renders through the canonical `Modal`
+ * `findByText` — ProviderLoginPanel now renders through the canonical `Modal`
  * (#2423), which `<Portal>`s outside the test's render container;
  * container-scoped queries can't see it.
  */
@@ -60,7 +60,7 @@ vi.mock("@/app/view/identity/identity-model", () => ({
     refreshAccountCache: (...args: unknown[]) => hub.refreshAccountCache(...args),
 }));
 
-import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { ProviderLoginPanel } from "./ProviderLoginPanel";
 import { Modal } from "@/element/modal";
 import { createSignal } from "solid-js";
 
@@ -83,7 +83,7 @@ afterEach(() => {
     cleanup();
 });
 
-describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #2414)", () => {
+describe("ProviderLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #2414)", () => {
     it("unlinks the stale alias provider after a successful login, using linkTarget's agentDefinitionId", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
@@ -91,7 +91,7 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
         });
 
         render(() => (
-            <ClaudeLoginPanel
+            <ProviderLoginPanel
                 onClose={() => {}}
                 existingAccountId="acc-claude-1"
                 linkTarget={{ agentDefinitionId: "agent-1" }}
@@ -117,7 +117,7 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
             return "inapp-success";
         });
 
-        render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        render(() => <ProviderLoginPanel onClose={() => {}} />);
 
         await waitFor(() => {
             expect(hub.refreshAccountCache).toHaveBeenCalled();
@@ -131,14 +131,14 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";
         });
-        render(() => <ClaudeLoginPanel onClose={() => {}} onSignedIn={onSignedIn} />);
+        render(() => <ProviderLoginPanel onClose={() => {}} onSignedIn={onSignedIn} />);
         await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith("acct-new"));
         expect(onSignedIn).toHaveBeenCalledTimes(1);
         cleanup();
 
         const failed = vi.fn();
         hub.runProviderLogin.mockImplementation(async () => "inapp-timeout");
-        render(() => <ClaudeLoginPanel onClose={() => {}} onSignedIn={failed} />);
+        render(() => <ProviderLoginPanel onClose={() => {}} onSignedIn={failed} />);
         await waitFor(() => expect(screen.getByText(/timed out/i)).toBeTruthy());
         expect(failed).not.toHaveBeenCalled();
     });
@@ -147,7 +147,7 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
         hub.runProviderLogin.mockResolvedValue("inapp-timeout");
 
         render(() => (
-            <ClaudeLoginPanel
+            <ProviderLoginPanel
                 onClose={() => {}}
                 linkTarget={{ agentDefinitionId: "agent-1" }}
                 staleAliasProvider="claude-code"
@@ -161,7 +161,7 @@ describe("ClaudeLoginPanel — staleAliasProvider cleanup (reagent P0 on PR #241
     });
 });
 
-describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)", () => {
+describe("ProviderLoginPanel — re-login link verification (codex P1 on PR #2414)", () => {
     it("does NOT show success for a linkTarget flow when the account was persisted but the agent link itself never landed", async () => {
         // finalizeAccount (run-provider-login.ts) catches and only logs a
         // LinkAgentIdentityCommand failure — onAccountRegistered still
@@ -174,7 +174,7 @@ describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)
         hub.listAgentIdentities.mockResolvedValue([]); // no link for this agent
 
         render(() => (
-            <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
         await screen.findByText(/couldn't confirm the account was linked/i);
@@ -193,7 +193,7 @@ describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)
         hub.listAgentIdentities.mockResolvedValueOnce([]); // link never landed
 
         render(() => (
-            <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
         const retryButton = await screen.findByText("Retry");
 
@@ -225,7 +225,7 @@ describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)
         });
 
         render(() => (
-            <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
         await screen.findByText(/signed in to anthropic/i);
@@ -248,7 +248,7 @@ describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)
         ]);
 
         render(() => (
-            <ClaudeLoginPanel
+            <ProviderLoginPanel
                 onClose={() => {}}
                 existingAccountId="acct-existing"
                 linkTarget={{ agentDefinitionId: "agent-1" }}
@@ -269,14 +269,14 @@ describe("ClaudeLoginPanel — re-login link verification (codex P1 on PR #2414)
             return "inapp-success";
         });
 
-        render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        render(() => <ProviderLoginPanel onClose={() => {}} />);
 
         await screen.findByText(/signed in to anthropic/i);
         expect(hub.listAgentIdentities).not.toHaveBeenCalled();
     });
 });
 
-describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
+describe("ProviderLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
     it("does NOT cancel the host's login when unmounting after already reaching success (inFlight is false)", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
@@ -284,7 +284,7 @@ describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
         });
 
         const { unmount } = render(() => (
-            <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
         await screen.findByText(/signed in to anthropic/i);
         hub.cancelCliLogin.mockClear(); // clear whatever the login flow itself called
@@ -300,7 +300,7 @@ describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
     it("DOES cancel the host's login when unmounting while still genuinely in flight", async () => {
         hub.runProviderLogin.mockImplementation(() => new Promise(() => {})); // never resolves
 
-        const { unmount } = render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        const { unmount } = render(() => <ProviderLoginPanel onClose={() => {}} />);
         await Promise.resolve();
 
         unmount();
@@ -309,22 +309,22 @@ describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
     });
 });
 
-describe("ClaudeLoginPanel — login-runner rejection (codex P2 on PR #2414)", () => {
+describe("ProviderLoginPanel — login-runner rejection (codex P2 on PR #2414)", () => {
     it("surfaces a retryable error instead of leaving the panel stuck when runProviderLogin rejects outright", async () => {
         hub.runProviderLogin.mockRejectedValue(new Error("PTY spawn failed"));
 
-        render(() => <ClaudeLoginPanel onClose={() => {}} />);
+        render(() => <ProviderLoginPanel onClose={() => {}} />);
 
         await screen.findByText(/PTY spawn failed/i);
         expect(hub.cancelCliLogin).toHaveBeenCalled();
     });
 });
 
-describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md)", () => {
-    // ClaudeLoginPanel's own `Modal` is opened from INSIDE another dialog
+describe("ProviderLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md)", () => {
+    // ProviderLoginPanel's own `Modal` is opened from INSIDE another dialog
     // that is itself already a canonical `Modal` (a pane's modal layer,
     // dispatched via modal-dispatch.tsx/ModalLayer.tsx).
-    // The real risk this guards against: if ClaudeLoginPanel were wired
+    // The real risk this guards against: if ProviderLoginPanel were wired
     // through `useModalLayer().open(...)` instead of a plain `<Modal>`
     // (a mistake that's easy to make — that's the established pattern for
     // most of this app's other dialogs), it would hit ModalLayer's
@@ -335,7 +335,7 @@ describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_S
     // `Modal`/`modal-stack.ts` primitive, so a minimal outer `<Modal>`
     // standing in for that dialog is a faithful, much cheaper test of
     // the same mechanism.
-    it("opening ClaudeLoginPanel from inside another open Modal does not close that outer Modal", async () => {
+    it("opening ProviderLoginPanel from inside another open Modal does not close that outer Modal", async () => {
         const [outerOpen, setOuterOpen] = createSignal(true);
         const [innerOpen, setInnerOpen] = createSignal(false);
 
@@ -343,7 +343,7 @@ describe("ClaudeLoginPanel — nested modal stacking (Fix 3 of ANALYSIS_ARMORY_S
             <Modal open={outerOpen()} onClose={() => setOuterOpen(false)} ariaLabel="Outer dialog">
                 <div>Outer content marker</div>
                 <button onClick={() => setInnerOpen(true)}>Connect</button>
-                {innerOpen() && <ClaudeLoginPanel onClose={() => setInnerOpen(false)} />}
+                {innerOpen() && <ProviderLoginPanel onClose={() => setInnerOpen(false)} />}
             </Modal>
         ));
 
