@@ -288,6 +288,12 @@ const CONTAINER_ATTACHMENTS_SUBDIR: &str = ".agentmux-attachments";
 /// the display name instead would make every container attachment unrecognizable to both on reload. A
 /// path with neither shape, or a copy that fails, joins `missing`, the same treatment a send-copy swept
 /// by retention gets.
+///
+/// The write goes through [`crate::backend::workdir_fs::Workdir`], the same primitive every other write
+/// into an agent's working directory uses: a container agent has read-write access to this whole tree
+/// through its bind mount, so the destination needs the same defenses a native agent's own workdir
+/// already gets against a symlinked ancestor folder or a symlinked destination file, not a hand-rolled
+/// check here that has to rediscover them (#7434).
 fn rehome_for_container(
     found: Vec<crate::backend::attachments::prompt::Resolved>,
     mut missing: Vec<String>,
@@ -295,6 +301,7 @@ fn rehome_for_container(
 ) -> (Vec<crate::backend::attachments::prompt::Resolved>, Vec<String>) {
     use crate::backend::runtime_adapter::MountRole;
     let container_root = RuntimeKind::Container.adapter().map_mount(MountRole::Workspace, host_cwd);
+    let workdir = crate::backend::workdir_fs::Workdir::open(std::path::Path::new(host_cwd));
     let mut rehomed = Vec::with_capacity(found.len());
     for mut item in found {
         let Some(suffix) = id_bearing_suffix(&item.path) else {
@@ -302,10 +309,15 @@ fn rehome_for_container(
             missing.push(item.name);
             continue;
         };
-        match safe_rehome_copy(host_cwd, &suffix, &item.path) {
+        let rel = format!("{CONTAINER_ATTACHMENTS_SUBDIR}/{}", suffix.to_string_lossy().replace('\\', "/"));
+        let copied: std::io::Result<()> = (|| {
+            let wd = workdir.as_ref().map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+            let bytes = std::fs::read(&item.path)?;
+            wd.write(&rel, &bytes, false)
+        })();
+        match copied {
             Ok(()) => {
-                let suffix = suffix.to_string_lossy().replace('\\', "/");
-                item.path = std::path::PathBuf::from(format!("{container_root}/{CONTAINER_ATTACHMENTS_SUBDIR}/{suffix}"));
+                item.path = std::path::PathBuf::from(format!("{container_root}/{rel}"));
                 rehomed.push(item);
             }
             Err(e) => {
@@ -315,39 +327,6 @@ fn rehome_for_container(
         }
     }
     (rehomed, missing)
-}
-
-/// Copies `src` into `host_cwd/CONTAINER_ATTACHMENTS_SUBDIR/suffix`, refusing to follow a symlink a
-/// container agent could have planted anywhere under its working folder. `host_cwd` itself, and
-/// everything above it, sits outside the bind mount a container agent can write to — the container
-/// cannot replace the working folder's own directory entry, only create things inside it — so `host_cwd`
-/// is trusted outright and never walked; a legitimate symlink above it (a symlinked home directory, or
-/// `/tmp` on macOS) is left alone. Only `CONTAINER_ATTACHMENTS_SUBDIR` and `suffix`'s own directory
-/// components, all of which live inside the mount, are checked: a plain `create_dir_all` + `fs::copy`
-/// there would walk or write through a planted symlink as the host process (#7434). The write itself
-/// lands via a same-directory rename, which replaces whatever is at the destination — symlink or not —
-/// without ever opening it.
-fn safe_rehome_copy(host_cwd: &str, suffix: &std::path::Path, src: &std::path::Path) -> std::io::Result<()> {
-    let mut built = std::path::PathBuf::from(host_cwd);
-    let rest = std::path::Path::new(CONTAINER_ATTACHMENTS_SUBDIR).join(suffix.parent().unwrap_or(std::path::Path::new("")));
-    for component in rest.components() {
-        built.push(component);
-        match std::fs::symlink_metadata(&built) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(std::io::Error::other("refusing to create the attachments folder through a symlink"));
-            }
-            Ok(meta) if meta.is_dir() => continue,
-            Ok(_) => return Err(std::io::Error::other("attachments folder path is blocked by a non-directory")),
-            Err(_) => std::fs::create_dir(&built)?,
-        }
-    }
-    let dest = built.join(suffix.file_name().unwrap_or_default());
-    let tmp = built.join(format!(".{}.part", uuid::Uuid::new_v4()));
-    if let Err(e) = std::fs::copy(src, &tmp) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, &dest)
 }
 
 /// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an
