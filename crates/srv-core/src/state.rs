@@ -31,7 +31,7 @@ pub struct ProcessRecord {
 
 /// Phase E.2 — workspace as held by the srv reducer's canonical
 /// state. Mirrors the persistent `Workspace` struct in
-/// `agentmux_srv::backend::obj::Workspace` but with the reducer-
+/// `agentmux_srv_core::backend::obj::Workspace` but with the reducer-
 /// canonical fields the cross-process events care about.
 ///
 /// Phase E.2b extends the record with `tab_ids` (ordered) and
