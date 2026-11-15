@@ -19,6 +19,7 @@ import { shortcutsPaneTab } from "@/app/view/shortcuts/shortcuts";
 import { memoryPaneTab } from "@/app/view/memory/memory";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { atlasPaneTab } from "@/app/view/atlas/atlas";
+import { reviewsPaneTab } from "@/app/view/reviews/reviews";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { kanbanPaneTab } from "@/app/view/kanban/kanban";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
@@ -55,6 +56,7 @@ const builtins = [
     swarmPaneTab, // native — Phase 2c
     kanbanPaneTab, // native — out of the Swarm (#9670)
     atlasPaneTab, // native — the Swarm's agents as a map
+    reviewsPaneTab, // native — every task's pull request and its review state
     identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c; only Jobs is left of it

@@ -142,6 +142,19 @@
             }
         }
     },
+    "defwidget@reviews": {
+        "singleton": true,
+        "display:order": 26,
+        "display:pinned": false,
+        "icon": "code-pull-request",
+        "label": "Reviews",
+        "description": "Every task's pull request and where its review stands",
+        "blockdef": {
+            "meta": {
+                "view": "reviews"
+            }
+        }
+    },
     "defwidget@kanban": {
         "singleton": true,
         "display:order": 9,
