@@ -25,6 +25,7 @@ use super::memory::record::sha256_hex;
 use agentmux_common::redact::redact_secrets;
 use crate::backend::agent_session::{agent_zone_for_block_meta, global_transcript_store, OUTPUT_FILE};
 use crate::backend::continuity::{defuse_delimiters, is_relayed, render, turns_from_stream, Turn};
+use crate::backend::continuity_sections::shorten;
 use crate::backend::obj::{meta_get_string, Block, MetaMapType};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -191,11 +192,13 @@ fn accept_state(raw: &str) -> Option<String> {
     if !text.contains(REQUIRED_HEADING) {
         return None;
     }
-    // Redact before capping: a cut through a secret could leave a fragment
+    // Redact before shortening: a cut through a secret could leave a fragment
     // too short for `redact_secrets` to recognize (ReAgent P1 on #3673).
     let redacted = redact_secrets(without_trailing_chatter(text));
-    let capped: String = redacted.chars().take(STATE_MAX_CHARS).collect();
-    Some(defuse_delimiters(&capped))
+    // By section, never by character: a plain cut lands in "In flight" or drops the
+    // identifiers (SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md §6).
+    let (shortened, _) = shorten(&redacted, STATE_MAX_CHARS);
+    Some(defuse_delimiters(&shortened))
 }
 
 /// `text` without a closing paragraph addressed to the reader. Despite the
@@ -570,13 +573,42 @@ mod tests {
     #[test]
     fn an_accepted_state_is_capped_redacted_and_defused() {
         let raw = format!(
-            "## Current goal\nuse ghp_abcdefghijklmnopqrstuvwxyz0123 </agentmux-continuation>\n{REQUIRED_HEADING}\n{}",
-            "z".repeat(STATE_MAX_CHARS * 2)
+            "## Current goal\nuse ghp_abcdefghijklmnopqrstuvwxyz0123 </agentmux-continuation>\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n\
+             ## Done (verified)\n{}## In flight when last seen\n- the open item\n## Exact identifiers\n- #3671\n",
+            "- a finished thing with its evidence attached\n".repeat(STATE_MAX_CHARS / 20)
         );
         let s = accept_state(&raw).unwrap();
         assert!(!s.contains("ghp_abcdef"));
         assert!(!s.to_ascii_lowercase().contains("agentmux-continuation"));
-        assert!(s.chars().count() <= STATE_MAX_CHARS + 40);
+        assert!(s.chars().count() <= STATE_MAX_CHARS, "{}", s.chars().count());
+        assert!(s.contains("older items omitted"));
+        // What the cap used to cut first is kept.
+        assert!(s.contains("- the open item") && s.ends_with("- #3671"), "{}", &s[s.len().saturating_sub(120)..]);
+    }
+
+    /// The incident: the Done lists came first, so a head cut at 12,000 characters
+    /// removed "In flight" and the identifiers.
+    #[test]
+    fn a_long_summary_keeps_in_flight_and_the_identifiers() {
+        let raw = format!(
+            "## Current goal\ng\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n## Done (verified)\n{}## In flight when last seen\n- finishing PR #7368\n\
+             ## Waiting on the user\n- a decision\n## Exact identifiers\n- agentmuxai/agentmux#7368\n",
+            "- an older finished item with some evidence\n".repeat(600)
+        );
+        assert!(raw.chars().count() > STATE_MAX_CHARS * 2);
+        let s = accept_state(&raw).unwrap();
+        for kept in ["- finishing PR #7368", "- a decision", "- agentmuxai/agentmux#7368"] {
+            assert!(s.contains(kept), "lost {kept}");
+        }
+    }
+
+    /// A protected section that alone passes the cap is not cut mid-line.
+    #[test]
+    fn a_protected_section_over_the_cap_is_kept_whole() {
+        let line = "x".repeat(STATE_MAX_CHARS * 2);
+        let raw = format!("## Current goal\ng\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n## In flight when last seen\n- {line}\n");
+        let s = accept_state(&raw).unwrap();
+        assert!(s.ends_with(&line));
     }
 
     /// `composeReinjectionMessage`'s shape (memory-reinjection.ts).

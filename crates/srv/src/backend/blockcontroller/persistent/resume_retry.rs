@@ -155,6 +155,13 @@ impl PersistentSubprocessController {
         // (`continuity_state.rs`). Missing for panes that aren't anchored to
         // an agent, or until the first update has run.
         let state = global.and_then(|(g, z)| crate::backend::continuity_state::latest_state(g, z));
+        // What AgentMux itself knows right now, written without a model: the packet
+        // is right about "in flight" even when the summary is old or was never made.
+        let now_ms = agentmux_common::time::now_ms();
+        let facts_text = self.mstore.as_deref().map(|mstore| {
+            let facts = crate::backend::continuity_facts::collect(mstore, self.identity_store.as_deref(), &self.block_id);
+            crate::backend::continuity_facts::render(&facts, now_ms)
+        });
         crate::backend::continuity::build_continuation_packet(
             &tail,
             starts_mid_line,
@@ -162,6 +169,9 @@ impl PersistentSubprocessController {
                 text: &s.text,
                 created_at_ms: s.created_at_ms,
             }),
+            facts_text
+                .as_deref()
+                .map(|text| crate::backend::continuity::RuntimeFacts { text, at_ms: now_ms }),
         )
     }
 
