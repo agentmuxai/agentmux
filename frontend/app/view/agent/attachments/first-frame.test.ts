@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { fitScale, firstFrame, MAX_PDF_BYTES, MAX_VIDEO_BYTES, wantsFrame } from "./first-frame";
+import { fitScale, firstFrame, MAX_PDF_BYTES, MAX_VIDEO_BYTES, tooBigForFrame, wantsFrame } from "./first-frame";
 
 describe("wantsFrame", () => {
     it("draws a picture for a PDF or a video of a size worth reading", () => {
@@ -16,9 +16,19 @@ describe("wantsFrame", () => {
         expect(wantsFrame("pdf", MAX_PDF_BYTES + 1)).toBe(false);
         expect(wantsFrame("video", MAX_VIDEO_BYTES + 1)).toBe(false);
         expect(wantsFrame("pdf", 0)).toBe(false);
-        expect(wantsFrame("pdf", undefined)).toBe(false);
         expect(wantsFrame("word", 1000)).toBe(false);
         expect(wantsFrame("audio", 1000)).toBe(false);
+    });
+});
+
+describe("a size that isn't known", () => {
+    it("is let through, and the length the file announces decides", () => {
+        expect(wantsFrame("pdf", undefined)).toBe(true);
+        expect(tooBigForFrame("pdf", String(MAX_PDF_BYTES + 1))).toBe(true);
+        expect(tooBigForFrame("video", String(MAX_PDF_BYTES + 1))).toBe(false);
+        expect(tooBigForFrame("pdf", "2048")).toBe(false);
+        expect(tooBigForFrame("pdf", null)).toBe(false);
+        expect(tooBigForFrame("pdf", "nonsense")).toBe(false);
     });
 });
 

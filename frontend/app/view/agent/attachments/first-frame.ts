@@ -23,9 +23,18 @@ export function frameLimit(kind: FrameKind): number {
     return kind === "pdf" ? MAX_PDF_BYTES : MAX_VIDEO_BYTES;
 }
 
-/** Whether a tile of this kind and size gets a picture drawn from its file. */
+/**
+ * Whether a tile of this kind and size gets a picture drawn from its file. A size that isn't known (a sent file's tile
+ * in the transcript has none) is let through: the file's own length is checked before its body is read.
+ */
 export function wantsFrame(kind: string, bytes: number | undefined): kind is FrameKind {
-    return (kind === "pdf" || kind === "video") && bytes != null && bytes > 0 && bytes <= frameLimit(kind);
+    return (kind === "pdf" || kind === "video") && (bytes == null || (bytes > 0 && bytes <= frameLimit(kind)));
+}
+
+/** Whether an answer says its file is more than a picture is worth reading. */
+export function tooBigForFrame(kind: FrameKind, contentLength: string | null): boolean {
+    const length = contentLength == null ? NaN : Number(contentLength);
+    return Number.isFinite(length) && length > frameLimit(kind);
 }
 
 /** The scale that fits a `w` x `h` picture into EDGE x2 on its longer side (never above 1 for a small source). */

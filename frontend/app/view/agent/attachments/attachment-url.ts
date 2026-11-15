@@ -16,7 +16,7 @@
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { firstFrame, type FrameKind } from "./first-frame";
+import { firstFrame, tooBigForFrame, type FrameKind } from "./first-frame";
 
 /** `text` is the extracted text version of a document. */
 export type AttachmentFileKind = "thumb" | "send" | "original" | "text";
@@ -44,7 +44,15 @@ function load(id: string, kind: EntryKind, setUrl: Entry["setUrl"]): Promise<Blo
     return fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${frame ? "original" : kind}`, {
         headers: authHeaders(),
     })
-        .then((r) => (r.ok ? r.blob() : null))
+        .then((r) => {
+            if (!r.ok) return null;
+            // A picture is not worth a big file: the length it announces is checked before any of it is read.
+            if (frame && tooBigForFrame(frame, r.headers.get("content-length"))) {
+                void r.body?.cancel().catch(() => {});
+                return null;
+            }
+            return r.blob();
+        })
         .catch(() => null)
         .then((blob) => (blob && frame ? firstFrame(frame, blob) : blob))
         .then((blob) => {

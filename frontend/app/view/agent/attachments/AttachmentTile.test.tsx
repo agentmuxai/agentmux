@@ -72,6 +72,20 @@ describe("AttachmentTile", () => {
         expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/original");
     });
 
+    it("reads nothing of a file that announces more than a picture is worth", async () => {
+        const body = new ReadableStream({ start: (c) => c.enqueue(new Uint8Array(4)) });
+        const big = new Response(body, { headers: { "content-length": String(200 * 1024 * 1024) } });
+        const blob = vi.spyOn(big, "blob");
+        vi.stubGlobal("fetch", vi.fn(async (_url: string) => big));
+        const { container } = render(() => (
+            <AttachmentTile tile={tile({ bytes: undefined, id: "d".repeat(64), pageCount: 2 })} onOpen={() => {}} />
+        ));
+        await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+        await Promise.resolve();
+        expect(blob).not.toHaveBeenCalled();
+        expect(container.querySelector("img")).toBeNull();
+    });
+
     it("renders a text preview as text, never as markup", async () => {
         const preview = "<img src=x onerror=alert(1)>\nline 2";
         // The text is read from the fetched file itself, not fetched again from its object URL.
