@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { Button } from "@/element/button";
 import { atoms } from "@/store/global";
 import clsx from "clsx";
@@ -27,6 +28,29 @@ export function visibleNotifications(all: NotificationType[], expanded: boolean)
     const keep = new Set([...sticky, ...(room > 0 ? rest.slice(-room) : [])]);
     return shown.filter((n) => keep.has(n));
 }
+
+/** The stack's box. It cuts a hole through a browser pane's native window it floats over, so the toasts show above
+ *  the page. `data-pane-overlay` does that on Windows alone (pane-overlay-auto.ts); `usePaneOverlay` does it on
+ *  every platform, and the same rect registered twice on Windows is one hole. It mounts only while there is a
+ *  stack, so the hole is there for exactly as long. */
+const ToastStackBox = (props: { setStack: (el: HTMLDivElement) => void; style: JSX.CSSProperties; children: JSX.Element }): JSX.Element => {
+    let box: HTMLDivElement | undefined;
+    usePaneOverlay(() => box);
+    return (
+        <div
+            ref={(el) => {
+                box = el;
+                props.setStack(el);
+            }}
+            style={props.style}
+            class="notification-bubbles"
+            data-pane-overlay
+            onClick={(e) => e.stopPropagation()}
+        >
+            {props.children}
+        </div>
+    );
+};
 
 const NotificationBubbles = (): JSX.Element => {
     const {
@@ -71,14 +95,7 @@ const NotificationBubbles = (): JSX.Element => {
         <>
             <ToastAnnouncer notifications={notifications} />
             <Show when={isOpen() && !notificationPopoverMode()}>
-                <div
-                    ref={setStack}
-                    style={floatingStyles() as any}
-                    class="notification-bubbles"
-                    // Over a browser pane's native window too: the clip cuts a hole in it for the stack.
-                    data-pane-overlay
-                    onClick={(e) => e.stopPropagation()}
-                >
+                <ToastStackBox setStack={setStack} style={floatingStyles() as JSX.CSSProperties}>
                     <div
                         class="notification-bubbles-body"
                         style={maxHeight() === undefined ? undefined : { "max-height": `calc(${maxHeight()}px / var(--zoomfactor))` }}
@@ -104,7 +121,7 @@ const NotificationBubbles = (): JSX.Element => {
                             )}
                         </For>
                     </div>
-                </div>
+                </ToastStackBox>
             </Show>
         </>
     );
