@@ -104,7 +104,7 @@
 282 crates/launcher/src/ipc/server.rs::enforce_register_first
 489 crates/launcher/src/ipc/server.rs::handle_connection
 163 crates/launcher/src/main.rs::launcher_main
-111 crates/launcher/src/main.rs::main
+112 crates/launcher/src/main.rs::main
 141 crates/launcher/src/notify/linux.rs::run
 109 crates/launcher/src/notify/mod.rs::session
 307 crates/launcher/src/reducer/mod.rs::update

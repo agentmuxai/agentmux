@@ -67,8 +67,23 @@ pub fn initial_rect(bounds: Option<(i32, i32, i32, i32)>) -> Option<(i32, i32, i
     active().then(|| place_rect(bounds.unwrap_or((0, 0, 1200, 800))))
 }
 
-/// Log [`start_line`] for `process`, if there is one.
-pub fn log_start(process: &str) {
+/// Why a process must not start: off-screen is asked for on macOS, where it cannot be done. AppKit
+/// moves a window onto a display when it is first shown and clamps every later move, so a window
+/// there can only be kept off the screen by never ordering it in, which this does not do yet. A test
+/// build that cannot hide its windows refuses to start rather than show one.
+fn refusal(off_screen: bool, macos: bool) -> Option<&'static str> {
+    (off_screen && macos).then_some(
+        "AGENTMUX_TEST_OFFSCREEN=1 is not supported on macOS yet: AppKit puts a shown window onto a display, so a window cannot be kept off the screen. Nothing was started. Start the build without the variable.",
+    )
+}
+
+/// The start of a process: it refuses (one line on stderr, exit status 2, nothing started) when
+/// off-screen is asked for where it cannot be done, and otherwise logs [`start_line`] if there is one.
+pub fn begin(process: &str) {
+    if let Some(why) = refusal(active(), cfg!(target_os = "macos")) {
+        eprintln!("{process}: {why}");
+        std::process::exit(2);
+    }
     if let Some(line) = start_line(process) {
         tracing::info!("{line}");
     }
@@ -118,6 +133,15 @@ mod tests {
         assert_eq!(initial_rect(None), None);
         assert_eq!(initial_rect(Some((5, 6, 7, 8))), None);
         assert_eq!(place_rect((10, 20, 30, 40)), (10, 20, 30, 40));
+    }
+
+    #[test]
+    fn macos_refuses_and_other_systems_do_not() {
+        assert!(refusal(true, true).is_some());
+        assert!(refusal(true, false).is_none());
+        // Not asked for, or ignored by a release (active() is false): nothing to refuse.
+        assert!(refusal(false, true).is_none());
+        assert!(refusal(false, false).is_none());
     }
 
     #[test]

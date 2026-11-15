@@ -141,6 +141,7 @@ fn main() {
         std::process::exit(code);
     }
     agentmux_common::dev_home_guard::refuse_or_continue_current_exe(); // a dev build by hand has no isolated home
+    agentmux_common::test_offscreen::begin("launcher"); // a test build that cannot keep its windows off the screen refuses to start
     // Before any thread or child exists: an instance key inherited from the shell that
     // started this launcher goes no further; the launcher mints its own for srv and the host.
     agentmux_common::secret_env::discard_startup_secrets();

@@ -725,7 +725,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     *app_state.ipc_port.lock() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);
-    agentmux_common::test_offscreen::log_start("host");
+    agentmux_common::test_offscreen::begin("host");
 
     // Phase B.2: connect to launcher's named-pipe IPC (if launcher
     // is in the loop) so the launcher can route Commands and Events
