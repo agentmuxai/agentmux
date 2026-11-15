@@ -44,6 +44,7 @@ beforeEach(() => {
     hub.container = false;
     hub.attachmentsEnabled = undefined;
     hub.copy.mockReset();
+    hub.copy.mockResolvedValue([]);
     hub.menu.mockReset();
     hub.claim.mockReset();
 });

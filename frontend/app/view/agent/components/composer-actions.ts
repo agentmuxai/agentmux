@@ -16,6 +16,7 @@ import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { getComposerDraft, saveSentHistory, SENT_HISTORY_MAX, setComposerDraft } from "../reload-persistence";
 import { agentDraft, rememberSent, saveAgentDraft } from "../agent-input-history";
 import type { SlashCommand } from "../commands/types";
+import { settlePastedCopies } from "../hooks/pasted-copies";
 import type { ComposerCtx } from "./composer-context";
 
 /** Show the dropdown only for a value that starts with `/` and has no space or newline: past the command name the user is filling in args. */
@@ -192,6 +193,8 @@ export function handleSend(c: ComposerCtx): void {
     } else {
         c.props.onSendMessage(message);
     }
+    // A file pasted into the working folder whose @mention was taken out of this message is not kept.
+    if (c.draftBlockId) void settlePastedCopies(c.draftBlockId, message);
     recordSent(c, message);
     c.hist.pos = c.sentHistory.length;
     c.hist.draft = "";
