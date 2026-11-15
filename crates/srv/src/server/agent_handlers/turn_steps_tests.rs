@@ -53,6 +53,10 @@ fn resolved(number: usize, name: &str, path: std::path::PathBuf) -> crate::backe
     crate::backend::attachments::prompt::Resolved { number, name: name.to_string(), path, mime: "image/png".into(), page_count: None, note: None }
 }
 
+fn resolved_with_note(number: usize, name: &str, path: std::path::PathBuf, note: &str) -> crate::backend::attachments::prompt::Resolved {
+    crate::backend::attachments::prompt::Resolved { note: Some(note.to_string()), ..resolved(number, name, path) }
+}
+
 const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
@@ -107,6 +111,44 @@ fn a_named_copy_keeps_its_named_hash_realname_shape() {
     assert!(missing.is_empty(), "{missing:?}");
     assert_eq!(found[0].path, std::path::PathBuf::from(format!("/workspace/{CONTAINER_ATTACHMENTS_SUBDIR}/named/{HASH_B}/spec.pdf")));
     assert_eq!(std::fs::read(cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join("named").join(HASH_B).join("spec.pdf")).unwrap(), b"pdf bytes");
+}
+
+#[test]
+fn a_documents_extracted_text_companion_is_rehomed_and_the_note_rewritten() {
+    let host = tempfile::tempdir().unwrap();
+    let named_dir = host.path().join("named").join(HASH_B);
+    std::fs::create_dir_all(&named_dir).unwrap();
+    let send_copy = named_dir.join("spec.pdf");
+    std::fs::write(&send_copy, b"pdf bytes").unwrap();
+    let text_copy = host.path().join(format!("{HASH_B}.v1.text.txt"));
+    std::fs::write(&text_copy, b"extracted text").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let note = format!("PDF, 12 pages; text version: {}", text_copy.display());
+
+    let (found, missing) = rehome_for_container(vec![resolved_with_note(1, "spec.pdf", send_copy, &note)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(missing.is_empty(), "{missing:?}");
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].note.as_deref(),
+        Some(format!("PDF, 12 pages; text version: /workspace/{CONTAINER_ATTACHMENTS_SUBDIR}/{HASH_B}.v1.text.txt").as_str())
+    );
+    assert_eq!(std::fs::read(cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join(format!("{HASH_B}.v1.text.txt"))).unwrap(), b"extracted text");
+}
+
+#[test]
+fn a_missing_text_companion_drops_just_that_part_of_the_note() {
+    let host = tempfile::tempdir().unwrap();
+    let send_copy = host.path().join(format!("{HASH_A}.send.png"));
+    std::fs::write(&send_copy, b"doc bytes").unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let gone_text = std::env::temp_dir().join(format!("{HASH_B}.gone.text.txt"));
+    let note = format!("Word document; text version: {}; contains macros", gone_text.display());
+
+    let (found, missing) = rehome_for_container(vec![resolved_with_note(1, "report.docx", send_copy, &note)], Vec::new(), cwd.path().to_str().unwrap());
+
+    assert!(missing.is_empty(), "the main attachment still succeeds: {missing:?}");
+    assert_eq!(found[0].note.as_deref(), Some("Word document; contains macros"));
 }
 
 #[test]

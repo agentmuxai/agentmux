@@ -294,6 +294,12 @@ const CONTAINER_ATTACHMENTS_SUBDIR: &str = ".agentmux-attachments";
 /// through its bind mount, so the destination needs the same defenses a native agent's own workdir
 /// already gets against a symlinked ancestor folder or a symlinked destination file, not a hand-rolled
 /// check here that has to rediscover them (#7434).
+///
+/// A document's extracted-text companion (`item.note`'s `text version: <path>`, from PDFs and Office
+/// files) is rehomed the same way and the note rewritten to the container path: a container agent
+/// could open the one file this leaves pointed at a host path but not the other (#7434). If the
+/// companion can't be rehomed, that part of the note is dropped rather than leaving a host path the
+/// container never gets.
 fn rehome_for_container(
     found: Vec<crate::backend::attachments::prompt::Resolved>,
     mut missing: Vec<String>,
@@ -304,29 +310,56 @@ fn rehome_for_container(
     let workdir = crate::backend::workdir_fs::Workdir::open(std::path::Path::new(host_cwd));
     let mut rehomed = Vec::with_capacity(found.len());
     for mut item in found {
-        let Some(suffix) = id_bearing_suffix(&item.path) else {
-            tracing::warn!(name = %item.name, path = %item.path.display(), "container attachment: its host path carries no recognizable id");
+        let Some(container_path) = rehome_one(&workdir, &container_root, &item.path) else {
             missing.push(item.name);
             continue;
         };
-        let rel = format!("{CONTAINER_ATTACHMENTS_SUBDIR}/{}", suffix.to_string_lossy().replace('\\', "/"));
-        let copied: std::io::Result<()> = (|| {
-            let wd = workdir.as_ref().map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
-            let bytes = std::fs::read(&item.path)?;
-            wd.write(&rel, &bytes, false)
-        })();
-        match copied {
-            Ok(()) => {
-                item.path = std::path::PathBuf::from(format!("{container_root}/{rel}"));
-                rehomed.push(item);
-            }
-            Err(e) => {
-                tracing::warn!(name = %item.name, error = %e, "container attachment: could not copy into the pane's working folder");
-                missing.push(item.name);
-            }
-        }
+        item.path = std::path::PathBuf::from(container_path);
+        item.note = item.note.map(|note| rehome_text_companion(&note, &workdir, &container_root));
+        rehomed.push(item);
     }
     (rehomed, missing)
+}
+
+/// Copies `host_path`'s send-copy into `host_cwd`'s `CONTAINER_ATTACHMENTS_SUBDIR`, keeping the exact
+/// id-bearing suffix [`id_bearing_suffix`] finds, and returns the container-side path string. `None`
+/// when `host_path` carries no recognizable id, or the copy fails — logged either way, so a caller
+/// that only has a name to report (`missing`) still has the reason in the log.
+fn rehome_one(workdir: &std::io::Result<crate::backend::workdir_fs::Workdir>, container_root: &str, host_path: &std::path::Path) -> Option<String> {
+    let Some(suffix) = id_bearing_suffix(host_path) else {
+        tracing::warn!(path = %host_path.display(), "container attachment: its host path carries no recognizable id");
+        return None;
+    };
+    let rel = format!("{CONTAINER_ATTACHMENTS_SUBDIR}/{}", suffix.to_string_lossy().replace('\\', "/"));
+    let copied: std::io::Result<()> = (|| {
+        let wd = workdir.as_ref().map_err(|e| std::io::Error::new(e.kind(), e.to_string()))?;
+        let bytes = std::fs::read(host_path)?;
+        wd.write(&rel, &bytes, false)
+    })();
+    match copied {
+        Ok(()) => Some(format!("{container_root}/{rel}")),
+        Err(e) => {
+            tracing::warn!(path = %host_path.display(), error = %e, "container attachment: could not copy into the pane's working folder");
+            None
+        }
+    }
+}
+
+/// Rewrites a `text version: <path>` segment of a document's note to the container-side path
+/// [`rehome_one`] copied it to, keeping the rest of the note (page count, "contains macros") as is.
+/// Drops just that segment, rather than leaving a host path, when the companion carries no
+/// recognizable id or its copy fails. A note with no such segment (an image's note is always `None`;
+/// a document's can read "no text version, …" instead) is returned unchanged.
+fn rehome_text_companion(note: &str, workdir: &std::io::Result<crate::backend::workdir_fs::Workdir>, container_root: &str) -> String {
+    const MARKER: &str = "text version: ";
+    let Some(marker_at) = note.find(MARKER) else { return note.to_string() };
+    let path_start = marker_at + MARKER.len();
+    let path_end = note[path_start..].find("; ").map_or(note.len(), |i| path_start + i);
+    let host_path = std::path::Path::new(&note[path_start..path_end]);
+    match rehome_one(workdir, container_root, host_path) {
+        Some(container_path) => format!("{}{container_path}{}", &note[..path_start], &note[path_end..]),
+        None => format!("{}{}", note[..marker_at].trim_end_matches("; "), &note[path_end..]),
+    }
 }
 
 /// The trailing part of a send-copy's host path that carries its attachment id: `<sha256>.…` for an
