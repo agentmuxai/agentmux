@@ -61,6 +61,11 @@ impl<'a> Scheduler<'a> {
         self.in_flight = None;
         self.finished.insert(id);
         self.keep_history(id, &mut output);
+        // What it cost counts as for any block that finished, against the run's
+        // cap and its loop's.
+        let cost = output.get("cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
+        self.spent += cost;
+        *self.spent_by.entry(id).or_default() += cost;
         self.scope.outputs.insert(id.to_string(), output.clone());
         self.scope.bits.insert(id.to_string(), (true, false));
         let _ = self.tx.send(RunEvent::BlockDone { run_id: self.run_id.to_string(), block_id: id.to_string(), output: output.clone() });
