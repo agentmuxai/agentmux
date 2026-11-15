@@ -186,6 +186,26 @@ pub fn validate(fields: &BTreeMap<String, String>) -> Result<(), String> {
     }
 }
 
+/// An update that names a new kind of place takes the parts the new kind has no use for with it, unless the update
+/// names them itself: an AWS secret's region and profile when the place becomes any other kind, and every part when
+/// the kind is emptied, which takes the link off. Without it an agent that moved a link off AWS was refused over a
+/// region the old place had left behind, and had to know to clear it (found in the Linux look check, 2026-11-14).
+pub fn settle_kind(fields: &mut BTreeMap<String, String>, asked: &BTreeMap<String, String>) {
+    if !asked.contains_key(KIND) {
+        return;
+    }
+    let left_over: &[&str] = match fields.get(KIND).map(String::as_str) {
+        None => &[LOCATION, KEY, REGION, PROFILE],
+        Some(AWS_SECRET) => &[],
+        Some(_) => &[REGION, PROFILE],
+    };
+    for name in left_over {
+        if !asked.contains_key(*name) {
+            fields.remove(*name);
+        }
+    }
+}
+
 /// An import that replaces an entry and names no machine copy leaves the entry's own link as it is.
 pub fn carry_over(fields: &mut BTreeMap<String, String>, current: &VaultRow) {
     if fields.keys().any(|k| is_field(k)) {

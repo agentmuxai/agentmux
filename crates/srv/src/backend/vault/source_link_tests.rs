@@ -280,10 +280,25 @@ fn an_agent_changes_the_link_only_as_the_person_allowed_it() {
     assert!(stale.contains("changed while the person was asked"), "{stale}");
     assert_eq!(link_of(&s, &id).unwrap().text(), "aws-secret:staging/app#db.user");
 
-    // Taking the link off is a change too, and a refusal is a line in the entry's history.
-    let clear = asked(&id, &[(KIND, ""), (LOCATION, ""), (KEY, ""), (REGION, "")]);
+    // A new kind of place takes the old kind's region with it: the agent names the new place and nothing else.
+    let to_github = asked(&id, &[(KIND, GITHUB_SECRET), (LOCATION, "acme/web@staging"), (KEY, "DEPLOY_TOKEN")]);
+    let change = inspect::link_change(&s, &to_github, "builder").unwrap().unwrap();
+    assert_eq!(change.to.as_ref().map(Link::describe), Some("the GitHub secret DEPLOY_TOKEN of acme/web@staging".to_string()));
+    assert_eq!(change.to.as_ref().map(|l| l.region.as_str()), Some(""));
+    // A region the update itself gives to a place that has none is still refused.
+    let with_region = asked(&id, &[(KIND, GITHUB_SECRET), (LOCATION, "acme/web"), (KEY, "DEPLOY_TOKEN"), (REGION, "eu-west-1")]);
+    let refused = inspect::link_change(&s, &with_region, "builder").unwrap_err();
+    assert!(refused.contains("are for an aws-secret only"), "{refused}");
+    // And a part changed without naming the kind keeps the region the AWS place has.
+    let rekey = inspect::link_change(&s, &asked(&id, &[(KEY, "db.host")]), "builder").unwrap().unwrap();
+    assert_eq!(rekey.to.as_ref().map(|l| l.region.as_str()), Some("eu-west-1"));
+
+    // Taking the link off is a change too: an empty kind is enough. A refusal is a line in the entry's history.
+    let clear = asked(&id, &[(KIND, "")]);
     let change = inspect::link_change(&s, &clear, "builder").unwrap().unwrap();
     assert!(change.to.is_none() && change.from.is_some());
+    let spelled_out = asked(&id, &[(KIND, ""), (LOCATION, ""), (KEY, ""), (REGION, "")]);
+    assert_eq!(inspect::link_change(&s, &spelled_out, "builder").unwrap().unwrap(), change);
     inspect::note_link_refused(&s, &change, "builder", "denied");
     let line = rows(&s).into_iter().find(|r| r.outcome == "denied").unwrap();
     assert_eq!((line.action.as_str(), line.target.as_str(), line.actor.as_str(), line.reason.as_str()), (inspect::CHANGED_DETAILS, "machine copy", "builder", REASON));

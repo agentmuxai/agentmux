@@ -10,7 +10,6 @@
 import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
-import { tip } from "@/app/element/tip";
 import { Field, Select, TextInput } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
@@ -56,9 +55,8 @@ export function machineCopy(fields: Record<string, string>): string {
 export interface SourceCheck {
     /** `same`, `different`, or `unread` for a place that could not be read. */
     state: "same" | "different" | "unread";
+    /** What it found and when, and for a place that could not be read, why: the line says it, not a tooltip. */
     text: string;
-    /** Why it could not be read, for the tooltip. */
-    why: string;
 }
 
 /** What the newest check of the entry's machine copy found, and when; null when it was never checked. */
@@ -66,30 +64,33 @@ export function sourceCheck(e: Pick<VaultEntryInfo, "source_checked">, now = Dat
     const checked = e.source_checked;
     if (!checked) return null;
     const when = formatWhen(checked.at, now);
-    if (checked.outcome === "same") return { state: "same", text: `same as the Vault's value, checked ${when}`, why: "" };
-    if (checked.outcome === "different") return { state: "different", text: `different from the Vault's value, checked ${when}`, why: "" };
-    return { state: "unread", text: `could not be read, checked ${when}`, why: checked.outcome.replace(/^could not read:\s*/, "") };
+    if (checked.outcome === "same") return { state: "same", text: `same as the Vault's value, checked ${when}` };
+    if (checked.outcome === "different") return { state: "different", text: `different from the Vault's value, checked ${when}` };
+    const why = checked.outcome.replace(/^could not read:?\s*/, "");
+    return { state: "unread", text: `could not be read, checked ${when}${why ? `: ${why}` : ""}` };
 }
 
-/** The entry's machine copy and its newest check, under its other details; `children` is the line's own action. */
+/**
+ * The entry's machine copy and its newest check, under its other details; `children` is the line's own action,
+ * which stays beside the text however the text wraps. A copy that differs and one that could not be read are both
+ * marked: neither is known to hold the entry's value.
+ */
 export function MachineCopyLine(props: { entry: VaultEntryInfo; children?: JSX.Element }): JSX.Element {
     return (
         <Show when={machineCopy(props.entry.fields)}>
             {(place) => (
                 <div class="vault-machine-copy">
-                    Machine copy: <span class="warden-manager-mono vault-import-id">{place()}</span>
-                    <Show when={sourceCheck(props.entry)} fallback={<span class="vault-machine-copy-check"> · not checked yet</span>}>
-                        {(check) => (
-                            <span
-                                class={check().state === "different" ? "vault-machine-copy-check vault-expiry-warn" : "vault-machine-copy-check"}
-                                data-check={check().state}
-                                {...tip(check().why || undefined)}
-                            >
-                                {" "}
-                                · {check().text}
-                            </span>
-                        )}
-                    </Show>{" "}
+                    <span class="vault-machine-copy-text">
+                        Machine copy: <span class="warden-manager-mono vault-import-id">{place()}</span>
+                        <Show when={sourceCheck(props.entry)} fallback={<span class="vault-machine-copy-check"> · not checked yet</span>}>
+                            {(check) => (
+                                <span class={check().state === "same" ? "vault-machine-copy-check" : "vault-machine-copy-check vault-expiry-warn"} data-check={check().state}>
+                                    {" "}
+                                    · {check().text}
+                                </span>
+                            )}
+                        </Show>
+                    </span>
                     {props.children}
                 </div>
             )}

@@ -86,12 +86,11 @@ describe("the link's fields and what a check found", () => {
     it("says what the newest check found and when, and why a place could not be read", () => {
         const now = 10 * 60_000;
         expect(sourceCheck({}, now)).toBeNull();
-        expect(sourceCheck({ source_checked: { at: now - 3 * 60_000, outcome: "same" } }, now)).toEqual({ state: "same", text: "same as the Vault's value, checked 3 min ago", why: "" });
+        expect(sourceCheck({ source_checked: { at: now - 3 * 60_000, outcome: "same" } }, now)).toEqual({ state: "same", text: "same as the Vault's value, checked 3 min ago" });
         expect(sourceCheck({ source_checked: { at: now, outcome: "different" } }, now)?.state).toBe("different");
         expect(sourceCheck({ source_checked: { at: now, outcome: "could not read: AWS refused: this identity can't read that secret" } }, now)).toEqual({
             state: "unread",
-            text: "could not be read, checked just now",
-            why: "AWS refused: this identity can't read that secret",
+            text: "could not be read, checked just now: AWS refused: this identity can't read that secret",
         });
     });
 
@@ -135,7 +134,10 @@ describe("an entry's machine copy in the list", () => {
         expect(differs.textContent).toContain("different from the Vault's value");
         const unread = row("b").querySelector("[data-check]") as HTMLElement;
         expect(unread.dataset.check).toBe("unread");
-        expect(unread.classList.contains("vault-expiry-warn")).toBe(false);
+        // Marked like a copy that differs, and the line itself says why: nothing is behind a hover.
+        expect(unread.classList.contains("vault-expiry-warn")).toBe(true);
+        expect(unread.textContent).toContain("AWS has no secret by that id, in that region");
+        expect(unread.hasAttribute("title")).toBe(false);
         expect(unread.textContent).toContain("could not be read");
         expect(row("c").textContent).toContain("not checked yet");
     });
@@ -220,6 +222,7 @@ describe("the question before an agent changes where a machine copy is", () => {
         replaces: false,
         signin: false,
         account: false,
+        change: false,
         requested_ms: 1,
         block_id: "pane-1",
         deadline_ms: Date.now() + 120_000,

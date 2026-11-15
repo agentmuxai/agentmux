@@ -180,6 +180,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
             v => fields.insert(name.clone(), v.to_string()),
         };
     }
+    source_link::settle_kind(&mut fields, asked);
     Ok(fields)
 }
 

@@ -239,7 +239,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                         <EntryDetails entry={e} showVault={!props.vault} onError={setError} />
                                     </td>
                                     <EntryValue entry={e} />
-                                    <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
+                                    <td class="warden-manager-dim vault-when">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">
                                         <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
                                         <IconButton icon="pen" label="Change" density="compact" onClick={() => setForm({ mode: "edit", entry: e })} />
