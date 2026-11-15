@@ -42,10 +42,13 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
         const ids = props.attachments.map((a) => a.id).filter((id): id is string => !!id && !untrack(() => asked.has(id)));
         if (!ids.length) return;
         for (const id of ids) asked.add(id);
-        RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids }).then(
-            (r) => setInfos((prev) => ({ ...prev, ...Object.fromEntries(r.items.map((i) => [i.id, i])) })),
-            () => ids.forEach((id) => asked.delete(id)),
-        );
+        // Started from a promise, so a call that throws (no RPC client yet) is a failed fetch, never a broken pane.
+        Promise.resolve()
+            .then(() => RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids }))
+            .then(
+                (r) => setInfos((prev) => ({ ...prev, ...Object.fromEntries(r.items.map((i) => [i.id, i])) })),
+                () => ids.forEach((id) => asked.delete(id)),
+            );
     });
     const tiles = createMemo<TileModel[]>(() =>
         props.attachments.map((a, i) => {
