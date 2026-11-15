@@ -666,5 +666,20 @@
     "vault.linkCard.noPlaceNow": "no place is recorded.",
     "vault.linkCard.askedFor": "Asked for:",
     "vault.linkCard.noPlaceAsked": "no place (the record is removed).",
-    "vault.linkCard.needsYes": "the place is not changed without a yes."
+    "vault.linkCard.needsYes": "the place is not changed without a yes.",
+    "backdrop.title": "Backdrop",
+    "backdrop.close": "Close the backdrop picker",
+    "backdrop.colours": "Backdrop colours",
+    "backdrop.custom.label": "Custom colour",
+    "backdrop.custom.pick": "Pick a custom colour",
+    "backdrop.custom.placeholder": "#rrggbb",
+    "backdrop.custom.invalid": "Use #rrggbb or #rgb.",
+    "backdrop.nudged": "Adjusted a little so the text reads. Your colour is kept for the other theme.",
+    "backdrop.polarity.label": "Polarity",
+    "backdrop.polarity.hint": "Dark or light keeps a built-in's side under either app theme.",
+    "backdrop.polarity.follow": "Follow",
+    "backdrop.polarity.dark": "Dark",
+    "backdrop.polarity.light": "Light",
+    "backdrop.readout": "text {{text}}, muted {{muted}}",
+    "backdrop.reset": "Reset"
 }
