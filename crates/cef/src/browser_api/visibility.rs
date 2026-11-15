@@ -163,10 +163,11 @@ pub(super) fn apply(nodes: &mut [Value], layout: &Layout, include_hidden: bool) 
 
 /// What every read of a page's tree does before an agent sees it, in a frame as on the top page: whatever is
 /// left of the hidden text (all of it with `include_hidden`) never carries a secret, and a control the page
-/// gives no name is named for what it looks like.
+/// gives no name is named for what it looks like. The names come first, so a tooltip that repeats a secret
+/// withheld elsewhere in its row is cleaned with every other repeat of it.
 pub(super) fn guard(nodes: &mut [Value], layout: &Layout) {
-    super::hidden_secrets::withhold(nodes, &layout.hidden, layout.unknown);
     super::icon_hints::mark(nodes, &layout.hints);
+    super::hidden_secrets::withhold(nodes, &layout.hidden, layout.unknown);
 }
 
 /// The line a snapshot ends with when it left hidden text out.

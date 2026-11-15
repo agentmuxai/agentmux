@@ -407,3 +407,15 @@ fn a_name_made_from_the_revealed_text_does_not_carry_it() {
     let out = shown(&nodes, None);
     assert!(!out.text.contains(SECRET), "{}", out.text);
 }
+
+#[test]
+fn a_tooltip_that_repeats_a_withheld_secret_does_not_carry_it_into_an_icon_buttons_name() {
+    let token = "q7Zp-93xaLm2Rt";
+    let mut nodes = row("Signing key", token);
+    nodes[5]["name"]["value"] = json!("");
+    let layout = Layout { hidden: HashSet::from([9]), hints: HashMap::from([(6, format!("title \"{token}\""))]), ..Layout::default() };
+    visibility::apply(&mut nodes, &layout, true);
+    let out = shown(&nodes, None);
+    assert!(!out.text.contains(token), "{}", out.text);
+    assert!(out.text.contains("no name"), "the button is still named for what it is: {}", out.text);
+}
