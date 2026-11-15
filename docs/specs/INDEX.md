@@ -196,6 +196,12 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
+### agent lifecycle
+
+| Spec | Title | Status | Date | Replaces / replaced by |
+|---|---|---|---|---|
+| [`SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14`](SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md) | Spec: prepare, then proceed. An agent gets a window to reach a safe point before a user action restarts its session | active | 2026-11-14 |  |
+
 ### compaction
 
 | Spec | Title | Status | Date | Replaces / replaced by |
