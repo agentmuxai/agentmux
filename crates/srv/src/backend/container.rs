@@ -34,6 +34,7 @@ pub mod cli_release;
 pub mod upload;
 pub mod credential;
 pub mod image;
+mod image_tools;
 pub mod listener;
 pub mod routes;
 pub mod runtime;
@@ -340,6 +341,10 @@ pub enum ContainerError {
     /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
     #[error("no login for the container: {0}")]
     NoLogin(String),
+    /// The image lacks what an AgentMux agent needs to talk to AgentMux (`agentmux-bashwrap`, `agentmux-mcp`): a
+    /// container made from it starts and cannot reach its tools, its startup memory or anyone.
+    #[error("the image {image} has no {}", missing.join(" or "))]
+    ImageIncomplete { image: String, missing: Vec<String> },
 }
 
 impl ContainerError {
@@ -361,6 +366,12 @@ impl ContainerError {
             Self::NoId { .. } => docker_error_message("the container was created without an id"),
             Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
             Self::NoLogin(reason) => keychain_credentials::no_login_message(reason),
+            Self::ImageIncomplete { image, missing } => format!(
+                "This agent's container image ({image}) has no {}, so the agent could not reach its tools or its startup \
+                 memory, or message anyone. Set its image to one AgentMux ships (`Agents update_container` with \
+                 container_image, or the agent's definition in the window), or build yours from ghcr.io/agentmuxai/agent-base.",
+                missing.join(" or ")
+            ),
             Self::VolumeRefused { path } => format!(
                 "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
             ),
@@ -532,7 +543,7 @@ impl ContainerManager {
         // that has ever run. Recreate on drift; the per-agent named volume
         // carries session/project state across the swap.
         let existing = match existing {
-            Some(status) => match self.container_drift(container_name, spec).await {
+            Some(status) => match self.container_drift(container_name, image, spec).await {
                 Some(reason) => {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
@@ -1092,10 +1103,13 @@ impl ContainerManager {
     /// recreate kills a live agent and loses its container-local state,
     /// which is worse than one more restart on stale state we couldn't
     /// even confirm).
-    async fn container_drift(&self, container_name: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
+    async fn container_drift(&self, container_name: &str, image: &str, spec: &ContainerMountSpec) -> Option<&'static str> {
         let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
             return None;
         };
+        if image_tools::made_from_retired_image(&details, image) {
+            return Some("made from the retired agent image");
+        }
         if !Self::mounts_match(&details, container_name, spec) {
             return Some("mounts differ from the desired spec (credentials/workspace)");
         }
