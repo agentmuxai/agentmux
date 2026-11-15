@@ -416,3 +416,69 @@ fn a_blocks_own_timeout_is_a_whole_number_of_seconds_up_to_a_day() {
     assert_eq!(default_timeout(BlockKind::Agent), Some(Duration::from_secs(900)));
     assert_eq!(default_timeout(BlockKind::Variables), None);
 }
+
+/// A block that always fails: its reducer is not one.
+fn failing(id: &str) -> FlowNode {
+    node(id, json!({ "kind": "variables", "entries": [{ "name": "x", "value": "1", "reducer": "bogus" }] }))
+}
+
+fn with_handler(risky: FlowNode) -> DroneGraph {
+    DroneGraph {
+        nodes: vec![risky, response("handler", "caught: {{risky.error}}"), response("fine", "all good")],
+        edges: vec![edge("e1", "risky", "fine", None), edge("e2", "risky", "handler", Some("error"))],
+    }
+}
+
+#[tokio::test]
+async fn a_failed_block_goes_to_its_error_edge_and_the_run_goes_on() {
+    let out = run(with_handler(failing("risky"))).await;
+    let said = out.result.clone().unwrap();
+    assert!(said.as_str().unwrap().starts_with("caught: block risky failed:"), "{said}");
+    assert_eq!(out.states["risky"].status, "error", "the block still shows as failed");
+    assert_eq!(out.states["handler"].status, "done");
+    assert_eq!(out.states["fine"].status, "skipped", "a block that failed takes no other edge");
+}
+
+#[tokio::test]
+async fn a_block_that_works_leaves_its_error_edge_alone() {
+    let out = run(with_handler(vars("risky", "n", "x"))).await;
+    assert_eq!(out.result, Ok(json!("all good")));
+    assert_eq!(out.states["handler"].status, "skipped");
+}
+
+#[tokio::test]
+async fn a_failed_block_with_no_error_edge_fails_the_run() {
+    let g = DroneGraph { nodes: vec![failing("risky"), response("fine", "all good")], edges: vec![edge("e1", "risky", "fine", None)] };
+    let out = run(g).await;
+    assert!(out.result.unwrap_err().starts_with("block risky failed:"));
+    assert!(!out.states.contains_key("fine"), "never reached");
+}
+
+async fn events_of(graph: DroneGraph) -> Vec<RunEvent> {
+    let mut handle = run_drone("d".to_string(), graph, Value::Null, None).await.unwrap();
+    let mut events = Vec::new();
+    while let Some(ev) = handle.events.recv().await {
+        events.push(ev);
+    }
+    events
+}
+
+#[tokio::test]
+async fn each_pass_of_a_loop_after_the_first_is_announced() {
+    let events = events_of(counting_loop("xxxx", json!({}), "{{var.n}}")).await;
+    let passes: Vec<u32> = events.iter().filter_map(|e| if let RunEvent::LoopIteration { block_id, iteration, .. } = e { assert_eq!(block_id, "guard"); Some(*iteration) } else { None }).collect();
+    assert_eq!(passes, [2, 3]);
+    assert!(!events.iter().any(|e| matches!(e, RunEvent::CapReached { .. })));
+}
+
+#[tokio::test]
+async fn a_limit_that_is_met_is_announced_whether_the_run_ends_or_goes_on() {
+    for (on_cap, ends) in [("end_run", true), ("exit_loop", false)] {
+        let events = events_of(counting_loop("never", json!({ "max_iterations": 3, "on_cap": on_cap }), "out")).await;
+        let caps: Vec<(&String, &String)> = events.iter().filter_map(|e| if let RunEvent::CapReached { block_id, reason, .. } = e { Some((block_id, reason)) } else { None }).collect();
+        assert_eq!(caps.len(), 1, "{on_cap}: {caps:?}");
+        assert_eq!(caps[0].0, "guard");
+        assert!(caps[0].1.contains("3 of at most 3 iterations"), "{}", caps[0].1);
+        assert_eq!(events.iter().any(|e| matches!(e, RunEvent::RunFailed { .. })), ends, "{on_cap}");
+    }
+}

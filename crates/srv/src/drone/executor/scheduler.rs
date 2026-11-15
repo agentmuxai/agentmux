@@ -21,11 +21,12 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::blocks;
 use super::engine::{mark_state, Cancel, RunEnd, RunEvent};
+use super::retry;
 use super::schedule::{self, Guard, OnCap, Plan};
 use crate::drone::data_flow::ExecutionScope;
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
@@ -85,7 +86,15 @@ fn kind_of(node: &FlowNode) -> Result<BlockKind, String> {
 
 /// Whether `edge` carries the run on once its source has run: a Condition's
 /// edge only when its handle matches the result.
-fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value) -> bool {
+fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value, failed: bool) -> bool {
+    // An error edge is for a block that failed, and only it: a block that
+    // failed takes no other.
+    if edge.source_handle.as_deref() == Some("error") {
+        return failed;
+    }
+    if failed {
+        return false;
+    }
     if source.data.get("kind").and_then(|v| v.as_str()) != Some("condition") {
         return true;
     }
@@ -263,6 +272,7 @@ impl<'a> Scheduler<'a> {
             return Ok(());
         }
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
+            self.cap_reached(id, &stopped);
             return Err(stopped);
         }
         // A loop's time runs from the first block of its cycle, not from the
@@ -271,14 +281,63 @@ impl<'a> Scheduler<'a> {
         for guard in guards {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
-        let output = self.run_block(node).await?;
+        let (output, failed) = match self.run_block(node).await {
+            Ok(output) => (output, false),
+            Err(e) if !self.cancelled && self.has_error_edge(id) => {
+                // The graph has a handler for this block: its output says what
+                // went wrong, as text that came from outside, and the run goes on.
+                let output = json!({ "error": e, "failed": true });
+                self.scope.outputs.insert(id.to_string(), output.clone());
+                self.scope.bits.insert(id.to_string(), (true, false));
+                (output, true)
+            }
+            Err(e) => return Err(e),
+        };
         self.finished.insert(id);
-        self.route(node, &output)
+        self.route(node, &output, failed)
+    }
+
+    fn has_error_edge(&self, id: &str) -> bool {
+        self.outgoing.get(id).is_some_and(|edges| edges.iter().any(|e| e.source_handle.as_deref() == Some("error")))
+    }
+
+    fn cap_reached(&self, block_id: &str, reason: &str) {
+        let _ = self.tx.send(RunEvent::CapReached { run_id: self.run_id.to_string(), block_id: block_id.to_string(), reason: reason.to_string() });
     }
 
     /// A block's code, ended when the run is cancelled (an Agent block's process
     /// goes with it) or the block passes its timeout.
     async fn guarded(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        let retry = retry::retry_of(node)?;
+        let mut ran = 0;
+        loop {
+            let result = self.attempt(node, kind).await;
+            ran += 1;
+            if self.cancelled || !retry::again(retry, kind, &result, ran) {
+                return match result {
+                    Err(e) if ran > 1 => Err(format!("{e} (after {ran} tries)")),
+                    Ok(Value::Object(mut out)) if ran > 1 => {
+                        out.insert("tries".to_string(), json!(ran));
+                        Ok(Value::Object(out))
+                    }
+                    other => other,
+                };
+            }
+            let wait = retry.map_or(Duration::ZERO, |r| retry::delay(&r, ran));
+            let cancel = self.cancel.clone();
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => {
+                    self.cancelled = true;
+                    return Err(format!("stopped: {}", cancel.reason()));
+                }
+                () = tokio::time::sleep(wait) => {}
+            }
+        }
+    }
+
+    /// One run of a block's code, within its time limit.
+    async fn attempt(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
         let limit = match schedule::timeout_seconds(node)? {
             Some(secs) => Some(Duration::from_secs(secs)),
             None => default_timeout(kind),
@@ -403,14 +462,15 @@ impl<'a> Scheduler<'a> {
 
     /// Send the run along the edges out of a block that ran, and count a loop's
     /// iteration when a guard takes it round.
-    fn route(&mut self, node: &'a FlowNode, output: &Value) -> Result<(), String> {
+    fn route(&mut self, node: &'a FlowNode, output: &Value, failed: bool) -> Result<(), String> {
         let id = node.id.as_str();
         let edges = self.outgoing.get(id).cloned().unwrap_or_default();
-        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output)).collect();
+        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output, failed)).collect();
         if let Some(guard) = self.plan.guards.get(id).cloned() {
             let goes_round = edges.iter().zip(&carry).any(|(e, c)| *c && guard.loop_edges.contains(&e.id));
             if goes_round {
                 if let Some(why) = self.loop_cap(id, &guard) {
+                    self.cap_reached(id, &why);
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
                         OnCap::ExitLoop => {
@@ -425,7 +485,9 @@ impl<'a> Scheduler<'a> {
                         }
                     }
                 } else {
-                    *self.rounds.entry(id).or_default() += 1;
+                    let rounds = self.rounds.entry(id).or_default();
+                    *rounds += 1;
+                    let _ = self.tx.send(RunEvent::LoopIteration { run_id: self.run_id.to_string(), block_id: id.to_string(), iteration: *rounds + 1 });
                 }
             }
         }
