@@ -126,10 +126,12 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
         ));
     }
     if let Some(b) = f.blocked.as_ref().filter(|_| f.running.is_none()) {
+        // A warning, not a failure: this is the note of an earlier start, which may have cleared since (the other AgentMux
+        // closed). `setup` stops on a failure before it starts the server, and the start is what finds out and clears it.
         out.push(check(
             "shared folder",
-            Level::Fail,
-            format!("{} is using it, and this version's data needs preparing first", b.owner),
+            Level::Warn,
+            format!("the last start was refused: {} is using it, and this version's data needs preparing first", b.owner),
             Some(&format!("close {} and run `agentmux start`, or update one of the two so both are the same version", b.owner)),
         ));
     }
@@ -393,13 +395,15 @@ mod tests {
     }
 
     #[test]
-    fn a_start_refused_beside_another_version_is_a_failure_that_says_what_to_do() {
+    fn a_start_refused_beside_another_version_is_a_warning_that_says_what_to_do_and_never_stops_setup() {
         let blocked = crate::state::Blocked { owner: "AgentMux 0.60.27 (stable)".into(), reason: "29 migration(s) pending".into(), version: "0.60.28".into(), since_unix: 1 };
         let facts = Facts { blocked: Some(blocked.clone()), ..good() };
         let checks = evaluate(&facts);
-        assert!(failed(&checks));
+        assert_eq!(level_of(&checks, "shared folder"), vec![Level::Warn]);
+        // `setup` refuses to go on after a failure; the note is the last start's, and the next start clears or renews it.
+        assert!(!failed(&checks), "a remembered refusal must not stop setup from retrying");
         let text = lines(&checks).join("\n");
-        assert!(text.contains("FAIL shared folder: AgentMux 0.60.27 (stable) is using it") && text.contains("-> close AgentMux 0.60.27 (stable) and run `agentmux start`"), "{text}");
+        assert!(text.contains("the last start was refused: AgentMux 0.60.27 (stable) is using it") && text.contains("-> close AgentMux 0.60.27 (stable) and run `agentmux start`"), "{text}");
         // A server that is running again has no refusal to report.
         let up = Facts { blocked: Some(blocked), running: Some(running("0.60.26")), answering: true, ..good() };
         assert!(level_of(&evaluate(&up), "shared folder").is_empty());
