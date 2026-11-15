@@ -172,7 +172,7 @@ fn a_loops_cost_and_time_limits_end_it_with_their_reason() {
     let graph = counting_loop("never", json!({ "max_cost_usd": 1.0, "max_minutes": 5 }), "unreached");
     let plan = schedule::analyze(&graph).unwrap();
     let guard = plan.guards["guard"].clone();
-    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), None, &tx, &states);
+    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), Limits::default(), &tx, &states);
     assert_eq!(s.loop_cap("guard", &guard), None, "nothing spent, nothing elapsed");
     s.spent_by.insert("step", 0.6);
     s.spent_by.insert("guard", 0.5);
@@ -191,7 +191,7 @@ async fn a_loops_clock_starts_with_the_first_block_of_its_cycle() {
     let states: States = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let graph = counting_loop("never", json!({ "max_minutes": 5 }), "unreached");
     let plan = schedule::analyze(&graph).unwrap();
-    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), None, &tx, &states);
+    let mut s = Scheduler::new("r", &graph, plan, ExecutionScope::new(), Limits::default(), &tx, &states);
     s.enqueue("start", false);
     s.step("start", false).await.unwrap();
     assert!(s.loop_started.is_empty(), "the start block is not in the cycle");
@@ -254,7 +254,7 @@ async fn the_run_marks_what_came_from_outside_as_tainted_for_the_state() {
     };
     let plan = schedule::analyze(&graph).unwrap();
     let scope = ExecutionScope::with_trigger(json!({ "title": "hi" }));
-    let mut s = Scheduler::new("r", &graph, plan, scope, None, &tx, &states);
+    let mut s = Scheduler::new("r", &graph, plan, scope, Limits::default(), &tx, &states);
     s.run().await.unwrap();
     assert!(s.scope.state.get("x").unwrap().tainted);
     assert_eq!(s.scope.bits["c"], (false, true), "a boolean made from tainted text is derived, not tainted");
@@ -349,4 +349,70 @@ async fn items_that_are_not_a_list_fail_the_block_and_say_what_they_were() {
     let out = run_with(g, trigger).await;
     let why = out.result.unwrap_err();
     assert!(why.contains("items must be a list") && why.contains("text"), "{why}");
+}
+
+/// The run's events until it ends: how it ended, and the blocks that finished.
+async fn end_of(mut handle: crate::drone::executor::engine::RunHandle) -> (String, Vec<String>) {
+    let (mut ended, mut done) = (String::new(), Vec::new());
+    while let Some(ev) = handle.events.recv().await {
+        match ev {
+            RunEvent::BlockDone { block_id, .. } => done.push(block_id),
+            RunEvent::RunDone { .. } => ended = "done".to_string(),
+            RunEvent::RunFailed { error, .. } => ended = format!("failed: {error}"),
+            RunEvent::RunCancelled { reason, .. } => ended = format!("cancelled: {reason}"),
+            _ => {}
+        }
+    }
+    (ended, done)
+}
+
+#[tokio::test]
+async fn a_cancelled_run_runs_no_more_blocks_and_ends_with_the_reason() {
+    // The run is spawned but cannot start until this test awaits.
+    let handle = run_drone("d".to_string(), counting_loop("never", json!({ "max_iterations": 1000 }), "unreached"), Value::Null, None).await.unwrap();
+    assert!(crate::drone::executor::cancel_run(&handle.run_id, "stopped by a person"));
+    assert!(!crate::drone::executor::cancel_run(&handle.run_id, "again"), "a stopped run is stopped once");
+    let states = handle.final_states.clone();
+    let (ended, done) = end_of(handle).await;
+    assert_eq!(ended, "cancelled: stopped by a person", "the first reason stays");
+    assert!(done.is_empty(), "{done:?}");
+    assert!(states.lock().await.values().all(|s| s.status != "done"));
+}
+
+#[tokio::test]
+async fn a_run_that_is_not_going_cannot_be_cancelled() {
+    assert!(!crate::drone::executor::cancel_run("no-such-run", "x"));
+    let handle = run_drone("d".to_string(), counting_loop("xx", json!({}), "{{var.n}}"), Value::Null, None).await.unwrap();
+    let run_id = handle.run_id.clone();
+    let (ended, _) = end_of(handle).await;
+    assert_eq!(ended, "done");
+    assert!(!crate::drone::executor::cancel_run(&run_id, "too late"), "a finished run is not kept");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_block_that_takes_longer_than_its_timeout_fails_and_says_how_long() {
+    let slow = |secs| async move {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        Ok::<_, String>(1)
+    };
+    assert_eq!(within(Some(Duration::from_secs(2)), slow(60)).await, Err("timed out after 2 seconds".to_string()));
+    assert_eq!(within(Some(Duration::from_secs(90)), slow(600)).await, Err("timed out after 90 seconds".to_string()));
+    assert_eq!(within(Some(Duration::from_secs(900)), slow(1000)).await, Err("timed out after 15 minutes".to_string()));
+    assert_eq!(within(Some(Duration::from_secs(7200)), slow(8000)).await, Err("timed out after 2 hours".to_string()));
+    assert_eq!(within(Some(Duration::from_secs(5)), slow(1)).await, Ok(1));
+    assert_eq!(within(None, slow(100_000)).await, Ok(1), "no limit, no timeout");
+}
+
+#[test]
+fn a_blocks_own_timeout_is_a_whole_number_of_seconds_up_to_a_day() {
+    let with_timeout = |t: Value| DroneGraph { nodes: vec![node("a", json!({ "kind": "variables", "entries": [], "timeout_seconds": t }))], edges: vec![] };
+    for ok in [json!(1), json!(900), json!(86_400)] {
+        assert!(schedule::analyze(&with_timeout(ok.clone())).is_ok(), "{ok}");
+    }
+    for bad in [json!(0), json!(86_401), json!(-5), json!(1.5), json!("30")] {
+        let issues = schedule::analyze(&with_timeout(bad.clone())).unwrap_err();
+        assert!(issues.iter().any(|i| i.message.contains("timeout_seconds must be a whole number from 1 to 86400")), "{bad}: {issues:?}");
+    }
+    assert_eq!(default_timeout(BlockKind::Agent), Some(Duration::from_secs(900)));
+    assert_eq!(default_timeout(BlockKind::Variables), None);
 }

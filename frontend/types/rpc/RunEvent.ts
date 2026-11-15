@@ -3,4 +3,4 @@
 /**
  * Streaming events emitted to the frontend during a run.
  */
-export type RunEvent = { "kind": "run_started", run_id: string, drone_id: string, } | { "kind": "block_started", run_id: string, block_id: string, } | { "kind": "block_done", run_id: string, block_id: string, output: unknown, } | { "kind": "block_error", run_id: string, block_id: string, error: string, } | { "kind": "run_done", run_id: string, output: unknown, } | { "kind": "run_failed", run_id: string, error: string, };
+export type RunEvent = { "kind": "run_started", run_id: string, drone_id: string, } | { "kind": "block_started", run_id: string, block_id: string, } | { "kind": "block_done", run_id: string, block_id: string, output: unknown, } | { "kind": "block_error", run_id: string, block_id: string, error: string, } | { "kind": "run_done", run_id: string, output: unknown, } | { "kind": "run_failed", run_id: string, error: string, } | { "kind": "run_cancelled", run_id: string, reason: string, };
