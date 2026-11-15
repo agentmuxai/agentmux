@@ -7,6 +7,7 @@ pub mod app_query;
 pub mod api;
 pub mod call;
 pub mod condition;
+pub mod join;
 pub mod message;
 pub mod notify;
 pub mod response;

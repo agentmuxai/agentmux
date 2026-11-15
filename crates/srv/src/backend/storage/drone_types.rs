@@ -35,6 +35,8 @@ pub enum BlockKind {
     Wait,
     /// Calls another drone as a step.
     Drone,
+    /// Brings branches that split back together.
+    Join,
 }
 
 impl BlockKind {
@@ -54,6 +56,7 @@ impl BlockKind {
             "spawn" => Some(Self::Spawn),
             "wait" => Some(Self::Wait),
             "drone" => Some(Self::Drone),
+            "join" => Some(Self::Join),
             _ => None,
         }
     }
