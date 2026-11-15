@@ -173,6 +173,27 @@ pub fn parse_needs_prepare_line(line: &str) -> Option<String> {
     Some(rest.strip_prefix("reason:").unwrap_or(rest).trim().to_string())
 }
 
+/// srv's exit code (and `migrate`'s) when another AgentMux of a different version holds the shared folder and this
+/// version's data needs preparing first: a refusal that does not clear until that AgentMux is closed, so a
+/// supervisor must not start it again by itself.
+pub const SHARED_FOLDER_HELD_EXIT: i32 = 5;
+
+/// Prefix of the line srv writes just before exiting [`SHARED_FOLDER_HELD_EXIT`].
+pub const SHARED_FOLDER_HELD_PREFIX: &str = "AGENTMUXSRV-SHARED-FOLDER-HELD";
+
+/// `AGENTMUXSRV-SHARED-FOLDER-HELD owner:<who> reason:<why the data needs preparing>`.
+pub fn shared_folder_held_line(owner: &str, reason: &str) -> String {
+    format!("{SHARED_FOLDER_HELD_PREFIX} owner:{} reason:{}", one_line(owner), one_line(reason))
+}
+
+/// The owner and the reason of a `SHARED_FOLDER_HELD_PREFIX` line; `None` for any other line.
+pub fn parse_shared_folder_held_line(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix(SHARED_FOLDER_HELD_PREFIX)?.trim_start();
+    let rest = rest.strip_prefix("owner:").unwrap_or(rest);
+    let (owner, reason) = rest.split_once(" reason:").unwrap_or((rest, ""));
+    Some((owner.trim().to_string(), reason.trim().to_string()))
+}
+
 /// Prefix of the line srv writes when a data-preparation step starts.
 pub const STEP_BEGIN_PREFIX: &str = "AGENTMUXSRV-STEP-BEGIN";
 /// Prefix of the line srv writes when that step ends.
@@ -350,6 +371,16 @@ pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shared_folder_held_line_round_trips_on_one_line() {
+        let line = shared_folder_held_line("AgentMux 0.60.27 (stable)", "29 migration(s) pending,\nstarting with 0002_block_zones_v1");
+        assert!(!line.contains('\n'), "{line}");
+        let (owner, reason) = parse_shared_folder_held_line(&line).unwrap();
+        assert_eq!(owner, "AgentMux 0.60.27 (stable)");
+        assert_eq!(reason, "29 migration(s) pending, | starting with 0002_block_zones_v1");
+        assert!(parse_shared_folder_held_line("agentmux-srv: something else").is_none());
+    }
 
     #[test]
     fn estart_line_round_trips() {

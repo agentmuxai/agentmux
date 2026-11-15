@@ -55,6 +55,8 @@ pub struct Facts {
     /// the system always has a store).
     pub certs_found: Option<bool>,
     pub installed_version: &'static str,
+    /// The note a start left when another AgentMux's version held the shared folder.
+    pub blocked: Option<crate::state::Blocked>,
     /// The service: whether its file exists, and whether it names this command's program.
     pub service_installed: bool,
     pub service_names_exe: Option<bool>,
@@ -121,6 +123,14 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
             Level::Warn,
             format!("not found: {} (the agent tools link them)", f.missing_libs.join(", ")),
             Some("install them with your package manager (Debian and Ubuntu: `apt install libdbus-1-3 libxcb1`; Fedora: `dnf install dbus-libs libxcb`)"),
+        ));
+    }
+    if let Some(b) = f.blocked.as_ref().filter(|_| f.running.is_none()) {
+        out.push(check(
+            "shared folder",
+            Level::Fail,
+            format!("{} is using it, and this version's data needs preparing first", b.owner),
+            Some(&format!("close {} and run `agentmux start`, or update one of the two so both are the same version", b.owner)),
         ));
     }
     if let Some(s) = &f.running {
@@ -258,6 +268,7 @@ mod tests {
             missing_libs: vec![],
             certs_found: Some(true),
             installed_version: "0.60.26",
+            blocked: None,
             service_installed: false,
             service_names_exe: None,
         }
@@ -379,6 +390,19 @@ mod tests {
         assert_eq!(level_of(&evaluate(&facts), "version"), vec![Level::Warn]);
         let same = Facts { running: Some(running("0.60.26")), answering: true, ..good() };
         assert!(level_of(&evaluate(&same), "version").is_empty());
+    }
+
+    #[test]
+    fn a_start_refused_beside_another_version_is_a_failure_that_says_what_to_do() {
+        let blocked = crate::state::Blocked { owner: "AgentMux 0.60.27 (stable)".into(), reason: "29 migration(s) pending".into(), version: "0.60.28".into(), since_unix: 1 };
+        let facts = Facts { blocked: Some(blocked.clone()), ..good() };
+        let checks = evaluate(&facts);
+        assert!(failed(&checks));
+        let text = lines(&checks).join("\n");
+        assert!(text.contains("FAIL shared folder: AgentMux 0.60.27 (stable) is using it") && text.contains("-> close AgentMux 0.60.27 (stable) and run `agentmux start`"), "{text}");
+        // A server that is running again has no refusal to report.
+        let up = Facts { blocked: Some(blocked), running: Some(running("0.60.26")), answering: true, ..good() };
+        assert!(level_of(&evaluate(&up), "shared folder").is_empty());
     }
 
     #[test]
