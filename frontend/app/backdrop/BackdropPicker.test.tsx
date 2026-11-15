@@ -164,6 +164,20 @@ describe("BackdropPicker", () => {
         expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin("teal", "dark")!.surfaces.surface);
     });
 
+    it("keeps its clicks, presses and focus to itself, so the pane's own handlers don't take focus from a swatch", () => {
+        const seen: string[] = [];
+        const { container } = render(() => (
+            <div class="block-frame-default" onClick={() => seen.push("click")} onMouseDown={() => seen.push("down")} onFocusIn={() => seen.push("focus")}>
+                <BackdropPicker blockId="pk" meta={() => ({})} onClose={() => {}} />
+            </div>
+        ));
+        const swatch = radios(container)[0];
+        fireEvent.mouseDown(swatch);
+        fireEvent.click(swatch);
+        fireEvent.focusIn(swatch);
+        expect(seen).toEqual([]);
+    });
+
     it("takes focus when it opens, so Esc works at once", () => {
         const { container } = mount();
         expect(document.activeElement).toBe(container.querySelector("[role=dialog]"));
