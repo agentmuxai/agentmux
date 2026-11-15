@@ -295,7 +295,6 @@ fn rehome_for_container(
 ) -> (Vec<crate::backend::attachments::prompt::Resolved>, Vec<String>) {
     use crate::backend::runtime_adapter::MountRole;
     let container_root = RuntimeKind::Container.adapter().map_mount(MountRole::Workspace, host_cwd);
-    let host_root = std::path::Path::new(host_cwd).join(CONTAINER_ATTACHMENTS_SUBDIR);
     let mut rehomed = Vec::with_capacity(found.len());
     for mut item in found {
         let Some(suffix) = id_bearing_suffix(&item.path) else {
@@ -303,7 +302,7 @@ fn rehome_for_container(
             missing.push(item.name);
             continue;
         };
-        match safe_rehome_copy(&host_root, &suffix, &item.path) {
+        match safe_rehome_copy(host_cwd, &suffix, &item.path) {
             Ok(()) => {
                 let suffix = suffix.to_string_lossy().replace('\\', "/");
                 item.path = std::path::PathBuf::from(format!("{container_root}/{CONTAINER_ATTACHMENTS_SUBDIR}/{suffix}"));
@@ -318,18 +317,20 @@ fn rehome_for_container(
     (rehomed, missing)
 }
 
-/// Copies `src` into `host_root.join(suffix)`, refusing to follow a symlink a container agent could have
-/// planted anywhere under `host_root`. `host_root` is a subfolder of the pane's working folder, which the
-/// bind mount hands the container read-write access to as `/workspace`: a compromised agent can pre-create
-/// a symlink there pointing at an arbitrary host path, and a plain `create_dir_all` + `fs::copy` would walk
-/// or write through it as the host process (#7434). `host_root`'s own ancestors (the working folder and
-/// above) sit outside the mount boundary — the container cannot replace them — so only `host_root` itself
-/// and `suffix`'s directory components are walked and checked; a legitimate symlink elsewhere on the host
-/// (a symlinked home directory, for instance) is left alone. The write itself lands via a same-directory
-/// rename, which replaces whatever is at the destination — symlink or not — without ever opening it.
-fn safe_rehome_copy(host_root: &std::path::Path, suffix: &std::path::Path, src: &std::path::Path) -> std::io::Result<()> {
-    let mut built = std::path::PathBuf::new();
-    for component in host_root.components().chain(suffix.parent().into_iter().flat_map(|p| p.components())) {
+/// Copies `src` into `host_cwd/CONTAINER_ATTACHMENTS_SUBDIR/suffix`, refusing to follow a symlink a
+/// container agent could have planted anywhere under its working folder. `host_cwd` itself, and
+/// everything above it, sits outside the bind mount a container agent can write to — the container
+/// cannot replace the working folder's own directory entry, only create things inside it — so `host_cwd`
+/// is trusted outright and never walked; a legitimate symlink above it (a symlinked home directory, or
+/// `/tmp` on macOS) is left alone. Only `CONTAINER_ATTACHMENTS_SUBDIR` and `suffix`'s own directory
+/// components, all of which live inside the mount, are checked: a plain `create_dir_all` + `fs::copy`
+/// there would walk or write through a planted symlink as the host process (#7434). The write itself
+/// lands via a same-directory rename, which replaces whatever is at the destination — symlink or not —
+/// without ever opening it.
+fn safe_rehome_copy(host_cwd: &str, suffix: &std::path::Path, src: &std::path::Path) -> std::io::Result<()> {
+    let mut built = std::path::PathBuf::from(host_cwd);
+    let rest = std::path::Path::new(CONTAINER_ATTACHMENTS_SUBDIR).join(suffix.parent().unwrap_or(std::path::Path::new("")));
+    for component in rest.components() {
         built.push(component);
         match std::fs::symlink_metadata(&built) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -340,7 +341,7 @@ fn safe_rehome_copy(host_root: &std::path::Path, suffix: &std::path::Path, src: 
             Err(_) => std::fs::create_dir(&built)?,
         }
     }
-    let dest = host_root.join(suffix);
+    let dest = built.join(suffix.file_name().unwrap_or_default());
     let tmp = built.join(format!(".{}.part", uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::copy(src, &tmp) {
         let _ = std::fs::remove_file(&tmp);

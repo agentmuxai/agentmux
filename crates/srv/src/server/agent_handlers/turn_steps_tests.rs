@@ -71,6 +71,28 @@ fn an_images_send_copy_keeps_its_id_and_send_suffix_so_reload_and_the_image_coun
     assert_eq!(std::fs::read(cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join(format!("{HASH_A}.v1-e2000.send.png"))).unwrap(), b"png bytes");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_cwd_reached_through_a_symlinked_ancestor_is_not_refused() {
+    // The symlink-safety walk must trust host_cwd and everything above it (a symlinked /tmp on macOS, a
+    // symlinked home directory): a container agent cannot replace any of that, only the
+    // .agentmux-attachments subtree it can actually write to (#7434).
+    let host = tempfile::tempdir().unwrap();
+    let send_copy = host.path().join(format!("{HASH_A}.send.png"));
+    std::fs::write(&send_copy, b"png bytes").unwrap();
+
+    let real_cwd = tempfile::tempdir().unwrap();
+    let link_parent = tempfile::tempdir().unwrap();
+    let symlinked_cwd = link_parent.path().join("cwd-via-symlink");
+    std::os::unix::fs::symlink(real_cwd.path(), &symlinked_cwd).unwrap();
+
+    let (found, missing) = rehome_for_container(vec![resolved(1, "shot.png", send_copy)], Vec::new(), symlinked_cwd.to_str().unwrap());
+
+    assert!(missing.is_empty(), "{missing:?}");
+    assert_eq!(found.len(), 1);
+    assert_eq!(std::fs::read(real_cwd.path().join(CONTAINER_ATTACHMENTS_SUBDIR).join(format!("{HASH_A}.send.png"))).unwrap(), b"png bytes");
+}
+
 #[test]
 fn a_named_copy_keeps_its_named_hash_realname_shape() {
     let host = tempfile::tempdir().unwrap();
