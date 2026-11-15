@@ -108,6 +108,17 @@ async fn a_loop_may_be_left_at_its_limit_and_the_run_goes_on() {
 }
 
 #[tokio::test]
+async fn leaving_a_loop_at_its_limit_does_not_take_the_guards_error_edge() {
+    let mut g = counting_loop("never", json!({ "max_iterations": 3, "on_cap": "exit_loop" }), "capped={{guard.capped}}");
+    g.nodes.push(response("handler", "caught"));
+    g.edges.push(edge("e5", "guard", "handler", Some("error")));
+    let out = run(g).await;
+    assert_eq!(out.result, Ok(json!("capped=true")));
+    assert_eq!(out.states["done"].status, "done");
+    assert_eq!(out.states["handler"].status, "skipped", "the guard did not fail");
+}
+
+#[tokio::test]
 async fn a_block_that_runs_again_can_read_its_earlier_outputs() {
     let out = run(counting_loop("xxxx", json!({}), "{{var.n}}")).await;
     let steps: Vec<&Value> = out.done.iter().filter(|(b, _)| b == "step").map(|(_, o)| o).collect();

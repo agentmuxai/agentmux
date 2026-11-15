@@ -535,9 +535,12 @@ impl<'a> Scheduler<'a> {
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
                         OnCap::ExitLoop => {
-                            // Leaving the loop takes every edge that is not one of its own.
+                            // Leaving the loop takes every edge that is not one of its own,
+                            // except that an error edge is for a block that failed, and
+                            // only it (`carries_on`).
                             for (e, c) in edges.iter().zip(carry.iter_mut()) {
-                                *c = !guard.loop_edges.contains(&e.id);
+                                let error_edge = e.source_handle.as_deref() == Some("error");
+                                *c = !guard.loop_edges.contains(&e.id) && error_edge == failed;
                             }
                             if let Some(map) = self.scope.outputs.get_mut(id).and_then(Value::as_object_mut) {
                                 map.insert("capped".to_string(), Value::Bool(true));
