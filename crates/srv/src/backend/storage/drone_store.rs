@@ -272,7 +272,7 @@ impl DroneStore for Store {
             &format!(
                 "UPDATE db_drone_runs SET status = ?1, ended_at = ?2,
                         error = CASE WHEN error = '' THEN 'interrupted: AgentMux restarted during this run' ELSE error END
-                  WHERE status IN ('running', 'needs_attention') AND id NOT IN ({skip})"
+                  WHERE status IN ('running', 'needs_attention', 'waiting') AND id NOT IN ({skip})"
             ),
             args.as_slice(),
         )?)
@@ -282,7 +282,7 @@ impl DroneStore for Store {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, drone_id, status, started_at, ended_at, block_states, output, error
-             FROM db_drone_runs WHERE status IN ('running', 'needs_attention') ORDER BY started_at",
+             FROM db_drone_runs WHERE status IN ('running', 'needs_attention', 'waiting') ORDER BY started_at",
         )?;
         let iter = stmt.query_map([], |row| {
             let block_states_s: String = row.get(5)?;

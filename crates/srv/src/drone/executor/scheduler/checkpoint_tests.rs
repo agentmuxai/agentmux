@@ -459,3 +459,197 @@ async fn a_run_that_is_cancelled_while_it_waits_ends_cancelled_and_stops_waiting
     let events = the_rest(&mut p.events).await;
     assert!(!events.iter().any(|e| matches!(e, RunEvent::BlockStarted { .. })), "the step was never run");
 }
+
+// ── Wait ────────────────────────────────────────────────────────────────────
+
+use crate::backend::drone_wait;
+
+/// `first`, then a Wait block set as `wait` says, then a response that reads what it came to.
+fn waiting(wait: Value, template: &str) -> DroneGraph {
+    let mut data = json!({ "kind": "wait" });
+    data.as_object_mut().unwrap().extend(wait.as_object().cloned().unwrap_or_default());
+    DroneGraph {
+        nodes: vec![vars("first", "a", "1"), node("wait", data), response("done", template)],
+        edges: vec![edge("e1", "first", "wait", None), edge("e2", "wait", "done", None)],
+    }
+}
+
+/// How many of a run's checkpoints it had kept when it stopped at its wait.
+fn waiting_at(kept: &Kept) -> usize {
+    let rows = kept.rows();
+    (1..=rows.len()).find(|n| load(&rows[..*n]).unwrap().unwrap().frontier.waiting == ["wait"]).expect("a checkpoint says the run is waiting")
+}
+
+#[tokio::test]
+async fn a_run_that_waits_for_a_time_keeps_where_it_waits_and_goes_on_when_the_time_comes() {
+    let graph = waiting(json!({ "for": "300ms" }), "late={{wait.late}}");
+    let started = std::time::Instant::now();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    assert_eq!(kept.result, Ok(json!("late=false")));
+    assert!(started.elapsed() >= std::time::Duration::from_millis(300), "it waited");
+
+    let n = waiting_at(&kept);
+    let at_wait = load(&kept.rows()[..n]).unwrap().unwrap();
+    assert!(at_wait.deadlines["wait"] > 0 && at_wait.resume_on.is_empty());
+    assert!(at_wait.frontier.running.is_empty(), "a wait is not a step with effects");
+    let last = load(&kept.rows()).unwrap().unwrap();
+    assert!(last.deadlines.is_empty() && last.frontier.waiting.is_empty(), "nothing is waited for once it is over");
+    assert_eq!(last.bits["wait"], (false, false), "a time brings nothing from outside");
+}
+
+#[tokio::test]
+async fn a_restart_takes_a_wait_up_where_it_was_and_does_not_start_it_over() {
+    let graph = waiting(json!({ "for": "700ms" }), "late={{wait.late}}");
+    let sink = Arc::new(MemorySink::default());
+    let mut handle = run_drone("d".to_string(), graph.clone(), Value::Null, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    while let Some(ev) = handle.events.recv().await {
+        if matches!(ev, RunEvent::Waiting { .. }) {
+            break;
+        }
+    }
+    // The first process is gone; what it kept is what the restart finds.
+    assert!(crate::backend::drone_cancel::cancel_run(&handle.run_id, "test over"));
+    while handle.events.recv().await.is_some() {}
+    let c = load(&sink.rows_of(&handle.run_id)).unwrap().unwrap();
+    let deadline = c.deadlines["wait"];
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((&graph, &c, Limits::default()), &tx, &states).await;
+    let finished = agentmux_common::time::now_ms();
+    assert_eq!(ended.ok(), Some(json!("late=false")));
+    drop(tx);
+    while rx.recv().await.is_some() {}
+    // It waited out what was left of the deadline it kept: not the whole 700 ms again, and not less.
+    assert!(finished >= deadline, "it did not go on before its time");
+    assert!(finished - deadline < 150, "it did not start the wait over: {} ms after its deadline", finished - deadline);
+}
+
+#[tokio::test]
+async fn a_wait_whose_time_passed_while_agentmux_was_stopped_ends_at_once_and_says_it_was_late() {
+    let graph = waiting(json!({ "for": "1h" }), "late={{wait.late}}");
+    // The run is at its wait: what it has kept is what a restart would find.
+    let sink = Arc::new(MemorySink::default());
+    let handle = run_drone("d".to_string(), graph.clone(), Value::Null, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    let (run_id, mut events) = (handle.run_id.clone(), handle.events);
+    while let Some(ev) = events.recv().await {
+        if matches!(ev, RunEvent::Waiting { .. }) {
+            break;
+        }
+    }
+    let mut c = load(&sink.rows_of(&run_id)).unwrap().unwrap();
+    assert_eq!(c.frontier.waiting, ["wait"]);
+    c.deadlines.insert("wait".to_string(), agentmux_common::time::now_ms() - 5_000);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((&graph, &c, Limits::default()), &tx, &states).await;
+    assert_eq!(ended.ok(), Some(json!("late=true")));
+    drop(tx);
+    let mut came = None;
+    while let Some(ev) = rx.recv().await {
+        if let RunEvent::BlockDone { block_id, output, .. } = ev {
+            if block_id == "wait" {
+                came = Some(output);
+            }
+        }
+    }
+    let came = came.unwrap();
+    assert!(came["late_ms"].as_i64().unwrap() >= 5_000, "{came}");
+}
+
+#[tokio::test]
+async fn a_wait_on_an_event_goes_on_when_its_key_is_used_and_what_came_is_outside_text() {
+    let graph = waiting(json!({ "on": "deploy.finished" }), "n={{wait.payload.n}}");
+    let sink = Arc::new(MemorySink::default());
+    let mut handle = run_drone("d".to_string(), graph.clone(), Value::Null, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    let run_id = handle.run_id.clone();
+    let mut key = String::new();
+    let mut ended = Vec::new();
+    while let Some(ev) = handle.events.recv().await {
+        match ev {
+            RunEvent::Waiting { on, key: Some(k), resume_at: None, .. } => {
+                assert_eq!(on.as_deref(), Some("deploy.finished"));
+                assert_eq!(k.len(), 64);
+                assert!(drone_wait::signal("not-the-key", json!(1)).is_err(), "a guess does nothing");
+                drone_wait::signal(&k, json!({ "n": 7 })).unwrap();
+                key = k;
+            }
+            RunEvent::WaitEnded { late, .. } => ended.push(late),
+            RunEvent::RunDone { output, .. } => assert_eq!(output, json!("n=7")),
+            RunEvent::RunFailed { error, .. } => panic!("{error}"),
+            _ => {}
+        }
+    }
+    assert!(!key.is_empty() && ended == [false]);
+    assert!(drone_wait::signal(&key, json!(1)).is_err(), "a key answers once");
+    let rows = sink.rows_of(&run_id);
+    let kept_key = (1..=rows.len()).find_map(|n| load(&rows[..n]).unwrap().unwrap().resume_on.get("wait").cloned());
+    assert_eq!(kept_key.as_deref(), Some(key.as_str()), "the key was kept before the run waited");
+    assert_eq!(load(&rows).unwrap().unwrap().bits["wait"], (true, false), "what the event brought is outside text");
+}
+
+#[tokio::test]
+async fn a_restart_takes_up_a_wait_on_an_event_with_the_same_key() {
+    let graph = waiting(json!({ "on": "deploy.finished" }), "n={{wait.payload.n}}");
+    let sink = Arc::new(MemorySink::default());
+    let mut handle = run_drone("d".to_string(), graph.clone(), Value::Null, (None, Some(Persist { sink: sink.clone(), graph: graph_ref() }))).await.unwrap();
+    let mut key = String::new();
+    while let Some(ev) = handle.events.recv().await {
+        if let RunEvent::Waiting { key: Some(k), .. } = ev {
+            key = k;
+            break;
+        }
+    }
+    // The first process is gone: its wait goes with it.
+    assert!(crate::backend::drone_cancel::cancel_run(&handle.run_id, "test over"));
+    while handle.events.recv().await.is_some() {}
+    assert!(drone_wait::signal(&key, json!(1)).is_err(), "a stopped run no longer waits");
+
+    let c = load(&sink.rows_of(&handle.run_id)).unwrap().unwrap();
+    assert_eq!(c.resume_on["wait"], key);
+    let (tx, mut events) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let (graph2, c2) = (graph.clone(), c.clone());
+    let task = tokio::spawn(async move { resume((&graph2, &c2, Limits::default()), &tx, &states).await.ok() });
+    let again = loop {
+        if let RunEvent::Waiting { key: Some(k), .. } = events.recv().await.expect("the run waits again") {
+            break k;
+        }
+    };
+    assert_eq!(again, key, "the same wait, so the same key");
+    drone_wait::signal(&key, json!({ "n": 3 })).unwrap();
+    assert_eq!(task.await.unwrap(), Some(json!("n=3")));
+}
+
+#[tokio::test]
+async fn a_run_that_is_stopped_while_it_waits_ends_and_its_key_stops_working() {
+    let graph = waiting(json!({ "on": "never" }), "unreached");
+    let mut handle = run_drone("d".to_string(), graph, Value::Null, (None, None)).await.unwrap();
+    let mut key = String::new();
+    while let Some(ev) = handle.events.recv().await {
+        if let RunEvent::Waiting { key: Some(k), .. } = ev {
+            key = k;
+            break;
+        }
+    }
+    assert!(crate::backend::drone_cancel::cancel_run(&handle.run_id, "asked to stop"));
+    let mut cancelled = false;
+    while let Some(ev) = handle.events.recv().await {
+        cancelled |= matches!(ev, RunEvent::RunCancelled { .. });
+    }
+    assert!(cancelled);
+    assert!(drone_wait::signal(&key, json!(1)).is_err());
+}
+
+#[tokio::test]
+async fn a_wait_set_wrongly_is_refused_before_the_run_starts_and_a_limit_ends_an_event_wait() {
+    let none = run_kept(waiting(json!({}), "x"), Value::Null).await;
+    assert!(none.result.unwrap_err().contains("needs `for`, `until` or `on`"));
+    let both = run_kept(waiting(json!({ "for": "1m", "on": "x" }), "x"), Value::Null).await;
+    assert!(both.result.unwrap_err().contains("only one of"));
+
+    let limited = run_kept(waiting(json!({ "on": "never", "timeout_seconds": 1 }), "x"), Value::Null).await;
+    assert!(limited.result.unwrap_err().contains("block wait failed: timed out after 1 seconds"));
+}

@@ -13,7 +13,7 @@ use crate::drone::executor::run_drone;
 use crate::drone::recorder::MemorySink;
 use crate::drone::types::{DroneDefinition, FlowEdge, FlowNode, NodePosition, RunStatus};
 use crate::drone::versions::Pin;
-use crate::server::drone_handlers::{resolve_drone_run, upsert_drone, ResolveRunReq};
+use crate::server::drone_handlers::{resolve_drone_run, resume_drone_wait, upsert_drone, ResolveRunReq, ResumeWaitReq};
 
 fn node(id: &str, data: Value) -> FlowNode {
     FlowNode { id: id.to_string(), position: NodePosition::default(), data, node_type: None }
@@ -86,7 +86,7 @@ async fn crashed_after(state: &AppState, drone: &DroneDefinition, kept: usize) -
 async fn ended(state: &AppState, c: &Crashed) -> DroneRun {
     for _ in 0..200 {
         let row = state.mstore.drone_runs_for(&c.drone_id, 10).unwrap().into_iter().find(|r| r.id == c.run_id).unwrap();
-        if row.status != RunStatus::Running.as_str() && row.status != RunStatus::NeedsAttention.as_str() {
+        if ![RunStatus::Running, RunStatus::NeedsAttention, RunStatus::Waiting].iter().any(|s| row.status == s.as_str()) {
             return row;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -218,4 +218,48 @@ async fn a_run_told_to_run_the_step_again_runs_it_and_ends_as_that_ends() {
 async fn nobody_can_answer_a_run_that_is_not_waiting() {
     let err = resolve_drone_run(ResolveRunReq { run_id: "no-such-run".into(), action: "cancel".into(), output: None }).unwrap_err();
     assert_eq!(err, "resolvedronerun: run no-such-run is not waiting for an answer");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_waiting_at_a_wait_block_is_taken_up_again_and_goes_on_late_when_its_time_passed() {
+    let state = crate::server::tests::test_state();
+    let graph = DroneGraph {
+        nodes: vec![
+            node("first", json!({ "kind": "variables", "entries": [{ "name": "a", "value": "1" }] })),
+            node("wait", json!({ "kind": "wait", "for": "300ms" })),
+            node("done", json!({ "kind": "response", "template": "late={{wait.late}}" })),
+        ],
+        edges: vec![edge("e1", "first", "wait"), edge("e2", "wait", "done")],
+    };
+    let drone = saved(&state, graph);
+    // Step 0, the checkpoint after `first`, and the one kept as the run stopped at its wait.
+    let c = crashed_after(&state, &drone, 3).await;
+    let waiting = DroneRun {
+        id: c.run_id.clone(),
+        drone_id: c.drone_id.clone(),
+        status: RunStatus::Waiting.as_str().to_string(),
+        started_at: 5,
+        ended_at: 0,
+        block_states: HashMap::new(),
+        output: String::new(),
+        error: String::new(),
+    };
+    state.mstore.drone_run_update(&waiting).unwrap();
+
+    assert_eq!(resume_runs(&state, None).await, HashSet::from([c.run_id.clone()]), "a waiting run is taken up with the running ones");
+    let row = ended(&state, &c).await;
+    assert_eq!((row.status.as_str(), row.output.as_str()), ("done", "late=true"), "its time had passed: {row:?}");
+}
+
+#[test]
+fn a_wait_is_ended_only_with_a_key_that_is_open_and_a_payload_of_a_size_that_fits() {
+    let err = resume_drone_wait(ResumeWaitReq { key: "no-such-key".into(), payload: None }).unwrap_err();
+    assert_eq!(err, "resumedronewait: no run is waiting on that key");
+    let big = json!("x".repeat(crate::server::drone_handlers::MAX_INPUT_BYTES + 1));
+    assert!(resume_drone_wait(ResumeWaitReq { key: "k".into(), payload: Some(big) }).unwrap_err().contains("at most"));
+
+    let key = crate::backend::drone_wait::new_key();
+    let mut rx = crate::backend::drone_wait::open(&key);
+    assert!(resume_drone_wait(ResumeWaitReq { key: key.clone(), payload: Some(json!({ "ok": 1 })) }).unwrap().resumed);
+    assert_eq!(rx.try_recv().unwrap(), json!({ "ok": 1 }));
 }

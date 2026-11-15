@@ -16,7 +16,7 @@
 //! leaves a loop by an edge that is not taken, the decision is held until
 //! nothing else can run, because a later iteration may still take it.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -56,7 +56,8 @@ fn default_timeout(kind: BlockKind) -> Option<Duration> {
     match kind {
         BlockKind::Agent => Some(Duration::from_secs(15 * 60)),
         BlockKind::Message | BlockKind::Task | BlockKind::Notify | BlockKind::AppQuery | BlockKind::Spawn => Some(Duration::from_secs(5 * 60)),
-        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => None,
+        // A wait is for as long as it says, and its own `timeout_seconds` may cut it short.
+        BlockKind::Api | BlockKind::Condition | BlockKind::Response | BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach | BlockKind::Wait => None,
     }
 }
 
@@ -141,6 +142,11 @@ struct Scheduler<'a> {
     /// The block that is running while it has effects, and whether it was forced:
     /// the one a restart must not run again on its own.
     in_flight: Option<(&'a str, bool)>,
+    /// The Wait block the run is stopped at, and whether it was forced, and what
+    /// it waits for: a time, as milliseconds since 1970, or the key of an event.
+    waiting: Option<(&'a str, bool)>,
+    deadlines: BTreeMap<String, i64>,
+    resume_on: BTreeMap<String, String>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -247,6 +253,9 @@ impl<'a> Scheduler<'a> {
             cancel: limits.cancel,
             cancelled: false,
             in_flight: None,
+            waiting: None,
+            deadlines: BTreeMap::new(),
+            resume_on: BTreeMap::new(),
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -340,7 +349,16 @@ impl<'a> Scheduler<'a> {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
         self.mark_in_flight(node, forced)?;
-        let (output, failed) = match self.run_block(node).await {
+        let waits = kind_of(node).is_ok_and(|k| k == BlockKind::Wait);
+        if waits {
+            self.waiting = Some((id, forced));
+        }
+        let ran = self.run_block(node).await;
+        if waits {
+            let late = ran.as_ref().is_ok_and(|o| o.get("late").and_then(Value::as_bool).unwrap_or(false));
+            self.end_wait(id, late);
+        }
+        let (output, failed) = match ran {
             Ok(output) => (output, false),
             Err(e) if !self.cancelled && self.has_error_edge(id) => {
                 // The graph has a handler for this block: its output says what
@@ -421,6 +439,9 @@ impl<'a> Scheduler<'a> {
         if kind == BlockKind::ForEach {
             return self.run_foreach(node).await;
         }
+        if kind == BlockKind::Wait {
+            return self.run_wait(node).await;
+        }
         let scope = &mut self.scope;
         match kind {
             BlockKind::Variables => blocks::variables::run(node, scope).await,
@@ -434,7 +455,7 @@ impl<'a> Scheduler<'a> {
             BlockKind::AppQuery => blocks::app_query::run(node, scope).await,
             BlockKind::Spawn => blocks::spawn::run(node, scope).await,
             BlockKind::Transform => blocks::transform::run(node, scope).await,
-            BlockKind::ForEach => unreachable!("handled above"),
+            BlockKind::ForEach | BlockKind::Wait => unreachable!("handled above"),
         }
     }
 
@@ -497,6 +518,9 @@ impl<'a> Scheduler<'a> {
             }
             BlockKind::Response => read("template"),
             BlockKind::Variables | BlockKind::Transform | BlockKind::ForEach => return,
+            // What an event brought is outside text; a wait for a time brings nothing.
+            BlockKind::Wait if node.data.get("on").is_some() => (true, false),
+            BlockKind::Wait => (false, false),
             BlockKind::Task | BlockKind::Notify | BlockKind::Spawn => (false, false),
         };
         self.scope.bits.insert(node.id.clone(), bits);
@@ -617,6 +641,7 @@ impl<'a> Scheduler<'a> {
 mod attention;
 mod checkpoint;
 mod foreach;
+mod wait;
 
 #[cfg(test)]
 #[path = "scheduler_tests.rs"]
