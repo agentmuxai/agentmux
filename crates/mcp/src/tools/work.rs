@@ -681,8 +681,7 @@ async fn run_work_get(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         anyhow::bail!("Tasks get failed: HTTP {status} — {}", refusal_words(&text));
     }
     let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    Ok(task_text(&v, id, now))
+    Ok(task_text(&v, id, agentmux_common::time::now_ms()))
 }
 
 /// How long ago, in the words a history line uses.

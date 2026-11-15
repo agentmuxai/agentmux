@@ -430,10 +430,14 @@ async fn a_task_is_read_back_whole_with_its_brief_card_and_history() {
 }
 
 #[tokio::test]
-async fn a_task_that_does_not_exist_is_not_found() {
+async fn a_task_that_does_not_exist_is_not_found_and_takes_no_number() {
     let app = app();
+    let (_, first) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
     let (s, v) = get(&app, "/agentmux/work/987654", "a1").await;
     assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
     let (s, _) = get(&app, "/agentmux/work/no-such-id", "a1").await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+    // A read of nothing leaves no card behind: the next task is the next number, with no gap.
+    let (_, next) = post(&app, "/agentmux/work", json!({"title": "t2", "payload": "p"})).await;
+    assert_eq!(next["num"].as_i64().unwrap(), first["num"].as_i64().unwrap() + 1, "{first} then {next}");
 }

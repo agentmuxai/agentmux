@@ -594,6 +594,10 @@ pub(super) async fn handle_work_get(
     if !sees_task(&state, caller.as_deref(), &id) {
         return none();
     }
+    // A card is made only for a task that exists: `work_card_ensure` takes the next number on the board.
+    if !matches!(state.work_store.work_queue_get(&id), Ok(Some(_))) {
+        return none();
+    }
     let _ = state.work_store.work_card_ensure(&id, now_ms());
     let Ok(Some(task)) = state.work_store.work_board_get(&id) else { return none() };
     let mut v = serde_json::to_value(&task).unwrap_or_default();
