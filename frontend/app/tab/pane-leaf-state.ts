@@ -319,6 +319,11 @@ export function useScopedNodeModel(
 export interface StackMembers {
     stackBlockIds: Accessor<string[]>;
     viewTypeOf: (id: string) => string;
+    /**
+     * Whether this agent-view member has a session to start: an agent chosen, and not a history reader. The picker
+     * (no agent yet) and a history tab never mount the session view, so they are not waited for.
+     */
+    hasSessionOf: (id: string) => boolean;
     /** The members actually mounted in the keep-alive branch. */
     mountedBlockIds: Accessor<string[]>;
 }
@@ -346,12 +351,16 @@ export function useStackMembers(
     // SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §5.
     const viewTypeOf = (id: string) =>
         resolveEffectiveViewType(MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta?.view ?? "");
+    const hasSessionOf = (id: string) => {
+        const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
+        return !!meta?.["agentId"] && !meta?.["agent:historyTabFor"];
+    };
     const mountedBlockIds = createMemo<string[]>(() => {
         const active = activeBlockId();
         return stackBlockIds().filter((id) => id === active || isKeepAliveView(viewTypeOf(id)));
     });
 
-    return { stackBlockIds, viewTypeOf, mountedBlockIds };
+    return { stackBlockIds, viewTypeOf, hasSessionOf, mountedBlockIds };
 }
 
 /**
@@ -361,13 +370,18 @@ export function useStackMembers(
  * Keyed on each member's view type alone, so a meta update to a block does not re-run it.
  */
 export function useAgentMountWatch(nodeModel: NodeModel, activeBlockId: () => string, members: StackMembers): void {
-    const { stackBlockIds, viewTypeOf, mountedBlockIds } = members;
-    const memberViews = createMemo(() => stackBlockIds().map((id) => `${id}:${viewTypeOf(id)}`).join("|"));
+    const { stackBlockIds, viewTypeOf, hasSessionOf, mountedBlockIds } = members;
+    // The view type and whether a session is to start, per member: a meta update that changes neither does not re-run it.
+    const memberViews = createMemo(() => stackBlockIds().map((id) => `${id}:${viewTypeOf(id)}:${hasSessionOf(id)}`).join("|"));
     createEffect(() => {
         memberViews();
         for (const id of untrack(stackBlockIds)) {
             const view = untrack(() => viewTypeOf(id));
-            if (view === "agent" || view === "") {
+            if (view === "agent" && !untrack(() => hasSessionOf(id))) {
+                // The picker, or a history reader: no session view is coming. Not "settled" for good, so choosing an
+                // agent (or leaving the reader) starts the wait then.
+                agentMountForgotten(id);
+            } else if (view === "agent" || view === "") {
                 expectAgentMount(
                     id,
                     () =>

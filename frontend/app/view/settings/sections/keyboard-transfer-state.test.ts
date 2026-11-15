@@ -100,4 +100,40 @@ describe("mergeImport", () => {
         const usable = [{ command: "tab:next", key: "ctrl+alt+n", platform: "other" }];
         expect(mergeImport([broken], usable)).toEqual([broken, ...usable]);
     });
+
+    it("an import with no platform replaces the command's entries for either platform", () => {
+        const mac = { command: "tab:new", key: "meta+alt+t", platform: "mac" };
+        const other = { command: "tab:new", key: "ctrl+alt+t", platform: "other" };
+        const bare = { command: "tab:new", key: "ctrl+alt+n" };
+        const merged = mergeImport([mac, other], [bare]);
+        expect(merged).toEqual([bare]);
+        expect(merged.filter((e) => (e as { command: string }).command === "tab:new")).toHaveLength(1);
+    });
+
+    it("an import for one platform leaves an entry with no platform working on the other", () => {
+        const bare = { command: "tab:new", key: "ctrl+alt+n" };
+        const usable = [{ command: "tab:new", key: "meta+alt+t", platform: "mac" }];
+        expect(mergeImport([bare], usable)).toEqual([{ command: "tab:new", key: "ctrl+alt+n", platform: "other" }, ...usable]);
+        expect(mergeImport([bare], [{ command: "-tab:new", key: "ctrl+alt+n", platform: "other" }])).toEqual([{ command: "tab:new", key: "ctrl+alt+n", platform: "mac" }, { command: "-tab:new", key: "ctrl+alt+n", platform: "other" }]);
+    });
+
+    it("an import that covers both platforms, one entry each, replaces an entry with no platform", () => {
+        const bare = { command: "tab:new", key: "ctrl+alt+n" };
+        const usable = [
+            { command: "tab:new", key: "meta+alt+t", platform: "mac" },
+            { command: "tab:new", key: "ctrl+alt+t", platform: "other" },
+        ];
+        expect(mergeImport([bare], usable)).toEqual(usable);
+    });
+
+    it("an unbind of the command counts as the command, whatever the platform of the entry it replaces", () => {
+        const bare = { command: "tab:new", key: "ctrl+alt+n" };
+        expect(mergeImport([bare], [{ command: "-tab:new" }])).toEqual([{ command: "-tab:new" }]);
+    });
+
+    it("the preview counts a command whose entries the merge changes, and not one it only adds to", () => {
+        const bare = { command: "tab:new", key: "ctrl+alt+n" };
+        expect(previewImport([bare], [{ command: "tab:new", key: "meta+alt+t", platform: "mac" }]).replaced).toBe(1);
+        expect(previewImport([{ command: "tab:next", key: "ctrl+alt+n", platform: "other" }], [{ command: "tab:new", key: "meta+alt+t", platform: "mac" }]).replaced).toBe(0);
+    });
 });

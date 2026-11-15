@@ -43,12 +43,11 @@ const PAGE_PIXELS = 400;
 
 /**
  * The zoom factor of one wheel event. A mouse wheel steps in lines on some systems, which as raw numbers is a
- * tenth of a pixel step; a trackpad pinch arrives as a wheel with the ctrl key and small deltas, so it is
- * scaled up to feel the same as a wheel.
+ * tenth of a pixel step. (A wheel with Ctrl or Cmd is the pane zoom's, not the map's.)
  */
-export function wheelFactor(e: { deltaY: number; deltaMode: number; ctrlKey: boolean }): number {
+export function wheelFactor(e: { deltaY: number; deltaMode: number }): number {
     const pixels = e.deltaMode === 1 ? e.deltaY * LINE_PIXELS : e.deltaMode === 2 ? e.deltaY * PAGE_PIXELS : e.deltaY;
-    return Math.exp(-pixels * (e.ctrlKey ? 0.01 : 0.0015));
+    return Math.exp(-pixels * 0.0015);
 }
 
 /**
@@ -62,9 +61,22 @@ export function localPoint(
     rect: { left: number; top: number; width: number; height: number },
     own: { w: number; h: number }
 ): { x: number; y: number } {
-    const sx = own.w > 0 && rect.width > 0 ? rect.width / own.w : 1;
-    const sy = own.h > 0 && rect.height > 0 ? rect.height / own.h : 1;
+    const { sx, sy } = pointerScale(rect, own);
     return { x: (clientX - rect.left) / sx, y: (clientY - rect.top) / sy };
+}
+
+/**
+ * How many screen pixels one of the map's own pixels is: 1 in a pane at its normal zoom, the pane zoom in one the
+ * person zoomed. A pointer's travel on screen is divided by this to be the map's travel.
+ */
+export function pointerScale(
+    rect: { width: number; height: number },
+    own: { w: number; h: number }
+): { sx: number; sy: number } {
+    return {
+        sx: own.w > 0 && rect.width > 0 ? rect.width / own.w : 1,
+        sy: own.h > 0 && rect.height > 0 ? rect.height / own.h : 1,
+    };
 }
 
 /**

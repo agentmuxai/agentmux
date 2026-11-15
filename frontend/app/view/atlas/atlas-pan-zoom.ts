@@ -9,7 +9,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { fitView, localPoint, wheelFactor, zoomAt, zoomCentered, type Viewport } from "./atlas-viewport";
+import { fitView, localPoint, pointerScale, wheelFactor, zoomAt, zoomCentered, type Viewport } from "./atlas-viewport";
 
 /** What the pane needs from the map to fit it. */
 export interface MapSize {
@@ -75,7 +75,8 @@ export function useAtlasPanZoom(
         setTouched(true);
         setView(next);
     };
-    let pan: { id: number; sx: number; sy: number; ox: number; oy: number } | null = null;
+    // The drag's start on screen and in the map, and the screen pixels one map pixel is (the pane zoom).
+    let pan: { id: number; sx: number; sy: number; ox: number; oy: number; kx: number; ky: number } | null = null;
     return {
         view,
         setViewport: (el) => (viewport = el),
@@ -83,6 +84,8 @@ export function useAtlasPanZoom(
         zoomBy: (factor) =>
             moveView(zoomCentered(view(), factor, size().width, size().height, paneSize().w, paneSize().h)),
         onWheel: (e) => {
+            // Ctrl or Cmd with the wheel is the pane zoom (the window's handler steps it), not the map's.
+            if (e.ctrlKey || e.metaKey) return;
             e.preventDefault();
             const at = localPoint(e.clientX, e.clientY, viewport!.getBoundingClientRect(), {
                 w: viewport!.clientWidth,
@@ -92,13 +95,17 @@ export function useAtlasPanZoom(
         },
         onPointerDown: (e) => {
             if (e.button !== 0 || (e.target as HTMLElement).closest(NOT_BACKGROUND)) return;
-            pan = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: view().x, oy: view().y };
+            const { sx: kx, sy: ky } = pointerScale(viewport!.getBoundingClientRect(), {
+                w: viewport!.clientWidth,
+                h: viewport!.clientHeight,
+            });
+            pan = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: view().x, oy: view().y, kx, ky };
             viewport?.setPointerCapture(e.pointerId);
             onBackgroundPress();
         },
         onPointerMove: (e) => {
             if (!pan || e.pointerId !== pan.id) return;
-            moveView({ ...view(), x: pan.ox + e.clientX - pan.sx, y: pan.oy + e.clientY - pan.sy });
+            moveView({ ...view(), x: pan.ox + (e.clientX - pan.sx) / pan.kx, y: pan.oy + (e.clientY - pan.sy) / pan.ky });
         },
         onPointerUp: (e) => {
             if (pan?.id === e.pointerId) pan = null;
