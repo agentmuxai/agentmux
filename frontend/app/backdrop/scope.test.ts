@@ -50,6 +50,15 @@ describe("scopeVars", () => {
         }
     });
 
+    it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {
+        expect(vars["--modal-bg-color"]).toBe("var(--surface-overlay)");
+        expect(vars["--block-bg-solid-color"]).toBe("var(--surface)");
+        expect(vars["--panel-bg-color"]).toBe("color-mix(in srgb, var(--surface-raised) 50%, transparent)");
+        expect(vars["--tab-strip-bg"]).toBe("color-mix(in srgb, var(--ink-text) 3%, transparent)");
+        expect(vars["--hover-bg-color"]).toBe("var(--ink-hover)");
+        expect(vars["--grey-text-color"]).toBe("var(--ink-faint)");
+    });
+
     it("gives --accent-color-rgb the accent's channels, which rgba(var(--accent-color-rgb), a) needs", () => {
         const n = parseInt(derived.ink.accent.slice(1, 7), 16);
         expect(vars["--accent-color-rgb"]).toBe(`${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`);
@@ -58,7 +67,15 @@ describe("scopeVars", () => {
     it("sets every token the map names, and every ink property a mapped token reads", () => {
         for (const token of MAPPED_TOKENS) expect(vars[token], token).toBeTruthy();
         for (const source of new Set(Object.values(INK_TOKEN_MAP))) expect(vars[source], source).toBeTruthy();
-        expect(Object.keys(SURFACE_TOKEN_MAP)).toEqual(["--main-bg-color", "--block-bg-color", "--elevated-bg-color"]);
+        expect(Object.keys(SURFACE_TOKEN_MAP)).toEqual([
+            "--main-bg-color",
+            "--block-bg-color",
+            "--elevated-bg-color",
+            "--modal-bg-color",
+            "--panel-bg-color",
+            "--block-bg-solid-color",
+            "--tab-strip-bg",
+        ]);
     });
 
     it("takes color-scheme from the side the surface is on", () => {
