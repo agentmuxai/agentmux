@@ -217,6 +217,10 @@ Tests: the waits-on rule is table-driven (every state combination in section 4.1
 - **The shared hourly limit.** The design never uses a shared token's quota and caps its own spend (6.2). The first build measures the real cost with GitHub's `rateLimit { cost }` field before R2 ships the 300-point budget.
 - **Private repositories.** The person's pane shows what their token can read; the route never gives a private PR to a caller without the repository (6.5).
 - **A task has one PR today.** The pane works with that (6.3); the list-of-PRs field is optional and separate (D5).
+- **A verdict with no head can't be told stale.** A notice that carries no commit gives a verdict with no head, so a push after it does not mark it stale until the pull request ends or a newer verdict arrives; until the new checks come in, an old approval of that kind reads "ready to merge". The review bot's notices carry the head, so this is the exception, and R2 reads the real head.
+- **A busy board.** The list reads each board the caller sees on its own, newest 500 tasks (open ones and those finished in the last 7 days), so one board's tasks never push another's out. A single board with more than 500 such tasks loses its oldest ones from the list until R2 asks only for tasks that name a pull request.
+- **A finished task.** A task that is done, cancelled or failed whose pull request no notice saw end shows as "The task is finished", waiting on no one.
+- **"A person".** `person` is the one value for a decision that is not an agent's turn; today it is a task waiting in Review to be accepted, which an agent may also do. The pane says "the task waits in Review to be accepted", not that a human must act.
 - **Two sources can disagree** (a flow state older than a refreshed GraphQL read): the newer by time wins and the row shows "as of" for the older source.
 
 ## 13. Decisions for the operator

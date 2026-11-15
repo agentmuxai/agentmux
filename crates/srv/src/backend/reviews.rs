@@ -138,7 +138,7 @@ pub struct ReviewRow {
     pub released_in: String,
     pub waits_on: WaitsOn,
     /// A short code for why: `changes_requested`, `checks_failing`, `checks_running`, `no_review`,
-    /// `review_stale`, `awaiting_accept`, `ready_to_merge`, `merged`, `closed`, `queued`, `unknown`.
+    /// `review_stale`, `awaiting_accept`, `ready_to_merge`, `merged`, `closed`, `task_finished`, `queued`, `unknown`.
     pub why: String,
     /// When anything about it last changed, in milliseconds since 1970.
     #[ts(type = "number")]
@@ -182,6 +182,10 @@ pub fn waits_on(i: &WaitsInput<'_>) -> (WaitsOn, &'static str) {
         "closed" => return (WaitsOn::None, "closed"),
         "queued" => return (WaitsOn::Queue, "queued"),
         _ => {}
+    }
+    // A task that is over (done, cancelled, failed) with a PR no one saw merge or close waits on no one.
+    if matches!(i.task_state, Some("done" | "cancelled" | "failed")) {
+        return (WaitsOn::None, "task_finished");
     }
     if i.checks == Some("failing") {
         return (WaitsOn::Author, "checks_failing");

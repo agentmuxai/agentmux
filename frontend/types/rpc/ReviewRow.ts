@@ -38,7 +38,7 @@ merge: string, merged_at_ms?: number,
 released_in: string, waits_on: WaitsOn, 
 /**
  * A short code for why: `changes_requested`, `checks_failing`, `checks_running`, `no_review`,
- * `review_stale`, `awaiting_accept`, `ready_to_merge`, `merged`, `closed`, `queued`, `unknown`.
+ * `review_stale`, `awaiting_accept`, `ready_to_merge`, `merged`, `closed`, `task_finished`, `queued`, `unknown`.
  */
 why: string, 
 /**

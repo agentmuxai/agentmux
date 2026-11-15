@@ -98,19 +98,9 @@ function mount(
     return { ...render(() => <ReviewsView data={data} ctx={ctx} />), setMeta };
 }
 
-/** A pane of this width: the view reads it once, when it mounts. */
+/** A pane of this width (its clientWidth, which the pane zoom does not scale): the view reads it when it mounts. */
 function paneWidth(px: number) {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-        width: px,
-        height: 600,
-        top: 0,
-        left: 0,
-        right: px,
-        bottom: 600,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(px);
 }
 
 beforeEach(() => {

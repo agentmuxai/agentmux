@@ -24,7 +24,7 @@ export interface ReviewsGroup {
     /** Stable across refreshes: `person`, `task:<num>` or `none`. */
     key: string;
     kind: "person" | "task" | "none";
-    /** The heading: "Needs a person", the task's number and title, or "No task". */
+    /** A task group's heading, its number and title; empty for the two fixed groups, whose words are the view's (reviews-text.ts). */
     title: string;
     /** The task's own state, for a task group. */
     state?: string;
@@ -89,9 +89,9 @@ export function groupRows(rows: readonly ReviewRow[]): ReviewsGroup[] {
     }
     const newest = (g: ReviewsGroup) => Math.max(...g.rows.map((r) => r.updated_at_ms));
     const groups: ReviewsGroup[] = [];
-    if (person.length > 0) groups.push({ key: "person", kind: "person", title: "Needs a person", rows: person });
+    if (person.length > 0) groups.push({ key: "person", kind: "person", title: "", rows: person });
     groups.push(...[...byTask.values()].sort((a, b) => newest(b) - newest(a)));
-    if (none.length > 0) groups.push({ key: "none", kind: "none", title: "No task", rows: none });
+    if (none.length > 0) groups.push({ key: "none", kind: "none", title: "", rows: none });
     return groups;
 }
 
@@ -113,64 +113,3 @@ export function inTaskRef(row: ReviewRow, value: string): boolean {
 export function kanbanIdOf(ref: string): string {
     return ref.replace(/^#/, "");
 }
-
-/** How a waits-on is said. */
-export const WAITS_LABEL: Record<WaitsOn, string> = {
-    person: "Waits on a person",
-    author: "Waits on its author",
-    reviewer: "Waits on a reviewer",
-    ci: "Waits on checks",
-    queue: "In the merge queue",
-    none: "Nothing to do",
-    unknown: "Unknown",
-};
-
-/** The short form, for a narrow row. */
-export const WAITS_SHORT: Record<WaitsOn, string> = {
-    person: "person",
-    author: "author",
-    reviewer: "reviewer",
-    ci: "checks",
-    queue: "queue",
-    none: "done",
-    unknown: "unknown",
-};
-
-/** Why, in words: srv's `why` codes; a code this build does not know is shown as its words. */
-const WHY_TEXT: Record<string, string> = {
-    changes_requested: "Changes requested on the latest commit",
-    checks_failing: "A check is failing",
-    checks_running: "Checks are still running",
-    no_review: "No review of the latest commit yet",
-    review_stale: "The review is of an older commit",
-    awaiting_accept: "Approved; the task waits to be accepted",
-    ready_to_merge: "Approved and green: ready to merge",
-    merged: "Merged",
-    closed: "Closed without merging",
-    queued: "In the merge queue",
-    unknown: "Not placed",
-};
-
-export function whyText(why: string): string {
-    return WHY_TEXT[why] ?? why.replace(/_/g, " ");
-}
-
-/** "3m", "2h", "5d": the age of a time, for a row. */
-export function ageText(atMs: number, nowMs: number): string {
-    const s = Math.max(0, Math.round((nowMs - atMs) / 1000));
-    if (s < 60) return "now";
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m`;
-    const h = Math.floor(m / 60);
-    if (h < 48) return `${h}h`;
-    return `${Math.floor(h / 24)}d`;
-}
-
-/** The filter options of the waits-on switch, in the order a person acts on them. */
-export const WAITS_OPTIONS: { value: WaitsOn | null; label: string }[] = [
-    { value: null, label: "All" },
-    { value: "person", label: "Person" },
-    { value: "author", label: "Author" },
-    { value: "reviewer", label: "Reviewer" },
-    { value: "ci", label: "Checks" },
-];

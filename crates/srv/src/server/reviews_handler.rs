@@ -22,7 +22,8 @@ use super::AppState;
 use crate::backend::kanban::{prs, FINISHED_WINDOW_MS};
 use crate::backend::reviews::{self, CardIn, ReviewRow, ReviewsList, ReviewsTask};
 
-/// The most tasks read from the board.
+/// The most tasks read from one board. Each board is read on its own, so a busy board cannot push another's
+/// tasks out of the cut, and a caller's visible boards are the only ones read.
 const TASKS_LIMIT: usize = 500;
 
 #[derive(Debug, Default, Deserialize)]
@@ -93,16 +94,14 @@ pub async fn handle_reviews(
     let now = agentmux_common::time::now_ms();
     let list = tokio::task::spawn_blocking(move || {
         let boards = work.work_boards_list(true, now).unwrap_or_default();
-        // A card with no board yet is on the default one.
-        let default_seen = boards.iter().any(|b| b.is_default && who.as_ref().map_or(true, |(agent, uid)| b.visible_to(agent, uid)));
-        let visible: HashSet<String> =
-            boards.into_iter().filter(|b| who.as_ref().map_or(true, |(agent, uid)| b.visible_to(agent, uid))).map(|b| b.id).collect();
-        let tasks: Vec<_> = work
-            .work_board_list_in(None, now - FINISHED_WINDOW_MS, TASKS_LIMIT, now)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| who.is_none() || visible.contains(&t.card.board_id) || (t.card.board_id.is_empty() && default_seen))
-            .collect();
+        let seen: Vec<_> = boards.into_iter().filter(|b| who.as_ref().map_or(true, |(agent, uid)| b.visible_to(agent, uid))).collect();
+        let mut tasks: Vec<_> = Vec::new();
+        let mut read: HashSet<String> = HashSet::new();
+        for board in &seen {
+            if read.insert(board.id.clone()) {
+                tasks.extend(work.work_board_list_in(Some(board.id.as_str()), now - FINISHED_WINDOW_MS, TASKS_LIMIT, now).unwrap_or_default());
+            }
+        }
         let mut list = reviews::build(&cards_of(&tasks), &crate::backend::pr_flow::recent(), now);
         if let Some((agent, _)) = &who {
             // A PR no visible task holds is the caller's only when the notice went to it.

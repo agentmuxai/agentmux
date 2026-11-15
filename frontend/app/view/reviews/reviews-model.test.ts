@@ -3,17 +3,7 @@
 
 import type { ReviewRow } from "@/types/rpc/ReviewRow";
 import { describe, expect, it } from "vitest";
-import {
-    ageText,
-    filterRows,
-    groupRows,
-    inTaskRef,
-    kanbanIdOf,
-    NO_FILTER,
-    rowKey,
-    taskRefOf,
-    whyText,
-} from "./reviews-model";
+import { filterRows, groupRows, inTaskRef, kanbanIdOf, NO_FILTER, rowKey, taskRefOf } from "./reviews-model";
 
 function row(over: Partial<ReviewRow> & { number: number }): ReviewRow {
     return {
@@ -53,7 +43,7 @@ describe("groupRows", () => {
         expect(groups.map((g) => g.key)).toEqual(["task:#2", "task:#1", "none"]);
         expect(groups[0].title).toBe("#2 new");
         expect(groups[0].state).toBe("claimed");
-        expect(groups[2].title).toBe("No task");
+        expect(groups[2].kind).toBe("none");
     });
 
     it("keeps one task's pull requests together", () => {
@@ -145,19 +135,5 @@ describe("text helpers", () => {
     it("names a row by repository and number, or by the repository id when the repository is unknown", () => {
         expect(rowKey(row({ number: 5, repo: "o/r" }))).toBe("o/r#5");
         expect(rowKey(row({ number: 5, repo_id: 9 }))).toBe("id:9#5");
-    });
-
-    it("says why in words, and a code it does not know as its own words", () => {
-        expect(whyText("review_stale")).toBe("The review is of an older commit");
-        expect(whyText("some_new_reason")).toBe("some new reason");
-    });
-
-    it("gives ages in minutes, hours and days", () => {
-        const now = 10_000_000_000;
-        expect(ageText(now - 5_000, now)).toBe("now");
-        expect(ageText(now - 3 * 60_000, now)).toBe("3m");
-        expect(ageText(now - 5 * 3_600_000, now)).toBe("5h");
-        expect(ageText(now - 3 * 86_400_000, now)).toBe("3d");
-        expect(ageText(now + 5_000, now)).toBe("now");
     });
 });

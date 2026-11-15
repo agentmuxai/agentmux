@@ -21,6 +21,7 @@ import {
     SegmentedControl,
     type PillTone,
 } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { openLink } from "@/app/store/global";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { openKanbanTask } from "@/app/util/open-kanban-task";
@@ -28,23 +29,23 @@ import type { ReviewRow } from "@/types/rpc/ReviewRow";
 import type { ReviewsVerdict } from "@/types/rpc/ReviewsVerdict";
 import type { WaitsOn } from "@/types/rpc/WaitsOn";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { filterRows, groupRows, inTaskRef, kanbanIdOf, rowKey, type ReviewsGroup } from "./reviews-model";
+import type { ReviewsData } from "./reviews-store";
 import {
     ageText,
-    filterRows,
-    groupRows,
-    inTaskRef,
-    kanbanIdOf,
-    rowKey,
-    WAITS_LABEL,
-    WAITS_OPTIONS,
-    WAITS_SHORT,
+    byText,
+    checksText,
+    groupTitle,
+    mergeText,
+    verdictText,
+    waitsLabel,
+    waitsOptions,
+    waitsShort,
     whyText,
-    type ReviewsGroup,
-} from "./reviews-model";
-import type { ReviewsData } from "./reviews-store";
+} from "./reviews-text";
 import "./reviews.scss";
 
-/** The pane's meta key that opens it filtered to one task (a task number). */
+/** The pane's meta key that opens it filtered to one task (a task ref: `12`, `#12` or `work#12`). */
 export const REVIEWS_TASK_META = "reviews:task";
 
 /** Below this width the detail replaces the list (the thin-pane rule: no sideways scroll at 280 to 440 px). */
@@ -60,21 +61,9 @@ const WAITS_TONE: Record<WaitsOn, PillTone> = {
     unknown: "neutral",
 };
 
-const BY_LABEL: Record<ReviewsVerdict["by"], string> = { bot: "Review bot", codex: "Codex", person: "Person" };
-
 function verdictTone(v: ReviewsVerdict): PillTone {
     if (v.stale) return "warn";
     return v.state === "approved" ? "ok" : v.state === "changes_requested" ? "error" : "neutral";
-}
-
-function verdictText(v: ReviewsVerdict): string {
-    const state =
-        v.state === "approved"
-            ? "approved"
-            : v.state === "changes_requested"
-              ? "changes requested"
-              : v.state.replace(/_/g, " ");
-    return v.stale ? `${state}, older commit` : state;
 }
 
 function checksTone(state: string): PillTone {
@@ -85,9 +74,9 @@ function mergeTone(merge: string): PillTone {
     return merge === "merged" ? "ok" : merge === "open" ? "neutral" : "accent";
 }
 
-/** The row's title: its task's, else the branch, else its number. */
+/** The row's title: its task's, else the branch; empty when it has neither, so its number is not said twice. */
 function titleOf(row: ReviewRow): string {
-    return row.task?.title || row.branch || `#${row.number}`;
+    return row.task?.title || row.branch || "";
 }
 
 /** The row's number as people say it: `#7407`, or `owner/repo#7407`. */
@@ -107,20 +96,22 @@ function ListRow(props: { row: ReviewRow; now: number; selected: boolean; onSele
         >
             <span class="reviews-row-line">
                 <span class="reviews-row-number">#{row().number}</span>
-                <span class="reviews-row-title">{titleOf(row())}</span>
+                <Show when={titleOf(row())}>
+                    <span class="reviews-row-title">{titleOf(row())}</span>
+                </Show>
             </span>
             <span class="reviews-row-chips">
                 <Pill tone={WAITS_TONE[row().waits_on]} title={whyText(row().why)}>
-                    {WAITS_SHORT[row().waits_on]}
+                    {waitsShort(row().waits_on)}
                 </Pill>
                 <Show when={row().merge !== "open"}>
-                    <Pill tone={mergeTone(row().merge)}>{row().merge}</Pill>
+                    <Pill tone={mergeTone(row().merge)}>{mergeText(row().merge)}</Pill>
                 </Show>
                 <Show when={row().checks?.state === "failing"}>
-                    <Pill tone="error">checks failing</Pill>
+                    <Pill tone="error">{t("reviews.chip.checksFailing")}</Pill>
                 </Show>
                 <Show when={row().reviews.some((v) => v.stale)}>
-                    <Pill tone="warn">stale review</Pill>
+                    <Pill tone="warn">{t("reviews.chip.staleReview")}</Pill>
                 </Show>
                 <Show when={row().agent}>
                     <span class="reviews-row-agent">{row().agent}</span>
@@ -140,70 +131,90 @@ function Fact(props: { label: string; children: JSX.Element }): JSX.Element {
     );
 }
 
+function Verdicts(props: { row: ReviewRow; now: number }): JSX.Element {
+    return (
+        <Show
+            when={props.row.reviews.length > 0}
+            fallback={<span class="reviews-muted">{t("reviews.fact.noReviews")}</span>}
+        >
+            <For each={props.row.reviews}>
+                {(v) => (
+                    <span class="reviews-verdict">
+                        {byText(v.by)} <Pill tone={verdictTone(v)}>{verdictText(v)}</Pill>{" "}
+                        <span class="reviews-muted">{ageText(v.at_ms, props.now)}</span>
+                    </span>
+                )}
+            </For>
+        </Show>
+    );
+}
+
+function Facts(props: { row: ReviewRow; now: number }): JSX.Element {
+    const row = () => props.row;
+    return (
+        <dl class="reviews-facts">
+            <Show when={row().task}>
+                {(task) => (
+                    <Fact label={t("reviews.fact.task")}>
+                        {task().ref} {task().title} <span class="reviews-muted">({task().state})</span>
+                    </Fact>
+                )}
+            </Show>
+            <Show when={row().agent}>
+                <Fact label={t("reviews.fact.agent")}>{row().agent}</Fact>
+            </Show>
+            <Show when={row().branch}>
+                <Fact label={t("reviews.fact.branch")}>{row().branch}</Fact>
+            </Show>
+            <Fact label={t("reviews.fact.reviews")}>
+                <Verdicts row={row()} now={props.now} />
+            </Fact>
+            <Fact label={t("reviews.fact.checks")}>
+                <Show when={row().checks} fallback={<span class="reviews-muted">{t("reviews.fact.noChecks")}</span>}>
+                    {(checks) => <Pill tone={checksTone(checks().state)}>{checksText(checks().state)}</Pill>}
+                </Show>
+            </Fact>
+            <Show when={row().released_in}>
+                <Fact label={t("reviews.fact.released")}>{row().released_in}</Fact>
+            </Show>
+        </dl>
+    );
+}
+
 function Detail(props: { row: ReviewRow; now: number; narrow: boolean; onBack: () => void }): JSX.Element {
     const row = () => props.row;
     return (
         <div class="reviews-detail" data-testid="reviews-detail">
             <Show when={props.narrow}>
-                <Button variant="link" icon="arrow-left" onClick={props.onBack} data-testid="reviews-back">
-                    Back to the list
+                <Button
+                    variant="link"
+                    icon="arrow-left"
+                    class="reviews-back"
+                    onClick={props.onBack}
+                    data-testid="reviews-back"
+                >
+                    {t("reviews.back")}
                 </Button>
             </Show>
-            <h3 class="reviews-detail-title">
-                {nameOf(row())} {titleOf(row())}
-            </h3>
+            <h3 class="reviews-detail-title">{`${nameOf(row())} ${titleOf(row())}`.trim()}</h3>
             <div class="reviews-row-chips">
-                <Pill tone={WAITS_TONE[row().waits_on]}>{WAITS_LABEL[row().waits_on]}</Pill>
-                <Pill tone={mergeTone(row().merge)}>{row().merge}</Pill>
+                <Pill tone={WAITS_TONE[row().waits_on]}>{waitsLabel(row().waits_on)}</Pill>
+                <Pill tone={mergeTone(row().merge)}>{mergeText(row().merge)}</Pill>
             </div>
             <p class="reviews-why">{whyText(row().why)}</p>
-            <dl class="reviews-facts">
-                <Show when={row().task}>
-                    {(task) => (
-                        <Fact label="Task">
-                            {task().ref} {task().title} <span class="reviews-muted">({task().state})</span>
-                        </Fact>
-                    )}
-                </Show>
-                <Show when={row().agent}>
-                    <Fact label="Agent">{row().agent}</Fact>
-                </Show>
-                <Show when={row().branch}>
-                    <Fact label="Branch">{row().branch}</Fact>
-                </Show>
-                <Fact label="Reviews">
-                    <Show when={row().reviews.length > 0} fallback={<span class="reviews-muted">none yet</span>}>
-                        <For each={row().reviews}>
-                            {(v) => (
-                                <span class="reviews-verdict">
-                                    {BY_LABEL[v.by]} <Pill tone={verdictTone(v)}>{verdictText(v)}</Pill>{" "}
-                                    <span class="reviews-muted">{ageText(v.at_ms, props.now)}</span>
-                                </span>
-                            )}
-                        </For>
-                    </Show>
-                </Fact>
-                <Fact label="Checks">
-                    <Show when={row().checks} fallback={<span class="reviews-muted">not reported</span>}>
-                        {(checks) => <Pill tone={checksTone(checks().state)}>{checks().state}</Pill>}
-                    </Show>
-                </Fact>
-                <Show when={row().released_in}>
-                    <Fact label="Released in">{row().released_in}</Fact>
-                </Show>
-            </dl>
+            <Facts row={row()} now={props.now} />
             <div class="reviews-actions">
                 <Show when={row().url}>
                     {(url) => (
                         <Button icon="arrow-up-right-from-square" onClick={() => openLink(url())}>
-                            Open on GitHub
+                            {t("reviews.open.github")}
                         </Button>
                     )}
                 </Show>
                 <Show when={row().task}>
                     {(task) => (
                         <Button icon="list-check" onClick={() => void openKanbanTask(kanbanIdOf(task().ref))}>
-                            Open the task
+                            {t("reviews.open.task")}
                         </Button>
                     )}
                 </Show>
@@ -218,9 +229,11 @@ function useNarrow(): { ref: (el: HTMLDivElement) => void; narrow: () => boolean
     const ref = (root: HTMLDivElement) => {
         onMount(() => {
             if (typeof ResizeObserver === "undefined") return;
-            const observer = new ResizeObserver((entries) => setWidth(entries[0]?.contentRect.width ?? 0));
+            // clientWidth both times: the pane zoom scales what getBoundingClientRect reports, and not clientWidth or the
+            // observer's content box, so the switch means the same width at any zoom.
+            const observer = new ResizeObserver(() => setWidth(root.clientWidth));
             observer.observe(root);
-            setWidth(root.getBoundingClientRect().width);
+            setWidth(root.clientWidth);
             onCleanup(() => observer.disconnect());
         });
     };
@@ -254,17 +267,17 @@ function Bar(props: {
             <FilterInput
                 value={props.text}
                 onInput={props.onText}
-                placeholder="Find a pull request, task or agent"
+                placeholder={t("reviews.filter.placeholder")}
                 testId="reviews-filter"
             />
             <SegmentedControl
-                ariaLabel="Waits on"
-                options={WAITS_OPTIONS.map((o) => ({ value: o.value ?? "all", label: o.label }))}
+                ariaLabel={t("reviews.filter.label")}
+                options={waitsOptions().map((o) => ({ value: o.value ?? "all", label: o.label }))}
                 value={props.waitsOn ?? "all"}
                 onChange={(v) => props.onWaitsOn(v === "all" ? null : (v as WaitsOn))}
             />
-            <span class="reviews-asof" {...tip("When this list was read")}>
-                <Show when={props.asOf}>as of {props.asOf}</Show>
+            <span class="reviews-asof" {...tip(t("reviews.asOf.tip"))}>
+                <Show when={props.asOf}>{t("reviews.asOf.label", { time: props.asOf })}</Show>
             </span>
         </div>
     );
@@ -284,19 +297,22 @@ function Rows(props: {
                     when={props.groups.length > 0}
                     fallback={
                         <EmptyState
-                            title={props.any ? "Nothing matches" : "No pull requests on the board yet"}
+                            class="reviews-empty"
+                            title={props.any ? t("reviews.empty.noMatch.title") : t("reviews.empty.none.title")}
                             icon="code-pull-request"
                         >
-                            {props.any
-                                ? "Clear the filter to see every pull request."
-                                : "A task shows here once it has a pull request, or an agent is told of its review."}
+                            {props.any ? t("reviews.empty.noMatch.body") : t("reviews.empty.none.body")}
                         </EmptyState>
                     }
                 >
                     <For each={props.groups}>
                         {(group) => (
                             <section class="reviews-group" data-group={group.key}>
-                                <SectionHeader variant="group" title={`${group.title} (${group.rows.length})`} />
+                                <SectionHeader
+                                    variant="group"
+                                    class="reviews-group-heading"
+                                    title={`${groupTitle(group)} (${group.rows.length})`}
+                                />
                                 <For each={group.rows}>
                                     {(row) => (
                                         <ListRow
@@ -323,22 +339,20 @@ function Notes(props: { data: ReviewsData; ctx: PaneTabHostContext }): JSX.Eleme
             <Show when={taskOf(props.ctx)}>
                 {(task) => (
                     <div class="reviews-scope">
-                        Showing task {task()}
+                        {t("reviews.scope.showing", { task: task() })}
                         <Button variant="link" onClick={() => void props.ctx.setMeta({ [REVIEWS_TASK_META]: null })}>
-                            Show every task
+                            {t("reviews.scope.clear")}
                         </Button>
                     </div>
                 )}
             </Show>
             <Show when={props.data.status() === "unavailable"}>
-                <Notice tone="warning" title="Could not read the list">
-                    This AgentMux cannot answer yet. It tries again every minute.
+                <Notice tone="warning" title={t("reviews.error.title")}>
+                    {t("reviews.error.body")}
                 </Notice>
             </Show>
             <Show when={props.data.list()?.last_notice_at_ms == null && props.data.status() === "ready"}>
-                <p class="reviews-hint">
-                    Showing pull requests your agents were notified about and the tasks that name one.
-                </p>
+                <p class="reviews-hint">{t("reviews.hint")}</p>
             </Show>
         </>
     );
@@ -375,7 +389,7 @@ export function ReviewsView(props: { data: ReviewsData; ctx: PaneTabHostContext 
                         when={props.data.status() !== "loading"}
                         fallback={
                             <EmptyState loading variant="fill">
-                                Reading the pull requests
+                                {t("reviews.loading")}
                             </EmptyState>
                         }
                     >
@@ -393,7 +407,7 @@ export function ReviewsView(props: { data: ReviewsData; ctx: PaneTabHostContext 
                             fallback={
                                 <Show when={!narrow()}>
                                     <div class="reviews-detail reviews-detail--empty">
-                                        <EmptyState>Select a pull request</EmptyState>
+                                        <EmptyState>{t("reviews.select")}</EmptyState>
                                     </div>
                                 </Show>
                             }

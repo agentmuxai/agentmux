@@ -6,6 +6,8 @@
 // takes the list's place.
 
 .reviews-root {
+    // The pane's zoom (the shared pane zoom's --pane-zoom, block.tsx): text and the room it needs scale with it.
+    zoom: var(--pane-zoom, 1);
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
@@ -70,7 +72,23 @@
     padding-bottom: var(--space-2);
 }
 
+// A group's heading is one line, cut with an ellipsis, and starts where the rows' text does.
+.reviews-group .reviews-group-heading {
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reviews-empty {
+    padding: var(--space-3) var(--space-2);
+}
+
 .reviews-row {
+    // The kit's row button is 10px and bold; a list of titles reads like the Swarm's rows instead.
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -108,7 +126,11 @@
 
 .reviews-row-age {
     margin-left: auto;
-    font-size: 0.85em;
+    font-size: var(--text-xs);
+}
+
+.reviews-row-agent {
+    font-size: var(--text-xs);
 }
 
 .reviews-detail {
@@ -121,6 +143,10 @@
     padding: var(--space-3);
     overflow-y: auto;
     overflow-wrap: anywhere;
+}
+
+.reviews-back {
+    align-self: flex-start;
 }
 
 .reviews-detail--empty {

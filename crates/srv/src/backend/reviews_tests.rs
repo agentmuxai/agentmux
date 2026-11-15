@@ -50,6 +50,14 @@ fn a_merged_or_closed_pr_waits_on_nothing() {
 }
 
 #[test]
+fn a_finished_task_with_a_pr_nobody_saw_end_waits_on_no_one() {
+    for state in ["done", "cancelled", "failed"] {
+        assert_eq!(waits("open", Some("failing"), &[("changes_requested", false)], Some(state)), (WaitsOn::None, "task_finished"), "{state}");
+    }
+    assert_eq!(waits("open", None, &[], Some("held")), (WaitsOn::Reviewer, "no_review"), "a held task is not over");
+}
+
+#[test]
 fn a_queued_pr_waits_on_the_queue() {
     assert_eq!(waits("queued", Some("passing"), &[("approved", false)], Some("review")), (WaitsOn::Queue, "queued"));
 }

@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_REVIEWS_PANE_2026_11_15`](SPEC_REVIEWS_PANE_2026_11_15.md) | Spec: a Reviews pane, every task's pull request and its review state in one viewer | draft | 2026-11-15 |  |
 | [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers | draft | 2026-11-14 |  |
 | [`SPEC_EDITOR_TAB_RENAME_2026_11_14`](SPEC_EDITOR_TAB_RENAME_2026_11_14.md) | SPEC: Rename a file from its Editor document tab | implemented | 2026-11-14 |  |
 | [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) | implemented | 2026-11-14 |  |
