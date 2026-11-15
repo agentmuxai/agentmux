@@ -87,6 +87,7 @@ mod attachments;
 pub(crate) mod local_proof;
 pub(crate) mod local_session;
 pub(crate) mod local_session_routes;
+mod ui_cache;
 pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod ws_register;
