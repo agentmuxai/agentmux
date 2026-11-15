@@ -319,7 +319,7 @@
     "frontend/app/view/settings/sections/keyboard-recorder.tsx": 19,
     "frontend/app/view/settings/sections/keyboard-section-parts.tsx": 3,
     "frontend/app/view/settings/sections/keyboard-section.tsx": 3,
-    "frontend/app/view/settings/sections/keyboard-transfer.tsx": 10,
+    "frontend/app/view/settings/sections/keyboard-transfer.tsx": 11,
     "frontend/app/view/settings/sections/pinned-senders.tsx": 30,
     "frontend/app/view/settings/sections/recording-section.tsx": 2,
     "frontend/app/view/settings/sections/terminal-section-parts.tsx": 1,
