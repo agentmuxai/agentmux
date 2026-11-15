@@ -32,11 +32,11 @@ const tile = (over: Partial<TileModel>): TileModel => ({
 });
 
 describe("AttachmentTile", () => {
-    it("shows a PDF as an icon with its extension, page count and macro badge", () => {
+    it("shows a PDF too big to read for a picture as an icon with its extension, page count and macro badge", () => {
         const fetchSpy = vi.fn();
         vi.stubGlobal("fetch", fetchSpy);
         const { container } = render(() => (
-            <AttachmentTile tile={tile({ pageCount: 12, macros: true })} onOpen={() => {}} />
+            <AttachmentTile tile={tile({ bytes: 200 * 1024 * 1024, pageCount: 12, macros: true })} onOpen={() => {}} />
         ));
         expect(container.querySelector(".fa-file-pdf")).not.toBeNull();
         expect(container.querySelector(".agent-attachment-tile__icon .ext")?.textContent).toBe("PDF");
@@ -46,6 +46,44 @@ describe("AttachmentTile", () => {
         // Icon tiles fetch nothing.
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(screen.getByRole("button", { name: /^File 2: report\.pdf/ })).toBeTruthy();
+    });
+
+    it("keeps a PDF's icon when its file can't give a picture", async () => {
+        const fetchSpy = vi.fn(async (_url: string) => new Response(null, { status: 404 }));
+        vi.stubGlobal("fetch", fetchSpy);
+        const { container } = render(() => <AttachmentTile tile={tile({ pageCount: 3 })} onOpen={() => {}} />);
+        await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+        expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(`http://x/api/v1/attachments/${"a".repeat(64)}/original`);
+        expect(container.querySelector("img")).toBeNull();
+        expect(container.querySelector(".fa-file-pdf")).not.toBeNull();
+        expect(container.querySelector(".agent-attachment-tile__pages")?.textContent).toBe("3 p");
+    });
+
+    it("fetches a PDF's picture once the tile it was still processing becomes ready", async () => {
+        const fetchSpy = vi.fn(async (_url: string) => new Response(null, { status: 404 }));
+        vi.stubGlobal("fetch", fetchSpy);
+        const [model, setModel] = createSignal(tile({ status: "processing", id: undefined }));
+        render(() => <AttachmentTile tile={model()} onOpen={() => {}} />);
+        expect(fetchSpy).not.toHaveBeenCalled();
+        // The tray replaces the model on each progress tick and when processing ends; the tile stays mounted.
+        // Its own id: a file a test used a moment ago is still cached.
+        setModel(tile({ status: "ready", id: "c".repeat(64) }));
+        await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+        expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/original");
+    });
+
+    it("reads nothing of a file that announces more than a picture is worth", async () => {
+        const body = new ReadableStream({ start: (c) => c.enqueue(new Uint8Array(4)) });
+        const big = new Response(body, { headers: { "content-length": String(200 * 1024 * 1024) } });
+        const blob = vi.spyOn(big, "blob");
+        vi.stubGlobal("fetch", vi.fn(async (_url: string) => big));
+        const { container } = render(() => (
+            <AttachmentTile tile={tile({ bytes: undefined, id: "d".repeat(64), pageCount: 2 })} onOpen={() => {}} />
+        ));
+        await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+        await Promise.resolve();
+        expect(blob).not.toHaveBeenCalled();
+        expect(container.querySelector("img")).toBeNull();
     });
 
     it("renders a text preview as text, never as markup", async () => {
