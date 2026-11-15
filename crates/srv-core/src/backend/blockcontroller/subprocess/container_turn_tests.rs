@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{SubprocessController, SubprocessSpawnConfig};
-use crate::backend::blockcontroller::{STATUS_DONE, STATUS_RUNNING};
+use crate::backend::blockcontroller::{Controller, STATUS_DONE, STATUS_RUNNING};
 use crate::backend::mps::Broker;
 
 #[path = "container_fake_docker.rs"]
@@ -438,4 +438,124 @@ async fn a_process_killed_for_memory_in_the_container_is_named_in_the_failure() 
     let published = failures(&seen);
     assert_eq!(published.len(), 1, "{published:?}");
     assert_eq!(published[0]["title"], "Ran out of memory");
+}
+
+#[tokio::test]
+async fn a_stop_holds_the_messages_queued_behind_the_turn_it_ends_and_the_next_turn_runs_them_after_itself() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT], 0) }, Turn::says(&[RESULT_OK], 0), Turn::says(&[RESULT_OK], 0)]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("queued behind")).unwrap();
+    assert_eq!(ctrl.inner.lock().unwrap().pending_messages.len(), 1);
+
+    Controller::stop(ctrl.as_ref(), true, STATUS_DONE).expect("the stop is accepted");
+    wait_done(&ctrl).await;
+    // A drain that wrongly ran the queued message would start its exec within moments of the turn ending.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(fake.execs(Kind::Turn).len(), 1, "the queued message did not start a turn on a stopped agent");
+    assert!(!ctrl.turn_in_flight(), "nothing is running");
+    {
+        let inner = ctrl.inner.lock().unwrap();
+        assert!(inner.pending_messages.is_empty());
+        assert_eq!(inner.held_after_stop.len(), 1, "it is kept, not dropped");
+    }
+
+    // A message that comes later starts the agent again (as it always has); the held one is not lost: it
+    // runs right after that turn.
+    ctrl.spawn_container_turn(cm, name, cli(), config("after the stop")).unwrap();
+    wait_for("both turns", || fake.execs(Kind::Turn).len() == 3 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["running", "after the stop", "queued behind"]);
+    assert!(ctrl.inner.lock().unwrap().held_after_stop.is_empty());
+}
+
+#[tokio::test]
+async fn an_interrupt_that_is_not_a_stop_still_runs_the_message_queued_behind_the_turn() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT], 0) }, Turn::says(&[RESULT_OK], 0)]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    ctrl.spawn_container_turn(cm, name, cli(), config("queued behind")).unwrap();
+
+    // Esc in the pane cancels the turn; the message already in line is still wanted.
+    ctrl.stop_subprocess(true).unwrap();
+    wait_for("the queued turn to run", || fake.execs(Kind::Turn).len() == 2 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    assert!(ctrl.inner.lock().unwrap().held_after_stop.is_empty());
+}
+
+#[tokio::test]
+async fn a_turn_in_flight_is_reported_while_it_runs_and_not_after_it_ends() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT], 0) }]);
+    let ctrl = controller(&unique("blk"), None);
+    assert!(!ctrl.turn_in_flight(), "idle");
+    ctrl.spawn_container_turn(fake.manager(), unique("c"), cli(), config("long job")).unwrap();
+    assert!(ctrl.turn_in_flight(), "a message sent now is queued behind it, so the sender is told it is queued");
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    assert!(ctrl.turn_in_flight());
+    ctrl.stop_subprocess(true).unwrap();
+    wait_done(&ctrl).await;
+    assert!(!ctrl.turn_in_flight());
+}
+
+const RETIRED_IMAGE: &str = "ghcr.io/agentmuxai/agent-claude:latest";
+
+/// What a container agent's start does about its image: ask whether it has the AgentMux tools, before any turn.
+fn startup_checking_image(ctrl: &SubprocessController, cm: crate::backend::container::ContainerManager, container: &str, image: &str) {
+    let (container, image) = (container.to_string(), image.to_string());
+    ctrl.set_container_startup(Arc::new(move || {
+        let (cm, container, image) = (cm.clone(), container.clone(), image.clone());
+        Box::pin(async move { cm.check_image_tools(&container, &image).await.map_err(|e| e.user_message()) })
+    }));
+}
+
+// The worker that started on narko with an image that has no agentmux-bashwrap and no agentmux-mcp (#47725): it
+// must not get as far as a turn.
+#[tokio::test]
+async fn an_agent_whose_image_lacks_the_agentmux_tools_is_refused_at_start_and_runs_no_turn() {
+    let fake = FakeDocker::start().await;
+    fake.state.lock().unwrap().missing_tools = vec!["agentmux-bashwrap".into(), "agentmux-mcp".into()];
+    fake.script(vec![Turn::says(&[INIT, RESULT_OK], 0)]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    startup_checking_image(&ctrl, cm.clone(), &name, RETIRED_IMAGE);
+
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("hello worker")).expect("the message is accepted; the start is what fails");
+    let (status, exit) = wait_done(&ctrl).await;
+    assert_eq!(status, STATUS_DONE);
+    assert_ne!(exit, 0, "the turn ended as a failure");
+
+    assert!(fake.execs(Kind::Turn).is_empty(), "no CLI ran in a container that cannot talk: {:?}", fake.labels());
+    assert!(fake.uploads().is_empty(), "the prompt was never uploaded");
+    let probes = fake.execs(Kind::ImageCheck);
+    assert_eq!(probes.len(), 1);
+    assert_eq!(&probes[0].0[4..], ["agentmux-bashwrap", "agentmux-mcp"], "it asks for exactly the two tools");
+
+    // What the pane and the sender are told: which image, and what to do.
+    let Err(e) = cm.check_image_tools(&name, RETIRED_IMAGE).await else { panic!("the next start is refused too") };
+    let msg = e.user_message();
+    assert!(msg.contains(RETIRED_IMAGE) && msg.contains("agentmux-bashwrap or agentmux-mcp") && msg.contains("update_container"), "{msg}");
+}
+
+#[tokio::test]
+async fn an_agent_whose_image_has_the_tools_runs_its_turns_and_is_asked_about_its_image_once() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn::says(&[INIT, RESULT_OK], 0), Turn::says(&[RESULT_OK], 0)]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    startup_checking_image(&ctrl, cm.clone(), &name, "ghcr.io/agentmuxai/agent-base:developer");
+
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("one")).unwrap();
+    wait_done(&ctrl).await;
+    ctrl.spawn_container_turn(cm, name, cli(), config("two")).unwrap();
+    wait_done(&ctrl).await;
+
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["one", "two"]);
+    assert_eq!(fake.execs(Kind::ImageCheck).len(), 1, "a container that passed is not asked again");
 }

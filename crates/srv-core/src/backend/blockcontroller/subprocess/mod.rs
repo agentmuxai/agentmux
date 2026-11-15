@@ -155,6 +155,10 @@ struct SubprocessControllerInner {
     /// Messages queued while a turn is in progress.
     /// Drained sequentially after the current turn exits.
     pending_messages: VecDeque<SubprocessSpawnConfig>,
+    /// Messages that were queued behind a turn when the agent was stopped. A stop stays a stop: they
+    /// do not run on their own (which would start the agent again and flip it back to wanted
+    /// running); the next turn that is accepted queues them right behind itself, in the order they were sent.
+    held_after_stop: VecDeque<SubprocessSpawnConfig>,
     /// Session ids the agent ended on purpose (`Agents fresh`, `codex_fresh`):
     /// a queued message or a stale `agent:sessionid` that still names one must
     /// not resume it.
@@ -252,6 +256,7 @@ impl SubprocessController {
                 current_pid: None,
                 kill_tx: None,
                 pending_messages: VecDeque::new(),
+                held_after_stop: VecDeque::new(),
                 retired_sessions: Vec::new(),
             })),
             broker,
@@ -376,6 +381,47 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
+    /// Whether a turn is running (or being started): a message sent now is queued behind it.
+    pub fn turn_in_flight(&self) -> bool {
+        self.run_lock.load(Ordering::SeqCst)
+    }
+
+    /// Move the messages queued behind the running turn to the held list (see
+    /// `SubprocessControllerInner::held_after_stop`).
+    fn hold_queue_for_stop(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.pending_messages.is_empty() {
+            return;
+        }
+        tracing::info!(
+            block_id = %self.block_id,
+            held = inner.pending_messages.len(),
+            "agent stopped: messages queued behind its turn are held, not run"
+        );
+        let queued = std::mem::take(&mut inner.pending_messages);
+        inner.held_after_stop.extend(queued);
+    }
+
+    /// [`Self::try_lock_run`] for a turn that is about to start: once it holds the lock, the messages a stop held
+    /// are queued behind it (see [`Self::release_held_behind_this_turn`]).
+    fn take_run_lock_for_turn(&self) -> bool {
+        let locked = self.try_lock_run();
+        if locked {
+            self.release_held_behind_this_turn();
+        }
+        locked
+    }
+
+    /// A turn has been accepted: the messages a stop held go to the front of the queue, so they run
+    /// right after it, in the order they were sent. They are in the ordinary queue from here, so a turn
+    /// that fails to start does not lose them.
+    fn release_held_behind_this_turn(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        while let Some(held) = inner.held_after_stop.pop_back() {
+            inner.pending_messages.push_front(held);
+        }
+    }
+
     /// Stop the currently running subprocess.
     pub fn stop_subprocess(&self, force: bool) -> Result<(), String> {
         let kill_tx = {
@@ -409,6 +455,9 @@ impl Controller for SubprocessController {
     }
 
     fn stop(&self, _graceful: bool, new_status: &str) -> Result<(), String> {
+        // A stop keeps what was queued behind the turn it ends: taken before the kill, so the
+        // process-waiter's drain finds nothing to run.
+        self.hold_queue_for_stop();
         // Stop any running subprocess
         self.stop_subprocess(true)?;
 

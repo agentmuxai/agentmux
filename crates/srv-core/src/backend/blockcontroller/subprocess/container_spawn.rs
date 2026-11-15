@@ -229,7 +229,7 @@ impl SubprocessController {
         if super::codex_compact::is_compact_request(&config) {
             return Err("Compacting a Codex agent that runs in a container isn't supported yet.".to_string());
         }
-        if !self.try_lock_run() {
+        if !self.take_run_lock_for_turn() {
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(
                 block_id = %self.block_id,

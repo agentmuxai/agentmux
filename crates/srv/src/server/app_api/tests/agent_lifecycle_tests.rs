@@ -245,8 +245,14 @@ async fn only_itself_and_a_worker_it_opened_are_stopped_without_the_override_win
 
 /// A stopped agent with no pane, as `Agents create` leaves it: `maker` is who made it.
 fn made_agent(state: &AppState, id: &str, maker: Option<(&str, &str)>) {
+    made_agent_in(state, id, maker, "");
+}
+
+/// [`made_agent`] with the folder it works in.
+fn made_agent_in(state: &AppState, id: &str, maker: Option<(&str, &str)>, working_directory: &str) {
     let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(json!({
         "id": id, "slug": id, "name": id, "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+        "working_directory": working_directory,
     }))
     .unwrap();
     state.mstore.agent_def_insert(&mut def).unwrap();
@@ -346,4 +352,41 @@ fn who_made_an_agent_is_srvs_to_say_and_a_fork_does_not_inherit_it() {
         assert!(client_may_write_content(content_type).is_err(), "{content_type}: a client cannot claim to have made an agent");
     }
     assert!(!written_only_by_srv("instructions") && client_may_write_content("instructions").is_ok());
+}
+
+#[tokio::test]
+async fn deleting_an_agent_keeps_its_workspace_folder_and_says_so() {
+    use crate::server::app_api::agent_spawn::CREATED_BY_CONTENT;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "kept-maker").await;
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("unpushed.txt"), "work that was never pushed").unwrap();
+    made_agent_in(&state, "kept-made", Some((CREATED_BY_CONTENT, "kept-maker")), &folder.path().to_string_lossy());
+
+    let (status, body) = call(&state, "delete", Some("kept-maker"), "kept-made").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["deleted"], json!(true));
+    assert_eq!(body["workspace_kept"], json!(true), "{body}");
+    let shown = folder.path().to_string_lossy().replace('\\', "/");
+    assert_eq!(body["workspace"], json!(shown));
+    let note = body["note"].as_str().unwrap();
+    assert!(note.contains("is kept") && note.contains(&shown) && note.contains("same name"), "{note}");
+    assert!(folder.path().join("unpushed.txt").exists(), "the folder and what is in it are untouched");
+}
+
+#[tokio::test]
+async fn deleting_an_agent_with_no_workspace_folder_does_not_claim_one_is_kept() {
+    use crate::server::app_api::agent_spawn::CREATED_BY_CONTENT;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "nofolder-maker").await;
+    let missing = tempfile::tempdir().unwrap().path().join("never-made");
+    made_agent_in(&state, "nofolder-made", Some((CREATED_BY_CONTENT, "nofolder-maker")), &missing.to_string_lossy());
+
+    let (status, body) = call(&state, "delete", Some("nofolder-maker"), "nofolder-made").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["workspace_kept"], json!(false), "{body}");
+    assert!(body.get("workspace").is_none(), "{body}");
+    assert!(!body["note"].as_str().unwrap().contains("kept"), "{body}");
 }

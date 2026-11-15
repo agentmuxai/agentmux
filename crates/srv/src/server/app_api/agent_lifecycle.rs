@@ -273,13 +273,41 @@ async fn delete(state: &AppState, actor: &Actor, req: &LifecycleRequest) -> Resu
     if found.as_ref().is_some_and(|f| f.tab_id.is_some()) {
         return Err(refuse(StatusCode::CONFLICT, format!("PANE_OPEN: {} has a pane open; close it first (Agents detach), then delete it", target.name)));
     }
+    // Read before the definition goes: the folder is named by it.
+    let kept = state.mstore.agent_def_get(&target.agent_id).ok().flatten().as_ref().and_then(kept_workspace);
     crate::server::agent_handlers::delete_agent_definition(state, &target.agent_id, "Agents delete")
         .await
         .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(json!({
-        "agent": target.name, "agent_id": target.agent_id, "deleted": true,
-        "note": "the agent's definition, its parked block and its container storage are gone; this cannot be undone",
-    }))
+    Ok(delete_answer(&target.name, &target.agent_id, kept))
+}
+
+/// The folder an agent worked in, when it is on this machine. A delete leaves it: it may hold work that
+/// was never pushed, and deleting an agent is not a reason to lose it. (A new agent made with the same name
+/// gets this folder again, clone and all, unless its owner removes it first.)
+fn kept_workspace(def: &crate::backend::storage::AgentDefinition) -> Option<std::path::PathBuf> {
+    let configured = def.working_directory.trim();
+    let folder = if configured.is_empty() {
+        crate::backend::base::expand_home_dir_safe(&format!("~/.agentmux/agents/{}", def.slug))
+    } else {
+        crate::backend::base::expand_home_dir_safe(configured)
+    };
+    folder.is_dir().then_some(folder)
+}
+
+/// `Agents delete`'s answer: what went, and that the workspace folder did not (with where it is).
+fn delete_answer(name: &str, agent_id: &str, kept: Option<std::path::PathBuf>) -> Value {
+    const GONE: &str = "the agent's definition, its parked block and its container storage are gone; this cannot be undone";
+    match kept {
+        Some(folder) => {
+            let folder = folder.to_string_lossy().replace('\\', "/");
+            json!({
+                "agent": name, "agent_id": agent_id, "deleted": true,
+                "workspace_kept": true, "workspace": folder,
+                "note": format!("{GONE}. Its workspace folder {folder} is kept, because it may hold work that was never pushed; remove it yourself when it does not. A new agent given the same name uses it again, clone included."),
+            })
+        }
+        None => json!({ "agent": name, "agent_id": agent_id, "deleted": true, "workspace_kept": false, "note": GONE }),
+    }
 }
 
 async fn run(state: &AppState, caller: Option<&Caller>, action: &str, req: LifecycleRequest) -> Result<Value, Refusal> {

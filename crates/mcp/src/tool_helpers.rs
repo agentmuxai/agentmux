@@ -261,15 +261,16 @@ pub(crate) fn quit_self_outcome(state: &str, body: &Value) -> anyhow::Result<Str
     }
 }
 
-/// `SendMessage`'s answer when srv accepted the message but queued it because
-/// the target's process is starting up, restarting or stopping
-/// (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.1). A target that is up gets
-/// it at once, mid-turn included, and is reported as delivered.
+/// `SendMessage`'s answer when srv accepted the message but queued it: the target's process is
+/// starting up, restarting or stopping (SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md §2.1), or it runs
+/// one turn at a time (a container agent, a Codex or Gemini agent) and is in one now, so the message
+/// waits for that turn to end. A persistent agent that is up gets it at once, mid-turn included, and
+/// is reported as delivered.
 pub(crate) fn deferred_delivery_text(to: &str) -> String {
     format!(
-        "QUEUED for {to} — their agent is starting up, restarting or stopping, \
-         so it has not reached them yet. Their AgentMux delivers it as soon as \
-         their agent is up. Don't resend it."
+        "QUEUED for {to} — their agent cannot take it yet: it is starting up, restarting or \
+         stopping, or it handles one turn at a time and is in one now. It has not reached them. \
+         Their AgentMux delivers it as soon as their agent can. Don't resend it."
     )
 }
 

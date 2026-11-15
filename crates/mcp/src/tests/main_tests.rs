@@ -144,8 +144,9 @@ fn stop_self_warns_and_requires_the_users_quote() {
 #[test]
 fn deferred_delivery_text_is_clean_and_names_the_target() {
     let t = deferred_delivery_text("Camper");
-    assert!(t.starts_with("QUEUED for Camper — their agent is starting up, restarting or stopping"), "{t}");
-    assert!(!t.contains("mid-turn") && !t.contains("turn ends"), "nothing waits for a turn: {t}");
+    assert!(t.starts_with("QUEUED for Camper — their agent cannot take it yet"), "{t}");
+    assert!(t.contains("starting up, restarting or") && t.contains("one turn at a time"), "both reasons are named: {t}");
+    assert!(!t.contains("injected") && !t.contains("Delivered"), "it says nothing was delivered: {t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
     assert!(t.ends_with("Don't resend it."), "{t}");
 }
