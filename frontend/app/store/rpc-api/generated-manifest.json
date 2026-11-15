@@ -907,6 +907,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "getdronepayloadschema",
+            "method": "GetDronePayloadSchemaCommand"
+        },
+        {
             "command": "listdroneruns",
             "method": "ListDroneRunsCommand"
         },
@@ -1337,6 +1341,10 @@
         {
             "command": "resumedronewait",
             "method": "ResumeDroneWaitCommand"
+        },
+        {
+            "command": "replaydronerun",
+            "method": "ReplayDroneRunCommand"
         },
         {
             "command": "layout.save",

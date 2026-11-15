@@ -634,6 +634,19 @@ describe("createTileLayout: a tile", () => {
             expect(document.elementFromPoint).toHaveBeenCalledWith(5, 5);
         });
 
+        it("refuses it when the press began on a header button, and allows one that began on the header", () => {
+            const { el, cfg } = start();
+            const header = el.querySelector<HTMLElement>('[data-role="block-header"]')!;
+            const close = document.createElement("button");
+            close.setAttribute("aria-label", "Close pane");
+            header.appendChild(close);
+            // The drag's own start comes after the pointer left the button, so only where the press began counts.
+            close.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            expect(cfg.canDrag({ input: { clientX: 5, clientY: 5 } })).toBe(false);
+            header.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            expect(cfg.canDrag({ input: { clientX: 5, clientY: 5 } })).toBe(true);
+        });
+
         it("refuses it for an ephemeral or a magnified pane", () => {
             const { cfg } = start();
             const nm = h.nodeModels.get("n1")!;

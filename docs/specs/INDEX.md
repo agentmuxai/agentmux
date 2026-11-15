@@ -196,6 +196,12 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
+### agent lifecycle
+
+| Spec | Title | Status | Date | Replaces / replaced by |
+|---|---|---|---|---|
+| [`SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14`](SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md) | Spec: prepare, then proceed. An agent gets a window to reach a safe point before a user action restarts its session | active | 2026-11-14 |  |
+
 ### compaction
 
 | Spec | Title | Status | Date | Replaces / replaced by |
@@ -247,10 +253,14 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_PANE_BACKGROUND_THEMES_2026_11_15`](SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md) | Spec: Pane backdrops: a background that brings its own readable foreground | active | 2026-11-15 |  |
+| [`SPEC_REVIEWS_PANE_2026_11_15`](SPEC_REVIEWS_PANE_2026_11_15.md) | Spec: a Reviews pane, every task's pull request and its review state in one viewer | active | 2026-11-15 |  |
+| [`SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15`](SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md) | Spec: one compact status bar summary, and Vault requests that notify there | active | 2026-11-15 |  |
 | [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers | draft | 2026-11-14 |  |
 | [`SPEC_EDITOR_TAB_RENAME_2026_11_14`](SPEC_EDITOR_TAB_RENAME_2026_11_14.md) | SPEC: Rename a file from its Editor document tab | implemented | 2026-11-14 |  |
 | [`SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14`](SPEC_REVIEW_AND_CHECKS_FLOW_EVENTS_2026_11_14.md) | Spec: review and checks flow, two events and a recent list (for the Atlas review bot and CI nodes) | implemented | 2026-11-14 |  |
 | [`SPEC_SWARM_CLOUD_TIER_2026_11_14`](SPEC_SWARM_CLOUD_TIER_2026_11_14.md) | Spec: The cloud tier: agents on the account's other machines that are not on the LAN, listed by srv for the Swarm and Atlas | active | 2026-11-14 |  |
+| [`SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14`](SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md) | SPEC: Vault autofill in the Browser pane: Chrome's password manager, recreated for our Vault | active | 2026-11-14 |  |
 | [`SPEC_ATLAS_AGENT_MAP_2026_11_13`](SPEC_ATLAS_AGENT_MAP_2026_11_13.md) | Spec: Atlas, a map of every agent across machines and tiers | active | 2026-11-13 |  |
 | [`SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12`](SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md) | Spec: AgentMux as a server-only package, with a free local web UI (task #2522, build #2523) | active | 2026-11-12 |  |
 | [`SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11`](SPEC_DRONE_GENERAL_AUTOMATION_2026_11_11.md) | SPEC: Drone as a general automation tool: loops, state, sub-drones, a Run step, durable waits | active | 2026-11-11 |  |

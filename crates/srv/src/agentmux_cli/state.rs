@@ -76,6 +76,50 @@ pub fn remove(channel_dir: &Path) {
     let _ = std::fs::remove_file(state_path(channel_dir));
 }
 
+/// Written when the server was not started because another AgentMux of a different version holds the shared folder
+/// (`blocked.json`). It lets `start`, `setup`, `status` and `doctor` say so, where the server's own log is the only other place.
+pub const BLOCKED_FILE: &str = "blocked.json";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Blocked {
+    /// Who holds the folder, for example `AgentMux 0.60.27 (stable)`.
+    pub owner: String,
+    /// Why this version's data cannot be used as it is.
+    pub reason: String,
+    /// The version that was refused.
+    pub version: String,
+    pub since_unix: u64,
+}
+
+impl Blocked {
+    /// One sentence: what happened, and what to do about it.
+    pub fn sentence(&self) -> String {
+        format!(
+            "The server did not start: {} is using the shared folder (your agents, accounts and history), and this version's data needs preparing first. Close {} and run `agentmux start`, or update one of the two so both are the same version.",
+            self.owner, self.owner
+        )
+    }
+}
+
+pub fn blocked_path(channel_dir: &Path) -> PathBuf {
+    channel_dir.join(BLOCKED_FILE)
+}
+
+pub fn read_blocked(channel_dir: &Path) -> Option<Blocked> {
+    serde_json::from_str(&std::fs::read_to_string(blocked_path(channel_dir)).ok()?).ok()
+}
+
+pub fn write_blocked(channel_dir: &Path, blocked: &Blocked) -> std::io::Result<()> {
+    let path = blocked_path(channel_dir);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(blocked).map_err(std::io::Error::other)?)?;
+    std::fs::rename(&tmp, &path)
+}
+
+pub fn clear_blocked(channel_dir: &Path) {
+    let _ = std::fs::remove_file(blocked_path(channel_dir));
+}
+
 /// The server's log, opened for appending (owner-only), after moving a big one aside.
 pub fn open_log(channel_dir: &Path) -> std::io::Result<std::fs::File> {
     let path = log_path(channel_dir);
@@ -167,6 +211,20 @@ mod tests {
         open_log(dir.path()).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
         assert!(dir.path().join("server.log.1").exists());
+    }
+
+    #[test]
+    fn a_refusal_is_remembered_said_in_one_sentence_and_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_blocked(dir.path()).is_none());
+        let b = Blocked { owner: "AgentMux 0.60.27 (stable)".into(), reason: "29 migration(s) pending".into(), version: "0.60.28".into(), since_unix: 1_794_600_000 };
+        write_blocked(dir.path(), &b).unwrap();
+        assert_eq!(read_blocked(dir.path()).unwrap(), b);
+        let said = b.sentence();
+        assert!(said.contains("AgentMux 0.60.27 (stable)") && said.contains("Close") && said.contains("agentmux start") && said.contains("update"), "{said}");
+        assert!(!said.contains('\n'), "one line");
+        clear_blocked(dir.path());
+        assert!(read_blocked(dir.path()).is_none());
     }
 
     #[test]

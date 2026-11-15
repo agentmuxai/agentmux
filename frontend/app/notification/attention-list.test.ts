@@ -40,6 +40,7 @@ describe("mergeAttention", () => {
                 color: "#3b82f6",
                 what: "asks to approve a Bash call",
                 since: 100,
+                kinds: [],
                 local: true,
             },
         ]);
@@ -93,7 +94,7 @@ describe("mergeAttention", () => {
         // Another window: only srv's row says so. The item is the pane where the answer is given.
         const elsewhere = mergeAttention([], [asks], seen, () => false);
         expect(elsewhere).toEqual([
-            { blockId: "web", name: "Korp", agentId: undefined, color: "#00aa00", what: "needs you in the browser", since: 500, local: false },
+            { blockId: "web", name: "Korp", agentId: undefined, color: "#00aa00", what: "needs you in the browser", since: 500, kinds: ["browser"], local: false },
         ]);
         // The pane's own window: its registry has the request already, so the row adds nothing.
         const here = mergeAttention([pane("web", "needs you in the browser", 100)], [asks], seen, () => true, () => "Browser");
@@ -136,5 +137,12 @@ describe("mergeAttention", () => {
             ["early", "An agent"],
             ["late", "An agent"],
         ]);
+    });
+
+    it("reads a wait that only srv's row reports as a Vault wait when the Vault holds a request from that pane", () => {
+        const asks = row({ name: "Korp", block_id: "far", state: "waiting_on_user" });
+        const items = mergeAttention([], [asks], seen, () => false, () => undefined, (b) => b === "far");
+        expect(items.map((i) => i.kinds)).toEqual([["vault"]]);
+        expect(mergeAttention([], [asks], seen).map((i) => i.kinds)).toEqual([[]]);
     });
 });

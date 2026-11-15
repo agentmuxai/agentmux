@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
-    COMMAND_LIST_DRONE_RUNS, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
+    COMMAND_GET_DRONE_PAYLOAD_SCHEMA, COMMAND_LIST_DRONE_RUNS, COMMAND_REPLAY_DRONE_RUN, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -194,7 +194,7 @@ pub(crate) fn delete_drone(state: &AppState, cmd: DeleteDroneReq) -> Result<Dele
 ///      future startup task can mark stale rows as
 ///      `interrupted` (cleaner than the prior
 ///      fire-and-forget that left no row at all).
-fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, started_at: i64) -> Result<(), String> {
+pub(crate) fn insert_run_placeholder(state: &AppState, run_id: &str, drone_id: &str, started_at: i64) -> Result<(), String> {
     let placeholder = DroneRun {
         id: run_id.to_string(),
         drone_id: drone_id.to_string(),
@@ -558,6 +558,17 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, _ctx| async move { resolve_drone_run(cmd) });
     engine.register_typed(COMMAND_RESUME_DRONE_WAIT, move |cmd: ResumeWaitReq, _ctx| async move { resume_drone_wait(cmd) });
+    let s = state.clone();
+    engine.register_typed(COMMAND_REPLAY_DRONE_RUN, move |cmd: crate::server::drone_replay::ReplayRunReq, _ctx| {
+        let s = s.clone();
+        async move { crate::server::drone_replay::replay_drone_run(&s, cmd).await }
+    });
+
+    let s = state.clone();
+    engine.register_typed(COMMAND_GET_DRONE_PAYLOAD_SCHEMA, move |cmd: crate::server::drone_payload::PayloadSchemaReq, _ctx| {
+        let s = s.clone();
+        async move { crate::server::drone_payload::get_payload_schema(&s, cmd) }
+    });
 
     let s = state.clone();
     engine.register_typed(COMMAND_LIST_DRONE_RUNS, move |cmd: ListRunsReq, _ctx| {
@@ -598,6 +609,7 @@ mod tests {
             (COMMAND_RUN_DRONE, "RunDroneReq", "RunResp"),
             (COMMAND_RESOLVE_DRONE_RUN, "ResolveRunReq", "ResolveRunResp"),
             (COMMAND_RESUME_DRONE_WAIT, "ResumeWaitReq", "ResumeWaitResp"),
+            (COMMAND_REPLAY_DRONE_RUN, "ReplayRunReq", "ReplayRunResp"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

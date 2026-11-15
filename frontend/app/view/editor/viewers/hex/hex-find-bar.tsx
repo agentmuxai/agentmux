@@ -12,6 +12,8 @@ import type { HexFind } from "./hex-find-state";
 
 export function HexFindBar(props: { find: HexFind }): JSX.Element {
     const f = props.find;
+    const closeButton = () => <CloseButton label="Close find" onClick={f.close} />;
+    const idle = () => f.canSearch() && !f.error() && !f.status();
     const onKeyDown = (e: KeyboardEvent) => {
         if (e.key === "Enter") {
             e.preventDefault();
@@ -41,14 +43,39 @@ export function HexFindBar(props: { find: HexFind }): JSX.Element {
                 value={f.mode()}
                 onChange={f.setMode}
             />
-            <IconButton icon="chevron-up" density="compact" label={`Previous match (Shift+Enter)`} disabled={!f.canSearch()} onClick={f.previous} />
-            <IconButton icon="chevron-down" density="compact" label={`Next match (Enter)`} disabled={!f.canSearch()} onClick={f.next} />
-            <span class="hex-find-status" role="status" classList={{ "hex-find-error": !!f.error() }} {...tip(`Find (${keyLabel("mod+f")})`)}>
-                <Show when={f.canSearch()} fallback="A file dropped in has no path on disk to search">
-                    {f.error() || f.status()}
-                </Show>
-            </span>
-            <CloseButton label="Close find" onClick={f.close} />
+            <div class="hex-find-nav">
+                <IconButton
+                    icon="chevron-up"
+                    density="compact"
+                    label={`Previous match (Shift+Enter)`}
+                    disabled={!f.canSearch()}
+                    onClick={f.previous}
+                />
+                <IconButton
+                    icon="chevron-down"
+                    density="compact"
+                    label={`Next match (Enter)`}
+                    disabled={!f.canSearch()}
+                    onClick={f.next}
+                />
+                {/* Nothing to say yet: the close button travels with the arrows, so a narrow strip never leaves it alone. */}
+                <Show when={idle()}>{closeButton()}</Show>
+            </div>
+            <Show when={!idle()}>
+                <div class="hex-find-tail">
+                    <span
+                        class="hex-find-status"
+                        role="status"
+                        classList={{ "hex-find-error": !!f.error() }}
+                        {...tip(`Find (${keyLabel("mod+f")})`)}
+                    >
+                        <Show when={f.canSearch()} fallback="A file dropped in has no path on disk to search">
+                            {f.error() || f.status()}
+                        </Show>
+                    </span>
+                    {closeButton()}
+                </div>
+            </Show>
         </div>
     );
 }

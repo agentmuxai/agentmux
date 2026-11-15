@@ -260,6 +260,7 @@ $gap: 6px;
         }
 
         &__pages,
+        &__play,
         &__warn {
             position: absolute;
             bottom: 3px;
@@ -271,6 +272,11 @@ $gap: 6px;
         }
         &__pages {
             right: 3px;
+            color: var(--main-text-color);
+        }
+        // A video's first frame says it is a video.
+        &__play {
+            left: 3px;
             color: var(--main-text-color);
         }
         &__warn {
@@ -406,6 +412,14 @@ $gap: 6px;
     // ── Transcript strip (read-only, above a sent message's text) ───────
     .agent-attachment-strip {
         margin-bottom: 4px;
+
+        // A sent message's bubble is the inverse of the page (light in a dark theme, dark in a light one), and the tile's
+        // fill is a translucent panel colour tuned for the page, so over the bubble it went grey (dark) or black (light)
+        // under its own icon and label (#47720). The fill is laid over the page's solid colour, so a tile looks the same
+        // here as in the tray, whatever the bubble is.
+        .agent-attachment-tile__main.ui-button {
+            background: linear-gradient(var(--panel-bg-color), var(--panel-bg-color)) var(--block-bg-solid-color);
+        }
 
         .agent-attachment-tray__tiles {
             padding-top: 2px;

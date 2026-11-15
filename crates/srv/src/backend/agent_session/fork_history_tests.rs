@@ -270,7 +270,22 @@ fn a_parent_over_the_cap_gives_the_fork_its_newest_part_from_a_turn_start() {
     let side: String = starts.iter().enumerate().map(|(i, o)| format!("{{\"off\":{o},\"ms\":{}}}\n", 1000 + i)).collect();
     write_zone_file(&gfs, &zone, TSIDX_FILE, side.as_bytes()).unwrap();
     write_zone_file(&gfs, &zone, SNAPSHOT_FILE, b"{\"highWaterMark\":160}").unwrap();
-    write_zone_file(&gfs, &zone, crate::backend::continuity_state::STATE_FILE, b"{\"summary\":1}").unwrap();
+    // Two summary versions: one that covered only the start of the parent, one that covers all of it.
+    let version = |n: u64, based_on: usize| {
+        let v = crate::backend::continuity_state::StateVersion {
+            version: n,
+            created_at_ms: 10 * n as i64,
+            based_on: based_on as i64,
+            sha256: String::new(),
+            text: format!("## Last user request
+summary {n}"),
+            tokens: None,
+        };
+        format!("{}
+", serde_json::to_string(&v).unwrap())
+    };
+    let state = format!("{}{}", version(1, 300), version(2, data.len()));
+    write_zone_file(&gfs, &zone, crate::backend::continuity_state::STATE_FILE, state.as_bytes()).unwrap();
     let cap = 6_000;
     assert!(data.len() > 4 * cap as usize);
 
@@ -293,7 +308,17 @@ fn a_parent_over_the_cap_gives_the_fork_its_newest_part_from_a_turn_start() {
     assert_eq!(recs, want);
     // The parent's snapshot counts lines of the whole transcript; its summary is the conversation's.
     assert!(gfs.stat(&fork, SNAPSHOT_FILE).unwrap().is_none());
-    assert_eq!(read_all(&gfs, &fork, crate::backend::continuity_state::STATE_FILE), b"{\"summary\":1}");
+    // Its coverage is moved to the copy, so the summary is still offered: a version that covered only
+    // what was cut away covers none of the copy, the newest covers all of it.
+    let versions: Vec<crate::backend::continuity_state::StateVersion> = read_all(&gfs, &fork, crate::backend::continuity_state::STATE_FILE)
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.is_empty())
+        .map(|l| serde_json::from_slice(l).unwrap())
+        .collect();
+    assert_eq!(versions.iter().map(|v| v.based_on).collect::<Vec<_>>(), vec![0, copied.len() as i64]);
+    let latest = crate::backend::continuity_state::latest_state(&gfs, &fork).expect("the summary is offered to the fork");
+    assert_eq!(latest.text, "## Last user request
+summary 2");
     assert_eq!(inherited_session(&gfs, &fork).as_deref(), Some("sess-b"));
     assert_eq!(read_all(&gfs, &zone, OUTPUT_FILE), data.as_bytes(), "the parent keeps everything");
     // The fork continues after what it was given.

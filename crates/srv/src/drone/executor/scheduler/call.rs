@@ -75,7 +75,7 @@ impl<'a> Scheduler<'a> {
         let remaining = remaining_cap(self.run_cap_usd, self.spent);
         let child_cancel = Cancel::default();
         let _stop = StopWith::new(self.cancel.clone(), child_cancel.clone());
-        let limits = Limits { run_cap_usd: remaining, cancel: child_cancel, persist: None, chain, lookup: Some(Arc::clone(&lookup)) };
+        let limits = Limits { run_cap_usd: remaining, cancel: child_cancel, persist: None, chain, lookup: Some(Arc::clone(&lookup)), replay: None };
         let child_id = uuid::Uuid::new_v4().to_string();
         let _ = self.tx.send(RunEvent::ChildStarted {
             run_id: self.run_id.to_string(),

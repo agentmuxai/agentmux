@@ -43,7 +43,27 @@ impl NavWatch {
     }
 }
 
-/// Wait `grace` for a navigation to be asked for; when one was, wait up to `bound` for a load to end after it.
+/// The frame an event is about (`params.frameId`), when it names one.
+fn frame_of(event: &Value) -> Option<&str> {
+    event.pointer("/params/frameId").and_then(Value::as_str)
+}
+
+/// Whether a load that ended is the end of the navigation asked for: the same session (a frame from another site loads
+/// on its own, and a load there says nothing of the page) and the same frame. An event that names no frame, or a
+/// request that named none, is taken as the navigation's.
+fn ends(stop: &Value, request: &Value) -> bool {
+    if stop.get("sessionId") != request.get("sessionId") {
+        return false;
+    }
+    match (frame_of(stop), frame_of(request)) {
+        (Some(s), Some(r)) => s == r,
+        _ => true,
+    }
+}
+
+/// Wait `grace` for a navigation to be asked for; when one was, wait up to `bound` for a load of that frame to end
+/// after it. A load of another frame (an embedded one finishing) used to end the wait, and the page was then read
+/// while it was still the old one (#47641).
 /// `true` when a requested navigation ended in time, `false` when none was asked for or it outlasted `bound`.
 async fn settle_after(
     requested: &mut UnboundedReceiver<Value>,
@@ -51,12 +71,20 @@ async fn settle_after(
     grace: Duration,
     bound: Duration,
 ) -> bool {
-    if tokio::time::timeout(grace, requested.recv()).await.ok().flatten().is_none() {
+    let Some(request) = tokio::time::timeout(grace, requested.recv()).await.ok().flatten() else {
         return false;
-    }
+    };
     // A load that ended before the request (the page was still settling) is not the navigation's end.
     while stopped.try_recv().is_ok() {}
-    tokio::time::timeout(bound, stopped.recv()).await.ok().flatten().is_some()
+    let wait = async {
+        while let Some(stop) = stopped.recv().await {
+            if ends(&stop, &request) {
+                return true;
+            }
+        }
+        false
+    };
+    tokio::time::timeout(bound, wait).await.unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -101,6 +129,58 @@ mod tests {
         // Nothing ends after the request: the wait runs to its bound and says so.
         assert!(!settle_after(&mut req, &mut stop, SHORT, SHORT).await);
         drop(stop_tx);
+    }
+
+    #[tokio::test]
+    async fn another_frame_finishing_does_not_end_the_wait_but_the_navigating_one_does() {
+        let (req_tx, mut req) = unbounded_channel::<Value>();
+        let (stop_tx, mut stop) = unbounded_channel::<Value>();
+        req_tx.send(json!({ "params": { "frameId": "main" } })).unwrap();
+        let ends = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            stop_tx.send(json!({ "params": { "frameId": "embedded" } })).unwrap();
+            stop_tx.send(json!({ "sessionId": "other-site", "params": { "frameId": "main" } })).unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            stop_tx.send(json!({ "params": { "frameId": "main" } })).unwrap();
+            stop_tx
+        });
+        let started = std::time::Instant::now();
+        assert!(settle_after(&mut req, &mut stop, SHORT, Duration::from_secs(5)).await);
+        assert!(started.elapsed() >= Duration::from_millis(140), "the embedded frame's load must not have ended it");
+        drop(ends.await);
+    }
+
+    #[tokio::test]
+    async fn a_navigation_in_an_attached_frame_ends_on_that_frames_own_session() {
+        let (req_tx, mut req) = unbounded_channel::<Value>();
+        let (stop_tx, mut stop) = unbounded_channel::<Value>();
+        req_tx.send(json!({ "sessionId": "s1", "params": { "frameId": "child" } })).unwrap();
+        let sender = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            stop_tx.send(json!({ "sessionId": "s2", "params": { "frameId": "child" } })).unwrap();
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            stop_tx.send(json!({ "sessionId": "s1", "params": { "frameId": "child" } })).unwrap();
+            stop_tx
+        });
+        let started = std::time::Instant::now();
+        assert!(settle_after(&mut req, &mut stop, SHORT, Duration::from_secs(5)).await);
+        assert!(started.elapsed() >= Duration::from_millis(70), "the other session's load must not have ended it");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(sender.await);
+    }
+
+    #[tokio::test]
+    async fn only_another_frame_loading_runs_the_wait_to_its_bound() {
+        let (req_tx, mut req) = unbounded_channel::<Value>();
+        let (stop_tx, mut stop) = unbounded_channel::<Value>();
+        req_tx.send(json!({ "params": { "frameId": "main" } })).unwrap();
+        let sender = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            stop_tx.send(json!({ "params": { "frameId": "embedded" } })).unwrap();
+            stop_tx
+        });
+        assert!(!settle_after(&mut req, &mut stop, SHORT, SHORT).await);
+        drop(sender.await);
     }
 
     #[tokio::test]

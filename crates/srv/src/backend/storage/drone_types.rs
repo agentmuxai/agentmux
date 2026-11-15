@@ -37,6 +37,8 @@ pub enum BlockKind {
     Drone,
     /// Brings branches that split back together.
     Join,
+    /// Runs a fixed command line in a container.
+    Run,
 }
 
 impl BlockKind {
@@ -57,6 +59,7 @@ impl BlockKind {
             "wait" => Some(Self::Wait),
             "drone" => Some(Self::Drone),
             "join" => Some(Self::Join),
+            "run" => Some(Self::Run),
             _ => None,
         }
     }

@@ -151,8 +151,29 @@ fn deploy_shell_integration() {
     //   * the per-instance root the shells actually source (isolation, I6), and
     //   * the stable `~/.agentmux/shell` path docs/MUXSPECT.md and docs/MUXSH.md
     //     tell users to invoke directly, which must stay predictable.
-    backend::shellintegration::deploy_scripts(&backend::shellintegration::integration_base());
+    let base = backend::shellintegration::integration_base();
+    backend::shellintegration::deploy_scripts(&base);
+    backend::shellintegration_prune::stamp_instance(&base, &backend::base::get_mux_data_dir());
     backend::shellintegration::deploy_scripts(&backend::shellintegration::documented_shell_root());
+    prune_stale_shell_integration(base);
+}
+
+/// Removes the `~/.agentmux/shell/<hash>` folders of instances whose data dir is gone. In the
+/// background: it reads every instance's folder listing. See `shellintegration_prune`.
+fn prune_stale_shell_integration(current_base: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let home = backend::base::get_home_dir().join(".agentmux");
+        let live = backend::shellintegration_prune::live_instance_data_dirs(&home);
+        let report = backend::shellintegration_prune::prune_stale_integration_dirs(&home.join("shell"), &current_base, &live);
+        if report != backend::shellintegration_prune::PruneReport::default() {
+            tracing::info!(
+                removed = report.removed,
+                stamped = report.stamped,
+                unattributed = report.unattributed,
+                "shell integration folders of instances that are gone"
+            );
+        }
+    });
 }
 
 /// A Groq key left in settings.json as plain text goes into the Vault, and the setting becomes a `vault:<id>`

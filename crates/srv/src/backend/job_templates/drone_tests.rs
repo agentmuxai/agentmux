@@ -83,6 +83,7 @@ fn a_graph_this_build_cannot_hold_is_refused_and_says_where() {
     refused(json!({ "nodes": [node("a", json!({ "task": "x" }))], "edges": [] }), "\"a\" is a \"\" node");
     // A call to another drone: what that drone does could not be shown in the prompt.
     refused(json!({ "nodes": [node("call", json!({ "kind": "drone", "drone": "other" }))], "edges": [] }), "a template cannot");
+    refused(json!({ "nodes": [node("go", json!({ "kind": "run", "command": ["ls"] }))], "edges": [] }), "runs a command, and a template cannot");
     let mut dangling = graph();
     dangling["edges"] = json!([{ "id": "e9", "source": "ask", "target": "nowhere" }]);
     refused(dangling, "\"nowhere\"");

@@ -37,12 +37,15 @@ for (const view of ["agent", "term", "help", "swarm"]) {
     registerPaneTab(stubPaneTab(view, view === "agent" || view === "term" ? { lifecycle: "keepAlive" } : {}));
 }
 
-const metaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: { view?: string } }>>>();
+type TestMeta = { view?: string; agentId?: string };
+const metaSignals = new Map<string, ReturnType<typeof createSignal<{ meta?: TestMeta }>>>();
 const metaOf = (id: string) => {
-    if (!metaSignals.has(id)) metaSignals.set(id, createSignal<{ meta?: { view?: string } }>({ meta: {} }));
+    if (!metaSignals.has(id)) metaSignals.set(id, createSignal<{ meta?: TestMeta }>({ meta: {} }));
     return metaSignals.get(id)!;
 };
-const setView = (id: string, view: string | undefined) => metaOf(id)[1]({ meta: { view } });
+// An agent pane here has an agent chosen: only such a pane has a session to wait for (the picker has none).
+const setView = (id: string, view: string | undefined) =>
+    metaOf(id)[1]({ meta: view === "agent" ? { view, agentId: "agent-a" } : { view } });
 
 const [treeVersion, bumpTree] = createSignal(0);
 const stacks = new Map<string, string[] | undefined>();

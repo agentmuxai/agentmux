@@ -15,6 +15,8 @@ import {
     zeroViolations,
     collect,
     colourLiterals,
+    colourList,
+    formatColourList,
     compare,
     followRenames,
     countButtons,
@@ -169,6 +171,29 @@ describe("rules 5-9: the shared scales", () => {
         ]);
     });
 
+    it("counts literals in SCSS variables, maps and @include arguments, not black, white or a token", () => {
+        const scss = `
+            $brand: #ef4444 !default;
+            $neutral: #fff;
+            $from-token: var(--accent-color);
+            $map: (
+                ok: rgb(1, 2, 3),
+                shadow: rgba(0, 0, 0, 0.3),
+            );
+            @mixin glow($c) { box-shadow: 0 0 4px $c; }
+            .a { $local: hsl(10 50% 50%); @include glow(#00ff88); color: $brand; }
+            .b { @include glow(var(--accent-color)); @include panel(rgba(10, 20, 30, 0.5)) { color: red; } }
+        `;
+        expect(colourLiterals(scss).map((c) => [c.property, c.literal])).toEqual([
+            ["$brand", "#ef4444"],
+            ["$map", "rgb(1, 2, 3)"],
+            ["$local", "hsl(10 50% 50%)"],
+            ["@include", "#00ff88"],
+            ["@include", "rgba(10, 20, 30, 0.5)"],
+            ["color", "red"],
+        ]);
+    });
+
     it("leaves out lines marked fixed for stylelint, and palette tokens set on :root", () => {
         const scss = `
             :root { --palette: #e5484d; }
@@ -269,6 +294,32 @@ describe("collect", () => {
             { path: "frontend/app/themes/nord.scss", source: "[data-theme=nord] { --accent-color: #88c0d0; }" },
         ];
         expect(collect(coloured).colours).toEqual({ "frontend/app/view/x/c.scss": 1 });
+    });
+
+    it("lists each file's literals, most first, without the theme files, tests or black and white", () => {
+        const files = [
+            { path: "frontend/app/view/x/a.scss", source: ".a { color: #ef4444; }" },
+            { path: "frontend/app/view/x/b.scss", source: "$c: #123456;\n.b { color: #abcdef; background: #000; }" },
+            { path: "frontend/app/view/x/c.css", source: ".c { color: var(--x); }" },
+            { path: "frontend/app/theme.scss", source: ":root { --e: #ef4444; }" },
+            { path: "frontend/app/view/x/t.tsx", source: 'const s = { fill: "#EA4335" };' },
+        ];
+        const rows = colourList(files, "colours");
+        expect(rows.map((r) => [r.path, r.literals.map((l) => `${l.line} ${l.literal}`)])).toEqual([
+            ["frontend/app/view/x/b.scss", ["1 #123456", "2 #abcdef"]],
+            ["frontend/app/view/x/a.scss", ["1 #ef4444"]],
+        ]);
+        expect(formatColourList(rows, "colours")).toBe(
+            [
+                "    2  frontend/app/view/x/b.scss",
+                "         L1  #123456",
+                "         L2  #abcdef",
+                "    1  frontend/app/view/x/a.scss",
+                "         L1  #ef4444",
+                "3 colour literals in stylesheets, outside the theme files, in 2 files",
+            ].join("\n")
+        );
+        expect(colourList(files, "tsColours").map((r) => r.path)).toEqual(["frontend/app/view/x/t.tsx"]);
     });
 
     it("doesn't count a variable set only by a test as defined", () => {
