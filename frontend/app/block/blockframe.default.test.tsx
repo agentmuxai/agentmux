@@ -103,6 +103,8 @@ type Over = {
     manageConnection?: boolean;
     dragging?: boolean;
     bodyItems?: any[];
+    /** The `bg` the view model reports (the legacy background). */
+    bg?: string;
 };
 
 function setup(over: Over = {}) {
@@ -134,6 +136,7 @@ function setup(over: Over = {}) {
     const viewModel = {
         noHeader: () => true,
         manageConnection: over.manageConnection ? util.createSignalAtom(true) : undefined,
+        blockBg: over.bg ? () => ({ bg: over.bg }) : undefined,
         getBodyContextMenuItems: (ctx?: unknown) => over.bodyItems?.map((i) => ({ ...i, ctx })) ?? [],
     } as any;
     const blockRef = { current: null as HTMLDivElement | null };
@@ -243,6 +246,39 @@ describe("the frame's markup", () => {
         expect(t.onClick).toHaveBeenCalledTimes(1);
         fireEvent.focusIn(frame(t.view.container));
         expect(t.onFocusCapture).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("the backdrop", () => {
+    const style = (c: HTMLElement) => frame(c).style;
+
+    it("a pane with none carries no data-backdrop and none of the scope's properties", () => {
+        const t = setup();
+        expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
+        expect(style(t.view.container).getPropertyValue("--surface")).toBe("");
+        expect(style(t.view.container).getPropertyValue("--main-text-color")).toBe("");
+    });
+
+    it("a built-in in the pane's meta puts its surface, ink and the re-pointed tokens on the frame, named by its id", () => {
+        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        const el = frame(t.view.container);
+        expect(el.getAttribute("data-backdrop")).toBe("builtin:teal");
+        expect(el.style.getPropertyValue("--surface")).toMatch(/^#[0-9a-f]{6}$/);
+        expect(el.style.getPropertyValue("--main-text-color")).toBe("var(--ink-text)");
+        expect(el.style.getPropertyValue("--block-agent-color")).not.toBe("");
+    });
+
+    it("a plain colour in the old bg meta is a legacy backdrop; a gradient is left untouched", () => {
+        const plain = setup({ bg: "#336699" });
+        expect(frame(plain.view.container).getAttribute("data-backdrop")).toBe("legacy");
+        cleanup();
+        const gradient = setup({ bg: "linear-gradient(red, blue)" });
+        expect(frame(gradient.view.container).hasAttribute("data-backdrop")).toBe(false);
+    });
+
+    it("a record that can't be read is no backdrop", () => {
+        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
+        expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
     });
 });
 
