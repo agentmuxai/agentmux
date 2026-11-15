@@ -205,6 +205,58 @@ pub(crate) fn cut_before(
     Ok(Some(size))
 }
 
+/// The sidecar for a copy of `output`'s bytes `[cut, end)`: the records from the first one at or past
+/// `cut` to the last before `end`, with their offsets lowered by `cut`, led by a record at 0 that
+/// carries the newest time before the cut so the copy's first line has one. Read through `read` like
+/// [`stamps_for`]; `Ok(None)` when bytes it needs aren't stored. Empty when the sidecar holds no
+/// record near the cut.
+pub(crate) fn rebase_range(
+    read: &dyn Fn(i64, i64) -> Result<Option<Vec<u8>>, StoreError>,
+    size: i64,
+    cut: u64,
+    end: u64,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    let Some(from) = cut_before(read, size, cut)? else { return Ok(None) };
+    // The record just before the cut: the last whole line of the window ahead of `from`.
+    let back = from.min(MARGIN);
+    let lead = if back > 0 {
+        let Some(bytes) = read(from - back, back)? else { return Ok(None) };
+        let whole = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        whole.rsplit(|&b| b == b'\n').next().and_then(parse).map(|(_, ms)| ms)
+    } else {
+        None
+    };
+    let mut records: Vec<(u64, i64)> = Vec::new();
+    let (mut pos, mut carry) = (from, Vec::new());
+    'read: while pos < size {
+        let len = CHUNK.min(size - pos);
+        let Some(chunk) = read(pos, len)? else { return Ok(None) };
+        carry.extend_from_slice(&chunk);
+        pos += len;
+        while let Some(nl) = carry.iter().position(|&b| b == b'\n') {
+            if let Some((off, ms)) = parse(&carry[..nl]) {
+                if off >= end {
+                    carry.clear();
+                    break 'read;
+                }
+                records.push((off.saturating_sub(cut), ms));
+            }
+            carry.drain(..=nl);
+        }
+    }
+    if let Some(rec) = parse(&carry).filter(|r| r.0 < end) {
+        records.push((rec.0.saturating_sub(cut), rec.1));
+    }
+    let mut out = Vec::new();
+    if let Some(ms) = lead.filter(|_| records.first().map_or(true, |&(off, _)| off > 0)) {
+        out.extend_from_slice(format!("{{\"off\":0,\"ms\":{ms}}}\n").as_bytes());
+    }
+    for (off, ms) in records {
+        out.extend_from_slice(format!("{{\"off\":{off},\"ms\":{ms}}}\n").as_bytes());
+    }
+    Ok(Some(out))
+}
+
 enum Probe {
     /// The first parsable record starting after `pos`.
     Found { start: i64, off: u64, ms: i64 },
@@ -326,6 +378,39 @@ mod tests {
         assert_eq!(cut_before(&read, 0, 10).unwrap(), Some(0));
         let unreadable = |_: i64, _: i64| -> Result<Option<Vec<u8>>, StoreError> { Ok(None) };
         assert_eq!(cut_before(&unreadable, size, 45_000_000).unwrap(), None);
+    }
+
+    #[test]
+    fn a_copy_that_starts_at_a_cut_gets_the_records_after_it_moved_to_zero() {
+        let records: Vec<(u64, i64)> = (0..200_000u64).map(|i| (i * 300, 1_700_000_000_000 + i as i64)).collect();
+        let bytes = sidecar(&records);
+        let read = |off: i64, len: i64| -> Result<Option<Vec<u8>>, StoreError> {
+            let (a, b) = (off as usize, ((off + len) as usize).min(bytes.len()));
+            Ok(Some(bytes[a..b].to_vec()))
+        };
+        let size = bytes.len() as i64;
+        // A cut between records: the lead is the record before it, at 0; the rest follow, lowered.
+        let cut = 45_000_150u64;
+        let got = rebase_range(&read, size, cut, u64::MAX).unwrap().unwrap();
+        let parsed: Vec<(u64, i64)> = got.split(|&b| b == b'\n').filter_map(parse).collect();
+        assert_eq!(parsed[0], (0, 1_700_000_000_000 + 150_000), "the record before the cut leads, at 0");
+        assert_eq!(parsed[1], (150, 1_700_000_000_000 + 150_001), "the first record past the cut");
+        assert_eq!(parsed.len(), 1 + (200_000 - 150_001), "every later record");
+        assert!(parsed.windows(2).all(|w| w[0].0 <= w[1].0));
+        // A cut on a record: no lead is added over it.
+        let on = rebase_range(&read, size, 45_000_000, u64::MAX).unwrap().unwrap();
+        let first = on.split(|&b| b == b'\n').filter_map(parse).next().unwrap();
+        assert_eq!(first, (0, 1_700_000_000_000 + 150_000));
+        // At the very start, and past the end.
+        assert_eq!(rebase_range(&read, size, 0, u64::MAX).unwrap().unwrap(), bytes);
+        assert!(rebase_range(&read, size, u64::MAX, u64::MAX).unwrap().unwrap().len() < 40, "only the lead");
+        assert!(rebase_range(&read, 0, 10, u64::MAX).unwrap().unwrap().is_empty());
+        // A copy that stops at an end: no record at or past it.
+        let bounded = rebase_range(&read, size, 45_000_150, 45_001_000).unwrap().unwrap();
+        let offs: Vec<u64> = bounded.split(|&b| b == b'\n').filter_map(parse).map(|r| r.0).collect();
+        assert_eq!(offs, vec![0, 150, 450, 750], "the lead, then the records below the end, lowered");
+        let unreadable = |_: i64, _: i64| -> Result<Option<Vec<u8>>, StoreError> { Ok(None) };
+        assert_eq!(rebase_range(&unreadable, size, 45_000_000, u64::MAX).unwrap(), None);
     }
 
     #[test]

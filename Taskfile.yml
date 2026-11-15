@@ -459,10 +459,10 @@ tasks:
             - task: dev:cleardata:macos
 
     init:
-        desc: 'Initialize the project for development: verify the required toolchain is present (Rust/Node/CMake/Ninja/git), then npm install. See scripts/bootstrap.sh / scripts/bootstrap.ps1 first if Task itself was just installed.'
+        desc: 'Initialize the project for development: verify the required toolchain is present (Rust/Node/CMake/Ninja/git), then npm ci. See scripts/bootstrap.sh / scripts/bootstrap.ps1 first if Task itself was just installed.'
         cmds:
             - sh scripts/check-toolchain.sh
-            - npm install
+            - npm ci
 
     dev:cleardata:windows:
         internal: true
@@ -480,15 +480,17 @@ tasks:
         cmd: 'rm -rf ~/Library/Application\ Support/agentmux-dev'
 
     npm:install:
-        desc: Runs `npm install`
+        # `npm ci`, not `npm install`: it installs exactly what package-lock.json says and never writes it.
+        # `npm install` rewrote the lockfile under a different npm (dropped "peer": true, marked vite "dev"),
+        # and a `git commit -am` then committed that. A dependency changes with `npm install <package>`.
+        desc: Runs `npm ci`
         internal: true
         generates:
             - node_modules/**/*
-            - package-lock.json
         sources:
             - package-lock.json
             - package.json
-        cmd: npm install
+        cmd: npm ci
 
     copyfiles:*:*:
         desc: Recursively copy directory and its contents.

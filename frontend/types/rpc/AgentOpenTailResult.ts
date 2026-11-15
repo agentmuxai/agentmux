@@ -40,4 +40,10 @@ gen_mismatch?: boolean,
  * The agent's saved history in the shared store was found damaged, so this read came from
  * the block's own copy, which holds only what this block wrote: earlier history may be missing.
  */
-history_damaged?: boolean, };
+history_damaged?: boolean, 
+/**
+ * The transcript has no line positions yet and srv is counting it (one scan, once per file):
+ * `lines` is empty. Ask again in a moment instead of opening the usual way, which cannot read a
+ * large transcript without them.
+ */
+counting?: boolean, };

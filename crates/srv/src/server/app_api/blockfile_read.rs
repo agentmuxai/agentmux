@@ -90,6 +90,9 @@ pub(super) async fn indexed_window(
     idx_result
 }
 
+/// How long a read waits for a file with no line epoch to be counted (the pane's read allows 30 s).
+const INDEX_COUNT_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// The read on the blocking pool: brings `output.idx` up to date and reads the window through it.
 fn read_from_index(
     filestore: &FileStoreRef,
@@ -105,6 +108,14 @@ fn read_from_index(
     let out_stat = filestore.stat(read_block, "output").ok()??;
     if out_stat.opts.circular {
         return None; // circular files: fall back to slow path
+    }
+    // A file with no line epoch has no generation to label the index with, so the index is rebuilt
+    // from byte 0 by every read and, while the file grows, never serves one (seconds each on a
+    // gigabyte transcript, then refused). Count it first: once per file, shared by every reader.
+    // Still counting after the wait: the whole-file path answers (a small file) or refuses (a
+    // large one, with a retry), without rebuilding.
+    if !crate::backend::transcript::counting::ensure_counted(filestore, read_block, INDEX_COUNT_WAIT) {
+        return None;
     }
     // Everything the answer rests on — the index judged fresh,
     // its entries, the output bytes they point at — comes from

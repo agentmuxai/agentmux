@@ -46,6 +46,20 @@ describe("which two nightly builds are compared", () => {
         expect(pickBuilds(runs, { bRunId: 99 }).b).toBeNull();
         expect(pickBuilds([]).b).toBeNull();
     });
+
+    it("honours a chosen A, which need not be the night before B", () => {
+        const p = pickBuilds(runs, { bRunId: 5, aRunId: "3" });
+        expect([p.b.id, p.a.id]).toEqual([5, 3]);
+    });
+
+    it("measures B alone, and says why, when the chosen A is gone, newer than B, or the same commit", () => {
+        expect(pickBuilds(runs, { bRunId: 4, aRunId: 5 }).a).toBeNull();
+        expect(pickBuilds(runs, { bRunId: 4, aRunId: 5 }).reason).toMatch(/run 5/);
+        expect(pickBuilds([run(5, "eee", "2026-10-19T12:00:00Z"), run(4, "ddd", "2026-10-18T10:00:00Z", false)], { aRunId: 4 }).a).toBeNull();
+        const same = pickBuilds([run(5, "eee", "2026-10-19T12:00:00Z"), run(4, "eee", "2026-10-18T10:00:00Z")], { aRunId: 4 });
+        expect(same.a).toBeNull();
+        expect(same.reason).toMatch(/same commit/);
+    });
 });
 
 describe("what was merged between the builds", () => {

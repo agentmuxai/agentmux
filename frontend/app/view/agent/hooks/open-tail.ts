@@ -28,6 +28,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 /** A first screen: about what fits one pane, plus a margin. */
 export const OPEN_TAIL_BYTES = 64 * 1024;
 
+/** A transcript this large (srv's `WHOLE_FILE_REFUSE_BYTES`) cannot be opened the usual way: its first screen is all there is. */
+export const HUGE_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
+
 export interface OpenTailRequest {
     block_id: string;
     filename: "output";
@@ -61,6 +64,8 @@ export interface OpenTailResult {
     snapshot_modts?: number;
     /** The saved history in the shared store is damaged: this slice is the block's own copy, so earlier history may be missing. */
     history_damaged?: boolean;
+    /** srv is counting the transcript (one scan, once per file): no lines yet, ask again. */
+    counting?: boolean;
 }
 
 /** An open tail with the line positions the pane needs, checked. */
@@ -127,23 +132,47 @@ export function startsAtTurn(line: string | undefined): boolean {
     }
 }
 
+/** How often the pane asks again while srv counts a large transcript, and how long it keeps asking. */
+export const COUNT_POLL_MS = 1500;
+export const COUNT_GIVE_UP_MS = 120_000;
+
 /**
  * Read the first screen. `null`: use the open's usual path (srv doesn't serve
  * the command, the read failed, or its answer has no usable line positions).
+ *
+ * A transcript srv has not counted yet answers `counting` with no lines; the read asks again
+ * until it is counted (or `stopped`, or two minutes), because the usual path cannot read a large
+ * transcript without line positions either.
  */
 export async function readOpenTail(
     req: OpenTailRequest,
-    opts?: { call?: (req: OpenTailRequest) => Promise<OpenTailResult>; timeout?: number },
+    opts?: {
+        call?: (req: OpenTailRequest) => Promise<OpenTailResult>;
+        timeout?: number;
+        /** True once the pane is gone: stop asking. */
+        stopped?: () => boolean;
+        sleep?: (ms: number) => Promise<void>;
+        now?: () => number;
+    },
 ): Promise<OpenTail | null> {
     if (unsupported) return null;
     const stub = (RpcApi as unknown as OpenTailApi).AgentOpenTailCommand;
     const call = opts?.call ?? (stub ? (r: OpenTailRequest) => stub(TabRpcClient, r, { timeout: opts?.timeout ?? 5000 }) : null);
     if (!call) return null; // srv has no typed command for it yet
-    try {
-        const res = await call(req);
-        return usableOpenTail(res) ? res : null;
-    } catch (err) {
-        if (UNKNOWN_COMMAND.test(String((err as { message?: string } | null)?.message ?? err))) unsupported = true;
-        return null;
+    const sleep = opts?.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const now = opts?.now ?? Date.now;
+    const began = now();
+    for (;;) {
+        let res: OpenTailResult;
+        try {
+            res = await call(req);
+        } catch (err) {
+            if (UNKNOWN_COMMAND.test(String((err as { message?: string } | null)?.message ?? err))) unsupported = true;
+            return null;
+        }
+        if (usableOpenTail(res)) return res;
+        if (!res?.counting || opts?.stopped?.() || now() - began >= COUNT_GIVE_UP_MS) return null;
+        await sleep(COUNT_POLL_MS);
+        if (opts?.stopped?.()) return null;
     }
 }
