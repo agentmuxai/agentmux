@@ -40,11 +40,16 @@ export interface ImportPreview {
     replaced: number;
 }
 
-/** The group an entry belongs to when merging: one command on one platform ("-command" is the same command). */
-function groupOf(entry: unknown): string {
-    const e = entry as { command: string; platform?: string };
-    return `${e.command.replace(/^-/, "")}|${e.platform ?? "*"}`;
-}
+type Entry = { command: string; key?: string; platform?: string };
+
+/** The command an entry is about ("-command" unbinds the same command). */
+const commandOf = (entry: unknown): string => (entry as Entry).command.replace(/^-/, "");
+
+/** The platforms an entry applies to: its own, or both when it names none. */
+const platformsOf = (entry: unknown): string[] => {
+    const p = (entry as Entry).platform;
+    return p ? [p] : ["mac", "other"];
+};
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -72,20 +77,40 @@ export function previewImport(current: unknown[], incoming: unknown[]): ImportPr
         else unusable.push({ index, message });
     });
     const have = (e: unknown) => current.some((c) => same(c, e));
-    const touched = new Set(usable.map(groupOf));
-    const replaced = [...touched].filter((g) => {
-        const mine = current.filter((c) => entryIssue(c) == null && groupOf(c) === g);
-        const theirs = usable.filter((u) => groupOf(u) === g);
-        return mine.length > 0 && !(mine.length === theirs.length && theirs.every(have));
+    const merged = mergeImport(current, usable);
+    const valid = (list: unknown[], command: string) => list.filter((c) => entryIssue(c) == null && commandOf(c) === command);
+    const commands = [...new Set(usable.map(commandOf))];
+    const replaced = commands.filter((command) => {
+        const before = valid(current, command);
+        const after = valid(merged, command);
+        return before.length > 0 && !(before.length === after.length && before.every((e) => after.some((a) => same(a, e))));
     }).length;
     return { usable, unusable, already: usable.filter(have).length, replaced };
 }
 
-/** The setting with the commands the import gives keys to taken from the import: the entries the setting has for them
- *  (on that platform) go, the imported ones are added, every other entry stays as it is. */
+/** The setting with the commands the import gives keys to taken from the import. For each such command the entries the
+ *  setting has go where the import covers the platform they apply to, and the imported ones are added; every other
+ *  entry stays as it is. An entry with no `platform` applies on both platforms, so one the import covers on only one
+ *  platform keeps working on the other (it becomes an entry for that platform), and an import with no `platform`
+ *  replaces the command's entries for either platform: no command is left with two entries for one platform. */
 export function mergeImport(current: unknown[], usable: unknown[]): unknown[] {
-    const touched = new Set(usable.map(groupOf));
-    const keep = current.filter((c) => entryIssue(c) != null || !touched.has(groupOf(c)));
+    const covered = new Map<string, Set<string>>();
+    for (const u of usable) {
+        const set = covered.get(commandOf(u)) ?? new Set<string>();
+        platformsOf(u).forEach((p) => set.add(p));
+        covered.set(commandOf(u), set);
+    }
+    const keep: unknown[] = [];
+    for (const c of current) {
+        const cover = entryIssue(c) == null ? covered.get(commandOf(c)) : undefined;
+        if (!cover) {
+            keep.push(c);
+            continue;
+        }
+        const left = platformsOf(c).filter((p) => !cover.has(p));
+        if (left.length === platformsOf(c).length) keep.push(c);
+        else if (left.length === 1) keep.push({ ...(c as Entry), platform: left[0] });
+    }
     return [...keep, ...usable];
 }
 

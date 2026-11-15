@@ -7,11 +7,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]>, copied: [] as string[] }));
+const h = vi.hoisted(() => ({ writes: [] as Array<[string, unknown]>, copied: [] as string[], clipboardFails: false }));
 
 vi.mock("@/util/platformutil", () => ({ isMacOS: () => false, isLinux: () => false }));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
-vi.mock("@/util/clipboard", () => ({ writeText: (t: string) => (h.copied.push(t), Promise.resolve()) }));
+vi.mock("@/util/clipboard", () => ({ writeText: (t: string) => (h.clipboardFails ? Promise.reject(new Error("no clipboard tool")) : (h.copied.push(t), Promise.resolve())) }));
 vi.mock("@/app/store/global", async () => {
     const { createSignal } = await import("solid-js");
     const [settings, setSettings] = createSignal<unknown>({});
@@ -45,6 +45,7 @@ const MINE = [
 beforeEach(() => {
     h.writes.length = 0;
     h.copied.length = 0;
+    h.clipboardFails = false;
     useEntries([]);
 });
 afterEach(cleanup);
@@ -56,6 +57,31 @@ describe("Export", () => {
         fireEvent.click(button("Export"));
         await waitFor(() => expect(screen.getByText("Copied 2 entries.")).toBeTruthy());
         expect(JSON.parse(h.copied[0])).toEqual(MINE);
+    });
+
+    it("shows the text selected, for Ctrl+C, when the clipboard does not take it", async () => {
+        h.clipboardFails = true;
+        useEntries(MINE);
+        render(() => <KeyboardSection />);
+        fireEvent.click(button("Export"));
+        const box = (await screen.findByLabelText("Exported keybindings")) as HTMLTextAreaElement;
+        expect(JSON.parse(box.value)).toEqual(MINE);
+        expect(box.readOnly).toBe(true);
+        expect(box.selectionStart).toBe(0);
+        expect(box.selectionEnd).toBe(box.value.length);
+        expect(screen.getByText(/Could not copy to the clipboard \(on Linux it needs wl-clipboard, xclip or xsel\)\. The entries are selected below: press Ctrl\+C\./)).toBeTruthy();
+    });
+
+    it("takes the text away again on the next export that copies", async () => {
+        h.clipboardFails = true;
+        useEntries(MINE);
+        render(() => <KeyboardSection />);
+        fireEvent.click(button("Export"));
+        await screen.findByLabelText("Exported keybindings");
+        h.clipboardFails = false;
+        fireEvent.click(button("Export"));
+        await waitFor(() => expect(screen.getByText("Copied 2 entries.")).toBeTruthy());
+        expect(screen.queryByLabelText("Exported keybindings")).toBeNull();
     });
 
     it("says there is nothing to export when nothing changed", () => {
