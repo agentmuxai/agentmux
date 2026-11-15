@@ -204,10 +204,14 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
+    // A backdrop is offered on the pane types whose own colours follow it. Phase 1 is the agent pane; a terminal keeps its
+    // own default text colour until phase 2 gives it the backdrop's, and would be unreadable on a pale one (spec §6, §14).
+    const backdropItems =
+        blockData?.meta?.view === "agent" ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
     return [
         { type: "separator" as const },
         { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
-        { label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) },
+        ...backdropItems,
     ];
 }
 

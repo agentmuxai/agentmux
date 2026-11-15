@@ -327,13 +327,17 @@ describe("the backdrop", () => {
         expect(preview.view.container.querySelector(".backdrop-picker")).toBeNull();
     });
 
-    it("the pane's menu has a Backdrop… entry, after Pane Color, that opens the picker", () => {
-        const t = setup();
-        const items = buildPaneColorSubmenu({ oid: t.blockId, meta: { view: "term" } } as unknown as Block);
+    it("an agent pane's menu has a Backdrop… entry, after Pane Color, that opens the picker; other panes have none yet", () => {
+        const t = setup({ meta: { view: "agent" } });
+        const items = buildPaneColorSubmenu({ oid: t.blockId, meta: { view: "agent" } } as unknown as Block);
         const labels = items.map((i) => i.label);
         expect(labels.indexOf("Backdrop…")).toBe(labels.indexOf("Pane Color") + 1);
         items.find((i) => i.label === "Backdrop…")!.click!();
         expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        for (const view of ["term", "files", "browser"]) {
+            const other = buildPaneColorSubmenu({ oid: "x", meta: { view } } as unknown as Block);
+            expect(other.map((i) => i.label), view).not.toContain("Backdrop…");
+        }
     });
 
     it("a record that can't be read is no backdrop", () => {
