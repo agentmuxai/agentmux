@@ -34,15 +34,19 @@ impl<'a> Scheduler<'a> {
 
     /// What `node` does to the world, which a for-each takes from its body.
     fn effect_of_node(&self, node: &FlowNode, kind: BlockKind) -> Effect {
+        let resolve = |template: &str| self.scope.resolve(template);
         let body = match kind {
             BlockKind::ForEach => foreach_config(node)
                 .ok()
                 .and_then(|cfg| self.node_of.get(cfg.body.as_str()).copied())
-                .and_then(|b| kind_of(b).ok().filter(|k| *k != BlockKind::ForEach).map(|k| effect_of(k, b, Effect::ReadOnly)))
+                .and_then(|b| kind_of(b).ok().filter(|k| *k != BlockKind::ForEach).map(|k| effect_of(k, b, Effect::ReadOnly, &resolve)))
+                // A key can depend on the item, which is not known here, so a body that
+                // relies on one cannot be told to be safe to run again.
+                .map(|e| if e == Effect::Idempotent { Effect::Effectful } else { e })
                 .unwrap_or(Effect::Effectful),
             _ => Effect::ReadOnly,
         };
-        effect_of(kind, node, body)
+        effect_of(kind, node, body, &resolve)
     }
 
     /// Before a block with effects starts, keep a checkpoint that says it is

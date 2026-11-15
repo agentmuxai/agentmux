@@ -31,6 +31,9 @@ pub enum RunEvent {
         output: Value,
     },
     RunFailed { run_id: String, error: String },
+    /// The run was taken up again after AgentMux restarted, from checkpoint
+    /// `step`: the blocks before it are not run again.
+    Resumed { run_id: String, step: u32 },
     /// The run's state was kept as checkpoint `step` (0 is the start, before any
     /// block); `block_id` is the block it follows.
     StepCheckpointed {

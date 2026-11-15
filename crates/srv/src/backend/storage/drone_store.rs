@@ -75,8 +75,12 @@ pub trait DroneStore {
     fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError>;
     /// After a restart, give every run still `running` the status `status`
     /// and end it at `now_ms`: its drain task died with the old process.
-    /// Returns rows changed.
-    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64) -> Result<usize, StoreError>;
+    /// The runs in `except` are the ones that are being taken up again from
+    /// their checkpoints, and stay as they are. Returns rows changed.
+    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64, except: &[String]) -> Result<usize, StoreError>;
+    /// The runs still `running`, oldest first: after a restart, the ones the
+    /// old process left (their checkpoints say whether they can go on).
+    fn drone_runs_running(&self) -> Result<Vec<DroneRun>, StoreError>;
     /// Keep checkpoint `step` of `run_id` (`kind` is `full` or `diff`). Writing a step that
     /// is already there is an error: a checkpoint is never rewritten.
     fn drone_checkpoint_put(&self, run_id: &str, step: u32, kind: &str, body: &[u8], now_ms: i64) -> Result<(), StoreError>;
@@ -258,14 +262,45 @@ impl DroneStore for Store {
         Ok(conn.execute("DELETE FROM db_drone_runs WHERE id = ?1", params![run_id])?)
     }
 
-    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64) -> Result<usize, StoreError> {
+    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64, except: &[String]) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
+        let skip = (3..3 + except.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&status, &now_ms];
+        args.extend(except.iter().map(|id| id as &dyn rusqlite::ToSql));
         Ok(conn.execute(
-            "UPDATE db_drone_runs SET status = ?1, ended_at = ?2,
-                    error = CASE WHEN error = '' THEN 'interrupted: AgentMux restarted during this run' ELSE error END
-              WHERE status = 'running'",
-            params![status, now_ms],
+            &format!(
+                "UPDATE db_drone_runs SET status = ?1, ended_at = ?2,
+                        error = CASE WHEN error = '' THEN 'interrupted: AgentMux restarted during this run' ELSE error END
+                  WHERE status = 'running' AND id NOT IN ({skip})"
+            ),
+            args.as_slice(),
         )?)
+    }
+
+    fn drone_runs_running(&self) -> Result<Vec<DroneRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, drone_id, status, started_at, ended_at, block_states, output, error
+             FROM db_drone_runs WHERE status = 'running' ORDER BY started_at",
+        )?;
+        let iter = stmt.query_map([], |row| {
+            let block_states_s: String = row.get(5)?;
+            Ok(DroneRun {
+                id: row.get(0)?,
+                drone_id: row.get(1)?,
+                status: row.get(2)?,
+                started_at: row.get(3)?,
+                ended_at: row.get(4)?,
+                block_states: serde_json::from_str(&block_states_s).unwrap_or_default(),
+                output: row.get(6)?,
+                error: row.get(7)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     fn drone_checkpoint_put(&self, run_id: &str, step: u32, kind: &str, body: &[u8], now_ms: i64) -> Result<(), StoreError> {
