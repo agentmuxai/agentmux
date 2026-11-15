@@ -191,6 +191,18 @@ async fn stopping_the_run_stops_the_drone_it_called() {
 }
 
 #[tokio::test]
+async fn a_call_that_runs_out_of_its_own_time_stops_the_drone_it_called() {
+    let waits = DroneGraph { nodes: vec![node("hold", json!({ "kind": "wait", "on": "never" }))], edges: vec![] };
+    let graph = DroneGraph { nodes: vec![node("call", json!({ "kind": "drone", "drone": "waits", "timeout_seconds": 1 }))], edges: vec![] };
+    let started = std::time::Instant::now();
+    let ran = run_as("main", graph, Value::Null, saved(vec![("waits", waits)])).await;
+    assert!(ran.result.unwrap_err().contains("block call failed: timed out after 1 seconds"));
+    // The callee was stopped with the call, and said so: it is not left running.
+    assert!(ran.events.iter().any(|e| matches!(e, RunEvent::ChildEnded { status, .. } if status == "cancelled")), "{:?}", ran.events.len());
+    assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+}
+
+#[tokio::test]
 async fn a_call_set_wrongly_is_refused_before_the_run_starts() {
     let none = DroneGraph { nodes: vec![node("call", json!({ "kind": "drone" }))], edges: vec![] };
     let why = run_as("main", none, Value::Null, saved(vec![])).await.result.unwrap_err();

@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 
 use super::{Limits, Scheduler};
 use crate::drone::executor::blocks::call as config;
-use crate::drone::executor::engine::{RunEnd, RunEvent};
+use crate::drone::executor::engine::{Cancel, RunEnd, RunEvent};
 use crate::drone::types::FlowNode;
 
 /// The deepest a chain of calls may go, the first drone counted.
@@ -69,9 +69,12 @@ impl<'a> Scheduler<'a> {
             return Err(format!("{id}: the inputs are {size} bytes; at most {MAX_INPUT_BYTES}"));
         }
 
-        // The callee has what the caller has left of its cap, and the caller's cancel.
+        // The callee has what the caller has left of its cap. Its cancel is its own, so that it can be
+        // stopped when the call is dropped (the block ran out of its own time), and it follows the caller.
         let remaining = remaining_cap(self.run_cap_usd, self.spent);
-        let limits = Limits { run_cap_usd: remaining, cancel: self.cancel.clone(), persist: None, chain, lookup: Some(Arc::clone(&lookup)) };
+        let child_cancel = Cancel::default();
+        let _stop = StopWith::new(self.cancel.clone(), child_cancel.clone());
+        let limits = Limits { run_cap_usd: remaining, cancel: child_cancel, persist: None, chain, lookup: Some(Arc::clone(&lookup)) };
         let child_id = uuid::Uuid::new_v4().to_string();
         let _ = self.tx.send(RunEvent::ChildStarted {
             run_id: self.run_id.to_string(),
@@ -86,6 +89,7 @@ impl<'a> Scheduler<'a> {
         // It announces its own end, so that is said even when the caller is stopped first.
         let (parent_tx, run_id, block_id) = (self.tx.clone(), self.run_id.to_string(), id.to_string());
         let (drone, callee_run) = (spec.drone.clone(), child_id.clone());
+        let late = Arc::clone(&self.late_spend);
         let task = tokio::spawn(async move {
             let (tx, rx) = mpsc::unbounded_channel();
             drop(rx);
@@ -96,10 +100,15 @@ impl<'a> Scheduler<'a> {
                 Err(RunEnd::Failed(_)) => "failed",
                 Err(RunEnd::Cancelled(_)) => "cancelled",
             };
+            // What it spent is the caller, and if the caller has gone on without waiting (the call ran out
+            // of its time) it is counted from here, at its next block.
+            late.lock().unwrap_or_else(|e| e.into_inner()).insert(callee_run.clone(), (block_id.clone(), spent));
             let _ = parent_tx.send(RunEvent::ChildEnded { run_id, block_id, child_run_id: callee_run, status: status.to_string(), cost_usd: spent });
             (ended, spent)
         });
         let (ended, spent) = task.await.map_err(|e| format!("{id}: the called drone stopped unexpectedly: {e}"))?;
+        // Counted here, so it is not counted again from the late list.
+        self.late_spend.lock().unwrap_or_else(|e| e.into_inner()).remove(&child_id);
         match ended {
             // The cost of a block that finished is counted from its output, as for any block.
             Ok(value) => Ok(json!({ "value": value, "run_id": child_id, "version": version, "cost_usd": spent })),
@@ -116,6 +125,44 @@ impl<'a> Scheduler<'a> {
                 Err(format!("stopped: {why}"))
             }
         }
+    }
+}
+
+impl Scheduler<'_> {
+    /// Count what callees spent after the call that started them was given up on.
+    pub(super) fn count_late_spend(&mut self) {
+        let late: Vec<(String, f64)> = self.late_spend.lock().unwrap_or_else(|e| e.into_inner()).drain().map(|(_, v)| v).collect();
+        for (block, spent) in late {
+            self.spent += spent;
+            if let Some((id, _)) = self.node_of.get_key_value(block.as_str()) {
+                *self.spent_by.entry(id).or_default() += spent;
+            }
+        }
+    }
+}
+
+/// Stops the callee when the call is dropped, and when the caller is stopped.
+struct StopWith {
+    callee: Cancel,
+    follow: tokio::task::AbortHandle,
+}
+
+impl StopWith {
+    fn new(caller: Cancel, callee: Cancel) -> Self {
+        let (from, to) = (caller, callee.clone());
+        let follow = tokio::spawn(async move {
+            from.cancelled().await;
+            to.cancel(&from.reason());
+        })
+        .abort_handle();
+        Self { callee, follow }
+    }
+}
+
+impl Drop for StopWith {
+    fn drop(&mut self) {
+        self.follow.abort();
+        self.callee.cancel("the call was stopped before it finished");
     }
 }
 

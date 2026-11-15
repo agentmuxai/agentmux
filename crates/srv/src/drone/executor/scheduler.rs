@@ -159,6 +159,8 @@ struct Scheduler<'a> {
     /// The drones above this one (a Drone block called it), and where to find a drone to call.
     chain: Vec<String>,
     lookup: Option<Arc<dyn DroneLookup>>,
+    /// What callees spent that nobody was waiting for any more, by child run: counted at the next block.
+    late_spend: Arc<std::sync::Mutex<HashMap<String, (String, f64)>>>,
     /// Writes the run's checkpoints, with the graph version they say the run is on.
     recorder: Option<(Recorder, GraphRef)>,
     started: Instant,
@@ -283,6 +285,7 @@ impl<'a> Scheduler<'a> {
             wait_timeouts: BTreeMap::new(),
             chain: limits.chain,
             lookup: limits.lookup,
+            late_spend: Arc::default(),
             recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
             started: Instant::now(),
             elapsed_before_ms: 0,
@@ -365,6 +368,7 @@ impl<'a> Scheduler<'a> {
             }
             return Ok(());
         }
+        self.count_late_spend();
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
             self.cap_reached(id, &stopped);
             return Err(stopped);
