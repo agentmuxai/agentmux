@@ -15,7 +15,8 @@
 //! intercept ran, a button inside a frame, or a button that copies nothing. Then nothing was taken, and the
 //! answer says so and that the clipboard may have been written, so the agent can tell the person.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -75,6 +76,32 @@ pub async fn capture_copy_route(State(state): State<Arc<AppState>>, headers: Hea
     }
 }
 
+/// The panes a copy is being taken on. The intercept puts itself over the page's own clipboard functions, so two at
+/// once would save each other's stand-in as "the page's own" and put the wrong one back: one copy per pane.
+fn taking() -> &'static Mutex<HashSet<String>> {
+    static TAKING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    TAKING.get_or_init(Mutex::default)
+}
+
+/// Held from before the intercept goes on until the page's own functions are back.
+#[derive(Debug)]
+struct Taking(String);
+
+impl Taking {
+    fn on(block_id: &str) -> Result<Self, String> {
+        if !taking().lock().unwrap_or_else(|p| p.into_inner()).insert(block_id.to_string()) {
+            return Err("this pane is already taking a copy for a capture: wait for it to finish, then ask again".into());
+        }
+        Ok(Self(block_id.to_string()))
+    }
+}
+
+impl Drop for Taking {
+    fn drop(&mut self) {
+        taking().lock().unwrap_or_else(|p| p.into_inner()).remove(&self.0);
+    }
+}
+
 /// The script as an expression that runs `mode` on the page's own `window`.
 fn run(nonce: &str, mode: &str) -> String {
     format!("({INTERCEPT})(window, {}, {})", json!(nonce), json!(mode))
@@ -101,6 +128,7 @@ async fn copy(state: &Arc<AppState>, root: &mut CdpSession, req: &CopyReq) -> Re
     if let ClickCheck::Ask(ask) = check_click(&mut on_page, &obj, &located.facts, "", &located.page, req.approved_as.as_ref(), approved).await? {
         return Ok(json!({ "needs_approval": ask }));
     }
+    let _taking = Taking::on(&req.block_id)?;
     let nonce = format!("__am{}", uuid::Uuid::new_v4().simple());
     eval(root, run(&nonce, "install")).await?;
     let taken = click_and_wait(root, &mut on_page, &obj, &nonce, req).await;
@@ -151,6 +179,15 @@ mod tests {
         let e = run("__am1", "install");
         assert!(e.starts_with("(function copyIntercept") || e.contains("copyIntercept"), "{e}");
         assert!(e.ends_with("(window, \"__am1\", \"install\")"), "{e}");
+    }
+
+    #[test]
+    fn one_copy_at_a_time_on_a_pane_and_the_next_may_start_when_it_ends() {
+        let first = Taking::on("pane-copy-test").unwrap();
+        assert!(Taking::on("pane-copy-test").unwrap_err().contains("already taking a copy"));
+        assert!(Taking::on("another-pane-copy-test").is_ok(), "per pane");
+        drop(first);
+        assert!(Taking::on("pane-copy-test").is_ok(), "released when it ends, whatever ended it");
     }
 
     #[test]

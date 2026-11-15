@@ -96,3 +96,24 @@ fn a_value_in_another_row_is_not_beside_the_label() {
     ];
     assert!(find_value(&nodes, "Secret", None).unwrap_err().contains("no value found"));
 }
+
+#[test]
+fn a_value_in_another_row_of_the_same_table_is_not_beside_the_label() {
+    // label cell, an empty value cell; and a second row holding a token: the row is the boundary.
+    let nodes = vec![
+        n("1", None, "RootWebArea", "Settings", 1, &["2"]),
+        n("2", Some("1"), "table", "", 2, &["3", "7"]),
+        n("3", Some("2"), "row", "", 3, &["4"]),
+        n("4", Some("3"), "cell", "", 4, &["5"]),
+        n("5", Some("4"), "StaticText", "Client secret", 5, &[]),
+        n("7", Some("2"), "row", "", 7, &["8"]),
+        n("8", Some("7"), "cell", "", 8, &["9"]),
+        n("9", Some("8"), "StaticText", SECRET, 9, &[]),
+    ];
+    assert!(find_value(&nodes, "Client secret", None).unwrap_err().contains("no value found"));
+    // The same row does hold it.
+    let mut same = nodes.clone();
+    same[3]["childIds"] = json!(["5", "9"]);
+    same[7]["parentId"] = json!("4");
+    assert_eq!(find_value(&same, "Client secret", None), Ok(9));
+}

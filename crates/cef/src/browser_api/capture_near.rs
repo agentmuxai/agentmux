@@ -33,7 +33,10 @@ use crate::state::AppState;
 const CLIMB: usize = 3;
 const ROW_NODES: usize = 60;
 /// Containers that are never a row.
-const NOT_A_ROW: &[&str] = &["navigation", "banner", "complementary", "contentinfo", "main", "region", "RootWebArea", "WebArea", "document"];
+/// A table's or list's own container is more than a row: the value beside a label is in the label's row or cell, not
+/// in another row of its table.
+const NOT_A_ROW: &[&str] =
+    &["navigation", "banner", "complementary", "contentinfo", "main", "region", "RootWebArea", "WebArea", "document", "table", "grid", "treegrid", "rowgroup", "list", "tree"];
 /// Controls whose text is their name, not a value beside a label.
 const CONTROLS: &[&str] = &["button", "link", "menuitem", "tab"];
 
