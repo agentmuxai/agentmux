@@ -51,6 +51,12 @@ pub fn place_rect((x, y, w, h): (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
     (x, y, w, h)
 }
 
+/// The rect a window of `width` x `height` is created at when this process is off-screen: CEF
+/// places a window whose initial bounds are empty at (0, 0), so the window must say where it starts.
+pub fn initial_rect(width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
+    active().then_some((ORIGIN, ORIGIN, width, height))
+}
+
 /// Log [`start_line`] for `process`, if there is one.
 pub fn log_start(process: &str) {
     if let Some(line) = start_line(process) {
@@ -94,6 +100,13 @@ mod tests {
         for v in [None, Some(""), Some("0"), Some("false"), Some("no"), Some("off"), Some("2")] {
             assert!(!requested_by(BuildKind::Dev, v), "{v:?}");
         }
+    }
+
+    #[test]
+    fn a_process_that_is_not_off_screen_gives_no_initial_rect() {
+        // The tests run without the variable set.
+        assert_eq!(initial_rect(1200, 800), None);
+        assert_eq!(place_rect((10, 20, 30, 40)), (10, 20, 30, 40));
     }
 
     #[test]

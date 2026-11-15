@@ -416,6 +416,14 @@ wrap_window_delegate! {
             }
         }
 
+        // CEF places a window whose initial bounds are empty at (0, 0), where the first frame shows. A test
+        // build (AGENTMUX_TEST_OFFSCREEN) starts every window off-screen instead; any other build keeps the default.
+        fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
+            let (_, _, w, h) = self.initial_bounds.unwrap_or((0, 0, 1200, 800));
+            let (x, y, width, height) = agentmux_common::test_offscreen::initial_rect(w, h).unwrap_or((0, 0, 0, 0));
+            Rect { x, y, width, height }
+        }
+
         fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
             ShowState::NORMAL
         }
