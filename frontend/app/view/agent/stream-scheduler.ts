@@ -82,8 +82,36 @@ function arm(): void {
     if (rafId == null) rafId = requestAnimationFrame(runFrame);
 }
 
+/** A flush that took this long or more is logged with its pane. */
+export const SLOW_FLUSH_MS = 16;
+/** At most this many slow flushes are logged in each minute; the ones over that are counted into the next line. */
+const SLOW_FLUSH_LINES_PER_MINUTE = 12;
+let slowWindowStart = Number.NEGATIVE_INFINITY;
+let slowInWindow = 0;
+let slowSkipped = 0;
+
+/**
+ * `[perf] long-frame` names this scheduler's frame callback but not which pane's flush filled it. A flush over
+ * SLOW_FLUSH_MS says so, with the block (the queue registers as `<blockId>#<n>`) and how long it ran. Never content.
+ */
+function noteSlowFlush(id: string, took: number, at: number): void {
+    if (at - slowWindowStart >= 60_000) {
+        slowWindowStart = at;
+        slowInWindow = 0;
+    }
+    if (slowInWindow >= SLOW_FLUSH_LINES_PER_MINUTE) {
+        slowSkipped++;
+        return;
+    }
+    slowInWindow++;
+    const skipped = slowSkipped ? ` (+${slowSkipped} slow flushes not logged)` : "";
+    slowSkipped = 0;
+    console.warn(`[perf] slow-flush block=${id.split("#")[0].slice(0, 8)} ${Math.round(took)}ms${skipped}`);
+}
+
 function runOne(id: string, req: Request): void {
     pending.delete(id);
+    const started = now();
     try {
         req.flush();
     } catch (err) {
@@ -92,6 +120,8 @@ function runOne(id: string, req: Request): void {
             throw err;
         });
     }
+    const ended = now();
+    if (ended - started >= SLOW_FLUSH_MS) noteSlowFlush(id, ended - started, ended);
 }
 
 /**
@@ -186,6 +216,9 @@ export function __resetStreamSchedulerForTests(): void {
     if (rafId != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
     rafId = null;
     lastInputAt = Number.NEGATIVE_INFINITY;
+    slowWindowStart = Number.NEGATIVE_INFINITY;
+    slowInWindow = 0;
+    slowSkipped = 0;
 }
 
 /** Tests only: record an input at the current time without dispatching an event. */

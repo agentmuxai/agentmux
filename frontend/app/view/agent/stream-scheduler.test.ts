@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     INPUT_WINDOW_MS,
     MAX_PANES_PER_FRAME_WHILE_INTERACTING,
+    SLOW_FLUSH_MS,
     STARVATION_MS,
     __markInputForTests,
     __resetStreamSchedulerForTests,
@@ -255,5 +256,40 @@ describe("stream scheduler", () => {
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }));
         frame();
         expect(order).toEqual(["a"]);
+    });
+});
+
+describe("slow flushes in the log", () => {
+    it("names the block of a flush that took SLOW_FLUSH_MS or more, and nothing else about it", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        requestStreamFlush("0123456789abcdef#1", () => {
+            clock += SLOW_FLUSH_MS + 40;
+        });
+        requestStreamFlush("fedcba9876543210#1", () => {
+            clock += SLOW_FLUSH_MS - 1;
+        });
+        frame();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith("[perf] slow-flush block=01234567 56ms");
+        warn.mockRestore();
+    });
+
+    it("writes at most 12 lines a minute and counts the rest into the next line", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        for (let i = 0; i < 15; i++) {
+            requestStreamFlush(`b${i}#1`, () => {
+                clock += SLOW_FLUSH_MS + 1;
+            });
+            frame();
+        }
+        expect(warn).toHaveBeenCalledTimes(12);
+        clock += 61_000;
+        requestStreamFlush("late#1", () => {
+            clock += SLOW_FLUSH_MS + 1;
+        });
+        frame();
+        expect(warn).toHaveBeenCalledTimes(13);
+        expect(warn.mock.calls[12][0]).toMatch(/\(\+3 slow flushes not logged\)$/);
+        warn.mockRestore();
     });
 });

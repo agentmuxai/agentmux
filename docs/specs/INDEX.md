@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_PANE_BACKGROUND_THEMES_2026_11_15`](SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md) | Spec: Pane backdrops: a background that brings its own readable foreground | active | 2026-11-15 |  |
 | [`SPEC_REVIEWS_PANE_2026_11_15`](SPEC_REVIEWS_PANE_2026_11_15.md) | Spec: a Reviews pane, every task's pull request and its review state in one viewer | active | 2026-11-15 |  |
 | [`SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15`](SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md) | Spec: one compact status bar summary, and Vault requests that notify there | active | 2026-11-15 |  |
 | [`SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14`](SPEC_CONTAINER_STATUS_IN_THE_FRONTEND_2026_11_14.md) | Spec: Container status in the frontend: each agent's runtime kind, and a live list of this machine's agent containers | draft | 2026-11-14 |  |
