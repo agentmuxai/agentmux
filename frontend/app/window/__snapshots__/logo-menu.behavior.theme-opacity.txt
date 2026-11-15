@@ -49,8 +49,9 @@ refreshWorkspaceList
     <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
     <div data-item="8" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
     <div data-item="9" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
-    <div data-item="10" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
-    <div data-item="11" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="10" data-label="Reload Window" data-icon="rotate-right" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="11" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="12" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
 -- light, 80%
 <div>
   <div data-stand="FlyoutMenu" data-anchor="logo-menu-anchor" data-placement="bottom-start" data-mirrored="false">
@@ -94,8 +95,9 @@ refreshWorkspaceList
     <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
     <div data-item="8" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
     <div data-item="9" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
-    <div data-item="10" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
-    <div data-item="11" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="10" data-label="Reload Window" data-icon="rotate-right" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="11" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="12" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
 -- dragging to 50%
 <div>
   <div data-stand="FlyoutMenu" data-anchor="logo-menu-anchor" data-placement="bottom-start" data-mirrored="false">
@@ -139,8 +141,9 @@ refreshWorkspaceList
     <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
     <div data-item="8" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
     <div data-item="9" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
-    <div data-item="10" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
-    <div data-item="11" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="10" data-label="Reload Window" data-icon="rotate-right" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="11" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="12" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
 press 4.1 Light
 fireAndForget
 setCurrentWindowTheme light
@@ -190,5 +193,6 @@ press 5.0 100%
     <div data-item="7" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
     <div data-item="8" data-label="Command Palette" data-icon="magnifying-glass" data-shortcut="<view:command-palette>" data-checked="undefined" data-keepopen="undefined" data-divider="false">
     <div data-item="9" data-label="Online Docs" data-icon="book" data-checked="undefined" data-keepopen="undefined" data-divider="false">
-    <div data-item="10" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
-    <div data-item="11" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="10" data-label="Reload Window" data-icon="rotate-right" data-checked="undefined" data-keepopen="undefined" data-divider="false">
+    <div data-item="11" data-label="" data-checked="undefined" data-keepopen="undefined" data-divider="true">
+    <div data-item="12" data-label="Exit" data-icon="right-from-bracket" data-checked="undefined" data-keepopen="undefined" data-divider="false">

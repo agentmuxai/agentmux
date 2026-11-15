@@ -1,7 +1,7 @@
 # SPEC: Editor pane — align markdown preview's scrollbar with source mode
 
 **Date:** 2026-08-22
-**Status:** Draft
+**Status:** implemented — §3 in #2769, §6 in #2774. Since #5295 every scrollable markdown scrolls natively, so the preview needs no flag for it.
 **Author:** Korp
 **Repo touched:** `agentmux` (`frontend`)
 **Related:** [`frontend/app/view/editor/editor-view.tsx`](../../frontend/app/view/editor/editor-view.tsx), [`frontend/app/view/editor/editor-view.scss`](../../frontend/app/view/editor/editor-view.scss),

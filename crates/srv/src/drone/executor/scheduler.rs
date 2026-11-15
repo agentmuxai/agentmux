@@ -21,13 +21,16 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use super::blocks;
 use super::engine::{mark_state, Cancel, RunEnd, RunEvent};
+use super::retry;
 use super::schedule::{self, Guard, OnCap, Plan};
+use crate::drone::checkpoint::{Checkpoint, GraphRef};
 use crate::drone::data_flow::ExecutionScope;
+use crate::drone::recorder::{Persist, Recorder};
 use crate::drone::types::{BlockKind, BlockState, DroneGraph, FlowEdge, FlowNode};
 use agentmux_common::time::now_ms;
 
@@ -37,11 +40,13 @@ const HISTORY_LEN: usize = 50;
 
 type States = Arc<tokio::sync::Mutex<HashMap<String, BlockState>>>;
 
-/// What stops a run besides its graph: its dollar cap and the way to cancel it.
+/// What a run is given besides its graph: its dollar cap, the way to cancel it,
+/// and where to keep its checkpoints (none for a run that is not kept).
 #[derive(Default)]
 pub(super) struct Limits {
     pub(super) run_cap_usd: Option<f64>,
     pub(super) cancel: Cancel,
+    pub(super) persist: Option<Persist>,
 }
 
 /// How long a block may run when its graph does not say (`timeout_seconds`): an
@@ -85,7 +90,15 @@ fn kind_of(node: &FlowNode) -> Result<BlockKind, String> {
 
 /// Whether `edge` carries the run on once its source has run: a Condition's
 /// edge only when its handle matches the result.
-fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value) -> bool {
+fn carries_on(edge: &FlowEdge, source: &FlowNode, output: &Value, failed: bool) -> bool {
+    // An error edge is for a block that failed, and only it: a block that
+    // failed takes no other.
+    if edge.source_handle.as_deref() == Some("error") {
+        return failed;
+    }
+    if failed {
+        return false;
+    }
     if source.data.get("kind").and_then(|v| v.as_str()) != Some("condition") {
         return true;
     }
@@ -125,6 +138,11 @@ struct Scheduler<'a> {
     cancel: Cancel,
     /// Set when the run ended because `cancel` did, so that is not taken for a failure.
     cancelled: bool,
+    /// Writes the run's checkpoints, with the graph version they say the run is on.
+    recorder: Option<(Recorder, GraphRef)>,
+    started: Instant,
+    /// How long the run had already run before this process took it up, when it is resumed.
+    elapsed_before_ms: u64,
     tx: &'a mpsc::UnboundedSender<RunEvent>,
     states: &'a States,
 }
@@ -142,8 +160,40 @@ pub(super) async fn execute(
         RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
     })?;
     let mut s = Scheduler::new(run_id, graph, plan, ExecutionScope::for_drone(drone_id, trigger), limits, tx, states);
-    match s.run().await {
-        Ok(()) => Ok(s.response.unwrap_or(Value::Null)),
+    s.seed_roots();
+    let started = s.checkpoint(None);
+    finish(&mut s, started).await
+}
+
+/// Take up a run from its newest checkpoint, `c`, and run it to its end: the
+/// blocks that were finished stay finished and what they said is what the rest
+/// read. `graph` must be the graph the checkpoint was written on.
+// Called when AgentMux starts and finds runs left running (the next change).
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) async fn resume(
+    (graph, c, limits): (&DroneGraph, &Checkpoint, Limits),
+    tx: &mpsc::UnboundedSender<RunEvent>,
+    states: &States,
+) -> Result<Value, RunEnd> {
+    let plan = schedule::analyze(graph).map_err(|issues| {
+        RunEnd::Failed(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>().join("; "))
+    })?;
+    let mut s = Scheduler::new(&c.run_id, graph, plan, ExecutionScope::for_drone(&c.drone_id, c.trigger.clone()), limits, tx, states);
+    s.restore(c).map_err(RunEnd::Failed)?;
+    s.show_restored().await;
+    finish(&mut s, Ok(())).await
+}
+
+/// Run what is left of a run that is set up, and say how it ended. `started` is
+/// how setting it up went: a run that could not even keep its first checkpoint
+/// ends before its first block.
+async fn finish(s: &mut Scheduler<'_>, started: Result<(), String>) -> Result<Value, RunEnd> {
+    let ran = match started {
+        Ok(()) => s.drive().await,
+        Err(e) => Err(e),
+    };
+    match ran {
+        Ok(()) => Ok(s.response.take().unwrap_or(Value::Null)),
         Err(_) if s.cancelled => Err(RunEnd::Cancelled(s.cancel.reason())),
         Err(e) => Err(RunEnd::Failed(e)),
     }
@@ -188,17 +238,25 @@ impl<'a> Scheduler<'a> {
             run_cap_usd: limits.run_cap_usd,
             cancel: limits.cancel,
             cancelled: false,
+            recorder: limits.persist.map(|p| (Recorder::new(p.sink, run_id), p.graph)),
+            started: Instant::now(),
+            elapsed_before_ms: 0,
             tx,
             states,
         }
     }
 
-    async fn run(&mut self) -> Result<(), String> {
+    /// The blocks nothing leads to are ready first.
+    fn seed_roots(&mut self) {
         let mut roots: Vec<&str> = self.node_of.keys().copied().filter(|id| !self.plan.owned.contains(*id) && self.incoming.get(id).is_none_or(|v| v.is_empty())).collect();
         roots.sort_unstable();
         for id in roots {
             self.enqueue(id, false);
         }
+    }
+
+    /// Run blocks until none is ready and no edge is left to decide.
+    async fn drive(&mut self) -> Result<(), String> {
         loop {
             while let Some((id, forced)) = self.ready.pop_front() {
                 self.queued.remove(id);
@@ -263,6 +321,7 @@ impl<'a> Scheduler<'a> {
             return Ok(());
         }
         if let Some(stopped) = over_run_cap(self.spent, self.run_cap_usd) {
+            self.cap_reached(id, &stopped);
             return Err(stopped);
         }
         // A loop's time runs from the first block of its cycle, not from the
@@ -271,14 +330,64 @@ impl<'a> Scheduler<'a> {
         for guard in guards {
             self.loop_started.entry(guard).or_insert_with(Instant::now);
         }
-        let output = self.run_block(node).await?;
+        let (output, failed) = match self.run_block(node).await {
+            Ok(output) => (output, false),
+            Err(e) if !self.cancelled && self.has_error_edge(id) => {
+                // The graph has a handler for this block: its output says what
+                // went wrong, as text that came from outside, and the run goes on.
+                let output = json!({ "error": e, "failed": true });
+                self.scope.outputs.insert(id.to_string(), output.clone());
+                self.scope.bits.insert(id.to_string(), (true, false));
+                (output, true)
+            }
+            Err(e) => return Err(e),
+        };
         self.finished.insert(id);
-        self.route(node, &output)
+        self.route(node, &output, failed)?;
+        self.checkpoint(Some(id))
+    }
+
+    fn has_error_edge(&self, id: &str) -> bool {
+        self.outgoing.get(id).is_some_and(|edges| edges.iter().any(|e| e.source_handle.as_deref() == Some("error")))
+    }
+
+    fn cap_reached(&self, block_id: &str, reason: &str) {
+        let _ = self.tx.send(RunEvent::CapReached { run_id: self.run_id.to_string(), block_id: block_id.to_string(), reason: reason.to_string() });
     }
 
     /// A block's code, ended when the run is cancelled (an Agent block's process
     /// goes with it) or the block passes its timeout.
     async fn guarded(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
+        let retry = retry::retry_of(node)?;
+        let mut ran = 0;
+        loop {
+            let result = self.attempt(node, kind).await;
+            ran += 1;
+            if self.cancelled || !retry::again(retry, kind, &result, ran) {
+                return match result {
+                    Err(e) if ran > 1 => Err(format!("{e} (after {ran} tries)")),
+                    Ok(Value::Object(mut out)) if ran > 1 => {
+                        out.insert("tries".to_string(), json!(ran));
+                        Ok(Value::Object(out))
+                    }
+                    other => other,
+                };
+            }
+            let wait = retry.map_or(Duration::ZERO, |r| retry::delay(&r, ran));
+            let cancel = self.cancel.clone();
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => {
+                    self.cancelled = true;
+                    return Err(format!("stopped: {}", cancel.reason()));
+                }
+                () = tokio::time::sleep(wait) => {}
+            }
+        }
+    }
+
+    /// One run of a block's code, within its time limit.
+    async fn attempt(&mut self, node: &'a FlowNode, kind: BlockKind) -> Result<Value, String> {
         let limit = match schedule::timeout_seconds(node)? {
             Some(secs) => Some(Duration::from_secs(secs)),
             None => default_timeout(kind),
@@ -403,14 +512,15 @@ impl<'a> Scheduler<'a> {
 
     /// Send the run along the edges out of a block that ran, and count a loop's
     /// iteration when a guard takes it round.
-    fn route(&mut self, node: &'a FlowNode, output: &Value) -> Result<(), String> {
+    fn route(&mut self, node: &'a FlowNode, output: &Value, failed: bool) -> Result<(), String> {
         let id = node.id.as_str();
         let edges = self.outgoing.get(id).cloned().unwrap_or_default();
-        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output)).collect();
+        let mut carry: Vec<bool> = edges.iter().map(|e| carries_on(e, node, output, failed)).collect();
         if let Some(guard) = self.plan.guards.get(id).cloned() {
             let goes_round = edges.iter().zip(&carry).any(|(e, c)| *c && guard.loop_edges.contains(&e.id));
             if goes_round {
                 if let Some(why) = self.loop_cap(id, &guard) {
+                    self.cap_reached(id, &why);
                     match guard.on_cap {
                         OnCap::EndRun => return Err(why),
                         OnCap::ExitLoop => {
@@ -425,7 +535,9 @@ impl<'a> Scheduler<'a> {
                         }
                     }
                 } else {
-                    *self.rounds.entry(id).or_default() += 1;
+                    let rounds = self.rounds.entry(id).or_default();
+                    *rounds += 1;
+                    let _ = self.tx.send(RunEvent::LoopIteration { run_id: self.run_id.to_string(), block_id: id.to_string(), iteration: *rounds + 1 });
                 }
             }
         }
@@ -488,6 +600,7 @@ impl<'a> Scheduler<'a> {
     }
 }
 
+mod checkpoint;
 mod foreach;
 
 #[cfg(test)]

@@ -194,3 +194,27 @@ fn the_wire_shape_of_a_definition_a_run_and_the_enums() {
     assert_eq!(BlockKind::parse("nope"), None);
     assert_eq!(serde_json::to_value(RunStatus::Failed).unwrap(), serde_json::json!("failed"));
 }
+
+#[test]
+fn a_runs_checkpoints_come_back_in_step_order_and_go_with_the_run() {
+    let store = Store::open_in_memory().unwrap();
+    store.drone_run_insert(&run("r1", "a", "running", 1)).unwrap();
+    store.drone_run_insert(&run("r2", "a", "running", 2)).unwrap();
+    store.drone_run_insert(&run("other", "b", "running", 3)).unwrap();
+    for (id, step, kind) in [("r1", 1, "diff"), ("r1", 0, "full"), ("r2", 0, "full"), ("other", 0, "full")] {
+        store.drone_checkpoint_put(id, step, kind, format!("{id}-{step}").as_bytes(), 10).unwrap();
+    }
+    let rows = store.drone_checkpoints_for("r1").unwrap();
+    assert_eq!(rows.iter().map(|r| (r.step, r.kind.as_str())).collect::<Vec<_>>(), [(0, "full"), (1, "diff")]);
+    assert_eq!(rows[1].body, b"r1-1");
+    assert!(store.drone_checkpoint_put("r1", 1, "diff", b"again", 11).is_err(), "a checkpoint is never rewritten");
+    assert_eq!(store.drone_checkpoints_for("r1").unwrap()[1].body, b"r1-1");
+
+    assert_eq!(store.drone_run_delete("r1").unwrap(), 1);
+    assert!(store.drone_checkpoints_for("r1").unwrap().is_empty());
+    assert_eq!(store.drone_checkpoints_for("r2").unwrap().len(), 1);
+
+    assert_eq!(store.drone_runs_delete_for("a").unwrap(), 1);
+    assert!(store.drone_checkpoints_for("r2").unwrap().is_empty(), "a deleted drone's runs take their checkpoints");
+    assert_eq!(store.drone_checkpoints_for("other").unwrap().len(), 1, "another drone's are kept");
+}

@@ -7,8 +7,12 @@
  * loaded, but no log line said whether the pane's view was ever created. A pane
  * that exists in the layout registers here; the agent view reports when it
  * mounts; one that has not after {@link MOUNT_WATCH_MS} logs what is known about
- * it, once.
+ * it, once. A pane still waiting then is also marked stalled, which the pane
+ * shows as a banner with a Reload button (agent-stalled-banner.tsx) until its
+ * view mounts after all.
  */
+
+import { createSignal } from "solid-js";
 
 export const MOUNT_WATCH_MS = 20_000;
 
@@ -17,6 +21,20 @@ export const mountWatchEnv = {
     now: (): number => performance.now(),
     log: (line: string): void => console.warn(line),
 };
+
+const [stalled, setStalled] = createSignal<ReadonlySet<string>>(new Set());
+const markStalled = (blockId: string, on: boolean): void => {
+    if (stalled().has(blockId) === on) return;
+    const next = new Set(stalled());
+    if (on) next.add(blockId);
+    else next.delete(blockId);
+    setStalled(next);
+};
+
+/** Whether `blockId`'s agent view has not started after {@link MOUNT_WATCH_MS} (reactive). */
+export function agentMountStalled(blockId: string): boolean {
+    return stalled().has(blockId);
+}
 
 const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>();
 /** Blocks whose wait ended with a mount (or that are not agents): not watched again until forgotten. */
@@ -29,6 +47,7 @@ export function expectAgentMount(blockId: string, describe: () => string): void 
     const timer = setTimeout(() => {
         waiting.delete(blockId);
         settled.add(blockId); // said once; a later run of the pane's effect does not say it again
+        markStalled(blockId, true);
         const seconds = Math.round((mountWatchEnv.now() - since) / 1000);
         mountWatchEnv.log(`[pane-mount] block=${blockId.slice(0, 8)} agent view has not started after ${seconds} s: ${describe()}`);
     }, MOUNT_WATCH_MS);
@@ -38,6 +57,7 @@ export function expectAgentMount(blockId: string, describe: () => string): void 
 /** The agent view mounted, or the block is not an agent (or gone): stop waiting. */
 export function agentMountSettled(blockId: string): void {
     settled.add(blockId);
+    markStalled(blockId, false);
     const entry = waiting.get(blockId);
     if (!entry) return;
     clearTimeout(entry.timer);

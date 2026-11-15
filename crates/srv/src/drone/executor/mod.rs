@@ -3,6 +3,7 @@
 
 pub mod blocks;
 pub mod engine;
+mod retry;
 pub mod schedule;
 mod scheduler;
 mod writers;

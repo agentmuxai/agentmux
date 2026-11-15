@@ -11,8 +11,10 @@
 //! a setting read it is a grant kept in the Vault (`setting:<key>` in `db_vault_grants`, bound to the entry
 //! it was given to), made by the Settings picker (the person's choice) or by AgentMux's own move of a plain
 //! key. So a file edit that points a setting at another entry reads nothing: the entry has no grant for it.
-//! The person sees it under the entry in the Vault and can take it back there. A read records the use,
-//! once every few minutes per entry, not once per call.
+//! The person sees it under the entry in the Vault and can take it back there. **One entry per setting:**
+//! allowing an entry takes the setting's grant off every other entry, each removal recorded, so the file
+//! alone can never point the setting back at an entry chosen before. A read records the use, once every
+//! few minutes per entry, not once per call.
 
 use super::{kinds, record, seal, NewEntry, Store};
 use agentmux_common::time::now_ms;
@@ -31,6 +33,8 @@ pub const AGENTMUX: &str = "AgentMux";
 pub const USED: &str = "read by AgentMux for a setting";
 /// The activity line for the grant.
 pub const ALLOWED: &str = "allowed for a setting";
+/// The activity line for a grant taken off an entry because another entry was allowed for the setting.
+pub const WITHDRAWN: &str = "no longer allowed for a setting";
 /// The one answer for a missing entry, an entry of another kind, an entry the setting was not allowed to
 /// read and a Vault that could not be opened, so a setting's error never says which entries exist; the
 /// reason is in srv's log.
@@ -66,6 +70,7 @@ pub fn present(store: &Store, setting: &str, id: &str) -> bool {
 
 /// Lets `setting` read entry `id`, recorded under `who`: the person's choice in Settings, or AgentMux's own
 /// move of a key that sat in the file. Only an `api-key` entry, and only for a setting that is on the list.
+/// One entry per setting: the setting's grant comes off every other entry, each removal recorded under `who`.
 pub fn allow(store: &Store, id: &str, setting: &str, who: &str) -> Result<(), String> {
     if !SETTINGS.contains(&setting) {
         return Err(format!("{setting} is not a setting that can read a Vault key"));
@@ -74,8 +79,18 @@ pub fn allow(store: &Store, id: &str, setting: &str, who: &str) -> Result<(), St
     if row.kind != "api-key" {
         return Err(format!("{} is not an API key, so a setting can't read it", row.label));
     }
-    store.vault_grant_add(&row.id, &grant_for(setting), now_ms(), row.created_at).map_err(|e| e.to_string())?;
+    let grant = grant_for(setting);
+    store.vault_grant_add(&row.id, &grant, now_ms(), row.created_at).map_err(|e| e.to_string())?;
     record(store, &row.id, &row.label, who, ALLOWED, setting, "done");
+    // The new grant is in before the old ones go: a failure part way leaves the setting readable, never unreadable.
+    let mut others: Vec<String> = store.vault_grants().map_err(|e| e.to_string())?.into_iter().filter(|(entry, grants)| *entry != row.id && grants.contains(&grant)).map(|(entry, _)| entry).collect();
+    others.sort();
+    for other in others {
+        if store.vault_grant_revoke(&other, &grant).map_err(|e| e.to_string())? {
+            let label = store.vault_get(&other).ok().flatten().map(|r| r.label).unwrap_or_default();
+            record(store, &other, &label, who, WITHDRAWN, setting, "done");
+        }
+    }
     Ok(())
 }
 
@@ -195,7 +210,10 @@ mod tests {
     #[test]
     fn an_allowed_key_is_read_back_and_the_use_is_recorded_under_who_used_it() {
         let store = store();
-        let id = allowed_key(&store, "gsk_test_0123456789");
+        // Its own label: `due` keeps one process-wide clock per entry id, and ids come from kind and label,
+        // so a test that reads a key under the shared label first would make this one's first read "not due".
+        let id = keep(&store, "Groq key read-back test", "gsk_test_0123456789").unwrap();
+        allow(&store, &id, SETTING, super::super::PERSON).unwrap();
         assert!(present(&store, SETTING, &id));
         assert_eq!(read(&store, SETTING, &id, "AgentMux voice input", "voice input").unwrap().as_str(), "gsk_test_0123456789");
         let log = crate::backend::vault::activity(&store, 10).unwrap();
@@ -224,6 +242,43 @@ mod tests {
         let again = allowed_key(&store, "gsk_again_0123456789");
         crate::backend::vault::delete(&store, &again).unwrap();
         assert!(!store.vault_grant_check(&again, &grant_for(SETTING)).unwrap());
+    }
+
+    #[test]
+    fn allowing_another_entry_takes_the_setting_off_the_old_one_and_records_it() {
+        let store = store();
+        let old = keep(&store, "Old groq key", "gsk_old_0123456789").unwrap();
+        let new = keep(&store, "New groq key", "gsk_new_0123456789").unwrap();
+        allow(&store, &old, SETTING, "you").unwrap();
+        assert_eq!(read(&store, SETTING, &old, "w", "x").unwrap().as_str(), "gsk_old_0123456789");
+        allow(&store, &new, SETTING, "you").unwrap();
+        // The old entry is refused on read, as an entry that was never allowed; the new one reads.
+        assert!(!present(&store, SETTING, &old) && present(&store, SETTING, &new));
+        assert_eq!(read(&store, SETTING, &old, "w", "x").unwrap_err(), NOT_AVAILABLE);
+        assert_eq!(read(&store, SETTING, &new, "w", "x").unwrap().as_str(), "gsk_new_0123456789");
+        assert!(!store.vault_grant_check(&old, &grant_for(SETTING)).unwrap() && store.vault_grant_check(&new, &grant_for(SETTING)).unwrap());
+        // The removal is a line in the Vault's history, under who chose and on the old entry.
+        let log = crate::backend::vault::activity(&store, 20).unwrap();
+        let line = log.iter().find(|l| l.action == WITHDRAWN).expect("the removal is recorded");
+        assert_eq!((line.actor.as_str(), line.target.as_str(), line.entry_id.as_str()), ("you", SETTING, old.as_str()));
+        assert_eq!(log.iter().filter(|l| l.action == WITHDRAWN).count(), 1);
+        // Choosing the same entry again takes nothing off and records no removal.
+        allow(&store, &new, SETTING, "you").unwrap();
+        assert!(store.vault_grant_check(&new, &grant_for(SETTING)).unwrap());
+        assert_eq!(crate::backend::vault::activity(&store, 20).unwrap().iter().filter(|l| l.action == WITHDRAWN).count(), 1);
+    }
+
+    #[test]
+    fn a_grant_that_is_not_the_settings_is_left_alone_when_the_setting_moves_to_another_entry() {
+        let store = store();
+        let key = keep(&store, "A groq key", "gsk_a_0123456789").unwrap();
+        let other = keep(&store, "Another key", "gsk_b_0123456789").unwrap();
+        let created = store.vault_get(&other).unwrap().unwrap().created_at;
+        store.vault_grant_add(&other, "command:deploy:value", now_ms(), created).unwrap();
+        allow(&store, &other, SETTING, "you").unwrap();
+        allow(&store, &key, SETTING, "you").unwrap();
+        assert!(store.vault_grant_check(&other, "command:deploy:value").unwrap(), "the other grant stays");
+        assert!(!store.vault_grant_check(&other, &grant_for(SETTING)).unwrap());
     }
 
     #[test]

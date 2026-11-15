@@ -78,6 +78,21 @@ describe("NotificationBubbles placement", () => {
     });
 });
 
+describe("NotificationBubbles over a native browser pane", () => {
+    it("registers its stack as an overlay while a toast shows, and not when none does", () => {
+        render(() => <NotificationBubbles />);
+        expect(document.querySelector(".notification-bubbles")).toBeNull();
+        expect(document.querySelector("[data-pane-overlay]")).toBeNull();
+        setNotifications([{ id: "t", icon: "bell", title: "t", message: "", timestamp: "" }]);
+        vi.advanceTimersByTime(50);
+        const stack = document.querySelector(".notification-bubbles") as HTMLElement;
+        expect(stack.hasAttribute("data-pane-overlay")).toBe(true);
+        setNotifications([]);
+        vi.advanceTimersByTime(50);
+        expect(document.querySelector("[data-pane-overlay]")).toBeNull();
+    });
+});
+
 describe("the stack's measured height", () => {
     it("is read with the cap placement put on it lifted, and the cap is put back", () => {
         // A stack shortened to fit above the status bar reports its shortened height; placed from that, the next

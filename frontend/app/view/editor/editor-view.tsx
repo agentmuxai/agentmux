@@ -19,6 +19,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { TextViewerSwitch, ViewerHost } from "./viewers/viewer-host";
 import { SaveAsInput } from "./editor-save-as-input";
 import { TabNameInput, TabRenameLine } from "./editor-tab-name-input";
+import { showAsMenuItems } from "./editor-tab-show-as";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
@@ -326,6 +327,7 @@ function EditorTabBar(props: {
                 // Once the menu has closed: it must not take the keyboard back from the box.
                 click: () => void setTimeout(() => startRename(tab.id), 0),
             },
+            ...showAsMenuItems(model, tab),
         ];
     };
     return (

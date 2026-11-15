@@ -15,14 +15,21 @@
  *   person a reload (what a tear-off did by accident). The window is never
  *   reloaded on its own: that would lose a composer draft or a drag under way.
  * - Agreeing again: take the offer back.
+ *
+ * No tab shown at all is the same fault, told apart only by how long it is
+ * allowed to last: closing, opening or revealing a tab shows none for a few
+ * seconds, so it counts after `NONE_SHOWN_SOFT_AFTER_MS` (2026-11-14: a window
+ * whose bindings had been abandoned showed no tab at all after its active
+ * tab was closed, and the person was never offered a way out).
  */
 export const SOFT_AFTER_MS = 2000;
 export const OFFER_RELOAD_AFTER_MS = 4000;
+export const NONE_SHOWN_SOFT_AFTER_MS = 8000;
 
 export interface DisplayWatchdogDeps {
     /** The tab that should be displayed now. */
     expected: () => string;
-    /** The tab whose container the page is showing, or null when none (or several) is; null is never acted on. */
+    /** The tab whose container the page is showing, or null when none (or several) is; null is acted on only after a longer wait. */
     shownInDom: () => string | null;
     /** A switch, a gate or a creation is under way, so a mismatch is expected. */
     inFlight: () => boolean;
@@ -45,10 +52,10 @@ export function createDisplayWatchdog(deps: DisplayWatchdogDeps): { check: () =>
         check() {
             const expected = deps.expected();
             const shown = deps.shownInDom();
-            // Only another tab being shown counts. No tab shown is a transient state of
-            // a tab being closed, opened or revealed (ordinary switching showed it for
-            // a few seconds), not the stuck window's symptom.
-            if (deps.inFlight() || shown === null || shown === expected) {
+            // No tab shown is a transient state of a tab being closed, opened or
+            // revealed (ordinary switching showed it for a few seconds), so it waits
+            // longer than another tab being shown; but it does not wait forever.
+            if (deps.inFlight() || shown === expected) {
                 since = null;
                 repaired = false;
                 if (offered) {
@@ -63,7 +70,9 @@ export function createDisplayWatchdog(deps: DisplayWatchdogDeps): { check: () =>
                 return;
             }
             const stuckFor = t - since;
-            if (stuckFor >= OFFER_RELOAD_AFTER_MS && repaired) {
+            const soft = shown === null ? NONE_SHOWN_SOFT_AFTER_MS : SOFT_AFTER_MS;
+            const offerAfter = soft + (OFFER_RELOAD_AFTER_MS - SOFT_AFTER_MS);
+            if (stuckFor >= offerAfter && repaired) {
                 if (offered) return;
                 offered = true;
                 deps.log(
@@ -72,7 +81,7 @@ export function createDisplayWatchdog(deps: DisplayWatchdogDeps): { check: () =>
                 deps.offerReload();
                 return;
             }
-            if (stuckFor >= SOFT_AFTER_MS && !repaired) {
+            if (stuckFor >= soft && !repaired) {
                 repaired = true;
                 deps.log(
                     `[tab-display] showing ${deps.shownInDom() ?? "no tab"} for ${stuckFor} ms while ${expected} is the active tab: showing it`

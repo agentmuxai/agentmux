@@ -50,7 +50,11 @@ pub mod event_source {
     pub const FILE_WATCH: &str = "file_watch";
     /// A POST arrived on this computer's loopback hook address.
     pub const WEBHOOK_LOCAL: &str = "webhook_local";
-    pub const ALL: [&str; 3] = [APP_EVENT, FILE_WATCH, WEBHOOK_LOCAL];
+    /// AgentMux's own state is asked every so often and each new item starts a run.
+    pub const POLL: &str = "poll";
+    /// A job it watches has not had a good run lately (a dead man's switch).
+    pub const EXPECT: &str = "expect";
+    pub const ALL: [&str; 5] = [APP_EVENT, FILE_WATCH, WEBHOOK_LOCAL, POLL, EXPECT];
 }
 
 /// The most entries an event trigger's filter holds, and the longest a filter key or text value may be.
@@ -191,6 +195,12 @@ impl EventTrigger {
         }
         if self.source == event_source::WEBHOOK_LOCAL {
             super::webhook_local::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::POLL {
+            super::poll::validate_filter(&self.filter)?;
+        }
+        if self.source == event_source::EXPECT {
+            super::expect::validate_filter(&self.filter)?;
         }
         Ok(())
     }
