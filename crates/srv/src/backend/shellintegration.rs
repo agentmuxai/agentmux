@@ -126,11 +126,15 @@ pub fn detect_shell_type(shell_path: &str) -> ShellType {
 /// The data dir is the right key: it is `<channel>/versions/<version>/data`
 /// by construction, so it already distinguishes exactly the pairs I6 names.
 pub fn integration_base_for(data_dir: &Path, home_dir: &Path) -> PathBuf {
+    home_dir.join(".agentmux").join("shell").join(instance_key(data_dir))
+}
+
+/// The folder name for an instance: a hash of its canonical, lowercased data dir.
+pub(super) fn instance_key(data_dir: &Path) -> String {
     let canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
-    let key = format!("{:016x}", agentmux_common::runtime_mode::fnv1a_64(
+    format!("{:016x}", agentmux_common::runtime_mode::fnv1a_64(
         canonical.to_string_lossy().to_lowercase().as_bytes(),
-    ));
-    home_dir.join(".agentmux").join("shell").join(key)
+    ))
 }
 
 /// The stable, user-facing script root: `~/.agentmux/shell`.

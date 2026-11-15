@@ -50,6 +50,9 @@ pub struct ExecutionScope {
     pub locals: HashMap<String, Value>,
     pub local_bits: (bool, bool),
     pub drone_id: String,
+    /// A background poll's call: with a Vault credential it may use only what the person already granted ("Always"),
+    /// and never asks (`server::drone_vault::Asking::Never`).
+    pub never_ask: bool,
 }
 
 impl ExecutionScope {

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createResource, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import { beginDrag, endDrag, session, type DragEndReason } from "@/app/drag/drag-session";
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -17,6 +17,7 @@ import { Button, CloseButton, TextArea, TextInput } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
 import { isModKey } from "@/util/platformutil";
 import { tip } from "@/app/element/tip";
+import { describeRef, judge, triggerPathsIn } from "./payload-schema";
 import { apiAuthFields, apiAuthPatch, type ApiAuthFields, type ApiAuthHow } from "./api-auth";
 import { GITHUB_PRESETS, githubPresetById, githubPresetPatch, githubRepoOf, type GithubPreset } from "./github-presets";
 
@@ -889,7 +890,29 @@ const NodeFields = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element =
                     onChange={(entries) => update({ entries })}
                 />
             </Show>
+            <TriggerRefsNote model={p.model} node={p.node} />
         </div>
+    );
+};
+
+/**
+ * The `{{trigger.…}}` fields a node reads, each said to be typed or outside text (a title, a log, a file name: words
+ * somebody outside the person's own design wrote). The fields come from the jobs that run this drone.
+ */
+const TriggerRefsNote = (p: { model: DroneViewModel; node: FlowNode }): JSX.Element => {
+    const refs = createMemo(() => judge(p.model.payloadSchemaAtom(), triggerPathsIn(p.node.data)));
+    return (
+        <Show when={refs().length > 0}>
+            <div class="drone-trigger-refs nodrag" data-testid="drone-trigger-refs">
+                <For each={refs()}>
+                    {(r) => (
+                        <span class="drone-trigger-ref" classList={{ "drone-trigger-ref--outside": r.outside }}>
+                            {describeRef(r)}
+                        </span>
+                    )}
+                </For>
+            </div>
+        </Show>
     );
 };
 

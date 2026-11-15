@@ -618,6 +618,8 @@ fn muxspect_routes() -> Router<AppState> {
         // The recent reviews, check results and merges of agents' PRs, ids, states and times only, for the Atlas map's review bot and
         // CI nodes on open (`backend::pr_flow`). Read-only.
         .route("/api/v1/pr-flow", get(pr_flow_handler::handle_pr_flow))
+        // Every PR a task names, with its review, checks and merge state and what it waits on (`backend::reviews`). Read-only.
+        .route("/api/v1/reviews", get(reviews_handler::handle_reviews))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
         // PostToChannel / ReadChannel: a repository's coordination channel

@@ -26,6 +26,7 @@ import { shouldReduceMotion } from "@/app/motion/motion";
 import { layoutBehind, markLayoutBehind, windowResizing } from "@/app/platform/window-resize";
 import { EASE_OUT } from "@/app/motion/tokens";
 import { gatingNodeIds } from "@/app/store/tab-reveal";
+import { guardControlPress } from "@/app/util/press-on-control";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -390,10 +391,13 @@ function createHeaderDraggable(
     const isEphemeral = () => nodeModel.isEphemeral();
     const isMagnified = () => nodeModel.isMagnified();
 
-    const bind = (handle: HTMLElement) =>
-        draggable({
+    const bind = (handle: HTMLElement) => {
+        // A press that began on a header button (close, minimise, a menu trigger) is never a pane drag.
+        const press = guardControlPress(handle);
+        const stop = draggable({
             element: handle,
             canDrag: ({ input }) => {
+                if (press.pressedOnControl()) return false;
                 if (isEphemeral() || isMagnified()) return false;
                 if (platform.rejectDragAt?.(props.layoutModel, input)) return false;
                 // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.1: a
@@ -456,6 +460,11 @@ function createHeaderDraggable(
                 platform.afterDrop?.();
             },
         });
+        return () => {
+            stop();
+            press.dispose();
+        };
+    };
 
     return bind;
 }

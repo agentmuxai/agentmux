@@ -11,7 +11,8 @@
 #   macOS  the .dmg, copied to /Applications (or ~/Applications)
 #
 # With --server it installs the AgentMux server package (no desktop app: a server whose web UI is a browser on its own
-# loopback address) from the same signed release, into ~/.agentmux/server, on Linux x64 or arm64 and macOS arm64 or x64.
+# loopback address) from the same signed release, into ~/.agentmux/server, on Linux x64 or arm64 and macOS arm64 (there is
+# no Intel Mac server package).
 #
 # Plain text, no prompts, ASCII only. Run it with --help for the options.
 # Design: docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md
@@ -62,6 +63,7 @@ Usage: install.sh [options]
   --force                   install even if AgentMux is already installed
   --require-signature       fail when the release's signature cannot be checked here
   --server                  install the AgentMux server (no desktop app) into ~/.agentmux/server, from the signed release
+                            (Linux x64 and arm64, macOS arm64)
   --setup                   with --server: then run  agentmux setup --yes --no-open  (a user service that starts at login)
   --help                    this text
 
@@ -110,19 +112,38 @@ case "$ARCH_RAW" in
     arm64 | aarch64) ARCH=arm64 ;;
     *) die "unsupported processor: $ARCH_RAW" ;;
 esac
-# The desktop app has no arm64 Linux or Intel Mac build; the server package has all four.
+# The desktop app has no arm64 Linux or Intel Mac build; the server package has Linux x64, Linux arm64 and macOS arm64
+# (the release builds no Intel Mac server).
 if [ "$SERVER" = 0 ] && [ "$OS" = linux ] && [ "$ARCH" != x86_64 ]; then die "there is no arm64 Linux build yet"; fi
 if [ "$SERVER" = 0 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac build: AgentMux for macOS needs Apple Silicon"; fi
+if [ "$SERVER" = 1 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac server package: the AgentMux server for macOS needs Apple Silicon (Linux x64 and arm64 have one)"; fi
 
 # ---- tools ----
 have() { command -v "$1" > /dev/null 2>&1; }
+
+# Say why a download failed. curl exits 77 when it cannot read the CA bundle and 60 when it cannot check the server's
+# certificate against it; wget exits 5 for the same. A system with no ca-certificates package fails every download this way.
+net_die() { # <what failed> <the tool's exit code> <curl or wget>
+    case "$3:$2" in
+        curl:60 | curl:77 | wget:5)
+            die "$1: $3 cannot check the server's certificate (error $2), which usually means the ca-certificates package is not installed. Install it (for example: sudo apt-get install ca-certificates, or sudo dnf install ca-certificates) and run this again"
+            ;;
+    esac
+    die "$1"
+}
 
 fetch() { # fetch <url or absolute path> <file>
     case "$1" in
         /*) cp "$1" "$2" ;; # a local file: the tests' fixtures
         *)
-            if have curl; then curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1" || die "could not download $1"
-            elif have wget; then wget -q --https-only -O "$2" "$1" || die "could not download $1"
+            if have curl; then
+                rc=0
+                curl -fsSL --proto '=https' --tlsv1.2 -o "$2" "$1" || rc=$?
+                [ "$rc" = 0 ] || net_die "could not download $1" "$rc" curl
+            elif have wget; then
+                rc=0
+                wget -q --https-only -O "$2" "$1" || rc=$?
+                [ "$rc" = 0 ] || net_die "could not download $1" "$rc" wget
             else die "curl or wget is needed"
             fi
             ;;
@@ -182,13 +203,26 @@ fi
 resolve_version() {
     if [ -n "$VERSION" ]; then return; fi
     have curl || die "curl is needed to find the latest release (or pass --version)"
-    url="$(curl -fsSLI --proto '=https' -o /dev/null -w '%{url_effective}' "$RELEASES/latest")" || die "could not look up the latest release"
+    rc=0
+    url="$(curl -fsSLI --proto '=https' -o /dev/null -w '%{url_effective}' "$RELEASES/latest")" || rc=$?
+    [ "$rc" = 0 ] || net_die "could not look up the latest release" "$rc" curl
     VERSION="${url##*/v}"
     printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || die "the latest release's address ($url) is not a version"
 }
 
-# True when this openssl can check an Ed25519 signature in one shot (OpenSSL 3).
-can_check_signature() { have openssl && openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; }
+# The openssl that checks signatures. The Ed25519 check needs OpenSSL 3 (pkeyutl -rawin). A stock Mac's /usr/bin/openssl is
+# LibreSSL 3.3.x, which cannot (LibreSSL has Ed25519 from 3.7, and no -rawin); a Mac with Homebrew or MacPorts usually has an
+# OpenSSL 3 that is not first on the PATH, so the PATH's openssl is tried first and then those places. Nothing is installed.
+OPENSSL=""
+OPENSSL_PLACES="${AGENTMUX_INSTALL_OPENSSL_PLACES:-/opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl /opt/local/bin/openssl}"
+find_openssl() {
+    [ -n "$OPENSSL" ] && return 0
+    for cand in openssl $OPENSSL_PLACES; do
+        if have "$cand" && "$cand" pkeyutl -help 2>&1 | grep -q -- '-rawin'; then OPENSSL="$cand"; return 0; fi
+    done
+    return 1
+}
+can_check_signature() { find_openssl; }
 
 # verify_signature <envelope> <signature file> -> 0 checked and good, 1 checked and bad, 2 cannot check
 verify_signature() {
@@ -199,11 +233,11 @@ verify_signature() {
         b64="${entry#*:}"
         line="$(grep "^$id " "$2" | head -n 1 || true)"
         [ -n "$line" ] || continue
-        printf '%s' "${line#* }" | openssl base64 -d -A > "$TMP/sig.bin" 2> /dev/null || continue
+        printf '%s' "${line#* }" | "$OPENSSL" base64 -d -A > "$TMP/sig.bin" 2> /dev/null || continue
         # The 12 bytes that turn 32 raw Ed25519 key bytes into a DER public key.
-        { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$b64" | openssl base64 -d -A; } > "$TMP/key.der" 2> /dev/null || continue
-        openssl pkey -pubin -inform DER -in "$TMP/key.der" -out "$TMP/key.pem" 2> /dev/null || continue
-        if openssl pkeyutl -verify -pubin -inkey "$TMP/key.pem" -rawin -in "$1" -sigfile "$TMP/sig.bin" > /dev/null 2>&1; then return 0; fi
+        { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$b64" | "$OPENSSL" base64 -d -A; } > "$TMP/key.der" 2> /dev/null || continue
+        "$OPENSSL" pkey -pubin -inform DER -in "$TMP/key.der" -out "$TMP/key.pem" 2> /dev/null || continue
+        if "$OPENSSL" pkeyutl -verify -pubin -inkey "$TMP/key.pem" -rawin -in "$1" -sigfile "$TMP/sig.bin" > /dev/null 2>&1; then return 0; fi
         return 1
     done
     return 1
@@ -225,11 +259,14 @@ download_verified() {
     dv_sig=0
     verify_signature "$TMP/envelope.json" "$TMP/envelope.sig" || dv_sig=$?
     case "$dv_sig" in
-        0) say "signature of the release checked" ;;
+        0) say "signature of the release checked: Ed25519, with $("$OPENSSL" version 2> /dev/null | head -n 1)" ;;
         1) die "the release's signature does not match: not installing" ;;
         *)
-            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here (it needs OpenSSL 3) and --require-signature was given"
-            say "signature not checked: this system's openssl cannot (it needs OpenSSL 3); checking the hashes only"
+            dv_ossl="$(openssl version 2> /dev/null | head -n 1 || true)"
+            [ -n "$dv_ossl" ] || dv_ossl="no openssl"
+            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl; the check needs OpenSSL 3) and --require-signature was given"
+            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it)"
+            say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
             ;;
     esac
 
@@ -252,7 +289,20 @@ download_verified() {
     dv_got_size="$(wc -c < "$dv_dest" | tr -d ' ')"
     [ "$dv_got_size" = "$dv_want_size" ] || { rm -f "$dv_dest"; die "$dv_name is $dv_got_size bytes, the manifest says $dv_want_size"; }
     [ "$(sha256_of "$dv_dest")" = "$dv_want_sha" ] || { rm -f "$dv_dest"; die "$dv_name does not match the manifest's SHA-256"; }
-    say "$dv_name matches the signed manifest"
+    if [ "$dv_sig" = 0 ]; then say "$dv_name matches the signed manifest"; else say "$dv_name matches the manifest's size and SHA-256 (the manifest's signature was not checked)"; fi
+}
+
+# After an install into ~/.local/bin: where the program is, how to run it now, and how to put it on the PATH. A fresh
+# ~/.local/bin is not on the PATH of the shell this ran from, and a login shell only adds it when the folder exists.
+path_hint() { # <command name>
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *)
+            say "$1 is at $HOME/.local/bin/$1, which is not on your PATH yet"
+            say "run it now with the full path:  $HOME/.local/bin/$1"
+            say "or add it to the PATH of this shell:  export PATH=\"\$HOME/.local/bin:\$PATH\"  (put that line in ~/.profile or your shell's rc file to keep it)"
+            ;;
+    esac
 }
 
 # ---- Linux ----
@@ -312,7 +362,7 @@ install_linux_portable() {
     tar -xJf "$TMP/$name" -C "$dest" || die "could not unpack $name (is xz installed?)"
     [ -x "$dest/AgentMux/agentmux.sh" ] || die "the tarball has no AgentMux/agentmux.sh"
     ln -sf "$dest/AgentMux/agentmux.sh" "$HOME/.local/bin/agentmux"
-    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) say "add $HOME/.local/bin to your PATH to run  agentmux" ;; esac
+    path_hint agentmux
 }
 
 launch_linux() {
@@ -411,7 +461,7 @@ install_server() {
     else
         say "something else is already named agentmux here (the desktop app?): run this one as  agentmux-server"
     fi
-    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) say "add $HOME/.local/bin to your PATH to run  $cmd" ;; esac
+    path_hint "$cmd"
     if [ "$SETUP" = 1 ]; then
         "$HOME/.local/bin/$cmd" setup --yes --no-open --service || die "setup did not finish: run  $cmd doctor  to see why"
     else

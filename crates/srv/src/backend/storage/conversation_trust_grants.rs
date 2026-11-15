@@ -7,6 +7,13 @@
 //! docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md
 //! Phase B.
 //!
+//! Kept although nothing writes it yet (2026-11-15 database audit, task #30):
+//! the read side is live (`trusted_peers` mode checks it in `server/reactive.rs`)
+//! and the mode is selectable, so dropping the table would break that mode.
+//! What is missing is the grant path
+//! (the `conversation_trust_grant_add` callers: a CLI or settings control), which
+//! is a trust-surface feature that needs its own spec, not a cleanup.
+//!
 //! Mirrors `lan_peer_pubkey_pins.rs`'s exact shape (own module, get/set-style
 //! methods, case-insensitive agent_id lookups) — the explicit precedent this
 //! table is modeled on. Distinct concern, though: pubkey pins record an

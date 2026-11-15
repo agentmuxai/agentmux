@@ -469,8 +469,19 @@ fn with_ui_headers(shape: &Shape, mut r: Response) -> Response {
     r
 }
 
+/// Is the UI's file asked for on an address this server serves? The files hold no secret, but a name that is not the
+/// server's own (a DNS-rebinding page, a stray alias) gets nothing from it: the same rule as the sign-in and API routes.
+fn ui_host_ok(shape: &Shape, headers: &HeaderMap) -> bool {
+    hval(headers, "host").is_some_and(|h| shape.host_ok(h))
+}
+
 /// Middleware for the served UI's files.
 pub(crate) async fn ui_headers(req: Request<Body>, next: Next) -> Response {
+    if let Some(shape) = SHAPE.get() {
+        if !ui_host_ok(shape, req.headers()) {
+            return refusal();
+        }
+    }
     let response = next.run(req).await;
     match SHAPE.get() {
         Some(shape) => with_ui_headers(shape, response),
@@ -492,7 +503,7 @@ const ENTER_HTML: &str = r#"<!doctype html>
 <h1>AgentMux</h1>
 <p id="msg">Signing in&hellip;</p>
 <p id="phrase" hidden></p>
-<p id="hint" hidden>Compare this with the terminal where you ran <code>agentmux-srv open</code>. Answer <code>y</code> there only if the two match.</p>
+<p id="hint" hidden>Compare this with the terminal where you ran <code>agentmux open</code>. Answer <code>y</code> there only if the two match.</p>
 </main>
 <script src="/auth/enter.js"></script>
 </body>

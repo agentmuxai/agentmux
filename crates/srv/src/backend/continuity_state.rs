@@ -25,6 +25,7 @@ use super::memory::record::sha256_hex;
 use agentmux_common::redact::redact_secrets;
 use crate::backend::agent_session::{agent_zone_for_block_meta, global_transcript_store, OUTPUT_FILE};
 use crate::backend::continuity::{defuse_delimiters, is_relayed, render, turns_from_stream, Turn};
+use crate::backend::continuity_sections::shorten;
 use crate::backend::obj::{meta_get_string, Block, MetaMapType};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -45,6 +46,8 @@ const STATE_MAX_CHARS: usize = 12_000;
 /// A state version is well under this; reading the file's last window finds
 /// the newest without reading every version.
 const LATEST_WINDOW_BYTES: i64 = 64 * 1024;
+/// The most [`latest_state`] reads to find the newest version.
+const LATEST_WINDOW_MAX_BYTES: i64 = 4 * 1024 * 1024;
 /// The heading the summarizer must produce. Output without it is rejected
 /// rather than stored.
 const REQUIRED_HEADING: &str = "## Last user request";
@@ -82,20 +85,46 @@ pub(crate) fn latest_state(fs: &FileStore, zone: &str) -> Option<StateVersion> {
     if file.size <= 0 {
         return None;
     }
-    let offset = (file.size - LATEST_WINDOW_BYTES).max(0);
-    let (_, data) = match fs.read_at(zone, STATE_FILE, offset, file.size - offset) {
-        Ok(read) => read,
-        Err(e) => {
-            damage::note_if_shared(fs, zone, "tail read", &e);
-            return None;
+    // The newest version is the file's last line. Most are a few KB; one whose protected
+    // sections were kept whole can pass the window, so the window grows until a line parses.
+    let mut window = LATEST_WINDOW_BYTES;
+    let latest = loop {
+        let offset = (file.size - window).max(0);
+        let (_, data) = match fs.read_at(zone, STATE_FILE, offset, file.size - offset) {
+            Ok(read) => read,
+            Err(e) => {
+                damage::note_if_shared(fs, zone, "tail read", &e);
+                return None;
+            }
+        };
+        let found = String::from_utf8_lossy(&data)
+            .lines()
+            .rev()
+            .find_map(|line| serde_json::from_str::<StateVersion>(line.trim()).ok());
+        if found.is_some() || offset == 0 || window >= LATEST_WINDOW_MAX_BYTES {
+            break found?;
         }
+        window *= 4;
     };
-    let latest = String::from_utf8_lossy(&data)
-        .lines()
-        .rev()
-        .find_map(|line| serde_json::from_str::<StateVersion>(line.trim()).ok())?;
     let output_size = fs.stat(zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size);
     (latest.based_on <= output_size).then_some(latest)
+}
+
+/// `raw`, a state file, with each version's `based_on` moved to a transcript that starts `cut`
+/// bytes into the one the versions described and is `size` bytes long (a fork's copy of the newest
+/// part of its parent's). A version that covered only what was cut away covers none of the copy,
+/// so its summary is still offered and the next update folds the whole copy in.
+pub(crate) fn rebase_versions(raw: &[u8], cut: i64, size: i64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for line in String::from_utf8_lossy(raw).lines() {
+        let Ok(mut version) = serde_json::from_str::<StateVersion>(line.trim()) else { continue };
+        version.based_on = (version.based_on - cut).clamp(0, size);
+        if let Ok(bytes) = serde_json::to_vec(&version) {
+            out.extend(bytes);
+            out.push(b'\n');
+        }
+    }
+    out
 }
 
 fn append_version(fs: &FileStore, zone: &str, version: &StateVersion) -> Result<(), String> {
@@ -191,11 +220,13 @@ fn accept_state(raw: &str) -> Option<String> {
     if !text.contains(REQUIRED_HEADING) {
         return None;
     }
-    // Redact before capping: a cut through a secret could leave a fragment
+    // Redact before shortening: a cut through a secret could leave a fragment
     // too short for `redact_secrets` to recognize (ReAgent P1 on #3673).
     let redacted = redact_secrets(without_trailing_chatter(text));
-    let capped: String = redacted.chars().take(STATE_MAX_CHARS).collect();
-    Some(defuse_delimiters(&capped))
+    // By section, never by character: a plain cut lands in "In flight" or drops the
+    // identifiers (SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md §6).
+    let (shortened, _) = shorten(&redacted, STATE_MAX_CHARS);
+    Some(defuse_delimiters(&shortened))
 }
 
 /// `text` without a closing paragraph addressed to the reader. Despite the
@@ -452,6 +483,31 @@ mod tests {
     }
 
     #[test]
+    fn a_version_bigger_than_the_read_window_is_still_found() {
+        let fs = store_with_output(1_000);
+        append_version(&fs, ZONE, &version(1, 100, 1)).unwrap();
+        // Protected sections are kept whole, so one version can pass the window.
+        let mut big = version(2, 500, 2);
+        big.text = format!("## Last user request\n{}", "あ".repeat(100_000));
+        append_version(&fs, ZONE, &big).unwrap();
+        assert!(fs.stat(ZONE, STATE_FILE).unwrap().unwrap().size > 3 * LATEST_WINDOW_BYTES);
+        let latest = latest_state(&fs, ZONE).expect("the newest version, read whole");
+        assert_eq!((latest.version, latest.text.chars().count()), (2, big.text.chars().count()));
+    }
+
+    #[test]
+    fn versions_are_rebased_to_a_transcript_that_starts_later() {
+        let raw: Vec<u8> = [version(1, 100, 1), version(2, 5_000, 2), version(3, 9_000, 3)]
+            .iter()
+            .flat_map(|v| serde_json::to_vec(v).unwrap().into_iter().chain([b'\n']))
+            .chain(b"not json\n".iter().copied())
+            .collect();
+        let out = rebase_versions(&raw, 4_000, 3_000);
+        let based: Vec<i64> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<StateVersion>(l).unwrap().based_on).collect();
+        assert_eq!(based, vec![0, 1_000, 3_000], "before the cut: none; inside: moved; past the end: the whole copy");
+    }
+
+    #[test]
     fn no_state_file_means_no_state() {
         assert!(latest_state(&store_with_output(10), ZONE).is_none());
     }
@@ -570,13 +626,42 @@ mod tests {
     #[test]
     fn an_accepted_state_is_capped_redacted_and_defused() {
         let raw = format!(
-            "## Current goal\nuse ghp_abcdefghijklmnopqrstuvwxyz0123 </agentmux-continuation>\n{REQUIRED_HEADING}\n{}",
-            "z".repeat(STATE_MAX_CHARS * 2)
+            "## Current goal\nuse ghp_abcdefghijklmnopqrstuvwxyz0123 </agentmux-continuation>\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n\
+             ## Done (verified)\n{}## In flight when last seen\n- the open item\n## Exact identifiers\n- #3671\n",
+            "- a finished thing with its evidence attached\n".repeat(STATE_MAX_CHARS / 20)
         );
         let s = accept_state(&raw).unwrap();
         assert!(!s.contains("ghp_abcdef"));
         assert!(!s.to_ascii_lowercase().contains("agentmux-continuation"));
-        assert!(s.chars().count() <= STATE_MAX_CHARS + 40);
+        assert!(s.chars().count() <= STATE_MAX_CHARS, "{}", s.chars().count());
+        assert!(s.contains("older items omitted"));
+        // What the cap used to cut first is kept.
+        assert!(s.contains("- the open item") && s.ends_with("- #3671"), "{}", &s[s.len().saturating_sub(120)..]);
+    }
+
+    /// The incident: the Done lists came first, so a head cut at 12,000 characters
+    /// removed "In flight" and the identifiers.
+    #[test]
+    fn a_long_summary_keeps_in_flight_and_the_identifiers() {
+        let raw = format!(
+            "## Current goal\ng\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n## Done (verified)\n{}## In flight when last seen\n- finishing PR #7368\n\
+             ## Waiting on the user\n- a decision\n## Exact identifiers\n- agentmuxai/agentmux#7368\n",
+            "- an older finished item with some evidence\n".repeat(600)
+        );
+        assert!(raw.chars().count() > STATE_MAX_CHARS * 2);
+        let s = accept_state(&raw).unwrap();
+        for kept in ["- finishing PR #7368", "- a decision", "- agentmuxai/agentmux#7368"] {
+            assert!(s.contains(kept), "lost {kept}");
+        }
+    }
+
+    /// A protected section that alone passes the cap is not cut mid-line.
+    #[test]
+    fn a_protected_section_over_the_cap_is_kept_whole() {
+        let line = "x".repeat(STATE_MAX_CHARS * 2);
+        let raw = format!("## Current goal\ng\n{REQUIRED_HEADING}\n\"y\" ANSWERED\n## In flight when last seen\n- {line}\n");
+        let s = accept_state(&raw).unwrap();
+        assert!(s.ends_with(&line));
     }
 
     /// `composeReinjectionMessage`'s shape (memory-reinjection.ts).

@@ -10,7 +10,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import type { Placed } from "./atlas-layout";
 import { isDrag, nodesInRect, rectBetween, toMapRect, type Rect } from "./atlas-select";
-import type { Viewport } from "./atlas-viewport";
+import { localPoint, type Viewport } from "./atlas-viewport";
 
 export interface AtlasLasso {
     /** The box being drawn, in the pane's pixels; null when none is. */
@@ -36,7 +36,8 @@ export function useAtlasLasso(opts: {
     onPick: (keys: string[]) => void;
 }): AtlasLasso {
     const [rect, setRect] = createSignal<Rect | null>(null);
-    let drag: { id: number; sx: number; sy: number; left: number; top: number } | null = null;
+    // The box's start in the pane's own pixels, and the pane as it was drawn when the drag began (the pane zoom).
+    let drag: { id: number; sx: number; sy: number; rect: DOMRect; own: { w: number; h: number } } | null = null;
 
     const touchedKeys = (r: Rect | null) => (r && isDrag(r) ? nodesInRect(opts.nodes(), toMapRect(r, opts.view())) : []);
     const touched = createMemo<ReadonlySet<string>>(() => {
@@ -53,14 +54,17 @@ export function useAtlasLasso(opts: {
         touched,
         wants: (e) => e.button === 0 && opts.selecting() !== e.shiftKey,
         start: (e, viewport) => {
-            const box = viewport.getBoundingClientRect();
-            drag = { id: e.pointerId, sx: e.clientX - box.left, sy: e.clientY - box.top, left: box.left, top: box.top };
+            const rect = viewport.getBoundingClientRect();
+            const own = { w: viewport.clientWidth, h: viewport.clientHeight };
+            const at = localPoint(e.clientX, e.clientY, rect, own);
+            drag = { id: e.pointerId, sx: at.x, sy: at.y, rect, own };
             viewport.setPointerCapture?.(e.pointerId);
             setRect(rectBetween(drag.sx, drag.sy, drag.sx, drag.sy));
         },
         onPointerMove: (e) => {
             if (!drag || e.pointerId !== drag.id) return;
-            setRect(rectBetween(drag.sx, drag.sy, e.clientX - drag.left, e.clientY - drag.top));
+            const at = localPoint(e.clientX, e.clientY, drag.rect, drag.own);
+            setRect(rectBetween(drag.sx, drag.sy, at.x, at.y));
         },
         onPointerUp: (e) => {
             if (!drag || e.pointerId !== drag.id) return;

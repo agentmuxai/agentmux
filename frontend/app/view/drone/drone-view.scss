@@ -344,6 +344,22 @@
     border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
 }
 
+// What a node reads of the trigger: typed, or outside text (underlined, and said in words).
+.drone-trigger-refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    padding-top: 3px;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.drone-trigger-ref--outside {
+    color: var(--error-text-color);
+    text-decoration: underline wavy;
+    text-underline-offset: 2px;
+}
+
 // Compact horizontal label + control row inside a node.
 .drone-node-field {
     display: grid;

@@ -208,7 +208,7 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         expect(ta.selectionEnd).toBe(18);
     });
 
-    it("triggers history recall on Shift+ArrowUp once the selection reaches true position 0", async () => {
+    it("leaves the selection alone on Shift+ArrowUp once it reaches true position 0, history recall takes only a bare ArrowUp (the operator, 2026-11-15)", async () => {
         const onSendMessage = vi.fn();
         render(() => <AgentFooter agentName="Test" onSendMessage={onSendMessage} />);
         const user = userEvent.setup();
@@ -225,7 +225,9 @@ describe("AgentFooter composer history vs. selection (SPEC_COMPOSER_SHIFT_UP_SEL
         ta.setSelectionRange(0, 18, "backward");
         keyOn(ta, "ArrowUp", { shiftKey: true });
 
-        expect(ta.value).toBe("second message"); // most recently sent
+        expect(ta.value).toBe(draft); // a Shift+arrow is always a selection (task 47694)
+        expect(ta.selectionStart).toBe(0);
+        expect(ta.selectionEnd).toBe(18);
     });
 
     it("does not trigger history recall on plain ArrowUp mid-line, only once the caret reaches true position 0", async () => {

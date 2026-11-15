@@ -211,6 +211,37 @@ case_pkexec_fails_without_an_agent() {
     pass "pkexec refused with status $rc (no READY, nothing installed); the printed command '$manual' installed $TO_VERSION"
 }
 
+# The first release whose rpm owns its folders: a remove of an earlier one leaves 24 empty folders under /opt/agentmux.
+REMOVE_CLEAN_SINCE="${REMOVE_CLEAN_SINCE:-0.60.30}"
+
+# A remove takes everything the package put under /opt/agentmux, for both formats: the release is installed over
+# $FROM_VERSION the way the printed command does it, then removed with the package manager.
+case_remove_leaves_nothing_under_opt() {
+    rc=0
+    stage
+    if [ "$(printf '%s\n%s\n' "$REMOVE_CLEAN_SINCE" "$TO_VERSION" | sort -V | head -n 1)" != "$REMOVE_CLEAN_SINCE" ]; then
+        pass "not checked: $TO_VERSION is older than $REMOVE_CLEAN_SINCE, the first release whose package removes its folders"
+    fi
+    if [ "$KIND" = deb ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$FILE" >/tmp/i.out 2>&1 || { tail -5 /tmp/i.out; fail "could not install $TO_VERSION"; }
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "$FILE" >/tmp/i.out 2>&1 || { tail -5 /tmp/i.out; fail "could not install $TO_VERSION"; }
+    else
+        zypper --non-interactive install --allow-unsigned-rpm "$FILE" >/tmp/i.out 2>&1 || { tail -5 /tmp/i.out; fail "could not install $TO_VERSION"; }
+    fi
+    [ "$(installed)" = "$TO_VERSION" ] || fail "$(installed) is installed, not $TO_VERSION"
+    if [ "$KIND" = deb ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get remove -y agentmux >/tmp/r.out 2>&1 || { tail -5 /tmp/r.out; fail "could not remove agentmux"; }
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf remove -y agentmux >/tmp/r.out 2>&1 || { tail -5 /tmp/r.out; fail "could not remove agentmux"; }
+    else
+        zypper --non-interactive remove agentmux >/tmp/r.out 2>&1 || { tail -5 /tmp/r.out; fail "could not remove agentmux"; }
+    fi
+    if [ "$KIND" = deb ]; then dpkg-query -W agentmux >/dev/null 2>&1; else rpm -q agentmux >/dev/null 2>&1; fi && fail "agentmux is still installed after the remove"
+    [ ! -e /opt/agentmux ] || fail "the remove left /opt/agentmux: $(find /opt/agentmux | wc -l) entries, $(find /opt/agentmux -type f | wc -l) of them files"
+    pass "removing $TO_VERSION leaves nothing under /opt/agentmux"
+}
+
 if [ "${1:-}" = --list ]; then list; exit 0; fi
 [ -n "${1:-}" ] && declare -F "case_$1" >/dev/null || { echo "usage: cases.sh --list | <case>"; exit 64; }
 "case_$1"

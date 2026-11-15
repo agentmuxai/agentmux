@@ -134,6 +134,10 @@ pub async fn run(node: &FlowNode, scope: &ExecutionScope) -> Result<Value, Strin
 pub(crate) fn poll_check() -> crate::backend::jobs::poll::Check {
     std::sync::Arc::new(|filter| {
         Box::pin(async move {
+            // A poll of a site outside AgentMux: the API block's own call, which never asks the person (`api_poll`).
+            if filter.get("query").and_then(|q| q.as_str()) == Some("api") {
+                return super::api_poll::ask(filter).await;
+            }
             let node = FlowNode { id: "poll".to_string(), position: Default::default(), data: Value::Object(filter), node_type: None };
             run(&node, &ExecutionScope::new()).await
         })

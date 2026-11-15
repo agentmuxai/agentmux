@@ -51,6 +51,18 @@ interface ResizableDetailsDrawerProps {
     children: JSX.Element;
     /** Which edge is pinned. Default `"bottom"` — the shell drawer's original behavior. */
     anchor?: "top" | "bottom";
+    /**
+     * Rows that sit above the resizable box (the shell drawer's one-line header). With `handleOnEdge` the
+     * handle goes above them, on the drawer's outer edge, so a header row never sits between the handle and
+     * the line it resizes from.
+     */
+    header?: JSX.Element;
+    /**
+     * Bottom-anchored only: put the handle on the drawer's outer top edge, straddling whatever border the
+     * thing above it has (the composer's bottom border), instead of inside the box under `header`. The
+     * handle is then an overlay and takes no height of its own. The container must be `position: relative`.
+     */
+    handleOnEdge?: boolean;
     /** Block-meta key the dragged height is persisted under. Default is the shell drawer's. */
     persistMetaKey?: string;
     /**
@@ -115,24 +127,32 @@ export const ResizableDetailsDrawer = (props: ResizableDetailsDrawerProps): JSX.
         window.removeEventListener("pointerup", onPointerUp);
     });
 
+    const onEdge = () => props.handleOnEdge === true && anchor() === "bottom";
     const handle = () => (
         <div
             class={`${prefix()}-resize-handle`}
-            classList={{ [`${prefix()}-resize-handle--active`]: dragging() }}
+            classList={{
+                [`${prefix()}-resize-handle--active`]: dragging(),
+                [`${prefix()}-resize-handle--edge`]: onEdge(),
+            }}
             onPointerDown={onPointerDown}
             {...tip("Drag to resize", { label: true })}
         />
     );
 
     return (
-        <div class={`${prefix()}-resizable`} style={{ height: `${height()}px` }}>
-            {/* Handle renders BEFORE the body when the free edge is on top,
-                AFTER it when the free edge is on the bottom — DOM order is
-                what puts it on the right edge of the flex column. */}
-            <Show when={anchor() === "bottom"}>{handle()}</Show>
-            <div class={`${prefix()}-body`}>{props.children}</div>
-            <Show when={anchor() === "top"}>{handle()}</Show>
-        </div>
+        <>
+            <Show when={onEdge()}>{handle()}</Show>
+            {props.header}
+            <div class={`${prefix()}-resizable`} style={{ height: `${height()}px` }}>
+                {/* Handle renders BEFORE the body when the free edge is on top,
+                    AFTER it when the free edge is on the bottom — DOM order is
+                    what puts it on the right edge of the flex column. */}
+                <Show when={anchor() === "bottom" && !onEdge()}>{handle()}</Show>
+                <div class={`${prefix()}-body`}>{props.children}</div>
+                <Show when={anchor() === "top"}>{handle()}</Show>
+            </div>
+        </>
     );
 };
 

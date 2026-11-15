@@ -297,7 +297,8 @@ fn check_block_limits(sorted: &[&FlowNode], issues: &mut Vec<Issue>) {
     for node in sorted {
         let wait = (kind_of(node) == "wait").then(|| super::blocks::wait::check(node).err()).flatten();
         let call = (kind_of(node) == "drone").then(|| super::blocks::call::parse(node).err()).flatten();
-        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err()).chain(wait).chain(call);
+        let run = (kind_of(node) == "run").then(|| super::blocks::run::check(node).err()).flatten();
+        let bad = timeout_seconds(node).err().into_iter().chain(super::retry::retry_of(node).err()).chain(wait).chain(call).chain(run);
         issues.extend(bad.map(|message| Issue { node: Some(node.id.clone()), message }));
     }
 }

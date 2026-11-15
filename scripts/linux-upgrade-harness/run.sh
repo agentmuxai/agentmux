@@ -118,6 +118,7 @@ run_case() { # distro case
     local launcher_src="$HERE/../../crates/launcher/src/upgrade_package.rs"
     [ -f "$launcher_src" ] && waiter_mount=(-v "$(readlink -f "$launcher_src"):/upgrade_package.rs:ro")
     if [ -n "${HELPER:-}" ]; then helper_mount=(-v "$(readlink -f "$HELPER"):/helper-under-test:ro"); helper_env=(-e HELPER=/helper-under-test); fi
+    [ -n "${REMOVE_CLEAN_SINCE:-}" ] && helper_env+=(-e "REMOVE_CLEAN_SINCE=$REMOVE_CLEAN_SINCE")
     # SYS_PTRACE: a real host's root can read another user's /proc/<pid>/exe, which the helper's
     # "is anything running from /opt/agentmux" check needs; Docker's default root cannot.
     id=$(docker create --cap-add SYS_PTRACE --label "$LABEL" --network "$NET" -e "FROM_VERSION=$FROM_VERSION" -e "TO_VERSION=$TO_VERSION" "${helper_env[@]}" \

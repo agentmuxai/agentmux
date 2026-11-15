@@ -31,7 +31,7 @@ impl<'a> Scheduler<'a> {
             let said = self.scope.outputs.get(&source);
             if self.decided.get(edge.id.as_str()) == Some(&true) {
                 branches.arrived.push((source, said.cloned().unwrap_or(Value::Null)));
-            } else if said.and_then(|o| o.get("failed")).and_then(Value::as_bool) == Some(true) {
+            } else if self.failed.contains(source.as_str()) {
                 let why = said.and_then(|o| o.get("error")).and_then(Value::as_str).unwrap_or("it failed").to_string();
                 branches.failed.push((source, why));
             } else {

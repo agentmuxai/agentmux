@@ -62,6 +62,10 @@ pub struct Position {
     pub finished: Vec<String>,
     /// Edges out of a loop that were not taken, decided when nothing else can run, in order.
     pub held: Vec<String>,
+    /// Blocks that failed this pass of their loop, and the graph handled it. A block skipped or run
+    /// again in a later pass keeps what it said before, so this is what says whether it failed now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<String>,
     /// What each block has spent, in dollars.
     pub spent_by: BTreeMap<String, f64>,
     /// How long each loop guard's loop has been running, in ms. A restart does
@@ -70,6 +74,16 @@ pub struct Position {
     /// What the run's Response block said, once it has run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<serde_json::Value>,
+}
+
+/// Where a replaying run came from: the run and the step it started at, and whether its
+/// blocks that have effects run for real. Never changes inside a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fork {
+    pub run_id: String,
+    pub step: u32,
+    #[serde(default)]
+    pub real: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +130,9 @@ pub struct Checkpoint {
     pub history: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub position: Position,
+    /// Set on a run that replays an earlier one (`replay`); absent on any other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork: Option<Fork>,
 }
 
 /// What changed from one checkpoint to the next. Fields that did not change
@@ -426,6 +443,7 @@ pub(crate) fn sample(step: u32) -> Checkpoint {
             finished: vec!["n1".into()],
             ..Position::default()
         },
+        fork: None,
     }
 }
 

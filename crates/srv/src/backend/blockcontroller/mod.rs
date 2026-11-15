@@ -16,6 +16,7 @@ pub mod acp_prelaunch;
 pub mod acp_mcp;
 pub mod agent_lock;
 pub mod app_server;
+mod app_server_input;
 pub mod app_server_controller;
 pub mod app_server_protocol;
 pub mod core;
@@ -846,7 +847,7 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message_from(message, false, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
+        app_server_ctrl.send_message_from(message, Vec::new(), false, Some(&RecordOrigin { origin: from, notes: held.note_texts() }))?;
         held.delivered();
         return Ok(AgentDelivery::Structured);
     }

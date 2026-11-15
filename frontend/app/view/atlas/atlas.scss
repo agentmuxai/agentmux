@@ -15,6 +15,10 @@
     min-height: 0;
     overflow: hidden;
     color: var(--main-text-color);
+    // The pane's zoom (the pane zoom keys, Ctrl+scroll, the all-panes zoom): the bar and the cards scale with it, and the
+    // map is formed and fitted for the room that is left (block.tsx gives the block its level as `--pane-zoom`; the
+    // pane's `paneZoom` capability in atlas.tsx says it takes part).
+    zoom: var(--pane-zoom, 1);
 }
 
 .atlas-bar {
