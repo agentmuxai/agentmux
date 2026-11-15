@@ -142,10 +142,15 @@ pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
     !needs_value && matches!(kind, "api-key" | "login" | "note")
 }
 
+/// What a drone's actor starts with: `drone:<id>`. A drone is not an agent a person is watching.
+pub const DRONE_ACTOR: &str = "drone:";
+
 /// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere,
-/// nor a new account (an agent makes one only on the person's yes).
+/// nor a new account (an agent makes one only on the person's yes), nor a drone's use: the 30 s rule assumes the person
+/// is at the desk while an agent works, and a drone often runs unattended (at night, on a webhook), so for it
+/// silence is a no.
 pub fn goes_ahead(req: &UseRequest) -> bool {
-    req.import.is_none() && !req.account && goes_ahead_on_silence(&req.kind, req.needs_value)
+    req.import.is_none() && !req.account && !req.agent.starts_with(DRONE_ACTOR) && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

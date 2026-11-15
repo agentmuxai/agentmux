@@ -10,11 +10,16 @@
 //! agents only is refused to it as if the entry weren't there; a Vault open to all agents is not.
 //! A grant is for one drone, one site (its origin) and one part of one entry: editing the node's
 //! URL to another site, or the node to use another entry, asks again.
+//!
+//! Silence is a no: a drone often runs unattended, so the Vault's "goes ahead after 30 s" rule does
+//! not apply to it ([`uses::goes_ahead`]). The run fails that block and the next run asks again.
+//! A key that records the site or service it was saved for is bound to it: sent anywhere else, the
+//! card says so and offers Allow once only, and an earlier grant doesn't count.
 
 use std::time::Duration;
 
 use crate::backend::vault::scrub::{self, Scrubber};
-use crate::backend::vault::uses::{Ended, UseRequest};
+use crate::backend::vault::uses::{self, Ended, UseRequest};
 use crate::backend::vault::{self, FillTarget};
 
 use super::AppState;
@@ -24,6 +29,8 @@ const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// The Activity line's action.
 const CALLED: &str = "called an API";
 const NOT_SENT: &str = "the request was not sent";
+/// The Activity outcome of a use nobody answered, which a drone's never goes ahead on.
+const NOT_ANSWERED: &str = "not answered";
 
 /// The value to send and what takes it back out of what comes back.
 pub(crate) struct Resolved {
@@ -33,8 +40,8 @@ pub(crate) struct Resolved {
 
 /// The actor a drone's use of the Vault is recorded and granted under.
 pub(crate) fn actor(drone_id: &str) -> String {
-    let id: String = drone_id.chars().take(64).collect();
-    format!("drone:{id}")
+    // The whole id: two drones whose ids share a beginning are two actors, with a grant each.
+    format!("{}{drone_id}", uses::DRONE_ACTOR)
 }
 
 /// The key a drone's grant is stored under, in the grants table that web forms and commands use:
@@ -70,6 +77,62 @@ pub(crate) fn entry_text_ok(entry: &str) -> Result<&str, String> {
     Ok(entry)
 }
 
+/// Whether the site an entry says it was saved for is the one the drone sends it to.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Binding {
+    /// The entry records no site or service: nothing to compare.
+    Unrecorded,
+    Matches,
+    /// It was saved for `recorded`, as the person wrote it.
+    Differs { recorded: String },
+}
+
+/// The recorded site or service of an entry's plain fields: an api-key's `service`, a login's `site`.
+fn recorded_of(kind: &str, fields: &str) -> String {
+    let key = if kind == "login" { "site" } else { "service" };
+    serde_json::from_str::<serde_json::Value>(fields).ok().and_then(|v| v.get(key).and_then(|x| x.as_str()).map(|x| x.trim().to_string())).unwrap_or_default()
+}
+
+/// The host a recorded value names, when it names one: a URL (`https://api.github.com/x`) or a bare host name
+/// (`api.github.com`). A service's name (`GitHub`, `Acme Billing`) names none.
+fn host_in(recorded: &str) -> Option<String> {
+    let text = recorded.trim().trim_end_matches('/');
+    let candidate = text.split("://").nth(1).unwrap_or(text);
+    let host = candidate.split(['/', '?', '#']).next().unwrap_or("").split(':').next().unwrap_or("").trim().trim_start_matches("www.").to_ascii_lowercase();
+    let host_like = !host.is_empty() && host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+    host_like.then_some(host)
+}
+
+/// Whether the entry's recorded `site` fits `origin` (`https://host[:port]`): a recorded host fits that host and its
+/// subdomains; a recorded name (`GitHub`) fits a host whose registrable name is it (`api.github.com`, not
+/// `github.evil.example`). With no public-suffix list the name check is the host's second label from the end, so
+/// `shop.example.co.uk` doesn't fit `Example`: a refusal to bind, never a wrong yes.
+pub(crate) fn binding(recorded: &str, origin: &str) -> Binding {
+    let recorded = recorded.trim();
+    if recorded.is_empty() {
+        return Binding::Unrecorded;
+    }
+    let host = reqwest::Url::parse(origin).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase)).unwrap_or_default();
+    let fits = match host_in(recorded) {
+        Some(want) => host == want || host.ends_with(&format!(".{want}")),
+        None => {
+            let name: String = recorded.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+            let labels: Vec<&str> = host.split('.').collect();
+            !name.is_empty() && labels.len() >= 2 && labels[labels.len() - 2] == name
+        }
+    };
+    if fits {
+        Binding::Matches
+    } else {
+        Binding::Differs { recorded: recorded.to_string() }
+    }
+}
+
+/// The host of `origin`, for the card.
+fn host_of(origin: &str) -> String {
+    reqwest::Url::parse(origin).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| origin.to_string())
+}
+
 /// Resolves, asks for and reads the entry `entry` for a call to `origin` by drone `drone_id`.
 /// Nothing is read and nothing is sent unless this returns `Ok`.
 pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origin: &str) -> Result<Resolved, String> {
@@ -81,18 +144,33 @@ pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origi
         .map_err(|e| e.to_string())??;
     part_allowed(target.kind, target.part)?;
 
+    // The site or service the entry says it was saved for, against the one this call goes to.
+    let (store, id) = (state.identity_store.clone(), target.id.clone());
+    let fields = tokio::task::spawn_blocking(move || store.vault_get(&id).ok().flatten().map(|r| r.fields).unwrap_or_default()).await.unwrap_or_default();
+    let bound = binding(&recorded_of(target.kind, &fields), origin);
+    let mismatch = match &bound {
+        Binding::Differs { recorded } => Some(format!("This key was saved for {recorded}; the drone {drone_id} sends it to {}", host_of(origin))),
+        _ => None,
+    };
+
+    let note = mismatch.clone().unwrap_or_default();
     let record = |outcome: &str| {
         vault::record_line(
             &state.identity_store,
-            vault::Line { entry_id: &target.id, label: &target.label, actor: &who, action: CALLED, target: origin, outcome, reason: "" },
+            vault::Line { entry_id: &target.id, label: &target.label, actor: &who, action: CALLED, target: origin, outcome, reason: &note },
         );
         // Every window's Vault pane shows the new line of the record.
         super::vault_handlers::publish(state);
     };
 
+    // An earlier "Always" doesn't cover a key that is now for another site: the card asks again.
     let key = grant_key(drone_id, origin, target.part);
-    let (store, id, k) = (state.identity_store.clone(), target.id.clone(), key.clone());
-    let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &k).unwrap_or(false)).await.unwrap_or(false);
+    let granted = if mismatch.is_some() {
+        false
+    } else {
+        let (store, id, k) = (state.identity_store.clone(), target.id.clone(), key.clone());
+        tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &k).unwrap_or(false)).await.unwrap_or(false)
+    };
     if !granted {
         let request = UseRequest {
             id: uuid::Uuid::new_v4().to_string(),
@@ -102,8 +180,9 @@ pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origi
             what: target.what.clone(),
             origin: origin.to_string(),
             field: "an authorization header".into(),
-            offer_always: true,
-            reason: format!("it is the first time the drone {drone_id} calls {origin} with this entry"),
+            // Only Allow once for a key saved for another site.
+            offer_always: mismatch.is_none(),
+            reason: mismatch.clone().unwrap_or_else(|| format!("it is the first time the drone {drone_id} calls {origin} with this entry")),
             kind: target.kind.to_string(),
             requested_ms: agentmux_common::time::now_ms_u64(),
             ..Default::default()
@@ -112,10 +191,15 @@ pub(crate) async fn resolve(state: &AppState, drone_id: &str, entry: &str, origi
         // No pane of its own to answer in: asked in every window.
         let (ended, _) = super::vault_ask::ask(state, "", request, ANSWER_WAIT, &headline).await;
         if !ended.allowed() {
+            // Silence is a no for a drone ([`uses::goes_ahead`]): said so, not as the person's refusal.
+            if matches!(ended, Ended::Expired | Ended::NoAnswer) {
+                record(NOT_ANSWERED);
+                return Err(format!("nobody answered the Vault request to send {} to {origin}, and a drone's first use of a site needs a yes: {NOT_SENT}; the next run asks again", target.label));
+            }
             record(ended.outcome());
             return Err(ended.refusal(NOT_SENT));
         }
-        if ended == Ended::Always {
+        if ended == Ended::Always && mismatch.is_none() {
             let (store, id, k, created) = (state.identity_store.clone(), target.id.clone(), key, target.created_at);
             let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &k, agentmux_common::time::now_ms(), created)).await;
         }
@@ -149,7 +233,10 @@ mod unit_tests {
     #[test]
     fn a_drone_is_its_own_actor_and_never_a_named_agent() {
         assert_eq!(actor("nightly"), "drone:nightly");
-        assert_eq!(actor(&"x".repeat(100)).len(), "drone:".len() + 64);
+        // Two drones whose ids share a long beginning are two actors, and a grant is for one.
+        let (a, b) = (format!("{}a", "x".repeat(80)), format!("{}b", "x".repeat(80)));
+        assert_ne!(actor(&a), actor(&b));
+        assert_ne!(grant_key(&a, "https://api.example.com", "value"), grant_key(&b, "https://api.example.com", "value"));
     }
 
     #[test]

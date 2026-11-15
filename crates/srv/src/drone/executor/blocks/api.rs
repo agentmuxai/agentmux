@@ -179,6 +179,11 @@ async fn credential(node: &FlowNode, scope: &ExecutionScope, url_raw: &str, url:
     }
     let site = api_auth::site(url_raw, url)?;
     let name = auth.how.name();
+    // The Host header picks the virtual host the server routes the request to: a node that kept the approved URL
+    // and set another Host would send the credential to a tenant nobody approved.
+    if headers.keys().any(|k| k.trim().eq_ignore_ascii_case("host")) {
+        return Err("a call with a Vault credential can't set the Host header: it goes to the site in the URL".into());
+    }
     if api_auth::sets_it_too(headers, &name) {
         return Err(format!("the node sets the {name} header and also takes it from the Vault: leave it out of `headers`"));
     }
@@ -398,6 +403,10 @@ mod tests {
         let both = node(json!({ "url": "https://api.example.com/x", "headers": { "Authorization": "Bearer mine" }, "auth": auth }));
         let err = run(&both, &scope_of("nightly")).await.unwrap_err();
         assert!(err.contains("authorization"), "{err}");
+        // A Host of another tenant would route the credential somewhere nobody approved.
+        let host = node(json!({ "url": "https://api.example.com/x", "headers": { "host": "other-tenant.example.net" }, "auth": auth }));
+        let err = run(&host, &scope_of("nightly")).await.unwrap_err();
+        assert!(err.contains("Host"), "{err}");
         // Not a saved drone's run: nobody to grant it to.
         let ok = node(json!({ "url": "https://api.example.com/x", "auth": auth }));
         assert!(run(&ok, &scope_of("")).await.unwrap_err().contains("saved drone"));
