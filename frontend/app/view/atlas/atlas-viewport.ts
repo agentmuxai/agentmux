@@ -43,12 +43,11 @@ const PAGE_PIXELS = 400;
 
 /**
  * The zoom factor of one wheel event. A mouse wheel steps in lines on some systems, which as raw numbers is a
- * tenth of a pixel step; a trackpad pinch arrives as a wheel with the ctrl key and small deltas, so it is
- * scaled up to feel the same as a wheel.
+ * tenth of a pixel step. (A wheel with Ctrl or Cmd is the pane zoom's, not the map's.)
  */
-export function wheelFactor(e: { deltaY: number; deltaMode: number; ctrlKey: boolean }): number {
+export function wheelFactor(e: { deltaY: number; deltaMode: number }): number {
     const pixels = e.deltaMode === 1 ? e.deltaY * LINE_PIXELS : e.deltaMode === 2 ? e.deltaY * PAGE_PIXELS : e.deltaY;
-    return Math.exp(-pixels * (e.ctrlKey ? 0.01 : 0.0015));
+    return Math.exp(-pixels * 0.0015);
 }
 
 /**

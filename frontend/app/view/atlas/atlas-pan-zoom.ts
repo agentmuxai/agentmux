@@ -84,6 +84,8 @@ export function useAtlasPanZoom(
         zoomBy: (factor) =>
             moveView(zoomCentered(view(), factor, size().width, size().height, paneSize().w, paneSize().h)),
         onWheel: (e) => {
+            // Ctrl or Cmd with the wheel is the pane zoom (the window's handler steps it), not the map's.
+            if (e.ctrlKey || e.metaKey) return;
             e.preventDefault();
             const at = localPoint(e.clientX, e.clientY, viewport!.getBoundingClientRect(), {
                 w: viewport!.clientWidth,

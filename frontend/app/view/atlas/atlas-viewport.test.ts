@@ -57,20 +57,16 @@ describe("zoomCentered", () => {
 
 describe("wheelFactor", () => {
     it("zooms in for an upward wheel and out for a downward one, by the same amount", () => {
-        const up = wheelFactor({ deltaY: -100, deltaMode: 0, ctrlKey: false });
-        const down = wheelFactor({ deltaY: 100, deltaMode: 0, ctrlKey: false });
+        const up = wheelFactor({ deltaY: -100, deltaMode: 0 });
+        const down = wheelFactor({ deltaY: 100, deltaMode: 0 });
         expect(up).toBeGreaterThan(1);
         expect(up * down).toBeCloseTo(1);
     });
 
     it("counts a wheel that steps in lines like one that steps in pixels", () => {
-        const lines = wheelFactor({ deltaY: -3, deltaMode: 1, ctrlKey: false });
+        const lines = wheelFactor({ deltaY: -3, deltaMode: 1 });
         // Three lines are 48 pixels, not 3.
-        expect(lines).toBeCloseTo(wheelFactor({ deltaY: -48, deltaMode: 0, ctrlKey: false }));
-    });
-
-    it("makes a pinch (the wheel with ctrl, small deltas) zoom visibly", () => {
-        expect(wheelFactor({ deltaY: -5, deltaMode: 0, ctrlKey: true })).toBeGreaterThan(1.04);
+        expect(lines).toBeCloseTo(wheelFactor({ deltaY: -48, deltaMode: 0 }));
     });
 });
 

@@ -4,6 +4,7 @@
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { useAtlasLasso } from "./atlas-lasso";
+import { useAtlasPanZoom } from "./atlas-pan-zoom";
 import { pointerScale } from "./atlas-viewport";
 
 /** A pane the person zoomed to 125%: it is 800 px of its own and is drawn 1000 px wide. */
@@ -51,6 +52,46 @@ describe("the lasso in a zoomed pane", () => {
             lasso.start(pointer(325, 175, "pointerdown"), viewportAt(ZOOMED));
             lasso.onPointerMove(pointer(725, 425));
             expect(lasso.rect()).toEqual({ x: 180, y: 100, w: 320, h: 200 });
+            dispose();
+        });
+    });
+});
+
+describe("the wheel over the map", () => {
+    function wheel(init: { ctrlKey?: boolean; metaKey?: boolean }) {
+        let prevented = false;
+        const e = {
+            deltaY: -100,
+            deltaMode: 0,
+            clientX: 300,
+            clientY: 200,
+            ctrlKey: false,
+            metaKey: false,
+            ...init,
+            preventDefault: () => (prevented = true),
+        } as unknown as WheelEvent;
+        return { e, prevented: () => prevented };
+    }
+
+    it("zooms the map, and with Ctrl or Cmd leaves the wheel to the pane zoom", () => {
+        createRoot((dispose) => {
+            const zoom = useAtlasPanZoom(
+                () => ({ width: 800, height: 600 }),
+                () => "machine",
+                () => {}
+            );
+            zoom.setViewport(viewportAt(ZOOMED) as HTMLDivElement);
+            const before = zoom.view();
+            for (const key of [{ ctrlKey: true }, { metaKey: true }]) {
+                const { e, prevented } = wheel(key);
+                zoom.onWheel(e);
+                expect(prevented()).toBe(false);
+                expect(zoom.view()).toEqual(before);
+            }
+            const plain = wheel({});
+            zoom.onWheel(plain.e);
+            expect(plain.prevented()).toBe(true);
+            expect(zoom.view().k).toBeGreaterThan(before.k);
             dispose();
         });
     });
