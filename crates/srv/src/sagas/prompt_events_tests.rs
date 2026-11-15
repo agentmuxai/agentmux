@@ -124,4 +124,5 @@ fn a_drone_run_event_is_tagged_by_its_kind() {
     );
     assert_eq!(run(RunEvent::RunDone { run_id: "r".into(), output: json!({"ok": true}) }), json!({ "kind": "run_done", "run_id": "r", "output": {"ok": true} }));
     assert_eq!(run(RunEvent::RunFailed { run_id: "r".into(), error: "e".into() }), json!({ "kind": "run_failed", "run_id": "r", "error": "e" }));
+    assert_eq!(run(RunEvent::RunCancelled { run_id: "r".into(), reason: "why".into() }), json!({ "kind": "run_cancelled", "run_id": "r", "reason": "why" }));
 }

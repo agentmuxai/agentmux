@@ -31,4 +31,7 @@ pub enum RunEvent {
         output: Value,
     },
     RunFailed { run_id: String, error: String },
+    /// The run was stopped on purpose (`cancel_run`): a person, an agent, the
+    /// job's timeout or the job's next run. `reason` says which, in plain words.
+    RunCancelled { run_id: String, reason: String },
 }
