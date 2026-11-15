@@ -93,6 +93,7 @@ mod ws_register;
 mod cli_version;
 mod ws_resync;
 pub(crate) mod drone_handlers;
+pub(crate) mod drone_replay;
 pub(crate) mod drone_resume;
 pub(crate) mod drone_template_handlers;
 pub(crate) mod cron;

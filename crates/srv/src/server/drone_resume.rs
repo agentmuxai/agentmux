@@ -44,7 +44,15 @@ pub(crate) async fn resume_runs(state: &AppState, ledger: Option<&Arc<RunLedger>
             Ok(Some((checkpoint, graph))) => {
                 let persist = Persist { sink: state.mstore.clone(), graph: checkpoint.graph.clone() };
                 let step = checkpoint.step;
-                match resume_drone(graph, checkpoint, persist).await {
+                // A replay goes on as a replay: its blocks with effects still say what they said before.
+                let replay = match crate::server::drone_replay::replay_for(state, &checkpoint) {
+                    Ok(replay) => replay,
+                    Err(why) => {
+                        tracing::warn!(run_id = %run.id, "drone: a replay is not taken up again: {why}");
+                        continue;
+                    }
+                };
+                match resume_drone(graph, checkpoint, persist, replay).await {
                     Ok(handle) => {
                         let ledger_run = ledger.and_then(|l| l.open_run_of_drone(&run.id).map(|id| (l.clone(), id)));
                         tracing::info!(run_id = %run.id, drone_id = %run.drone_id, step, "drone: taking a run up again after the restart");
@@ -74,7 +82,7 @@ fn checkpoint_and_graph(state: &AppState, run: &DroneRun) -> Result<Option<(Chec
 /// graph (by hash), else the drone's current graph when that is. A graph that was
 /// edited since, with no saved version to go back to, is no graph the run's
 /// checkpoints fit.
-fn graph_of(state: &AppState, drone_id: &str, graph: &GraphRef) -> Result<DroneGraph, String> {
+pub(crate) fn graph_of(state: &AppState, drone_id: &str, graph: &GraphRef) -> Result<DroneGraph, String> {
     if graph.version > 0 {
         if let Ok(Some(v)) = state.id_store.version_get(drone_id, graph.version) {
             if v.hash == graph.hash {
