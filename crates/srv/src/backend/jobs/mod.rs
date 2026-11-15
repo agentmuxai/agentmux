@@ -20,6 +20,7 @@ pub mod caps;
 pub mod cloud_events;
 pub mod cloud_hub;
 pub mod definition;
+pub mod expect;
 pub mod file_watch;
 pub mod follower;
 pub mod from_template;

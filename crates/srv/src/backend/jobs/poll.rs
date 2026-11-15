@@ -300,18 +300,21 @@ pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check,
     offered
 }
 
-/// Start the poller. `check` answers the App query.
+/// Start the poller, which also looks after the `expect` jobs. `check` answers the App query.
 pub fn spawn(jobs: Arc<Store>, scheduler: Arc<CronScheduler>, check: Check) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
     tokio::spawn(async move {
         let mut state = PollState::default();
+        let mut expects = super::expect::ExpectState::default();
         loop {
             tokio::time::sleep(TICK).await;
             let listing = jobs.clone();
             let all = tokio::task::spawn_blocking(move || listing.cron_list_enabled()).await.ok().and_then(Result::ok).unwrap_or_default();
-            poll_due(&scheduler, &all, &check, &mut state, agentmux_common::time::now_ms()).await;
+            let now = agentmux_common::time::now_ms();
+            poll_due(&scheduler, &all, &check, &mut state, now).await;
+            super::expect::expect_due(&scheduler, &all, &check, &mut expects, now).await;
         }
     });
 }
