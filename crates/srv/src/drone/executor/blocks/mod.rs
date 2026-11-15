@@ -12,6 +12,7 @@ pub mod join;
 pub mod message;
 pub mod notify;
 pub mod response;
+pub mod run;
 pub mod spawn;
 pub mod task;
 pub mod transform;
