@@ -70,6 +70,28 @@ fn a_pass_frames_what_is_old_enough_and_far_enough_from_the_end() {
     assert_eq!(again.frames, 0);
 }
 
+/// This build reads codec 3 but does not write it yet: a build rolled back one release must still read what the
+/// framer wrote and open the store, so a transcript of current CLI lines (with an `api_message_id`) is framed
+/// with codec 1, and the store stays at version 3.
+#[test]
+fn a_pass_does_not_write_codec_three_or_stamp_four_yet() {
+    let (_dir, fs) = open();
+    let mut data = Vec::new();
+    for n in 0..(210 * P as u64 / 300) {
+        data.extend_from_slice(
+            format!("{{\"type\":\"stream_event\",\"event\":{{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"word {n} \"}}}},\"session_id\":\"s\",\"parent_tool_use_id\":null,\"uuid\":\"{:08x}-0000-4000-8000-{:012x}\",\"api_message_id\":\"msg_01XXXXXXXXXXXXXXXXXXXXXX\"}}\n", n, n).as_bytes(),
+        );
+    }
+    fs.make_file("agent:a:current", "output", FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines("agent:a:current", "output", &data).unwrap();
+    let mut skip = HashSet::new();
+    let report = pass_with(&fs, &nobody_blocks, PASS_FRAMES, &mut skip, agentmux_common::time::now_ms()).unwrap();
+    assert!(report.frames > 0, "something was framed: {report:?}");
+    assert_eq!(report.codec2, 0, "no frame took a line that carries a message id");
+    assert_eq!(user_version(&fs), 3, "and nothing stamped 4");
+    assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+}
+
 #[test]
 fn a_pass_stops_at_its_budget_and_the_next_carries_on() {
     let (_dir, fs) = open();

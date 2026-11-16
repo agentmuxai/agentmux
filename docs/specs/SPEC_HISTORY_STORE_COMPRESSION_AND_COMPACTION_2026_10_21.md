@@ -163,6 +163,12 @@ Tool input streams the same way, as `input_json_delta` / `partial_json`.
 
 **The payload** (then zstd): `AMD2`, a string table (session ids, `parent_tool_use_id` values as they appear), the blocks (session, parent, index, kind, text), and the records in order: raw bytes, or a delta line (block, text length, uuid). A frame's first and last chunks may be partial lines; they are raw.
 
+### 8.1 Codec 3: delta lines that carry an `api_message_id` (#47661)
+
+The CLI now ends every `stream_event` delta line `…,"uuid":"<36>","api_message_id":"msg_…"}`. Codec 2 takes a line only if it ends at the uuid, so it takes none of these, and on a current transcript it saves 4.0% over plain zstd (measured on the unframed recent part of a copy of a real store, 2026-11-16; every frame decoded to its exact bytes). Codec 3 is codec 2 with an optional `,"api_message_id":"<body>"` after the uuid (a body without escapes; the same render-back check), payload magic `AMD3`: each block also names its message id, so a block is one content block of one message, as the CLI numbers blocks again for the next message. Same measurement: 13.5% smaller than plain zstd, 7.69x against 6.66x.
+
+A build that reads only codecs 1 and 2 reads a codec 3 frame as damaged, so by rule 4 the store is stamped `user_version` 4 before the first one (`GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION`), and the readers check lists codec 3 among what every running srv must read. An in-app upgrade can roll back one release, and a rolled-back build must still open the shared store, so it ships in two releases: **the reader first** (this build reads codec 3 and accepts 4, but writes only codecs 1 and 2 and stamps only 3; a codec 2 request leaves a line with a message id as it was), **the writer one release later** (the framer asks for codec 3 and stamps 4).
+
 ## 9. Plan
 
 | PR | What | Changes behaviour? |

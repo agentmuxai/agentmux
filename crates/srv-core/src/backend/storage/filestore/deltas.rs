@@ -24,10 +24,18 @@
 //! appear, quotes included or `null`), the blocks (session, parent, index,
 //! kind, text), then the records in order: `0` raw bytes, or `1` a delta
 //! line (block, text length, uuid).
+//!
+//! The Claude CLI also puts `,"api_message_id":"msg_…"` after the uuid on each
+//! delta line. A frame with such a line is `"AMD3"` (codec 3): the same, with
+//! each block also naming its message id (a string, or none), so a block is
+//! one content block of one message. A frame with none stays `"AMD2"` and
+//! codec 2, which every build that reads frames can read.
 
 use std::collections::HashMap;
 
 const MAGIC: &[u8; 4] = b"AMD2";
+/// A frame holding delta lines that carry an `api_message_id`.
+const MAGIC_API: &[u8; 4] = b"AMD3";
 const TAG_RAW: u8 = 0;
 const TAG_DELTA: u8 = 1;
 
@@ -42,6 +50,8 @@ const P5: &[u8] = br#""}},"session_id":""#;
 const P6: &[u8] = br#"","parent_tool_use_id":"#;
 const P7: &[u8] = br#","uuid":""#;
 const P8: &[u8] = b"\"}\n";
+/// Between the uuid and the end of the line, when the line has a message id.
+const P8_API: &[u8] = br#"","api_message_id":""#;
 
 /// One delta line, taken apart.
 #[derive(Debug, PartialEq, Eq)]
@@ -52,9 +62,11 @@ struct Delta<'a> {
     session: &'a [u8],
     parent: &'a [u8],
     uuid: [u8; 16],
+    /// The `api_message_id` after the uuid, if the line has one.
+    api: Option<&'a [u8]>,
 }
 
-fn render(out: &mut Vec<u8>, index: u64, kind: u8, text: &[u8], session: &[u8], parent: &[u8], uuid: &[u8; 16]) {
+fn render(out: &mut Vec<u8>, index: u64, kind: u8, text: &[u8], session: &[u8], parent: &[u8], uuid: &[u8; 16], api: Option<&[u8]>) {
     let (ty, field) = KINDS[kind as usize];
     out.extend_from_slice(P1);
     out.extend_from_slice(index.to_string().as_bytes());
@@ -70,6 +82,10 @@ fn render(out: &mut Vec<u8>, index: u64, kind: u8, text: &[u8], session: &[u8], 
     out.extend_from_slice(parent);
     out.extend_from_slice(P7);
     push_uuid(out, uuid);
+    if let Some(api) = api {
+        out.extend_from_slice(P8_API);
+        out.extend_from_slice(api);
+    }
     out.extend_from_slice(P8);
 }
 
@@ -144,6 +160,11 @@ fn push_uuid(out: &mut Vec<u8>, u: &[u8; 16]) {
 /// Take a line (with its `\n`) apart if it is a delta line this codec
 /// stores, and only if rendering it back gives exactly its bytes.
 fn parse_delta(line: &[u8]) -> Option<Delta<'_>> {
+    parse_delta_with(line, true)
+}
+
+/// [`parse_delta`], taking a line with an `api_message_id` only if `allow_api`.
+fn parse_delta_with(line: &[u8], allow_api: bool) -> Option<Delta<'_>> {
     let mut s = line;
     take(&mut s, P1)?;
     let digits = s.iter().take_while(|c| c.is_ascii_digit()).count();
@@ -185,12 +206,21 @@ fn parse_delta(line: &[u8]) -> Option<Delta<'_>> {
     }
     let uuid = parse_uuid(&s[..36])?;
     s = &s[36..];
+    let api = if allow_api && take(&mut s, P8_API).is_some() {
+        let body = string_body(&mut s)?;
+        if body.contains(&b'\\') {
+            return None;
+        }
+        Some(body)
+    } else {
+        None
+    };
     if s != P8 {
         return None;
     }
-    let delta = Delta { index, kind, text, session, parent, uuid };
+    let delta = Delta { index, kind, text, session, parent, uuid, api };
     let mut back = Vec::with_capacity(line.len());
-    render(&mut back, delta.index, delta.kind, delta.text, delta.session, delta.parent, &delta.uuid);
+    render(&mut back, delta.index, delta.kind, delta.text, delta.session, delta.parent, &delta.uuid, delta.api);
     (back == line).then_some(delta)
 }
 
@@ -255,17 +285,29 @@ pub(crate) struct Stats {
     pub lines: usize,
     /// Their bytes in the original.
     pub bytes: usize,
+    /// Whether any of them carries an `api_message_id`: the payload is then `AMD3`, for codec 3.
+    pub api: bool,
 }
 
 /// The payload for a frame's bytes, or `None` when it has no delta line to
 /// leave out or the payload doesn't decode back to exactly `raw` (then the
 /// frame is stored with codec 1).
 pub(crate) fn encode(raw: &[u8]) -> Option<(Vec<u8>, Stats)> {
+    encode_with(raw, true)
+}
+
+/// [`encode`] for codec 2: a line with an `api_message_id` is kept as it was,
+/// so the payload is one every build that reads frames can read.
+pub(crate) fn encode_codec2(raw: &[u8]) -> Option<(Vec<u8>, Stats)> {
+    encode_with(raw, false)
+}
+
+fn encode_with(raw: &[u8], allow_api: bool) -> Option<(Vec<u8>, Stats)> {
     let mut strings: Vec<&[u8]> = Vec::new();
     let mut string_ids: HashMap<&[u8], u64> = HashMap::new();
-    // Blocks by (session, parent, index, kind), in order of first appearance.
-    let mut block_ids: HashMap<(u64, u64, u64, u8), usize> = HashMap::new();
-    let mut blocks: Vec<((u64, u64, u64, u8), Vec<u8>)> = Vec::new();
+    // Blocks by (session, parent, index, kind, message id + 1 or 0), in order of first appearance.
+    let mut block_ids: HashMap<(u64, u64, u64, u8, u64), usize> = HashMap::new();
+    let mut blocks: Vec<((u64, u64, u64, u8, u64), Vec<u8>)> = Vec::new();
     enum Rec {
         Raw(usize, usize),
         Delta { block: usize, len: usize, uuid: [u8; 16] },
@@ -278,11 +320,13 @@ pub(crate) fn encode(raw: &[u8]) -> Option<(Vec<u8>, Stats)> {
         let line = &raw[start..end];
         // The frame's first chunk may be the end of a line that began in the
         // frame before; a delta line never parses from such a piece anyway.
-        match parse_delta(line) {
+        match parse_delta_with(line, allow_api) {
             Some(d) => {
                 let session = intern(d.session, &mut strings, &mut string_ids);
                 let parent = intern(d.parent, &mut strings, &mut string_ids);
-                let key = (session, parent, d.index, d.kind);
+                let api = d.api.map_or(0, |a| intern(a, &mut strings, &mut string_ids) + 1);
+                stats.api |= d.api.is_some();
+                let key = (session, parent, d.index, d.kind, api);
                 let block = *block_ids.entry(key).or_insert_with(|| {
                     blocks.push((key, Vec::new()));
                     blocks.len() - 1
@@ -303,18 +347,21 @@ pub(crate) fn encode(raw: &[u8]) -> Option<(Vec<u8>, Stats)> {
         return None;
     }
     let mut out = Vec::with_capacity(raw.len() / 2);
-    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(if stats.api { MAGIC_API } else { MAGIC });
     put_varint(&mut out, strings.len() as u64);
     for s in &strings {
         put_varint(&mut out, s.len() as u64);
         out.extend_from_slice(s);
     }
     put_varint(&mut out, blocks.len() as u64);
-    for ((session, parent, index, kind), text) in &blocks {
+    for ((session, parent, index, kind, api), text) in &blocks {
         put_varint(&mut out, *session);
         put_varint(&mut out, *parent);
         put_varint(&mut out, *index);
         out.push(*kind);
+        if stats.api {
+            put_varint(&mut out, *api);
+        }
         put_varint(&mut out, text.len() as u64);
         out.extend_from_slice(text);
     }
@@ -351,9 +398,11 @@ pub(crate) fn encode(raw: &[u8]) -> Option<(Vec<u8>, Stats)> {
 /// Rebuild a frame's bytes from its payload. `raw_len` bounds the output.
 pub(crate) fn decode(payload: &[u8], raw_len: usize) -> Result<Vec<u8>, String> {
     let mut r = Reader { s: payload };
-    if r.bytes(4)? != MAGIC {
-        return Err("not a delta payload".to_string());
-    }
+    let with_api = match r.bytes(4)? {
+        m if m == MAGIC => false,
+        m if m == MAGIC_API => true,
+        _ => return Err("not a delta payload".to_string()),
+    };
     let n_strings = r.varint()? as usize;
     let mut strings = Vec::with_capacity(n_strings.min(4096));
     for _ in 0..n_strings {
@@ -369,8 +418,13 @@ pub(crate) fn decode(payload: &[u8], raw_len: usize) -> Result<Vec<u8>, String> 
         if kind as usize >= KINDS.len() {
             return Err("bad kind".to_string());
         }
+        let api_id = if with_api { r.varint()? as usize } else { 0 };
+        let api = match api_id {
+            0 => None,
+            n => Some(*strings.get(n - 1).ok_or("bad string")?),
+        };
         let text = r.len_prefixed()?;
-        blocks.push((session, parent, index, kind, text, 0usize));
+        blocks.push((session, parent, index, kind, api, text, 0usize));
     }
     let n_recs = r.varint()? as usize;
     let mut out = Vec::with_capacity(raw_len);
@@ -381,11 +435,11 @@ pub(crate) fn decode(payload: &[u8], raw_len: usize) -> Result<Vec<u8>, String> 
                 let block = blocks.get_mut(r.varint()? as usize).ok_or("bad block")?;
                 let len = r.varint()? as usize;
                 let uuid: [u8; 16] = r.bytes(16)?.try_into().map_err(|_| "bad uuid")?;
-                let (session, parent, index, kind, text, cursor) = block;
+                let (session, parent, index, kind, api, text, cursor) = block;
                 let stop = cursor.checked_add(len).ok_or("bad length")?;
                 let piece = text.get(*cursor..stop).ok_or("block text too short")?;
                 *cursor += len;
-                render(&mut out, *index, *kind, piece, session, parent, &uuid);
+                render(&mut out, *index, *kind, piece, session, parent, &uuid, *api);
             }
             _ => return Err("bad record".to_string()),
         }
