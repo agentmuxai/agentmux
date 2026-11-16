@@ -5,7 +5,7 @@
 // countdown: the card in the agent's pane and, for a use with no pane, the
 // window's prompt (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4).
 
-import { createEffect, createSignal, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
 import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
@@ -73,6 +73,7 @@ export function siteOf(origin: string): string {
 export function promptTitle(u: UseRequest, short = false): string {
     const agent = short ? clip(u.agent, CLIP.name) : u.agent;
     const label = short ? clip(u.entry_label, CLIP.label) : u.entry_label;
+    if (u.batch) return t("vault.batchCard.title", { agent, count: u.batch.items.length, service: u.batch.service, name: short ? clip(u.batch.name, CLIP.label) : u.batch.name });
     if (u.import) {
         const from = u.import.service;
         return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
@@ -91,6 +92,7 @@ export function promptTitle(u: UseRequest, short = false): string {
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
+    if (u.batch) return t("vault.batchCard.note");
     if (u.import) return "The agent never sees the value: AgentMux reads it.";
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
@@ -216,6 +218,56 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
     );
 }
 
+/** A batch of imports: the one account, region and Vault, and a row for every secret with its tick. A row left
+ *  unticked is not read. Every row is shown; a long list scrolls. */
+function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState }): JSX.Element {
+    const b = props.batch;
+    const a = props.answer;
+    return (
+        <>
+            <p data-batch="source">
+                <Show when={b.region} fallback={t("vault.batchCard.fromDefaultRegion", { service: b.service })}>
+                    <Rich k="vault.batchCard.from" params={{ service: b.service, region: b.region }} />
+                </Show>{" "}
+                <span {...tip(clip(b.profile, CLIP.label) === b.profile ? undefined : b.profile)}>
+                    <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin")}>
+                        <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label) }} />}>
+                            <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label) }} />
+                        </Show>
+                    </Show>
+                </span>
+            </p>
+            <p data-batch="vault" {...tip(clip(b.vault, CLIP.label) === b.vault ? undefined : b.vault)}>
+                <Rich k="vault.batchCard.into" params={{ vault: clip(b.vault, CLIP.label) }} />
+            </p>
+            <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
+                <For each={b.items}>
+                    {(item, i) => (
+                        <li>
+                            <label class="vault-batch-row">
+                                <input type="checkbox" checked={a.rows().includes(i())} onChange={(e) => a.tickRow(i(), e.currentTarget.checked)} disabled={a.busy()} />
+                                <span class="vault-batch-entry">
+                                    <strong>
+                                        <Clipped text={item.label} max={CLIP.label} />
+                                    </strong>
+                                    <span class="warden-manager-dim">{item.replaces ? t("vault.batchCard.replaces") : t("vault.batchCard.new", { kind: item.kind })}</span>
+                                </span>
+                                <span class="vault-batch-secret warden-manager-mono warden-manager-dim vault-import-id">
+                                    <ClippedId text={item.secret} max={CLIP.secret} />
+                                    <Show when={item.key}>
+                                        {" "}
+                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />)
+                                    </Show>
+                                </span>
+                            </label>
+                        </li>
+                    )}
+                </For>
+            </ul>
+        </>
+    );
+}
+
 /** The command a use runs, and where. */
 function UseCommand(props: { use: UseRequest }): JSX.Element {
     const u = props.use;
@@ -273,7 +325,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : props.use.link ? t("vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.link ? t("vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }
@@ -311,13 +363,16 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
     const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
+    // The rows of a batch the person leaves ticked, by their place in its list: all of them to begin with.
+    const [rows, setRows] = createSignal<number[]>(u.batch ? u.batch.items.map((_, i) => i) : []);
+    const tickRow = (row: number, on: boolean) => setRows((was) => (on ? [...was.filter((r) => r !== row), row].sort((x, y) => x - y) : was.filter((r) => r !== row)));
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) done();
     });
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined);
             // The typed value doesn't outlive the answer.
             setTyped("");
             setAnswered(true);
@@ -333,7 +388,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered };
+    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered, rows, tickRow };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -466,17 +521,26 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
     return (
         <div class="vault-use-activity" onPointerMove={held} onKeyDown={held} onFocusIn={held}>
             <props.Body>
+                <Show when={u.batch}>
+                    {(b) => (
+                        <>
+                            <UseBatchSubject batch={b()} answer={a} />
+                            <UseSays use={u} />
+                            <UseDeadline use={u} />
+                        </>
+                    )}
+                </Show>
                 <Show
                     when={u.import}
                     fallback={
                         <Show
                             when={u.link}
                             fallback={
-                                <>
+                                <Show when={!u.batch}>
                                     <UseDeadline use={u} />
                                     <UseSays use={u} />
                                     <UseSubject use={u} answer={a} focus={props.focus} />
-                                </>
+                                </Show>
                             }
                         >
                             {(l) => (
@@ -510,8 +574,8 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 </Button>
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
-                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("once")}>
-                        {u.needs_value ? "Fill it in" : "Allow once"}
+                    <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => void a.decide("once")}>
+                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : "Allow once"}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
                         <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>

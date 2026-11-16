@@ -25,8 +25,8 @@ use crate::identity::aws_broker::request::{credentials_for, Ask};
 use crate::identity::aws_broker::{policy, sessions};
 
 /// How long the person has to answer by default, and at most.
-const ANSWER_WAIT: Duration = Duration::from_secs(120);
-const ANSWER_WAIT_MAX: Duration = Duration::from_secs(600);
+pub(super) const ANSWER_WAIT: Duration = Duration::from_secs(120);
+pub(super) const ANSWER_WAIT_MAX: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ImportBody {
@@ -38,7 +38,7 @@ pub(crate) struct ImportBody {
     wait_secs: Option<u64>,
 }
 
-fn error(status: StatusCode, message: impl Into<String>) -> Response {
+pub(super) fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
@@ -98,7 +98,7 @@ fn headline(plan: &Plan, who: &Who) -> String {
 }
 
 /// What the agent is told when the card didn't end in a yes: silence is a no for an import, whatever the kind.
-fn not_allowed(ended: Ended) -> String {
+pub(super) fn not_allowed(ended: Ended) -> String {
     match ended {
         Ended::Expired => "nobody answered, and a copy of a secret needs a yes: nothing was copied; ask the person".to_string(),
         other => other.refusal("nothing was copied"),

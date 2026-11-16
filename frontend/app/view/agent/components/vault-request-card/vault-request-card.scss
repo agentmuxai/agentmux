@@ -49,6 +49,14 @@
         max-height: 120px;
         overflow: auto;
     }
+
+    // A batch's rows at their full height: the body is the one scroll box, so the list never shrinks to a row
+    // and a row is never behind a second scroll bar.
+    .vault-batch-rows {
+        flex-shrink: 0;
+        max-height: none;
+        overflow-y: visible;
+    }
 }
 
 .vault-request-card-why {

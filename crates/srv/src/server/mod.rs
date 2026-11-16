@@ -182,6 +182,7 @@ pub(crate) mod vault_ask;
 pub(crate) mod drone_vault;
 pub(crate) mod vault_handlers;
 pub(crate) mod vault_import;
+pub(crate) mod vault_import_batch;
 pub(crate) mod vault_inspect;
 pub(crate) mod vault_rotate;
 pub(crate) mod vault_source;
