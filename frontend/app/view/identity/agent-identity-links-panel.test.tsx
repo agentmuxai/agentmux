@@ -101,14 +101,14 @@ vi.mock("./identity-model", () => ({
 }));
 
 const claudeLoginPanel = vi.fn();
-vi.mock("@/app/view/accounts/ClaudeLoginPanel", () => ({
+vi.mock("@/app/view/accounts/ProviderLoginPanel", () => ({
     // Stub: records the props it was opened with instead of driving a real
-    // login session (that flow is ClaudeLoginPanel's own concern) — this
+    // login session (that flow is ProviderLoginPanel's own concern) — this
     // file only tests that AgentIdentityLinksPanel opens it with the right
     // existingAccountId/linkTarget from the right row.
-    ClaudeLoginPanel: (props: any) => {
+    ProviderLoginPanel: (props: any) => {
         claudeLoginPanel(props);
-        return <div data-testid="claude-login-panel" />;
+        return <div data-testid="provider-login-panel" />;
     },
 }));
 
@@ -178,7 +178,7 @@ describe("AgentIdentityLinksPanel", () => {
     });
 
     describe("Claude Connect/Re-login (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3)", () => {
-        it("shows a Re-login button on a bound claude row and opens ClaudeLoginPanel with that row's account + this agent as linkTarget", async () => {
+        it("shows a Re-login button on a bound claude row and opens ProviderLoginPanel with that row's account + this agent as linkTarget", async () => {
             listAllAgentIdentities.mockResolvedValue([
                 mkLink({ agent_id: "agent-1", account_id: "acc-claude-1", provider: "claude" }),
             ]);

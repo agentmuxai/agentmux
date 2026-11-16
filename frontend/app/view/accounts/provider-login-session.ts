@@ -10,22 +10,23 @@ import { ensureProviderAuthDir } from "@/app/view/agent/agent-launch-env";
 import { loginBackend } from "@/app/view/agent/flows/login-backend";
 import { withLoginWindow } from "@/app/view/agent/flows/login-window";
 import { runProviderLogin, type ProviderLoginOutcome } from "@/app/view/agent/flows/run-provider-login";
-import { applyOutcome, confirmLink, needsLinkCheck } from "./claude-login-finish";
-import { CLAUDE_PROVIDER } from "./claude-login-model";
-import type { LoginState } from "./claude-login-state";
+import { applyOutcome, confirmLink, needsLinkCheck } from "./provider-login-finish";
+import { loginProviderOf } from "./provider-login-model";
+import type { LoginState } from "./provider-login-state";
 
 /** The CLI's path, or null after saying why it couldn't be found. */
 async function resolveCliPath(s: LoginState): Promise<string | null> {
+    const provider = loginProviderOf(s.props);
     try {
         const r = await RpcApi.ResolveCliCommand(
             TabRpcClient,
             {
-                provider_id: CLAUDE_PROVIDER.id,
-                cli_command: CLAUDE_PROVIDER.cliCommand,
-                npm_package: CLAUDE_PROVIDER.npmPackage,
-                pinned_version: CLAUDE_PROVIDER.pinnedVersion,
-                windows_install_command: CLAUDE_PROVIDER.windowsInstallCommand,
-                unix_install_command: CLAUDE_PROVIDER.unixInstallCommand,
+                provider_id: provider.id,
+                cli_command: provider.cliCommand,
+                npm_package: provider.npmPackage,
+                pinned_version: provider.pinnedVersion,
+                windows_install_command: provider.windowsInstallCommand,
+                unix_install_command: provider.unixInstallCommand,
             },
             { timeout: 120000 },
         );
@@ -39,10 +40,11 @@ async function resolveCliPath(s: LoginState): Promise<string | null> {
 
 /** The login's environment, or null after saying why the auth directory couldn't be made. */
 async function buildAuthEnv(s: LoginState): Promise<Record<string, string> | null> {
+    const provider = loginProviderOf(s.props);
     const authEnv: Record<string, string> = {};
-    if (!CLAUDE_PROVIDER.authConfigDirEnvVar) return authEnv;
+    if (!provider.authConfigDirEnvVar) return authEnv;
     try {
-        authEnv[CLAUDE_PROVIDER.authConfigDirEnvVar] = await ensureProviderAuthDir(CLAUDE_PROVIDER.id);
+        authEnv[provider.authConfigDirEnvVar] = await ensureProviderAuthDir(provider.id);
     } catch (e) {
         s.setError((e as Error)?.message ?? String(e));
         return null;
@@ -52,10 +54,11 @@ async function buildAuthEnv(s: LoginState): Promise<Record<string, string> | nul
 
 export function createLoginSession(s: LoginState) {
     const props = s.props;
+    const provider = loginProviderOf(props);
 
     const runAttempt = async (cliPath: string, authEnv: Record<string, string>, skipTier1: boolean) =>
         runProviderLogin({
-            provider: CLAUDE_PROVIDER,
+            provider,
             cliPath,
             authEnv,
             // Prefer the account THIS panel already minted/persisted
@@ -78,7 +81,7 @@ export function createLoginSession(s: LoginState) {
                 s.setAuthUrl(url ?? undefined);
                 if (url) s.setPhase("waiting-authorize");
             },
-            log: (_cat, msg) => console.log(`[claude-login] ${msg}`),
+            log: (_cat, msg) => console.log(`[provider-login] ${msg}`),
             isCancelled: () => s.cancelled || s.terminalRequested,
             onAccountRegistered: (accountId) => {
                 s.registeredAccountId = accountId;
@@ -130,7 +133,7 @@ export function createLoginSession(s: LoginState) {
 
     // The login's window opens inside the click (its URL comes later), and is
     // closed on every way out of the flow if no URL used it (login-window.ts).
-    const start = () => (s.inFlight() ? Promise.resolve() : withLoginWindow(CLAUDE_PROVIDER, startFlow));
+    const start = () => (s.inFlight() ? Promise.resolve() : withLoginWindow(provider, startFlow));
 
     const onCancel = () => {
         s.cancelled = true;

@@ -65,10 +65,10 @@ vi.mock("./identity-model", () => ({
     },
     PROVIDER_LABELS: { github: "GitHub", anthropic: "Anthropic" },
 }));
-vi.mock("@/app/view/accounts/ClaudeLoginPanel", () => ({
-    ClaudeLoginPanel: (props: any) => {
+vi.mock("@/app/view/accounts/ProviderLoginPanel", () => ({
+    ProviderLoginPanel: (props: any) => {
         h.log.push(
-            `ClaudeLoginPanel opened existingAccountId=${props.existingAccountId} linkTarget=${JSON.stringify(props.linkTarget)} staleAliasProvider=${props.staleAliasProvider} scope=${props.scope}`,
+            `ProviderLoginPanel opened existingAccountId=${props.existingAccountId} linkTarget=${JSON.stringify(props.linkTarget)} staleAliasProvider=${props.staleAliasProvider} scope=${props.scope}`,
         );
         return (
             <div data-login-panel="">

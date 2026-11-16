@@ -367,6 +367,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # The frontend's source maps, packed by package.sh before it strips them from the portable. The release job
+      # collects every *.tar.xz, so the signed manifest lists this archive like the other files.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-frontend-maps
+          path: ${{ env.OUT }}/AgentMux_*_windows-frontend-maps.tar.xz
+          if-no-files-found: error
+          retention-days: 7
+
       # ── Upload to GitHub Release (when release-tag is set) ─────────────────
       - name: Upload artifacts to GitHub Release
         if: steps.in.outputs.release_tag != ''
@@ -379,4 +388,5 @@ jobs:
             "$OUT"/agentmux-*-x64-portable.7z \
             "$OUT"/AgentMux-*-x64-setup.exe \
             "$OUT"/msix/AgentMux_*_x64.msix \
+            "$OUT"/AgentMux_*_windows-frontend-maps.tar.xz \
             --repo agentmuxai/agentmux --clobber

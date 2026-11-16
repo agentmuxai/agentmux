@@ -5,11 +5,22 @@
 
 import type { ModalScope } from "@/element/modal";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
+import type { ProviderDefinition } from "@/app/view/agent/providers/types";
 
 export const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
-export interface ClaudeLoginProps {
+/** The provider a panel signs in to: its own, or Claude's for the callers that came first. */
+export const loginProviderOf = (props: { provider?: ProviderDefinition }): ProviderDefinition => props.provider ?? CLAUDE_PROVIDER;
+
+/** What the panel calls the sign-in on screen: the account's brand ("Anthropic", "ChatGPT"), not the CLI's name. */
+export const brandOf = (props: { brand?: string }): string => props.brand ?? "Anthropic";
+
+export interface ProviderLoginProps {
     onClose: () => void;
+    /** The provider to sign in to; Claude when absent. */
+    provider?: ProviderDefinition;
+    /** The brand the panel names on screen ("ChatGPT"); "Anthropic" when absent. */
+    brand?: string;
     /** Set for a per-binding re-login: refreshes THIS account's
      *  isolated dir instead of minting a new one, and links the result back
      *  to the agent. Omit for Connectors' bare Connect (fresh account, no

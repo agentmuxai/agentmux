@@ -19,6 +19,7 @@
  */
 
 import { untrack, type Accessor, type Setter } from "solid-js";
+import { markHealth } from "@/app/element/shared-ticker";
 
 const MAX_ENTRIES = 100;
 const SUMMARY_MS = 60_000;
@@ -45,6 +46,8 @@ export interface SelectTraceOptions {
     log?: (line: string) => void;
     setTimer?: (fn: () => void, ms: number) => unknown;
     clearTimer?: (handle: unknown) => void;
+    /** The animated marks on screen and how many stopped following the clock (shared-ticker.ts). */
+    marks?: () => { marks: number; frozen: number; tick: number };
 }
 
 const short = (id: string | null | undefined): string => (id ? id.slice(0, 8) : "-");
@@ -59,6 +62,12 @@ function emptyCounters(): TraceCounters {
         reveals: 0,
         overlappingReveals: 0,
     };
+}
+
+/** The animated marks on screen and how many are behind the clock, for the minute line; two lines with the same
+ *  tick mean the clock stopped. Nothing when no mark animates. */
+function marksText(m: { marks: number; frozen: number; tick: number }): string {
+    return m.marks > 0 ? ` marks=${m.marks} frozen=${m.frozen} tick=${m.tick}` : "";
 }
 
 export function createSelectTrace(opts: SelectTraceOptions = {}) {
@@ -93,7 +102,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
         record(
             `[swarm] last ${Math.round(SUMMARY_MS / 1000)}s: rebuilds=${c.rebuilds}${causes ? ` (${causes})` : ""} ` +
                 `presses=${c.presses} lost=${c.lostClicks} (row gone=${c.lostClicksRowGone}) ` +
-                `reveals=${c.reveals} overlapping=${c.overlappingReveals}`,
+                `reveals=${c.reveals} overlapping=${c.overlappingReveals}${marksText((opts.marks ?? markHealth)())}`,
             true
         );
         counters = emptyCounters();
