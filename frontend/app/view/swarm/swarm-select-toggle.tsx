@@ -3,6 +3,7 @@
 
 import { createMemo, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { SwarmViewModel } from "./swarm-model";
 import { actionableKeys, filterActive } from "./swarm-filter-state";
 import { remoteFleetTargets } from "./swarm-fleet-targets";
@@ -53,10 +54,10 @@ export function SwarmSelectToggle(props: { model: SwarmViewModel; ids: () => str
                     <Button
                         density="compact"
                         class="swarm-select-toggle__btn"
-                        title="Select only the agents of this computer, not those on LAN or cloud machines"
+                        title={t("swarm.select.hostTitle")}
                         onClick={() => model.selectAll(hostIds())}
                     >
-                        Select all on host
+                        {t("swarm.select.host")}
                     </Button>
                 </Show>
                 <Show when={count() > 0}>
