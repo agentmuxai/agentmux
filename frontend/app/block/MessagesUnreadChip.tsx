@@ -11,7 +11,7 @@ export const chipTitle = (unread: number, needsYou: boolean): string =>
     `Messages, ${unread} unread${needsYou ? ", needs you" : ""}`;
 
 /**
- * The count of messages the person has not seen in a pane's Messages panel, on the pane's Swarm row and its tab: the
+ * The count of messages the person has not seen in a pane's Messages panel, on the pane's Swarm row: the
  * same number the pane's header button shows (store/messages-unread.ts). Nothing while there are none.
  */
 export function MessagesUnreadChip(props: { blockId: string }): JSX.Element {

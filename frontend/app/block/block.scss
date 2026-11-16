@@ -471,7 +471,7 @@
     align-self: center;
 }
 
-// The count of messages not yet seen in a pane's Messages panel, on its tab and its Swarm row
+// The count of messages not yet seen in a pane's Messages panel, on its Swarm row
 // (MessagesUnreadChip, store/messages-unread.ts). The pill is the kit's; this only seats it in a line of text.
 .messages-unread-chip {
     display: inline-flex;
