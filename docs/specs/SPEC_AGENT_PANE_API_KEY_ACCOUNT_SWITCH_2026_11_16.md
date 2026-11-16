@@ -1,7 +1,6 @@
 # Spec: an Anthropic API key as an account in the agent pane's menu (first slice)
 
-Status: draft for build (task #47858 / #47859, parts B.1 to B.3, Anthropic only).
-Owner: Agent5@narko. Written 2026-11-16, uncommitted; it ships with the code.
+**Status:** active. First slice (parts B.1 to B.3, Anthropic only) of task #47858, built in #47859 on the operator's go. Author: Agent5@narko, 2026-11-16.
 
 The operator's words, relayed by AgentY: "lets also move the claude api, setting it in agent pane. we want that in the next release. in that case you'd add you api to connectors, and selectable in with the set display name".
 
