@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
 import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { saveForReload } from "@/app/store/recycle-savers";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../../../agent-model/types";
@@ -14,15 +16,28 @@ import {
 } from "./useInSessionSearch";
 
 describe("useInSessionSearch", () => {
-    it("an open search blocks a renderer recycle until it is closed", () => {
+    it("an open search does not block a renderer recycle: it is written down for the reload", async () => {
         const { search, dispose } = createRoot((d) => ({
-            search: useInSessionSearch({ document: () => [] }),
+            search: useInSessionSearch({ blockId: "b-open", document: () => [] }),
             dispose: d,
         }));
         search.setVisible(true);
-        expect(recycleBlockers()).toContain("a transcript search is open");
+        expect(recycleBlockers()).toEqual([]);
+        await saveForReload();
+        expect(sessionStorage.getItem("agentmux:find-in-pane:b-open")).not.toBeNull();
+        dispose();
+        sessionStorage.clear();
+    });
+
+    it("a closed search writes nothing down", async () => {
+        const { search, dispose } = createRoot((d) => ({
+            search: useInSessionSearch({ blockId: "b-closed", document: () => [] }),
+            dispose: d,
+        }));
+        search.setVisible(true);
         search.close();
-        expect(recycleBlockers()).not.toContain("a transcript search is open");
+        await saveForReload();
+        expect(sessionStorage.getItem("agentmux:find-in-pane:b-closed")).toBeNull();
         dispose();
     });
 
@@ -272,5 +287,109 @@ describe("useInSessionSearch: the pass", () => {
         search.close();
         expect(search.dim()).toBe(false);
         dispose();
+    });
+});
+
+describe("useInSessionSearch: a bar brought back after a recycle", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        sessionStorage.clear();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const doc = [md("a", "alpha hit"), md("b", "beta"), md("c", "gamma hit"), md("d", "delta hit")];
+
+    function mount(blockId: string, extra: Partial<UseInSessionSearchOptions> = {}) {
+        const jumpTo = vi.fn();
+        const made = createRoot((dispose) => ({
+            search: useInSessionSearch({ blockId, document: () => doc, jumpTo, clock: immediate, ...extra }),
+            dispose,
+        }));
+        return { ...made, jumpTo };
+    }
+
+    it("comes back open with its text and its current match, without moving the view", async () => {
+        const first = mount("b1");
+        first.search.setVisible(true);
+        first.search.performSearch("HIT");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        first.search.next();
+        expect(first.search.highlightId()).toBe("c");
+        await saveForReload();
+        first.dispose();
+
+        // The reloaded page: a fresh hook for the same pane.
+        const again = mount("b1");
+        expect(again.search.visible()).toBe(true);
+        expect(again.search.text()).toBe("HIT");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(again.search.matches()).toEqual(["a", "c", "d"]);
+        expect(again.search.highlightId()).toBe("c");
+        expect(again.jumpTo).not.toHaveBeenCalled();
+        again.dispose();
+    });
+
+    it("a bar nobody has typed in or brought back has no text, so it takes the caret", () => {
+        const fresh = mount("b0");
+        fresh.search.setVisible(true);
+        expect(fresh.search.text()).toBeUndefined();
+        fresh.search.performSearch("x");
+        expect(fresh.search.text()).toBe("x");
+        fresh.search.close();
+        expect(fresh.search.text()).toBeUndefined();
+        fresh.dispose();
+    });
+
+    it("takes the stored bar once: a pane that loads again later starts closed", async () => {
+        const first = mount("b2");
+        first.search.setVisible(true);
+        await saveForReload();
+        first.dispose();
+        const again = mount("b2");
+        expect(again.search.visible()).toBe(true);
+        again.dispose();
+        const third = mount("b2");
+        expect(third.search.visible()).toBe(false);
+        third.dispose();
+    });
+
+    it("an open bar with nothing typed comes back open and empty, and keeps the dim choice", async () => {
+        const first = mount("b3");
+        first.search.setVisible(true);
+        first.search.setDim(false);
+        await saveForReload();
+        first.dispose();
+        const again = mount("b3");
+        expect(again.search.visible()).toBe(true);
+        // Empty text, not undefined: the bar is brought back, so it does not take the caret.
+        expect(again.search.text()).toBe("");
+        expect(again.search.dim()).toBe(false);
+        again.dispose();
+    });
+
+    it("a current match that is no longer in the rows is not forced: the matches are counted and none is current", async () => {
+        const first = mount("b4");
+        first.search.setVisible(true);
+        first.search.performSearch("hit");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        first.search.next();
+        await saveForReload();
+        first.dispose();
+        sessionStorage.setItem("agentmux:find-in-pane:b4", JSON.stringify({ text: "hit", matchId: "gone", dim: true }));
+        const again = mount("b4");
+        await vi.advanceTimersByTimeAsync(0);
+        expect(again.search.matches()).toEqual(["a", "c", "d"]);
+        expect(again.search.currentIndex()).toBe(-1);
+        again.dispose();
+    });
+
+    it("typing after the bar came back drops the remembered match", async () => {
+        sessionStorage.setItem("agentmux:find-in-pane:b5", JSON.stringify({ text: "hit", matchId: "d", dim: true }));
+        const again = mount("b5");
+        again.search.performSearch("beta");
+        await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        expect(again.search.matches()).toEqual(["b"]);
+        expect(again.search.highlightId()).toBe("b");
+        again.dispose();
     });
 });

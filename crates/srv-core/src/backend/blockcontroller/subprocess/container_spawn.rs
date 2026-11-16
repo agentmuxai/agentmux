@@ -229,6 +229,9 @@ impl SubprocessController {
         if super::codex_compact::is_compact_request(&config) {
             return Err("Compacting a Codex agent that runs in a container isn't supported yet.".to_string());
         }
+        // What a queued message runs with (its own args were taken into `base_cmd`), kept for a replacement
+        // controller to run the queue with (replace.rs).
+        self.remember_container_context(&cm, &container_name, &base_cmd);
         if !self.take_run_lock_for_turn() {
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(
@@ -280,7 +283,7 @@ impl SubprocessController {
     /// its next spawn is attempted. If provider argv validation rejects that
     /// spawn, persist a transcript error so the message does not disappear
     /// with only a server log. Mirrors the host queue-drain failure path.
-    fn publish_queued_spawn_error(
+    pub(super) fn publish_queued_spawn_error(
         block_id: &str,
         error: &str,
         broker: &Option<Arc<crate::backend::mps::Broker>>,

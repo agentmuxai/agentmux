@@ -270,6 +270,8 @@ impl ResyncCtx<'_> {
         let ctrl = Arc::new(ctrl);
         ctrl.set_self_ref();
         register_controller(&self.block.oid, ctrl.clone());
+        // What the controller this one replaces had queued behind its turn runs now.
+        ctrl.run_queue_left_by_replaced();
         let result = ctrl.start(self.block.meta.clone(), self.rt_opts, self.force);
         notify_tracked_blocks_changed();
         result

@@ -52,6 +52,7 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     // In-session search over the loaded document slice: matches, navigation, highlight. A new query starts at the
     // first match from the row at the top of the screen; a query with no match closes what a jump opened.
     const search = useInSessionSearch({
+        blockId: model.blockId,
         document: paneModel.document,
         // A match inside a message only the Messages panel holds opens it there: the conversation has no row for it.
         jumpTo: (id) => void (showInPanelIfHeld(model.blockId, paneModel.document(), id) || reveal.jumpTo(id)),

@@ -135,7 +135,8 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
         const busy: string[] = [];
         if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
         if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
-        // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
+        // `openModal` dialogs and declarative `<Modal>`s are tracked apart. No limit: a form in one may hold what the
+        // person typed and has not saved.
         if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
         if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
         return busy;
