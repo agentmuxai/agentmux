@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { t } from "@/app/i18n/i18n";
 import { Button, IconButton, Notice, TextInput } from "@/app/element/ui";
 import type { BrowserViewModel } from "../browser-model";
@@ -80,9 +81,14 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
         (url) => props.model.rememberPageUrl(url)
     );
 
+    // On screen means in view and in a tab the person can see: a kept-alive hidden tab keeps its box in the viewport.
+    const [inView, setInView] = createSignal(false);
+    const tabVisibility = usePaneTabVisibility(props.model.blockId);
+    createEffect(() => pane.shown(inView() && tabVisibility() === "active"));
+
     onMount(() => {
         const sizes = new ResizeObserver(() => pane.resized(stage.clientWidth, stage.clientHeight));
-        const sight = new IntersectionObserver((entries) => pane.shown(entries.some((e) => e.isIntersecting)));
+        const sight = new IntersectionObserver((entries) => setInView(entries.some((e) => e.isIntersecting)));
         sizes.observe(stage);
         sight.observe(stage);
         pane.resized(stage.clientWidth, stage.clientHeight);
