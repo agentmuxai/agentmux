@@ -1088,6 +1088,29 @@ describe("runProviderLogin — a sign-in that cannot be stored", () => {
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
     });
 
+    it("does not call a login unfinished, or reap it, when another surface's login took over after the code", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        let generation = 1;
+        let codeSentAt = Infinity;
+        hub.getCliLoginStatus.mockImplementation(async () => ({ active: true, credential_changed: false, generation }));
+        // Another window starts its login while the check that would call this one unfinished is away.
+        hub.checkCliAuthCommand.mockImplementation(async () => {
+            if (Date.now() - codeSentAt >= 60_000) generation = 2;
+            return { authenticated: false };
+        });
+
+        const promise = run();
+        await vi.advanceTimersByTimeAsync(4_000);
+        await loginBackend().submitCode("claude", "the-code");
+        codeSentAt = Date.now();
+        await vi.advanceTimersByTimeAsync(62_000);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
+    });
+
     it("keeps waiting for a person who has not sent a code, however long the authorize page takes", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(URL);

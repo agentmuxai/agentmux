@@ -475,6 +475,8 @@ mod spawn_site_coverage {
          "test: macOS only; the ignored live tests add and delete their own throwaway entries in the real login keychain"),
         ("src/identity/secret_store.rs", "\"/usr/bin/security\"", 1,
          "test: adds a keychain entry that trusts no app, for the macOS needs-consent test (ignored; real keychain)"),
+        ("src/server/keychain_probe.rs", "\"/usr/bin/security\"", 1,
+         "sanitized: macOS only; asks which keychain is the user's default before a Claude sign-in (`security default-keychain -d user`), sanitize_external_command (it keeps HOME, which is what it checks), output parsed then discarded"),
         ("src/server/app_api/blockstats.rs", "\"ping\"", 1,
          "test: a disposable child (Windows) registered as a pane's shell, so the stats tooltip test has a Tower task to read"),
         ("src/server/app_api/blockstats.rs", "\"sleep\"", 1,

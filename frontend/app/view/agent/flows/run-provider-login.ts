@@ -425,7 +425,7 @@ async function pollForInAppLoginCompletion(
         }
         const delivered = codeDeliveredAt();
         if (childActive && !authed && delivered !== null && Date.now() - delivered >= CODE_SETTLE_MS) {
-            return { completed: false, superseded: false, notStored: "unfinished" };
+            return await notStoredOutcome("unfinished", myGeneration);
         }
         if (!childActive) {
             if (authed && (credentialChanged || !initialAuthed)) return { completed: true, superseded: false };

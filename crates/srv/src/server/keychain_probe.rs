@@ -50,6 +50,7 @@ pub(crate) async fn no_keychain_result() -> Option<crate::backend::rpc_types::Ch
 #[cfg(target_os = "macos")]
 pub(crate) async fn credential_store_problem() -> Option<&'static str> {
     let mut cmd = tokio::process::Command::new("/usr/bin/security");
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
     cmd.args(["default-keychain", "-d", "user"])
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
