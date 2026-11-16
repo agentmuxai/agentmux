@@ -176,6 +176,8 @@ export const FIT_MAX_K = 1.5;
 const FIT_PAD = 16;
 /** The columns the grid of agents with no lead may have, tried in turn. */
 const GRID_COLS_CHOICES = [2, 3, 4, 5, 6];
+/** The same for the By seat picture, which has no machine boxes to keep narrow: a wide pane may take far more columns, so its cards can grow (#47793). */
+const SEAT_GRID_COLS_CHOICES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16];
 /** The most reports of a lead one row may hold, tried in turn after the unwrapped row. */
 const REPORT_COLS_CHOICES = [6, 4, 3, 2];
 
@@ -361,7 +363,7 @@ export function layoutBySeat(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
     if (!pane || pane.w <= 0 || pane.h <= 0) return seatWithCols(graph, GRID_COLS);
     return pickBest(
         reportColsChoices(graph).flatMap((reportCols) =>
-            GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols, reportCols))
+            SEAT_GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols, reportCols))
         ),
         pane,
         true
