@@ -12,11 +12,14 @@ type Send = (message: object) => void;
 /** Wire input from `stage` (focusable) to `send`, measuring positions on `canvas`. Returns the way to unwire it. */
 export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement | undefined, send: Send): () => void {
     const box = () => (canvas() ?? stage).getBoundingClientRect();
+    // Only the page itself (the stage or its canvas) is the page's: a control drawn over it (Reconnect) keeps its own keys and clicks.
+    const onPage = (e: Event) => e.target === stage || e.target === canvas();
     let pressed = false;
     let moveFrame = 0;
     let lastMove: MouseEvent | null = null;
 
     const onDown = (e: MouseEvent) => {
+        if (!onPage(e)) return;
         stage.focus();
         pressed = true;
         send(mouseMessage("down", e, box()));
@@ -39,17 +42,19 @@ export function attachStageInput(stage: HTMLElement, canvas: () => HTMLElement |
         });
     };
     const onWheel = (e: WheelEvent) => {
+        if (!onPage(e)) return;
         e.preventDefault();
         send(wheelMessage(e, box(), box().height));
     };
     const onKey = (type: "down" | "up") => (e: KeyboardEvent) => {
-        if (isPasteChord(e)) return;
+        if (!onPage(e) || isPasteChord(e)) return;
         e.preventDefault();
         send(keyMessage(type, e));
     };
     const onKeyDown = onKey("down");
     const onKeyUp = onKey("up");
     const onPaste = (e: ClipboardEvent) => {
+        if (!onPage(e)) return;
         const text = e.clipboardData?.getData("text/plain") ?? "";
         e.preventDefault();
         if (text) send({ t: "paste", text });

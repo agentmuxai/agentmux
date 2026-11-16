@@ -108,4 +108,20 @@ describe("a streamed pane's state", () => {
         expect(sent).toContainEqual({ t: "resize", w: 1000, h: 700 });
         dispose();
     });
+
+    it("keeps an address typed while it is still connecting and sends it once the socket opens", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        pane.send({ t: "nav", go: "url", url: "https://a.test/" });
+        pane.send({ t: "mouse", type: "down", x: 1, y: 1 });
+        expect(sent).toHaveLength(0);
+        events!.onOpen();
+        expect(sent).toEqual([{ t: "nav", go: "url", url: "https://a.test/" }]);
+        pane.send({ t: "nav", go: "reload" });
+        expect(sent).toHaveLength(2);
+        dispose();
+    });
 });
