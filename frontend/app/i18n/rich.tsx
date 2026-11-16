@@ -32,7 +32,9 @@ export function richParts(template: string): RichPart[] {
 
 /** The text of `key` with its markup rendered and `params` filled in. Reactive, like `t`. */
 export function Rich(props: { k: string; params?: Params }): JSX.Element {
-    const parts = () => richParts(t(props.k)).map((p) => ({ ...p, text: interpolate(p.text, props.params, appLocale()) }));
+    // A count picks the key's plural variant, as it does for `t`. It is filled in as a number, which is never markup.
+    const count = () => (typeof props.params?.count === "number" ? { count: props.params.count } : undefined);
+    const parts = () => richParts(t(props.k, count())).map((p) => ({ ...p, text: interpolate(p.text, props.params, appLocale()) }));
     return (
         <For each={parts()}>
             {(p) => {

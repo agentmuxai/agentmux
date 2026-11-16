@@ -622,6 +622,11 @@
     }
 }
 
+// The Vault a batch is saved to: wide enough for a Vault's name, never the whole width of a maximized card.
+.vault-batch-vault .ui-input {
+    max-width: 24em;
+}
+
 // The tick, then the entry it becomes; the secret it is read from sits under the entry.
 .vault-batch-row {
     display: grid;
