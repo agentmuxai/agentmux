@@ -58,7 +58,7 @@ import { failureToRow, isTransient, type FailureActions, type FailureRow, type F
 import { agoLabel, failureVerdict, isAccountCause, type AccountState, type FailureVerdict, type JudgedFailure } from "../failure/failure-verdict";
 import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { restoreRefusedSend } from "../failure/refused-send-restore";
-import { IN_FLIGHT_IDLE_LIMIT_MS, registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { IN_FLIGHT_BLOCKER, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
 import { sourceOf } from "@/app/store/agent-pane-state/failure-precedence";
@@ -664,11 +664,7 @@ function rowActions(s: FailureHookState, pf: PaneFailure): FailureActions {
 export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureResult {
     const s = createFailureHookState(opts);
     // A reload doesn't re-arm the countdown (only a live failure does).
-    onCleanup(
-        registerRecycleBlocker(() => (s.autoRetryIn() != null ? "a failed turn is about to be retried" : null), {
-            idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS,
-        })
-    );
+    onCleanup(registerRecycleBlocker(() => (s.autoRetryIn() != null ? "a failed turn is about to be retried" : null), IN_FLIGHT_BLOCKER));
 
     onMount(() => {
         const seed = seedStoredFailure(s, (pf) => verdictOf(s, pf));

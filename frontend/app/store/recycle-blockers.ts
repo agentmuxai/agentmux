@@ -34,6 +34,9 @@ export const PLACE_IDLE_LIMIT_MS = 60 * 60_000;
 /** Work in flight (an upload, an answer streaming in): it has long ended, or got stuck, after this long without input. */
 export const IN_FLIGHT_IDLE_LIMIT_MS = 6 * 60 * 60_000;
 
+/** For work in flight (an upload, an answer streaming in): lets go after a long time with no input. */
+export const IN_FLIGHT_BLOCKER: RecycleBlockerOptions = { idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS };
+
 const blockers = new Map<RecycleBlocker, RecycleBlockerOptions>();
 
 /** Add a check; the returned function removes it. */

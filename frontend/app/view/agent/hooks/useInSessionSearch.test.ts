@@ -329,6 +329,17 @@ describe("useInSessionSearch: a bar brought back after a recycle", () => {
         again.dispose();
     });
 
+    it("a bar nobody has typed in or brought back has no text, so it takes the caret", () => {
+        const fresh = mount("b0");
+        fresh.search.setVisible(true);
+        expect(fresh.search.text()).toBeUndefined();
+        fresh.search.performSearch("x");
+        expect(fresh.search.text()).toBe("x");
+        fresh.search.close();
+        expect(fresh.search.text()).toBeUndefined();
+        fresh.dispose();
+    });
+
     it("takes the stored bar once: a pane that loads again later starts closed", async () => {
         const first = mount("b2");
         first.search.setVisible(true);
@@ -350,6 +361,7 @@ describe("useInSessionSearch: a bar brought back after a recycle", () => {
         first.dispose();
         const again = mount("b3");
         expect(again.search.visible()).toBe(true);
+        // Empty text, not undefined: the bar is brought back, so it does not take the caret.
         expect(again.search.text()).toBe("");
         expect(again.search.dim()).toBe(false);
         again.dispose();

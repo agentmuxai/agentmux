@@ -256,14 +256,11 @@ describe("recycle blockers that let go", () => {
         off();
     });
 
-    it("a dialog left open for hours no longer holds an idle window", async () => {
+    it("a dialog never lets go: a form in it may hold what the person typed and has not saved", async () => {
         idle.modal = true;
-        idle.sinceInputMs = 5 * 60 * MIN;
+        idle.sinceInputMs = 30 * 24 * 60 * MIN;
         await expect(answerRecycleRequest()).resolves.toBe(false);
         expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a dialog is open");
-        resetRecycleForTests();
-        idle.sinceInputMs = 7 * 60 * MIN;
-        await expect(answerRecycleRequest()).resolves.toBe(true);
     });
 });
 

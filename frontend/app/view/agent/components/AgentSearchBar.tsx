@@ -64,7 +64,7 @@ export interface AgentSearchBarProps {
     /** A pass is taking long enough to say so. */
     searching?: Accessor<boolean>;
     /** What is typed, as typed: a bar brought back after a recycle, or drawn again, starts with it and leaves the caret alone. */
-    text?: Accessor<string>;
+    text?: Accessor<string | undefined>;
     /** Dim mode: rows that do not match are shown at reduced strength while a query is showing. */
     dim?: Accessor<boolean>;
     onDimChange?: (dim: boolean) => void;
@@ -107,10 +107,10 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                     variant="plain"
                     ref={(el) => {
                         if (props.measuring) return;
-                        // A bar that already has text (brought back after a recycle, or drawn again) shows it and
-                        // leaves the caret where the person had it.
-                        const typed = props.text?.() ?? "";
-                        if (typed) {
+                        // A bar with text, even empty text (brought back after a recycle, or drawn again), shows it and
+                        // leaves the caret where the person had it; only a bar nobody has typed in takes it.
+                        const typed = props.text?.();
+                        if (typed !== undefined) {
                             el.value = typed;
                             return;
                         }
