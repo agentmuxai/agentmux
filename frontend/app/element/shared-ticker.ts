@@ -6,58 +6,70 @@
 // which reads as a strobe rather than one steady motion. A tick is TICKER_MS; each animation derives
 // its frame from the tick, so identical animations always show the same frame. The timer runs only while
 // at least one animation is mounted.
+//
+// An animation is a plain callback the clock calls, not a Solid binding on a tick signal. Solid abandons every
+// binding queued in a flush that throws, and gives them up for good (the window-display watchdog's doc says the
+// same of tab content); a mark bound to a signal stopped on whatever frame it had when some other computation
+// threw, each at its own moment (#47754: Swarm rows "working" with a different frozen frame each, until the
+// window was restarted). A callback is called by the clock itself, one at a time, each in its own try/catch.
 // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10,
 // SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md §3.
 
-import { createSignal, untrack } from "solid-js";
-
 export const TICKER_MS = 120;
 
-const [tick, setTick] = createSignal(0);
-let mounted = 0;
-let timer: ReturnType<typeof setInterval> | undefined;
-
-/** The current tick: reading it in a Solid scope re-runs the scope every TICKER_MS (while a ticker is held). */
-export const sharedTick = tick;
-
-/** Hold the ticker; call the returned function to let go. The last holder stops the timer and resets the tick. */
-export function acquireTicker(): () => void {
-    if (mounted++ === 0) timer = setInterval(() => setTick((t) => t + 1), TICKER_MS);
-    return () => {
-        if (--mounted === 0) {
-            clearInterval(timer);
-            timer = undefined;
-            setTick(0);
-        }
-    };
+interface Subscriber {
+    draw: (tick: number) => void;
+    /** The last tick this subscriber drew without throwing. */
+    drawn: number;
 }
 
-// What the animations on screen last drew, so a mark that stopped following the clock can be counted from the log
-// (#47754: working rows in the Swarm showing a frozen frame each, after a long session). A mark reports the tick
-// it drew; one that is more than FROZEN_AFTER_TICKS behind the clock has stopped following it.
-const FROZEN_AFTER_TICKS = 8;
-const drawn = new Map<number, number>();
-let markSeq = 0;
+const subscribers = new Set<Subscriber>();
+let ticks = 0;
+let timer: ReturnType<typeof setInterval> | undefined;
+let failures = 0;
 
-/** A mark on screen, for `markHealth`: `drew(tick)` after each frame it draws, `release()` when it goes. */
-export function registerMark(): { drew: (tick: number) => void; release: () => void } {
-    const id = ++markSeq;
-    drawn.set(id, untrack(tick));
-    return {
-        drew: (t) => {
-            drawn.set(id, t);
-        },
-        release: () => {
-            drawn.delete(id);
-        },
+/** A mark more than this many ticks behind the clock has stopped following it (about a second). */
+const FROZEN_AFTER_TICKS = 8;
+
+/** The current tick, for a mark's first frame. It is not reactive: marks are called, they do not read it. */
+export const currentTick = (): number => ticks;
+
+function advance(): void {
+    ticks++;
+    for (const sub of [...subscribers]) {
+        try {
+            sub.draw(ticks);
+            sub.drawn = ticks;
+        } catch (e) {
+            // One mark failing (a prop read after its owner went) must not stop the others. The first failure and
+            // then one in five hundred are logged: a mark that fails every tick would flood the log.
+            if (failures++ % 500 === 0) console.error("[ticker] a mark failed to draw", e);
+        }
+    }
+}
+
+/**
+ * Call `draw(tick)` on every tick until the returned function is called. The first subscriber starts the timer;
+ * the last one stops it and resets the tick, so the next animation starts from its first frame.
+ */
+export function subscribeFrames(draw: (tick: number) => void): () => void {
+    const sub: Subscriber = { draw, drawn: ticks };
+    subscribers.add(sub);
+    if (subscribers.size === 1) timer = setInterval(advance, TICKER_MS);
+    return () => {
+        if (!subscribers.delete(sub)) return;
+        if (subscribers.size === 0) {
+            clearInterval(timer);
+            timer = undefined;
+            ticks = 0;
+        }
     };
 }
 
 /** The marks animating now, how many of them are behind the clock, and the clock's tick: two readings a minute
  *  apart with the same tick and marks above zero mean the timer itself stopped. */
 export function markHealth(): { marks: number; frozen: number; tick: number } {
-    const now = untrack(tick);
     let frozen = 0;
-    for (const seen of drawn.values()) if (seen < now - FROZEN_AFTER_TICKS) frozen++;
-    return { marks: drawn.size, frozen, tick: now };
+    for (const sub of subscribers) if (sub.drawn < ticks - FROZEN_AFTER_TICKS) frozen++;
+    return { marks: subscribers.size, frozen, tick: ticks };
 }
