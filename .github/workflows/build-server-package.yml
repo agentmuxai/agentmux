@@ -346,6 +346,77 @@ jobs:
             & "$bin\agentmux.exe" stop
           }
 
+      # The throwaway machine for what a person does at install: the package goes where the install puts it (under the
+      # profile: the logon task only runs a program there), `setup` registers the task, the task is run once on demand,
+      # then `setup --no-service` and `uninstall` take it all away. The task firing at a real sign-in, and Defender and
+      # SmartScreen on a downloaded copy, are what a runner cannot show: the first run on the operator's own machine does.
+      # Its own step and not a gate: if the runner's scheduler misbehaves, the step above has already proved the package.
+      - name: Install, logon task and uninstall (Windows)
+        if: matrix.os == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = (Get-ChildItem dist-server -Filter 'agentmux-headless-*-windows-x64.zip' | Select-Object -First 1).FullName
+          Remove-Item -Recurse -Force unpacked -ErrorAction SilentlyContinue
+          Expand-Archive -Path $zip -DestinationPath unpacked
+          $top = (Get-ChildItem unpacked -Directory | Select-Object -First 1).FullName
+          $version = (Get-Content (Join-Path $top 'VERSION') -Raw).Trim()
+          $install = Join-Path $env:LOCALAPPDATA "AgentMux\Headless\$version"
+          New-Item -ItemType Directory -Force -Path (Split-Path $install) | Out-Null
+          Copy-Item -Recurse -Force $top $install
+          $agentmux = Join-Path $install 'bin\agentmux.exe'
+          $task = 'AgentMux Headless'
+          $port = 17390
+
+          function Test-Task { schtasks /Query /TN $task *> $null; return ($LASTEXITCODE -eq 0) }
+          # Up: wait for /health to answer 200. Down: wait for it to stop answering.
+          function Wait-Health([bool]$up) {
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 3
+                if ($up -and $r.StatusCode -eq 200) { return $true }
+              } catch {
+                if (-not $up) { return $true }
+              }
+              Start-Sleep -Seconds 1
+            }
+            return $false
+          }
+
+          try {
+            & $agentmux setup --yes --service --no-open --port $port --secret-store file
+            if ($LASTEXITCODE -ne 0) { throw "agentmux setup failed ($LASTEXITCODE)" }
+            if (-not (Test-Task)) { throw "setup did not register the task '$task'" }
+            Write-Host "the logon task is registered"
+            # Setup starts the server; stop it, then start it the way the task does at sign-in.
+            & $agentmux stop
+            if (-not (Wait-Health $false)) { throw 'the server still answers after stop' }
+            schtasks /Run /TN $task
+            if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed ($LASTEXITCODE)" }
+            if (-not (Wait-Health $true)) { throw 'the task did not start the server: /health never answered 200' }
+            Write-Host "started by the task: /health 200"
+            & $agentmux status
+            & $agentmux stop
+            if (-not (Wait-Health $false)) { throw 'the server still answers after stop' }
+            # Uninstall. If this build's `uninstall` does not know the Windows install folder, take the same things away by hand
+            # and say so, so the run still proves the task and the files go.
+            & $agentmux uninstall --yes
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::warning::agentmux uninstall exited $LASTEXITCODE on Windows; removing the task and the folder by hand"
+              & $agentmux setup --yes --no-service --no-start --no-open
+              if ($LASTEXITCODE -ne 0) { throw "agentmux setup --no-service failed ($LASTEXITCODE)" }
+              Remove-Item -Recurse -Force $install
+            }
+            if (Test-Task) { throw "the task '$task' is still registered after uninstall" }
+            if (Test-Path $install) { throw "$install is still there after uninstall" }
+            Write-Host "uninstalled: the task and the files are gone"
+          } finally {
+            # Whatever happened, leave nothing running or registered.
+            if (Test-Path $agentmux) { & $agentmux stop *> $null }
+            if (Test-Task) { schtasks /Delete /TN $task /F *> $null }
+          }
+
       # The server's https trusts the system's certificates, and a minimal Linux image has none. The packaged command must
       # say so plainly there (and not once the package that holds them is installed).
       #

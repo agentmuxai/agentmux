@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { crc32 as zlibCrc32, deflateRawSync } from "node:zlib";
+import * as zlib from "node:zlib";
 
 /** 2026-01-01 00:00:00 as the DOS date and time a zip header holds. */
 export const DOS_DATE = ((2026 - 1980) << 9) | (1 << 5) | 1;
@@ -26,9 +26,8 @@ export const DOS_TIME = 0;
 const LIMIT = 0xffffffff;
 
 let table;
-/** CRC-32 of a buffer: Node's own where it has one (22.2 and later), else the table form. */
-export function crc32(buf) {
-    if (typeof zlibCrc32 === "function") return zlibCrc32(buf) >>> 0;
+/** CRC-32 of a buffer, by the table: what `crc32` falls back to on a Node that has no `zlib.crc32` (before 22.2). */
+export function crc32Table(buf) {
     if (!table) {
         table = new Uint32Array(256);
         for (let n = 0; n < 256; n++) {
@@ -40,6 +39,12 @@ export function crc32(buf) {
     let c = 0xffffffff;
     for (let i = 0; i < buf.length; i++) c = table[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
     return (c ^ 0xffffffff) >>> 0;
+}
+
+/** CRC-32 of a buffer: Node's own where it has one (22.2 and later), else the table form. The module is imported as a
+ *  namespace: a named import of a function an older Node does not export would fail to load, and the fallback never run. */
+export function crc32(buf) {
+    return typeof zlib.crc32 === "function" ? zlib.crc32(buf) >>> 0 : crc32Table(buf);
 }
 
 /** Every file and folder under `dir`, as paths relative to it with `/`, in byte order of the whole path. */
@@ -78,7 +83,7 @@ export function zipFolder(root) {
         let method = 0;
         let data = raw;
         if (raw.length > 0) {
-            const packed = deflateRawSync(raw, { level: 9 });
+            const packed = zlib.deflateRawSync(raw, { level: 9 });
             if (packed.length < raw.length) {
                 method = 8;
                 data = packed;

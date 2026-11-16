@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { crc32, DOS_DATE, DOS_TIME, listEntries, writeZip, zipFolder } from "./zip-deterministic.mjs";
+import { crc32, crc32Table, DOS_DATE, DOS_TIME, listEntries, writeZip, zipFolder } from "./zip-deterministic.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./zip-deterministic.mjs", import.meta.url));
 
@@ -69,6 +69,13 @@ describe("zip-deterministic", () => {
     it("crc32 is the standard check value", () => {
         expect(crc32(Buffer.from("123456789"))).toBe(0xcbf43926);
         expect(crc32(Buffer.alloc(0))).toBe(0);
+    });
+
+    it("the table form, which an older Node falls back to, gives the same sums", () => {
+        expect(crc32Table(Buffer.from("123456789"))).toBe(0xcbf43926);
+        expect(crc32Table(Buffer.alloc(0))).toBe(0);
+        const data = Buffer.from(Array.from({ length: 5000 }, (_, i) => (i * 131 + 7) % 256));
+        expect(crc32Table(data)).toBe(crc32(data));
     });
 
     it("lists entries in byte order of the whole path, folders before what is in them", () => {
