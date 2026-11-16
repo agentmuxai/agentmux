@@ -146,7 +146,8 @@ describe("any colour", () => {
         expect(nudged).toBeLessThan(4096 / 2);
         // Past the cap only the middle of the dead zone (and the overlay layer's step) is left, a small share of all colours.
         expect(readable).toBeLessThan(4096 * 0.2);
-    });
+        // About 2 s on a quiet machine; a loaded merge-queue runner took over vitest's 5 s default.
+    }, 60_000);
 
     it("nudges a mid-tone colour the smallest amount that gets primary text to 7:1, and says so", () => {
         const mid = "#808080";
