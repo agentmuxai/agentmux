@@ -1031,7 +1031,7 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
     let shown = service::plain_path(&base);
     match uninstall::remove_program_folder(&base, &exe) {
         Ok(uninstall::Removal::Gone) => tell!("Removed {}.", shown.display()),
-        Ok(uninstall::Removal::RestAfterExit) => tell!("Removed {}; this program's own file goes a few seconds after this command ends.", shown.display()),
+        Ok(uninstall::Removal::RestAfterExit) => tell!("Removed {}; this program's own file goes as soon as this command has ended.", shown.display()),
         Ok(uninstall::Removal::RestIsYours) => tell!("Removed what could be removed of {}; delete that folder once this command has ended.", shown.display()),
         Err(e) => return fail(&e),
     }

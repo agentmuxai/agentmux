@@ -55,14 +55,14 @@ pub fn install_of(exe: &Path) -> Option<PathBuf> {
 pub enum Removal {
     Gone,
     /// Windows does not let a running program's own file be deleted: all else is removed, and a helper removes the rest
-    /// a few seconds after this command ends.
+    /// as soon as this command ends.
     RestAfterExit,
     /// As above, but the helper could not be started: the person removes the folder by hand.
     RestIsYours,
 }
 
 /// Remove the program folder `base`. On Windows `running` (this program, inside `base`) stays until it ends: everything
-/// else is removed now, and a hidden helper removes the folder a few seconds after this command ends.
+/// else is removed now, and a hidden helper removes the folder as soon as this command has ended.
 pub fn remove_program_folder(base: &Path, running: &Path) -> Result<Removal, String> {
     let failed = |e: std::io::Error| format!("cannot remove {}: {e}", base.display());
     if !cfg!(windows) {
@@ -101,8 +101,9 @@ fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Start a hidden `cmd` that waits a few seconds and removes `base`, so this program's own file goes once it has ended.
-/// `false` when the path holds a character `cmd` would act on, so nothing is run on a guess.
+/// Start a hidden `cmd` that tries to remove `base` once a second (for up to two minutes) until it is gone, so this
+/// program's own file goes as soon as it has ended, however long the rest of the command takes (`--remove-data` can be
+/// slow). `false` when the path holds a character `cmd` would act on, so nothing is run on a guess.
 #[cfg(windows)]
 fn later_removal(base: &Path) -> bool {
     use agentmux_common::win32::NoWindow;
@@ -115,7 +116,9 @@ fn later_removal(base: &Path) -> bool {
         return false;
     }
     std::process::Command::new("cmd.exe")
-        .raw_arg(format!("/d /s /c \"ping -n 4 127.0.0.1 >nul & rmdir /s /q \"{text}\"\""))
+        .raw_arg(format!(
+            "/d /s /c \"for /l %n in (1,1,120) do (ping -n 2 127.0.0.1 >nul & rmdir /s /q \"{text}\" 2>nul & if not exist \"{text}\" exit)\""
+        ))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
