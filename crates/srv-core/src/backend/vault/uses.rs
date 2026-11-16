@@ -126,6 +126,12 @@ pub struct UseChoice {
 pub struct UseLink {
     pub from: String,
     pub to: String,
+    /// What the entry says of its key beside the place (who reads it, when it last changed, where else it is kept),
+    /// now and as asked; empty when it says nothing.
+    pub about_from: String,
+    pub about_to: String,
+    /// The entry is a link: it holds no value, so the place is where the key itself lives, not a copy of it.
+    pub only: bool,
 }
 
 /// A batch of imports as the person reads it: its name, the one account and region it reads, the one Vault it goes
@@ -159,6 +165,8 @@ pub struct UseBatchItem {
     pub key: String,
     /// It replaces the value of an entry that exists, the old one kept as a version.
     pub replaces: bool,
+    /// The row makes a linked entry: where the key lives is recorded, and no value is read.
+    pub link: bool,
 }
 
 /// What an import copies, as the person reads it: where from, and where to. Nothing of the value.

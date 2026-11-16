@@ -49,9 +49,13 @@ async fn post_waiting(cx: &ToolCtx<'_>, url: &str, body: &Value, what: &str, wai
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
-/// Whether an `update` changes where the entry's machine copy is (a `source_*` field): the person is asked first.
+/// What an entry says of its key beside the place: who reads it, the date it last changed, where else it is kept.
+const SAID_OF_THE_KEY: [&str; 3] = ["readers", "rotated", "copies"];
+
+/// Whether an `update` changes where the entry's machine copy is (a `source_*` field) or what the entry says of its
+/// key: the person may be asked first, so the call waits as long as the answer may take.
 fn changes_machine_copy(arguments: &Value) -> bool {
-    arguments.get("fields").and_then(Value::as_object).is_some_and(|f| f.keys().any(|k| k.starts_with("source_")))
+    arguments.get("fields").and_then(Value::as_object).is_some_and(|f| f.keys().any(|k| k.starts_with("source_") || SAID_OF_THE_KEY.contains(&k.as_str())))
 }
 
 /// `check`: whether an entry's machine copy still holds the entry's value. The answer is `same`, `different` or
@@ -293,6 +297,10 @@ mod tests {
     fn only_an_update_of_the_machine_copy_waits_for_the_person() {
         assert!(changes_machine_copy(&json!({ "fields": { "source_kind": "aws-secret", "source_location": "staging/app" } })));
         assert!(changes_machine_copy(&json!({ "fields": { "notes": "x", "source_key": "" } })));
+        // A linked entry's readers, date and other places are the person's to allow too.
+        for said in ["readers", "rotated", "copies"] {
+            assert!(changes_machine_copy(&json!({ "fields": { said: "x" } })), "{said}");
+        }
         assert!(!changes_machine_copy(&json!({ "fields": { "service": "Example", "notes": "the source of truth" } })));
         assert!(!changes_machine_copy(&json!({ "label": "Example" })));
     }

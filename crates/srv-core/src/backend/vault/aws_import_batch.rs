@@ -7,7 +7,8 @@
 //! This is the part with no server in it: every check of the list before the person is asked, the rows the person
 //! approved, and the batch's own line in the history. Each secret is read and kept as `import` keeps one
 //! ([`super::aws_import`]), so a value's way from the CLI to the sealed row is that one, and no value is in an answer,
-//! an error or a history row here either.
+//! an error or a history row here either. An item marked `link` is not read at all: it becomes a linked entry
+//! ([`super::linked`]), which records where the key lives.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -15,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::aws_import::{self, ImportRequest, Plan, Source, Target, Via, SERVICE};
-use super::{history, record_row, vaults};
+use super::aws_import::{self, ImportRequest, Imported, Plan, Source, Target, Via, SERVICE};
+use super::{history, kinds, linked, record_row, vaults, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultActivityRow;
 use crate::identity::aws_broker::mint::Runner;
@@ -33,7 +34,9 @@ const MAX_NAME: usize = 60;
 /// How much of the line the labels the person left out may take.
 const LEFT_OUT_KEPT: usize = 300;
 const ONE_PLACE: &str = "one batch, one account and region: every secret is read under the batch's source (profile and region), so split the list";
-const NO_LINKS: &str = "link: true (an entry that records where a key lives and holds no value) can't be made yet: leave link out to copy the value";
+const LINK_IS_NEW: &str = "link: true makes a new entry that records where the key lives: leave id out, or leave link out to replace that entry's value";
+/// The kind of a linked entry whose item names none.
+const LINK_KIND: &str = "api-key";
 const OUT_OF_TIME: &str = "not reached: the batch ran out of time before this secret was read; import it again";
 
 /// What the whole batch is read under: one account and region.
@@ -62,6 +65,8 @@ pub struct BatchItem {
     /// Replace this entry's main value instead of making a new entry.
     #[serde(default)]
     pub id: Option<String>,
+    /// Make a linked entry: record where the key lives and who reads it (`fields`: readers, rotated, copies, expires),
+    /// and read no value.
     #[serde(default)]
     pub link: bool,
     /// The batch's own, when given at all: an item can't name another region, profile or Vault.
@@ -195,9 +200,6 @@ impl BatchPlan {
 
     /// One item, checked as `import` checks one, under the batch's source and into the batch's Vault.
     fn item(&self, store: &Store, item: &BatchItem, agent: &str) -> Result<Plan, String> {
-        if item.link {
-            return Err(NO_LINKS.into());
-        }
         let another = |own: &Option<String>, batch: &Option<String>| named(own).is_some_and(|v| Some(v) != batch.as_deref());
         if another(&item.region, &self.region) || another(&item.profile, &self.profile) {
             return Err(ONE_PLACE.into());
@@ -206,6 +208,9 @@ impl BatchPlan {
             if vaults::resolve(store, which, Some(Some(agent)))?.id != self.vault_id {
                 return Err(self.one_vault());
             }
+        }
+        if item.link {
+            return self.link_item(item);
         }
         let request = ImportRequest {
             source: Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), region: self.region.clone(), profile: self.profile.clone() },
@@ -222,6 +227,24 @@ impl BatchPlan {
             Target::Replace { vault_id, .. } if *vault_id != self.vault_id => Err(self.one_vault()),
             _ => Ok(plan),
         }
+    }
+
+    /// A link item, checked: a new entry of a kind (an API key when the item names none) that holds no value, with
+    /// the secret as its place under the batch's region and profile.
+    fn link_item(&self, item: &BatchItem) -> Result<Plan, String> {
+        if named(&item.id).is_some() {
+            return Err(LINK_IS_NEW.into());
+        }
+        let source = aws_import::check_source(&Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), region: self.region.clone(), profile: self.profile.clone() })?;
+        let kind = kinds::kind(named(&Some(item.kind.clone())).unwrap_or(LINK_KIND)).ok_or_else(|| {
+            let names: Vec<&str> = kinds::KINDS.iter().map(|k| k.name).collect();
+            format!("a link is an entry of a kind, {LINK_KIND} when left out: one of {}", names.join(", "))
+        })?;
+        let label = item.label.trim().to_string();
+        let fields = linked::fields_for(&source, &item.fields);
+        super::validate(kind, &label, &fields, &[], &Parts::default())?;
+        let target = Target::Link { kind: kind.name, label, fields, vault_id: self.vault_id.clone() };
+        Ok(Plan { source, target, vault_name: self.vault_name.clone(), reason: self.reason.clone(), refs: self.refs.clone() })
     }
 
     /// No entry twice and no secret (with its key) twice: a row the person ticks is one copy into one entry.
@@ -281,6 +304,7 @@ impl BatchPlan {
             put(item.kind());
             put(item.label());
             put(item.entry_id());
+            put(if item.is_link() { "link" } else { "copy" });
         }
         hex::encode(h.finalize()).chars().take(16).collect()
     }
@@ -342,17 +366,27 @@ pub fn note(store: &Store, plan: &BatchPlan, agent: &str, outcome: &str, what: &
     );
 }
 
+/// One approved row: a link is made without a read, and any other row is read and kept as `import` does one.
+async fn perform_one<R: Runner>(store: &Arc<Store>, runner: &R, plan: &Plan, via: Via<'_>, agent: &str) -> Result<Imported, String> {
+    if !plan.is_link() {
+        return aws_import::perform(store, runner, plan, via, agent).await;
+    }
+    let (store, plan, agent) = (Arc::clone(store), plan.clone(), agent.to_string());
+    tokio::task::spawn_blocking(move || linked::make(&store, &plan, &agent)).await.map_err(|e| e.to_string())?
+}
+
 /// Reads and keeps each approved row in turn, as `import` does one. A row that fails is recorded as failed and the
 /// rest go on: nothing is undone, since each entry is its own row with its own history line.
 pub async fn perform<R: Runner>(store: &Arc<Store>, runner: &R, items: &[Plan], via: Via<'_>, agent: &str, budget: Duration) -> Vec<ItemResult> {
     let started = Instant::now();
     let mut results = Vec::with_capacity(items.len());
     for plan in items {
-        let done = if started.elapsed() >= budget { Err(OUT_OF_TIME.to_string()) } else { aws_import::perform(store, runner, plan, via, agent).await };
+        let done = if started.elapsed() >= budget { Err(OUT_OF_TIME.to_string()) } else { perform_one(store, runner, plan, via, agent).await };
         results.push(match done {
             Ok(done) => ItemResult { label: done.label, id: Some(done.id), error: None },
             Err(why) => {
-                aws_import::note(store, plan, plan.entry_id(), plan.label(), agent, "failed");
+                let note = if plan.is_link() { linked::note } else { aws_import::note };
+                note(store, plan, plan.entry_id(), plan.label(), agent, "failed");
                 ItemResult { label: plan.label().to_string(), id: None, error: Some(why) }
             }
         });

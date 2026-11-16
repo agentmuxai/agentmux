@@ -47,6 +47,7 @@ fn card(plan: &BatchPlan, who: &Who) -> UseRequest {
             secret: p.source.aws_secret_id.clone(),
             key: p.source.key.clone().unwrap_or_default(),
             replaces: matches!(p.target, Target::Replace { .. }),
+            link: p.is_link(),
         })
         .collect();
     UseRequest {
@@ -73,6 +74,10 @@ fn card(plan: &BatchPlan, who: &Who) -> UseRequest {
 }
 
 fn headline(plan: &BatchPlan, who: &Who) -> String {
+    if plan.items.iter().all(|p| p.is_link()) {
+        let keys = if plan.items.len() == 1 { "1 key lives".to_string() } else { format!("{} keys live", plan.items.len()) };
+        return format!("{} wants to record where {keys}: {}", who.agent, plan.name);
+    }
     format!("{} wants to copy {} from {SERVICE} into your Vault: {}", who.agent, secrets(plan.items.len()), plan.name)
 }
 
@@ -133,9 +138,13 @@ fn answer(plan: &BatchPlan, approved: &Approved, results: &[ItemResult], outcome
 /// Reads the approved rows under one AWS session (one broker mint for a container agent, whatever the rows), and
 /// records the batch's own line.
 async fn run(state: &AppState, plan: &BatchPlan, approved: &Approved, who: &Who) -> Response {
-    let minted = match credentials(state, who, plan.profile.as_deref().unwrap_or_default(), &plan.reason).await {
-        Ok(minted) => minted,
-        Err(why) => return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
+    // A link is made without a read, so a list of links only asks the broker for nothing.
+    let minted = match approved.items.iter().any(|p| !p.is_link()) {
+        true => match credentials(state, who, plan.profile.as_deref().unwrap_or_default(), &plan.reason).await {
+            Ok(minted) => minted,
+            Err(why) => return refused(state, plan, who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
+        },
+        false => None,
     };
     let via = minted.as_ref().map_or(Via::Host, Via::Session);
     let results = aws_import_batch::perform(&state.identity_store, &HostRunner, &approved.items, via, &who.agent, BUDGET).await;

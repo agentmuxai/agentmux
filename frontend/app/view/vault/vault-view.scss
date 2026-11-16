@@ -412,6 +412,20 @@
     overflow-wrap: anywhere;
 }
 
+// A linked entry: its two badges after its label, and what it says of its key under where the key is kept.
+.vault-linked-badges {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-left: var(--space-1);
+    vertical-align: middle;
+}
+
+.vault-linked-said {
+    margin-top: var(--space-1);
+    overflow-wrap: anywhere;
+}
+
 // An entry's earlier values: last characters, when and by whom replaced, Restore.
 // The History dialog's All / Changes / Uses buttons sit together on the left.
 .vault-history-filters {
@@ -636,8 +650,9 @@
     box-shadow: inset 3px 0 0 var(--border-color);
 }
 
-// Who did it and what they did are a word or two. Beside a long place they keep their words whole ("teste / r" and
-// "importe / d" in the Linux look check), and still break when one is longer than the pane.
+// When it happened, who did it and what they did are a word or two. Beside a long place they keep their words whole
+// ("teste / r" and "importe / d" in one Linux look check; "just no / w" in a batch's set-in lines in the next), and
+// still break when one is longer than the pane.
 .vault-table td.vault-activity-word {
     overflow-wrap: break-word;
 }

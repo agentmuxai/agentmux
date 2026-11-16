@@ -140,7 +140,7 @@ function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) 
     const exists = () => (vaultEntries() ?? []).some((e) => e.id === a().entry_id);
     return (
         <tr data-outcome={a().outcome} classList={{ "vault-activity-nested": !!props.nested }}>
-            <td class="warden-manager-dim">{formatWhen(a().at)}</td>
+            <td class="warden-manager-dim vault-activity-word">{formatWhen(a().at)}</td>
             <td class="vault-activity-word">{whoOf(a())}</td>
             <td class="vault-activity-word">
                 {a().action}

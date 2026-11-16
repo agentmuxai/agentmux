@@ -76,6 +76,8 @@ pub struct ImportRequest {
 pub enum Target {
     New { kind: &'static str, part: &'static str, label: String, fields: BTreeMap<String, String>, vault_id: String },
     Replace { id: String, created_at: i64, kind: &'static str, part: &'static str, label: String, vault_id: String },
+    /// A linked entry (`super::linked`): the place is recorded and no value is read. Only a batch makes one.
+    Link { kind: &'static str, label: String, fields: BTreeMap<String, String>, vault_id: String },
 }
 
 /// An import that has been checked: nothing in it needs the store again, except to put the value in.
@@ -99,22 +101,27 @@ impl Plan {
 
     pub fn label(&self) -> &str {
         match &self.target {
-            Target::New { label, .. } | Target::Replace { label, .. } => label,
+            Target::New { label, .. } | Target::Replace { label, .. } | Target::Link { label, .. } => label,
         }
     }
 
     /// The entry replaced, if the import replaces one.
     pub fn entry_id(&self) -> &str {
         match &self.target {
-            Target::New { .. } => "",
+            Target::New { .. } | Target::Link { .. } => "",
             Target::Replace { id, .. } => id,
         }
     }
 
     pub fn kind(&self) -> &'static str {
         match &self.target {
-            Target::New { kind, .. } | Target::Replace { kind, .. } => kind,
+            Target::New { kind, .. } | Target::Replace { kind, .. } | Target::Link { kind, .. } => kind,
         }
+    }
+
+    /// Whether this is a link: an entry that records where the key lives, made without reading it.
+    pub fn is_link(&self) -> bool {
+        matches!(self.target, Target::Link { .. })
     }
 }
 
@@ -187,6 +194,9 @@ fn replace_target(store: &Store, id: &str, kind: &str, agent: &str) -> Result<(T
         return Err(no_entry());
     }
     let info = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    if let Some(refusal) = super::linked::takes_no_value(&row, "import the value as a new entry") {
+        return Err(refusal);
+    }
     if !kind.trim().is_empty() && kind.trim() != row.kind {
         return Err(format!("{id} is a {} entry: leave kind out to replace its value", row.kind));
     }
@@ -255,9 +265,59 @@ fn argv(source: &Source, via: &Via<'_>) -> Vec<String> {
     args
 }
 
+/// What AWS says of a secret that isn't there.
+pub const NO_SUCH_SECRET: &str = "AWS has no secret by that id, in that region";
+/// What a description asks for: when the secret last changed, whether it rotates, and whether it is being deleted.
+const DESCRIPTION: &str = "{changed: LastChangedDate, rotation: RotationEnabled, deleted: DeletedDate}";
+
+/// [`argv`] for the secret's description instead of its value: the same secret, region and profile.
+fn describe_argv(source: &Source, via: &Via<'_>) -> Vec<String> {
+    let mut args = argv(source, via);
+    args[1] = "describe-secret".to_string();
+    args[5] = DESCRIPTION.to_string();
+    args
+}
+
+/// A secret as its description gives it: dates and a setting, nothing of its value.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Described {
+    /// The day (UTC) it last changed, when AWS says.
+    pub changed: Option<chrono::NaiveDate>,
+    pub rotation: Option<bool>,
+    /// It is scheduled for deletion.
+    pub deleted: bool,
+}
+
+/// A timestamp as the CLI prints one: RFC 3339 text (v2), or seconds since 1970 (v1).
+fn day_of(v: &serde_json::Value) -> Option<chrono::NaiveDate> {
+    match v {
+        serde_json::Value::String(s) => chrono::DateTime::parse_from_rfc3339(s.trim()).ok().map(|t| t.with_timezone(&chrono::Utc).date_naive()),
+        serde_json::Value::Number(n) => chrono::DateTime::from_timestamp(n.as_f64()? as i64, 0).map(|t| t.date_naive()),
+        _ => None,
+    }
+}
+
+/// Reads a secret's description: metadata only, so the value never leaves AWS. A secret that isn't there fails with
+/// [`NO_SUCH_SECRET`].
+pub async fn describe_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -> Result<Described, String> {
+    let stdout = run_cli(runner, describe_argv(source, &via), source, via).await?;
+    let said: serde_json::Value = serde_json::from_slice(stdout.as_slice()).map_err(|_| "AWS answered with something that isn't a secret's description".to_string())?;
+    Ok(Described { changed: day_of(&said["changed"]), rotation: said["rotation"].as_bool(), deleted: !said["deleted"].is_null() })
+}
+
 /// Runs the AWS CLI's Secrets Manager read and returns the secret's text. The CLI's stdout is the secret: it is wiped
 /// when this returns, and nothing of it goes into an error.
 pub async fn read_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -> Result<Zeroizing<String>, String> {
+    let stdout = run_cli(runner, argv(source, &via), source, via).await?;
+    // `null` is a secret kept as binary: SecretString is empty then.
+    let text: Option<String> = serde_json::from_slice(stdout.as_slice()).map_err(|_| "AWS answered with something that isn't a secret's text".to_string())?;
+    let text = Zeroizing::new(text.ok_or("that secret is binary, not text: import copies text secrets only")?);
+    Ok(text)
+}
+
+/// Runs the AWS CLI with `args` as `via` says and returns its stdout, which may be a secret: it is wiped when dropped,
+/// and nothing of it goes into an error.
+async fn run_cli<R: Runner>(runner: &R, args: Vec<String>, source: &Source, via: Via<'_>) -> Result<Zeroizing<Vec<u8>>, String> {
     let Some(program) = runner.which("aws") else {
         return Err("this computer has no AWS CLI (v2.9 or newer), which an import reads with".into());
     };
@@ -270,7 +330,7 @@ pub async fn read_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -
         env.push(("AWS_SECRET_ACCESS_KEY".into(), s.secret_access_key.to_string()));
         env.push(("AWS_SESSION_TOKEN".into(), s.session_token.to_string()));
     }
-    let spec = RunSpec { program, args: argv(source, &via), env, timeout: RECIPE_TIMEOUT };
+    let spec = RunSpec { program, args, env, timeout: RECIPE_TIMEOUT };
     let out = match runner.run(spec).await {
         Ok(out) => out,
         Err(RunError::TimedOut) => return Err("AWS took too long to answer (25 s). Try again in a minute.".into()),
@@ -280,10 +340,7 @@ pub async fn read_secret<R: Runner>(runner: &R, source: &Source, via: Via<'_>) -
     if !out.success {
         return Err(aws_said(&out.stderr, source));
     }
-    // `null` is a secret kept as binary: SecretString is empty then.
-    let text: Option<String> = serde_json::from_slice(stdout.as_slice()).map_err(|_| "AWS answered with something that isn't a secret's text".to_string())?;
-    let text = Zeroizing::new(text.ok_or("that secret is binary, not text: import copies text secrets only")?);
-    Ok(text)
+    Ok(stdout)
 }
 
 /// 12-digit runs (account numbers) cut out of a line of AWS's.
@@ -309,7 +366,7 @@ fn aws_said(stderr: &str, source: &Source) -> String {
     if s.contains("accessdenied") || s.contains("not authorized") || s.contains("explicit deny") {
         "AWS refused: this identity can't read that secret".into()
     } else if s.contains("resourcenotfound") || s.contains("can't find the specified secret") {
-        "AWS has no secret by that id, in that region".into()
+        NO_SUCH_SECRET.into()
     } else if s.contains("decryptionfailure") || (s.contains("kms") && s.contains("denied")) {
         "AWS refused: this identity can't decrypt that secret".into()
     } else if login_lapsed(stderr) {
@@ -392,6 +449,7 @@ pub fn store_value(store: &Store, plan: &Plan, value: &Zeroizing<String>, agent:
             replace_main(store, id, *created_at, part, value, agent)?;
             (id.clone(), label.clone())
         }
+        Target::Link { label, .. } => return Err(format!("{label} is a link, which holds no value")),
     };
     note(store, plan, &id, &label, agent, "done");
     Ok(Imported { id, label, vault: plan.vault_name.clone() })

@@ -15,4 +15,8 @@ key: string,
 /**
  * It replaces the value of an entry that exists, the old one kept as a version.
  */
-replaces: boolean, };
+replaces: boolean, 
+/**
+ * The row makes a linked entry: where the key lives is recorded, and no value is read.
+ */
+link: boolean, };
