@@ -137,6 +137,7 @@ export function TileList(props: Part) {
                                 onOpen={() => setLightboxIndex(tile()!.number - 1)}
                                 onRemove={() => t.removeTile(key, false)}
                                 onKeyDown={t.onTileKeyDown(key)}
+                                reorder={t.reorderFor(key)}
                             />
                         </Show>
                     );

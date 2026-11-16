@@ -50,7 +50,11 @@
         font-weight: 500;
         color: var(--drop-prompt-fg);
         background: var(--drop-prompt-bg);
-        @include mixins.truncate;
+        // Wraps rather than truncates: text-overflow does not apply to flex text, and the part that says how many
+        // files fit is at the end of the line.
+        white-space: normal;
+        text-align: center;
+        overflow-wrap: anywhere;
 
         i {
             flex-shrink: 0;

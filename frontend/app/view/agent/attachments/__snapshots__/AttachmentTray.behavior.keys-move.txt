@@ -120,6 +120,7 @@ draft move k1 1
           "pic3.png"
         <button class="stub-remove" aria-label="Remove pic3.png">
   <span class="sr-only" aria-live="polite">
+    "Moved pic1.png to position 2 of 3."
 draft move k1 -1
 focusComposer
 -- escape
@@ -146,3 +147,4 @@ focusComposer
           "pic3.png"
         <button class="stub-remove" aria-label="Remove pic3.png">
   <span class="sr-only" aria-live="polite">
+    "Moved pic1.png to position 1 of 3."
