@@ -83,7 +83,8 @@ jobs:
           LEGS: ${{ inputs.legs }}
         run: |
           # timeout: the leg's limit in minutes, about three times what it takes cold (a release builds with no cache).
-          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140},{"os":"windows","arch":"x64","runner":"windows-latest","timeout":50}]'
+          # Windows measured cold on PR 7552: 28.5 min from start to the packed zip (cargo build 24.7), so 85; the macOS DMG leg already holds a release longer.
+          release='[{"os":"linux","arch":"x64","runner":"ubuntu-22.04","timeout":50},{"os":"linux","arch":"arm64","runner":"ubuntu-22.04-arm","timeout":50},{"os":"macos","arch":"arm64","runner":"macos-latest","timeout":140},{"os":"windows","arch":"x64","runner":"windows-latest","timeout":85}]'
           late='[{"os":"macos","arch":"x64","runner":"macos-15-intel","timeout":160}]'
           if [ "$LEGS" = release ]; then
             legs="$release"
