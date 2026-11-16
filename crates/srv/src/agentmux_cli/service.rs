@@ -170,6 +170,7 @@ fn install_task(user_home: &Path, exe: &Path, channel: &str) -> Result<PathBuf, 
         (Ok(domain), Ok(name)) if !domain.is_empty() && !name.is_empty() => Some(format!("{domain}\\{name}")),
         _ => None,
     };
+    program_folder_is_theirs(&program, user.as_deref().unwrap_or("%USERNAME%"))?;
     let path = file_path(Manager::Task, user_home, channel);
     let dir = path.parent().unwrap_or(user_home);
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -180,6 +181,25 @@ fn install_task(user_home: &Path, exe: &Path, channel: &str) -> Result<PathBuf, 
     std::fs::write(&path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     run_quiet("schtasks", &["/Create", "/TN", &task_name(channel), "/XML", &path.to_string_lossy(), "/F"])?;
     Ok(path)
+}
+
+/// The logon task runs `program` as the person, so anyone who can change the folder it is in, or the file, could have
+/// their own program run as the person. On Windows a folder's access list says who: it must name no one besides the
+/// person, the system and the administrators, or the task is not registered, and the words say how to fix it.
+fn program_folder_is_theirs(program: &Path, user: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use agentmux_common::owner_only;
+        for path in [program.parent(), Some(program)].into_iter().flatten() {
+            let others = owner_only::others_who_can_open(path)?;
+            if !others.is_empty() {
+                return Err(owner_only::refusal_because(path, &others, user, "The sign-in task runs this program as you, so anyone who can change it could have their own program run as you"));
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (program, user);
+    Ok(())
 }
 
 /// A value inside a systemd double-quoted word: backslash, quote and the specifier mark are escaped.
@@ -514,6 +534,19 @@ mod tests {
         assert_eq!(read_text(&path).as_deref(), Some("héllo <Task/>"));
         std::fs::write(&path, "plain utf-8").unwrap();
         assert_eq!(read_text(&path).as_deref(), Some("plain utf-8"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_program_in_a_shared_folder_is_refused_and_one_in_the_persons_own_is_not() {
+        // C:\Users\Public is shared with every account by design; a folder made in the temp folder is the person's own.
+        let public = std::env::var("PUBLIC").unwrap_or_else(|_| r"C:\Users\Public".to_string());
+        let refused = program_folder_is_theirs(&Path::new(&public).join("agentmuxw.exe"), r"PC\sam").unwrap_err();
+        assert!(refused.contains("icacls") && refused.contains("run as you"), "{refused}");
+        let own = tempfile::tempdir().unwrap();
+        let exe = own.path().join("agentmuxw.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(program_folder_is_theirs(&exe, r"PC\sam"), Ok(()));
     }
 
     #[test]
