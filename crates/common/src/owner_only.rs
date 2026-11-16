@@ -40,8 +40,13 @@ fn say_who(principal: &str) -> Other {
 /// to the object, each named once, in the order the list gives them. A denial is not an allowance, and an entry that
 /// gives no rights gives none. An empty answer is a list only the user (and those) can use.
 pub fn others_with_access(sddl: &str, user_sid: &str) -> Vec<Other> {
-    let dacl = sddl.find("D:").map(|at| &sddl[at + 2..]).unwrap_or("");
+    // An object with no list at all (a null list, which SDDL writes `D:NO_ACCESS_CONTROL` or leaves out) lets everyone in;
+    // an empty list (`D:`) lets nobody in.
+    let Some(dacl) = sddl.find("D:").map(|at| &sddl[at + 2..]) else { return vec![say_who("WD")] };
     let dacl = dacl.split("S:").next().unwrap_or("");
+    if dacl.contains("NO_ACCESS_CONTROL") {
+        return vec![say_who("WD")];
+    }
     let mut out: Vec<Other> = Vec::new();
     for entry in dacl.split('(').skip(1) {
         let body = entry.split(')').next().unwrap_or("");
@@ -52,7 +57,9 @@ pub fn others_with_access(sddl: &str, user_sid: &str) -> Vec<Other> {
         if !allows || rights.is_empty() || principal.is_empty() {
             continue;
         }
-        if principal.eq_ignore_ascii_case(user_sid) || ALWAYS_ALLOWED.iter().any(|ok| ok.eq_ignore_ascii_case(principal)) {
+        // SDDL writes the built-in administrator account (the user whose SID ends in -500) as `LA`, so that is the user too.
+        let is_the_user = principal.eq_ignore_ascii_case(user_sid) || (principal.eq_ignore_ascii_case("LA") && user_sid.ends_with("-500"));
+        if is_the_user || ALWAYS_ALLOWED.iter().any(|ok| ok.eq_ignore_ascii_case(principal)) {
             continue;
         }
         let who = say_who(&principal.to_ascii_uppercase());
@@ -223,8 +230,27 @@ mod tests {
     fn a_denial_an_empty_entry_and_an_audit_entry_give_nobody_access() {
         let sddl = format!("D:P(D;;FA;;;WD)(A;;;;;WD)(A;;FA;;;{USER})S:(AU;SA;FA;;;WD)");
         assert!(others_with_access(&sddl, USER).is_empty(), "{:?}", others_with_access(&sddl, USER));
-        assert!(others_with_access("", USER).is_empty());
-        assert!(others_with_access("O:BAG:BA", USER).is_empty());
+        assert!(others_with_access("D:", USER).is_empty(), "an empty list lets nobody in");
+        assert!(others_with_access("D:P", USER).is_empty());
+    }
+
+    /// SDDL writes the built-in administrator account (RID 500) as `LA`: for that user it is the user, for anyone else it is not.
+    #[test]
+    fn the_built_in_administrator_is_the_user_only_when_it_is_the_user() {
+        let admin = "S-1-5-21-1111-2222-3333-500";
+        assert!(others_with_access("D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", admin).is_empty());
+        let found = others_with_access("D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)", USER);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].sid, "LA");
+    }
+
+    /// An object with no access list at all is open to everyone, and is read as such.
+    #[test]
+    fn a_missing_access_list_is_open_to_everyone() {
+        let everyone = vec![Other { name: "Everyone".into(), sid: "S-1-1-0".into() }];
+        for sddl in ["", "O:BAG:BA", "D:NO_ACCESS_CONTROL", "D:P(A;;FA;;;SY)NO_ACCESS_CONTROL"] {
+            assert_eq!(others_with_access(sddl, USER), everyone, "{sddl:?}");
+        }
     }
 
     #[test]

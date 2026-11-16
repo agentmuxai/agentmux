@@ -655,10 +655,14 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
         None if cfg!(windows) => ask_to_shut_down(paths),
         None => Err(format!("could not signal AgentMux Headless (pid {})", record.pid)),
     };
-    if let Err(e) = stopped {
-        return fail(&e);
+    let mut gone = false;
+    match stopped {
+        Ok(()) => gone = wait_gone(record.pid, STOP_WAIT),
+        // `--force` is for the server that does not answer: it goes on to the identity-checked end.
+        Err(e) if force && cfg!(windows) => warn!("{e}"),
+        Err(e) => return fail(&e),
     }
-    if !wait_gone(record.pid, STOP_WAIT) {
+    if !gone {
         if !force {
             warn!("AgentMux Headless has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
             return 3;

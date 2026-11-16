@@ -502,7 +502,8 @@ mod tests {
 
     #[test]
     fn the_stub_is_found_beside_the_command_and_a_kept_registration_reads_back() {
-        assert_eq!(task_program(Path::new(r"C:\i\bin\agentmux.exe")), Path::new(r"C:\i\bin\agentmuxw.exe"));
+        let bin = Path::new("i").join("bin");
+        assert_eq!(task_program(&bin.join("agentmux.exe")), bin.join("agentmuxw.exe"));
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.xml");
         let mut bytes = vec![0xFF, 0xFE];

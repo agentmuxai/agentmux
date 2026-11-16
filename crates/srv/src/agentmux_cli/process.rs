@@ -105,7 +105,9 @@ pub fn kill(pid: u32) -> bool {
         if handle.is_null() {
             return false;
         }
-        let ended = TerminateProcess(handle, 1) != 0;
+        // Exit code 0: the end was asked for, so the supervisor and the logon task that run it see a clean end and the task's
+        // restart on failure does not start the server again. A crash has its own code.
+        let ended = TerminateProcess(handle, 0) != 0;
         CloseHandle(handle);
         ended
     }
