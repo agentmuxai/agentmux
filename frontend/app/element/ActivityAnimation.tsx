@@ -8,43 +8,56 @@
 // the tooltip reads the bucket and how long it has run ("Building, 4m 12s").
 // SPEC_LONG_RUNNING_ACTIVITY_ANIMATIONS_2026_11_02.md §3.
 
-import { createEffect, onCleanup, type JSX } from "solid-js";
+import { createEffect, on, onCleanup, untrack, type JSX } from "solid-js";
 
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { formatDurationShort } from "@/util/format-time";
 import { bucketFrame, bucketTooltip, type Bucket } from "./activity-bucket";
-import { acquireTicker, registerMark, sharedTick } from "./shared-ticker";
+import { currentTick, subscribeFrames } from "./shared-ticker";
 import { Tooltip } from "./tooltip";
 import "./ActivityAnimation.scss";
 
-/** `class` styles the glyph where it sits; `since` (Unix ms) turns on the tooltip. */
+/** `class` styles the glyph where it sits; `since` (Unix ms) turns on the tooltip. The shared clock calls it each
+ *  tick and it writes its own glyph, so no other computation's failure can stop it (shared-ticker.ts). */
 export function ActivityAnimation(props: { bucket: Bucket; since?: number; class?: string }): JSX.Element {
+    let el: HTMLSpanElement | undefined;
     const reducedMotion = () => shouldReduceMotion("status");
-    let drew: (tick: number) => void = () => {};
-    createEffect(() => {
-        if (reducedMotion()) return;
-        const mark = registerMark();
-        drew = mark.drew;
-        onCleanup(acquireTicker());
-        onCleanup(() => {
-            drew = () => {};
-            mark.release();
-        });
-    });
-    const frame = () => {
-        if (reducedMotion()) return props.bucket.still;
-        const t = sharedTick();
-        drew(t);
-        return bucketFrame(props.bucket, t);
+    const glyph = (tick: number) => (reducedMotion() ? props.bucket.still : bucketFrame(props.bucket, tick));
+    let stop: (() => void) | undefined;
+    const follow = (on: boolean) => {
+        stop?.();
+        stop = on
+            ? subscribeFrames((tick) => {
+                  if (el) el.textContent = glyph(tick);
+              })
+            : undefined;
     };
+    // Following starts here, not in an effect: an effect queued in a flush that throws never runs.
+    follow(!untrack(reducedMotion));
+    createEffect(
+        on(
+            reducedMotion,
+            (reduced) => {
+                follow(!reduced);
+                if (el) el.textContent = glyph(currentTick());
+            },
+            { defer: true }
+        )
+    );
+    onCleanup(() => stop?.());
     return (
         <Tooltip
             disable={props.since == null}
             divClassName="activity-animation-tip"
             content={bucketTooltip(props.bucket, formatDurationShort(Date.now() - (props.since ?? Date.now())))}
         >
-            <span class={`activity-animation${props.class ? ` ${props.class}` : ""}`} data-bucket={props.bucket.id} aria-hidden="true">
-                {frame()}
+            <span
+                ref={el}
+                class={`activity-animation${props.class ? ` ${props.class}` : ""}`}
+                data-bucket={props.bucket.id}
+                aria-hidden="true"
+            >
+                {untrack(() => glyph(currentTick()))}
             </span>
         </Tooltip>
     );
