@@ -50,6 +50,14 @@ describe("dependentAliases", () => {
         expect(names).not.toContain("--other");
     });
 
+    it("leaves a window-level token at the window's value, and what reads only it", () => {
+        const withWindow = new Map([...defaults, ["--app-fg", "var(--fg)"], ["--uses-app-fg", "var(--app-fg)"]]);
+        const kept = dependentAliases(withWindow, { ...mapped, windowLevel: ["--app-fg"] });
+        expect(kept).not.toContain("--app-fg");
+        expect(kept).not.toContain("--uses-app-fg");
+        expect(dependentAliases(withWindow, mapped)).toContain("--app-fg");
+    });
+
     it("follows a chain written before the alias it reads", () => {
         const later = new Map([
             ["--first", "var(--second)"],

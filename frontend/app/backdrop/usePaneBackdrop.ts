@@ -5,7 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from
 import { isLightThemeActive } from "../block/pane-identity";
 import { currentWindowTheme } from "../store/window-appearance";
 import { themeAnsi } from "./ansi";
-import { resolveBackdrop, type ResolvedBackdrop } from "./meta";
+import { resolveBackdrop, sameResolved, type ResolvedBackdrop } from "./meta";
 import { registerPaneScope, releasePaneScope, scopeVars } from "./scope";
 
 /** The app theme backdrops step aside for: it has its own fixed contrast (spec §8, §12). */
@@ -26,6 +26,28 @@ function createForcedColors(): Accessor<boolean> {
 }
 
 /**
+ * Whether backdrops are suppressed now: the `high-contrast` app theme, or forced colours (spec §8, §12). One place for
+ * it, read by the hook that keeps a pane's scope and by the picker's preview, so neither can draw a backdrop the other
+ * has stepped aside for.
+ */
+export function useBackdropSuppressed(): Accessor<boolean> {
+    const forced = createForcedColors();
+    return () => currentWindowTheme() === BACKDROP_SUPPRESSED_THEME || forced();
+}
+
+/**
+ * The backdrop a pane's meta resolves to under the app theme now, or undefined when it has none to show: no record, or
+ * backdrops are suppressed. The same answer for the pane's frame and for the picker.
+ */
+export function useResolvedBackdrop(
+    meta: () => { backdrop?: unknown; bg?: unknown } | undefined,
+    suppressed: Accessor<boolean> = useBackdropSuppressed()
+): Accessor<ResolvedBackdrop | undefined> {
+    // The same backdrop is not a new one: every block-data update (a title, a cwd) makes a new object, and must not re-register the scope.
+    return createMemo(() => (suppressed() ? undefined : resolveBackdrop(meta(), isLightThemeActive() ? "light" : "dark")), undefined, { equals: sameResolved });
+}
+
+/**
  * A pane's backdrop, from its meta, kept registered as its scope (`registerPaneScope`) for as long as the pane
  * lives. It follows the app theme: a switch re-derives the same backdrop for the other side. Returns the
  * resolved backdrop (for the pane's `data-backdrop`), or undefined when the pane has none to show: no record, or
@@ -43,11 +65,7 @@ export function usePaneBackdrop(
     meta: () => { backdrop?: unknown; bg?: unknown } | undefined,
     { owner = true }: { owner?: boolean } = {}
 ): () => ResolvedBackdrop | undefined {
-    const forced = createForcedColors();
-    const resolved = createMemo(() => {
-        if (currentWindowTheme() === BACKDROP_SUPPRESSED_THEME || forced()) return undefined;
-        return resolveBackdrop(meta(), isLightThemeActive() ? "light" : "dark");
-    });
+    const resolved = useResolvedBackdrop(meta);
     if (owner) {
         createEffect(() => {
             const r = resolved();
