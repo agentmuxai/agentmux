@@ -1,6 +1,6 @@
 # Spec: a streamed Browser pane in the web UI of a headless AgentMux server (task #18045, the demo)
 
-**Status:** active - slice 1 (the server side and the probe) is PR #7484; the pane in the web UI and the demo image are not started.
+**Status:** active - slice 1 (the server side and the probe) shipped in PR #7484; slice 2 (the pane in the web UI) is in review; the demo image and its how-to are not started.
 Owner: Korp@narko. Srv side reviewed by AgentA@Area54; pane code by Camper@narko. Security conditions: AgentY@narko.
 
 **The operator's words (via AgentY, 2026-11-15):** "the streamed browser spec is for loading a browser pane inside the agentmux web interface? lets proceed with the spike, it would be cool to see that work".

@@ -8,6 +8,7 @@
 
 import type { HostModule } from "@/app/host/host-module";
 import { requireSignIn } from "./not-signed-in";
+import { streamedBrowserAvailable } from "./streamed-browser-probe";
 import { buildWebApi } from "./web-api";
 
 /** srv's HTTP and WebSocket endpoints for a page served from `origin`. */
@@ -26,7 +27,7 @@ export const hostModule: HostModule = {
         const { web, ws } = endpointsFor(window.location.origin);
         window.__WAVE_SERVER_WEB_ENDPOINT__ = web;
         window.__WAVE_SERVER_WS_ENDPOINT__ = ws;
-        const api = buildWebApi();
+        const api = buildWebApi({ streamedBrowserPane: await streamedBrowserAvailable(window.sessionStorage.getItem("amx-session") ?? undefined) });
         // A browser that was never signed in gets one plain card, not a reconnect loop that ends in "Press Restore".
         // `window.api` is installed only after the check: the app's own start (app-init.ts waits for `window.api`)
         // must not run beside it, or its failure would put the recovery card over this one.
