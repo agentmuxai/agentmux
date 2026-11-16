@@ -6,7 +6,7 @@
 // and checked by the real `ssh-keygen -Y verify` wherever it is installed (the release job's runner has it; CI sets CI).
 
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createPrivateKey, createPublicKey, sign as cryptoSign } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
     SSHSIG_FLOOR,
+    SIGNER_ENV,
     SSHSIG_NAMESPACE,
     buildRelease,
     envelopeName,
@@ -26,6 +27,7 @@ import {
     sshsigName,
     sshsigPathFor,
     sshsigPreimage,
+    signerCommand,
     verifyRelease,
     verifySshsig,
     versionAtLeast,
@@ -52,6 +54,60 @@ beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "release-sshsig-"));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+/**
+ * The script, run as a person's release job would run it, but with nothing of AWS in its environment (no credentials,
+ * no profile, no config, no instance role): whatever a test does, it cannot sign with the real service.
+ */
+const runScript = (args, env = {}) => {
+    const withoutAws = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.toUpperCase().startsWith("AWS_")));
+    const none = { AWS_PROFILE: "no-such-profile-for-tests", AWS_CONFIG_FILE: join(dir, "no-config"), AWS_SHARED_CREDENTIALS_FILE: join(dir, "no-credentials"), AWS_EC2_METADATA_DISABLED: "true" };
+    return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...withoutAws, ...none, ...env } });
+};
+
+/**
+ * A stand-in for `aws kms sign`, as a node script (it runs the same on Windows, macOS and Linux, with no shell and no
+ * program looked up on the PATH), named to the script by the environment variable the script reads. Its Nth call signs
+ * the `--message` file with the key `calls[N]` names (the last one repeats), or answers with text that is no signature.
+ * It writes the arguments of every call to `log`, so a test can say the stand-in, and nothing else, was called.
+ */
+function writeStandIn(calls) {
+    const script = join(dir, "stand-in-signer.mjs");
+    const log = join(dir, "signer.log");
+    const spec = { log, calls };
+    writeFileSync(
+        script,
+        [
+            'import { appendFileSync, readFileSync } from "node:fs";',
+            'import { createPrivateKey, sign } from "node:crypto";',
+            `const spec = ${JSON.stringify(spec)};`,
+            'appendFileSync(spec.log, process.argv.slice(2).join(" ") + "\\n");',
+            'const n = readFileSync(spec.log, "utf8").trim().split("\\n").length;',
+            "const call = spec.calls[Math.min(n, spec.calls.length) - 1];",
+            'if (call.garbage) { console.log("not a signature"); process.exit(0); }',
+            'const file = process.argv[process.argv.indexOf("--message") + 1].replace(/^fileb:\\/\\//, "");',
+            'process.stdout.write(sign(null, readFileSync(file), createPrivateKey(readFileSync(call.pem, "utf8"))).toString("base64"));',
+            "",
+        ].join("\n"),
+    );
+    return { log, env: { [SIGNER_ENV]: JSON.stringify([process.execPath, script]) } };
+}
+
+/** What the stand-in was called with, one entry per call; none if it was never called. */
+const standInCalls = (stand) => (existsSync(stand.log) ? readFileSync(stand.log, "utf8").trim().split("\n") : []);
+
+/** A release built from one file, and the arguments `sign-kms` is given: the envelope, a keys file (key 7 pinned) and where the signature goes. */
+function releaseToSign() {
+    const files = join(dir, "files");
+    const out = join(dir, "out");
+    mkdirSync(files);
+    writeFileSync(join(files, `AgentMux-${SSHSIG_FLOOR}-x64-setup.exe`), "setup");
+    expect(runScript(["build", "--dir", files, "--tag", TAG, "--out", out]).status).toBe(0);
+    writeFileSync(join(dir, "keys.json"), JSON.stringify({ keys: [{ id: "k1", public_key: publicB64(7) }] }));
+    const sig = join(out, `${envelopeName(TAG)}.sig`);
+    const signArgs = ["sign-kms", "--envelope", join(out, envelopeName(TAG)), "--key-id", "alias/release", "--id", "k1", "--out", sig, "--keys-file", join(dir, "keys.json")];
+    return { files, out, sig, signArgs };
+}
 
 describe("the signed bytes and the file", () => {
     it("the preimage is SSHSIG, the namespace, an empty reserved string, sha512 and the envelope's SHA-512, each a length-prefixed string", () => {
@@ -164,8 +220,8 @@ describe("the floor: from the first release that carries it, a release without o
     });
 });
 
-describe("the command line, through the local-key path (the same code as the signing service's, with its own signer)", () => {
-    const run = (args, env = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
+describe("the command line, through the local-key path (the same code as the signing service's, with its own signer)", { timeout: 30_000 }, () => {
+    const run = runScript;
     const made = () => {
         const files = join(dir, "files");
         const out = join(dir, "out");
@@ -216,30 +272,17 @@ describe("the command line, through the local-key path (the same code as the sig
     });
 
     it("sign-kms writes both files in the one step, with the signing service called twice with the same key id and a second message", () => {
-        const files = join(dir, "files");
-        const out = join(dir, "out");
-        mkdirSync(files);
-        writeFileSync(join(files, `AgentMux-${SSHSIG_FLOOR}-x64-setup.exe`), "setup");
-        run(["build", "--dir", files, "--tag", TAG, "--out", out]);
-        // A stand-in for `aws kms sign`: signs the --message file with the throwaway key, and logs how it was called.
+        const { files, out, sig, signArgs } = releaseToSign();
         writeFileSync(join(dir, "k.pem"), pemOf(7));
-        mkdirSync(join(dir, "bin"));
-        writeFileSync(
-            join(dir, "bin", "aws"),
-            `#!/bin/sh\necho "$@" >> "${dir}/aws.log"\nmsg=""\nwhile [ $# -gt 0 ]; do case "$1" in --message) msg="\${2#fileb://}"; shift 2 ;; *) shift ;; esac; done\nopenssl pkeyutl -sign -inkey "${dir}/k.pem" -rawin -in "$msg" | openssl base64 -A\n`,
-        );
-        chmodSync(join(dir, "bin", "aws"), 0o755);
-        writeFileSync(join(dir, "keys.json"), JSON.stringify({ keys: [{ id: "k1", public_key: publicB64(7) }] }));
-        const sig = join(out, `${envelopeName(TAG)}.sig`);
-        const r = run(["sign-kms", "--envelope", join(out, envelopeName(TAG)), "--key-id", "alias/release", "--id", "k1", "--out", sig, "--keys-file", join(dir, "keys.json")], {
-            PATH: `${join(dir, "bin")}:${process.env.PATH}`,
-        });
+        const stand = writeStandIn([{ pem: join(dir, "k.pem") }]);
+        const r = run(signArgs, stand.env);
+        // First of all: the stand-in was what signed, twice, and nothing else could have.
+        const calls = standInCalls(stand);
+        expect(calls.length).toBe(2);
         expect(r.stderr).toBe("");
         expect(r.status).toBe(0);
         expect(existsSync(sig)).toBe(true);
         expect(existsSync(join(out, sshsigName(TAG)))).toBe(true);
-        const calls = readFileSync(join(dir, "aws.log"), "utf8").trim().split("\n");
-        expect(calls.length).toBe(2);
         for (const c of calls) {
             expect(c).toContain("kms sign --key-id alias/release");
             expect(c).toContain("--message-type RAW --signing-algorithm ED25519_SHA_512");
@@ -251,49 +294,62 @@ describe("the command line, through the local-key path (the same code as the sig
     });
 
     it("sign-kms refuses to write a signature the pinned key does not verify (the service's key is not the pinned one)", () => {
-        const files = join(dir, "files");
-        const out = join(dir, "out");
-        mkdirSync(files);
-        writeFileSync(join(files, `AgentMux-${SSHSIG_FLOOR}-x64-setup.exe`), "setup");
-        run(["build", "--dir", files, "--tag", TAG, "--out", out]);
+        const { out, signArgs } = releaseToSign();
         writeFileSync(join(dir, "k.pem"), pemOf(8)); // the service signs with key 8
-        mkdirSync(join(dir, "bin"));
-        writeFileSync(join(dir, "bin", "aws"), `#!/bin/sh\nmsg=""\nwhile [ $# -gt 0 ]; do case "$1" in --message) msg="\${2#fileb://}"; shift 2 ;; *) shift ;; esac; done\nopenssl pkeyutl -sign -inkey "${dir}/k.pem" -rawin -in "$msg" | openssl base64 -A\n`);
-        chmodSync(join(dir, "bin", "aws"), 0o755);
-        writeFileSync(join(dir, "keys.json"), JSON.stringify({ keys: [{ id: "k1", public_key: publicB64(7) }] }));
-        const r = run(["sign-kms", "--envelope", join(out, envelopeName(TAG)), "--key-id", "alias/release", "--id", "k1", "--out", join(out, `${envelopeName(TAG)}.sig`), "--keys-file", join(dir, "keys.json")], {
-            PATH: `${join(dir, "bin")}:${process.env.PATH}`,
-        });
+        const stand = writeStandIn([{ pem: join(dir, "k.pem") }]);
+        const r = run(signArgs, stand.env);
+        expect(standInCalls(stand).length).toBeGreaterThan(0);
         expect(r.status).toBe(1);
         expect(existsSync(join(out, sshsigName(TAG)))).toBe(false);
     });
 });
 
-describe("sign-kms when the second signature goes wrong: non-zero exit, no .sshsig left behind", () => {
-    const run = (args, env = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
-    // A stand-in for `aws kms sign`: the first call signs with key 7 (the .sig line); the second does what `second` says.
+describe("the signing program: aws from the PATH in the release job, only a named stand-in in a test", { timeout: 30_000 }, () => {
+    it("is plain `aws` when nothing names another and no test runner is running: the release workflow's behaviour", () => {
+        expect(signerCommand({})).toEqual(["aws"]);
+        expect(signerCommand({ [SIGNER_ENV]: "" })).toEqual(["aws"]);
+        // The release job's environment (the AWS variables the signing step has) changes nothing.
+        expect(signerCommand({ AWS_REGION: "x", AWS_ACCESS_KEY_ID: "y" })).toEqual(["aws"]);
+    });
+
+    it("is the program a test names, with its leading arguments, and refuses anything that is not a JSON array of strings", () => {
+        expect(signerCommand({ [SIGNER_ENV]: JSON.stringify(["/n/node", "/t/fake.mjs"]) })).toEqual(["/n/node", "/t/fake.mjs"]);
+        for (const bad of ["aws", "[]", "[1]", '[""]', '{"a":1}', "null", '["a", 2]']) {
+            expect(() => signerCommand({ [SIGNER_ENV]: bad }), bad).toThrow(/JSON array of strings/);
+        }
+    });
+
+    it("refuses under a test runner when no stand-in is named, so a test can never reach the real signing service", () => {
+        expect(() => signerCommand({ VITEST: "true" })).toThrow(/refusing to call the real signing service/);
+        expect(() => signerCommand({ VITEST: "true", [SIGNER_ENV]: "" })).toThrow(/refusing to call the real signing service/);
+        // ...and a stand-in named in the same environment is what runs.
+        expect(signerCommand({ VITEST: "true", [SIGNER_ENV]: JSON.stringify(["x"]) })).toEqual(["x"]);
+    });
+
+    it("sign-kms run with no stand-in named signs nothing, writes nothing and says why (and could not have found an aws: the PATH is an empty folder)", () => {
+        const { out, signArgs } = releaseToSign();
+        mkdirSync(join(dir, "empty"));
+        const r = runScript(signArgs, { PATH: join(dir, "empty"), VITEST: "true", [SIGNER_ENV]: "" });
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain("refusing to call the real signing service");
+        expect(existsSync(join(out, `${envelopeName(TAG)}.sig`))).toBe(false);
+        expect(existsSync(join(out, sshsigName(TAG)))).toBe(false);
+    });
+});
+
+describe("sign-kms when the second signature goes wrong: non-zero exit, no .sshsig left behind", { timeout: 30_000 }, () => {
+    const run = runScript;
+    // The stand-in's first call signs with key 7 (the .sig line); the second does what `second` says.
     const setup = (second) => {
-        const files = join(dir, "files");
-        const out = join(dir, "out");
-        mkdirSync(files);
-        writeFileSync(join(files, `AgentMux-${SSHSIG_FLOOR}-x64-setup.exe`), "setup");
-        run(["build", "--dir", files, "--tag", TAG, "--out", out]);
+        const { out, signArgs } = releaseToSign();
         writeFileSync(join(dir, "k7.pem"), pemOf(7));
         writeFileSync(join(dir, "k8.pem"), pemOf(8));
-        mkdirSync(join(dir, "bin"));
-        const body = second === "garbage" ? `echo "not a signature"` : `openssl pkeyutl -sign -inkey "${dir}/k8.pem" -rawin -in "$msg" | openssl base64 -A`;
-        writeFileSync(
-            join(dir, "bin", "aws"),
-            `#!/bin/sh\necho x >> "${dir}/calls"\nmsg=""\nwhile [ $# -gt 0 ]; do case "$1" in --message) msg="\${2#fileb://}"; shift 2 ;; *) shift ;; esac; done\nif [ "$(wc -l < "${dir}/calls")" -le 1 ]; then openssl pkeyutl -sign -inkey "${dir}/k7.pem" -rawin -in "$msg" | openssl base64 -A; else ${body}; fi\n`,
-        );
-        chmodSync(join(dir, "bin", "aws"), 0o755);
-        writeFileSync(join(dir, "keys.json"), JSON.stringify({ keys: [{ id: "k1", public_key: publicB64(7) }] }));
-        const sig = join(out, `${envelopeName(TAG)}.sig`);
+        const stand = writeStandIn([{ pem: join(dir, "k7.pem") }, second === "garbage" ? { garbage: true } : { pem: join(dir, "k8.pem") }]);
         // A file left by an earlier run must not survive a failed one.
         writeFileSync(join(out, sshsigName(TAG)), "stale");
-        const r = run(["sign-kms", "--envelope", join(out, envelopeName(TAG)), "--key-id", "alias/release", "--id", "k1", "--out", sig, "--keys-file", join(dir, "keys.json")], {
-            PATH: `${join(dir, "bin")}:${process.env.PATH}`,
-        });
+        const r = run(signArgs, stand.env);
+        // First of all: the stand-in was what answered, twice.
+        expect(standInCalls(stand).length).toBe(2);
         return { r, out };
     };
 

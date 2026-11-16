@@ -181,14 +181,41 @@ export function signWithKey(envelope, privateKeyPem, id) {
     return `${id} ${cryptoSign(null, Buffer.from(envelope), createPrivateKey(privateKeyPem)).toString("base64")}\n`;
 }
 
-/** The signature line for the envelope's file, made by the signing service. */
-export function signWithKms(envelopePath, keyId, id) {
+/** The environment variable a test names its stand-in signer with: a JSON array, the program and its leading arguments. */
+export const SIGNER_ENV = "AGENTMUX_RELEASE_SIGNER";
+
+/**
+ * The command that signs: `aws` from the PATH (the release workflow's), unless `env` names another in
+ * `AGENTMUX_RELEASE_SIGNER` as a JSON array (the program, then any leading arguments: a test's stand-in is
+ * `[process.execPath, "<its script>"]`, which runs the same on every system). Fails closed under a test runner: with
+ * `VITEST` set and no stand-in named, nothing is run, so a test can never reach the real signing service.
+ */
+export function signerCommand(env = process.env) {
+    const named = env[SIGNER_ENV];
+    if (named === undefined || named === "") {
+        if (env.VITEST) throw new Error(`refusing to call the real signing service (aws kms sign) from a test: name a stand-in in ${SIGNER_ENV}`);
+        return ["aws"];
+    }
+    let command;
+    try {
+        command = JSON.parse(named);
+    } catch {
+        throw new Error(`${SIGNER_ENV} isn't a JSON array of strings`);
+    }
+    if (!Array.isArray(command) || command.length === 0 || !command.every((a) => typeof a === "string" && a !== "")) throw new Error(`${SIGNER_ENV} isn't a JSON array of strings`);
+    return command;
+}
+
+/** `aws kms sign` of the file's bytes with the release key, as the base64 the service answers with. */
+function kmsSign(messageFile, keyId) {
+    const [program, ...leading] = signerCommand();
     const out = execFileSync(
-        "aws",
+        program,
         [
+            ...leading,
             "kms", "sign",
             "--key-id", keyId,
-            "--message", `fileb://${envelopePath}`,
+            "--message", `fileb://${messageFile}`,
             "--message-type", "RAW",
             "--signing-algorithm", "ED25519_SHA_512",
             "--query", "Signature",
@@ -197,7 +224,12 @@ export function signWithKms(envelopePath, keyId, id) {
         { encoding: "utf8" },
     ).trim();
     if (!/^[A-Za-z0-9+/=]{80,100}$/.test(out)) throw new Error("the signing service didn't return a signature");
-    return `${id} ${out}\n`;
+    return out;
+}
+
+/** The signature line for the envelope's file, made by the signing service. */
+export function signWithKms(envelopePath, keyId, id) {
+    return `${id} ${kmsSign(envelopePath, keyId)}\n`;
 }
 
 // ---- the second signature: SSH signature (SSHSIG) form -------------------------------------------------------------------
@@ -309,20 +341,7 @@ export function signSshsigWithKms(envelopePath, keyId, publicKeyB64) {
     try {
         const file = join(dir, "preimage");
         writeFileSync(file, sshsigPreimage(readFileSync(envelopePath)));
-        const out = execFileSync(
-            "aws",
-            [
-                "kms", "sign",
-                "--key-id", keyId,
-                "--message", `fileb://${file}`,
-                "--message-type", "RAW",
-                "--signing-algorithm", "ED25519_SHA_512",
-                "--query", "Signature",
-                "--output", "text",
-            ],
-            { encoding: "utf8" },
-        ).trim();
-        if (!/^[A-Za-z0-9+/=]{80,100}$/.test(out)) throw new Error("the signing service didn't return a signature");
+        const out = kmsSign(file, keyId);
         return sshsigArmor(Buffer.from(publicKeyB64, "base64"), Buffer.from(out, "base64"));
     } finally {
         rmSync(dir, { recursive: true, force: true });
