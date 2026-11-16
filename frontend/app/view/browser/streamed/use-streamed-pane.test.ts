@@ -38,12 +38,13 @@ const nav = (url: string, loading = false) => ({ t: "nav" as const, url, title: 
 
 describe("a streamed pane's state", () => {
     it("opens only once it is on screen and has a size", () => {
+        vi.useFakeTimers();
         const { pane, dispose } = mount();
         pane.shown(true);
+        vi.advanceTimersByTime(150);
         expect(events).toBeNull();
         pane.resized(800, 600);
-        vi.useFakeTimers();
-        pane.resized(800, 600);
+        expect(events).toBeNull();
         vi.advanceTimersByTime(150);
         expect(events).not.toBeNull();
         expect(pane.status()).toBe("connecting");
@@ -122,6 +123,63 @@ describe("a streamed pane's state", () => {
         expect(sent).toEqual([{ t: "nav", go: "url", url: "https://a.test/" }]);
         pane.send({ t: "nav", go: "reload" });
         expect(sent).toHaveLength(2);
+        dispose();
+    });
+
+    it("follows a drag: the newest size goes out every interval while the size keeps changing, not once it stops", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        sent.length = 0;
+        for (let w = 810; w <= 850; w += 10) {
+            pane.resized(w, 600);
+            vi.advanceTimersByTime(40);
+        }
+        expect(sent.length).toBeGreaterThanOrEqual(1);
+        vi.advanceTimersByTime(150);
+        expect(sent[sent.length - 1]).toEqual({ t: "resize", w: 850, h: 600 });
+        dispose();
+    });
+
+    it("does not reopen a failed or ended socket when the pane is resized; Reconnect does", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        events!.onEnd("failed");
+        events = null;
+        pane.resized(900, 600);
+        vi.advanceTimersByTime(150);
+        expect(events).toBeNull();
+        expect(pane.status()).toBe("failed");
+        pane.reconnect();
+        expect(events).not.toBeNull();
+        dispose();
+    });
+
+    it("opens on the first usable size when it was shown while too small", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        pane.shown(false);
+        pane.resized(10, 10);
+        vi.advanceTimersByTime(150);
+        events = null;
+        pane.shown(true);
+        expect(events).toBeNull();
+        expect(pane.status()).toBe("paused");
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        expect(events).not.toBeNull();
+        expect(pane.status()).toBe("connecting");
         dispose();
     });
 });
