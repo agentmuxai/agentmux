@@ -111,10 +111,13 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
         },
         resized: (w, h) => {
             size = { w, h };
-            clearTimeout(timer);
+            // A throttle, not a debounce: during a drag the newest size goes out every RESIZE_MS, and once more when it settles.
+            if (timer !== undefined) return;
             timer = setTimeout(() => {
-                if (handle) handle.send({ t: "resize", w: clampSide(w), h: clampSide(h) });
-                else open();
+                timer = undefined;
+                if (handle) handle.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
+                // Only a pane that has never opened opens here; a failed or ended one waits for Reconnect.
+                else if (status() === "waiting") open();
             }, RESIZE_MS);
         },
         shown: (v) => {
