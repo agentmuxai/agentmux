@@ -4,6 +4,7 @@
 import { useTick } from "@/app/hook/useTick";
 import type { PlayedSound } from "@/app/notification/sound/sound-history";
 import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
+import { recentSounds } from "@/app/notification/sound/sound-history";
 import { revealBlock } from "@/app/util/reveal-block";
 import { lastSound, soundText, usePlayedSounds } from "@/app/view/audit/audit-sound";
 import { openAuditAtSound } from "@/app/view/audit/open-audit";
@@ -19,7 +20,7 @@ export const LAST_SOUND_TIP = "Click to see this in the Audit. Shift-click goes 
  * a shift-click goes to the agent's pane.
  */
 export function LastSoundStatus(props: { rows?: Accessor<AgentRuntime[]> }): JSX.Element {
-    const sounds = usePlayedSounds();
+    const sounds = () => (tick(), recentSounds());
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const sound = createMemo(() => lastSound(sounds(), now()));
