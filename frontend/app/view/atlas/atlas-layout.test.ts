@@ -316,6 +316,20 @@ describe("layoutBySeat for a pane", () => {
         expect(columns.size).toBe(4);
         expect(shown(l, pane).k).toBeGreaterThanOrEqual(MIN_READABLE_K);
     });
+
+    it("takes more than six columns in a wide pane when that lets the cards grow (#47793)", () => {
+        // Two leads with two reports each and 51 agents with no lead, in a 1600 x 700 pane: six columns are 9 rows
+        // tall and leave the right half empty, so the height sets the scale.
+        const agents: AtlasAgent[] = [agent("boss", "narko"), agent("chief", "narko")];
+        for (let i = 0; i < 2; i++) agents.push(agent(`r${i}`, "narko", "boss"), agent(`s${i}`, "narko", "chief"));
+        for (let i = 0; i < 51; i++) agents.push(agent(`loner${i}`, "narko"));
+        const pane = { w: 1600, h: 700 };
+        const l = layoutBySeat(buildAtlasGraph([machine("narko")], agents), pane);
+        const columns = new Set([...l.nodes].filter(([key]) => key.includes("loner")).map(([, p]) => p.x));
+        expect(columns.size).toBeGreaterThan(6);
+        // Bigger than the 0.89 the six-column cap left.
+        expect(shown(l, pane).k).toBeGreaterThan(0.89);
+    });
 });
 
 
