@@ -298,14 +298,10 @@ pub(crate) fn compact_for_backstop(state: &AppState, block_id: &str) -> Result<(
 
 /// Wait for `block_id`'s turn to end, then send `message` as AgentMux's own turn.
 async fn compact_when_turn_ends(state: AppState, block_id: String, message: String) {
-    let deadline = tokio::time::Instant::now() + TURN_END_WAIT;
-    while crate::backend::blockcontroller::get_block_controller_status(&block_id).is_some_and(|s| s.turn_active) {
-        if tokio::time::Instant::now() >= deadline {
-            tracing::warn!(block_id = %block_id, "self-compaction given up: the turn didn't end within 30 minutes");
-            context_reading::compact_sent(&block_id, false);
-            return;
-        }
-        tokio::time::sleep(TURN_END_POLL).await;
+    if !wait_for_turn_end(&block_id).await {
+        tracing::warn!(block_id = %block_id, "self-compaction given up: the turn didn't end within 30 minutes");
+        context_reading::compact_sent(&block_id, false);
+        return;
     }
     let deps = crate::server::agent_handlers::AgentTurnDeps::from_state(&state);
     let outcome = crate::server::agent_handlers::run_agent_turn(

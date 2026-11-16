@@ -65,6 +65,9 @@ pub enum AccountSwitchStatus {
     Switched,
     /// An agent's pane is in a turn: the switch waits for the turn to end.
     Queued,
+    /// The agent was asked to reach a safe point and leave a handoff first
+    /// (`server::prep`); the switch runs when it has, or when its window ends.
+    Preparing,
     /// The agent is already on that account (a queued switch is cancelled).
     Unchanged,
 }
@@ -86,19 +89,15 @@ pub(super) fn open_panes(state: &AppState, def_id: &str) -> Vec<Block> {
 }
 
 fn set_pending(state: &AppState, blocks: &[Block], pending: Option<(&str, &str)>) {
-    for b in blocks {
-        let has = b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| !v.is_null());
-        if pending.is_none() && !has {
-            continue;
-        }
-        let mut update = obj::MetaMapType::new();
-        update.insert(META_PENDING_ACCOUNT.to_string(), pending.map_or(serde_json::Value::Null, |(a, _)| serde_json::json!(a)));
-        update.insert(META_PENDING_BY.to_string(), pending.map_or(serde_json::Value::Null, |(_, by)| serde_json::json!(by)));
-        match crate::server::service::update_object_meta(&state.mstore, &format!("block:{}", b.oid), &update) {
-            Ok(()) => blockcontroller::core::broadcast_block_update(&state.mstore, &state.event_bus, &b.oid),
-            Err(e) => tracing::warn!(block_id = %b.oid, error = %e, "agent.account.switch: pending switch not stored"),
-        }
-    }
+    // Clearing touches only the panes that carry one.
+    let ids: Vec<&str> =
+        blocks.iter().filter(|b| pending.is_some() || b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| !v.is_null())).map(|b| b.oid.as_str()).collect();
+    let null = serde_json::Value::Null;
+    let updates = [
+        (META_PENDING_ACCOUNT, pending.map_or(null.clone(), |(a, _)| serde_json::json!(a))),
+        (META_PENDING_BY, pending.map_or(null, |(_, by)| serde_json::json!(by))),
+    ];
+    crate::server::prep::set_block_meta(state, &ids, &updates);
 }
 
 /// Point the pane's own `cmd:env` config-dir variable at `to`. The spawn injects the linked
@@ -320,41 +319,114 @@ pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &Identi
         .map(|l| l.account_id)
         .collect();
     let label = account_label_in(to, accounts);
+    let result = |status| AgentAccountSwitchResult { status, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
     if !links.is_empty() && links.iter().all(|a| *a == to.id) {
         set_pending(state, &blocks, None);
-        return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Unchanged, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
+        // The change the agent was asked to prepare for isn't going to happen.
+        crate::server::prep::cancel(state, def_id);
+        return Ok(result(AccountSwitchStatus::Unchanged));
+    }
+    if is_asked(state, actor, def_id, &blocks, to, &label, when) {
+        let prep = prep_of(state, actor, def_id, &blocks, to, &label, when);
+        let (s, actor_c, def, to_id) = (state.clone(), actor.to_string(), def_id.to_string(), to.id.clone());
+        let now = when == AccountSwitchWhen::Now;
+        // The window first, then the choice it waits on: `apply_pending` skips an agent in a window, so
+        // a refresh between the two can't apply the choice before the agent was asked.
+        crate::server::prep::open(state, prep, Box::new(move |how| settle(&s, &actor_c, &def, &to_id, now || how == crate::server::prep::How::PersonSaidNow)));
+        set_pending(state, &blocks, Some((&to.id, actor)));
+        return Ok(result(AccountSwitchStatus::Preparing));
     }
     if when == AccountSwitchWhen::AfterTurn && blocks.iter().any(|b| busy(state, &b.oid)) {
         set_pending(state, &blocks, Some((&to.id, actor)));
-        return Ok(AgentAccountSwitchResult { status: AccountSwitchStatus::Queued, account_id: to.id.clone(), account_label: label, restarted: 0, failed: Vec::new() });
+        return Ok(result(AccountSwitchStatus::Queued));
     }
     Ok(apply(state, actor, def_id, to, provider, &blocks, accounts, when == AccountSwitchWhen::Now))
+}
+
+/// Whether the agent is asked to prepare before this switch (`server::prep`): a switch already waiting on
+/// its window is the window's, a failover never asks (AgentMux acts because the account failed, and the
+/// agent can seldom answer), and any other agent is asked when it has something to lose.
+fn is_asked(state: &AppState, actor: &str, def_id: &str, blocks: &[Block], to: &IdentityAccount, label: &str, when: AccountSwitchWhen) -> bool {
+    if super::failover::is_actor(actor) || blocks.is_empty() {
+        return false;
+    }
+    crate::server::prep::is_open(def_id) || crate::server::prep::decide(state, &prep_of(state, actor, def_id, blocks, to, label, when)) == crate::server::prep::Decision::Ask
+}
+
+fn prep_of(state: &AppState, actor: &str, def_id: &str, blocks: &[Block], to: &IdentityAccount, label: &str, when: AccountSwitchWhen) -> crate::server::prep::Prep {
+    crate::server::prep::Prep {
+        def_id: def_id.to_string(),
+        agent_name: blocks.first().map(|b| agent_name(&state.mstore, b)).unwrap_or_default(),
+        blocks: blocks.iter().map(|b| b.oid.clone()).collect(),
+        action: "account_switch",
+        target: to.id.clone(),
+        what: format!("move you to the account {label}"),
+        actor: actor.to_string(),
+        cuts_turn: when == AccountSwitchWhen::Now,
+    }
+}
+
+/// What a switch does when its window ends: as it would have without one. A turn still running waits for
+/// its end, unless the switch ends turns (`now`: the caller said `when: now`, or the person pressed
+/// "Switch now"). BLOCKING.
+fn settle(state: &AppState, actor: &str, def_id: &str, account_id: &str, now: bool) {
+    let blocks = open_panes(state, def_id);
+    // The account is read again: it may have signed out or gone in the window.
+    let Some((to, provider, accounts)) = receiving(state, account_id) else {
+        tracing::info!(def_id = %def_id, "agent.account.switch: a prepared switch was dropped, its account is gone or signed out");
+        set_pending(state, &blocks, None);
+        return;
+    };
+    if !now && blocks.iter().any(|b| busy(state, &b.oid)) {
+        // Still queued in the panes' meta: `apply_pending` runs it when the turn ends.
+        set_pending(state, &blocks, Some((&to.id, actor)));
+        return;
+    }
+    apply(state, actor, def_id, &to, &provider, &blocks, &accounts, now);
+}
+
+/// The account `account_id` as it is now, when it can take an agent: it, its provider and the provider's accounts.
+fn receiving(state: &AppState, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
+    let all: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
+    let to = all.iter().find(|a| a.id == account_id && can_receive(&a.status))?.clone();
+    let provider = canonical(&to.provider);
+    let same_provider = all.into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    Some((to, provider, same_provider))
+}
+
+/// Clear the chip's countdown from panes whose window is gone: srv restarted in it, so the choice it
+/// waited on is applied by `apply_pending` from the pane's own meta, without a window.
+fn clear_stale_prep(state: &AppState) {
+    for pane in tab_blocks(&state.mstore).iter().filter(|b| b.meta.get(crate::server::prep::META_PREP).is_some_and(|v| !v.is_null())) {
+        if !crate::server::prep::is_open(&obj::meta_get_string(&pane.meta, "agentId", "")) {
+            crate::server::prep::set_block_meta(state, &[pane.oid.as_str()], &[(crate::server::prep::META_PREP, serde_json::Value::Null)]);
+        }
+    }
 }
 
 /// Apply each queued switch whose agent has no pane in a turn. Runs with every
 /// episode refresh (a turn ending pokes it). BLOCKING.
 pub(super) fn apply_pending(state: &AppState) {
+    clear_stale_prep(state);
     let panes: Vec<Block> = tab_blocks(&state.mstore).into_iter().filter(|b| b.meta.get(META_PENDING_ACCOUNT).is_some_and(|v| v.is_string())).collect();
     let mut done = std::collections::HashSet::new();
     for first in &panes {
         let def_id = obj::meta_get_string(&first.meta, "agentId", "");
         let account_id = obj::meta_get_string(&first.meta, META_PENDING_ACCOUNT, "");
         let by = obj::meta_get_string(&first.meta, META_PENDING_BY, "operator");
-        if def_id.is_empty() || !done.insert(def_id.clone()) {
+        // An agent in its window is applied by the window, which also carries what it left.
+        if def_id.is_empty() || crate::server::prep::is_open(&def_id) || !done.insert(def_id.clone()) {
             continue;
         }
         let blocks = open_panes(state, &def_id);
         if blocks.iter().any(|b| busy(state, &b.oid)) {
             continue;
         }
-        let accounts: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
-        let Some(to) = accounts.iter().find(|a| a.id == account_id && can_receive(&a.status)) else {
+        let Some((to, provider, accounts)) = receiving(state, &account_id) else {
             tracing::info!(def_id = %def_id, "agent.account.switch: a queued switch was dropped, its account is gone or signed out");
             set_pending(state, &blocks, None);
             continue;
         };
-        let provider = canonical(&to.provider);
-        let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == provider).cloned().collect();
-        apply(state, &by, &def_id, to, &provider, &blocks, &same_provider, false);
+        apply(state, &by, &def_id, &to, &provider, &blocks, &accounts, false);
     }
 }

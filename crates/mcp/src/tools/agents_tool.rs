@@ -35,6 +35,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "context", tool: "AgentContext", rename: &[] },
     Act { action: "compact", tool: "AgentCompact", rename: &[] },
     Act { action: "fresh", tool: "AgentFresh", rename: &[] },
+    Act { action: "ready", tool: "AgentReady", rename: &[] },
     Act { action: "env_get", tool: "AgentEnvGet", rename: &[] },
     Act { action: "env_set", tool: "AgentEnvSet", rename: &[] },
     Act { action: "set_seat", tool: "AgentSetSeat", rename: &[] },
@@ -87,6 +88,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Some(handoff) => own_context(cx, "fresh", Some(handoff)).await,
                     None => Err(anyhow::anyhow!("Agents fresh needs a handoff: what your next session must know")),
                 },
+                "AgentReady" => ready(cx, &args).await,
                 "AgentEnvGet" => env(cx, "get", &args).await,
                 "AgentEnvSet" => env(cx, "set", &args).await,
                 "AgentSetSeat" => set_seats(cx, &args).await,
@@ -409,6 +411,31 @@ async fn own_context(cx: &ToolCtx<'_>, route: &str, focus: Option<String>) -> Re
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         anyhow::bail!("Agents {route}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `ready`: the caller answers the note that asked it to prepare for a change, as its own pane, which srv
+/// resolves from this process's agent token like `context` and `compact` (`/api/v1/agent/self/ready`).
+async fn ready(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let (handoff, more_time) = (str_arg(args, "handoff"), args.get("more_time").and_then(Value::as_bool).unwrap_or(false));
+    if handoff.is_none() && !more_time {
+        anyhow::bail!("Agents ready needs handoff (what is in flight, what you wait on, the next step), or more_time true with why");
+    }
+    let url = format!("{}/api/v1/agent/self/ready", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": crate::identity::agent_slug()?, "handoff": handoff, "more_time": more_time, "why": str_arg(args, "why") }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents ready: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }
@@ -863,6 +890,18 @@ mod tests {
         let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
         let e = call("Agents", &json!({ "action": "stop" }), &cx).await.unwrap_err().to_string();
         assert!(e.contains("missing required parameter: agent"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn ready_needs_a_handoff_or_more_time_before_anything_is_sent() {
+        let client = reqwest::Client::new();
+        let loops = LoopRegistry::default();
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let cx = ToolCtx { local_url: "http://127.0.0.1:1", auth_key: "k", block_id: "b", client: &client, loops: &loops, loop_counter: &counter };
+        let e = ready(&cx, &json!({ "why": "x" })).await.unwrap_err().to_string();
+        assert!(e.contains("needs handoff"), "{e}");
+        let (act, args) = pick("Agents", ACTS, &json!({ "action": "ready", "handoff": "In flight: PR 7", "more_time": false })).unwrap();
+        assert_eq!((act.tool, str_arg(&args, "handoff").as_deref()), ("AgentReady", Some("In flight: PR 7")));
     }
 
     /// A `host` makes the call remote, so an action that has no remote form refuses it instead of

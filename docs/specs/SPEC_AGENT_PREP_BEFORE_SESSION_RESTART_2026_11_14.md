@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-14
 **Author:** Agent5@narko (kanban #47642; the build is #47643)
-**Status:** active — approved; build #47643: PR 1 (the continuation record, section 6) is in review, PRs 2 and 3 not started.
+**Status:** active — approved; build #47643: PR 1 (the continuation record, section 6) merged (#7420); PR 2 (the framework and the account switch, sections 3 and 4, with DRY items 1 and 2) in review; PR 3 (the next actions, DRY items 3 to 5) not started.
 **Area:** agent lifecycle
 **Read at:** origin/main `0aef75be5`. Every file and line below was read there (a few by a read-only audit, then re-read by me where the spec leans on them; the places I did not re-read are marked "audit").
 **Asked by:** the operator, 2026-11-14, in their words:
@@ -162,7 +162,7 @@ You get up to 2 minutes, once. Then end your turn.
 
 It names the actor ("the person", an agent's name, or "AgentMux"). It never asks for approval: it reports what will happen.
 
-**Mid-turn.** If the agent is mid-tool-call, the note is queued behind it by the controller like any message; the window runs from the person's action, not from when the agent reads it. An agent that never reads it in time simply times out (3.5).
+**Mid-turn.** Read at `reactive/handler.rs` `send_to_block` and `blockcontroller/mod.rs` `deliver_agent_message_from` while building PR 2: a note sent to an agent in a turn is written on its live stdin at once and steers the turn (a persistent controller queues only while its process is starting, restarting or stopping), so the agent reads it after its current tool call and can answer `ready` inside the same turn. The window runs from the person's action, not from when the agent reads it. An agent that is inside one long tool call is not asked to wait for it: see 3.5.
 
 ### 3.3 The answer: one tool action
 
@@ -186,11 +186,13 @@ The handoff is stored once, durably, in the agent's own zone (`agent:<defId>:cur
 
 - **30 s by default**, counted from the person's action. **One extension to 120 s** when the agent says it needs it (`more_time`). These two numbers are constants in one place; the existing ones (`OVERRIDE_WINDOW` 30 s, `SELF_QUIT_WINDOW` 15 s) are not changed.
 - **Ends early** when: the agent answers `ready` and its turn has ended; the person presses **"Switch now"**.
-- **Ends at the deadline** whatever the agent has done. If it is still in a turn, `proceed` uses `Now` (the existing `stop_turn`). If it answered `ready`, it had already ended its turn by then; if it did not, AgentMux's own record is the handoff (section 6).
+- **Ends at the deadline** whatever the agent has done, and the deadline bounds only the agent's chance to answer, never a turn it is in (review by Manoz, 2026-11-15). When it runs out: a switch that ends turns (`when: now`, or the person's "Switch now") stops the turn as `stop_turn` always did; a switch that waits for the turn (`after_turn`, the composer's default) goes back to waiting for it, as it did before this existed (`agent:pending_account`, applied by `apply_pending` when the turn ends). So an agent inside one long tool call is not cut at 30 s. If it answered `ready`, what it left is stored already and is read by the next session whenever that starts; if it did not, AgentMux's own record is the handoff (section 6).
 - **Never blocks the person.** There is no state in which the action waits for an agent that cannot answer.
 - **Cancel:** choosing the account the agent is already on clears the pending change today (`set_pending(None)`); `prep` listens for that and drops the request, and tells the agent: "[AgentMux] The change was cancelled; carry on."
 - **A second request for the same agent** while one is pending replaces the target and **keeps the deadline** (it does not restart the window); an identical one is a no-op. One prep per agent at a time.
-- **srv restarts during a window:** the ledger is in memory, but the pending choice is already persisted in pane meta (`agent:pending_account`); after the restart `apply_pending` applies it at once, with no prep (the agent's turn context is gone anyway), and the framework's record (section 6) carries it.
+- **srv restarts during a window:** the ledger is in memory, but the pending choice is already persisted in pane meta (`agent:pending_account`, set when the window opens). After the restart `apply_pending` applies it with no prep, and a countdown left in `agent:prep` is cleared (`clear_stale_prep`). It cannot cut a live turn: `apply_pending` applies a queued switch only when none of the agent's panes is in a turn (`busy`, the same guard it always had), and it reads the controllers srv has after the restart, not the ones it had before. What I did not establish is whether an agent CLI process outlives a crashed srv (I found a Job Object with KILL_ON_JOB_CLOSE only for the window's own children, `bootstrap/watchers.rs`); the guard does not depend on it. The framework's record (section 6) and a handoff already stored carry the rest.
+- **Another door restarts the pane during a window** (the model panel's runtime change, an app upgrade, a stop): the window does not hold it back and does not yield to it. The change that door makes restarts the pane; the window's closure then runs on the new process as it would have on the old one (it re-reads the panes when it runs), and the handoff slot is read by whichever spawn comes first. Moving every door into one is DRY item 3, which stays in the follow-ups: it changes the model panel's frontend and each door's audit, and none of that is needed for the account switch to be safe.
+- **The handoff slot** (3.4) is one file per agent. A second handoff replaces one not yet read: the agent wrote it with the first in its context, because no restart happened in between (a restart is what reads the slot). A cancel removes only the handoff of its own request.
 
 ### 3.6 What the person sees
 
@@ -200,7 +202,7 @@ Inline, in the element they acted in, no modal. For the account switch that is t
 
 and, once the agent asks for longer: "Agent5 asks for more time: finishing a push · 1:40 · **Switch now**". It ends in "Switched" or, on timeout, "Switched (Agent5 did not answer in time; it resumes from AgentMux's record)". The bulk move (account strip) shows one such line with the longest window.
 
-**Shared with the shutdown countdown, so not written again:** the ledger shape (id, deadline, a `Notify` the window task selects on), the `now` RPC (the mirror of `close_now`), the event the frontend renders (a `prep:pending` and `prep:cleared` pair in the same form as `shutdown-pending`), the countdown component's timer (a frontend `setInterval` over `deadline_ms`), and the audit and `tell_requesters` helpers. **Not shared:** the banner (it is the pane's, operator-only, and has Keep, which means the opposite here) and the actions (`Stop`, `ClosePane`).
+**As built (PR 2):** the window is written to the pane's meta, `agent:prep` = `{id, action, until_ms, extended, why}`, the way the queued switch already shows through `agent:pending_account`, so the chip reads it live, it survives a window reload, and no new event type is added (the `prep:pending` and `prep:cleared` pair this section first proposed). The chip's timer is a frontend `setInterval` over `until_ms`; "Switch now" is the chip's click, an `agent.prep.now` RPC (the mirror of `close_now`). The ledger shape (id, deadline, a `Notify` the window task selects on) follows `pending_shutdown`'s; it is a second ledger rather than a shared one because a window here ends in a closure, not in a shutdown action. **Not shared:** the banner (it is the pane's, operator-only, and has Keep, which means the opposite here) and the actions (`Stop`, `ClosePane`).
 
 ### 3.7 Audit
 
@@ -247,11 +249,11 @@ One ordinary turn, at the agent's current context size: the note in, a short rep
 
 Only what the build touches anyway; each is a small, reviewable change, not a rewrite.
 
-1. **One "is this agent in a turn" helper**, used by `moves::busy`, `agent_context::wait_for_turn_end`, `switch::pane_in_a_turn` and `prep`. One definition (agent state Working or Waiting), one name.
-2. **One `wait_for_turn_end`**, the one `fresh` and `compact` already share, moved out of `agent_context.rs` to where `prep` and `account_episodes` can use it; `apply_pending` keeps its refresh but asks the shared helper.
-3. **One door to restart a pane.** `runtime-apply.ts` calls `ControllerResyncCommand` from the window; the build routes it through the srv `restart_panes_of` that the account and model switch use, so a restart has one place a handoff and an audit row can be added. (Frontend change small; behaviour the same.)
-4. **One "tell the agent" helper** with the choice made explicit (`starts_a_turn` or `held`): `failover::notify`, `login_expiry::resume`, `resume::start`, `handoff_message` and `prep` call it instead of each choosing.
-5. **The countdown ledger** stays in `pending_shutdown.rs`; `prep` reuses its pieces (3.6) and does not copy them. The sensitive-operation window is left alone in this task; it is noted as the next candidate to merge into the same ledger.
+1. **(Done in PR 2: `agent_state::in_turn`, used by `moves::busy`, `model_gateway::switch::pane_in_a_turn` and `prep`.) One "is this agent in a turn" helper**, used by `moves::busy`, `agent_context::wait_for_turn_end`, `switch::pane_in_a_turn` and `prep`. One definition (agent state Working or Waiting), one name.
+2. **(Done in PR 2 for `fresh` and `compact`, which now share the one in `agent_context.rs`; `prep` polls on its own because it also waits on a wake-up, and `apply_pending` asks `in_turn`.) One `wait_for_turn_end`**, the one `fresh` and `compact` already share, moved out of `agent_context.rs` to where `prep` and `account_episodes` can use it; `apply_pending` keeps its refresh but asks the shared helper.
+3. (PR 3.) **One door to restart a pane.** `runtime-apply.ts` calls `ControllerResyncCommand` from the window; the build routes it through the srv `restart_panes_of` that the account and model switch use, so a restart has one place a handoff and an audit row can be added. (Frontend change small; behaviour the same.)
+4. (PR 3; PR 2's one new caller, `prep`, calls `deliver_system_note` directly.) **One "tell the agent" helper** with the choice made explicit (`starts_a_turn` or `held`): `failover::notify`, `login_expiry::resume`, `resume::start`, `handoff_message` and `prep` call it instead of each choosing.
+5. (PR 3.) **The countdown ledger** stays in `pending_shutdown.rs`; `prep` reuses its pieces (3.6) and does not copy them. The sensitive-operation window is left alone in this task; it is noted as the next candidate to merge into the same ledger.
 
 ---
 

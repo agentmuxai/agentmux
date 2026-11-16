@@ -1799,6 +1799,10 @@
             "method": "AgentModelPanelCommand"
         },
         {
+            "command": "agent.prep.now",
+            "method": "AgentPrepNowCommand"
+        },
+        {
             "command": "agent.model.switch",
             "method": "AgentModelSwitchCommand",
             "opts": "{ timeout: 120000, ...opts }"

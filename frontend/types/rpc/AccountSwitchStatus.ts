@@ -3,4 +3,4 @@
 /**
  * What `agent.account.switch` did.
  */
-export type AccountSwitchStatus = "switched" | "queued" | "unchanged";
+export type AccountSwitchStatus = "switched" | "queued" | "preparing" | "unchanged";

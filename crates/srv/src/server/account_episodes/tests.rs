@@ -580,6 +580,7 @@ async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
     assert_eq!(busy, both, "listed, with the pane in a turn");
     assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "old", "not relinked");
     assert_eq!(pending_of(&state, &limited), Some(json!("spare")), "queued on the episode's pane too");
+    window_closed("twin").await;
 
     blockcontroller::delete_controller(&working);
     register_stub(&working, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
@@ -798,6 +799,18 @@ async fn listing_accounts_numbers_same_email_groups_and_keeps_the_numbers() {
     assert_eq!(seq(&r, "second"), Some(json!(2)));
 }
 
+/// Wait until the agent's window for a switch has ended and its closure has run. Nothing answers the
+/// note in these tests (no agent is registered to take it), so the window ends at once, not-asked.
+async fn window_closed(agent: &str) {
+    for _ in 0..600 {
+        if !crate::server::prep::is_open(agent) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("the window of {agent} did not close");
+}
+
 fn switch_req(agent: &str, account: &str, when: switch::AccountSwitchWhen) -> switch::AgentAccountSwitchReq {
     switch::AgentAccountSwitchReq { agent_id: Some(agent.to_string()), account: account.to_string(), when }
 }
@@ -826,6 +839,7 @@ async fn a_queued_strip_move_to_an_unchecked_account_lands_and_a_stale_alias_row
     let busy = pane(&state, &tab, "busy", "Busy", "old", None, true).await;
     let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "fresh".into(), block_ids: vec![busy.clone()] };
     assert_eq!(moves::move_agents(&state, &req).unwrap().busy.len(), 1, "queued");
+    window_closed("busy").await;
     register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
     switch::apply_pending(&state);
     assert_eq!(linked_account(&state, "busy"), ["fresh"]);
@@ -866,7 +880,7 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     assert_eq!(env.and_then(|e| e.get("CLAUDE_CONFIG_DIR").cloned()), Some(json!(dir_of(&state, "new"))), "the pane's own auth env follows the link");
 
     let r = switch::switch(&state, "busy", &switch_req("busy", "new", AfterTurn)).unwrap();
-    assert_eq!(r.status, switch::AccountSwitchStatus::Queued);
+    assert_eq!(r.status, switch::AccountSwitchStatus::Preparing, "an agent in a turn is asked to reach a safe point first");
     assert_eq!(linked_account(&state, "busy"), ["old"], "not moved under a turn");
     assert_eq!(pending_of(&state, &busy), Some(json!("new")));
     switch::apply_pending(&state);
@@ -879,6 +893,7 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
 
     // Queue again; the turn ends; the queued switch applies.
     switch::switch(&state, "", &switch_req("busy", "new", AfterTurn)).unwrap();
+    window_closed("busy").await;
     register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
     switch::apply_pending(&state);
     assert_eq!(linked_account(&state, "busy"), ["new"]);
@@ -888,7 +903,9 @@ async fn a_switch_applies_at_once_when_idle_waits_for_a_turn_and_cancels_on_the_
     state.identity_store.agent_identity_link("busy", "old", "claude").unwrap();
     register_stub(&busy, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
     let r = switch::switch(&state, "", &switch_req("busy", "new", Now)).unwrap();
-    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(r.status, switch::AccountSwitchStatus::Preparing, "asked first, as any agent in a turn is");
+    window_closed("busy").await;
+    assert_eq!(linked_account(&state, "busy"), ["new"], "and it moved when the window ended, without waiting for the turn");
     assert!(
         blockcontroller::get_controller(&busy).is_none_or(|c| !c.get_runtime_status().turn_active),
         "now ends the turn: a forced resync alone would only defer the restart to its end"
@@ -1177,4 +1194,77 @@ async fn a_switch_names_the_agent_by_its_display_name() {
     state.mstore.agent_def_insert(&mut twin).unwrap();
     let e = switch::switch(&state, "", &switch_req("Agent twin-1", "b", AfterTurn)).unwrap_err();
     assert!(e.contains("more than one agent"), "{e}");
+}
+
+/// An agent in a turn is asked to reach a safe point; it answers with a handoff, its turn ends, and the
+/// switch runs on that, long before the window would have ended (spec §3).
+#[tokio::test]
+async fn a_switch_asks_an_agent_in_a_turn_and_moves_it_when_it_answers() {
+    use crate::server::prep::{answer, tests::sink, Answer};
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    agent_def(&state, "asked");
+    state.identity_store.agent_identity_link("asked", "old", "claude").unwrap();
+    crate::backend::agent_session::set_global_transcript_store(std::sync::Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap()));
+    sink::expect("Asked");
+    let tab = new_tab(&state).await;
+    let working = pane(&state, &tab, "asked", "Asked", "old", None, true).await;
+
+    let r = switch::switch(&state, "", &switch_req("asked", "new", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Preparing);
+    assert_eq!(linked_account(&state, "asked"), ["old"], "not moved yet");
+    let meta = state.mstore.get::<Block>(&working).unwrap().unwrap().meta.get("agent:prep").cloned().unwrap();
+    assert_eq!(meta["action"], "account_switch", "the chip counts down from the pane's meta: {meta}");
+
+    for _ in 0..600 {
+        if !sink::notes("Asked").is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(sink::notes("Asked").len(), 1, "one note starts the agent's turn");
+    // It answers inside its turn, then the turn ends.
+    answer(&state, "asked", "asked", Answer { handoff: Some("In flight: PR 7".into()), ..Answer::default() }).unwrap();
+    register_stub(&working, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    window_closed("asked").await;
+    assert_eq!(linked_account(&state, "asked"), ["new"]);
+    assert_eq!(pending_of(&state, &working), None, "applied, so no longer queued");
+    assert!(state.mstore.get::<Block>(&working).unwrap().unwrap().meta.get("agent:prep").is_none_or(|v| v.is_null()), "the countdown is cleared");
+    assert_eq!(crate::backend::continuity_handoff::take("asked").unwrap().text, "In flight: PR 7", "the new session reads what it left");
+    cleanup(&[&working]);
+}
+
+/// An agent that holds nothing and is between turns is switched at once, with no note and no window; a
+/// failover never asks, whatever the agent is doing.
+#[tokio::test]
+async fn an_idle_agent_and_a_failover_are_never_asked() {
+    use crate::server::prep::tests::sink;
+    use switch::AccountSwitchWhen::AfterTurn;
+    let state = test_state();
+    for id in ["old", "new"] {
+        state.id_store.identity_upsert(&account(id, "claude", "valid")).unwrap();
+    }
+    for a in ["resting", "failing"] {
+        agent_def(&state, a);
+        state.identity_store.agent_identity_link(a, "old", "claude").unwrap();
+    }
+    sink::expect("Resting");
+    sink::expect("Failing");
+    let tab = new_tab(&state).await;
+    let resting = pane(&state, &tab, "resting", "Resting", "old", None, false).await;
+    let failing = pane(&state, &tab, "failing", "Failing", "old", None, true).await;
+
+    let r = switch::switch(&state, "", &switch_req("resting", "new", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched, "nothing to lose: at once");
+    assert!(!crate::server::prep::is_open("resting") && sink::notes("Resting").is_empty());
+
+    let accounts = fresh::identity_list(&state).unwrap();
+    let to = accounts.iter().find(|a| a.id == "new").unwrap();
+    let r = switch::switch_to(&state, failover::ACTOR, "failing", to, "claude", &accounts, AfterTurn).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Queued, "a failover waits for the turn as before");
+    assert!(!crate::server::prep::is_open("failing") && sink::notes("Failing").is_empty());
+    cleanup(&[&resting, &failing]);
 }
