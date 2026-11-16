@@ -80,7 +80,8 @@ fn routes() -> std::sync::MutexGuard<'static, Option<HashMap<isize, Vec<LocalRec
 pub fn apply(win: Id, wnum: isize, routing: MouseRouting, holes: Vec<LocalRect>) {
     match routing {
         MouseRouting::ByPixel => {
-            set_ignores_mouse(win, false);
+            // The window's state is left as it is: `track` reads the cursor and sets it, and a refresh that
+            // lands while a button is held (the stack resized under a press) must not undo the held-button rule.
             track(wnum, holes);
         }
         MouseRouting::App => {
