@@ -345,10 +345,26 @@ pub fn installed(user_home: &Path, channel: &str) -> bool {
     }
 }
 
+/// Does this channel's login service start a program from under `base`? Read from the service's own definition (the
+/// unit, the plist or the scheduled task's XML), so a channel whose service runs a program from somewhere else (a package
+/// unpacked by hand, the folder the install script used before the rename) does not count as using `base`.
+pub fn runs_from(user_home: &Path, channel: &str, base: &Path) -> bool {
+    let definition = match manager() {
+        Some(Manager::Task) => run_output("schtasks", &["/Query", "/TN", &task_name(channel), "/XML"]).ok(),
+        Some(m) => std::fs::read_to_string(file_path(m, user_home, channel)).ok(),
+        None => None,
+    };
+    definition.is_some_and(|text| super::uninstall::text_names_under(&text, base))
+}
+
 fn run_quiet(program: &str, args: &[&str]) -> Result<(), String> {
+    run_output(program, args).map(|_| ())
+}
+
+fn run_output(program: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new(program).args(args).stdin(Stdio::null()).no_window().output().map_err(|e| format!("cannot run {program}: {e}"))?;
     if out.status.success() {
-        return Ok(());
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
     let said = String::from_utf8_lossy(&out.stderr);
     Err(format!("`{program} {}` failed: {}", args.join(" "), said.trim()))
