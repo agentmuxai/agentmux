@@ -200,7 +200,7 @@ describe("a release srv found", () => {
         await mount();
         look("available, setup install");
         await click("What's new");
-        await click("Download");
+        await click("Open the download page");
         await snapshot("release-setup");
     });
 

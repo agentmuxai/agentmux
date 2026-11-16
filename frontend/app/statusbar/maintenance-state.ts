@@ -13,6 +13,7 @@ import {
     cancelUpgrade,
     checkedAt,
     checkForUpdate,
+    downloadPageUrl,
     loadAppUpdate,
     releaseDownload,
     startAppUpdateDownload,
@@ -52,6 +53,11 @@ function createUpdateView() {
     const storeBelowFloor = () => viaStore() && !!installFirst();
     // A Store install is updated by the Store: the release on offer is the one it lists, so there is no button until it lists one.
     const storeOffers = () => !viaStore() || storeAnswer()?.state === "available";
+    // A release on offer that this install can't download itself (not a Store install, which has its own button): the
+    // button opens the download page for this system, and says so.
+    const opensDownloadPage = () => !viaStore() && !!release() && !installFirst() && !appUpdate()?.can_download;
+    // Why not, when srv says (a macOS app that can't be replaced where it is, GitHub limiting the check).
+    const downloadBlocked = () => (opensDownloadPage() ? (appUpdate()?.download_blocked ?? null) : null);
     // Where this AgentMux stands, beside Check for update. A Store install says it in the Store's terms.
     const standing = () => {
         const s = appUpdate();
@@ -79,7 +85,7 @@ function createUpdateView() {
     // A release GitHub has that the Store has not listed for this PC yet: the panel says so and offers the Store page.
     const storeLagging = () => storePublishedNotListed() !== null;
     const openStorePage = () => void openLink(MS_STORE_PAGE_URL);
-    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, storeLagging, openStorePage, standing, badge };
+    return { release, download, updaterStatus, percent, updaterVersion, installFirst, storeBelowFloor, storeOffers, storeLagging, openStorePage, opensDownloadPage, downloadBlocked, standing, badge };
 }
 
 /** Check for update, and what it said when it failed. */
@@ -139,7 +145,7 @@ export function createMaintenance() {
             // srv downloads, verifies and unpacks what it can (a Windows
             // portable); for any other install the release page is the way.
             if (!appUpdate()?.can_download) {
-                void openLink(r.url);
+                void openLink(downloadPageUrl(appUpdate()?.install) ?? r.url);
                 return;
             }
             setStartError(null);

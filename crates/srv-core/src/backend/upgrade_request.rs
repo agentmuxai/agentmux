@@ -346,6 +346,7 @@ mod tests {
             install: if can_download { "windows-portable" } else { "windows-setup" }.into(),
             asset: None,
             can_download,
+            download_blocked: None,
             download: None,
             install_first: None,
             rev: 0,

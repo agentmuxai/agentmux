@@ -370,7 +370,7 @@ describe("staged release helpers", () => {
 });
 
 describe("Maintenance update row", () => {
-    it("shows the release, What's new opens its page on GitHub, and Download opens the release page", async () => {
+    it("shows the release, What's new opens its page on GitHub, and the button opens the download page for this system", async () => {
         updateStatus.mockResolvedValue(AVAILABLE);
         render(() => <MaintenanceSection />);
         expect(await screen.findByText("v0.59.27 is out")).toBeTruthy();
@@ -378,9 +378,28 @@ describe("Maintenance update row", () => {
         expect(openLink).toHaveBeenCalledWith("https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27");
         expect(screen.queryByText("- Sysinfo opens on a new Overview")).toBeNull();
         openLink.mockReset();
-        fireEvent.click(screen.getByRole("button", { name: "Download" }));
-        expect(openLink).toHaveBeenCalledWith(AVAILABLE.url);
+        // A setup.exe install that can't download the file itself says what the button does, and opens its system's page.
+        expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Open the download page" }));
+        expect(openLink).toHaveBeenCalledWith("https://agentmux.ai/downloads#windows");
         expect(installAppUpdate).not.toHaveBeenCalled();
+    });
+
+    it("a macOS app that can't download says why, and its button opens the macOS page, not the releases page", async () => {
+        const why = "GitHub is limiting update checks from this computer; try again after 08:29. The download is offered once GitHub answers.";
+        updateStatus.mockResolvedValue({ ...AVAILABLE, install: "macos-app", download_blocked: why });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText(why)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Open the download page" }));
+        expect(openLink).toHaveBeenCalledWith("https://agentmux.ai/downloads#macos");
+    });
+
+    it("an install that downloads in the app keeps Download and shows no reason", async () => {
+        updateStatus.mockResolvedValue({ ...PORTABLE, download_blocked: undefined });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Open the download page" })).toBeNull();
     });
 
     it("What's new is offered when the release has no notes", async () => {
@@ -1004,10 +1023,10 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(openLink).toHaveBeenCalledWith("https://docs.agentmux.ai/installation/#moving-off-the-microsoft-store-build");
     });
 
-    it("other installs keep their Download button and no Store note", async () => {
+    it("other installs keep their own button and no Store note", async () => {
         updateStatus.mockResolvedValue(AVAILABLE);
         render(() => <MaintenanceSection />);
-        expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
+        expect(await screen.findByRole("button", { name: "Open the download page" })).toBeTruthy();
         expect(screen.queryByText(/Microsoft Store/)).toBeNull();
         expect(storeCheck).not.toHaveBeenCalled();
     });
@@ -1017,7 +1036,7 @@ describe("Maintenance on a Microsoft Store install", () => {
         updateCheck.mockResolvedValue(AVAILABLE);
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Check for update" }));
-        expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
+        expect(await screen.findByRole("button", { name: "Open the download page" })).toBeTruthy();
         expect(updateCheck).toHaveBeenCalledTimes(1);
         expect(storeCheck).not.toHaveBeenCalled();
     });
