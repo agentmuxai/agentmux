@@ -39,8 +39,8 @@ const TOKENS = `:root{
   --ui-font-size:12px;--ui-font-weight:500;--ui-pad-y:4px;--ui-pad-x:12px;--ui-gap:6px;--ui-height:26px;--ui-icon-size:12px;
 }
 body{margin:0;background:#000;color:#ddd;font:13px Arial,sans-serif}
-/* The agent pane's own font: monospace at --font-agent-size, which wraps far more than Arial (Clare's look check). */
-.view,.view button,.view input{font-family:Consolas,'DejaVu Sans Mono','Liberation Mono',monospace}
+/* The agent pane's own font: monospace at --font-agent-size, which wraps far more than Arial (Clare's look check). Consolas is narrower than the DejaVu and Menlo faces the other platforms use, so the letters are spaced out to their width: the first version passed here and failed on macOS, Linux and CI. */
+.view,.view button,.view input{font-family:Consolas,'DejaVu Sans Mono','Liberation Mono',monospace;letter-spacing:.055em}
 .case{margin:0 0 8px;overflow:hidden}`;
 
 /** What the agent pane gives the stack: a column with the transcript above and the composer below. The pane's zoom is

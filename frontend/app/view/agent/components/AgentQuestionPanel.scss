@@ -292,6 +292,11 @@
         gap: 0 var(--space-1-5);
     }
 
+    // The icon is only decoration, and took a line of its own here.
+    .agent-question-panel-icon {
+        display: none;
+    }
+
     .agent-question-panel-title {
         font-size: var(--text-sm);
     }
@@ -308,12 +313,12 @@
         flex-wrap: wrap;
         justify-content: stretch;
         gap: var(--space-1);
-        padding: var(--space-1) var(--space-3);
+        padding: var(--space-1) var(--space-2);
         // Smaller buttons: a row of 26 px buttons with their padding was most of the bar.
         --ui-height: 22px;
         --ui-pad-y: 2px;
-        --ui-pad-x: var(--space-1-5);
-        --ui-font-size: var(--text-xs);
+        --ui-pad-x: var(--space-1);
+        --ui-font-size: var(--text-2xs);
 
         .agent-question-panel-btn {
             flex: 1 1 auto;
@@ -339,5 +344,6 @@
         flex-direction: column;
         align-items: flex-start;
         gap: var(--space-1);
+        font-size: var(--text-sm);
     }
 }
