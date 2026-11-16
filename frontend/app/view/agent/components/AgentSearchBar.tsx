@@ -63,6 +63,8 @@ export interface AgentSearchBarProps {
     matchCount: Accessor<number>;
     /** A pass is taking long enough to say so. */
     searching?: Accessor<boolean>;
+    /** What is typed, as typed: a bar brought back after a recycle, or drawn again, starts with it and leaves the caret alone. */
+    text?: Accessor<string | undefined>;
     /** Dim mode: rows that do not match are shown at reduced strength while a query is showing. */
     dim?: Accessor<boolean>;
     onDimChange?: (dim: boolean) => void;
@@ -104,10 +106,18 @@ export const AgentSearchBar = (props: AgentSearchBarProps): JSX.Element => {
                 <TextInput
                     variant="plain"
                     ref={(el) => {
+                        if (props.measuring) return;
+                        // A bar with text, even empty text (brought back after a recycle, or drawn again), shows it and
+                        // leaves the caret where the person had it; only a bar nobody has typed in takes it.
+                        const typed = props.text?.();
+                        if (typed !== undefined) {
+                            el.value = typed;
+                            return;
+                        }
                         // Auto-focus when the bar appears. The setTimeout defers
                         // the focus call past the current render frame so the
                         // element is guaranteed to be mounted and visible.
-                        if (!props.measuring) setTimeout(() => el?.focus(), 0);
+                        setTimeout(() => el?.focus(), 0);
                     }}
                     class="agent-search-input"
                     type="text"
