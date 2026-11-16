@@ -166,11 +166,11 @@ impl<'a> Scheduler<'a> {
             position: Position {
                 decided: self.decided.iter().map(|(id, carries)| (id.to_string(), *carries)).collect(),
                 finished,
-                failed: {
+                failed: Some({
                     let mut failed: Vec<String> = self.failed.iter().map(|id| id.to_string()).collect();
                     failed.sort_unstable();
                     failed
-                },
+                }),
                 held: self.held.iter().map(|e| e.id.clone()).collect(),
                 spent_by: self.spent_by.iter().map(|(id, usd)| (id.to_string(), *usd)).collect(),
                 loop_elapsed_ms: self.loop_started.iter().map(|(id, since)| (id.clone(), ms(since))).collect(),
@@ -214,7 +214,16 @@ impl<'a> Scheduler<'a> {
             decided.insert(edge(id)?.id.as_str(), *carries);
         }
         let finished = c.position.finished.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?;
-        let failed = c.position.failed.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?;
+        let failed = match &c.position.failed {
+            Some(ids) => ids.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?,
+            // Written before the set was kept: a block that finished with a handled failure said so
+            // as its output (`failed: true` and the error), and that is still what it says.
+            None => finished
+                .iter()
+                .copied()
+                .filter(|id| c.outputs.get(*id).is_some_and(|o| o.get("failed").and_then(serde_json::Value::as_bool) == Some(true) && o.get("error").is_some()))
+                .collect(),
+        };
         let held = c.position.held.iter().map(|id| edge(id)).collect::<Result<Vec<_>, _>>()?;
         let mut rounds = HashMap::new();
         for (id, n) in &c.loop_counters {
