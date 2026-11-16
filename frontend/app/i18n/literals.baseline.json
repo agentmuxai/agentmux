@@ -343,7 +343,7 @@
     "frontend/app/view/ssh-approval/SshApprovalWindow.tsx": 2,
     "frontend/app/view/swarm/swarm-agent-card.tsx": 2,
     "frontend/app/view/swarm/swarm-background-tasks.tsx": 1,
-    "frontend/app/view/swarm/swarm-broadcast.tsx": 9,
+    "frontend/app/view/swarm/swarm-broadcast.tsx": 8,
     "frontend/app/view/swarm/swarm-filter-bar.tsx": 5,
     "frontend/app/view/swarm/swarm-fleet-toolbar.tsx": 13,
     "frontend/app/view/swarm/swarm-provider-icon.tsx": 1,

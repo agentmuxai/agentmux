@@ -87,18 +87,18 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
     });
     out.push(match f.free_bytes {
         None => check("disk", Level::Warn, "cannot read the free space", None),
-        Some(b) if b < 200 * MIB => check("disk", Level::Fail, format!("{} MiB free", b / MIB), Some("free space: agent work and the server's databases are written here")),
+        Some(b) if b < 200 * MIB => check("disk", Level::Fail, format!("{} MiB free", b / MIB), Some("free space: agent work and the databases of AgentMux Headless are written here")),
         Some(b) if b < 1024 * MIB => check("disk", Level::Warn, format!("{} MiB free", b / MIB), Some("free some space soon")),
         Some(b) => check("disk", Level::Ok, format!("{:.1} GiB free", b as f64 / (1024.0 * MIB as f64)), None),
     });
     out.push(match f.key_mode {
-        None => check("key file", Level::Ok, "none yet (the server makes it at its first start, owner-only)", None),
+        None => check("key file", Level::Ok, "none yet (AgentMux Headless makes it at its first start, owner-only)", None),
         Some(mode) if mode & 0o077 != 0 => check("key file", Level::Fail, format!("the key file is readable by others (mode {:o})", mode & 0o777), Some("chmod 600 the file named in `agentmux status`, then `agentmux restart`")),
         Some(_) => check("key file", Level::Ok, "owner-only", None),
     });
     out.push(match (&f.running, f.answering, f.port_free) {
-        (Some(s), true, _) => check("port", Level::Ok, format!("the server answers on port {}", s.web_port), None),
-        (Some(s), false, _) => check("port", Level::Warn, format!("the server (pid {}) is running but does not answer on port {} yet", s.pid, s.web_port), Some("wait a moment, then `agentmux logs`")),
+        (Some(s), true, _) => check("port", Level::Ok, format!("AgentMux Headless answers on port {}", s.web_port), None),
+        (Some(s), false, _) => check("port", Level::Warn, format!("AgentMux Headless (pid {}) is running but does not answer on port {} yet", s.pid, s.web_port), Some("wait a moment, then `agentmux logs`")),
         (None, _, Some(true)) => check("port", Level::Ok, format!("ports {} and {} are free", f.port, f.port + 1), None),
         (None, _, Some(false)) => check("port", Level::Fail, format!("port {} or {} is in use by another program", f.port, f.port + 1), Some("choose another with `agentmux setup --port <port>`")),
         (None, _, None) => check("port", Level::Warn, "not checked", None),
@@ -145,7 +145,7 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
         }
     }
     out.push(match (f.service_installed, f.service_names_exe) {
-        (false, _) => check("service", Level::Ok, "none: the server runs only when you start it", Some("`agentmux setup --service` starts it at every login")),
+        (false, _) => check("service", Level::Ok, "none: AgentMux Headless runs only when you start it", Some("`agentmux setup --service` starts it at every login")),
         (true, Some(false)) => check("service", Level::Warn, "the service runs a different install of this command", Some("`agentmux setup --service` points it at this one")),
         (true, _) => check("service", Level::Ok, "installed, and it runs this install", None),
     });
@@ -495,7 +495,7 @@ mod tests {
         let text = lines(&evaluate(&facts)).join("\n");
         assert!(text.contains("FAIL disk: 10 MiB free\n       -> free space"), "{text}");
         assert!(text.contains("ok   platform: linux x86_64\n"), "{text}");
-        assert!(!text.contains("ok   service: none: the server runs only when you start it\n       ->"), "an ok line carries no arrow: {text}");
+        assert!(!text.contains("ok   service: none: AgentMux Headless runs only when you start it\n       ->"), "an ok line carries no arrow: {text}");
     }
 
     #[test]

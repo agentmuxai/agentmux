@@ -95,7 +95,7 @@ impl Blocked {
     /// One sentence: what happened, and what to do about it.
     pub fn sentence(&self) -> String {
         format!(
-            "The server did not start: {} is using the shared folder (your agents, accounts and history), and this version's data needs preparing first. Close {} and run `agentmux start`, or update one of the two so both are the same version.",
+            "AgentMux Headless did not start: {} is using the shared folder (your agents, accounts and history), and this version's data needs preparing first. Close {} and run `agentmux start`, or update one of the two so both are the same version.",
             self.owner, self.owner
         )
     }
