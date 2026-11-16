@@ -577,6 +577,10 @@ pub(crate) unsafe fn install_macos_accessibility_governor() {
 /// `set_macos_dock_icon` (the icon needs a tile to land on). Harmless in a
 /// future packaged `.app` (already regular there). Idempotent.
 ///
+/// A test build in test window mode (`AGENTMUX_TEST_OFFSCREEN=1`) asks for an accessory app instead:
+/// no Dock tile, no menu bar and no activation, so a run on a shared screen leaves no trace there
+/// (`agentmux_common::test_offscreen::macos_activation_policy`).
+///
 /// Must run on the main thread after `cef::initialize` (NSApplication exists
 /// by then). FFI mirrors `set_macos_dock_icon` — raw libobjc, no extra crate.
 pub(crate) unsafe fn set_macos_activation_policy_regular() {
@@ -585,9 +589,6 @@ pub(crate) unsafe fn set_macos_activation_policy_regular() {
     type Id    = *mut c_void;
     type Sel   = *const c_void;
     type Class = *mut c_void;
-
-    // NSApplicationActivationPolicyRegular == 0 (Accessory == 1, Prohibited == 2).
-    const NS_ACTIVATION_POLICY_REGULAR: isize = 0;
 
     extern "C" {
         fn objc_getClass(name: *const c_char) -> Class;
@@ -615,8 +616,15 @@ pub(crate) unsafe fn set_macos_activation_policy_regular() {
     let sel_set = sel_registerName(b"setActivationPolicy:\0".as_ptr() as _);
     let msg_set: extern "C" fn(Id, Sel, isize) -> u8 =
         std::mem::transmute(objc_msgSend as *const ());
-    let ok = msg_set(app, sel_set, NS_ACTIVATION_POLICY_REGULAR);
-    tracing::info!(ok = ok != 0, "activation-policy: set NSApplication to Regular (Dock-visible)");
+    // NSApplicationActivationPolicyRegular == 0, Accessory == 1, Prohibited == 2.
+    let policy = agentmux_common::test_offscreen::macos_activation_policy();
+    let ok = msg_set(app, sel_set, policy);
+    tracing::info!(
+        ok = ok != 0,
+        policy,
+        "activation-policy: set NSApplication to {}",
+        if policy == 0 { "Regular (Dock-visible)" } else { "Accessory (test window mode: no Dock tile)" }
+    );
 }
 
 /// Set the macOS Dock icon for the running process.
@@ -643,6 +651,11 @@ pub(crate) unsafe fn set_macos_activation_policy_regular() {
 /// and the icon lives as long as the app does.
 pub(crate) unsafe fn set_macos_dock_icon() {
     use std::ffi::{c_char, c_void};
+
+    // A test build is an accessory app (set_macos_activation_policy_regular): no Dock tile to paint.
+    if agentmux_common::test_offscreen::active() {
+        return;
+    }
 
     type Id    = *mut c_void;
     type Sel   = *const c_void;
