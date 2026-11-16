@@ -185,17 +185,22 @@ export function signWithKey(envelope, privateKeyPem, id) {
 export const SIGNER_ENV = "AGENTMUX_RELEASE_SIGNER";
 
 /**
- * The command that signs: `aws` from the PATH (the release workflow's), unless `env` names another in
- * `AGENTMUX_RELEASE_SIGNER` as a JSON array (the program, then any leading arguments: a test's stand-in is
- * `[process.execPath, "<its script>"]`, which runs the same on every system). Fails closed under a test runner: with
- * `VITEST` set and no stand-in named, nothing is run, so a test can never reach the real signing service.
+ * The command that signs. Four cases, by whether a test runner is running (`VITEST`) and whether `AGENTMUX_RELEASE_SIGNER`
+ * is set to something:
+ * - neither: `aws` from the PATH, as the release workflow runs it;
+ * - a test runner and no stand-in: refused, so a test can never reach the real signing service;
+ * - a test runner and a stand-in: the stand-in, a JSON array (the program, then any leading arguments: `[process.execPath,
+ *   "<its script>"]` runs the same on every system);
+ * - a stand-in and no test runner: refused, so a release job never runs a program the environment names.
  */
 export function signerCommand(env = process.env) {
     const named = env[SIGNER_ENV];
+    const testing = Boolean(env.VITEST);
     if (named === undefined || named === "") {
-        if (env.VITEST) throw new Error(`refusing to call the real signing service (aws kms sign) from a test: name a stand-in in ${SIGNER_ENV}`);
+        if (testing) throw new Error(`refusing to call the real signing service (aws kms sign) from a test: name a stand-in in ${SIGNER_ENV}`);
         return ["aws"];
     }
+    if (!testing) throw new Error(`${SIGNER_ENV} is for tests: it is honoured only under a test runner, and nothing was run`);
     let command;
     try {
         command = JSON.parse(named);

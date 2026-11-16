@@ -304,26 +304,32 @@ describe("the command line, through the local-key path (the same code as the sig
     });
 });
 
-describe("the signing program: aws from the PATH in the release job, only a named stand-in in a test", { timeout: 30_000 }, () => {
-    it("is plain `aws` when nothing names another and no test runner is running: the release workflow's behaviour", () => {
+describe("the signing program: aws from the PATH in the release job, only a named stand-in under a test runner", { timeout: 30_000 }, () => {
+    const stand = JSON.stringify(["/n/node", "/t/fake.mjs"]);
+
+    it("neither a test runner nor a stand-in: plain `aws`, the release workflow's behaviour, whatever else its environment holds", () => {
         expect(signerCommand({})).toEqual(["aws"]);
         expect(signerCommand({ [SIGNER_ENV]: "" })).toEqual(["aws"]);
+        expect(signerCommand({ VITEST: "" })).toEqual(["aws"]);
         // The release job's environment (the AWS variables the signing step has) changes nothing.
         expect(signerCommand({ AWS_REGION: "x", AWS_ACCESS_KEY_ID: "y" })).toEqual(["aws"]);
     });
 
-    it("is the program a test names, with its leading arguments, and refuses anything that is not a JSON array of strings", () => {
-        expect(signerCommand({ [SIGNER_ENV]: JSON.stringify(["/n/node", "/t/fake.mjs"]) })).toEqual(["/n/node", "/t/fake.mjs"]);
+    it("a test runner and no stand-in: refused, so a test can never reach the real signing service", () => {
+        expect(() => signerCommand({ VITEST: "true" })).toThrow(/refusing to call the real signing service/);
+        expect(() => signerCommand({ VITEST: "true", [SIGNER_ENV]: "" })).toThrow(/refusing to call the real signing service/);
+    });
+
+    it("a test runner and a stand-in: the program it names, with its leading arguments, and nothing that is not a JSON array of strings", () => {
+        expect(signerCommand({ VITEST: "true", [SIGNER_ENV]: stand })).toEqual(["/n/node", "/t/fake.mjs"]);
         for (const bad of ["aws", "[]", "[1]", '[""]', '{"a":1}', "null", '["a", 2]']) {
-            expect(() => signerCommand({ [SIGNER_ENV]: bad }), bad).toThrow(/JSON array of strings/);
+            expect(() => signerCommand({ VITEST: "true", [SIGNER_ENV]: bad }), bad).toThrow(/JSON array of strings/);
         }
     });
 
-    it("refuses under a test runner when no stand-in is named, so a test can never reach the real signing service", () => {
-        expect(() => signerCommand({ VITEST: "true" })).toThrow(/refusing to call the real signing service/);
-        expect(() => signerCommand({ VITEST: "true", [SIGNER_ENV]: "" })).toThrow(/refusing to call the real signing service/);
-        // ...and a stand-in named in the same environment is what runs.
-        expect(signerCommand({ VITEST: "true", [SIGNER_ENV]: JSON.stringify(["x"]) })).toEqual(["x"]);
+    it("a stand-in and no test runner: refused, so a release job never runs a program its environment names", () => {
+        expect(() => signerCommand({ [SIGNER_ENV]: stand })).toThrow(/is for tests/);
+        expect(() => signerCommand({ [SIGNER_ENV]: "aws", VITEST: "" })).toThrow(/is for tests/);
     });
 
     it("sign-kms run with no stand-in named signs nothing, writes nothing and says why (and could not have found an aws: the PATH is an empty folder)", () => {
@@ -332,6 +338,18 @@ describe("the signing program: aws from the PATH in the release job, only a name
         const r = runScript(signArgs, { PATH: join(dir, "empty"), VITEST: "true", [SIGNER_ENV]: "" });
         expect(r.status).toBe(1);
         expect(r.stderr).toContain("refusing to call the real signing service");
+        expect(existsSync(join(out, `${envelopeName(TAG)}.sig`))).toBe(false);
+        expect(existsSync(join(out, sshsigName(TAG)))).toBe(false);
+    });
+
+    it("sign-kms run with a stand-in named but no test runner signs nothing and does not call the stand-in", () => {
+        const { out, signArgs } = releaseToSign();
+        writeFileSync(join(dir, "k.pem"), pemOf(7));
+        const standIn = writeStandIn([{ pem: join(dir, "k.pem") }]);
+        const r = runScript(signArgs, { ...standIn.env, VITEST: "" });
+        expect(r.status).toBe(1);
+        expect(r.stderr).toContain("is for tests");
+        expect(standInCalls(standIn)).toEqual([]);
         expect(existsSync(join(out, `${envelopeName(TAG)}.sig`))).toBe(false);
         expect(existsSync(join(out, sshsigName(TAG)))).toBe(false);
     });
