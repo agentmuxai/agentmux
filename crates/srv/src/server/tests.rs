@@ -3039,10 +3039,10 @@ mod fleet_tests {
             .into_iter()
             // register_agent's own setup call above now also audits a
             // "register" event (event_kind, #2694) alongside the stop's
-            // own delivery-attempt entry — both share this test's unique
-            // block_id, so filter to the delivery entry this test is
+            // own action entry — both share this test's unique
+            // block_id, so filter to the action entry this test is
             // actually about.
-            .filter(|e| e.block_id == block_id && e.event_kind == "delivery")
+            .filter(|e| e.block_id == block_id && e.event_kind == "action")
             .collect();
 
         assert_eq!(matching.len(), 1, "exactly one audit entry for this test's own block_id");
