@@ -56,7 +56,7 @@ export const STARTUP_HEADING_RE = /^# Session Context\b/;
 
 /**
  * Matches a full `[JEKT:...]...[/JEKT]` marker block spanning the whole
- * message. Produced by `wrap_jekt_message` (`crates/srv/src/backend/
+ * message. Produced by `wrap_jekt_message` (`crates/srv-core/src/backend/
  * reactive/sanitize.rs`) and the cloud relay's own wrapper — the two current producers of this format. Group 1 is the
  * structured tag's field string (`FROM=... TO=... TIER=...`); group 2 is
  * everything between the tag line and the closing `[/JEKT]`.
@@ -68,7 +68,7 @@ const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
 /**
  * A Swarm broadcast turn: one `[BROADCAST:FROM=user VIA=swarm TO=... RECIPIENTS=n
  * MSGID=... TS=...]` header line, then the body. Produced by
- * `broadcast_turn_message` (`crates/srv/src/backend/reactive/sanitize.rs`). Group 1
+ * `broadcast_turn_message` (`crates/srv-core/src/backend/reactive/sanitize.rs`). Group 1
  * is the field string; group 2 is the body.
  *
  * Spec: docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md §4.5.

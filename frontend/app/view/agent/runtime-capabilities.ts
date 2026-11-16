@@ -13,7 +13,7 @@ import type { PermissionMode } from "../../agent-model/types";
  * that is not offered).
  *
  * srv decides the same thing for the same reason when it seeds or fills
- * `--effort` (`model_takes_effort` in crates/srv/src/backend/agent_runtime.rs).
+ * `--effort` (`model_takes_effort` in crates/srv-core/src/backend/agent_runtime.rs).
  */
 
 /**
@@ -233,7 +233,7 @@ export function effectiveRuntime<T extends { model: string; effort: string; perm
  *
  * With the permission prompt tool (a persistent agent), the CLI SENDS a
  * `can_use_tool` request for what its mode wants approval for, and srv answers
- * EVERY one "allow" itself (`handle_control_frame`, crates/srv/src/backend/
+ * EVERY one "allow" itself (`handle_control_frame`, crates/srv-core/src/backend/
  * blockcontroller/persistent/input.rs; AskUserQuestion is the exception - it is
  * shown to the user). The CLI asked about: in Default, writes, reads outside the
  * working directory, and shell commands that are not known-safe (`touch`, `curl`;

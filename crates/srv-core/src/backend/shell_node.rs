@@ -1,0 +1,1018 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! ShellNodeRunner — spawns a shell command and streams output to the
+//! frontend as `shell_chunk` MPS events scoped to the agent's block.
+//!
+//! Launched by `handle_shell_create` (server/mod.rs) via `tokio::spawn`.
+//! The runner is fire-and-forget; the HTTP handler returns the `shell_id`
+//! to the MCP caller immediately while output streams asynchronously.
+//!
+//! Phase 2 of SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md. Uses
+//! `tokio::process::Command` with captured pipes (no PTY in this phase;
+//! PTY support is a Phase 3 follow-up that requires portable-pty wiring
+//! similar to the existing ShellController).
+
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use parking_lot::Mutex;
+use serde::Serialize;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::sync::{mpsc, oneshot};
+
+use crate::backend::mps::Broker;
+use agentmux_common::api_types::ShellInputFailure;
+
+use agentmux_common::time::now_ms_u64 as now_ms;
+
+/// How much of a job's cleaned output is kept for the agent that ran it.
+const TAIL_LINES: usize = 400;
+const TAIL_LINE_CHARS: usize = 4000;
+
+/// Live status of a running (or recently exited) shell. Updated by
+/// `ShellNodeRunner` as output arrives and on exit.
+///
+/// `block_id`/`cmd`/`title`/`started_at` are populated once at spawn (see
+/// `ShellNodeRunner::run`) and never change — kept here (rather than a
+/// separate lookup) so `list_active` (SPEC_SWARM_LONG_RUNNING_PROCESS_
+/// ROWS_2026_07_20) can answer "which shells belong to block X" from the
+/// same map `get_status`/`ShellStatus` already query, with no new registry
+/// or second source of truth.
+#[derive(Clone, Default)]
+pub struct ShellStatusInfo {
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
+    pub block_id: String,
+    pub cmd: String,
+    pub title: String,
+    pub started_at: u64,
+    /// The last lines of a job that was given Vault secrets, already cleaned of them:
+    /// kept only for such a job, so the agent that ran it can read the result.
+    pub tail: Option<Arc<Mutex<VecDeque<String>>>>,
+    /// A line of `tail` was cut to the per-line limit: the output is not whole.
+    pub tail_clipped: bool,
+    /// The entries a `capture` stored, once the job ended.
+    pub captured: Vec<String>,
+    /// Why a `capture` failed, and so why the output was withheld.
+    pub withheld: Option<String>,
+}
+
+/// Snapshot of one currently-running shell for the Swarm pane's per-agent
+/// long-running-process rows. See `ShellSessionRegistry::list_active`.
+/// Carries `block_id` (unfiltered list — same shape as `subagent.ListActive`/
+/// `ActiveSubagent.parent_block_id`) so the Swarm pane's `buildTree()` groups
+/// by block client-side in one pass, instead of one RPC call per tracked
+/// agent block.
+#[derive(Clone, Serialize)]
+pub struct ShellSummary {
+    pub shell_id: String,
+    pub block_id: String,
+    pub cmd: String,
+    pub title: String,
+    pub started_at: u64,
+    pub line_count: u64,
+}
+
+// Per-shell registry entry: stop handle + optional stdin channel (Phase 3b).
+// The stdin_tx is an mpsc sender to a relay task that owns the real ChildStdin.
+// Sending text is non-blocking (unbounded channel); the relay handles the
+// actual write. When all senders are dropped, the channel closes, the relay
+// exits, ChildStdin is dropped, and the child sees EOF on stdin.
+struct ShellEntry {
+    stop_tx: oneshot::Sender<()>,
+    // None for entries created by unit tests (no relay task / ChildStdin).
+    stdin_tx: Option<mpsc::UnboundedSender<String>>,
+}
+
+/// Per-shell stop handles + status. `ShellStop` fires the oneshot; `ShellInput`
+/// sends to the stdin relay; `ShellStatus` reads the live status arc.
+/// Lives in `AppState.shell_sessions`.
+/// Max number of EXITED shell statuses retained for post-exit ShellStatus
+/// queries. Running shells are always kept regardless of this cap; only
+/// exited entries beyond it are evicted oldest-first. Bounds memory for
+/// long-lived sidecars that spawn many short shells.
+const MAX_EXITED_STATUS: usize = 512;
+
+#[derive(Default)]
+pub struct ShellSessionRegistry {
+    shells: Mutex<HashMap<String, ShellEntry>>,
+    // Status entries persist after exit so ShellStatus can query final
+    // exit_code/line_count. Exited entries are capped at MAX_EXITED_STATUS
+    // (oldest-first eviction via status_order); running entries are never
+    // evicted. stop_all() clears everything on srv shutdown.
+    status_map: Mutex<HashMap<String, Arc<Mutex<ShellStatusInfo>>>>,
+    // Spawn-order queue of shell_ids, used to evict the oldest exited status
+    // entries first when over the cap.
+    status_order: Mutex<VecDeque<String>>,
+}
+
+impl ShellSessionRegistry {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    // Used by unit tests — registers a stop handle with no stdin relay/status.
+    #[cfg(test)]
+    fn insert(&self, shell_id: String, tx: oneshot::Sender<()>) {
+        self.shells.lock().insert(shell_id, ShellEntry { stop_tx: tx, stdin_tx: None });
+    }
+
+    // Full registration called by the runner after spawning the child.
+    // stdin_tx is None when capture_stdin is false (stdin is /dev/null).
+    // Returns shell_ids evicted by the prune pass — the caller (which holds
+    // the Broker, unlike this registry) purges their `shell:<id>` persisted
+    // MuxEvent history so the broker's persist_map key set stays bounded
+    // in step with this registry's own MAX_EXITED_STATUS cap.
+    //
+    // `pub(crate)` (rather than private) so `server::shell_handlers`'s own
+    // tests can seed a running/exited shell directly, without spawning a
+    // real child process, to exercise the `shellstatus` RPC handler's JSON
+    // shape end-to-end for both branches — the same pre-tested primitive
+    // this module's own tests already use, not duplicated logic.
+    pub fn register_full(
+        &self,
+        shell_id: String,
+        stop_tx: oneshot::Sender<()>,
+        stdin_tx: Option<mpsc::UnboundedSender<String>>,
+        status: Arc<Mutex<ShellStatusInfo>>,
+    ) -> Vec<String> {
+        self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx });
+        self.status_map.lock().insert(shell_id.clone(), status);
+        self.status_order.lock().push_back(shell_id);
+        // Bound retained exited statuses; every spawn is a natural prune trigger.
+        self.prune_exited_statuses()
+    }
+
+    /// Evict oldest EXITED status entries beyond `MAX_EXITED_STATUS`. Running
+    /// shells are always retained (their status is read live via ShellStatus).
+    /// Also drops any order-queue ids whose status entry is already gone.
+    /// Returns the shell_ids actually evicted (status entry removed) so the
+    /// caller can purge their broker-side persisted history too.
+    fn prune_exited_statuses(&self) -> Vec<String> {
+        let mut map = self.status_map.lock();
+        let mut order = self.status_order.lock();
+        let mut evicted = Vec::new();
+        let mut exited = map
+            .values()
+            .filter(|arc| !arc.lock().running)
+            .count();
+        let mut i = 0;
+        while exited > MAX_EXITED_STATUS && i < order.len() {
+            let id = order[i].clone();
+            match map.get(&id) {
+                // Exited entry over the cap → evict it.
+                Some(arc) if !arc.lock().running => {
+                    map.remove(&id);
+                    order.remove(i);
+                    exited -= 1;
+                    evicted.push(id);
+                }
+                // Still running → keep in place, advance.
+                Some(_) => i += 1,
+                // Stale order id (already removed) → drop from queue.
+                None => {
+                    order.remove(i);
+                }
+            }
+        }
+        evicted
+    }
+
+    /// Request stop of a running shell. Returns false if unknown or already exited.
+    /// Dropping the stdin_tx here closes the relay channel → ChildStdin drops →
+    /// child sees EOF, unblocking any stdin-reading process before the kill.
+    pub fn stop(&self, shell_id: &str) -> bool {
+        // Do NOT remove from status_map here — the runner task is still live
+        // and will persist the final exit status after child.wait() returns.
+        if let Some(entry) = self.shells.lock().remove(shell_id) {
+            // stdin_tx dropped here → relay closes → child gets stdin EOF
+            let _ = entry.stop_tx.send(());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Called by the runner on natural exit (stdout/stderr closed). Removes the
+    /// shells entry (dropping stdin_tx → child gets stdin EOF). Status entry is
+    /// intentionally kept so ShellStatus can query the final exit code/line count.
+    fn remove(&self, shell_id: &str) {
+        self.shells.lock().remove(shell_id);
+        // status_map entry is NOT removed — it persists so get_status() can
+        // return the final running:false / exit_code / line_count after exit.
+    }
+
+    /// Stop every running shell. For srv-shutdown cleanup.
+    pub fn stop_all(&self) -> usize {
+        self.status_map.lock().clear();
+        self.status_order.lock().clear();
+        let drained: Vec<_> = self.shells.lock().drain().map(|(_, e)| e.stop_tx).collect();
+        let n = drained.len();
+        for tx in drained {
+            let _ = tx.send(());
+        }
+        n
+    }
+
+    /// Resolve where a `ShellInput` write should go, distinguishing two
+    /// failure modes:
+    /// - `Ok(tx)`            — running with captured stdin
+    /// - `Err(StdinNotCaptured)` — running but created without capture_stdin
+    /// - `Err(NotRunning)`   — unknown id or already exited
+    pub fn resolve_stdin(
+        &self,
+        shell_id: &str,
+    ) -> Result<mpsc::UnboundedSender<String>, ShellInputFailure> {
+        let shells = self.shells.lock();
+        match shells.get(shell_id) {
+            Some(entry) => match &entry.stdin_tx {
+                Some(tx) => Ok(tx.clone()),
+                None => Err(ShellInputFailure::StdinNotCaptured),
+            },
+            None => Err(ShellInputFailure::NotRunning),
+        }
+    }
+
+    /// Return a snapshot of the shell's status. Returns `running: false` if unknown.
+    /// Existing, documented contract for `POST /api/v1/shell/status` (the MCP
+    /// `ShellStatus` tool) — do not change: an agent calling this for an id
+    /// it doesn't recognize expects a plain "not running" answer, not an error.
+    pub fn get_status(&self, shell_id: &str) -> ShellStatusInfo {
+        self.status_map.lock()
+            .get(shell_id)
+            .map(|arc| arc.lock().clone())
+            .unwrap_or_default()
+    }
+
+    /// Like [`Self::get_status`], but `None` when no entry exists at all —
+    /// distinguishing "genuinely unknown" from "known, and not running."
+    ///
+    /// Needed by the `shellstatus` RPC command (unlike the MCP tool above,
+    /// which is fine collapsing "unknown" into "not running"): `register_full`
+    /// only runs after the runner task spawns the child process, but
+    /// `shell_node_create` is published to the frontend BEFORE that task is
+    /// even scheduled (`handle_shell_create` in server/mod.rs). A caller that
+    /// checks status immediately after seeing `shell_node_create` can race
+    /// ahead of registration — reagent P1 on PR #2770: collapsing that race
+    /// window into `running: false` was indistinguishable from a genuinely
+    /// already-exited shell, so a fast, still-registering, genuinely LIVE
+    /// shell (e.g. a real `task dev`) could be shown as failed in the
+    /// Activity Dock for its entire run.
+    pub fn get_status_if_known(&self, shell_id: &str) -> Option<ShellStatusInfo> {
+        self.status_map.lock().get(shell_id).map(|arc| arc.lock().clone())
+    }
+
+    /// List every currently-RUNNING shell across all blocks — the Swarm
+    /// pane's data source for its per-agent long-running-process rows
+    /// (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20). Unfiltered, like
+    /// `subagent.ListActive`/`ListDispatches` — the Swarm pane fetches once
+    /// and groups by `block_id` client-side in `buildTree()`, rather than
+    /// one RPC per tracked agent block. Exited shells are intentionally
+    /// excluded: Phase 1's scope is "what's happening now," not a shell
+    /// history view.
+    pub fn list_active(&self) -> Vec<ShellSummary> {
+        self.status_map
+            .lock()
+            .iter()
+            .filter_map(|(shell_id, arc)| {
+                let s = arc.lock();
+                if s.running {
+                    Some(ShellSummary {
+                        shell_id: shell_id.clone(),
+                        block_id: s.block_id.clone(),
+                        cmd: s.cmd.clone(),
+                        title: s.title.clone(),
+                        started_at: s.started_at,
+                        line_count: s.line_count,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+}
+
+/// Kill the entire process tree rooted at `pid`. `Child::kill` / `kill_on_drop`
+/// only reap the wrapper shell (`cmd /C` / `sh -c`); a `task dev` spawns
+/// `task.exe` → `cargo`/`node` grandchildren that survive otherwise.
+///
+/// Scoped strictly to OUR `pid` — never by image name. Killing `task.exe`
+/// by name is the cross-instance hazard that let agent "Mazs" nuke peer
+/// dev servers (see SPEC_PERSISTENT_SHELL_PHASE3_STOP §1).
+fn kill_tree(pid: u32) {
+    // Group-kill with SIGTERM → 300ms → SIGKILL escalation on Unix (the child
+    // is spawned via process_group(0), so the negative-pid signal reaches its
+    // descendants); `taskkill /F /T /PID` on Windows. The implementation is
+    // shared with the other by-PID kill sites in `agentmux_common::process`.
+    agentmux_common::process::kill_process_group(pid);
+}
+
+pub struct ShellNodeRunner {
+    pub shell_id: String,
+    pub block_id: String,
+    pub cmd: String,
+    /// Caller-supplied display title, defaulting to `cmd` — mirrors
+    /// `handle_shell_create`'s own `title` local, threaded through so
+    /// `ShellStatusInfo`/`list_active` can show it without a second lookup.
+    pub title: String,
+    pub cwd: Option<String>,
+    /// The program and arguments when the command runs elsewhere: `wsl.exe`
+    /// for a WSL distro (`remote::wsl::launch`), `ssh` for an SSH host
+    /// (`remote::ssh::launch_exec`). `None` runs it here through `cmd`/`sh`.
+    pub launch: Option<(String, Vec<String>)>,
+    /// The askpass secret of an SSH command (`remote::askpass`), revoked when
+    /// this runner ends, however it ends.
+    pub askpass_secret: Option<String>,
+    pub extra_env: HashMap<String, String>,
+    pub broker: Arc<Broker>,
+    /// Stop registry — the runner registers its `shell_id` here so
+    /// `ShellStop` can tree-kill it, and removes itself on natural exit.
+    pub registry: Arc<ShellSessionRegistry>,
+    /// If true, pipe stdin and start the relay task so ShellInput() works.
+    /// If false (default), stdin is /dev/null — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    pub capture_stdin: bool,
+    /// Takes the Vault values the command was given out of its output, before
+    /// anything is published (spec section 7.2).
+    pub scrubber: Option<Arc<crate::backend::vault::scrub::Scrubber>>,
+    /// A Vault value for its stdin (`stdin_secret`): written with a newline, then
+    /// stdin is closed. Never with `capture_stdin`.
+    pub stdin_once: Option<zeroize::Zeroizing<String>>,
+    /// The folder of its Vault secret files, removed when this runner ends, however
+    /// it ends.
+    pub secret_dir: Option<crate::backend::vault::files::SecretDir>,
+    /// Values its output goes into the Vault as (`capture`): the output is held
+    /// until it ends, and published only once they are taken out of it.
+    pub capture: Option<crate::backend::vault::capture::Job>,
+}
+
+/// `cmd`, a command line, run the way a person's terminal runs it: `sh -c` on Unix, and on Windows cmd.exe
+/// reading the line as typed. `Command::args` would quote the whole line as ONE argument and backslash-escape
+/// the quotes inside it, which cmd.exe does not read: `--reason "two words"` reached the program as
+/// `--reason \"two` `words\"`. The line goes in raw, between the one pair of quotes `/S` takes off.
+fn local_command(cmd: &str) -> tokio::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut c = tokio::process::Command::new("cmd");
+        c.as_std_mut().args(["/S", "/C"]).raw_arg(format!("\"{cmd}\""));
+        c
+    }
+    #[cfg(not(windows))]
+    {
+        let mut c = tokio::process::Command::new("sh");
+        c.args(["-c", cmd]);
+        c
+    }
+}
+
+impl ShellNodeRunner {
+    pub async fn run(mut self) {
+        let shell_id = self.shell_id.clone();
+        let block_id = self.block_id.clone();
+        let broker = self.broker.clone();
+
+        let _askpass = self.askpass_secret.clone().map(crate::backend::remote::askpass::Revoke);
+        let mut child_cmd = if let Some((program, args)) = &self.launch {
+            let mut c = tokio::process::Command::new(program);
+            c.args(args);
+            c
+        } else {
+            local_command(&self.cmd)
+        };
+
+        // This runner backs POST /api/v1/shell/create — the MCP `Shell` tool,
+        // which CLAUDE.md names as the way for an agent to launch `task dev` /
+        // `task package`. Without this it inherited agentmux-srv's full
+        // AGENTMUX_* environment, so a build started here adopted the LAUNCHING
+        // instance's channel and data dir: the exact failure this is meant to
+        // prevent, on the most likely path for it to happen. Missed by the
+        // first revision of the fix and caught in review (ReAgent P0 on #3326).
+        crate::backend::pane_env::sanitize_process_command(&mut child_cmd);
+
+        // Only set the working directory if it actually exists. The cwd is
+        // normalized upstream (handle_shell_create → base::normalize_working_dir),
+        // but a stale or mistyped path would otherwise make the spawn fail hard
+        // with os error 267 (ERROR_DIRECTORY) on Windows. Like the agent-CLI
+        // spawn (blockcontroller/core.rs::apply_working_dir, which skips
+        // `current_dir` when the directory is missing and can't be created),
+        // warn via a system chunk and run in the server's cwd rather than
+        // killing the shell before it starts.
+        if let Some(ref cwd) = self.cwd {
+            if std::path::Path::new(cwd).is_dir() {
+                child_cmd.current_dir(cwd);
+            } else {
+                publish_chunk(
+                    &broker,
+                    &block_id,
+                    &shell_id,
+                    "system",
+                    &format!("[cwd not found: {cwd} — running in the server's working directory]"),
+                    now_ms(),
+                );
+            }
+        }
+        for (k, v) in &self.extra_env {
+            child_cmd.env(k, v);
+        }
+
+        child_cmd.stdout(std::process::Stdio::piped());
+        child_cmd.stderr(std::process::Stdio::piped());
+        // stdin: piped only when capture_stdin=true (opt-in). Default is null so
+        // programs that read stdin to EOF (e.g. `cat` with no args) don't block
+        // forever. When piped, a relay task forwards ShellInput() writes; when all
+        // senders drop the relay exits, ChildStdin drops, and the child sees EOF.
+        if self.capture_stdin || self.stdin_once.is_some() {
+            child_cmd.stdin(std::process::Stdio::piped());
+        } else {
+            child_cmd.stdin(std::process::Stdio::null());
+        }
+        // Windows: suppress the console window that Windows auto-creates for
+        // CUI-subsystem processes (cmd.exe). stdout/stderr are piped so no
+        // output is lost — the window was decorative noise only.
+        #[cfg(windows)]
+        {
+            child_cmd.no_window();
+        }
+        // Backstop: reap the wrapper shell if this runner task is ever dropped.
+        child_cmd.kill_on_drop(true);
+        // Unix: own process group so kill_tree can signal the whole group
+        // (-pgid). Windows uses taskkill /T on the pid instead.
+        #[cfg(unix)]
+        {
+            child_cmd.process_group(0);
+        }
+
+        // Joins the agent's tracker before it runs, so the shell and everything
+        // it starts (`task dev` → task.exe/node) end with the agent on every
+        // teardown path (agent_teardown spec §6.5).
+        let mut child = match crate::backend::process_tracker::registry::spawn_tracked(&block_id, &mut child_cmd, crate::backend::process_tracker::registry::Join::Adopted) {
+            Ok(c) => c,
+            Err(e) => {
+                publish_chunk(&broker, &block_id, &shell_id, "system", &format!("[spawn error: {e}]"), now_ms());
+                publish_exit(&broker, &block_id, &shell_id, 1, false, now_ms());
+                return;
+            }
+        };
+
+        let pid = child.id();
+        tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
+
+        // A Vault value for stdin: written, then stdin is dropped, so the command sees
+        // the end of its input and nothing else can be typed there.
+        if let Some(value) = self.stdin_once.take() {
+            if !self.capture_stdin {
+                if let Some(mut writer) = child.stdin.take() {
+                    tokio::spawn(async move {
+                        let _ = writer.write_all(value.as_bytes()).await;
+                        let _ = writer.write_all(b"\n").await;
+                        let _ = writer.flush().await;
+                    });
+                }
+            }
+        }
+
+        // Spawn stdin relay only when capture_stdin=true.
+        let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {
+            let child_stdin = child.stdin.take().expect("stdin piped");
+            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+            tokio::spawn(async move {
+                let mut writer = BufWriter::new(child_stdin);
+                while let Some(text) = rx.recv().await {
+                    if writer.write_all(text.as_bytes()).await.is_err() { break; }
+                    if writer.flush().await.is_err() { break; }
+                }
+                // All senders dropped or write error → ChildStdin dropped → child EOF
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
+        let status_arc = Arc::new(Mutex::new(ShellStatusInfo {
+            running: true,
+            exit_code: None,
+            line_count: 0,
+            block_id: block_id.clone(),
+            cmd: self.cmd.clone(),
+            title: self.title.clone(),
+            started_at: now_ms(),
+            tail: (self.scrubber.is_some() || self.capture.is_some()).then(|| Arc::new(Mutex::new(VecDeque::new()))),
+            ..Default::default()
+        }));
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        let evicted = self.registry.register_full(
+            shell_id.clone(),
+            cancel_tx,
+            stdin_tx,
+            Arc::clone(&status_arc),
+        );
+        for evicted_id in evicted {
+            broker.purge_scope(&format!("shell:{evicted_id}"));
+        }
+        let kill_task = tokio::spawn(async move {
+            match cancel_rx.await {
+                Ok(()) => {
+                    if let Some(pid) = pid {
+                        let _ = tokio::task::spawn_blocking(move || kill_tree(pid)).await;
+                    }
+                    true // stopped by request
+                }
+                Err(_) => false, // sender dropped → natural exit
+            }
+        });
+
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+
+        // Collect both stdout and stderr into a single ordered channel.
+        // Each task owns its half of the pipe; the channel closes when both
+        // tasks finish, at which point the main loop exits and we wait for exit.
+        type Line = (&'static str, String, u64);
+        let (tx, mut rx) = mpsc::unbounded_channel::<Line>();
+
+        let tx_out = tx.clone();
+        let t_stdout = tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let ts = now_ms();
+                let _ = tx_out.send(("stdout", line, ts));
+            }
+        });
+
+        let tx_err = tx.clone();
+        let t_stderr = tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let ts = now_ms();
+                let _ = tx_err.send(("stderr", line, ts));
+            }
+        });
+
+        // Drop original sender so channel closes once both reader tasks finish.
+        drop(tx);
+
+        let mut line_count: u64 = 0;
+        // With `capture`, nothing is published until the command has ended and the
+        // values are in the Vault: until then srv can't know which line holds one.
+        let mut held: Vec<Line> = Vec::new();
+        let mut held_bytes = 0usize;
+        let mut held_cut = false;
+        while let Some((kind, content, ts)) = rx.recv().await {
+            line_count += 1;
+            status_arc.lock().line_count = line_count;
+            if self.capture.is_some() {
+                if held_bytes + content.len() + 1 > crate::backend::vault::capture::MAX_HELD {
+                    held_cut = true;
+                } else {
+                    held_bytes += content.len() + 1;
+                    held.push((kind, content, ts));
+                }
+                continue;
+            }
+            let clean = match &self.scrubber {
+                Some(s) => s.scrub(&content),
+                None => std::borrow::Cow::Borrowed(content.as_str()),
+            };
+            emit(&status_arc, &broker, &block_id, &shell_id, kind, &clean, ts);
+        }
+
+        let _ = tokio::join!(t_stdout, t_stderr);
+
+        // Drop our stop handle (no-op if ShellStop already removed it) so the
+        // natural-exit path lets `kill_task` resolve.
+        self.registry.remove(&shell_id);
+
+        let exit_code = match child.wait().await {
+            Ok(status) => status.code().unwrap_or(-1),
+            Err(_) => -1,
+        };
+
+        if let Some(job) = self.capture.take() {
+            self.publish_captured(job, held, held_cut, exit_code, &status_arc).await;
+        }
+
+        let was_stopped = kill_task.await.unwrap_or(false);
+        tracing::info!(shell_id = %shell_id, exit_code, was_stopped, line_count, "shell.exit");
+
+        // Persist final status in the status_map so ShellStatus can still query it.
+        {
+            let mut s = status_arc.lock();
+            s.running = false;
+            s.exit_code = Some(exit_code);
+            s.line_count = line_count;
+        }
+
+        publish_exit(&broker, &block_id, &shell_id, exit_code, was_stopped, now_ms());
+    }
+}
+
+impl ShellNodeRunner {
+    /// Runs the capture on the held output, then publishes it cleaned of the
+    /// values, or, if the capture failed, one line saying it is withheld and why.
+    async fn publish_captured(&self, job: crate::backend::vault::capture::Job, held: Vec<(&'static str, String, u64)>, cut: bool, exit_code: i32, status: &Arc<Mutex<ShellStatusInfo>>) {
+        use crate::backend::vault::capture::Outcome;
+        let given = |line: &str| -> String {
+            match &self.scrubber {
+                Some(s) => s.scrub(line).into_owned(),
+                None => line.to_string(),
+            }
+        };
+        let stdout = zeroize::Zeroizing::new(held.iter().filter(|l| l.0 == "stdout").map(|l| l.1.as_str()).collect::<Vec<_>>().join("\n"));
+        let output = zeroize::Zeroizing::new(held.iter().map(|l| given(&l.1)).collect::<Vec<_>>().join("\n"));
+        let lines = held.len();
+        let (store, capture) = (job.store.clone(), job.capture.clone());
+        let outcome = tokio::task::spawn_blocking(move || capture.finish(&store, &stdout, &output, cut, exit_code))
+            .await
+            .unwrap_or_else(|e| Outcome::Withheld { why: format!("the capture stopped: {e}"), kept_as: None });
+        (job.changed)();
+        match outcome {
+            Outcome::Stored { ids, scrubber, short } => {
+                // The values it was given and the ones it printed, in one scrubber.
+                let all = match &self.scrubber {
+                    Some(given) => given.merged(&scrubber),
+                    None => scrubber,
+                };
+                match crate::backend::vault::capture::clean_held(&held, &all, &short) {
+                    Ok(lines) => {
+                        for (kind, clean, ts) in lines {
+                            emit(status, &self.broker, &self.block_id, &self.shell_id, kind, &clean, ts);
+                        }
+                    }
+                    Err(why) => {
+                        let line = format!("The values went into the Vault, but the output ({lines} lines) is withheld: {why}.");
+                        emit(status, &self.broker, &self.block_id, &self.shell_id, "system", &line, now_ms());
+                        status.lock().withheld = Some(why);
+                    }
+                }
+                status.lock().captured = ids;
+            }
+            Outcome::Withheld { why, kept_as } => {
+                let kept = match &kept_as {
+                    Some(id) => format!(" The person can open it in the Vault as [vault:{id}]."),
+                    None => String::new(),
+                };
+                let line = format!("The output ({lines} lines) is withheld: the capture failed: {why}.{kept}");
+                emit(status, &self.broker, &self.block_id, &self.shell_id, "system", &line, now_ms());
+                status.lock().withheld = Some(why);
+            }
+        }
+    }
+}
+
+/// Publishes one cleaned line, and keeps it in the job's tail when it has one.
+fn emit(status: &Arc<Mutex<ShellStatusInfo>>, broker: &Broker, block_id: &str, shell_id: &str, kind: &str, clean: &str, ts: u64) {
+    {
+        let mut s = status.lock();
+        if s.tail.is_some() && clean.chars().count() > TAIL_LINE_CHARS {
+            s.tail_clipped = true;
+        }
+        if let Some(tail) = &s.tail {
+            let mut t = tail.lock();
+            if t.len() >= TAIL_LINES {
+                t.pop_front();
+            }
+            t.push_back(clean.chars().take(TAIL_LINE_CHARS).collect());
+        }
+    }
+    publish_chunk(broker, block_id, shell_id, kind, clean, ts);
+}
+
+// Every shell_chunk / exit event is published under a SINGLE scope:
+//   - `shell:<shell_id>`  → a per-shell persistence ring buffer (1024 entries).
+//
+// Single-scope delivery (chosen over the fallback of strengthening the reducer's
+// dedup): an earlier design also published every chunk under `block:<block_id>`
+// for "live" delivery, so output produced before the frontend's `shell:<id>`
+// subscription established (the common case — process spawn + first lines beat
+// the WS resub round-trip) arrived LIVE via the block scope AND then again in the
+// replay burst when the broker replayed the whole `shell:<id>` ring on first
+// subscribe. The reducer's last-chunk-only `isDuplicate` let those non-adjacent
+// dups through → doubled output (full duplication on WS reconnect).
+//
+// Now chunks/exit go ONLY to `shell:<shell_id>`. The frontend subscribes to that
+// scope when it sees the (block-scoped, persist:64) `shell_node_create`. Because
+// the broker persists the ring regardless of subscribers (mps.rs persist_event
+// runs inside publish whenever persist>0), any output produced before the
+// subscription establishes is retained in the persist:1024 ring and replayed
+// exactly once on subscribe (guarded by the broker's per-route+event+scope
+// `replayed` set). No chunk is ever delivered via two paths → no duplication.
+//
+// This still preserves the reason the per-shell ring was introduced: each shell
+// has its OWN ring, so a chatty shell can't evict another shell's `exit` event
+// (the bug that left a sibling's row stuck `running` after a remount when all
+// shells shared the block ring).
+fn shell_scopes(shell_id: &str) -> Vec<String> {
+    vec![format!("shell:{shell_id}")]
+}
+
+/// `shell_chunk`: one line a Shell command wrote, or its exit. Scoped `shell:<shell_id>`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(tag = "op", rename_all = "lowercase")]
+pub enum ShellChunkEvent {
+    Chunk {
+        shell_id: String,
+        #[ts(type = r#""stdout" | "stderr" | "system""#)]
+        kind: String,
+        content: String,
+        #[ts(type = "number")]
+        timestamp: u64,
+    },
+    Exit {
+        shell_id: String,
+        exit_code: i32,
+        /// The exit was caused by ShellStop (tree-killed), so the frontend shows the grey
+        /// "stopped" status instead of exited-err.
+        stopped: bool,
+        #[ts(type = "number")]
+        timestamp: u64,
+    },
+}
+
+/// `shell_node_create`: a Shell command started, so the agent pane adds its row before the first
+/// chunk. Scoped `block:<agent block>`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ShellNodeCreateEvent {
+    pub shell_id: String,
+    pub cmd: String,
+    pub cwd: Option<String>,
+    pub title: String,
+    #[ts(type = "number")]
+    pub timestamp: u64,
+}
+
+fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
+    let event = ShellChunkEvent::Chunk { shell_id: shell_id.to_string(), kind: kind.to_string(), content: content.to_string(), timestamp: ts };
+    broker.publish_event::<crate::backend::mps_events::ShellChunk>(&event, shell_scopes(shell_id), 1024);
+}
+
+#[cfg(test)]
+mod tests {
+    // A real process, so ignored like the other real-process tests in this crate:
+    // run with `cargo test -p agentmux-srv-core --lib a_runner_with_a_scrubber -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_runner_with_a_scrubber_publishes_the_output_without_the_value() {
+        use crate::backend::vault::scrub::Scrubber;
+        const VALUE: &str = "sk_live_abcdefgh1234";
+        let broker = Arc::new(Broker::new());
+        let registry = ShellSessionRegistry::new();
+        let runner = ShellNodeRunner {
+            shell_id: "scrub-1".into(),
+            block_id: "block-1".into(),
+            cmd: format!("echo token={VALUE} && echo fine"),
+            title: "t".into(),
+            cwd: None,
+            launch: None,
+            askpass_secret: None,
+            extra_env: HashMap::new(),
+            broker: Arc::clone(&broker),
+            registry,
+            capture_stdin: false,
+            scrubber: Some(Arc::new(Scrubber::new(&[("api-key-x".to_string(), VALUE.to_string())]))),
+            stdin_once: None,
+            secret_dir: None,
+            capture: None,
+        };
+        runner.run().await;
+        let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, "shell:scrub-1", 20);
+        let text = events.iter().map(|e| e.data.clone().unwrap_or_default().to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("token=[vault:api-key-x]") && text.contains("fine"), "{text}");
+        assert!(!text.contains(VALUE), "{text}");
+    }
+
+    // A real process too: `cargo test -p agentmux-srv-core --lib a_runner_with_a_capture -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_runner_with_a_capture_publishes_only_once_the_value_is_in_the_vault() {
+        use agentmux_common::api_types::{CaptureFrom, CaptureInto, CaptureRule};
+        use crate::backend::vault::{capture, seal};
+        const VALUE: &str = "ghp_abcdefgh12345678";
+        seal::use_test_key();
+        let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        store.apply_identity_schema_for_tests().unwrap();
+        let run = |id: &str, pattern: &str| {
+            let rule = CaptureRule { into: CaptureInto { kind: Some("api-key".into()), label: Some(format!("Token {id}")), ..Default::default() }, from: CaptureFrom::Regex(pattern.into()) };
+            let cmd = format!("echo token={VALUE} && echo fine");
+            let plan = capture::plan(&store, &[rule], "Agent2-6", &cmd).unwrap();
+            ShellNodeRunner {
+                shell_id: id.into(),
+                block_id: "block-1".into(),
+                cmd,
+                title: "t".into(),
+                cwd: None,
+                launch: None,
+                askpass_secret: None,
+                extra_env: HashMap::new(),
+                broker: Arc::new(Broker::new()),
+                registry: ShellSessionRegistry::new(),
+                capture_stdin: false,
+                scrubber: None,
+                stdin_once: None,
+                secret_dir: None,
+                capture: Some(capture::Job { capture: plan, store: Arc::clone(&store), changed: Box::new(|| {}) }),
+            }
+        };
+        let published = |broker: &Broker, id: &str| {
+            let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, &format!("shell:{id}"), 20);
+            events.iter().map(|e| e.data.clone().unwrap_or_default().to_string()).collect::<Vec<_>>().join("\n")
+        };
+
+        let r = run("cap-1", r"token=(\S+)");
+        let (broker, registry) = (Arc::clone(&r.broker), Arc::clone(&r.registry));
+        r.run().await;
+        let text = published(&broker, "cap-1");
+        assert!(text.contains("token=[vault:api-key-token-cap-1]") && text.contains("fine"), "{text}");
+        assert!(!text.contains(VALUE), "{text}");
+        assert_eq!(registry.get_status("cap-1").captured, ["api-key-token-cap-1"]);
+
+        let r = run("cap-2", r"key=(\S+)");
+        let (broker, registry) = (Arc::clone(&r.broker), Arc::clone(&r.registry));
+        r.run().await;
+        let text = published(&broker, "cap-2");
+        assert!(text.contains("withheld: the capture failed: the regex matched nothing"), "{text}");
+        assert!(!text.contains(VALUE) && !text.contains("fine"), "{text}");
+        assert_eq!(registry.get_status("cap-2").withheld.as_deref(), Some("the regex matched nothing"));
+    }
+
+    use super::*;
+
+    /// Runs `line` through [`local_command`] in a folder holding a script that prints each of its first three
+    /// arguments in brackets, and returns what it printed.
+    async fn args_seen_by_script(line: &str) -> String {
+        // A folder of its own per call: the tests run in parallel.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("amx-local-command-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (name, body) = if cfg!(windows) {
+            ("args.bat", "@echo off\r\necho [%~1][%~2][%~3]\r\n")
+        } else {
+            ("args.sh", "printf '[%s][%s][%s]' \"$1\" \"$2\" \"$3\"\n")
+        };
+        std::fs::write(dir.join(name), body).unwrap();
+        // The script by its full path: cmd does not look in the current folder when the person has turned that off.
+        let script = dir.join(name).display().to_string();
+        let line = if cfg!(windows) { line.replace("SCRIPT", &script) } else { line.replace("SCRIPT", &format!("sh {script}")) };
+        let out = local_command(&line).current_dir(&dir).output().await.unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if text.is_empty() {
+            return format!("(no output; {}; stderr: {})", out.status, String::from_utf8_lossy(&out.stderr).trim());
+        }
+        text
+    }
+
+    #[tokio::test]
+    async fn a_quoted_argument_with_spaces_is_one_argument_without_its_quotes() {
+        assert_eq!(args_seen_by_script(r#"SCRIPT "two words" x y"#).await, "[two words][x][y]");
+        assert_eq!(args_seen_by_script(r#"SCRIPT --reason "two words" -- "#).await, "[--reason][two words][--]");
+    }
+
+    #[tokio::test]
+    async fn quotes_inside_an_argument_and_an_apostrophe_survive() {
+        assert_eq!(args_seen_by_script(r#"SCRIPT "it's here" "a=b c" z"#).await, "[it's here][a=b c][z]");
+    }
+
+    #[tokio::test]
+    async fn a_command_line_with_two_commands_runs_both() {
+        let out = local_command("echo one && echo two").output().await.unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        assert_eq!(lines, ["one", "two"]);
+    }
+
+    #[test]
+    fn shell_events_serialize_as_before() {
+        let chunk = ShellChunkEvent::Chunk { shell_id: "s1".into(), kind: "stdout".into(), content: "ok".into(), timestamp: 5 };
+        assert_eq!(
+            serde_json::to_value(&chunk).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "op": "chunk", "kind": "stdout", "content": "ok", "timestamp": 5 })
+        );
+        let exit = ShellChunkEvent::Exit { shell_id: "s1".into(), exit_code: 1, stopped: true, timestamp: 6 };
+        assert_eq!(
+            serde_json::to_value(&exit).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "op": "exit", "exit_code": 1, "stopped": true, "timestamp": 6 })
+        );
+        let created = ShellNodeCreateEvent { shell_id: "s1".into(), cmd: "npm test".into(), cwd: None, title: "npm test".into(), timestamp: 7 };
+        assert_eq!(
+            serde_json::to_value(&created).unwrap(),
+            serde_json::json!({ "shell_id": "s1", "cmd": "npm test", "cwd": null, "title": "npm test", "timestamp": 7 })
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_signals_then_is_idempotent() {
+        let reg = ShellSessionRegistry::new();
+        let (tx, rx) = oneshot::channel::<()>();
+        reg.insert("s1".to_string(), tx);
+        assert!(reg.stop("s1")); // fires the channel
+        assert!(rx.await.is_ok());
+        assert!(!reg.stop("s1")); // second stop: unknown id
+    }
+
+    #[tokio::test]
+    async fn remove_drops_sender_without_signalling() {
+        let reg = ShellSessionRegistry::new();
+        let (tx, rx) = oneshot::channel::<()>();
+        reg.insert("s2".to_string(), tx);
+        reg.remove("s2"); // natural-exit path
+        assert!(rx.await.is_err()); // sender dropped → Err, not Ok
+        assert!(!reg.stop("s2"));
+    }
+
+    #[tokio::test]
+    async fn stop_all_fires_every_handle() {
+        let reg = ShellSessionRegistry::new();
+        let (tx1, rx1) = oneshot::channel::<()>();
+        let (tx2, rx2) = oneshot::channel::<()>();
+        reg.insert("a".to_string(), tx1);
+        reg.insert("b".to_string(), tx2);
+        reg.stop_all();
+        assert!(rx1.await.is_ok());
+        assert!(rx2.await.is_ok());
+    }
+
+    fn register_exited(reg: &ShellSessionRegistry, id: &str, running: bool) {
+        let (tx, _rx) = oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running,
+            exit_code: if running { None } else { Some(0) },
+            line_count: 1,
+            ..Default::default()
+        }));
+        // _rx is intentionally dropped; we only exercise the status-map cap.
+        reg.register_full(id.to_string(), tx, None, status);
+    }
+
+    #[tokio::test]
+    async fn exited_statuses_are_capped_oldest_first() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 10;
+        for i in 0..total {
+            register_exited(&reg, &format!("s{i}"), false);
+        }
+        // Never exceeds the cap.
+        assert_eq!(reg.status_map.lock().len(), MAX_EXITED_STATUS);
+        // Oldest 10 evicted → get_status returns default (exit_code None).
+        assert!(reg.get_status("s0").exit_code.is_none());
+        assert!(reg.get_status("s9").exit_code.is_none());
+        // Newest retained with its real exit code.
+        assert_eq!(reg.get_status(&format!("s{}", total - 1)).exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn running_statuses_are_never_evicted() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 5;
+        for i in 0..total {
+            register_exited(&reg, &format!("r{i}"), true); // all running
+        }
+        // Running shells exceed the exited cap but none are evicted.
+        assert_eq!(reg.status_map.lock().len(), total);
+        assert!(reg.get_status("r0").running);
+    }
+
+    fn register_running_for_block(reg: &ShellSessionRegistry, id: &str, block_id: &str, cmd: &str) {
+        let (tx, _rx) = oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running: true,
+            block_id: block_id.to_string(),
+            cmd: cmd.to_string(),
+            title: cmd.to_string(),
+            started_at: 1_000,
+            ..Default::default()
+        }));
+        reg.register_full(id.to_string(), tx, None, status);
+    }
+
+    #[tokio::test]
+    async fn list_active_returns_only_running_shells_across_all_blocks() {
+        let reg = ShellSessionRegistry::new();
+        register_running_for_block(&reg, "s1", "block-a", "npm run dev");
+        register_running_for_block(&reg, "s2", "block-b", "task dev");
+        register_exited(&reg, "s3", false); // exited — must not appear
+
+        let mut active = reg.list_active();
+        active.sort_by(|a, b| a.shell_id.cmp(&b.shell_id));
+
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[0].shell_id, "s1");
+        assert_eq!(active[0].block_id, "block-a");
+        assert_eq!(active[0].cmd, "npm run dev");
+        assert_eq!(active[1].shell_id, "s2");
+        assert_eq!(active[1].block_id, "block-b");
+    }
+}
+
+fn publish_exit(broker: &Broker, _block_id: &str, shell_id: &str, exit_code: i32, stopped: bool, ts: u64) {
+    let event = ShellChunkEvent::Exit { shell_id: shell_id.to_string(), exit_code, stopped, timestamp: ts };
+    broker.publish_event::<crate::backend::mps_events::ShellChunk>(&event, shell_scopes(shell_id), 1024);
+}

@@ -101,17 +101,17 @@ describe("the default container image", () => {
     it("is the same public base image in the catalog, the seed and the server", () => {
         expect(getCliCatalogEntry("claude")?.containerImage).toBe(base);
 
-        const seed = JSON.parse(readFileSync(resolve(repoRoot, "crates/srv/agent-seed.json"), "utf8"));
+        const seed = JSON.parse(readFileSync(resolve(repoRoot, "crates/srv-core/agent-seed.json"), "utf8"));
         const claude = seed.agents.find((a: { id: string }) => a.id === "claude");
         expect(claude.container_image).toBe(base);
 
-        const rust = readFileSync(resolve(repoRoot, "crates/srv/src/backend/container/image.rs"), "utf8");
+        const rust = readFileSync(resolve(repoRoot, "crates/srv-core/src/backend/container/image.rs"), "utf8");
         expect(rust).toContain(`pub const DEFAULT_AGENT_IMAGE: &str = "${base}";`);
     });
 
     it("is not the private image that bundles Claude Code", () => {
         const catalog = readFileSync(resolve(repoRoot, "frontend/app/view/agent/defaults/cli-catalog.ts"), "utf8");
-        const seed = readFileSync(resolve(repoRoot, "crates/srv/agent-seed.json"), "utf8");
+        const seed = readFileSync(resolve(repoRoot, "crates/srv-core/agent-seed.json"), "utf8");
         expect(catalog).not.toContain("agent-claude");
         expect(seed).not.toContain("agent-claude");
     });

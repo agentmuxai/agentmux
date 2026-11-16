@@ -25,7 +25,7 @@
  *
  * The backend stores the result in the `term:ambient_summary` block meta key
  * itself, keeping the current title unless the new one names a different goal
- * (`crates/srv/src/ambient/title.rs`, shared with its empty-title recovery).
+ * (`crates/srv-core/src/ambient/title.rs`, shared with its empty-title recovery).
  * agent-model.ts and swarm-model.ts read that key (preferring it over the free
  * `term:osc_title` signal — see
  * docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §3.4).

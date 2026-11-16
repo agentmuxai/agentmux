@@ -31,7 +31,7 @@ result in place is a manual step (see "Putting the result in place").
    the content scan).
 6. Plans what to do with each damaged file:
    - `agent:<id>:current` / `output`: **rebuild** from the richest whole per-channel
-     copy, the same source `crates/srv/src/backend/transcript_backfill.rs` uses (every
+     copy, the same source `crates/srv-core/src/backend/transcript_backfill.rs` uses (every
      `channels/*/versions/*/data` and `dev/**/data` store; the blocks whose meta
      `agentId` or legacy `agent:id` is the agent). A copy with its own gap, the wrong size or NUL bytes is not used.
      No copy: **no-source**, left alone. A copy shorter than the zone: **source-shorter**,
@@ -106,4 +106,4 @@ no copy or a short one) and runs the dry run and `--apply` on it. The suite need
 Rust encoder, and runs the damage scan and a rebuild on a store holding frames. The Rust
 side decodes the same file (`tests_frame_vector.rs` in the filestore), so the two decoders
 can't drift apart. After a change to the frame format, write the file again with
-`AGENTMUX_WRITE_FRAME_VECTOR=1 cargo test -p agentmux-srv --bins -- tests_vector`.
+`AGENTMUX_WRITE_FRAME_VECTOR=1 cargo test -p agentmux-srv-core --lib -- tests_vector`.

@@ -23,7 +23,7 @@ d("check-name-resolver-callers.sh", () => {
 
     it("passes when resolve_name_to_uid appears only in the two boundary files", () => {
         const r = repo(GATE, {
-            "crates/srv/src/backend/name_resolution.rs": "pub fn resolve_name_to_uid() {}\n",
+            "crates/srv-core/src/backend/name_resolution.rs": "pub fn resolve_name_to_uid() {}\n",
             "crates/srv/src/server/name_resolution.rs": "use x::resolve_name_to_uid;\n",
             "crates/srv/src/other.rs": "fn f() {}\n",
         }).run(GATE);

@@ -13,7 +13,7 @@ then pinned in the image build.
 As of 2026-10-07 the published container image (`ghcr.io/agentmuxai/agent-base`) no
 longer contains Claude Code at all (proprietary license; redistribution is not
 cleared). AgentMux installs the pinned version from npm into the agent's container the
-first time it starts ([`crates/srv/src/backend/container/cli.rs`](../crates/srv/src/backend/container/cli.rs)), so the pin that
+first time it starts ([`crates/srv-core/src/backend/container/cli.rs`](../crates/srv-core/src/backend/container/cli.rs)), so the pin that
 matters for containers is the same one host installs use. See
 [`docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md`](specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md).
 
@@ -21,7 +21,7 @@ matters for containers is the same one host installs use. See
 
 | File | Location | Purpose |
 |------|----------|---------|
-| [`crates/srv/src/backend/providers/claude.rs`](../crates/srv/src/backend/providers/claude.rs) | `pinned_version: "2.1.321"` (CLAUDE static) | Version the backend installs for host agents, and into a container agent's container on first start |
+| [`crates/srv-core/src/backend/providers/claude.rs`](../crates/srv-core/src/backend/providers/claude.rs) | `pinned_version: "2.1.321"` (CLAUDE static) | Version the backend installs for host agents, and into a container agent's container on first start |
 | [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts) (re-exported via `./index`) | `pinnedVersion: "2.1.321"` (PROVIDERS.claude) | Version surfaced in the UI |
 | [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts) (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias: **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
@@ -43,7 +43,7 @@ retired `agent-claude` image) keeps that one.
 ## How to bump
 
 1. Check the latest release: `npm view @anthropic-ai/claude-code version`
-2. In [`crates/srv/src/backend/providers/claude.rs`](../crates/srv/src/backend/providers/claude.rs): update the CLAUDE static's `pinned_version`
+2. In [`crates/srv-core/src/backend/providers/claude.rs`](../crates/srv-core/src/backend/providers/claude.rs): update the CLAUDE static's `pinned_version`
 3. In [`frontend/app/view/agent/providers/catalog.ts`](../frontend/app/view/agent/providers/catalog.ts): update `PROVIDERS.claude.pinnedVersion`
 4. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
    matches what the pinned CLI currently resolves that alias to (e.g. `opus` -> "Opus 5")

@@ -7,7 +7,7 @@ import { t } from "@/app/i18n/i18n";
 // blob, one `KEY=VALUE` per line, `#` for a comment. The launch (agent-model.ts)
 // and the Environment editor read it with this one parser, so the editor shows
 // exactly the lines the launch would skip. srv's rules for what an agent may
-// write are in crates/srv/src/backend/agent_env.rs; the operator is not bound
+// write are in crates/srv-core/src/backend/agent_env.rs; the operator is not bound
 // by them.
 
 /** The `agent_content` type that holds a definition's environment. */

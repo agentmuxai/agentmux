@@ -19,26 +19,26 @@ describe("check-srv-http-clients", () => {
             "    let g = reqwest::get(url).await;",
             "}",
         ].join("\n");
-        expect(lines("crates/srv/src/backend/x.rs", text)).toEqual([2, 3, 4, 5, 6]);
+        expect(lines("crates/srv-core/src/backend/x.rs", text)).toEqual([2, 3, 4, 5, 6]);
     });
 
     it("flags the short form only where reqwest's Client is imported", () => {
         const body = "fn a() { let c = Client::builder().build(); let d = Client::new(); }\n";
-        expect(lines("crates/srv/src/backend/x.rs", `use reqwest::{Client, Url};\n${body}`)).toEqual([2]);
-        expect(lines("crates/srv/src/backend/y.rs", `use reqwest::Client;\n${body}`)).toEqual([2]);
-        expect(lines("crates/srv/src/backend/z.rs", `use other::Client;\n${body}`)).toEqual([]);
+        expect(lines("crates/srv-core/src/backend/x.rs", `use reqwest::{Client, Url};\n${body}`)).toEqual([2]);
+        expect(lines("crates/srv-core/src/backend/y.rs", `use reqwest::Client;\n${body}`)).toEqual([2]);
+        expect(lines("crates/srv-core/src/backend/z.rs", `use other::Client;\n${body}`)).toEqual([]);
     });
 
     it("leaves the helper, test files, test modules and comments alone", () => {
         const direct = "let c = reqwest::Client::new();\n";
-        expect(checkFile("crates/srv/src/http_client.rs", direct)).toEqual([]);
-        expect(checkFile("crates/srv/src/http_client_tests.rs", direct)).toEqual([]);
+        expect(checkFile("crates/srv-core/src/http_client.rs", direct)).toEqual([]);
+        expect(checkFile("crates/srv-core/src/http_client_tests.rs", direct)).toEqual([]);
         expect(checkFile("crates/srv/src/server/tests.rs", direct)).toEqual([]);
-        expect(checkFile("crates/srv/src/muxbus/ws_connect_tests.rs", direct)).toEqual([]);
-        expect(checkFile("crates/srv/src/test_support.rs", direct)).toEqual([]);
+        expect(checkFile("crates/srv-core/src/muxbus/ws_connect_tests.rs", direct)).toEqual([]);
+        expect(checkFile("crates/srv-core/src/test_support.rs", direct)).toEqual([]);
         expect(checkFile("crates/srv/tests/x.rs", direct)).toEqual([]);
-        expect(checkFile("crates/srv/src/backend/x.rs", `fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { ${direct} }\n}\n`)).toEqual([]);
-        expect(checkFile("crates/srv/src/backend/x.rs", "// built with reqwest::Client::new() once\nlet c = crate::http_client::client(); // not reqwest::Client::new()\n")).toEqual([]);
+        expect(checkFile("crates/srv-core/src/backend/x.rs", `fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { ${direct} }\n}\n`)).toEqual([]);
+        expect(checkFile("crates/srv-core/src/backend/x.rs", "// built with reqwest::Client::new() once\nlet c = crate::http_client::client(); // not reqwest::Client::new()\n")).toEqual([]);
     });
 
     it("sees production code after a test module in the middle of a file, and none inside it", () => {
@@ -70,7 +70,7 @@ describe("check-srv-http-clients", () => {
 
         it("flags unwrap_or_default, expect and unwrap, on the line of the ending", () => {
             for (const end of [".unwrap_or_default()", '.expect("builds")', ".unwrap()"]) {
-                expect(lines("crates/srv/src/identity/x.rs", chain(end))).toEqual([5]);
+                expect(lines("crates/srv-core/src/identity/x.rs", chain(end))).toEqual([5]);
             }
         });
 
@@ -82,7 +82,7 @@ describe("check-srv-http-clients", () => {
 
         it("leaves the sites that return the error, the finisher and the other crates alone", () => {
             for (const end of [".map_err(|e| e.to_string())?", ".ok()?", ".unwrap_or_else(|_| crate::http_client::client())"]) {
-                expect(lines("crates/srv/src/identity/x.rs", chain(end))).toEqual([]);
+                expect(lines("crates/srv-core/src/identity/x.rs", chain(end))).toEqual([]);
             }
             expect(lines("crates/srv/src/a.rs", "fn c() {\n    crate::http_client::client_with(|b| b.timeout(t))\n}\n")).toEqual([]);
             expect(lines("crates/mcp/src/main.rs", chain('.expect("http client")').replace("crate::http_client", "agentmux_common::local_http"))).toEqual([]);

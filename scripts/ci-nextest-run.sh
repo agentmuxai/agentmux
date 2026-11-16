@@ -71,7 +71,7 @@ CEILING_RAM="${CI_MEM_MAX:-14G}"
 CEILING_SWAP="${CI_SWAP_MAX:-7G}"
 GAP_SECONDS=20
 GAP_MEM_MB=2048
-CRATES="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
+CRATES="-p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
 
 # Whether the machine is out of memory: below 512 MB available and 1 GB of swap free, or below 300 MB available
 # whatever the swap. The second rule is for the stall that left no log (2026-11-12 and 11-13, nine times: a job ran to
@@ -230,12 +230,21 @@ attempt() {
     fi
     # Two LLVM threads in the srv test compile instead of four: see 4. in the header.
     export CARGO_BUILD_JOBS="$CARGO_JOBS"
+    # The core's test harness first, alone: it is the biggest compile (about 9 GB), and cargo would otherwise run it beside
+    # the server layer's test harness (another 8 GB) on a 16 GB runner (2026-11-15, the PR that split the core into its own
+    # package: both at once, the machine paging, the sampler starved 879 s). The two packages are named together so the
+    # core is built with the `test-support` feature the server layer's tests turn on, which is the build the run below
+    # reuses; `--lib` leaves the server layer's own targets for the build after it.
+    cargo nextest run --no-run -p agentmux-srv-core -p agentmux-srv --lib 2>&1 | tee -a "$BUILD_LOG" || return $?
+    # Then the server layer's own test harness, alone: with the other crates' tests beside it the build held 13.9 GB of
+    # a 14 GB ceiling (a 9 GB rustc and a second one) and the machine paged for 15 minutes (run 43768804420).
+    cargo nextest run --no-run -p agentmux-srv-core -p agentmux-srv --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
     if [ "${IN_QUEUE:-}" = true ]; then
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
         # build).
         cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
-        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
+        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-mcp --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
     # shellcheck disable=SC2086 # CRATES is a list of arguments

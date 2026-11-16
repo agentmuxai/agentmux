@@ -12,7 +12,7 @@ export const DEFAULT_MAX_CHILDREN = 5;
 /**
  * The id of the `n`th node (from 1) a layout action creates: the action id
  * with its first eight hex digits replaced by `n`. srv derives the same ids
- * for the same intent (`derive_node_id`, crates/srv/src/backend/layout/intent.rs),
+ * for the same intent (`derive_node_id`, crates/srv-core/src/backend/layout/intent.rs),
  * so the branches the frontend predicts are the ones srv stores.
  */
 export function deriveNodeId(actionId: string, n: number): string {

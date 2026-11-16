@@ -105,9 +105,9 @@ describe("summarize", () => {
 });
 
 describe("every kind srv can announce has a place in the summary", () => {
-    // crates/srv/src/backend/user_attention.rs: `pub const KINDS: [&str; N] = [...]`.
+    // crates/srv-core/src/backend/user_attention.rs: `pub const KINDS: [&str; N] = [...]`.
     const here = dirname(fileURLToPath(import.meta.url));
-    const rust = readFileSync(join(here, "../../../crates/srv/src/backend/user_attention.rs"), "utf8");
+    const rust = readFileSync(join(here, "../../../crates/srv-core/src/backend/user_attention.rs"), "utf8");
     const kinds = [...(/pub const KINDS: \[&str; \d+\] = \[([^\]]*)\]/.exec(rust)?.[1] ?? "").matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
 
     it("reads srv's list", () => {

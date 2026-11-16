@@ -4,7 +4,7 @@
 // What is wrong with a (recovered) filestore: for every file, its parts must run
 // 0..N with no gap and add up to the recorded size (a line-oriented file's last part may be
 // longer, with spaces after the content: `slackOnly`). The parts are 64 KB each
-// (`PART_DATA_SIZE` in crates/srv/src/backend/storage/filestore/core.rs). A part
+// (`PART_DATA_SIZE` in crates/srv-core/src/backend/storage/filestore/core.rs). A part
 // is a row of `db_file_data` or a part of a compressed frame (lib/frames.mjs).
 
 import { hasFrames, partIndex, scanFrames, slackOnly, wellShaped } from "./frames.mjs";
