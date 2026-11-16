@@ -197,4 +197,60 @@ describe("pointer-drag-state", () => {
             expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
         });
     });
+
+    // The list of a native select is a window of its own: the page hears the press and nothing after it,
+    // neither a pointerup nor a blur. Hover panels stayed shut in the whole window until the next click.
+    describe("a release the page never heard", () => {
+        const mouse = (type: string, buttons: number, pointerType = "mouse"): PointerEvent =>
+            new PointerEvent(type, { button: type === "pointerdown" ? 0 : -1, buttons, pointerType, bubbles: true });
+
+        it("is noticed on the next mouse move that reports no button", () => {
+            window.dispatchEvent(mouse("pointerdown", 1));
+            expect(isPrimaryButtonDown()).toBe(true);
+            window.dispatchEvent(mouse("pointermove", 0));
+            expect(isPrimaryButtonDown()).toBe(false);
+        });
+
+        it("is noticed on an element's enter, which comes before the move and is what a hover panel decides on", () => {
+            const el = document.body.appendChild(document.createElement("div"));
+            let seenByTheElement: boolean | undefined;
+            el.addEventListener("pointerover", () => {
+                seenByTheElement = isPrimaryButtonDown();
+            });
+            window.dispatchEvent(mouse("pointerdown", 1));
+            el.dispatchEvent(mouse("pointerover", 0));
+            expect(seenByTheElement).toBe(false);
+            el.remove();
+        });
+
+        it("tells the release listeners once, so a panel whose anchor is under the pointer can open", () => {
+            let calls = 0;
+            const off = onPrimaryButtonRelease(() => {
+                calls++;
+            });
+            window.dispatchEvent(mouse("pointerdown", 1));
+            window.dispatchEvent(mouse("pointermove", 0));
+            window.dispatchEvent(mouse("pointermove", 0));
+            expect(calls).toBe(1);
+            off();
+        });
+
+        it("leaves a drag alone: a move with the button still down, or with only another button down", () => {
+            window.dispatchEvent(mouse("pointerdown", 1));
+            window.dispatchEvent(mouse("pointermove", 1));
+            window.dispatchEvent(mouse("pointermove", 3));
+            expect(isPrimaryButtonDown()).toBe(true);
+            window.dispatchEvent(mouse("pointermove", 2));
+            expect(isPrimaryButtonDown()).toBe(false);
+        });
+
+        it("believes only a mouse about a mouse: a finger that is down is not lifted by a mouse move", () => {
+            window.dispatchEvent(mouse("pointerdown", 1, "touch"));
+            window.dispatchEvent(mouse("pointermove", 0));
+            expect(isPrimaryButtonDown()).toBe(true);
+            window.dispatchEvent(mouse("pointerdown", 1));
+            window.dispatchEvent(mouse("pointermove", 0, "pen"));
+            expect(isPrimaryButtonDown()).toBe(true);
+        });
+    });
 });
