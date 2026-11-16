@@ -79,11 +79,12 @@ describe("the overlay over the composer says how many of the dropped files fit",
         });
     });
 
-    it("refuses the whole drop when the message is full", () => {
+    it("does not refuse a drop on a full message: the limit may have been raised, so the app decides", () => {
         hub.have = 30;
         expect(mount().accept(drag)).toEqual({
-            ok: false,
-            reason: "This message already has the most attachments it can carry (30)",
+            ok: true,
+            message: "Drop 2 files: this message is at its limit of 30, files over it are refused",
+            icon: "fa-triangle-exclamation",
         });
     });
 });

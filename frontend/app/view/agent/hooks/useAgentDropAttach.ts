@@ -80,7 +80,9 @@ export function trayVerdict(
     what: string
 ): { ok: true; message: string; icon: string } | { ok: false; reason: string } {
     const room = draft.maxFiles() - draft.count();
-    if (room <= 0) return { ok: false, reason: `This message already has the most attachments it can carry (${draft.maxFiles()})` };
+    // The limit is only refreshed by an ingest, so a full tray is not refused here: a raised limit would never be seen.
+    // The drop goes through and the app reports what is over.
+    if (room <= 0) return { ok: true, message: `Drop ${what}: this message is at its limit of ${draft.maxFiles()}, files over it are refused`, icon: "fa-triangle-exclamation" };
     if (dragged > room) {
         const over = dragged - room;
         return { ok: true, message: `Drop ${what}: ${room} will attach, ${over} over the limit of ${draft.maxFiles()}`, icon: "fa-triangle-exclamation" };

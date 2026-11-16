@@ -3,7 +3,7 @@
 
 import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import { createTileReorder, movedAnnouncement, REORDER_MIME } from "./attachment-tile-reorder";
+import { createTileReorder, movedAnnouncement, positionOf, REORDER_MIME } from "./attachment-tile-reorder";
 
 type Item = { key: string; name: string };
 
@@ -112,5 +112,13 @@ describe("the announcement after a move", () => {
         };
         expect(movedAnnouncement(d as never, "y")).toBe("Moved y.png to position 2 of 2.");
         expect(movedAnnouncement(d as never, "z")).toBeNull();
+    });
+
+    it("says nothing when the tile stayed where it was", () => {
+        const d = { items: () => [{ key: "x", name: "x.png" }, { key: "y", name: "y.png" }] };
+        expect(movedAnnouncement(d as never, "x", 0)).toBeNull();
+        expect(movedAnnouncement(d as never, "y", 0)).toBe("Moved y.png to position 2 of 2.");
+        expect(positionOf(d as never, "y")).toBe(1);
+        expect(positionOf(d as never, "z")).toBe(-1);
     });
 });

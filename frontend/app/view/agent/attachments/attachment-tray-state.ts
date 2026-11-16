@@ -13,7 +13,7 @@ import type { AttachmentDraft, DraftAttachment, RemovedAttachment } from "./atta
 import type { LightboxItem } from "./AttachmentLightbox";
 import type { TileModel } from "./AttachmentTile";
 import { attachmentNoun, fileKind, type FileKind } from "./file-kind";
-import { createTileReorder, movedAnnouncement } from "./attachment-tile-reorder";
+import { createTileReorder, movedAnnouncement, positionOf } from "./attachment-tile-reorder";
 import { limitLevel, trayLayout } from "./tray-layout";
 
 const UNDO_MS = 6000;
@@ -201,8 +201,9 @@ export function createAttachmentTray(props: AttachmentTrayProps) {
             e.preventDefault();
             const delta = e.key === "ArrowLeft" ? -1 : 1;
             if (e.altKey) {
+                const was = positionOf(d, key);
                 d.move(key, delta);
-                const said = movedAnnouncement(d, key);
+                const said = movedAnnouncement(d, key, was);
                 if (said) setAnnouncement(said);
                 queueMicrotask(() => focusTile(key));
             } else {

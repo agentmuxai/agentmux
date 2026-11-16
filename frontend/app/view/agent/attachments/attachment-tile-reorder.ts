@@ -27,11 +27,20 @@ export interface TileReorder {
     onDragEnd: () => void;
 }
 
-/** "Moved name to position 2 of 5.", read out after a drag or an Alt+arrow. */
-export function movedAnnouncement(d: AttachmentDraft, key: string): string | null {
+/** Where a tile is now, or -1: taken before a move, so the announcement can tell a move from a no-op. */
+export function positionOf(d: AttachmentDraft, key: string): number {
+    return d.items().findIndex((i) => i.key === key);
+}
+
+/**
+ * "Moved name to position 2 of 5.", read out after a drag or an Alt+arrow. With `from` (the place before the move)
+ * a move that left the tile where it was (Alt+Left on the first tile, a drop next to its own neighbour) says nothing.
+ */
+export function movedAnnouncement(d: AttachmentDraft, key: string, from?: number): string | null {
     const items = d.items();
     const at = items.findIndex((i) => i.key === key);
-    return at < 0 ? null : `Moved ${items[at].name} to position ${at + 1} of ${items.length}.`;
+    if (at < 0 || at === from) return null;
+    return `Moved ${items[at].name} to position ${at + 1} of ${items.length}.`;
 }
 
 export function createTileReorder(d: AttachmentDraft, announce: (text: string) => void) {
@@ -72,8 +81,9 @@ export function createTileReorder(d: AttachmentDraft, announce: (text: string) =
             e.stopPropagation();
             clear();
             if (from === key) return;
+            const was = positionOf(d, from);
             d.moveNear(from, key, o?.key === key ? o.after : false);
-            const said = movedAnnouncement(d, from);
+            const said = movedAnnouncement(d, from, was);
             if (said) announce(said);
         },
         onDragEnd: clear,
