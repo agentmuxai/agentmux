@@ -8,6 +8,7 @@ vi.mock("../attention-list", () => ({
     attentionItems: () => [],
     attentionWho: (blockId: string) => (blockId === "b1" ? { name: "Korp", color: "#e8a33d" } : { name: "An agent" }),
 }));
+vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => [] }) }));
 const listeners = vi.hoisted(() => new Set<(e: unknown) => void>());
 vi.mock("../waiting-for-you", () => ({ waitingPanes: () => [], onWaitingEnded: (cb: (e: unknown) => void) => (listeners.add(cb), () => listeners.delete(cb)) }));
 
@@ -112,5 +113,37 @@ describe("an ask only srv's rows report (an agent of another window)", () => {
         listeners.forEach((cb) => cb(ended({ since: 1_000, reason: "submitted" })));
         noteAttention([], new Set(), Date.now() + 1_000);
         expect(endedAsks(Date.now() + 1_000)).toHaveLength(1);
+    });
+
+    it("is not a second ask when srv's row clears long after the registry ended it", () => {
+        installEndedAsks();
+        const wait = (at: number) => noteAttention([remote({ blockId: "b1", since: 1_000 })], new Set(), at);
+        wait(20_000);
+        const now = Date.now();
+        listeners.forEach((cb) => cb(ended({ since: now - 30_000 })));
+        expect(endedAsks(now + 1)).toHaveLength(1);
+        wait(now + 1_000);
+        wait(now + 8_000);
+        noteAttention([], new Set(), now + 12_000);
+        expect(endedAsks(now + 12_000), "the row clearing 12 s later adds none").toHaveLength(1);
+    });
+
+    it("is a new ask again once the pane was unlisted and waits anew", () => {
+        installEndedAsks();
+        const now = Date.now();
+        listeners.forEach((cb) => cb(ended({ since: now - 30_000 })));
+        noteAttention([remote({ blockId: "b1", since: 1_000 })], new Set(), now + 1_000);
+        noteAttention([], new Set(), now + 2_000);
+        noteAttention([remote({ blockId: "b1", since: now + 3_000 })], new Set(), now + 3_000);
+        noteAttention([], new Set(), now + 20_000);
+        expect(endedAsks(now + 20_000)).toHaveLength(2);
+    });
+
+    it("is not over while srv's row still says it waits, though Settings leaves it out of the list", () => {
+        noteAttention([remote({ what: "needs you in the browser" })], new Set(), 20_000);
+        noteAttention([], new Set(), 30_000, new Set(["r1"]));
+        expect(endedAsks(30_000), "hidden, still waiting").toHaveLength(0);
+        noteAttention([], new Set(), 40_000, new Set());
+        expect(endedAsks(40_000), "answered once the row stops waiting").toMatchObject([{ blockId: "r1", what: "needs you in the browser", endedAt: 40_000 }]);
     });
 });

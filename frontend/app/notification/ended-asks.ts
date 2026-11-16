@@ -15,6 +15,7 @@
  */
 
 import { createEffect, createRoot, createSignal } from "solid-js";
+import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { attentionItems, attentionWho, UNKNOWN_NAME, type AttentionItem } from "./attention-list";
 import { onWaitingEnded, waitingPanes, type EndedWait } from "./waiting-for-you";
 import { APP_KEY_PREFIX } from "./waiting-keys";
@@ -99,28 +100,49 @@ interface RuntimeAsk {
     since: number;
 }
 const runtimeOnly = new Map<string, RuntimeAsk>();
+/** Panes whose ask this window's registry already ended while srv's row still lists them waiting: the row clearing later is
+ *  not a second ask. Kept until the pane is no longer listed. */
+const settled = new Set<string>();
+const NONE: ReadonlySet<string> = new Set();
 
 /**
- * One look at the list of everything that waits (`items`), given which panes this window's registry has (`registry`).
- * The registry says when its own asks end; an ask only srv's rows report (an agent of another window) leaves no end
- * there, so it ends here: when its pane stops being listed and the registry has no wait for it. Exported for the test.
+ * One look at the list of everything that waits (`items`), given which panes this window's registry has (`registry`) and
+ * which srv's rows still say wait (`srvWaiting`, before any Settings filter). The registry says when its own asks end; an
+ * ask only srv's rows report (an agent of another window) leaves no end there, so it ends here: when its pane stops being
+ * listed, the registry has no wait for it, and srv's row no longer says it waits (a Browser wait left out in Settings is
+ * unlisted too, but not over). Exported for the test.
  */
-export function noteAttention(items: AttentionItem[], registry: ReadonlySet<string>, now: number): void {
+export function noteAttention(items: AttentionItem[], registry: ReadonlySet<string>, now: number, srvWaiting: ReadonlySet<string> = NONE): void {
     const listed = new Set<string>();
     for (const i of items) {
         listed.add(i.blockId);
         names.set(i.blockId, { name: i.name, color: i.color });
-        if (registry.has(i.blockId)) runtimeOnly.delete(i.blockId);
-        else runtimeOnly.set(i.blockId, { name: i.name, color: i.color, what: i.what, since: i.since });
+        if (registry.has(i.blockId)) {
+            runtimeOnly.delete(i.blockId);
+            settled.delete(i.blockId);
+        } else if (!settled.has(i.blockId)) {
+            runtimeOnly.set(i.blockId, { name: i.name, color: i.color, what: i.what, since: i.since });
+        }
     }
+    for (const id of [...settled]) if (!listed.has(id)) settled.delete(id);
     for (const [blockId, ask] of [...runtimeOnly]) {
-        if (listed.has(blockId)) continue;
+        if (listed.has(blockId) || srvWaiting.has(blockId)) continue;
         runtimeOnly.delete(blockId);
         names.delete(blockId);
         // The registry took it over, or it began and ended before anyone could look for it.
         if (registry.has(blockId) || now - ask.since < ENDED_MIN_WAIT_MS || ask.since <= 0) continue;
         noteEndedAsk({ blockId, name: ask.name, color: ask.color, what: ask.what, since: ask.since, endedAt: now, how: "answered" });
     }
+}
+
+/** The panes srv's runtime rows say wait on the person, as the rows are, whatever Settings leaves out of the list. */
+function srvWaitingPanes(): Set<string> {
+    const out = new Set<string>();
+    for (const r of sharedAgentRuntime().rows()) {
+        const id = r.state === "waiting_on_user" ? (r.waiting_in ?? r.block_id) : undefined;
+        if (id) out.add(id);
+    }
+    return out;
 }
 
 let installed = false;
@@ -133,12 +155,13 @@ export function installEndedAsks(): void {
         const ask = endedAskOf(ended, Date.now());
         runtimeOnly.delete(ended.blockId);
         names.delete(ended.blockId);
+        settled.add(ended.blockId);
         if (ask) noteEndedAsk(ask);
     });
     createRoot(() =>
         createEffect(() => {
             const items = attentionItems();
-            noteAttention(items, new Set(waitingPanes().map((p) => p.blockId)), Date.now());
+            noteAttention(items, new Set(waitingPanes().map((p) => p.blockId)), Date.now(), srvWaitingPanes());
         })
     );
 }
@@ -148,4 +171,5 @@ export function __resetEndedAsks(): void {
     setRing([]);
     names.clear();
     runtimeOnly.clear();
+    settled.clear();
 }
