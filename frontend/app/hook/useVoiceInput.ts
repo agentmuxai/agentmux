@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createEffect, createRoot } from "solid-js";
 import { createSignalAtom, type SignalAtom } from "@/util/util";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { createWhisperVoiceSession } from "./whisperVoiceEngine";
@@ -242,6 +243,27 @@ function facadeSignal<T>(pick: (s: VoiceSession) => SignalAtom<T> | undefined, f
 
 let _facade: VoiceSession | null = null;
 
+/** Voice input is switched off (`voice:enabled: false`, Settings > Recording). Off is off for every way of starting
+ *  it: the button, the shortcut, and anything added later, because they all start it through `getVoiceSession()`. */
+export function voiceInputOff(): boolean {
+    return getSettingsKeyAtom("voice:enabled")() === false;
+}
+
+/**
+ * A press of a pane's microphone by the keyboard shortcut (`pane:voice`): starts voice input into that pane, stops it
+ * when that pane has it, or moves it there when another pane has it, as a click on the pane's button does. Nothing
+ * happens when voice input is switched off or can't run here; a stop always goes through.
+ */
+export function toggleVoiceFor(blockId: string, handle: PaneVoiceHandle): void {
+    const voice = getVoiceSession();
+    const wasListening = voice.isListening();
+    if (!wasListening && !voice.isAvailable()) return;
+    const wasMine = wasListening && voice.currentTargetId() === blockId;
+    // The pane is bound first: the session reads its handle on every result, so a press in another pane retargets.
+    voice.registerPane(blockId, handle);
+    if (!wasListening || wasMine) voice.toggleListening();
+}
+
 /**
  * Returns a STABLE facade object (same identity forever) so long-lived
  * callers that cache the return value once at component setup — MicButton.tsx,
@@ -262,9 +284,20 @@ export function getVoiceSession(): VoiceSession {
         lastErrorDetail: facadeSignal((s) => s.lastErrorDetail, NULL_STRING_SIGNAL),
         notSetUp: facadeSignal((s) => s.notSetUp, NO_GAP_SIGNAL),
         level: facadeSignal((s) => s.level, NO_LEVEL_SIGNAL),
-        isAvailable: () => ensureVoiceSession().isAvailable(),
-        toggleListening: () => ensureVoiceSession().toggleListening(),
+        isAvailable: () => !voiceInputOff() && ensureVoiceSession().isAvailable(),
+        toggleListening: () => {
+            const session = ensureVoiceSession();
+            // Switched off, nothing starts it. A session that is listening can always be stopped.
+            if (voiceInputOff() && !session.isListening()) return;
+            session.toggleListening();
+        },
         registerPane: (blockId, handle) => ensureVoiceSession().registerPane(blockId, handle),
     };
+    // Switched off while it listens: it stops, and the microphone is let go.
+    createRoot(() =>
+        createEffect(() => {
+            if (voiceInputOff() && _session?.isListening()) _session.toggleListening();
+        })
+    );
     return _facade;
 }

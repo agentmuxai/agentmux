@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getVoiceSession } from "@/app/hook/useVoiceInput";
+import { toggleVoiceFor } from "@/app/hook/useVoiceInput";
 import { hostHas } from "@/util/host-caps";
 import { countBasicTerms } from "@/app/store/view-actions";
 import { atoms, settingsAtom, setIsTermMultiInput } from "@/app/store/global";
@@ -183,17 +183,8 @@ function registerPaneActionKeys() {
         if (!vm?.voiceHandle) {
             return true;
         }
-        const voice = getVoiceSession();
-        if (!voice.isAvailable()) return true;
-        const wasListening = voice.isListening();
-        const wasMine = wasListening && voice.currentTargetId() === blockId;
-        voice.registerPane(blockId, vm.voiceHandle());
-        if (!wasListening) {
-            voice.toggleListening();
-        } else if (wasMine) {
-            voice.toggleListening();
-        }
-        // else: retarget without toggle (same logic as MicButton click)
+        // Off (Settings > Recording) is off for the shortcut too: `toggleVoiceFor` starts nothing then.
+        toggleVoiceFor(blockId, vm.voiceHandle());
         return true;
     });
 }

@@ -19,10 +19,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignalAtom } from "@/util/util";
 
 let engineSignal: ReturnType<typeof createSignal<string | null>>;
+// `voice:enabled`: undefined on a fresh install (on), false when the person switched voice input off.
+let enabledSignal: ReturnType<typeof createSignal<boolean | undefined>>;
 
 vi.mock("@/app/store/global", () => ({
     getSettingsKeyAtom: (key: string) => {
         if (key === "voice:engine") return engineSignal[0];
+        if (key === "voice:enabled") return enabledSignal[0];
         return () => null;
     },
 }));
@@ -51,6 +54,7 @@ describe("getVoiceSession — cached facade observes a live engine switch", () =
     beforeEach(() => {
         vi.resetModules();
         engineSignal = createRoot(() => createSignal<string | null>("groq"));
+        enabledSignal = createRoot(() => createSignal<boolean | undefined>(undefined));
     });
     afterEach(() => vi.clearAllMocks());
 
@@ -97,5 +101,65 @@ describe("getVoiceSession — cached facade observes a live engine switch", () =
         // must also still be the same object, since some callers do that too.
         const second = getVoiceSession();
         expect(second).toBe(first);
+    });
+});
+
+describe("voice input switched off (voice:enabled: false) is off for every way of starting it", () => {
+    const handle = { appendFinal: () => {}, setInterim: () => {} };
+    beforeEach(() => {
+        vi.resetModules();
+        engineSignal = createRoot(() => createSignal<string | null>("groq"));
+        enabledSignal = createRoot(() => createSignal<boolean | undefined>(false));
+    });
+    afterEach(() => vi.clearAllMocks());
+
+    it("the button's start does nothing, and the session says it is not available", async () => {
+        const { getVoiceSession, voiceInputOff } = await import("./useVoiceInput");
+        const voice = getVoiceSession();
+        expect(voiceInputOff()).toBe(true);
+        expect(voice.isAvailable()).toBe(false);
+        // What MicButton does on a click.
+        voice.registerPane("pane-a", handle);
+        voice.toggleListening();
+        expect(voice.isListening()).toBe(false);
+
+        // Switched back on, the same click starts it.
+        enabledSignal[1](true);
+        expect(voice.isAvailable()).toBe(true);
+        voice.toggleListening();
+        expect(voice.isListening()).toBe(true);
+    });
+
+    it("the shortcut starts nothing and binds no pane", async () => {
+        const { getVoiceSession, toggleVoiceFor } = await import("./useVoiceInput");
+        const voice = getVoiceSession();
+        toggleVoiceFor("pane-a", handle);
+        expect(voice.isListening()).toBe(false);
+        expect(voice.currentTargetId()).toBeNull();
+    });
+
+    it("switched on, the shortcut starts, moves to another pane, and stops in the pane that has it", async () => {
+        enabledSignal[1](undefined);
+        const { getVoiceSession, toggleVoiceFor } = await import("./useVoiceInput");
+        const voice = getVoiceSession();
+        toggleVoiceFor("pane-a", handle);
+        expect([voice.isListening(), voice.currentTargetId()]).toEqual([true, "pane-a"]);
+        toggleVoiceFor("pane-b", handle);
+        expect([voice.isListening(), voice.currentTargetId()]).toEqual([true, "pane-b"]);
+        toggleVoiceFor("pane-b", handle);
+        expect(voice.isListening()).toBe(false);
+    });
+
+    it("switching it off while it listens stops it, and it can't be started again until it is back on", async () => {
+        enabledSignal[1](true);
+        const { getVoiceSession, toggleVoiceFor } = await import("./useVoiceInput");
+        const voice = getVoiceSession();
+        toggleVoiceFor("pane-a", handle);
+        expect(voice.isListening()).toBe(true);
+        enabledSignal[1](false);
+        expect(voice.isListening()).toBe(false);
+        toggleVoiceFor("pane-a", handle);
+        voice.toggleListening();
+        expect(voice.isListening()).toBe(false);
     });
 });
