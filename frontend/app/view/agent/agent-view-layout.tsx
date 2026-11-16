@@ -333,6 +333,8 @@ function AgentViewBottom({ v }: { v: AgentViewParts }): JSX.Element {
                 canSwitchAccount={account.canSwitchAccount()}
                 onSwitchAccount={account.onSwitchAccount}
                 pendingAccountLabel={account.pendingAccountLabel()}
+                prepCountdown={account.prepCountdown()}
+                onSwitchNow={account.onSwitchNow}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}

@@ -570,6 +570,25 @@
     }
   },
   {
+    "command": "agent.prep.now",
+    "request": "agentmux_srv::server::prep::handlers::AgentPrepNowReq",
+    "requestName": "AgentPrepNowReq",
+    "requestTs": {
+      "imports": [
+        "AgentPrepNowReq"
+      ],
+      "name": "AgentPrepNowReq"
+    },
+    "response": "agentmux_srv::server::prep::handlers::AgentPrepNowResult",
+    "responseName": "AgentPrepNowResult",
+    "responseTs": {
+      "imports": [
+        "AgentPrepNowResult"
+      ],
+      "name": "AgentPrepNowResult"
+    }
+  },
+  {
     "command": "agent.process-list",
     "request": "agentmux_srv_core::backend::rpc_types::agent::AgentProcessListCommand",
     "requestName": "AgentProcessListCommand",

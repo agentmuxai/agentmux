@@ -41,6 +41,8 @@ import type { AgentOpenResult } from "@/types/rpc/AgentOpenResult";
 import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentPaneUnregisterResult } from "@/types/rpc/AgentPaneUnregisterResult";
 import type { AgentPeerLabels } from "@/types/rpc/AgentPeerLabels";
+import type { AgentPrepNowReq } from "@/types/rpc/AgentPrepNowReq";
+import type { AgentPrepNowResult } from "@/types/rpc/AgentPrepNowResult";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
@@ -3172,6 +3174,10 @@ export const GeneratedApi = {
   // command "agent.model.panel"
   AgentModelPanelCommand(client: RpcClient, data: AgentModelPanelReq, opts?: RpcOpts): Promise<AgentModelPanel> {
     return client.rpcCall("agent.model.panel", data, opts);
+  },
+  // command "agent.prep.now"
+  AgentPrepNowCommand(client: RpcClient, data: AgentPrepNowReq, opts?: RpcOpts): Promise<AgentPrepNowResult> {
+    return client.rpcCall("agent.prep.now", data, opts);
   },
   // command "agent.model.switch"
   AgentModelSwitchCommand(

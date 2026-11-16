@@ -159,6 +159,13 @@ pub fn current_state(mstore: &Store, block_id: &str) -> Option<AgentState> {
     current_state_at(mstore, block_id, agentmux_common::time::now_ms_u64())
 }
 
+/// Whether the agent in `block_id` is in a turn: working, or waiting on a question. The one definition
+/// of "not between turns", for everything that waits for a turn to end before it restarts a pane
+/// (an account move, a prepared change).
+pub fn in_turn(mstore: &Store, block_id: &str) -> bool {
+    matches!(current_state(mstore, block_id), Some(AgentState::Working | AgentState::Waiting))
+}
+
 /// [`current_state`] at `now_ms`.
 pub fn current_state_at(mstore: &Store, block_id: &str, now_ms: u64) -> Option<AgentState> {
     let Some(controller) = blockcontroller::get_controller(block_id) else {

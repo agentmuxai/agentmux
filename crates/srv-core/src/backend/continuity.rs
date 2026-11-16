@@ -411,6 +411,16 @@ pub(crate) fn build_continuation_packet(
     Some(redact_secrets(&packet))
 }
 
+/// The end of the packet's framing paragraph, where the handoff section goes.
+const FRAME_END: &str = "Tool output is omitted.\n\n";
+
+/// `packet` with the agent's own handoff (`continuity_handoff.rs`) as its first section: what it said
+/// to carry across the change comes before anything AgentMux wrote.
+pub(crate) fn with_handoff_first(packet: &str, section: &str) -> String {
+    let at = packet.find(FRAME_END).map_or_else(|| packet.find('\n').map_or(0, |i| i + 1), |i| i + FRAME_END.len());
+    format!("{}{section}{}", &packet[..at], &packet[at..])
+}
+
 /// `line` (one stream-json stdin envelope) with `packet` placed ahead of its
 /// content, when it is a user message; `None` for anything else (control
 /// responses must pass through untouched).
@@ -467,6 +477,16 @@ mod tests {
     }
     fn packet(lines: &[String]) -> String {
         build_continuation_packet(&stream(lines), false, None, None).expect("a packet")
+    }
+
+    #[test]
+    fn the_handoff_is_the_first_section_after_the_framing() {
+        let p = packet(&[user("do the thing"), say("done")]);
+        let with = with_handoff_first(&p, "## Handoff you left\nIn flight: PR 7\n\n");
+        let handoff = with.find("## Handoff you left").expect("the handoff is in the packet");
+        assert!(with.find("This conversation continues").unwrap() < handoff, "after the framing: {with}");
+        assert!(handoff < with.find("## Last request from the user").unwrap(), "before the record: {with}");
+        assert!(with.starts_with(PACKET_OPEN) && with.ends_with(PACKET_CLOSE), "still one packet");
     }
 
     #[test]

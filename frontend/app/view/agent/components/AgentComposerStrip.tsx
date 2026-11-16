@@ -109,6 +109,10 @@ interface AgentComposerStripProps {
     onSwitchAccount?: (e: MouseEvent) => void;
     /** The account a queued switch moves to when the turn ends. */
     pendingAccountLabel?: string;
+    /** While the agent has its window to reach a safe point before the switch: the countdown line. */
+    prepCountdown?: string;
+    /** "Switch now": the chip's click while that window is open. */
+    onSwitchNow?: () => void;
 
     /** Cumulative cost/tokens/duration for this pane, shown in the
      *  session-stats popover the context reading opens. */
@@ -330,12 +334,16 @@ function authSlot(props: AgentComposerStripProps): Slot {
                 return props.pendingAccountLabel ? `${base} → ${cut(props.pendingAccountLabel)}` : base;
             };
             const label = () => labelWith(shortenEmail);
+            // The window srv gave the agent to reach a safe point: the time left rides on the label, the whole line
+            // is the tooltip, and a click ends the window (the picker would only change a choice already made).
+            const remaining = () => props.prepCountdown?.split(" · ").pop();
+            const preparing = () => !!props.prepCountdown && !!props.onSwitchNow;
             // Tight: the dot and one letter, the whole label in the tooltip and the accessible name. Signed out
             // keeps a mark of its own, as "N" for "Not logged in" would read as a name.
             // With room to spare it shows the address cut in the middle instead ("taylo…@mail.dev"), by the budget
             // the strip gives it; a switch pending ("a@x → b@y") has no middle form and keeps the letter.
             const shown = () => {
-                if (!compact()) return label();
+                if (!compact()) return remaining() ? `${label()} · ${remaining()}` : label();
                 if (props.authStatus === "unauthenticated") return "!";
                 const room = props.pendingAccountLabel ? undefined : budget?.();
                 return room === undefined ? accountInitial(label()) : middleTruncate(labelWith((email) => email), room);
@@ -347,6 +355,7 @@ function authSlot(props: AgentComposerStripProps): Slot {
                     : props.authEmail
                     ? `Signed in as ${props.authEmail}`
                     : "Signed in to this agent's provider";
+                if (props.prepCountdown) return `${base}. Switching to ${props.pendingAccountLabel ?? "another account"}: ${props.prepCountdown}. Click to switch now.`;
                 if (props.pendingAccountLabel) return `${base}. Switching to ${props.pendingAccountLabel} when this turn ends.`;
                 if (!hasOthers()) return base;
                 return busy()
@@ -373,7 +382,7 @@ function authSlot(props: AgentComposerStripProps): Slot {
                             class="agent-composer-strip-auth-link"
                             aria-haspopup="menu"
                             aria-label={compact() ? label() : undefined}
-                            onClick={(e) => props.onSwitchAccount?.(e)}
+                            onClick={(e) => (preparing() ? props.onSwitchNow?.() : props.onSwitchAccount?.(e))}
                         >
                             {shown()}
                         </Button>

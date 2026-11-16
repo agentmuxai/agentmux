@@ -522,6 +522,31 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         );
     });
 
+    it("counts down the agent's window to reach a safe point, and a click ends it instead of opening the picker", async () => {
+        const onSwitchNow = vi.fn();
+        const onSwitchAccount = vi.fn();
+        const { container } = render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                loading={true}
+                authStatus="authenticated"
+                authEmail="alice@example.com"
+                pendingAccountLabel="bob@example.com"
+                prepCountdown="waiting for Agent5 to reach a safe point · 24 s"
+                onSwitchNow={onSwitchNow}
+                canSwitchAccount={true}
+                onSwitchAccount={onSwitchAccount}
+            />
+        ));
+        expect(chip(container)).toHaveTextContent("alice@example.com → bob@example.com · 24 s");
+        expect(chip(container).getAttribute("data-hover-tip")).toBe(
+            "Signed in as alice@example.com. Switching to bob@example.com: waiting for Agent5 to reach a safe point · 24 s. Click to switch now."
+        );
+        await userEvent.click(link(container)!);
+        expect(onSwitchNow).toHaveBeenCalledTimes(1);
+        expect(onSwitchAccount).not.toHaveBeenCalled();
+    });
+
     it("is still a link while a compaction is in progress", () => {
         const { container } = render(() => (
             <AgentComposerStrip

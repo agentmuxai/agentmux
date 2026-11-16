@@ -4,11 +4,12 @@
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import type { Accessor } from "solid-js";
 import type { Account } from "@/app/view/identity/identity-model";
+import type { PrepMeta } from "./prep-window";
 import { useAccountBinding } from "./useAccountBinding";
 
 /**
  * `useAccountBinding` for an agent pane: the agent it acts for, and the switch queued for it
- * (`agent:pending_account`), are read from the pane's block meta.
+ * (`agent:pending_account`) and the window the agent has to prepare for it (`agent:prep`), are read from the pane's block meta.
  */
 export function useAgentAccountBinding(opts: {
     blockId: string;
@@ -18,7 +19,7 @@ export function useAgentAccountBinding(opts: {
     signedOut?: Accessor<boolean>;
     onLogin?: () => void;
 }) {
-    const meta = (key: "agentId" | "agent:pending_account") => () =>
+    const meta = (key: "agentId" | "agentName" | "agent:pending_account") => () =>
         getBlockMetaKeyAtom(opts.blockId, key)() as string | undefined;
     return useAccountBinding({
         blockId: opts.blockId,
@@ -26,6 +27,8 @@ export function useAgentAccountBinding(opts: {
         providerId: opts.providerId,
         bindExistingAccount: opts.bindExistingAccount,
         pendingAccountId: meta("agent:pending_account"),
+        prep: () => getBlockMetaKeyAtom(opts.blockId, "agent:prep")() as PrepMeta | undefined,
+        agentName: meta("agentName"),
         signedOut: opts.signedOut,
         onLogin: opts.onLogin,
     });

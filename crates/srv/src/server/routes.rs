@@ -833,6 +833,8 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         .route("/api/v1/agent/self/context", post(app_api::agent_context::handle_context_self))
         .route("/api/v1/agent/self/compact", post(app_api::agent_context::handle_compact_self))
         .route("/api/v1/agent/self/fresh", post(app_api::agent_context::handle_fresh_self))
+        // An agent answering the window a user action gave it to prepare (SPEC_AGENT_PREP_BEFORE_SESSION_RESTART).
+        .route("/api/v1/agent/self/ready", post(crate::server::prep::handle_ready_self))
         // An agent reading and editing a definition's extra environment variables.
         .route("/api/v1/agent/env", post(app_api::agent_env::handle_agent_env))
         // The GitHub App's installation token for an agent's git and gh, through

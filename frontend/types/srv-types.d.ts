@@ -926,6 +926,9 @@ declare global {
          *  turn (agent.account.switch, `after_turn`): the account id, and who asked. */
         "agent:pending_account"?: string;
         "agent:pending_account_by"?: string;
+        /** The window an agent has to reach a safe point and leave a handoff before a switch restarts its session
+         *  (srv `prep`): its id, when it ends (epoch ms), whether the agent asked for the longer one and why. Null when none. */
+        "agent:prep"?: { id: string; action: string; until_ms: number; extended: boolean; why?: string | null } | null;
         /** Where this pane's model API is when its CLI was started pointed at an address other than the
          *  default (a proxy or gateway): the connectivity service id, and the address. Written by srv at
          *  each start (blockcontroller/core.rs `attach_model_api`), cleared when the default is back. */
