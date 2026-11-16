@@ -13,7 +13,8 @@ vi.mock("@/app/store/global", () => ({ openLink }));
 
 import { SERVICE_CATALOG } from "./accounts-catalog";
 import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetails";
-import { guideFor, optionForMode, PROVIDER_GUIDES, shown, type Fact, type ProviderGuide } from "./provider-guide";
+import { OtherAgentsSection, otherAgentsShown } from "./OtherAgentsSection";
+import { guideFor, optionForMode, OTHER_AGENTS, PROVIDER_GUIDES, shown, type Fact, type ProviderGuide } from "./provider-guide";
 
 afterEach(() => {
     cleanup();
@@ -41,7 +42,7 @@ function factsOf(g: ProviderGuide): Array<[string, Fact<unknown>]> {
 function wordsOf(g: ProviderGuide): string[] {
     const out: string[] = [];
     for (const o of g.options) {
-        out.push(o.title, o.pickWhen, o.what.value, o.plansNote?.value ?? "", o.billedAgainst?.value ?? "", ...(o.plans?.value ?? []));
+        out.push(o.title, o.pickWhen ?? "", o.what.value, o.plansNote?.value ?? "", o.billedAgainst?.value ?? "", ...(o.plans?.value ?? []));
     }
     for (const p of g.pointers) out.push(p.label);
     return out;
@@ -164,5 +165,142 @@ describe("ProviderGuideDetails", () => {
         expect(screen.getByText("Sourced sentence.")).toBeTruthy();
         expect(screen.queryByText("Unsourced cost.")).toBeNull();
         expect(screen.queryByRole("button", { name: "Unsourced page" })).toBeNull();
+    });
+});
+
+describe("the tiles that have no sign-in to run", () => {
+    it("gives xAI text only: a tile with no way to connect, and a guide with nothing to pick", () => {
+        const xai = SERVICE_CATALOG.find((t) => t.id === "xai");
+        expect(xai?.authModes).toEqual([]);
+        expect(xai?.signIn).toBeUndefined();
+        expect(guideFor("xai")?.options.map((o) => o.kind)).toEqual(["inside"]);
+    });
+
+    it("gives Moonshot a key, named by the provider id the Kimi agent and srv's key class use", () => {
+        const kimi = SERVICE_CATALOG.find((t) => t.id === "kimi");
+        expect(kimi?.displayName).toBe("Moonshot");
+        expect(kimi?.authModes).toEqual(["key"]);
+        expect(kimi?.keyKind).toBe("api_key");
+        expect(PROVIDERS["kimi"]?.authType).toBe("api-key");
+        expect(optionForMode(guideFor("kimi"), "key")?.key?.createAt.value).toBe("https://platform.kimi.ai/console/api-keys");
+        expect(optionForMode(guideFor("kimi"), "key")?.key?.prefix).toBeUndefined();
+        expect(guideFor("kimi")?.options.some((o) => o.kind === "inside")).toBe(true);
+    });
+
+    it("puts Copilot under GitHub as text, with no sign-in of its own", () => {
+        const github = guideFor("github");
+        expect(github?.options.map((o) => o.kind)).toEqual(["inside"]);
+        expect(github?.options[0].plans?.value).toContain("Copilot Pro+");
+        expect(SERVICE_CATALOG.find((t) => t.id === "github")?.signIn).toBeUndefined();
+        const signIns = PROVIDER_GUIDES.flatMap((g) => g.options).filter((o) => o.kind === "signin");
+        expect(signIns.filter((o) => o.cli === "copilot" || o.cli === "grok")).toEqual([]);
+    });
+});
+
+describe("the other agents' data", () => {
+    it("gives each line an https source and the day it was read, and tells no history", () => {
+        for (const a of OTHER_AGENTS) {
+            const facts = [a.line, a.key?.createAt, ...(a.key?.notes ?? [])].filter((f): f is Fact<string> => !!f);
+            for (const f of facts) {
+                expect(shown(f), `${a.id}: ${f.value}`).toBeTruthy();
+                expect(f.source.startsWith("https://"), `${a.id}: ${f.value}`).toBe(true);
+                expect(f.value, `${a.id}: ${f.value}`).not.toMatch(/was renamed|moved to|formerly|previously|since \d|used to|no longer/i);
+            }
+        }
+    });
+
+    it("names only agents the catalog has, once each, with an https docs link, and none that has a tile", () => {
+        const ids = OTHER_AGENTS.map((a) => a.id);
+        expect(new Set(ids).size).toBe(ids.length);
+        const tileClis = new Set(SERVICE_CATALOG.flatMap((t) => (t.signIn ? [t.signIn.provider] : [])));
+        for (const id of ids) {
+            expect(PROVIDERS[id], id).toBeTruthy();
+            expect(PROVIDERS[id].docsUrl.startsWith("https://"), id).toBe(true);
+            expect(tileClis.has(id), id).toBe(false);
+            expect(
+                SERVICE_CATALOG.some((t) => t.id === id),
+                id
+            ).toBe(false);
+        }
+        expect(otherAgentsShown().map((a) => a.id)).toEqual(ids);
+    });
+
+    it("sends a key to the vendor the catalog says the agent runs on", () => {
+        for (const a of OTHER_AGENTS.filter((x) => x.key)) {
+            const vendor = PROVIDERS[a.id].supportedVendors?.[0];
+            expect(["openrouter", "deepseek"], a.id).toContain(vendor);
+            expect(a.key?.createAt.value, a.id).toBe(
+                vendor === "openrouter" ? "https://openrouter.ai/keys" : "https://platform.deepseek.com/api_keys"
+            );
+        }
+    });
+});
+
+describe("OtherAgentsSection", () => {
+    it("lists each agent with its line and a docs link from the catalog, collapsed until opened", () => {
+        const { container } = render(() => <OtherAgentsSection />);
+        expect(container.querySelector("details.accounts-other")?.hasAttribute("open")).toBe(false);
+        expect(screen.getByText(`Other agents (${OTHER_AGENTS.length})`)).toBeTruthy();
+        expect(screen.getByText("Muse Code")).toBeTruthy();
+        expect(screen.getByText("Asks you to sign in with your browser or an API key the first time it runs.")).toBeTruthy();
+        const row = container.querySelector('[data-agent="goose"]') as HTMLElement;
+        (row.querySelector("button") as HTMLButtonElement).click();
+        expect(openLink).toHaveBeenCalledWith(PROVIDERS["goose"].docsUrl);
+    });
+
+    it("gives OpenRouter's key to Qwen Code and DeepSeek's to its harness", () => {
+        const { container } = render(() => <OtherAgentsSection />);
+        const keyButton = (row: HTMLElement, label: string) =>
+            Array.from(row.querySelectorAll("button")).find((b) => b.textContent === label) as HTMLButtonElement;
+        const qwen = container.querySelector('[data-agent="qwen"]') as HTMLElement;
+        keyButton(qwen, "OpenRouter key").click();
+        expect(openLink).toHaveBeenCalledWith("https://openrouter.ai/keys");
+        expect(qwen.textContent).toContain("sk-or-v1-");
+        const dsh = container.querySelector('[data-agent="dsh"]') as HTMLElement;
+        keyButton(dsh, "DeepSeek key").click();
+        expect(openLink).toHaveBeenCalledWith("https://platform.deepseek.com/api_keys");
+    });
+
+    it("draws no key for an agent that has none", () => {
+        const { container } = render(() => <OtherAgentsSection />);
+        expect(container.querySelector('[data-agent="aider"] .accounts-other-key')).toBeNull();
+    });
+});
+
+describe("the tile guides draw", () => {
+    it("Grok Build's sign-in in plain view, with its docs page", () => {
+        const { container } = render(() => <ProviderGuideInside guide={guideFor("xai")!} />);
+        expect(container.querySelector("details")).toBeNull();
+        expect(screen.getByText("Grok Build signs in inside the agent")).toBeTruthy();
+        screen.getByRole("button", { name: "Grok Build docs" }).click();
+        expect(openLink).toHaveBeenCalledWith("https://docs.x.ai/build/overview");
+    });
+
+    it("Moonshot's key, where to make one, and Kimi Code's own sign-in", () => {
+        const g = guideFor("kimi")!;
+        render(() => (
+            <>
+                <ProviderGuideInside guide={g} />
+                <ProviderGuideDetails guide={g} />
+            </>
+        ));
+        expect(screen.getByText("Kimi Code signs in inside the agent")).toBeTruthy();
+        expect(screen.getByText(/open a Kimi agent and run \/login/)).toBeTruthy();
+        screen.getByRole("button", { name: "Make one" }).click();
+        expect(openLink).toHaveBeenCalledWith("https://platform.kimi.ai/console/api-keys");
+    });
+
+    it("Copilot's plans under GitHub, with nothing to pick between", () => {
+        const g = guideFor("github")!;
+        const { container } = render(() => (
+            <>
+                <ProviderGuideInside guide={g} />
+                <ProviderGuideDetails guide={g} />
+            </>
+        ));
+        expect(screen.getByText("GitHub Copilot signs in inside the agent")).toBeTruthy();
+        expect(screen.getByText(/Copilot Student/)).toBeTruthy();
+        expect(screen.getByText("Usage is counted in GitHub AI Credits.")).toBeTruthy();
+        expect(container.querySelector("details")).toBeNull();
     });
 });

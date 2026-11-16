@@ -241,3 +241,75 @@
         padding-top: var(--space-2);
     }
 }
+
+// "Other agents": the agents with no tile, one row each (OtherAgentsSection).
+.accounts-other {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+
+    .accounts-other-summary {
+        cursor: pointer;
+        color: var(--secondary-text-color);
+    }
+
+    .accounts-other-intro {
+        margin: var(--space-1) 0 var(--space-2);
+        color: var(--secondary-text-color);
+    }
+
+    .accounts-other-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .accounts-other-row {
+        display: flex;
+        gap: var(--space-2);
+        align-items: flex-start;
+    }
+
+    .accounts-other-logo {
+        @include mixins.flex-center(inline-flex);
+        flex: none;
+        width: 16px;
+        height: 20px;
+    }
+
+    .accounts-other-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-width: 0;
+        gap: var(--space-1);
+    }
+
+    .accounts-other-head {
+        display: flex;
+        gap: var(--space-1);
+        align-items: center;
+    }
+
+    .accounts-other-name {
+        font-weight: 600;
+    }
+
+    .accounts-other-line,
+    .accounts-other-note {
+        overflow-wrap: anywhere;
+    }
+
+    .accounts-other-key {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-2);
+        align-items: center;
+    }
+
+    .accounts-other-note {
+        color: var(--secondary-text-color);
+    }
+}

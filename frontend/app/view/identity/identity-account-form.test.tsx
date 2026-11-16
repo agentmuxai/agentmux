@@ -164,6 +164,7 @@ describe("AccountForm: opening", () => {
             "aws",
             "openai",
             "anthropic",
+            "kimi",
             "slack",
             "custom",
             "agentmux",

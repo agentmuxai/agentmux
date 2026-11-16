@@ -19,7 +19,9 @@ import type { AgentDefinition, IdentityAccount } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux";
+// `xai` is a tile with no account of its own (Grok Build signs in inside the agent); `kimi` is the Moonshot
+// key's provider id, the one srv's key class and the agent's provider use.
+export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux" | "xai" | "kimi";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 /** `needs_reauth`: the provider refused a refresh (`invalid_grant`); the user must reconnect. */
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking" | "needs_reauth";
@@ -232,6 +234,8 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     slack: "Slack",
     custom: "Custom",
     agentmux: "AgentMux",
+    xai: "xAI",
+    kimi: "Moonshot",
 };
 
 export const KIND_LABELS: Record<AccountKind, string> = {

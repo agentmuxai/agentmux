@@ -83,10 +83,14 @@ function OptionDetails(props: { option: ConnectOption }): JSX.Element {
                 </div>
             </Show>
             <KeyLines option={o()} />
-            <div class="accounts-guide-line">
-                <span class="accounts-guide-label">Pick it when</span>
-                <span class="accounts-guide-value">{o().pickWhen}</span>
-            </div>
+            <Show when={o().pickWhen}>
+                {(when) => (
+                    <div class="accounts-guide-line">
+                        <span class="accounts-guide-label">Pick it when</span>
+                        <span class="accounts-guide-value">{when()}</span>
+                    </div>
+                )}
+            </Show>
         </section>
     );
 }

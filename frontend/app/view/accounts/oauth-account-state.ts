@@ -10,6 +10,7 @@
 import { createSignal } from "solid-js";
 
 import type { Account } from "@/app/view/identity/identity-model";
+import { SERVICE_CATALOG } from "./accounts-catalog";
 import { supportsOAuth } from "./oauth-catalog";
 
 /** An account connected through srv's service-OAuth flow (its tokens in the keychain). */
@@ -126,8 +127,21 @@ export function setOAuthNote(accountId: string, note: OAuthNote | null): void {
     });
 }
 
-/** A Reconnect is offered: the login stopped working, or its organization blocked the last try. */
+/** The sign-in of an agent CLI that Connectors runs (Claude Code's, Codex's): its login lives in a directory of its
+ *  own (`oauth_config_dir`), not in the keychain. Undefined for any other account, and for a CLI whose sign-in
+ *  Connectors doesn't run yet. */
+export function cliSignInOf(a: Pick<Account, "kind" | "provider" | "secret_ref">): { provider: string; brand: string } | undefined {
+    if (a.kind !== "oauth" || a.secret_ref?.backend !== "oauth_config_dir") return undefined;
+    return SERVICE_CATALOG.find((t) => t.signIn?.provider === a.provider)?.signIn;
+}
+
+/** A CLI sign-in the provider no longer accepts: the statuses srv counts as unable to run an agent. */
+const LOST_CLI_STATUS = new Set(["expired", "needs_reauth", "invalid"]);
+
+/** A Reconnect is offered: the login stopped working, or its organization blocked the last try. For a CLI sign-in it
+ *  runs the CLI's login again in the account's own directory, so the agents bound to it keep it. */
 export function canReconnect(a: Pick<Account, "id" | "kind" | "provider" | "secret_ref" | "status">): boolean {
+    if (cliSignInOf(a)) return LOST_CLI_STATUS.has(a.status);
     return isServiceOAuthAccount(a) && (a.status === "needs_reauth" || !!oauthNote(a.id)?.blocked);
 }
 

@@ -58,8 +58,12 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
         "openai" => Some(ProviderClass::ApiKey {
             env_vars: &["OPENAI_API_KEY"],
         }),
+        // Moonshot's own pages name `MOONSHOT_API_KEY` for a Kimi API Platform key; the Kimi CLI's configuration page
+        // (moonshotai.github.io/kimi-cli/en/configuration/env-vars.html, read 2026-11-16) names `KIMI_API_KEY`
+        // for its `kimi` provider and neither page names the other. Both get the key, so it reaches the CLI by the
+        // name the CLI documents and a script that reads Moonshot's name still finds it.
         "kimi" => Some(ProviderClass::ApiKey {
-            env_vars: &["MOONSHOT_API_KEY"],
+            env_vars: &["KIMI_API_KEY", "MOONSHOT_API_KEY"],
         }),
         "aws" => Some(ProviderClass::ApiKey {
             env_vars: &["AWS_ACCESS_KEY_ID"],
@@ -138,6 +142,14 @@ mod tests {
         assert_eq!(
             provider_class("muse"),
             Some(ProviderClass::OAuth { config_dir_env_var: "XDG_CONFIG_HOME" }),
+        );
+    }
+
+    #[test]
+    fn kimi_key_is_injected_under_the_names_both_vendors_pages_use() {
+        assert_eq!(
+            provider_class("kimi"),
+            Some(ProviderClass::ApiKey { env_vars: &["KIMI_API_KEY", "MOONSHOT_API_KEY"] }),
         );
     }
 

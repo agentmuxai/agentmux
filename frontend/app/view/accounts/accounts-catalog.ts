@@ -68,6 +68,11 @@ export const SERVICE_CATALOG: ServiceTile[] = [
         blurb: "Browser sign-in, or API key",
         signIn: { provider: "claude", brand: "Anthropic" },
     },
+    // xAI: Grok Build signs in inside the agent, so the tile is text only (no way to connect from here).
+    { id: "xai", displayName: "xAI", authModes: [], keyKind: "api_key", blurb: "Grok Build" },
+    // Moonshot: a Kimi API Platform key. Its provider id is `kimi`, the id srv's key class and the Kimi agent use
+    // (the account is bound and injected as that agent's key); Kimi Code's own sign-in is inside the agent.
+    { id: "kimi", displayName: "Moonshot", authModes: ["key"], keyKind: "api_key", blurb: "Kimi API key" },
     { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
     { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
 ];

@@ -386,6 +386,7 @@ function ProviderField({ f }: { f: FormFields }): JSX.Element {
                 <option value="aws">AWS</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
+                <option value="kimi">{PROVIDER_LABELS.kimi}</option>
                 <option value="slack">Slack</option>
                 <option value="custom">Custom</option>
                 <option value="agentmux">AgentMux</option>
@@ -419,7 +420,7 @@ function KindField({ f }: { f: FormFields }): JSX.Element {
                 <Show when={f.provider() === "openai"}>
                     <option value="api_key">API Key</option>
                 </Show>
-                <Show when={f.provider() === "anthropic"}>
+                <Show when={f.provider() === "anthropic" || f.provider() === "kimi"}>
                     <option value="api_key">API Key</option>
                 </Show>
                 <Show when={f.provider() === "custom"}>
