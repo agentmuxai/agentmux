@@ -116,8 +116,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
             timer = setTimeout(() => {
                 timer = undefined;
                 if (handle) handle.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
-                // Only a pane that has never opened opens here; a failed or ended one waits for Reconnect.
-                else if (status() === "waiting") open();
+                // A pane that has not opened yet (or was shown too small to open) opens here; a failed or ended one waits for Reconnect.
+                else if (status() === "waiting" || status() === "paused") open();
             }, RESIZE_MS);
         },
         shown: (v) => {

@@ -161,4 +161,25 @@ describe("a streamed pane's state", () => {
         expect(events).not.toBeNull();
         dispose();
     });
+
+    it("opens on the first usable size when it was shown while too small", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        pane.shown(false);
+        pane.resized(10, 10);
+        vi.advanceTimersByTime(150);
+        events = null;
+        pane.shown(true);
+        expect(events).toBeNull();
+        expect(pane.status()).toBe("paused");
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        expect(events).not.toBeNull();
+        expect(pane.status()).toBe("connecting");
+        dispose();
+    });
 });
