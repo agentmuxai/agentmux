@@ -192,8 +192,13 @@ pub(crate) fn close(state: &AppState, block_id: &str) -> Answer {
 /// clear the listener's state, so the next Up, Down, Escape or Enter in the page's field is the page's.
 pub(crate) async fn close_from_ui(state: &AppState, block_id: &str) {
     close(state, block_id);
-    let body = json!({ "block_id": block_id });
-    if let Err((_, e)) = super::ui_handlers::proxy_value(state, "signin_list_clear", body, HOST_WAIT).await {
+    // Not `proxy_value`: that notes the call as an agent's input to the pane, and this is housekeeping for the
+    // person's own press, which must not be taken for the agent's (a popup the person opens next).
+    let told = match super::ui_handlers::get_host_ipc(state).await {
+        Ok(host) => super::ui_handlers::proxy_to_host_timeout(state, &host, "signin_list_clear", json!({ "block_id": block_id }), Some(HOST_WAIT)).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = told {
         tracing::info!(error = %e, "[signin-list] the page's listener wasn't told the list closed");
     }
 }

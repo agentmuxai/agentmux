@@ -16,9 +16,37 @@ import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { openVault } from "@/app/view/vault/open-vault";
+import { getApi } from "@/util/app-api";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { listRowLabel, MANAGE_PASSWORDS_LABEL, readSigninList, SIGNIN_LIST_LABEL, STRONG_PASSWORD_LABEL } from "./browser-signin-offer-model";
+
+// A press anywhere else in the app's own UI (another pane, the address bar, the tab strip) closes the list while it
+// shows: the page sees none of those, so its listener can't report them. srv closes it and tells the listener.
+function closeOnPressElsewhere(shown: () => boolean, blockId: string, panel: () => HTMLElement | undefined, close: () => void): void {
+    const open = createMemo(shown);
+    createEffect(() => {
+        if (!open()) return;
+        // Only a real press: a click in any browser pane's page reaches the DOM as a synthetic one on the body
+        // (BrowserPaneOutsideClickBridge), without saying which pane. This pane's own page tells its listener.
+        const onPress = (e: Event) => {
+            if (!e.isTrusted) return;
+            const el = panel();
+            const within = el?.closest(".anchored-popover") ?? el;
+            if (within && e.target instanceof Node && within.contains(e.target)) return;
+            close();
+        };
+        document.addEventListener("pointerdown", onPress, true);
+        // A click in another browser pane's page is no DOM press, but the host says which pane it was.
+        const unlisten = getApi().listen<{ block_id: string }>("browser-pane-clicked", (p) => {
+            if (p.block_id !== blockId) close();
+        });
+        onCleanup(() => {
+            document.removeEventListener("pointerdown", onPress, true);
+            void unlisten.then((off) => off());
+        });
+    });
+}
 
 export function BrowserSigninList(props: { blockId: string; meta: () => Record<string, unknown> | undefined }): JSX.Element {
     const list = createMemo(() => readSigninList(props.meta()));
@@ -34,20 +62,8 @@ export function BrowserSigninList(props: { blockId: string; meta: () => Record<s
     // The anchor is the nav bar's group this component sits in: the list opens under the key button's place.
     // Read once mounted: a ref runs before the element has a parent.
     onMount(() => setAnchor(host?.parentElement ?? undefined));
-    // A press anywhere else in the app's own UI (another pane, the address bar, the tab strip) closes the list:
-    // the page sees none of those, so its listener can't report them. srv closes it and tells the listener.
     let panel: HTMLElement | undefined;
-    const shown = createMemo(() => list() !== undefined);
-    createEffect(() => {
-        if (!shown()) return;
-        const onPress = (e: Event) => {
-            const within = panel?.closest(".anchored-popover") ?? panel;
-            if (within && e.target instanceof Node && within.contains(e.target)) return;
-            run(RpcApi.SigninListCloseCommand(TabRpcClient, { block_id: props.blockId }));
-        };
-        document.addEventListener("pointerdown", onPress, true);
-        onCleanup(() => document.removeEventListener("pointerdown", onPress, true));
-    });
+    closeOnPressElsewhere(() => list() !== undefined, props.blockId, () => panel, () => run(RpcApi.SigninListCloseCommand(TabRpcClient, { block_id: props.blockId })));
     return (
         <>
             <span ref={(el) => (host = el)} class="browser-signin-list-anchor" aria-hidden="true" />
