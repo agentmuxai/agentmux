@@ -1,8 +1,9 @@
 // Your own widget bar entries. Save the file and they apply at once.
 //
 // Every entry here is merged over the built-in ones. A new key adds a button to the
-// widget bar; a built-in key, such as "defwidget@swarm", replaces that button. The built-in
-// entries are in crates/srv-core/src/config/widgets.json in the AgentMux source.
+// widget bar; give it a key with an @ in it, such as "defwidget@my-docs". A built-in key, such
+// as "defwidget@swarm", replaces that button. The built-in entries are in
+// crates/srv-core/src/config/widgets.json in the AgentMux source.
 // Comments (// and /* */) and trailing commas are allowed. If the file has a mistake,
 // Settings names the line, and your widgets stay as they were until it is fixed.
 //
@@ -27,7 +28,7 @@
 //
 // An example, ready to use: remove the // from its lines, then change them.
 {
-    // "my-docs": {
+    // "defwidget@my-docs": {
     //     "label": "Docs",
     //     "icon": "book",
     //     "description": "The AgentMux docs",

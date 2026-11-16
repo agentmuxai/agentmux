@@ -494,7 +494,7 @@ mod tests {
             .map(|l| l.strip_prefix("    // ").unwrap_or(l).to_string())
             .collect();
         let user = parse_user_widgets(&live.join("\n"), "widgets.json").unwrap();
-        assert_eq!(user["my-docs"].label, "Docs");
+        assert_eq!(user["defwidget@my-docs"].label, "Docs");
     }
 
     #[test]
