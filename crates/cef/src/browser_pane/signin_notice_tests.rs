@@ -110,7 +110,7 @@ fn the_list_asks_only_for_the_text_of_a_user_name_field_and_only_on_the_persons_
     let end = SCRIPT.find("const watchLeaving").expect("what follows them");
     let list = &SCRIPT[start..end];
     assert!(!list.contains("password.value") && !list.contains("pw.value"), "no password value in the list's code");
-    assert_eq!(list.matches("isTrusted").count(), 3, "pointerdown, keydown and input each count only the person's own");
+    assert_eq!(list.matches("isTrusted").count(), 4, "pointerdown, focusin, keydown and input each count only the person's own");
 }
 
 #[test]

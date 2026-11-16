@@ -30,7 +30,17 @@
     --form-element-primary-color: var(--accent-color);
     --form-element-error-color: var(--error-color);
     --sysinfo-cpu-color: var(--accent-color);
+    --process-kind-agents: var(--term-magenta);
+    --process-kind-agentmux: var(--term-cyan);
+    --process-kind-shells: var(--term-green);
+    --process-kind-builds: var(--term-yellow);
+    --process-kind-runtimes: var(--term-blue);
     --kanban-stage-backlog: var(--secondary-text-color);
+    --kanban-stage-research: var(--process-kind-agentmux);
+    --kanban-stage-progress: var(--process-kind-agents);
+    --kanban-stage-review: var(--process-kind-builds);
+    --kanban-stage-merged: var(--process-kind-shells);
+    --kanban-stage-released: var(--process-kind-runtimes);
     --shadow-focus-ring: 0 0 0 2px var(--accent-color);
     --ui-line-accent: color-mix(in srgb, var(--accent-color) 35%, transparent);
     --ui-line-danger: color-mix(in srgb, var(--error-color) 45%, transparent);

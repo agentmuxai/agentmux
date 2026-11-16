@@ -100,6 +100,17 @@ function listenForInput(): void {
     for (const type of ["keydown", "pointerdown", "wheel", "input", "compositionstart", "compositionupdate"]) {
         document.addEventListener(type, mark, opts);
     }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+}
+
+/**
+ * A frame already requested when the page is hidden never fires, and no new request may come to reach `armDrain` from
+ * `arm`: start the drain on the change itself. When the page is shown again the frames are back, so the drain stops.
+ */
+function onVisibilityChange(): void {
+    if (document.hidden) return armDrain();
+    clearDrain();
+    arm();
 }
 
 /**

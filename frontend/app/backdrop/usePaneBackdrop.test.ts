@@ -11,6 +11,7 @@ const theme = vi.hoisted(() => ({ read: (): string => "default" }));
 vi.mock("../store/window-appearance", () => ({ currentWindowTheme: () => theme.read() }));
 vi.mock("../block/pane-identity", () => ({ isLightThemeActive: () => theme.read() === "light" }));
 
+import { ANSI_TOKENS, resetThemeAnsi } from "./ansi";
 import { getPaneScope } from "./scope";
 import { usePaneBackdrop } from "./usePaneBackdrop";
 
@@ -18,6 +19,7 @@ const teal = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
 const disposers: Array<() => void> = [];
 const realMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
 afterEach(() => {
+    resetThemeAnsi();
     while (disposers.length) disposers.pop()!();
     theme.read = () => "default";
     if (realMatchMedia) Object.defineProperty(window, "matchMedia", realMatchMedia);
@@ -142,5 +144,42 @@ describe("usePaneBackdrop", () => {
         expect(getPaneScope("hb-owner")()).toEqual(live);
         dispose();
         expect(getPaneScope("hb-owner")()).toEqual(live);
+    });
+});
+
+describe("usePaneBackdrop and the theme's terminal palette", () => {
+    const root = document.documentElement;
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    afterEach(() => {
+        for (const t of ANSI_TOKENS) root.style.removeProperty(t);
+        root.removeAttribute("data-theme");
+        resetThemeAnsi();
+    });
+
+    it("sets the palette tone-moved on a pane with a backdrop, and sets none on a pane with none", () => {
+        root.style.setProperty("--term-green", "#4e9a06");
+        mount("hb-ansi", () => ({ backdrop: teal }));
+        expect(getPaneScope("hb-ansi")()?.["--term-green"]).toMatch(/^#[0-9a-f]{6}$/);
+        mount("hb-ansi-none", () => ({}));
+        expect(getPaneScope("hb-ansi-none")()).toBeUndefined();
+    });
+
+    it("reads the palette for no pane that has no backdrop", () => {
+        const spy = vi.spyOn(window, "getComputedStyle");
+        mount("hb-ansi-quiet", () => ({}));
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+    });
+
+    it("sets them again when the theme changes, from the new theme's palette", async () => {
+        root.style.setProperty("--term-green", "#4e9a06");
+        mount("hb-ansi-theme", () => ({ backdrop: teal }));
+        const first = getPaneScope("hb-ansi-theme")()?.["--term-green"];
+        root.style.setProperty("--term-green", "#a6e3a1");
+        root.setAttribute("data-theme", "catppuccin");
+        await tick();
+        const second = getPaneScope("hb-ansi-theme")()?.["--term-green"];
+        expect(second).toMatch(/^#[0-9a-f]{6}$/);
+        expect(second).not.toBe(first);
     });
 });

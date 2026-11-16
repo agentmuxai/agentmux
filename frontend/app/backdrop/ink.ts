@@ -93,6 +93,10 @@ const NUDGE_CAP = 0.08;
 const NUDGE_STEP = 0.004;
 /** A little above the target, so a hex rounded to 8 bits still clears it. */
 const MARGIN = 0.02;
+/** How much of the ink a selected row washes over its surface (the hover wash is half of it). */
+const SELECTED_WASH = 0.16;
+/** Primary text keeps this ratio on a washed row, whatever level the colour reaches. */
+const WASHED_TEXT_FLOOR = 4.5;
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
@@ -153,8 +157,13 @@ function bestPossible(against: string, light: boolean): number {
  * dead zone is about 0.01 of lightness from the 4.5:1 crossover on each side, the layers' steps a little more).
  */
 function nudgeSurface(base: Oklch, light: boolean): { base: Oklch; high: boolean } {
-    const reach = (b: Oklch, target: number) =>
-        bestPossible(hardestOf(layersOf(b, light), light), light) >= target + MARGIN;
+    // The wash of a selected row pulls the surface toward the ink, so the best ink must keep 4.5:1 on the hardest
+    // layer under it too (the washed text is the pale-on-pale case a "readable" colour would otherwise miss).
+    const reach = (b: Oklch, target: number) => {
+        const hard = hardestOf(layersOf(b, light), light);
+        const washed = washedOver(hard, light ? WHITE : BLACK, SELECTED_WASH);
+        return bestPossible(hard, light) >= target + MARGIN && bestPossible(washed, light) >= WASHED_TEXT_FLOOR + MARGIN;
+    };
     const step = (moved: number): Oklch => ({ ...base, l: clamp01(base.l + (light ? -moved : moved)) });
     if (reach(base, INK_TARGETS.text.floor)) return { base, high: true };
     for (let moved = NUDGE_STEP; moved <= NUDGE_CAP + 1e-9; moved += NUDGE_STEP) {
@@ -164,6 +173,20 @@ function nudgeSurface(base: Oklch, light: boolean): { base: Oklch; high: boolean
         if (reach(step(moved), INK_TARGETS.muted.floor)) return { base: step(moved), high: false };
     }
     return { base, high: false };
+}
+
+/**
+ * `surface` with `ink` washed over it by `t`: what a hovered or selected row paints, as `#rrggbb`. The alpha is the
+ * 8-bit one `withAlpha` writes into the token (16 percent is 41/255), so the check judges the painted colour.
+ */
+function washedOver(surface: string, ink: string, t: number): string {
+    const [a, b] = [hexToRgb(surface), hexToRgb(ink.slice(0, 7))];
+    if (!a || !b) return surface;
+    const ch = (i: number) =>
+        Math.round((a[i] + (b[i] - a[i]) * (Math.round(t * 255) / 255)) * 255)
+            .toString(16)
+            .padStart(2, "0");
+    return `#${ch(0)}${ch(1)}${ch(2)}`;
 }
 
 function withAlpha(hex: string, alpha: number): string {
@@ -240,10 +263,12 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         info: tone(signals.info),
         focus: accent,
         hover: withAlpha(text, 0.08),
-        selected: withAlpha(text, 0.16),
+        selected: withAlpha(text, SELECTED_WASH),
     };
-    const checks: [string, string, number][] = [
+    const onSelected = washedOver(hard, text, SELECTED_WASH);
+    const checks: [string, string, number, string?][] = [
         ["text", ink.text, nudge.high ? INK_TARGETS.text.floor : 4.5],
+        ["textOnSelected", ink.text, WASHED_TEXT_FLOOR, onSelected],
         ["muted", ink.muted, INK_TARGETS.muted.floor],
         ["faint", ink.faint, INK_TARGETS.faint.floor],
         ["border", ink.border, INK_TARGETS.border.floor],
@@ -261,6 +286,6 @@ export function deriveInk(chosen: string, signals: Signals = APP_SIGNALS): Deriv
         level: nudge.high ? "high" : "readable",
         nudged: nudge.base.l !== start.l,
         chosen,
-        unmet: checks.filter(([, hex, floor]) => contrastRatio(hex, hard) < floor).map(([name]) => name),
+        unmet: checks.filter(([, hex, floor, on]) => contrastRatio(hex, on ?? hard) < floor).map(([name]) => name),
     };
 }

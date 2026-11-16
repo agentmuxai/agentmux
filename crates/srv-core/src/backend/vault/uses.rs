@@ -87,6 +87,16 @@ pub struct UseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub import: Option<UseImport>,
+    /// An agent wants to change where the entry's machine copy is (`Vault` `update` of its `source_*` fields); never
+    /// goes ahead on silence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub link: Option<UseLink>,
+    /// A named list of secrets an agent wants copied into the Vault from another service (`Vault` `import_batch`): one
+    /// answer for the whole list, naming the rows the person left ticked; never goes ahead on silence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub batch: Option<UseBatch>,
     /// The cards the person may pick from, when the agent named none or named one the person may swap
     /// (`Browser` `fill` of a whole card): none for any other use. `entry_id` is the one preselected, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +117,56 @@ pub struct UseChoice {
     pub expired: bool,
     /// The person's default card.
     pub default: bool,
+}
+
+/// A change to where an entry's machine copy is, as the person reads it: the place now and the place asked for.
+/// Either is empty when there is none. No value: a place is a name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseLink {
+    pub from: String,
+    pub to: String,
+    /// What the entry says of its key beside the place (who reads it, when it last changed, where else it is kept),
+    /// now and as asked; empty when it says nothing.
+    pub about_from: String,
+    pub about_to: String,
+    /// The entry is a link: it holds no value, so the place is where the key itself lives, not a copy of it.
+    pub only: bool,
+}
+
+/// A batch of imports as the person reads it: its name, the one account and region it reads, the one Vault it goes
+/// into, and a row for every secret. Nothing of a value.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseBatch {
+    /// The agent's name for the list ("host passwords").
+    pub name: String,
+    /// The service the secrets are read from, e.g. "AWS Secrets Manager".
+    pub service: String,
+    pub region: String,
+    /// What the reads run under, as [`UseImport::profile`].
+    pub profile: String,
+    /// `profile` is a grant AgentMux mints a session for, not a profile on this computer.
+    pub grant: bool,
+    /// The Vault every row goes into.
+    pub vault: String,
+    pub items: Vec<UseBatchItem>,
+}
+
+/// One row of a batch: the entry it becomes and the secret it is read from.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseBatchItem {
+    /// The new entry's label, or the label of the entry whose value it replaces.
+    pub label: String,
+    pub kind: String,
+    pub secret: String,
+    /// The field of a JSON secret, when one is picked; empty for the whole secret.
+    pub key: String,
+    /// It replaces the value of an entry that exists, the old one kept as a version.
+    pub replaces: bool,
+    /// The row makes a linked entry: where the key lives is recorded, and no value is read.
+    pub link: bool,
 }
 
 /// What an import copies, as the person reads it: where from, and where to. Nothing of the value.
@@ -145,12 +205,17 @@ pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
 /// What a drone's actor starts with: `drone:<id>`. A drone is not an agent a person is watching.
 pub const DRONE_ACTOR: &str = "drone:";
 
-/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere,
-/// nor a new account (an agent makes one only on the person's yes), nor a drone's use: the 30 s rule assumes the person
-/// is at the desk while an agent works, and a drone often runs unattended (at night, on a webhook), so for it
-/// silence is a no.
+/// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere
+/// (one or a batch), a new place for an entry's machine copy, nor a new account (an agent makes one only on the person's yes), nor a
+/// drone's use: the 30 s rule assumes the person is at the desk while an agent works, and a drone often runs
+/// unattended (at night, on a webhook), so for it silence is a no.
 pub fn goes_ahead(req: &UseRequest) -> bool {
-    req.import.is_none() && !req.account && !req.agent.starts_with(DRONE_ACTOR) && goes_ahead_on_silence(&req.kind, req.needs_value)
+    req.import.is_none()
+        && req.batch.is_none()
+        && req.link.is_none()
+        && !req.account
+        && !req.agent.starts_with(DRONE_ACTOR)
+        && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,11 +256,13 @@ pub struct UseAnswer {
     pub by: By,
     /// The card the person picked (an entry id from the request's `choices`), for a whole-card fill.
     pub choice: Option<String>,
+    /// The rows of a batch the person left ticked, by their place in the request's list; none for any other use.
+    pub rows: Option<Vec<usize>>,
 }
 
 impl UseAnswer {
     pub fn of(decision: Decision) -> Self {
-        Self { decision, value: None, save: false, by: By::Person, choice: None }
+        Self { decision, value: None, save: false, by: By::Person, choice: None, rows: None }
     }
 
     fn by(decision: Decision, by: By) -> Self {

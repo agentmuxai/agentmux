@@ -29,10 +29,56 @@ async fn history(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Stri
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
 
+/// Posts `body` to a Vault route that may wait for the person for `wait` seconds before it answers.
+async fn post_waiting(cx: &ToolCtx<'_>, url: &str, body: &Value, what: &str, wait: u64) -> Result<String> {
+    let resp = cx
+        .client
+        .post(url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .timeout(std::time::Duration::from_secs(wait + 90))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(crate::srv_http::describe_transport_error(what, url, &e)))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(crate::srv_http::describe_http_error(what, status, &text));
+    }
+    let result: Value = serde_json::from_str(&text).unwrap_or_default();
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
+/// What an entry says of its key beside the place: who reads it, the date it last changed, where else it is kept.
+const SAID_OF_THE_KEY: [&str; 3] = ["readers", "rotated", "copies"];
+
+/// Whether an `update` changes where the entry's machine copy is (a `source_*` field) or what the entry says of its
+/// key: the person may be asked first, so the call waits as long as the answer may take.
+fn changes_machine_copy(arguments: &Value) -> bool {
+    arguments.get("fields").and_then(Value::as_object).is_some_and(|f| f.keys().any(|k| k.starts_with("source_") || SAID_OF_THE_KEY.contains(&k.as_str())))
+}
+
+/// `check`: whether an entry's machine copy still holds the entry's value. The answer is `same`, `different` or
+/// `could not read` with why; neither value comes back.
+async fn check(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let id = arguments.get("id").and_then(Value::as_str).unwrap_or("").trim();
+    if id.is_empty() {
+        anyhow::bail!("Vault check needs an id: the entry whose machine copy to check (list shows which have a source)");
+    }
+    let body = json!({
+        "id": id,
+        "reason": arguments.get("reason").and_then(Value::as_str),
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault check needs this agent's signed identity: {e}"))?,
+    });
+    // The read of the other place: the CLI's 25 s and some room.
+    post_waiting(cx, &format!("{base}/api/v1/vault/check"), &body, "Vault check", 0).await
+}
+
 /// `show`, `verify` and `health` read the Vault; `update` changes an entry's details. None returns a value.
 async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
     let text = |k: &str| arguments.get(k).and_then(Value::as_str);
     let auth = crate::identity::sign_ui_automation_auth();
+    let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(REQUEST_WAIT_SECS).min(REQUEST_WAIT_MAX_SECS);
     let body = match action {
         "show" | "verify" => {
             if action == "show" && text("id").is_none_or(|i| i.trim().is_empty()) {
@@ -46,11 +92,15 @@ async fn inspect(action: &str, arguments: &Value, cx: &ToolCtx<'_>, base: &str) 
             "fields": arguments.get("fields").filter(|f| f.is_object()).cloned().unwrap_or_else(|| json!({})),
             "tags": arguments.get("tags").cloned(),
             "reason": text("reason"),
+            "wait_secs": wait,
             "auth": auth.map_err(|e| anyhow::anyhow!("Vault update needs this agent's signed identity: {e}"))?,
         }),
         _ => json!({ "auth": auth.ok() }),
     };
     let what = format!("Vault {action}");
+    if action == "update" && changes_machine_copy(arguments) {
+        return post_waiting(cx, &format!("{base}/api/v1/vault/update"), &body, &what, wait).await;
+    }
     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/{action}"), cx.auth_key, &body, &what).await?;
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
 }
@@ -93,6 +143,62 @@ async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Strin
     }
     let result: Value = serde_json::from_str(&text).unwrap_or_default();
     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
+/// `rotate`: give an entry a new value the Vault makes, and set it at its service with the agent's command.
+async fn rotate(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let body = json!({
+        "id": s("id"),
+        "set": s("set"),
+        "verify": arguments.get("verify").and_then(Value::as_str),
+        "reason": arguments.get("reason").and_then(Value::as_str),
+        "cwd": arguments.get("cwd").and_then(Value::as_str),
+        "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault rotate needs this agent's signed identity: {e}"))?,
+    });
+    // The person's approval, then set and verify, each up to 10 minutes.
+    let url = format!("{base}/api/v1/vault/rotate");
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .timeout(std::time::Duration::from_secs(32 * 60))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(crate::srv_http::describe_transport_error("Vault rotate", &url, &e)))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(crate::srv_http::describe_http_error("Vault rotate", status, &text));
+    }
+    let result: Value = serde_json::from_str(&text).unwrap_or_default();
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+}
+
+/// How long srv lets a batch's reads take, after the person's answer.
+const BATCH_READ_SECS: u64 = 300;
+
+/// `import_batch`: copy a named list of secrets from AWS Secrets Manager into one Vault under one approval. The
+/// person sees a row for every secret and may leave rows out; the agent gets a row per secret, never a value.
+async fn import_batch(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    if !arguments.get("items").and_then(Value::as_array).is_some_and(|items| !items.is_empty()) {
+        anyhow::bail!("Vault import_batch needs items: the secrets to copy, each with aws_secret_id, kind and label (or id, to replace an entry's value)");
+    }
+    let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(REQUEST_WAIT_SECS).min(REQUEST_WAIT_MAX_SECS);
+    let body = json!({
+        "batch": arguments.get("batch").and_then(Value::as_str).unwrap_or(""),
+        "vault": arguments.get("vault").and_then(Value::as_str),
+        "reason": arguments.get("reason").and_then(Value::as_str),
+        "source": arguments.get("source").filter(|s| s.is_object()).cloned().unwrap_or_else(|| json!({})),
+        "items": arguments.get("items").cloned().unwrap_or_else(|| json!([])),
+        "refs": arguments.get("refs").cloned().unwrap_or_else(|| json!([])),
+        "wait_secs": wait,
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault import_batch needs this agent's signed identity: {e}"))?,
+    });
+    // The person's answer, then every read in turn.
+    post_waiting(cx, &format!("{base}/api/v1/vault/import_batch"), &body, "Vault import_batch", wait + BATCH_READ_SECS).await
 }
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -155,40 +261,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let result = crate::srv_http::srv_post_json(cx.client, &format!("{base}/api/v1/vault/generate"), cx.auth_key, &body, "Vault generate").await?;
                     Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
                 }
-                "rotate" => {
-                    let s = |k: &str| arguments.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-                    let body = json!({
-                        "id": s("id"),
-                        "set": s("set"),
-                        "verify": arguments.get("verify").and_then(Value::as_str),
-                        "reason": arguments.get("reason").and_then(Value::as_str),
-                        "cwd": arguments.get("cwd").and_then(Value::as_str),
-                        "rules": arguments.get("rules").cloned().unwrap_or_else(|| json!({})),
-                        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault rotate needs this agent's signed identity: {e}"))?,
-                    });
-                    // The person's approval, then set and verify, each up to 10 minutes.
-                    let url = format!("{base}/api/v1/vault/rotate");
-                    let resp = cx
-                        .client
-                        .post(&url)
-                        .header(AUTH_KEY_HEADER, cx.auth_key)
-                        .timeout(std::time::Duration::from_secs(32 * 60))
-                        .json(&body)
-                        .send()
-                        .await
-                        .map_err(|e| anyhow::anyhow!(crate::srv_http::describe_transport_error("Vault rotate", &url, &e)))?;
-                    let status = resp.status();
-                    let text = resp.text().await.unwrap_or_default();
-                    if !status.is_success() {
-                        anyhow::bail!(crate::srv_http::describe_http_error("Vault rotate", status, &text));
-                    }
-                    let result: Value = serde_json::from_str(&text).unwrap_or_default();
-                    Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
-                }
+                "rotate" => rotate(arguments, cx, base).await,
                 "history" => history(arguments, cx, base).await,
                 "import" => import(arguments, cx, base).await,
+                "import_batch" => import_batch(arguments, cx, base).await,
+                "check" => check(arguments, cx, base).await,
                 action @ ("show" | "update" | "verify" | "health") => inspect(action, arguments, cx, base).await,
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history, import, show, update, verify or health"),
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history, import, import_batch, check, show, update, verify or health"),
             }
         }
         _ => Err(not_in_family()),
@@ -203,7 +282,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "show", "update", "verify", "health"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "import_batch", "check", "show", "update", "verify", "health"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv-core/src/backend/vault/kinds.rs");
@@ -212,5 +291,17 @@ mod tests {
         srv_kinds.sort_unstable();
         ours.sort_unstable();
         assert_eq!(ours, srv_kinds);
+    }
+
+    #[test]
+    fn only_an_update_of_the_machine_copy_waits_for_the_person() {
+        assert!(changes_machine_copy(&json!({ "fields": { "source_kind": "aws-secret", "source_location": "staging/app" } })));
+        assert!(changes_machine_copy(&json!({ "fields": { "notes": "x", "source_key": "" } })));
+        // A linked entry's readers, date and other places are the person's to allow too.
+        for said in ["readers", "rotated", "copies"] {
+            assert!(changes_machine_copy(&json!({ "fields": { said: "x" } })), "{said}");
+        }
+        assert!(!changes_machine_copy(&json!({ "fields": { "service": "Example", "notes": "the source of truth" } })));
+        assert!(!changes_machine_copy(&json!({ "label": "Example" })));
     }
 }

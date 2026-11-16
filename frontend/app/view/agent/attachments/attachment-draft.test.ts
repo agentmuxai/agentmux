@@ -142,6 +142,32 @@ describe("AttachmentDraft", () => {
         expect(d.items().map((i) => i.name)).toEqual(["b.png", "a.png"]);
     });
 
+    it("a drag reorder puts a tile before or after another, and the refs follow", async () => {
+        const d = new AttachmentDraft("b4m");
+        let batch = "";
+        hub.ingest.mockImplementation(async (_c: unknown, req: { batch_id: string }) => {
+            batch = req.batch_id;
+            return accepted(batch, ["a.png", "b.png", "c.png", "d.png"]);
+        });
+        await d.ingestPaths(["/p/a.png", "/p/b.png", "/p/c.png", "/p/d.png"]);
+        for (const [i, ch] of ["1", "2", "3", "4"].entries()) d.onReady({ batch_id: batch, index: i, info: info(ch.repeat(64)) });
+        const [a, b, c, last] = d.items();
+        const names = () => d.items().map((i) => i.name);
+        d.moveNear(last.key, a.key, false);
+        expect(names()).toEqual(["d.png", "a.png", "b.png", "c.png"]);
+        d.moveNear(last.key, c.key, true);
+        expect(names()).toEqual(["a.png", "b.png", "c.png", "d.png"]);
+        d.moveNear(a.key, c.key, false);
+        expect(names()).toEqual(["b.png", "a.png", "c.png", "d.png"]);
+        expect(d.refs().map((r) => r.name)).toEqual(["b.png", "a.png", "c.png", "d.png"]);
+        const before = d.items();
+        d.moveNear(b.key, a.key, false);
+        expect(d.items()).toBe(before);
+        d.moveNear(b.key, b.key, true);
+        d.moveNear("nope", a.key, true);
+        expect(d.items()).toBe(before);
+    });
+
     it("reports images refused by the limits", async () => {
         const d = new AttachmentDraft("b5");
         hub.ingest.mockImplementation(async (_c: unknown, req: { batch_id: string }) => ({

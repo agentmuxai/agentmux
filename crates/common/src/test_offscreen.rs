@@ -14,6 +14,10 @@
 //!
 //! Windows and Linux/X11 place a window anywhere. Wayland cannot place a window at all, so there
 //! the flag does nothing and a tester must use X11 (or XWayland) for a test build.
+//!
+//! macOS cannot park a window: AppKit puts a shown window onto a display. There no window is ever
+//! shown at all (`test_offscreen_macos`): the process blocks every way to order one in, refuses to
+//! start if it cannot, and stops itself if one is on the on-screen list anyway.
 
 use crate::build_kind::{build_kind, BuildKind};
 
@@ -67,22 +71,31 @@ pub fn initial_rect(bounds: Option<(i32, i32, i32, i32)>) -> Option<(i32, i32, i
     active().then(|| place_rect(bounds.unwrap_or((0, 0, 1200, 800))))
 }
 
-/// Why a process must not start: off-screen is asked for on macOS, where it cannot be done. AppKit
-/// moves a window onto a display when it is first shown and clamps every later move, so a window
-/// there can only be kept off the screen by never ordering it in, which this does not do yet. A test
-/// build that cannot hide its windows refuses to start rather than show one.
-fn refusal(off_screen: bool, macos: bool) -> Option<&'static str> {
-    (off_screen && macos).then_some(
-        "AGENTMUX_TEST_OFFSCREEN=1 is not supported on macOS yet: AppKit puts a shown window onto a display, so a window cannot be kept off the screen. Nothing was started. Start the build without the variable.",
-    )
+/// Why a process must not start: it was asked to stay off-screen and cannot. On macOS AppKit moves a
+/// window onto a display when it is first shown and clamps every later move, so the only way is that
+/// no window is ever ordered in; `test_offscreen_macos` makes that so,
+/// and a process where it could not be made so refuses to start rather than show a window.
+#[cfg(target_os = "macos")]
+fn engage(process: &str) -> Result<(), String> {
+    crate::test_offscreen_macos::engage(process).map_err(|why| {
+        format!("{ENV}=1 needs every window kept from being shown on macOS, and that could not be set up ({why}). Nothing was started.")
+    })
 }
 
-/// The start of a process: it refuses (one line on stderr, exit status 2, nothing started) when
-/// off-screen is asked for where it cannot be done, and otherwise logs [`start_line`] if there is one.
+#[cfg(not(target_os = "macos"))]
+fn engage(_process: &str) -> Result<(), String> {
+    Ok(())
+}
+
+/// The start of a process: when it runs off-screen it first makes sure it can (on macOS, that no
+/// window will ever be ordered in), and refuses (one line on stderr, exit status 2, nothing started)
+/// when it cannot. It then logs [`start_line`] if there is one.
 pub fn begin(process: &str) {
-    if let Some(why) = refusal(active(), cfg!(target_os = "macos")) {
-        eprintln!("{process}: {why}");
-        std::process::exit(2);
+    if active() {
+        if let Err(why) = engage(process) {
+            eprintln!("{process}: {why}");
+            std::process::exit(2);
+        }
     }
     if let Some(line) = start_line(process) {
         tracing::info!("{line}");
@@ -93,7 +106,9 @@ pub fn begin(process: &str) {
 /// tell a build that ignored it from one that honoured it. `None` when it was not set.
 pub fn start_line(process: &str) -> Option<String> {
     let value = std::env::var(ENV).ok().filter(|v| !v.trim().is_empty())?;
-    Some(if active() {
+    Some(if active() && cfg!(target_os = "macos") {
+        format!("{process}: test window mode: no window is ever shown (every way to order one in is blocked, a watchdog stops the process if one is on the screen) and its place is not saved")
+    } else if active() {
         format!("{process}: test window mode: every window is created off-screen at ({}, {}) and its place is not saved", ORIGIN.0, ORIGIN.1)
     } else {
         format!("{process}: {ENV}={value} ignored: only a dev or local build runs off-screen")
@@ -133,15 +148,6 @@ mod tests {
         assert_eq!(initial_rect(None), None);
         assert_eq!(initial_rect(Some((5, 6, 7, 8))), None);
         assert_eq!(place_rect((10, 20, 30, 40)), (10, 20, 30, 40));
-    }
-
-    #[test]
-    fn macos_refuses_and_other_systems_do_not() {
-        assert!(refusal(true, true).is_some());
-        assert!(refusal(true, false).is_none());
-        // Not asked for, or ignored by a release (active() is false): nothing to refuse.
-        assert!(refusal(false, true).is_none());
-        assert!(refusal(false, false).is_none());
     }
 
     #[test]

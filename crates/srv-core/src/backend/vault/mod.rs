@@ -10,6 +10,7 @@
 //! is blocking (the store, the keychain): call it off the async runtime.
 
 pub mod aws_import;
+pub mod aws_import_batch;
 pub mod capture;
 pub mod changes;
 pub mod card;
@@ -24,6 +25,7 @@ pub mod inspect;
 pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
+pub mod linked;
 pub mod plain_export;
 pub mod requests;
 pub mod endpoint_key;
@@ -34,6 +36,7 @@ pub mod setting_key;
 pub mod signins;
 pub mod signups;
 pub mod slots;
+pub mod source_link;
 pub mod transfer;
 pub mod uses;
 pub mod vaults;
@@ -80,6 +83,11 @@ pub struct VaultEntryInfo {
     pub tail: String,
     /// Earlier values kept for 7 days, which the person can put back.
     pub versions: u32,
+    /// The newest check of the entry's machine copy (`source_link`) against its value; absent when the entry has no
+    /// link, or the place it names now was never checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_checked: Option<source_link::VaultSourceCheck>,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -89,8 +97,8 @@ pub struct VaultEntryInfo {
 }
 
 /// An entry as an agent sees it (`Vault` `list`): what it is called, what
-/// kind it is, and when it expires, a date being no secret. No value, tail,
-/// other field or grant.
+/// kind it is, when it expires (a date being no secret) and where its machine
+/// copy is, if it has one. No value, tail, other field or grant.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VaultAgentEntry {
     pub id: String,
@@ -101,6 +109,9 @@ pub struct VaultAgentEntry {
     pub vault: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>,
+    /// Where a copy of its value lives outside the Vault, and what the newest check of it found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<source_link::AgentLink>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -190,7 +201,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         return Err(format!("a label is at most {MAX_LABEL} characters"));
     }
     for (k, v) in fields {
-        if !kind.fields.contains(&k.as_str()) {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) {
             return Err(format!("a {} entry has no field {k:?}", kind.name));
         }
         if v.len() > MAX_FIELD {
@@ -206,6 +217,8 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
             return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
         }
     }
+    source_link::validate(fields)?;
+    linked::validate(fields, !parts.0.is_empty())?;
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
     }
@@ -406,7 +419,8 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     signins::settle_profile(kind.name, &mut fields);
     card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
-    if entry.parts.get(kind.parts[0]).is_none() {
+    // A linked entry is the one kind of entry with no value: it says where the key lives.
+    if !linked::is_linked(&fields) && entry.parts.get(kind.parts[0]).is_none() {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
     }
     let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
@@ -505,6 +519,10 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     let mut fields = trimmed(std::mem::take(&mut change.fields));
     signins::settle_profile(kind.name, &mut fields);
     validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
+    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
+        return Err(linked::SET_WHEN_MADE.into());
+    }
     if change.clear.iter().any(|p| p == kind.parts[0]) {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
     }
@@ -529,7 +547,6 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     }
     card::settle(kind.name, &mut fields, &mut parts)?;
     let label = change.label.trim().to_string();
-    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
     let target = match (old_fields.get(expiry::FIELD), fields.get(expiry::FIELD)) {
         (old, Some(new)) if old != Some(new) => format!("expires {new}"),
         (Some(_), None) => "no expiry date".to_string(),
@@ -626,6 +643,9 @@ fn usable_entry(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(none)?;
     if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
         return Err(none());
+    }
+    if let Some(no_value) = linked::no_value(&row) {
+        return Err(no_value);
     }
     Ok(row)
 }
@@ -748,7 +768,9 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             },
             _ => (Vec::new(), String::new()),
         };
+        let source_checked = source_link::Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link));
         out.push(VaultEntryInfo {
+            source_checked,
             fields: serde_json::from_str(&row.fields).unwrap_or_default(),
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,
@@ -784,7 +806,8 @@ pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAge
             let section = kinds::kind(&r.kind)?.section;
             let expires = expiry::of(&r).map(|d| d.to_string());
             let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires })
+            let source = source_link::for_agent(store, &r);
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source })
         })
         .collect())
 }

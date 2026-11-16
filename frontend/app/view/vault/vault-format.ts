@@ -22,6 +22,19 @@ export interface Expiry {
     warn: boolean;
 }
 
+/** Outcomes that say a line did what its action names: there is nothing more to tell. */
+const PLAIN_OUTCOMES = ["", "done", "ok"];
+/** Outcomes that are news of their own, and no trouble: a check that found the value the same, or the place there. */
+const FINE_OUTCOMES = ["asked", "same", "present"];
+
+/** What became of a history line, when its action alone does not say: an import that failed reads "imported" like
+ *  one that worked. `warn` marks one where the action did not happen, or not as asked. */
+export function outcomeOf(outcome: string): { text: string; warn: boolean } | null {
+    const text = outcome.trim();
+    if (PLAIN_OUTCOMES.includes(text)) return null;
+    return { text, warn: !FINE_OUTCOMES.includes(text) };
+}
+
 /** An entry's `expires` field (`YYYY-MM-DD`, as srv keeps it) read against today, in local time. */
 export function expiryOf(expires: string | undefined, now = new Date()): Expiry | null {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expires?.trim() ?? "");

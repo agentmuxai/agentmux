@@ -471,6 +471,8 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/vault/generate", post(super::vault_handlers::handle_vault_generate))
         .route("/api/v1/vault/history", post(super::vault_handlers::handle_vault_history))
         .route("/api/v1/vault/import", post(super::vault_import::handle_vault_import))
+        .route("/api/v1/vault/import_batch", post(super::vault_import_batch::handle_vault_import_batch))
+        .route("/api/v1/vault/check", post(super::vault_source::handle_vault_check))
         .route("/api/v1/vault/show", post(super::vault_inspect::handle_vault_show))
         .route("/api/v1/vault/update", post(super::vault_inspect::handle_vault_update))
         .route("/api/v1/vault/verify", post(super::vault_inspect::handle_vault_verify))

@@ -21,7 +21,7 @@ import { onCleanup, onMount } from "solid-js";
 import { copyIntoWorkdir, fileCount, notifyDrop, paneWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import { registerFileDropTarget, type FileDropHook } from "@/app/drag/file-drop";
 import { getSettingsKeyAtom, MOS } from "@/app/store/global";
-import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { getAttachmentDraft, type AttachmentDraft } from "../attachments/attachment-draft";
 import { isContainerAgentMode } from "@/util/runtime-kind";
 
 interface Opts {
@@ -68,6 +68,28 @@ export function isContainerPane(blockId: string): boolean {
     return isContainerAgentMode(block?.meta?.["agentMode"]);
 }
 
+/**
+ * What the drop overlay says over the composer when files go to the tray: how many are coming, and how many
+ * of them the message has room for. A message carries at most `maxFiles` attachments; the rest of a drop
+ * would be refused, so the overlay says so before the files are let go. (Size limits are only known once
+ * the files are read, so they are reported after the drop, as before.)
+ */
+export function trayVerdict(
+    draft: Pick<AttachmentDraft, "count" | "maxFiles">,
+    dragged: number,
+    what: string
+): { ok: true; message: string; icon: string } | { ok: false; reason: string } {
+    const room = draft.maxFiles() - draft.count();
+    // The limit is only refreshed by an ingest, so a full tray is not refused here: a raised limit would never be seen.
+    // The drop goes through and the app reports what is over.
+    if (room <= 0) return { ok: true, message: `Drop ${what}: this message is at its limit of ${draft.maxFiles()}, files over it are refused`, icon: "fa-triangle-exclamation" };
+    if (dragged > room) {
+        const over = dragged - room;
+        return { ok: true, message: `Drop ${what}: ${room} will attach, ${over} over the limit of ${draft.maxFiles()}`, icon: "fa-triangle-exclamation" };
+    }
+    return { ok: true, message: `Drop ${what} to attach`, icon: "fa-paperclip" };
+}
+
 /** Register this agent pane as a file-drop target for as long as it's mounted. */
 export function useAgentDropAttach(opts: Opts): void {
     const enabledAtom = getSettingsKeyAtom("dnd:enabled");
@@ -96,7 +118,7 @@ export function useAgentDropAttach(opts: Opts): void {
         accept(drag) {
             if (!enabled()) return { ok: false, reason: "File drop is turned off (dnd:enabled)" };
             const what = drag.count > 0 ? fileCount(drag.count) : "files";
-            if (toTray()) return { ok: true, message: `Drop ${what} to attach`, icon: "fa-paperclip" };
+            if (toTray()) return trayVerdict(getAttachmentDraft(opts.blockId), drag.count, what);
             const cwd = paneWorkdir(opts.blockId);
             return cwd
                 ? { ok: true, message: `Copy ${what} to ${cwd}`, icon: "fa-copy" }

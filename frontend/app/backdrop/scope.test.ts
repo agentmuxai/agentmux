@@ -5,6 +5,8 @@
 
 import { createRoot, createEffect } from "solid-js";
 import { describe, expect, it } from "vitest";
+import { contrastRatio } from "../block/pane-color-scheme";
+import { ANSI_TOKENS } from "./ansi";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
 
@@ -82,6 +84,39 @@ describe("scopeVars", () => {
         const light = deriveBuiltin(BUILTINS[0].id, "light")!;
         expect(scopeVars(light)["color-scheme"]).toBe("light");
         expect(vars["color-scheme"]).toBe("dark");
+    });
+});
+
+describe("scopeVars with the theme's terminal palette", () => {
+    // The default theme's palette, as a stand-in for whatever theme is active.
+    const palette = Object.fromEntries(
+        ANSI_TOKENS.map((t, i) => [t, ["#3465a4", "#32afff", "#34e2e2", "#58c142", "#ad7fa8", "#06989a", "#4e9a06", "#bc3fbc", "#c4a000"][i]])
+    );
+
+    it("sets none of them without the palette, so they stay the theme's", () => {
+        const vars = scopeVars(derived);
+        for (const token of ANSI_TOKENS) expect(token in vars, token).toBe(false);
+    });
+
+    it("sets each one read to 4.5:1 on all three layers, on a pale and on a dark backdrop", () => {
+        for (const [id, scheme] of [["yellow", "light"], ["indigo", "dark"]] as const) {
+            const d = deriveBuiltin(id, scheme)!;
+            const vars = scopeVars(d, palette);
+            for (const token of ANSI_TOKENS) {
+                for (const layer of Object.values(d.surfaces)) expect(contrastRatio(vars[token], layer), `${token} on ${id} ${layer}`).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    });
+
+    it("keeps a palette colour that already reads, as it is", () => {
+        const dark = deriveBuiltin("indigo", "dark")!;
+        expect(scopeVars(dark, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"]).toBe("#34e2e2");
+    });
+
+    it("moves one that doesn't: bright cyan on a pale backdrop", () => {
+        const pale = deriveBuiltin("yellow", "light")!;
+        const moved = scopeVars(pale, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"];
+        expect(moved).not.toBe("#34e2e2");
     });
 });
 

@@ -12,6 +12,7 @@ import clsx from "clsx";
 import { Button, CloseButton, Tag } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
+import type { TileReorder } from "./attachment-tile-reorder";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, hasThumbnail, kindIcon, type FileKind } from "./file-kind";
 import { wantsFrame } from "./first-frame";
@@ -48,6 +49,8 @@ interface Props {
     flash?: boolean;
     caption?: boolean;
     ref?: (el: HTMLLIElement) => void;
+    /** Present in the composer's tray, where tiles can be dragged into a new order. */
+    reorder?: TileReorder;
 }
 
 export function tileTooltip(t: TileModel): string {
@@ -123,17 +126,18 @@ function useTilePicture(tile: () => TileModel, thumbnail: () => boolean) {
     return { url: () => thumb() ?? frame() ?? clip(), clip };
 }
 
+/** What a screen reader says for a tile: its kind and number, name, size and state. */
+function tileLabel(t: TileModel): string {
+    const state =
+        t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
+    const noun = t.kind === "image" ? "Image" : "File";
+    return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
+}
+
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
     const { url, clip } = useTilePicture(() => props.tile, picture);
-    const label = () => {
-        const t = props.tile;
-        const state =
-            t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
-        const noun = t.kind === "image" ? "Image" : "File";
-        return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
-    };
     const icon = () => (
         <Show
             when={props.tile.status !== "error"}
@@ -154,13 +158,21 @@ export function AttachmentTile(props: Props) {
                 "is-processing": props.tile.status === "processing",
                 "is-error": props.tile.status === "error",
                 "is-flash": props.flash,
+                "is-dragging": props.reorder?.dragging,
+                "is-drop-before": props.reorder?.drop === "before",
+                "is-drop-after": props.reorder?.drop === "after",
             })}
+            draggable={props.reorder ? true : undefined}
+            onDragStart={props.reorder?.onDragStart}
+            onDragOver={props.reorder?.onDragOver}
+            onDrop={props.reorder?.onDrop}
+            onDragEnd={props.reorder?.onDragEnd}
             onKeyDown={props.onKeyDown}
         >
             <Button
                 class="agent-attachment-tile__main"
                 title={tileTooltip(props.tile)}
-                aria-label={`${label()}. Open preview`}
+                aria-label={`${tileLabel(props.tile)}. Open preview`}
                 onClick={() => props.onOpen()}
             >
                 <Show
