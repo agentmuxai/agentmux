@@ -1254,18 +1254,11 @@ async fn route_command(
 
 /// `browser_panes_set_overlay_clip`: the overlay rects of a window, to cut out of its browser panes.
 fn set_overlay_clip(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
-    // Apply a clip region to every pane HWND that excludes the given
-    // overlay rectangles. The pane stays visible everywhere except
-    // under the overlays — DOM overlays render through the holes.
-    // Empty list restores full visibility.
-    //
-    // `window_label` scopes the clip to panes owned by the
-    // requesting window so a modal in window B doesn't also
-    // hide panes in window A (Codex P1 on PR #544). Defaults to
-    // "main" for back-compat with older frontends that omit it.
-    //
-    // Each rect: { x, y, w, h } in main-window client pixel coords, and `passive: true` when
-    // it is an overlay shown over the page without taking it over (a toast; macOS only acts on it).
+    // Cuts every pane's window around the given overlay rects, so DOM overlays render through the
+    // holes; an empty list restores full visibility. `window_label` scopes the clip to the requesting
+    // window's panes, so a modal in window B does not clip window A's (#544); it defaults to "main"
+    // for older frontends. Each rect: { x, y, w, h } in main-window client pixels, and `passive: true`
+    // for an overlay shown over the page without taking it over (a toast; only macOS acts on it).
     let window_label = args
         .get("window_label")
         .and_then(|v| v.as_str())

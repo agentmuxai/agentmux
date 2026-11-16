@@ -266,8 +266,8 @@ pub fn apply_pane_overlay_hole_mask(
         CGPathRelease(path); // setPath: copies/retains the path
         set_id(layer, sel_set_mask, mask_layer);
         // Only NOW, after the mask is actually applied: earlier, a failed CAShapeLayer allocation above
-        // would leave the window click-inert with no visual hole (reagent P2 on #2130). See the module doc
-        // for what the mouse does with each routing.
+        // would leave the window click-inert with no visual hole (#2130). See the module doc for what the
+        // mouse does with each routing.
         super::pane_hole_mouse::apply(overlay_win, overlay_wnum, routing, local_holes);
         call_void(overlay_win, sel_invalidate_shadow);
         tracing::debug!(
