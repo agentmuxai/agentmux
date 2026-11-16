@@ -106,12 +106,20 @@ describe("getVoiceSession — cached facade observes a live engine switch", () =
 
 describe("voice input switched off (voice:enabled: false) is off for every way of starting it", () => {
     const handle = { appendFinal: () => {}, setInterim: () => {} };
+    // The app's toast is asked for with an event on the window, which these tests stand in for.
+    const dispatchEvent = vi.fn();
+    const toasts = () => dispatchEvent.mock.calls.map(([e]) => [(e as CustomEvent).type, (e as CustomEvent).detail]);
     beforeEach(() => {
         vi.resetModules();
         engineSignal = createRoot(() => createSignal<string | null>("groq"));
         enabledSignal = createRoot(() => createSignal<boolean | undefined>(false));
+        dispatchEvent.mockReset();
+        vi.stubGlobal("window", { dispatchEvent });
     });
-    afterEach(() => vi.clearAllMocks());
+    afterEach(() => {
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
+    });
 
     it("the button's start does nothing, and the session says it is not available", async () => {
         const { getVoiceSession, voiceInputOff } = await import("./useVoiceInput");
@@ -130,12 +138,27 @@ describe("voice input switched off (voice:enabled: false) is off for every way o
         expect(voice.isListening()).toBe(true);
     });
 
-    it("the shortcut starts nothing and binds no pane", async () => {
+    it("the shortcut starts nothing, binds no pane, and says that voice input is off", async () => {
         const { getVoiceSession, toggleVoiceFor } = await import("./useVoiceInput");
         const voice = getVoiceSession();
-        toggleVoiceFor("pane-a", handle);
+
+        // A pane with the line above its composer says it there, with no toast.
+        toggleVoiceFor("pane-a", { ...handle, showsSetupNotice: true });
         expect(voice.isListening()).toBe(false);
         expect(voice.currentTargetId()).toBeNull();
+        expect(voice.notSetUp?.()).toEqual({ blockId: "pane-a", missing: "off", detail: null });
+        expect(toasts()).toEqual([]);
+
+        // Switched back on, the line has nothing left to say.
+        enabledSignal[1](true);
+        expect(voice.notSetUp?.()).toBeNull();
+
+        // A pane without the line gets the app's toast, and no line is left for another pane to show.
+        enabledSignal[1](false);
+        toggleVoiceFor("pane-b", handle);
+        expect(toasts()).toEqual([["voice-input-error", "voice-off"]]);
+        expect(voice.notSetUp?.()).toBeNull();
+        expect(voice.isListening()).toBe(false);
     });
 
     it("switched on, the shortcut starts, moves to another pane, and stops in the pane that has it", async () => {

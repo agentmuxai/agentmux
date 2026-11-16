@@ -10,7 +10,7 @@
 import { t } from "@/app/i18n/i18n";
 import { Button, Notice, Select, TextInput } from "@/app/element/ui";
 import { authHeaders } from "@/app/store/auth-headers";
-import { createSignal, onCleanup, onMount, Show, For, type Accessor, type JSX, type Setter } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, For, type Accessor, type JSX, type Setter } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { isDev } from "@/app/store/misc-utils";
@@ -509,6 +509,11 @@ export function RecordingSection(): JSX.Element {
 
     const { devices, refresh } = createDeviceList();
     const test = createMicTest(engine, () => s()["voice:inputDeviceId"] as string | undefined, refresh);
+    // Switched off while a test runs: the test stops and the microphone is let go, so nothing more is recorded or
+    // sent. Its rows are not shown while voice input is off, so a test can't be started then.
+    createEffect(() => {
+        if (!enabled()) cancelMicTest(test);
+    });
 
     return (
         <div class="settings-section-body">
