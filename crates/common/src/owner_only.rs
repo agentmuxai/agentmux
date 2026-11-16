@@ -320,6 +320,8 @@ mod tests {
         std::fs::write(&key, b"k").unwrap();
         restrict_to_user(&key).unwrap();
         assert!(others_who_can_open(&key).unwrap().is_empty(), "{}", sddl_of(&key).unwrap());
-        assert!(!sddl_of(&key).unwrap().contains("WD") && sddl_of(&key).unwrap().contains(&user), "{}", sddl_of(&key).unwrap());
+        // SDDL writes the built-in administrator account (RID 500, the CI runner's user) as `LA`.
+        let user_in_sddl = if user.ends_with("-500") { "LA" } else { user.as_str() };
+        assert!(!sddl_of(&key).unwrap().contains("WD") && sddl_of(&key).unwrap().contains(user_in_sddl), "{}", sddl_of(&key).unwrap());
     }
 }
