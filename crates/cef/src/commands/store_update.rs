@@ -250,6 +250,19 @@ fn update_version(update: &windows::Services::Store::StorePackageUpdate) -> Opti
     Some((v.Major, v.Minor, v.Build))
 }
 
+/// One listed update for the log: its package's full name (which says whether it is the app or an
+/// optional package, and the version it carries) and whether the Store calls it mandatory.
+#[cfg(target_os = "windows")]
+fn update_description(update: &windows::Services::Store::StorePackageUpdate) -> String {
+    let name = update
+        .Package()
+        .ok()
+        .and_then(|p| p.Id().ok())
+        .and_then(|id| id.FullName().ok())
+        .map_or_else(|| "unreadable".to_string(), |n| n.to_string());
+    format!("{name} mandatory={}", update.Mandatory().unwrap_or(false))
+}
+
 /// What the Store listed for this app: its context (our window attached), the updates themselves (the install
 /// and download calls take them), the version of each, and whether it would install silently.
 #[cfg(target_os = "windows")]
@@ -278,6 +291,10 @@ fn list_updates() -> Result<Listed, String> {
     let updates = answer_within(updates, LIST_TIMEOUT).map_err(list_error)?;
     let listed = updates.Size().map_err(|e| format!("couldn't count updates: {e}"))?;
     let versions = (0..listed).map(|i| updates.GetAt(i).ok().and_then(|u| update_version(&u))).collect();
+    // What was listed, by package: a check that says "available" with no newer version is otherwise
+    // unexplainable afterwards.
+    let described: Vec<String> = (0..listed).filter_map(|i| updates.GetAt(i).ok()).map(|u| update_description(&u)).collect();
+    tracing::info!("[store-check] listed {listed}: {}", described.join("; "));
     let silent = context.CanSilentlyDownloadStorePackageUpdates().unwrap_or(false);
     Ok(Listed { context, updates, versions, silent })
 }

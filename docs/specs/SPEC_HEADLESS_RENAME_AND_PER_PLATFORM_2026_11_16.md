@@ -64,7 +64,7 @@ Changes (agentmux repo unless stated):
 | Release notes lines (`release-core.yml`: "the server package is built for ...") | server package | Headless |
 | Workflow and job names | `build-server-package.yml`, "Server package (os-arch)", "Build — server package" | `build-headless-package.yml`, "Headless package (os-arch)", "Build — Headless package". Check which job names branch protection requires before renaming; if one is required, rename it in the same change that updates the rule (AgentY). |
 | The landing's download model, its All Downloads page and Get AgentMux block, its data file and its checks of the page against the release | server | Headless; the model's slot ids `server.linux-x64` become `headless.linux-x64` |
-| docs.agentmux.ai (agentmux-docs) | I found no page about the package | a page "AgentMux Headless" under Install (Winny to confirm none exists) |
+| docs.agentmux.ai (agentmux-docs) | a page named "Headless server" (added by the docs pass, agentmux-docs #297) | renamed "AgentMux Headless", with the new commands once the rename release is out (P5) |
 | README | the server package paragraph | Headless |
 
 Stays (internal, or a name a person never reads):

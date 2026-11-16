@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ClaudeLoginPanel — the in-app Claude/Anthropic login session, driven from
+ * ProviderLoginPanel — the in-app Claude/Anthropic login session, driven from
  * a context that has no agent block: Connectors → Accounts' "Connect"
  * (fresh account, no `linkTarget`) and a per-binding
  * "Connect / Re-login" action (`linkTarget` + `existingAccountId`, refresh
@@ -20,17 +20,17 @@
 
 import type { JSX } from "solid-js";
 
-import type { ClaudeLoginProps } from "./claude-login-model";
-import { createLoginSession } from "./claude-login-session";
-import { createLoginState } from "./claude-login-state";
-import { LoginView } from "./claude-login-view";
+import type { ProviderLoginProps } from "./provider-login-model";
+import { createLoginSession } from "./provider-login-session";
+import { createLoginState } from "./provider-login-state";
+import { LoginView } from "./provider-login-view";
 
 /**
- * The panel is a state object (claude-login-state.ts), the session that acts on it (claude-login-session.ts,
- * with the outcome handling in claude-login-finish.ts), and the page that reads both. The login starts as
+ * The panel is a state object (provider-login-state.ts), the session that acts on it (provider-login-session.ts,
+ * with the outcome handling in provider-login-finish.ts), and the page that reads both. The login starts as
  * soon as the panel is made.
  */
-export function ClaudeLoginPanel(props: ClaudeLoginProps): JSX.Element {
+export function ProviderLoginPanel(props: ProviderLoginProps): JSX.Element {
     const s = createLoginState(props);
     const session = createLoginSession(s);
 
@@ -39,4 +39,4 @@ export function ClaudeLoginPanel(props: ClaudeLoginProps): JSX.Element {
     return <LoginView s={s} session={session} />;
 }
 
-ClaudeLoginPanel.displayName = "ClaudeLoginPanel";
+ProviderLoginPanel.displayName = "ProviderLoginPanel";

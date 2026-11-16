@@ -313,9 +313,12 @@ export const storeRestartAsk = (working: readonly string[] = [], agents = 0): st
 /** Said when the install fell back to the Store page: `why` is the host's reason, when it gave one. */
 export const storeFallbackLine = (why?: string): string => `${why ? `${why} ` : ""}Opened the Microsoft Store page to finish the update.`;
 
-/** Said before the Store is asked to download: Restart now installs it afterwards. */
+/**
+ * Said under "Update in the Store", before it is pressed: what that button does and what comes next. It names
+ * "Restart now" only as a button that appears later, since it is not on the row yet.
+ */
 export const storeClosesLine = (version: string): string =>
-    `The Store downloads ${version ? `v${version}` : "the update"}. Restart now then installs it and opens AgentMux again.`;
+    `Update in the Store asks the Microsoft Store to download ${version ? `v${version}` : "the update"}. When it is downloaded, a Restart now button appears here: it installs the update and opens AgentMux again.`;
 
 /** Added when the Scheduled Task that opens AgentMux again after the update could not be registered. */
 export const storeReopenFailedNote = "AgentMux could not arrange to open itself after the update, so it was opened by hand.";

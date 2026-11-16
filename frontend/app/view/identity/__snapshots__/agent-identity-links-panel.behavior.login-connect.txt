@@ -1,7 +1,7 @@
 rpc ListAllAgentIdentities
 subscribeAccountChanges
 subscribe agentidentities:changed:claude-agent
-ClaudeLoginPanel opened existingAccountId=undefined linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
+ProviderLoginPanel opened existingAccountId=undefined linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
 -- opened
 <div>
   <div class="identity-pane">

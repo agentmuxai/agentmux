@@ -205,6 +205,9 @@ jobs:
       - name: Time stamp of the build
         shell: bash
         run: echo "BUILD_TIME=$(TZ=UTC git log -1 --date=format-local:%Y%m%d.%H%M%S --format=%cd)" >> "$GITHUB_ENV"
+      - name: Commit of the build
+        shell: bash
+        run: echo "AGENTMUX_COMMIT=$(git rev-parse --short=10 HEAD)" >> "$GITHUB_ENV"
 
       # The fast-release profile (thin LTO, optimised for speed) rather than release (full LTO, one codegen unit, optimised
       # for size): the full-LTO link of the server did not finish in two hours on a 7 GB macOS runner, and the desktop

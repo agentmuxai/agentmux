@@ -16,7 +16,7 @@ host storeUpdateCheck
     <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
       "Update in the Store"
   <div class="maintenance-row-text maintenance-row-text--dim">
-    "The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again."
+    "Update in the Store asks the Microsoft Store to download v0.59.27. When it is downloaded, a Restart now button appears here: it installs the update and opens AgentMux again."
   <div class="maintenance-update-row">
     <span class="maintenance-row-text maintenance-row-text--dim">
       "Checked <time>"
