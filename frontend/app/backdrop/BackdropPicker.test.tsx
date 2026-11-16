@@ -202,6 +202,43 @@ describe("BackdropPicker", () => {
         }
     });
 
+    it("takes a preview off the pane when forced colours come on while the swatch is still focused, and puts it back when they go off", () => {
+        // A media query whose answer changes while the picker is open, as the system's forced colours do.
+        const listeners: Array<(e: { matches: boolean }) => void> = [];
+        Object.defineProperty(window, "matchMedia", {
+            configurable: true,
+            writable: true,
+            value: () => ({ matches: false, addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => listeners.push(cb), removeEventListener() {} }),
+        });
+        const setForced = (matches: boolean) => listeners.forEach((cb) => cb({ matches }));
+        // A pane with no backdrop of its own: its frame has nothing to re-register, so only the picker can clear the preview.
+        const { container } = mount();
+        fireEvent.focus(radios(container)[1]);
+        const previewed = deriveBuiltin(BUILTINS[1].id, "dark")!.surfaces.surface;
+        expect(getPaneScope("pk")()?.["--surface"]).toBe(previewed);
+
+        setForced(true);
+        expect(container.textContent).toContain("A backdrop isn't shown while High Contrast or forced colours are on.");
+        expect(getPaneScope("pk")(), "suppressed: the preview is gone").toBeUndefined();
+
+        setForced(false);
+        expect(getPaneScope("pk")()?.["--surface"], "the swatch is still focused: its preview is back").toBe(previewed);
+
+        // Once the swatch is left, suppression ending brings nothing back.
+        fireEvent.blur(radios(container)[1]);
+        setForced(true);
+        setForced(false);
+        expect(getPaneScope("pk")()).toBeUndefined();
+    });
+
+    it("follows the polarity while a swatch is focused: the preview is the side just chosen", () => {
+        const { container } = mount();
+        fireEvent.focus(radios(container)[1]);
+        expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin(BUILTINS[1].id, "dark")!.surfaces.surface);
+        fireEvent.click(button(container, "Light"));
+        expect(getPaneScope("pk")()?.["--surface"]).toBe(deriveBuiltin(BUILTINS[1].id, "light")!.surfaces.surface);
+    });
+
     it("says nothing about suppression, and previews as usual, when backdrops are showing", () => {
         const t = mount({ backdrop: teal });
         expect(t.container.textContent).not.toContain("isn't shown while High Contrast");
