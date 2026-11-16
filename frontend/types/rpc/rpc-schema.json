@@ -1920,6 +1920,23 @@
     }
   },
   {
+    "command": "browser.signin_list_close",
+    "request": "agentmux_srv_core::backend::rpc_types::misc::CommandBrowserSigninListCloseData",
+    "requestName": "CommandBrowserSigninListCloseData",
+    "requestTs": {
+      "imports": [
+        "CommandBrowserSigninListCloseData"
+      ],
+      "name": "CommandBrowserSigninListCloseData"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "command": "browser.signin_offer_answer",
     "request": "agentmux_srv_core::backend::rpc_types::misc::CommandBrowserSigninOfferAnswerData",
     "requestName": "CommandBrowserSigninOfferAnswerData",

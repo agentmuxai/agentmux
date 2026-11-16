@@ -9,7 +9,7 @@
 // Down, Enter, Tab and Escape reach srv through the page's listener, not through this panel. A click
 // on a row is the person's pick, as for the key button: the panel is marked operator-only, so no
 // agent's UI click or key press reaches it. It is not in any Browser tool answer or page screenshot:
-// it is the app's own UI, outside the page.
+// it is the app's own UI, outside the page. A press anywhere else in the app's UI closes it.
 // reactive-coverage: one-shot nothing is fetched on mount: the list is the block's live meta, and the RPC calls are the person's clicks
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
@@ -17,7 +17,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { openVault } from "@/app/view/vault/open-vault";
 import clsx from "clsx";
-import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { listRowLabel, MANAGE_PASSWORDS_LABEL, readSigninList, SIGNIN_LIST_LABEL, STRONG_PASSWORD_LABEL } from "./browser-signin-offer-model";
 
 export function BrowserSigninList(props: { blockId: string; meta: () => Record<string, unknown> | undefined }): JSX.Element {
@@ -34,6 +34,20 @@ export function BrowserSigninList(props: { blockId: string; meta: () => Record<s
     // The anchor is the nav bar's group this component sits in: the list opens under the key button's place.
     // Read once mounted: a ref runs before the element has a parent.
     onMount(() => setAnchor(host?.parentElement ?? undefined));
+    // A press anywhere else in the app's own UI (another pane, the address bar, the tab strip) closes the list:
+    // the page sees none of those, so its listener can't report them. srv closes it and tells the listener.
+    let panel: HTMLElement | undefined;
+    const shown = createMemo(() => list() !== undefined);
+    createEffect(() => {
+        if (!shown()) return;
+        const onPress = (e: Event) => {
+            const within = panel?.closest(".anchored-popover") ?? panel;
+            if (within && e.target instanceof Node && within.contains(e.target)) return;
+            run(RpcApi.SigninListCloseCommand(TabRpcClient, { block_id: props.blockId }));
+        };
+        document.addEventListener("pointerdown", onPress, true);
+        onCleanup(() => document.removeEventListener("pointerdown", onPress, true));
+    });
     return (
         <>
             <span ref={(el) => (host = el)} class="browser-signin-list-anchor" aria-hidden="true" />
@@ -50,6 +64,7 @@ export function BrowserSigninList(props: { blockId: string; meta: () => Record<s
                                 role="listbox"
                                 aria-label={SIGNIN_LIST_LABEL}
                                 ref={(el: HTMLElement) => {
+                                    panel = el;
                                     el.setAttribute("data-operator-only", "");
                                     el.dataset.testid = "browser-signin-list";
                                     // A press on the panel never takes the keyboard from the page's field.

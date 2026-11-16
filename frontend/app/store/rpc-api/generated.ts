@@ -149,6 +149,7 @@ import type { CommandBrowserProfileDeleteData } from "@/types/rpc/CommandBrowser
 import type { CommandBrowserProfileUpdateData } from "@/types/rpc/CommandBrowserProfileUpdateData";
 import type { CommandBrowserProfilesListData } from "@/types/rpc/CommandBrowserProfilesListData";
 import type { CommandBrowserSigninFillData } from "@/types/rpc/CommandBrowserSigninFillData";
+import type { CommandBrowserSigninListCloseData } from "@/types/rpc/CommandBrowserSigninListCloseData";
 import type { CommandBrowserSigninOfferAnswerData } from "@/types/rpc/CommandBrowserSigninOfferAnswerData";
 import type { CommandBrowserSigninStopData } from "@/types/rpc/CommandBrowserSigninStopData";
 import type { CommandBrowserSignupPasswordData } from "@/types/rpc/CommandBrowserSignupPasswordData";
@@ -1295,6 +1296,10 @@ export const GeneratedApi = {
   // command "browser.signin_stop"
   SigninStopCommand(client: RpcClient, data: CommandBrowserSigninStopData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("browser.signin_stop", data, opts);
+  },
+  // command "browser.signin_list_close"
+  SigninListCloseCommand(client: RpcClient, data: CommandBrowserSigninListCloseData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("browser.signin_list_close", data, opts);
   },
   // command "browser.signup_password"
   SignupPasswordCommand(client: RpcClient, data: CommandBrowserSignupPasswordData, opts?: RpcOpts): Promise<void> {

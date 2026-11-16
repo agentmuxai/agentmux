@@ -20,6 +20,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use cef::ImplBrowser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -160,6 +161,28 @@ pub async fn signin_fill_route(State(state): State<Arc<AppState>>, headers: Head
         Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
         Err(e) => fail(e),
     }
+}
+
+#[derive(Deserialize)]
+pub struct SigninListClearReq {
+    pub block_id: String,
+}
+
+/// `POST /agentmux/browser/signin_list_clear`, for srv only: the person pressed in the app's own UI while
+/// the pane's list of saved sign-ins showed, and srv closed it. The page saw no press, so the listener is
+/// told here that no list shows, and its keys are the page's again.
+pub async fn signin_list_clear_route(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<SigninListClearReq>) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let resolved = match state.browser_api.target_cache.resolve(&state, &req.block_id).await {
+        Ok(r) => r,
+        Err(e) => return fail(e),
+    };
+    if let Some(browser) = state.get_browser(&resolved.label) {
+        crate::browser_pane::signin_list::clear(browser.identifier()).await;
+    }
+    (StatusCode::OK, Json(ApiResponse::ok(json!({}))))
 }
 
 /// The frames of `tree` whose origin is exactly `origin`.

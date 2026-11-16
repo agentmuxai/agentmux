@@ -9,15 +9,18 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fill = vi.fn(() => Promise.resolve());
 const strong = vi.fn(() => Promise.resolve());
+const close = vi.fn(() => Promise.resolve());
 const openVault = vi.fn(() => Promise.resolve());
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SigninFillCommand: (...a: unknown[]) => fill(...(a as [])),
         SignupPasswordCommand: (...a: unknown[]) => strong(...(a as [])),
+        SigninListCloseCommand: (...a: unknown[]) => close(...(a as [])),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -38,6 +41,7 @@ afterEach(() => {
     cleanup();
     fill.mockClear();
     strong.mockClear();
+    close.mockClear();
     openVault.mockClear();
 });
 
@@ -107,6 +111,24 @@ describe("BrowserSigninList", () => {
         await r.findByTestId("browser-signin-list");
         fireEvent.click(r.getByTestId("browser-signin-list-manage"));
         expect(openVault).toHaveBeenCalledWith("logins");
+    });
+
+    it("closes on a press elsewhere in the app's UI, not on a press on the panel", async () => {
+        const [meta, setMeta] = createSignal<Record<string, unknown>>(list());
+        const outside = document.createElement("button");
+        document.body.appendChild(outside);
+        const r = render(() => <BrowserSigninList blockId="b1" meta={meta} />);
+        const panel = await r.findByTestId("browser-signin-list");
+        panel.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(close).not.toHaveBeenCalled();
+        outside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(close).toHaveBeenCalledWith({}, { block_id: "b1" });
+        // srv closed it: nothing listens any more.
+        setMeta({});
+        close.mockClear();
+        outside.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        expect(close).not.toHaveBeenCalled();
+        outside.remove();
     });
 
     it("says why when a fill fails", async () => {

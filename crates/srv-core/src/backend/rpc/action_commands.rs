@@ -69,7 +69,7 @@ pub const ALWAYS: &[&str] = &[
 pub const UNLESS_OPERATOR: &[&str] = &[
     "agent.input-draft", "agent.input-history-append", "agent.input-history-clear", "agent.input-history-delete",
     "agent.input-history-restore", "agent.input-history-trash", "ambientnarrate", "attachments.cancel",
-    "backgroundtaskcompletion", "backgroundtaskpid", "block.reveal", "block.revealed", "blockfile:write_state", "bookmarks.set",
+    "backgroundtaskcompletion", "backgroundtaskpid", "block.reveal", "block.revealed", "blockfile:write_state", "bookmarks.set", "browser.signin_list_close",
     "controllerresync", "createsubblock", "deletesubblock", "docknodestatus", "fs.reveal", "fs.unwatch", "fs.watch",
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
