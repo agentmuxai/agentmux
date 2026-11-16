@@ -9,7 +9,8 @@
 import { describe, expect, it } from "vitest";
 import { contrastRatio } from "../block/pane-color-scheme";
 import { hexToRgb, oklchOfHex, oklchToHex } from "../theme/oklch";
-import { BUILTINS, deriveBuiltin, type AppScheme } from "./builtins";
+import { slotById } from "../theme/palette";
+import { BUILTINS, builtinSurface, deriveBuiltin, type AppScheme } from "./builtins";
 import { deriveInk, INK_TARGETS, type DerivedBackdrop } from "./ink";
 
 const SCHEMES: AppScheme[] = ["dark", "light"];
@@ -51,21 +52,37 @@ function assertTargets(d: DerivedBackdrop, text: number, label: string) {
     }
 }
 
-describe("the 16 built-ins", () => {
+/** The side a built-in's own surface is on under an app theme: the theme's for a hue, its own for Black and White. */
+const sideOf = (id: string, scheme: AppScheme): AppScheme => ({ black: "dark" as const, white: "light" as const })[slotById(id)?.neutral ?? ""] ?? scheme;
+
+describe("the 14 built-ins", () => {
     for (const scheme of SCHEMES) {
         for (const b of BUILTINS) {
             it(`${b.id} under a ${scheme} app theme: primary text 7:1 and every token at its floor`, () => {
                 const d = deriveBuiltin(b.id, scheme)!;
                 expect(d.nudged).toBe(false);
                 expect(d.level).toBe("high");
-                expect(d.scheme).toBe(scheme);
+                expect(d.scheme).toBe(sideOf(b.id, scheme));
                 assertTargets(d, INK_TARGETS.text.floor, `${b.id}/${scheme}`);
             });
         }
     }
 
-    it("has 16, in the palette's order, and none of the deep or pale tones is in the 7:1 dead zone", () => {
-        expect(BUILTINS).toHaveLength(16);
+    it("keeps Black and White as themselves under both app themes, and a retired id as the slot it became", () => {
+        for (const scheme of SCHEMES) {
+            expect(builtinSurface("black", scheme)).toBe("#000000");
+            expect(builtinSurface("white", scheme)).toBe("#ffffff");
+            expect(deriveBuiltin("black", scheme)!.surfaces.surface).toBe("#000000");
+            expect(deriveBuiltin("white", scheme)!.surfaces.surface).toBe("#ffffff");
+            expect(builtinSurface("azure", scheme)).toBe(builtinSurface("blue", scheme));
+            expect(builtinSurface("crimson", scheme)).toBe(builtinSurface("red", scheme));
+        }
+        expect(builtinSurface("mauve", "dark")).toBeUndefined();
+    });
+
+    it("has 14, in the palette's order, and none of the deep or pale tones is in the 7:1 dead zone", () => {
+        expect(BUILTINS).toHaveLength(14);
+        expect(BUILTINS.slice(12).map((b) => b.id)).toEqual(["black", "white"]);
         for (const scheme of SCHEMES) {
             for (const b of BUILTINS) {
                 const surface = deriveBuiltin(b.id, scheme)!.surfaces.surface;

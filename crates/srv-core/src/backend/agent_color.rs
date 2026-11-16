@@ -9,13 +9,15 @@
 //! agents by migration `m0020_agent_color_backfill`, and seeded into each
 //! new agent block's `frame:activebordercolor` meta at `agent.open`.
 //! The colors come from the shared palette (`backend::palette`,
-//! `docs/specs/SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md`); see also
+//! `docs/specs/SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md`): a new
+//! agent is given one of its 12 hues, never Black or White, which are only
+//! ever someone's own choice. See also
 //! `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`.
 
 use crate::backend::palette::pick_slot;
 
 /// Pick a palette color for an agent: the plain FNV-1a hash of the agent id
-/// over the shared palette (`backend::palette`). Stable across re-runs and
+/// over the shared palette's 12 hues (`backend::palette`). Stable across re-runs and
 /// machines, dependency-free. A caller that knows the colours the other
 /// agents have uses [`pick_agent_color_avoiding`] to spread them.
 pub fn pick_agent_color(agent_id: &str) -> &'static str {
@@ -24,8 +26,9 @@ pub fn pick_agent_color(agent_id: &str) -> &'static str {
 }
 
 /// The palette color for a new agent given the colors `taken` by existing
-/// agents: the least-used slot, ties broken by the id's hash
-/// (`palette::pick_slot`), so no color repeats until all 16 are in use.
+/// agents: the least-used hue, ties broken by the id's hash
+/// (`palette::pick_slot`), so no color repeats until all 12 hues are in use.
+/// An agent someone made Black or White uses no hue, so it does not count.
 pub fn pick_agent_color_avoiding<S: AsRef<str>>(
     agent_id: &str,
     taken: impl IntoIterator<Item = S>,
@@ -45,7 +48,7 @@ pub fn colors_in_use(mstore: &crate::backend::storage::store::Store) -> Vec<Stri
         .collect()
 }
 
-/// The color a new agent is given: the least-used slot among the colors the
+/// The color a new agent is given: the least-used hue among the colors the
 /// existing agents keep.
 pub fn color_for_new_agent(
     mstore: &crate::backend::storage::store::Store,
@@ -92,6 +95,20 @@ mod tests {
     fn avoiding_the_taken_colors_gives_a_free_one() {
         let taken: Vec<&str> = slots().iter().skip(1).map(|s| s.hex.as_str()).collect();
         assert_eq!(pick_agent_color_avoiding("anything", &taken), slots()[0].hex);
+    }
+
+    #[test]
+    fn a_new_agent_is_never_black_or_white_and_a_neutral_agent_takes_no_hue() {
+        let neutral = |hex: &str| slots().iter().any(|s| s.neutral.is_some() && s.hex == hex);
+        let mut taken: Vec<String> = vec!["#000000".to_string(), "#ffffff".to_string()];
+        for i in 0..40 {
+            let color = pick_agent_color_avoiding(&format!("agent-{i}"), &taken);
+            assert!(!neutral(color), "agent-{i} got {color}");
+            taken.push(color.to_string());
+        }
+        // The first 12 after the two neutral agents all differ: the neutrals used up no hue.
+        let first: std::collections::HashSet<_> = taken[2..14].iter().collect();
+        assert_eq!(first.len(), 12);
     }
 
     #[test]

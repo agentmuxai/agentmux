@@ -3,6 +3,7 @@
 **Date:** 2026-11-01
 **Author:** Agent1@narko
 **Status:** active. Approved by the operator, 2026-11-01 ("Approve the palette spec", relayed by AgentY), all five §12 decisions as recommended. Spec task #17138; being built as #17139 in two PRs (§10).
+**Changed by:** [`SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md`](SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md) (2026-11-16): the palette is now 12 hues plus Black and White. The slots, names and counts below are the 16 that were; the method (§4.2), the single source and the role tones still hold.
 **Verified against:** `origin/main` @ `0670e7669`, by reading the files named in §2 and by running the calculations in §4 (a throwaway script, not committed; §4.2 lists every step so the build can recreate it as a checked tool).
 **Builds on / replaces:** [`SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md`](SPEC_PANE_COLOR_SYSTEM_CONSOLIDATION_2026_09_20.md), [`SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md`](SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md), [`SPEC_AGENT_COLOR_2026_08_08.md`](SPEC_AGENT_COLOR_2026_08_08.md). It overrides the "must not share one source" rule of [`SPEC_TAB_COLOR_DESATURATION_2026_08_13.md`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) (§6 says why that is now safe). The role tones (`PANE_COLOR_TOKENS` in `pane-color-scheme.ts`) are kept as they are.
 

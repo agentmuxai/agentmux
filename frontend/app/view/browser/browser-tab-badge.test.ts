@@ -7,12 +7,19 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./browser-profiles", () => ({
-    profileById: (id: string) => (id === "work" ? { id: "work", name: "Work", color: "#3b82f6" } : id === "plain" ? { id: "plain", name: "Plain" } : undefined),
+    profileById: (id: string) =>
+        ({
+            work: { id: "work", name: "Work", color: "#3b82f6" },
+            plain: { id: "plain", name: "Plain" },
+            night: { id: "night", name: "Night", color: "#000000" },
+            paper: { id: "paper", name: "Paper", color: "#ffffff" },
+        })[id],
 }));
 
 import type { PaneTabContext } from "@/app/element/pane-tab-model";
 import { browserPaneTab } from "./browser";
 import { parseIdentity } from "@/app/util/browser-identity";
+import { paneRoleColor } from "@/app/block/pane-color-scheme";
 import { identityBadge } from "./browser-tab-badge";
 
 const ctx = (meta: Record<string, unknown>): PaneTabContext => ({ blockId: "b1", view: "browser", meta: { view: "browser", ...meta } as never, ordinal: 1, liveViewModel: null });
@@ -25,6 +32,12 @@ describe("identityBadge", () => {
 
     it("is the named profile's colour, labelled with its name", () => {
         expect(identityBadge(parseIdentity("profile:work"))).toEqual({ color: "#3b82f6", label: "Work" });
+    });
+
+    it("draws a Black or White profile's mark in the neutral's line tone, which shows on a tab of its own colour", () => {
+        expect(identityBadge(parseIdentity("profile:night"))).toEqual({ color: paneRoleColor(undefined, "black", false, "identity"), label: "Night" });
+        expect(identityBadge(parseIdentity("profile:paper"))).toEqual({ color: paneRoleColor(undefined, "white", false, "identity"), label: "Paper" });
+        expect(identityBadge(parseIdentity("profile:night"))?.color).not.toBe("#000000");
     });
 
     it("falls back to the accent for a profile with no colour, and for one that no longer exists", () => {

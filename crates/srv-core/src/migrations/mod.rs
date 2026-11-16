@@ -96,6 +96,7 @@ pub mod m0047_agents_drop_own_bundle;
 pub mod m0048_seed_grok_muse_accounts;
 pub mod m0049_drone_versions;
 pub mod m0050_drone_checkpoints;
+pub mod m0051_palette_12_snap;
 pub mod backup;
 pub mod gate;
 pub mod prepare;
@@ -277,4 +278,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0048_seed_grok_muse_accounts::M0048SeedGrokMuseAccounts,
     &m0049_drone_versions::M0049DroneVersions,
     &m0050_drone_checkpoints::M0050DroneCheckpoints,
+    &m0051_palette_12_snap::M0051Palette12Snap,
 ];

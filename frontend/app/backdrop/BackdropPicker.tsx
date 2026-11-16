@@ -123,8 +123,9 @@ function useSwatchPreview(blockId: string, suppressed: Accessor<boolean>, scheme
 }
 
 /**
- * The pane's backdrop picker (spec §10): an inline panel over the pane's own body, not a window modal. Sixteen
- * swatches, each a small pane in its own ink; a custom colour; polarity; what the choice reads like in numbers; and
+ * The pane's backdrop picker (spec §10): an inline panel over the pane's own body, not a window modal. Fourteen
+ * swatches in two rows of seven (the 12 hues, then Black and White, as the pane colour picker has them), each a small
+ * pane in its own ink; a custom colour; polarity; what the choice reads like in numbers; and
  * Reset. Hovering or focusing a swatch previews it on this pane through the scope and reverts when it leaves;
  * choosing writes the pane's `backdrop` record. Esc reverts and closes.
  */
@@ -195,7 +196,7 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
                 ariaLabel={t("backdrop.colours")}
                 options={options()}
                 value={record()?.kind === "builtin" ? record()!.id : undefined}
-                columns={4}
+                columns={7}
                 onChange={choose}
                 onPreview={preview}
             />

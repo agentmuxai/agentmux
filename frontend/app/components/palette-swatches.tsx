@@ -2,19 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one colour picker: the shared palette's 16 slots as a grid of swatches
- * (docs/specs/SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md §5.4). Used by
- * the window-tab menu, Settings > Widget colors and the browser profile
- * pickers. Each swatch is painted in the identity tone of the current theme,
- * what the ring and the underline will be, so what you click is what you get.
- * A name on hover and as the accessible label, and a check mark on the chosen
- * one, so the picker never depends on colour alone.
+ * The one colour picker: the shared palette's 14 slots as a grid of swatches,
+ * the 12 hues and then Black and White
+ * (docs/specs/SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md §7). Used
+ * by the window-tab menu, Settings > Widget colors and the browser profile
+ * pickers. A hue's swatch is painted in the identity tone of the current
+ * theme, what the ring and the underline will be, so what you click is what
+ * you get; Black and White are painted as themselves. A hairline around every
+ * swatch, so a black one shows on a dark menu and a white one on a light
+ * menu. A name on hover and as the accessible label, and a check mark on the
+ * chosen one, so the picker never depends on colour alone.
  */
 
 import clsx from "clsx";
 import { For, Show, type JSX } from "solid-js";
 
-import { paneRoleColor } from "@/app/block/pane-color-scheme";
+import { slotSwatchColor } from "@/app/block/pane-color-scheme";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { PALETTE, slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { Button } from "@/element/ui";
@@ -30,15 +33,20 @@ export interface PaletteSwatchesProps {
     label: string;
     /** Put a leading swatch that means "no colour" (its name, e.g. "No colour", "Default") in the grid. */
     noneLabel?: string;
-    /** Swatches per row, fixed. Default: two even rows, 8 of the 16 (9 and 8 with the "none" swatch). A context that
-     *  must narrow the grid with its pane's width leaves this out and sets `--palette-cols` in its own styles. */
+    /** Swatches per row, fixed. Default: two rows of 7 (8 and 7 with the "none" swatch). A context that must narrow
+     *  the grid with its pane's width leaves this out and sets `--palette-cols` in its own styles. */
     columns?: number;
     class?: string;
 }
 
 export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
     const chosen = () => (p.value === null || p.value === undefined ? undefined : slotOf(p.value)?.id);
-    const tone = (slot: PaletteSlot) => paneRoleColor(undefined, slot.id, isLightThemeActive(), "identity");
+    // The check mark's colour. On a hue it is the theme's background; that is black on the black swatch of a dark
+    // theme and white on the white swatch of a light one, so a neutral names its own: the other neutral's colour.
+    const swatchStyle = (slot: PaletteSlot): JSX.CSSProperties => ({
+        "background-color": slotSwatchColor(slot, isLightThemeActive()),
+        ...(slot.neutral && { "--palette-swatch-ink": PALETTE.find((s) => s.neutral && s.neutral !== slot.neutral)?.hex }),
+    });
     return (
         <div
             class={clsx("palette-swatches", p.noneLabel && "palette-swatches--with-none", p.class)}
@@ -64,7 +72,7 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
                     <Tooltip content={slot.name} placement="top" divClassName="palette-swatch-anchor">
                         <Button
                             class="palette-swatch"
-                            style={{ "background-color": tone(slot) }}
+                            style={swatchStyle(slot)}
                             pressed={chosen() === slot.id}
                             aria-label={slot.name}
                             onClick={() => p.onSelect(slot)}

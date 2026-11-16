@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PALETTE } from "@/app/theme/palette";
+import { HUE_SLOTS } from "@/app/theme/palette";
 import { isValidAgentColor, pickAgentColor } from "./agent-color";
 
 describe("pickAgentColor", () => {
@@ -13,7 +13,7 @@ describe("pickAgentColor", () => {
     });
 
     it("returns a palette member", () => {
-        const hexes = new Set(PALETTE.map((s) => s.hex));
+        const hexes = new Set(HUE_SLOTS.map((s) => s.hex));
         for (const id of ["a", "b", "c", "0d5b45f1-9b2c-4a7e-8f3d-1234567890ab", ""]) {
             expect(hexes.has(pickAgentColor(id))).toBe(true);
         }
@@ -27,7 +27,7 @@ describe("pickAgentColor", () => {
 
 describe("isValidAgentColor", () => {
     it("accepts every palette color", () => {
-        for (const { hex } of PALETTE) {
+        for (const { hex } of HUE_SLOTS) {
             expect(isValidAgentColor(hex)).toBe(true);
         }
     });
@@ -62,7 +62,7 @@ describe("picks the colour srv's palette.rs would", () => {
             for (const byte of Buffer.from(id, "utf8")) {
                 hash = ((hash ^ BigInt(byte)) * prime) & mask;
             }
-            expect(pickAgentColor(id), id).toBe(PALETTE[Number(hash % BigInt(PALETTE.length))].hex);
+            expect(pickAgentColor(id), id).toBe(HUE_SLOTS[Number(hash % BigInt(HUE_SLOTS.length))].hex);
         }
     });
 });

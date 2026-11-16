@@ -1,6 +1,7 @@
 # Spec: Pane backdrops: a background that brings its own readable foreground
 
 **Status:** active. Approved by the operator on 2026-11-15 (decisions D1 to D12 as recommended). Building in phases under task #47696 (spec #47695): phase 0 is in PR #7459; phases 1 to 4 are not started. Author: Agent1@narko, 2026-11-15.
+Changed by: [`SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md`](SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md) (2026-11-16): the built-ins of §3.2 are now 14, the palette's 12 hues plus Black and White, which keep one surface under both app themes; the picker is 7 by 2.
 Read against: agentmuxai/agentmux `origin/main` at `09cb71400`. Engine: CEF crate `156.4.0+156.0.26` (Chromium 156), from `Cargo.lock`.
 
 ## 0. The operator's words

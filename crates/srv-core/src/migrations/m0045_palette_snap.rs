@@ -14,6 +14,9 @@
 //! left as they are: they are read as their nearest slot and become slot
 //! values the next time the user picks one.
 //!
+//! The palette has since become 12 hues, Black and White; `m0051_palette_12_snap`
+//! moves the stored colours again, with the functions below.
+//!
 //! Like `m0020`, it attaches the global definition registry itself so it sees
 //! agents that live only there. Idempotent: a value that is already a slot's
 //! hex is left alone (and keeps its `updated_at`).
@@ -30,14 +33,14 @@ use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 pub struct M0045PaletteSnap;
 
 /// The slot hex a stored colour snaps to, or `None` when it already is one or is not a colour.
-fn snapped(stored: &str) -> Option<String> {
+pub(super) fn snapped(stored: &str) -> Option<String> {
     let stored = stored.trim();
     let slot = snap_hex(stored)?;
     (!slot.hex.eq_ignore_ascii_case(stored)).then(|| slot.hex.clone())
 }
 
 /// Snap every profile's colour; whether anything changed.
-fn snap_profiles(profiles: &mut [BrowserProfile]) -> bool {
+pub(super) fn snap_profiles(profiles: &mut [BrowserProfile]) -> bool {
     let mut changed = false;
     for p in profiles {
         if let Some(hex) = snapped(&p.color) {
@@ -73,7 +76,7 @@ impl Migration for M0045PaletteSnap {
     }
 }
 
-fn snap_profiles_file(path: &std::path::Path) -> Result<(), String> {
+pub(super) fn snap_profiles_file(path: &std::path::Path) -> Result<(), String> {
     let mut profiles = read_profiles(path).map_err(|e| format!("read profiles: {e}"))?;
     if snap_profiles(&mut profiles) {
         write_profiles(path, &profiles).map_err(|e| format!("write profiles: {e}"))?;
@@ -81,7 +84,7 @@ fn snap_profiles_file(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-fn snap_agent_colors(store_path: &std::path::Path) -> Result<(), MigrationError> {
+pub(super) fn snap_agent_colors(store_path: &std::path::Path) -> Result<(), MigrationError> {
     let mstore = Arc::new(
         Store::open(store_path).map_err(|e| MigrationError(format!("palette_snap: open mstore: {e}")))?,
     );
@@ -120,7 +123,7 @@ fn snap_agent_colors(store_path: &std::path::Path) -> Result<(), MigrationError>
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::migrations) mod tests {
     use super::*;
     use crate::backend::palette::slots;
     use crate::backend::storage::agents::AgentDefinition;
@@ -128,7 +131,7 @@ mod tests {
 
     /// Run `f` with the home override on a fresh temp dir, so the migration
     /// never reads the machine's real registry or profiles (see m0020's tests).
-    fn with_isolated_home<T>(f: impl FnOnce() -> T) -> T {
+    pub(in crate::migrations) fn with_isolated_home<T>(f: impl FnOnce() -> T) -> T {
         let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let home_tmp = tempfile::tempdir().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", home_tmp.path().to_str().unwrap());
@@ -137,7 +140,7 @@ mod tests {
         result
     }
 
-    fn ctx_for(path: &std::path::Path) -> MigrationContext {
+    pub(in crate::migrations) fn ctx_for(path: &std::path::Path) -> MigrationContext {
         MigrationContext {
             home: std::env::temp_dir(),
             data_dir: std::env::temp_dir(),
@@ -146,7 +149,7 @@ mod tests {
         }
     }
 
-    fn insert_def(mstore: &Store, name: &str) -> String {
+    pub(in crate::migrations) fn insert_def(mstore: &Store, name: &str) -> String {
         let mut def = AgentDefinition {
             seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -183,7 +186,7 @@ mod tests {
         def.id
     }
 
-    fn set_color(mstore: &Store, id: &str, color: &str, at: i64) {
+    pub(in crate::migrations) fn set_color(mstore: &Store, id: &str, color: &str, at: i64) {
         mstore
             .agent_content_set(&AgentContent {
                 agent_id: id.to_string(),
@@ -196,8 +199,8 @@ mod tests {
 
     #[test]
     fn an_old_colour_snaps_and_a_slot_hex_or_junk_is_left_alone() {
-        assert_eq!(snapped("#14b8a6").as_deref(), Some("#00b89e"));
-        assert_eq!(snapped(" #14B8A6 ").as_deref(), Some("#00b89e"));
+        assert_eq!(snapped("#14b8a6").as_deref(), Some("#00b5b3"));
+        assert_eq!(snapped(" #14B8A6 ").as_deref(), Some("#00b5b3"));
         assert_eq!(snapped(&slots()[3].hex), None);
         assert_eq!(snapped(&slots()[3].hex.to_uppercase()), None);
         assert_eq!(snapped("junk"), None);
@@ -216,7 +219,7 @@ mod tests {
         };
         let mut ps = vec![profile("#ec4899"), profile(&slots()[0].hex)];
         assert!(snap_profiles(&mut ps));
-        assert_eq!(ps[0].color, "#e276a0");
+        assert_eq!(ps[0].color, "#e47696");
         assert_eq!(ps[1].color, slots()[0].hex);
         assert!(!snap_profiles(&mut ps), "a second run changes nothing");
     }
@@ -235,7 +238,7 @@ mod tests {
             M0045PaletteSnap.up(&ctx_for(tmp.path())).unwrap();
 
             let snapped_old = mstore.agent_content_get(&old, "ui:color").unwrap().unwrap();
-            assert_eq!(snapped_old.content, "#53a3f2", "Tailwind blue is Azure");
+            assert_eq!(snapped_old.content, "#61a0f4", "Tailwind blue is Blue");
             let kept = mstore.agent_content_get(&current, "ui:color").unwrap().unwrap();
             assert_eq!((kept.content.as_str(), kept.updated_at), (slots()[5].hex.as_str(), 42));
             assert!(mstore.agent_content_get(&none, "ui:color").unwrap().is_none());
