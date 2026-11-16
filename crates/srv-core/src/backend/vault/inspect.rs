@@ -85,7 +85,8 @@ fn expiry_state(row: &VaultRow, today: chrono::NaiveDate) -> (&'static str, Opti
 }
 
 /// `show`: the entry's kind, label, plain fields, tags, which parts are set, expiry state, Vault, version counts and
-/// last use, for an entry in a Vault `agent` may use.
+/// last use, for an entry in a Vault `agent` may use. It is what an agent is given, so the login the entry's machine
+/// copy is read under is not among the fields, as in `list`.
 pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today: chrono::NaiveDate) -> Result<Shown, String> {
     let row = entry_for(store, id, agent)?;
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
@@ -102,7 +103,7 @@ pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today
     let kept_versions = store.vault_versions(&row.id, row.created_at).map_err(|e| e.to_string())?.len();
     let vault = store.vault_info(&row.vault_id).map_err(|e| e.to_string())?.map(|v| v.name).unwrap_or_default();
     Ok(Shown {
-        fields: fields_of(&row),
+        fields: source_link::fields_for_agent(fields_of(&row)),
         tags: serde_json::from_str(&row.tags).unwrap_or_default(),
         expires: expiry::of(&row).map(|d| d.to_string()),
         id: row.id,

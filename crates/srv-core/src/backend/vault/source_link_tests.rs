@@ -136,6 +136,13 @@ fn an_agents_list_names_the_place_and_never_the_login_it_is_read_under() {
     let shown = serde_json::to_string(&list).unwrap();
     assert!(shown.contains(r#""source":{"kind":"aws-secret","location":"staging/app","key":"db.password"}"#), "{shown}");
     assert!(!shown.contains("work-read") && !shown.contains(VALUE), "{shown}");
+
+    // `show` gives the entry's plain fields, and the login is not one of them there either.
+    let one = inspect::show(&s, &linked, Some("builder"), &Ok(seal::test_key()), crate::backend::vault::expiry::today()).unwrap();
+    assert_eq!(one.fields, fields(&aws()));
+    let shown = serde_json::to_string(&one).unwrap();
+    assert!(!shown.contains("work-read") && !shown.contains(PROFILE) && !shown.contains(VALUE), "{shown}");
+    assert_eq!(link_of(&s, &linked).unwrap().profile, "work-read", "the entry keeps it");
 }
 
 #[tokio::test]
@@ -315,6 +322,45 @@ async fn a_check_made_before_the_entry_last_changed_is_not_its_newest_check() {
     assert_eq!((shown(&s), to_agents(&s)), (None, None));
     check(&s, &same, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
     assert_eq!((shown(&s).as_deref(), to_agents(&s).as_deref()), (Some(DIFFERENT), Some(DIFFERENT)));
+}
+
+#[tokio::test]
+async fn a_check_whose_link_changed_while_it_was_read_says_nothing_about_the_new_one() {
+    let s = store();
+    let mut place = aws();
+    place.push((PROFILE, "work-read"));
+    let id = key_entry(&s, &place);
+    let shown = |s: &Store| list_for_pane(s).unwrap().0[0].source_checked.clone().map(|c| c.outcome);
+    let to_agents = |s: &Store| list_for_agent(s, Some("builder")).unwrap()[0].source.as_ref().unwrap().checked.clone().map(|c| c.outcome);
+    let change = |name: &str, value: &str| {
+        let mut f: BTreeMap<String, String> = serde_json::from_str(&s.vault_get(&id).unwrap().unwrap().fields).unwrap();
+        f.insert(name.into(), value.into());
+        update(&s, EntryChange { id: id.clone(), label: "Staging database".into(), fields: f, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
+    };
+    let changed = "could not read: where the entry's machine copy is was changed while it was read";
+
+    // Planned for one region and finished after the link names another: the history names both places the same way,
+    // and the line is written after the change. The copy that was read holds the entry's value, and that is not said.
+    for (name, value) in [(REGION, "us-east-1"), (PROFILE, "work-admin")] {
+        let stale = plan_for_agent(&s, &id, "builder", Some(REASON)).unwrap();
+        change(name, value);
+        assert_eq!(link_of(&s, &id).unwrap().text(), stale.link.text());
+        let found = check(&s, &Fake::ok(secret_with(VALUE)), &stale, Via::Host).await;
+        assert_eq!(found.outcome, COULD_NOT_READ, "{name}");
+        assert!(found.why.contains("was changed while it was read"), "{}", found.why);
+        assert!(shown(&s).unwrap().starts_with(changed) && to_agents(&s).unwrap().starts_with(changed), "{name}: {:?}", shown(&s));
+    }
+
+    // Nor is a refusal under the old login the new one's.
+    let stale = plan_for_person(&s, &id).unwrap();
+    change(PROFILE, "work-read");
+    let refused = check(&s, &Fake::failing("An error occurred (AccessDeniedException) when calling the GetSecretValue operation"), &stale, Via::Host).await;
+    assert!(refused.why.contains("was changed while it was read"), "{}", refused.why);
+
+    // A check of the link as it is now answers for it.
+    check(&s, &Fake::ok(secret_with(VALUE)), &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!((shown(&s).as_deref(), to_agents(&s).as_deref()), (Some(SAME), Some(SAME)));
+    nothing_leaked(&s, &[]);
 }
 
 #[test]

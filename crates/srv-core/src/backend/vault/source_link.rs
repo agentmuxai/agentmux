@@ -245,6 +245,12 @@ pub struct AgentLink {
     pub checked: Option<VaultSourceCheck>,
 }
 
+/// An entry's plain fields as an agent is given them: all of them but the login its machine copy is read under.
+pub fn fields_for_agent(mut fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    fields.remove(PROFILE);
+    fields
+}
+
 pub fn for_agent(store: &Store, row: &VaultRow) -> Option<AgentLink> {
     let link = Link::of_row(row)?;
     let checked = last_check(store, row, &link);
@@ -401,12 +407,22 @@ async fn read<R: Runner>(runner: &R, link: &Link, via: Via<'_>) -> Result<Zeroiz
     aws_import::pick(secret, source.key.as_deref())
 }
 
-/// The entry's own value against `other`. The entry is opened here and wiped when this returns.
-fn compare(store: &Store, plan: &CheckPlan, other: &Zeroizing<String>) -> Outcome {
-    let cant = |why: &str| Outcome::CouldNotRead(why.to_string());
+/// The entry as it is once the read has come back, when it is still the entry the check was planned for and its
+/// link is still the one that was read. A read takes seconds, and the link may change under it: a line written for
+/// the old region or profile would count as the newest check of the new one, which the history names the same way.
+fn as_planned(store: &Store, plan: &CheckPlan) -> Result<VaultRow, String> {
     let Some(row) = store.vault_get(&plan.entry_id).ok().flatten().filter(|r| r.created_at == plan.created_at) else {
-        return cant("the entry was deleted while its machine copy was read");
+        return Err("the entry was deleted while its machine copy was read".into());
     };
+    if Link::of_row(&row).as_ref() != Some(&plan.link) {
+        return Err("where the entry's machine copy is was changed while it was read, so what was read says nothing about it: check again".into());
+    }
+    Ok(row)
+}
+
+/// The entry's own value against `other`. The entry is opened here and wiped when this returns.
+fn compare(row: &VaultRow, plan: &CheckPlan, other: &Zeroizing<String>) -> Outcome {
+    let cant = |why: &str| Outcome::CouldNotRead(why.to_string());
     let Ok(key) = seal::key(false) else { return cant("this computer's Vault key can't be read, so the entry's own value can't be opened") };
     let Ok(parts) = seal::open(&key, &row.id, &row.sealed) else { return cant("the entry's own value doesn't open with this computer's Vault key") };
     match parts.get(plan.part).filter(|v| !v.is_empty()) {
@@ -425,9 +441,10 @@ pub fn conclude(store: &Store, plan: &CheckPlan, outcome: &Outcome) -> Checked {
 
 /// What a read of the copy came to, compared with the entry's value and recorded.
 fn finish(store: &Store, plan: &CheckPlan, other: Result<Zeroizing<String>, String>) -> Checked {
-    let outcome = match &other {
-        Ok(value) => compare(store, plan, value),
-        Err(why) => Outcome::CouldNotRead(why.clone()),
+    let outcome = match (as_planned(store, plan), &other) {
+        (Err(why), _) => Outcome::CouldNotRead(why),
+        (Ok(row), Ok(value)) => compare(&row, plan, value),
+        (Ok(_), Err(why)) => Outcome::CouldNotRead(why.clone()),
     };
     conclude(store, plan, &outcome)
 }
