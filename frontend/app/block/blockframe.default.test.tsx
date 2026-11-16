@@ -275,7 +275,7 @@ describe("the backdrop", () => {
         // The transcript's terminal palette is set again on the pane when the theme gives one.
         resetThemeAnsi();
         document.documentElement.style.setProperty("--term-green", "#4e9a06");
-        const withPalette = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        const withPalette = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
         expect(frame(withPalette.view.container).style.getPropertyValue("--term-green")).toMatch(/^#[0-9a-f]{6}$/);
         document.documentElement.style.removeProperty("--term-green");
         resetThemeAnsi();

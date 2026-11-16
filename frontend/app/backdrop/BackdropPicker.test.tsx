@@ -12,6 +12,7 @@ vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (...a: unknown[]) => h.
 vi.mock("../block/pane-identity", () => ({ isLightThemeActive: () => h.light }));
 vi.mock("../store/window-appearance", () => ({ currentWindowTheme: () => h.theme }));
 
+import { resetThemeAnsi } from "./ansi";
 import { BackdropPicker } from "./BackdropPicker";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
@@ -206,6 +207,22 @@ describe("BackdropPicker", () => {
         expect(t.container.textContent).not.toContain("isn't shown while High Contrast");
         fireEvent.focus(radios(t.container)[1]);
         expect(getPaneScope("pk")()?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
+    });
+
+    it("previews and restores the pane with the theme's terminal palette moved too, as the pane's own scope has it", () => {
+        const root = document.documentElement;
+        resetThemeAnsi();
+        root.style.setProperty("--term-green", "#4e9a06");
+        try {
+            const t = mount({ backdrop: teal });
+            fireEvent.focus(radios(t.container)[1]);
+            expect(getPaneScope("pk")()?.["--term-green"]).toMatch(/^#[0-9a-f]{6}$/);
+            fireEvent.keyDown(radios(t.container)[1], { key: "Escape" });
+            expect(getPaneScope("pk")()?.["--term-green"], "after it closes").toMatch(/^#[0-9a-f]{6}$/);
+        } finally {
+            root.style.removeProperty("--term-green");
+            resetThemeAnsi();
+        }
     });
 
     it("takes focus when it opens, so Esc works at once", () => {

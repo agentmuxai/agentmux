@@ -11,6 +11,7 @@ import type { DerivedBackdrop } from "./ink";
 import { parseBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
 import { builtinOptions, builtinRecord, colorRecord, contrastReadout, parseHexInput, schemeFor } from "./picker-model";
 import { useDialogKeys } from "./picker-state";
+import { themeAnsi } from "./ansi";
 import { registerPaneScope, scopeVars } from "./scope";
 import { useBackdropSuppressed, useResolvedBackdrop } from "./usePaneBackdrop";
 
@@ -128,12 +129,12 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
 
     const write = (next: BackdropMeta | null) => void setBlockMeta(props.blockId, { backdrop: next } as never);
     /** Put back what the pane really has, ending a preview. */
-    const restore = () => registerPaneScope(props.blockId, resolved() ? scopeVars(resolved()!.derived) : undefined);
+    const restore = () => registerPaneScope(props.blockId, resolved() ? scopeVars(resolved()!.derived, themeAnsi()) : undefined);
     onCleanup(restore);
 
     const preview = (id: string | undefined) => {
         const derived = id && !suppressed() ? deriveBuiltin(id, scheme()) : undefined;
-        if (derived) registerPaneScope(props.blockId, scopeVars(derived));
+        if (derived) registerPaneScope(props.blockId, scopeVars(derived, themeAnsi()));
         else restore();
     };
     const choose = (id: string) => write(builtinRecord(id, polarity()));
