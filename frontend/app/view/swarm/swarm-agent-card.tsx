@@ -101,9 +101,11 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
             {/* Running with no pane (closing its pane, tab or window parked it): the same
                 mark My Agents puts on its row; a click on the row opens its pane. */}
             <Show when={isParked()}>
-                <Tag tone="ok" title="Running with no pane. Click to open.">
-                    No pane
-                </Tag>
+                <span class="swarm-nopane-slot">
+                    <Tag tone="ok" title="Running with no pane. Click to open.">
+                        No pane
+                    </Tag>
+                </span>
             </Show>
             {/* Turns this agent didn't get from you that finished
                 unseen: the same mark as its pane header (UnseenTurnsDot). */}
