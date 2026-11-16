@@ -433,6 +433,34 @@ async fn an_export_can_be_a_keepass_database_and_only_a_known_format() {
     assert!(!body.to_string().contains("123-45"), "{body}");
 }
 
+#[tokio::test]
+async fn an_export_of_the_linked_entries_only_is_a_vault_file_with_no_value_in_it() {
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    send(&app, host(new_ssn())).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("links.vault").to_string_lossy().into_owned();
+    let links = |format: &str| json!({ "op": "export", "path": path, "format": format, "links_only": true, "passphrase": "correct horse battery staple" });
+    // With no linked entry there is nothing to write, whatever else the Vault holds.
+    let (s, body) = send(&app, host(links("vault"))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("no linked entries"), "{body}");
+    let link = json!({ "op": "create", "kind": "api-key", "label": "Mail provider key", "fields": { "link": "only", "source_kind": "aws-secret", "source_location": "prod/mailer" }, "parts": {} });
+    let (s, body) = send(&app, host(link)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    // No other format carries a link.
+    let (s, body) = send(&app, host(links("kdbx"))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("as a Vault file"), "{body}");
+    // The link alone is written: the SSN beside it holds a value and stays out.
+    let (s, body) = send(&app, host(links("vault"))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!((body["data"]["count"].clone(), body["data"]["file_name"].clone()), (json!(1), json!("links.vault")));
+    let (_, body) = send(&app, host(json!({ "op": "import_inspect", "path": path, "passphrase": "correct horse battery staple" }))).await;
+    assert_eq!(body["data"]["preview"]["total"], 1, "{body}");
+    assert!(!body.to_string().contains("123-45"), "{body}");
+}
+
 /// A state and a signed identity for a registered agent, as `Vault` `generate` sends.
 fn signed_agent(state: &AppState) -> agentmux_common::api_types::UiAutomationAuth {
     let agent = format!("maker-{}", uuid::Uuid::new_v4());

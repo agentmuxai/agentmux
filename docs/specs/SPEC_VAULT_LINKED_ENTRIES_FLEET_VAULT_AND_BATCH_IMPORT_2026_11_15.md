@@ -1,6 +1,6 @@
 # Spec: The Vault as the central index of keys: linked entries, a Fleet Vault, and bulk import with one approval per batch
 
-**Status:** active. The spec task is complete and the build is under way: B1 is built (#7487, with follow-ups in #7492), B3 is built (#7498, see "As built (B3)" at the end) and B2 is built (#7501, see "As built (B2)") and B4 is built by the PR that adds "As built (B4)"; B5 is not built yet.
+**Status:** active. The spec task is complete and the build is under way: B1 is built (#7487, with follow-ups in #7492), B3 is built (#7498, see "As built (B3)" at the end) and B2 is built (#7501, see "As built (B2)"), B4 is built (#7506, see "As built (B4)") and B5 is built by the PR that adds "As built (B5)".
 **Task:** #47647 (the build is #47648). **Author:** Agent2-6 (Vault). **Date:** 2026-11-15.
 **Asked by the operator (2026-11-14):** "lets audit all our keys and make sure they all link centeraly to the vault"; and, on the recommendation to build a bulk approval first and a second Vault: "great, go with recommendations".
 **Public repository.** This spec and its tests use invented names (`example/app`, `EXAMPLE_TOKEN`) and no counts of a real inventory. The inventory itself stays in a private report.
@@ -214,7 +214,7 @@ Agent2, 2026-11-15, task #47648. Linked entries, as §2 says, with these choices
 - **Health** counts `linked`, `linked_changed_or_missing` and `linked_unchecked_for_30_days`, and no longer counts a link as unused. `verify` finds a link with a value wrong, and not one without. An expiry reminder follows a link's `expires` as any entry's. A check that says changed or missing has no reminder of its own yet.
 - **In the pane** a link has the badges "Linked" and "Readable outside the Vault", "no value kept" where the last characters go, "Kept at:" with the newest check, then who reads it, the date recorded and the other places. It has no Show or copy; "Copy the place" copies the location. The form shows no value input for one.
 - **`list` and `show`** give `link_only`, the place, `readers`, `rotated`, `copies` and the newest check; never the login.
-- **Not in this build:** a `.vault` export leaves a link out and an import skips one, as entries with no value (B5); KeePass export and import do not carry `link`, `readers`, `rotated` or `copies`; linked entries do not default to a Vault named Fleet (B4).
+- **Not in this build:** a `.vault` export writes a link as an entry with its fields and no value, and an import skips one as an entry with no value (B5 changes the import and adds the links-only export; this line first said the export left links out, which was wrong); KeePass export and import do not carry `link`, `readers`, `rotated` or `copies`; linked entries do not default to a Vault named Fleet (B4).
 
 ## As built (B4)
 
@@ -226,3 +226,15 @@ Agent2, 2026-11-15, task #47648. Fleet on the batch card, as §3.1 and §4.2 say
 - **A batch that replaces a value offers no choice.** A row that replaces an entry's value stays with its entry, and a batch is one Vault, so such a card has no control, and an answer that names another Vault for it is refused.
 - **The choice is checked again as the same batch.** An Allow with another Vault runs every check of the batch for that Vault (names taken there, the agent's use of it) under the same batch id and references. When it can't go there the answer says so and nothing is copied; the history has the batch as failed. The answer to the agent names the Vault the entries went into.
 - **The Fleet filter is the pane's Vault filter.** With more than one Vault the pane already filters by Vault (VS1), so Fleet is one of its choices and there is no second control. The "Readable outside the Vault" badge was built with B2.
+
+## As built (B5)
+
+Agent2, 2026-11-16, task #47648. The links-only export of §6's R1, with these choices made while building:
+
+- **"Linked entries only" is a choice in the export dialog**, shown when the Vault has a linked entry. It lists the linked entries alone, each with its tick, and asks for a passphrase as any `.vault` export does. The file is an ordinary `.vault` file (docs/api/VAULT_FILE_FORMAT.md) whose entries are links: their place, who reads the key, the date recorded and the other places. No value is in it.
+- **srv keeps the promise, not the dialog.** The host passes `links_only` on, and srv writes the linked entries among the ones chosen and leaves every entry that holds a value out, even one named. With no linked entry it writes nothing and says so. A linked entry found holding a value (`verify` calls that wrong) stops the export. No other format takes the option: a KeePass, CSV or JSON file has no place for a link.
+- **A whole export carries links too**, as it did since B2: a link is written with its fields and no part. (B2's notes said it was left out; that line is corrected.)
+- **An import takes a link.** An entry whose fields say `link: only` comes in as a linked entry: it needs its place and must hold no part, or it is skipped with the reason shown. It goes to the Vault the person chooses in the import dialog, under its own id when that is free. Until this build a link in a file was skipped as an entry with no value.
+- **A link is known again by its place.** On import a linked entry duplicates one in the Vault when the kind and the place match (`source_kind`, `source_location`, `source_key`, `source_region`), so importing the same file twice doubles nothing. "Replace" takes what the file says of the key (readers, date, other places); the entry stays a link, in the Vault it is in.
+- **When a link was last checked is not carried.** The check's result is in the history, which belongs to one machine: on the other machine the link reads "not checked yet" until it is checked there.
+- **The history line** of a links-only export says how many linked entries were written and that no value was.
