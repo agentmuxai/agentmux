@@ -4,9 +4,9 @@
 import { t } from "@/app/i18n/i18n";
 import { Button, CloseButton, Field, Notice, SectionHeader, SegmentedControl, SwatchGrid, TextInput } from "@/app/element/ui";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { isLightThemeActive } from "../block/pane-identity";
-import { deriveBuiltin } from "./builtins";
+import { deriveBuiltin, type AppScheme } from "./builtins";
 import type { DerivedBackdrop } from "./ink";
 import { parseBackdrop, sameBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
 import { builtinOptions, builtinRecord, colorRecord, contrastReadout, parseHexInput, schemeFor } from "./picker-model";
@@ -101,6 +101,28 @@ function ContrastReadout(props: { derived: DerivedBackdrop | undefined; missed: 
 }
 
 /**
+ * The preview of the swatch being looked at (hovered or focused), on the pane's scope. Returns what a swatch calls
+ * with its id, or with nothing when it is left. The swatch is kept as state and not only acted on when its event
+ * fires: the pane's scope has to follow suppression and the polarity while the swatch stays focused. High Contrast
+ * or forced colours coming on takes the preview off the pane (`restore`), and going off puts it back.
+ */
+function useSwatchPreview(blockId: string, suppressed: Accessor<boolean>, scheme: Accessor<AppScheme>, restore: () => void): (id: string | undefined) => void {
+    const [previewId, setPreviewId] = createSignal<string | undefined>();
+    createEffect(
+        on(
+            [previewId, suppressed, scheme],
+            ([id, off, side]) => {
+                const derived = id && !off ? deriveBuiltin(id, side) : undefined;
+                if (derived) registerPaneScope(blockId, scopeVars(derived, themeAnsi()));
+                else restore();
+            },
+            { defer: true }
+        )
+    );
+    return (id) => void setPreviewId(id);
+}
+
+/**
  * The pane's backdrop picker (spec §10): an inline panel over the pane's own body, not a window modal. Sixteen
  * swatches, each a small pane in its own ink; a custom colour; polarity; what the choice reads like in numbers; and
  * Reset. Hovering or focusing a swatch previews it on this pane through the scope and reverts when it leaves;
@@ -134,11 +156,7 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     const restore = () => registerPaneScope(props.blockId, resolved() ? scopeVars(resolved()!.derived, themeAnsi()) : undefined);
     onCleanup(restore);
 
-    const preview = (id: string | undefined) => {
-        const derived = id && !suppressed() ? deriveBuiltin(id, scheme()) : undefined;
-        if (derived) registerPaneScope(props.blockId, scopeVars(derived, themeAnsi()));
-        else restore();
-    };
+    const preview = useSwatchPreview(props.blockId, suppressed, scheme, restore);
     const choose = (id: string) => write(builtinRecord(id, polarity()));
     const applyHex = () => {
         const hex = parseHexInput(hexText());
@@ -153,6 +171,7 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     };
     const reset = () => write(null);
     const close = () => {
+        preview(undefined);
         restore();
         props.onClose();
     };

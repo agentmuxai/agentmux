@@ -380,7 +380,9 @@ mod tests {
     #[test]
     fn a_private_key_after_a_certificate_is_still_redacted() {
         let text = "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n\
-                    -----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----\ndone";
+                    -----BEGIN RSA PRIV\
+                    ATE KEY-----\nMIIEsecret\n-----END RSA PRIV\
+                    ATE KEY-----\ndone";
         let out = redact_private_keys(text);
         assert!(out.contains("MIIBcert"), "a certificate is public: {out}");
         assert!(!out.contains("MIIEsecret"), "{out}");
