@@ -33,6 +33,12 @@ name: Container Agent Image
 
 on:
   workflow_call:
+    inputs:
+      suite-proof:
+        description: "Set only by release-core.yml: 'later' (the jobs that send anything out of the run need its suite) or the result of its suite job. Blank outside release-core.yml: check 6 of the release gate is then the commit's own push run."
+        required: false
+        type: string
+        default: ""
     outputs:
       digest:
         description: 'The digest of the multi-arch index just pushed (sha256:<64 hex>). release-core.yml puts it in the signed manifest.'
@@ -88,7 +94,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
-        run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
+          SUITE_PROOF: ${{ inputs.suite-proof }}
+        run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT" --suite-proof "$SUITE_PROOF"
 
   build-and-push:
     # A release (the gate passed), or a manual run from main.
