@@ -161,14 +161,19 @@ fn check_low_disk(state: &std::sync::Arc<crate::state::AppState>, root: &std::pa
     }
 }
 
+/// The recycle governor watches the same budget on its own thread; the UI-stall probe writes a stall to the log
+/// with what the machine looked like (ui_stall.rs).
+fn start_watchers(state: &std::sync::Arc<crate::state::AppState>) {
+    crate::commands::recycle_governor::start(state.clone());
+    ui_stall::start(agentmux_common::data_paths::agentmux_root().ok());
+}
+
 /// Spawn a background thread that logs memory stats at a fixed interval.
 /// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
 pub fn start(state: std::sync::Arc<crate::state::AppState>) {
-    // The renderer recycle governor watches the same budget on its own thread.
-    crate::commands::recycle_governor::start(state.clone());
-    // A UI thread that stops for seconds is written to the log with what the machine looked like (ui_stall.rs).
-    ui_stall::start(agentmux_common::data_paths::agentmux_root().ok());
+    // The watchers that run on their own threads beside the heartbeat.
+    start_watchers(&state);
     std::thread::Builder::new()
         .name("mem-heartbeat".into())
         .spawn(move || {
