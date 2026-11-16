@@ -68,6 +68,20 @@ fn a_forged_authentication_results_below_googles_is_ignored() {
 }
 
 #[test]
+fn more_than_one_result_from_google_is_flagged_and_one_is_not() {
+    let forged = "mx.google.com; dkim=pass header.i=@vendor.com; spf=pass smtp.mailfrom=x@vendor.com; dmarc=pass header.from=vendor.com";
+    let c = check(&[("Authentication-Results", FAIL), ("Authentication-Results", forged), FROM]);
+    assert!(flags(&c).contains(&"several_google_results".to_string()), "{c}");
+    assert_eq!(c["dmarc"]["result"], "fail", "the topmost is still the one read");
+    let c = check(&[("Authentication-Results", PASS), FROM]);
+    assert!(flags(&c).is_empty(), "{c}");
+    // Another server's header is not Google's: it doesn't count.
+    let other = "mail.evil.test; dmarc=pass header.from=vendor.com";
+    let c = check(&[("Authentication-Results", PASS), ("Authentication-Results", other), FROM]);
+    assert!(flags(&c).is_empty(), "{c}");
+}
+
+#[test]
 fn a_mail_with_no_header_from_google_has_no_verdict() {
     let c = check(&[FROM]);
     assert_eq!(flags(&c), ["no_verdict"]);
@@ -93,6 +107,22 @@ fn a_reply_to_on_another_domain_is_flagged_and_one_on_the_same_site_is_not() {
     // Any one address on another domain is enough.
     let c = check(&[("Authentication-Results", PASS), FROM, ("Reply-To", "a@vendor.com, b@elsewhere.org")]);
     assert_eq!(flags(&c), ["reply_to_differs"]);
+}
+
+#[test]
+fn a_reply_to_that_cannot_be_read_whole_is_flagged() {
+    // 20 addresses on the sender's own domain, then another one: the last is not kept, and the list says so.
+    let many: Vec<String> = (0..20).map(|i| format!("a{i}@vendor.com")).collect();
+    let hidden = format!("{}, attacker@evil.test", many.join(", "));
+    let c = check(&[("Authentication-Results", PASS), FROM, ("Reply-To", &hidden)]);
+    assert!(flags(&c).contains(&"reply_to_incomplete".to_string()), "{c}");
+    // A value too long to read whole.
+    let long = format!("{}attacker@evil.test", "a@vendor.com, ".repeat(200));
+    let c = check(&[("Authentication-Results", PASS), FROM, ("Reply-To", &long)]);
+    assert!(flags(&c).contains(&"reply_to_incomplete".to_string()), "{c}");
+    // Exactly 20 are read whole.
+    let c = check(&[("Authentication-Results", PASS), FROM, ("Reply-To", &many.join(", "))]);
+    assert!(flags(&c).is_empty(), "{c}");
 }
 
 #[test]
@@ -195,6 +225,20 @@ fn raw_headers_are_one_line_each_and_a_value_cannot_start_a_line() {
 }
 
 #[test]
+fn raw_headers_say_cut_when_a_header_a_name_or_a_value_went_missing() {
+    let short: Vec<(String, String)> = (0..RAW_HEADERS_MAX + 1).map(|i| (format!("X-{i}"), "v".to_string())).collect();
+    let refs: Vec<(&str, &str)> = short.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect();
+    let mut budget = RAW_THREAD_CHARS;
+    assert_eq!(raw_headers(&msg(&refs), &mut budget)["cut"], true, "more headers than are shown");
+    let mut budget = RAW_THREAD_CHARS;
+    assert_eq!(raw_headers(&msg(&refs[..RAW_HEADERS_MAX]), &mut budget)["cut"], false);
+    let mut budget = RAW_THREAD_CHARS;
+    assert_eq!(raw_headers(&msg(&[("Subject", &"s".repeat(RAW_VALUE_CHARS + 1))]), &mut budget)["cut"], true, "a value cut short");
+    let mut budget = RAW_THREAD_CHARS;
+    assert_eq!(raw_headers(&msg(&[(&"N".repeat(RAW_NAME_CHARS + 1), "v")]), &mut budget)["cut"], true, "a name cut short");
+}
+
+#[test]
 fn raw_headers_are_cut_per_message_and_per_thread() {
     let many: Vec<(String, String)> = (0..200).map(|i| (format!("X-{i}"), "v".repeat(500))).collect();
     let refs: Vec<(&str, &str)> = many.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect();
@@ -248,6 +292,7 @@ fn a_search_line_carries_the_dmarc_verdict_and_flags_of_the_latest_message() {
     ] });
     let two = json!({ "messages": [{ "labelIds": ["INBOX"], "payload": { "headers": [{ "name": "Authentication-Results", "value": PASS }, { "name": "From", "value": "d@vendor.com" }] } }] });
     let out = shape_search(&list, &[one, two]);
-    assert_eq!(out["threads"][0]["sender_check"], json!({ "dmarc": "fail", "flags": ["reply_to_differs", "not_aligned"] }));
-    assert_eq!(out["threads"][1]["sender_check"], json!({ "dmarc": "pass", "flags": [] }));
+    // The verdict names the sender it is about (the latest message's), which may not be the first one's.
+    assert_eq!(out["threads"][0]["sender_check"], json!({ "dmarc": "fail", "from_domain": "vendor.com", "flags": ["reply_to_differs", "not_aligned"] }));
+    assert_eq!(out["threads"][1]["sender_check"], json!({ "dmarc": "pass", "from_domain": "vendor.com", "flags": [] }));
 }
