@@ -81,6 +81,8 @@ pub async fn export(state: &Arc<AppState>, args: &Value) -> Result<Value, String
             "format": format,
             "path": path.to_string_lossy(),
             "ids": args.get("ids"),
+            // The linked entries only: srv leaves every entry that holds a value out of the file.
+            "links_only": args.get("links_only").and_then(Value::as_bool).unwrap_or(false),
             "passphrase": args.get("passphrase").and_then(Value::as_str).unwrap_or(""),
         }),
     )

@@ -251,6 +251,16 @@ export function reviewLoad(tasks: KanbanTask[], now: number): { count: number; s
     };
 }
 
+/** An agent's name as a person reads it: "Tess", not its id "tess-2". */
+export function agentLabel(a: Pick<KanbanAgent, "name" | "display">): string {
+    return a.display || a.name;
+}
+
+/** Who a task's card names as its owner, as a person reads it: the holder, else the agent it is for. */
+export function ownerLabel(t: KanbanTask): string {
+    return t.claimed_by ? t.claimed_by_name || t.claimed_by : t.target_agent_name || t.target_agent;
+}
+
 /** Who asked for a task, in words. */
 export function requestedBy(t: KanbanTask): string {
     const c = t.card;

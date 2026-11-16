@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: () => null }));
+vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: () => null, toggleVoiceFor: vi.fn() }));
 vi.mock("@/util/host-caps", () => ({ hostHas: () => true }));
 vi.mock("@/app/view/term/term-models", () => ({ basicTermModels: () => [] }));
 vi.mock("@/app/store/global", () => ({

@@ -84,6 +84,8 @@ export function agentStateWords(state: KanbanAgentState | undefined): string {
 /** An agent's name with its live state, the name in its colour when it has one. */
 export function AgentChip(props: {
     name: string;
+    /** The name to show when the agent is not running, so `agent` has none ("Tess" for "tess-2"). */
+    display?: string | null;
     agent?: KanbanAgent | null;
     uid?: string;
     colors?: Record<string, string>;
@@ -94,17 +96,18 @@ export function AgentChip(props: {
     const nameColor = () => agentColor(props.agent, props.uid, props.colors, "identity");
     const seats = useSeatIndex();
     const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
+    const shown = () => props.display || props.agent?.display || props.name;
     return (
-        <span class="kanban-agent-chip" {...tip(seat() ? `${props.name}: ${seatTooltipLine(seat()!)}` : undefined)}>
+        <span class="kanban-agent-chip" {...tip(seat() ? `${shown()}: ${seatTooltipLine(seat()!)}` : undefined)}>
             <StatusDot
                 tone={agentTone(props.agent?.state)}
-                label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
+                label={`${shown()}: ${agentStateWords(props.agent?.state)}`}
             />
             <span
                 class="kanban-agent-chip__name"
                 style={nameColor() ? { "--kanban-agent-text": nameColor() } : undefined}
             >
-                {props.name}
+                {shown()}
             </span>
         </span>
     );
@@ -125,7 +128,12 @@ interface CardState {
     t: () => KanbanTask;
     column: Accessor<ColumnId>;
     reason: Accessor<string | null>;
-    who: Accessor<{ name: string; agent: KanbanAgent | null | undefined; uid: string | undefined } | null>;
+    who: Accessor<{
+        name: string;
+        display: string | null | undefined;
+        agent: KanbanAgent | null | undefined;
+        uid: string | undefined;
+    } | null>;
     stripe: Accessor<string | undefined>;
     open: () => void;
     /** The card's element, once it is in the page. */
@@ -138,10 +146,12 @@ function createCardState(props: KanbanCardProps): CardState {
     const reason = createMemo(() => needsReason(t()));
     const who = createMemo(() => {
         const task = t();
-        if (task.claimed_by) return { name: task.claimed_by, agent: task.holder, uid: task.claimed_by_uid };
+        if (task.claimed_by)
+            return { name: task.claimed_by, display: task.claimed_by_name, agent: task.holder, uid: task.claimed_by_uid };
         if (task.target_agent)
             return {
                 name: task.target_agent,
+                display: task.target_agent_name,
                 agent: props.agents.find((a) => a.name === task.target_agent) ?? null,
                 uid: task.target_agent_uid,
             };
@@ -252,7 +262,7 @@ function WhoChip({ s }: { s: CardState }) {
     const { props, who } = s;
     return (
         <Show when={who()}>
-            {(w) => <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} showSeat />}
+            {(w) => <AgentChip name={w().name} display={w().display} agent={w().agent} uid={w().uid} colors={props.colors} showSeat />}
         </Show>
     );
 }

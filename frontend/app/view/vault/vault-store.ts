@@ -196,10 +196,11 @@ export const allowSetting = (entryId: string, setting: string) => call<unknown>(
 
 /** What the host needs to export: which entries (all when left out) and the
  *  passphrase; the host asks where to save. `null` if the person closed the dialog. */
-export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx" }): Promise<{ count: number; file_name: string } | null> {
+export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx"; linksOnly?: boolean }): Promise<{ count: number; file_name: string } | null> {
     const relay = getApi()?.approvals?.vaultExport;
     if (!relay) throw new Error("Export needs the AgentMux desktop app.");
-    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format })) as {
+    // `links_only`: a `.vault` file of the linked entries, which hold no value; srv leaves every other entry out.
+    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format, links_only: args.linksOnly || undefined })) as {
         cancelled?: boolean;
         count?: number;
         file_name?: string;
