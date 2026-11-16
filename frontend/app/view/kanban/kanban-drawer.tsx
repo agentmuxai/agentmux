@@ -20,7 +20,7 @@ import { moveEntries } from "./kanban-board-picker";
 import { refOf } from "./kanban-boards";
 import { DrawerMedia } from "./kanban-media";
 import { agentStateWords, AgentChip } from "./kanban-card";
-import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
+import { agentLabel, columnOf, isFinishedColumn, isResearchKind, needsReason, ownerLabel, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type {
     KanbanActRequest,
@@ -227,7 +227,11 @@ function DrawerFacts(props: { m: DrawerState }): JSX.Element {
             <Show when={t().claimed_by || t().target_agent}>
                 {(name) => (
                     <span>
-                        <AgentChip name={name()} agent={t().holder ?? m.props.agents.find((a) => a.name === name())} />
+                        <AgentChip
+                            name={name()}
+                            display={ownerLabel(t())}
+                            agent={t().holder ?? m.props.agents.find((a) => a.name === name())}
+                        />
                         <span class="warden-manager-dim"> {agentStateWords((t().holder ?? m.props.agents.find((a) => a.name === name()))?.state)}</span>
                     </span>
                 )}
@@ -356,7 +360,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
         <Show when={m.heldByAgent()}>
             <Show when={t().holder_unavailable}>
                 <p class="warden-manager-dim">
-                    {t().claimed_by || "Its agent"} can't work right now. Take the task back to let someone else do it.
+                    {t().claimed_by ? ownerLabel(t()) : "Its agent"} can't work right now. Take the task back to let someone else do it.
                 </p>
             </Show>
             <div class="kanban-drawer__row">
@@ -377,7 +381,7 @@ function TakeBackRows(props: { m: DrawerState }): JSX.Element {
                     options={[
                         { value: "", label: "Give it to…" },
                         { value: ANYONE, label: "Anyone" },
-                        ...m.otherAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` })),
+                        ...m.otherAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` })),
                     ]}
                 />
                 <Button
@@ -427,7 +431,7 @@ function StartRows(props: { m: DrawerState }): JSX.Element {
                     onChange={m.setStartOn}
                     density="compact"
                     ariaLabel="Agent to start it on"
-                    options={[{ value: "", label: "Start on…" }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` }))]}
+                    options={[{ value: "", label: "Start on…" }, ...m.runningAgents().map((a) => ({ value: a.name, label: `${agentLabel(a)} (${agentStateWords(a.state)})` }))]}
                 />
                 <Button density="compact" tone="accent" icon="play" disabled={!m.startOn() || m.busy()} onClick={() => void m.act({ action: "start", agent: m.startOn() })}>
                     Start

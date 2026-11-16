@@ -9,7 +9,7 @@ import { createSignal, type JSX } from "solid-js";
 import { Button, Select, Switch, TextArea, TextInput } from "@/app/element/ui";
 
 import { agentsByRecentUse } from "./kanban-agent-order";
-import { parseAfter } from "./kanban-columns";
+import { agentLabel, parseAfter } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent } from "./kanban-types";
 import { tip } from "@/app/element/tip";
@@ -76,7 +76,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
                     onChange={setAgent}
                     options={[
                         { value: "", label: "For anyone" },
-                        ...agentsByRecentUse(props.agents).map((a) => ({ value: a.name, label: `For ${a.name}` })),
+                        ...agentsByRecentUse(props.agents).map((a) => ({ value: a.name, label: `For ${agentLabel(a)}` })),
                     ]}
                 />
                 <label
