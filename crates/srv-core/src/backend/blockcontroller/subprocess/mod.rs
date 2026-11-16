@@ -62,6 +62,8 @@ pub mod codex_fresh;
 pub mod gemini_mcp;
 pub mod container_spawn;
 pub mod host_spawn;
+pub(crate) mod replace;
+pub use replace::forget_left_for_replacement;
 pub mod session;
 #[cfg(test)]
 mod tests;
@@ -138,10 +140,6 @@ pub struct SubprocessSpawnConfig {
     pub record: Option<crate::backend::message_origin::RecordOrigin>,
 }
 
-/// Messages a stop held on a controller that was then replaced (an explicit start builds a new one for the
-/// block), by block id, until the replacement is made: they were accepted, so they are not lost with the old one.
-static HELD_ACROSS_REPLACE: Mutex<Option<HashMap<String, VecDeque<SubprocessSpawnConfig>>>> = Mutex::new(None);
-
 /// Inner state protected by mutex.
 struct SubprocessControllerInner {
     /// Current process status.
@@ -163,6 +161,9 @@ struct SubprocessControllerInner {
     /// do not run on their own (which would start the agent again and flip it back to wanted
     /// running); the next turn that is accepted queues them right behind itself, in the order they were sent.
     held_after_stop: VecDeque<SubprocessSpawnConfig>,
+    /// Messages that were queued behind a turn when `stop_for_replace` ended it: the replacement runs them
+    /// (see `replace.rs`).
+    queued_for_replacement: VecDeque<SubprocessSpawnConfig>,
     /// Session ids the agent ended on purpose (`Agents fresh`, `codex_fresh`):
     /// a queued message or a stale `agent:sessionid` that still names one must
     /// not resume it.
@@ -208,6 +209,11 @@ pub struct SubprocessController {
     /// run at the start of the turn's own task, so it is not cut short with the
     /// request. `None` for a host agent.
     container_startup: Mutex<Option<StartupStep>>,
+    /// How the last accepted message was launched (host process or container exec), so a replacement can launch
+    /// what the replaced controller had queued the same way.
+    adapter: Mutex<Option<Arc<dyn crate::backend::runtime_adapter::RuntimeAdapter>>>,
+    /// The replaced controller's run lock, until the replacement has waited for its killed turn to exit.
+    left_old_run_lock: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 /// A container turn's first step: ready the container. `Err` carries the text
@@ -247,21 +253,28 @@ impl SubprocessController {
                 })
                 .ok()
         });
-        let held_by_a_replaced_controller = take_held_across_replace(&block_id);
+        let left = replace::take_left_for_replacement(&block_id);
+        let (held, queued, session_id, adapter, old_run_lock) = match left {
+            Some(l) => (l.held, l.queued, l.session_id, l.adapter, l.old_run_lock),
+            None => Default::default(),
+        };
         Self {
             tab_id,
             block_id,
             run_lock: Arc::new(AtomicBool::new(false)),
             container_startup: Mutex::new(None),
+            adapter: Mutex::new(adapter),
+            left_old_run_lock: Mutex::new(old_run_lock),
             inner: Arc::new(Mutex::new(SubprocessControllerInner {
                 proc_status: STATUS_INIT.to_string(),
                 proc_exit_code: 0,
                 status_version: 0,
-                session_id: None,
+                session_id,
                 current_pid: None,
                 kill_tx: None,
-                pending_messages: VecDeque::new(),
-                held_after_stop: held_by_a_replaced_controller,
+                pending_messages: queued,
+                held_after_stop: held,
+                queued_for_replacement: VecDeque::new(),
                 retired_sessions: Vec::new(),
             })),
             broker,
@@ -386,16 +399,6 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
-    /// This controller is being replaced: what a stop held goes to the controller that takes its place.
-    pub(crate) fn hand_over_held_to_replacement(&self) {
-        let held = std::mem::take(&mut self.inner.lock().unwrap().held_after_stop);
-        if held.is_empty() {
-            return;
-        }
-        tracing::info!(block_id = %self.block_id, held = held.len(), "controller replaced: its held messages go to the new one");
-        HELD_ACROSS_REPLACE.lock().unwrap().get_or_insert_with(HashMap::new).entry(self.block_id.clone()).or_default().extend(held);
-    }
-
     /// Whether a turn is running (or being started): a message sent now is queued behind it.
     pub fn turn_in_flight(&self) -> bool {
         self.run_lock.load(Ordering::SeqCst)
@@ -484,6 +487,12 @@ impl Controller for SubprocessController {
         Ok(())
     }
 
+    /// A replace is not a user's stop: what was queued behind the turn goes to the replacement to run, not into
+    /// `held_after_stop` (replace.rs).
+    fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+        self.stop_keeping_queue_for_replacement(new_status)
+    }
+
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
         self.get_status_snapshot()
     }
@@ -533,11 +542,6 @@ impl Controller for SubprocessController {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-}
-
-/// The messages [`SubprocessController::hand_over_held_to_replacement`] left for `block_id`'s next controller.
-fn take_held_across_replace(block_id: &str) -> VecDeque<SubprocessSpawnConfig> {
-    HELD_ACROSS_REPLACE.lock().unwrap().as_mut().and_then(|m| m.remove(block_id)).unwrap_or_default()
 }
 
 /// Output formats whose CLI never writes the user's prompt into its own

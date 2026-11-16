@@ -280,7 +280,7 @@ impl SubprocessController {
     /// its next spawn is attempted. If provider argv validation rejects that
     /// spawn, persist a transcript error so the message does not disappear
     /// with only a server log. Mirrors the host queue-drain failure path.
-    fn publish_queued_spawn_error(
+    pub(super) fn publish_queued_spawn_error(
         block_id: &str,
         error: &str,
         broker: &Option<Arc<crate::backend::mps::Broker>>,
