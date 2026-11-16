@@ -49,6 +49,12 @@ asset?: ReleaseAsset,
  */
 can_download: boolean, 
 /**
+ * When a newer release is on offer and this install could upgrade itself but can't now, why: a macOS app that
+ * can't be replaced in place, a release known only by its tag (GitHub is limiting the check), or a release with
+ * no file for this computer. The page says so beside the button that opens the download page.
+ */
+download_blocked?: string, 
+/**
  * A download of the latest release, once one was asked for.
  */
 download?: DownloadStatus, 

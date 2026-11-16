@@ -397,7 +397,37 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
     opts.open(&path)
         .and_then(|mut f| f.write_all(key.as_bytes()))
         .map_err(|e| format!("cannot write the auth key to {}: {e}", path.display()))?;
+    // Windows has no mode bits: the file's own access list gives it to the user and the system only, whatever the
+    // folder it is in lets others do.
+    #[cfg(windows)]
+    agentmux_common::owner_only::restrict_to_user(&path).map_err(|e| format!("the auth key at {} could not be limited to you: {e}", path.display()))?;
     Ok((key, path))
+}
+
+/// Bind a listener for this server's own use of its address. Windows lets programs share an address when they ask to
+/// (`SO_REUSEADDR`), and a program that did could then receive connections meant for this server, the sign-in among them;
+/// with `SO_EXCLUSIVEADDRUSE` the address is this server's alone and any other bind of it is refused, whatever it asks for.
+/// Elsewhere the system already refuses a second bind.
+pub(crate) async fn bind_exclusive(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawSocket;
+        use windows_sys::Win32::Networking::WinSock::{setsockopt, SOCKET_ERROR, SOL_SOCKET, SO_EXCLUSIVEADDRUSE};
+        let wanted: std::net::SocketAddr = addr.parse().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{addr}: {e}")))?;
+        let socket = if wanted.is_ipv4() { tokio::net::TcpSocket::new_v4()? } else { tokio::net::TcpSocket::new_v6()? };
+        let on: i32 = 1;
+        // SAFETY: a socket this function owns, and a value that outlives the call.
+        let set = unsafe { setsockopt(socket.as_raw_socket() as usize, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (&on as *const i32).cast(), std::mem::size_of::<i32>() as i32) };
+        if set == SOCKET_ERROR {
+            return Err(std::io::Error::last_os_error());
+        }
+        socket.bind(wanted)?;
+        socket.listen(1024)
+    }
+    #[cfg(not(windows))]
+    {
+        tokio::net::TcpListener::bind(addr).await
+    }
 }
 
 /// The address a startup listener binds: `STARTUP_BIND_ADDR` (loopback,
@@ -432,6 +462,22 @@ mod tests {
 
     fn cli(v: &[&str]) -> CliArgs {
         <CliArgs as clap::Parser>::try_parse_from(args(v)).unwrap()
+    }
+
+    /// A second bind of an address the server holds is refused, even by a program that asks to share it.
+    #[tokio::test]
+    async fn the_address_the_server_holds_is_not_given_to_a_second_binder() {
+        let held = bind_exclusive("127.0.0.1:0").await.unwrap();
+        let addr = held.local_addr().unwrap();
+        assert!(bind_exclusive(&addr.to_string()).await.is_err(), "a second exclusive bind");
+        let sharing = tokio::net::TcpSocket::new_v4().unwrap();
+        sharing.set_reuseaddr(true).unwrap();
+        let got = sharing.bind(addr).and_then(|()| sharing.listen(16).map(|_| ()));
+        assert!(got.is_err(), "a bind that asks to share the address must not get it");
+        // The holder still answers.
+        let client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (_server_side, _) = held.accept().await.unwrap();
+        drop(client);
     }
 
     #[test]

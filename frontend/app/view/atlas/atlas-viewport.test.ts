@@ -2,7 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { fitView, localPoint, MAX_ZOOM, MIN_ZOOM, wheelFactor, zoomAt, zoomCentered } from "./atlas-viewport";
+import {
+    fitView,
+    keepInPlace,
+    localPoint,
+    MAX_ZOOM,
+    MIN_ZOOM,
+    nearestPlaced,
+    gapSpread,
+    wheelFactor,
+    zoomAt,
+    zoomCentered,
+} from "./atlas-viewport";
 
 describe("zoomAt", () => {
     it("keeps the point under the pointer where it is", () => {
@@ -83,5 +94,40 @@ describe("localPoint", () => {
         const p = localPoint(350, 175, { left: 100, top: 50, width: 800, height: 625 }, { w: 640, h: 500 });
         expect(p.x).toBeCloseTo(200);
         expect(p.y).toBeCloseTo(100);
+    });
+});
+
+describe("gapSpread", () => {
+    it("is all of the gaps up to the fitted view, and past it the share that keeps a gap its size on screen", () => {
+        expect(gapSpread(0.8, 0.8)).toBe(1);
+        expect(gapSpread(0.8, 0.5)).toBe(1);
+        expect(gapSpread(0.8, 1.6)).toBeCloseTo(0.5);
+        // A gap of 40 map pixels is 32 on screen in the fitted view, and still 32 at twice the scale.
+        expect(40 * gapSpread(0.8, 1.6) * 1.6).toBeCloseTo(40 * 0.8);
+        expect(gapSpread(0, 2)).toBe(1);
+    });
+});
+
+describe("nearestPlaced and keepInPlace", () => {
+    const placed = new Map([
+        ["a", { x: 0, y: 0 }],
+        ["b", { x: 200, y: 0 }],
+        ["c", { x: 0, y: 300 }],
+    ]);
+
+    it("finds what stands nearest a map point, and nothing on an empty map", () => {
+        expect(nearestPlaced(placed, 190, 20)).toBe("b");
+        expect(nearestPlaced(placed, 10, 260)).toBe("c");
+        expect(nearestPlaced(new Map(), 0, 0)).toBeUndefined();
+    });
+
+    it("moves the view so that what moved in the map is where it was in the pane", () => {
+        const view = { x: 40, y: 10, k: 2 };
+        const was = { x: 0, y: 300 };
+        const now = { x: 0, y: 180 };
+        const kept = keepInPlace(view, was, now);
+        expect(kept.y + now.y * kept.k).toBeCloseTo(view.y + was.y * view.k);
+        expect(kept.x + now.x * kept.k).toBeCloseTo(view.x + was.x * view.k);
+        expect(kept.k).toBe(2);
     });
 });

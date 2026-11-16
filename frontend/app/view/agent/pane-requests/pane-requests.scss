@@ -19,6 +19,23 @@
     overflow-y: auto;
 }
 
+// A question gets more of the pane than the other requests (the same 70% a Vault batch gets, vault-request-card.scss):
+// at 40% a narrow, zoomed pane left the options no height under the header and the answers (#47821).
+.agent-request-stack:has(.agent-question-panel) {
+    max-height: 70%;
+    // The larger share gives way first when the pane is too short for it, as a Vault card's does
+    // (vault-request-card.scss): the rows under the stack (the working line, the status rows, the composer) keep
+    // their height, and the panel scrolls in what is left, down to the 40% every stack has.
+    flex-shrink: 1000;
+    min-height: min(40%, 6rem);
+
+    // In a pane under 280 px wide (a 372 px pane at 200% zoom is 186 px) the header wraps to several lines and the
+    // answers stack one per line, which alone fill 70% of it: the question is what the agent waits on, so it takes more.
+    @container agent-pane (max-width: 280px) {
+        max-height: 85%;
+    }
+}
+
 .pane-request-dock {
     display: flex;
     flex-direction: column;

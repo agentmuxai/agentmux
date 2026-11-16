@@ -68,10 +68,10 @@ export function litRowId(entries: readonly AuditEntry[], sounds: readonly Played
     return undefined;
 }
 
-/** The line "♪ agent · Bash · 4s ago": who is left out when unknown. */
+/** The line "agent · Bash · 4s ago": who is left out when unknown. */
 export function soundText(sound: PlayedSound, who: string | undefined, now: number): string {
     const what = sound.tool ?? SOUNDS[sound.event as keyof typeof SOUNDS]?.label ?? sound.event;
-    return `♪ ${[who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ")}`;
+    return [who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ");
 }
 
 /** The newest sound, if it played in the last minute: what the Audit's bar and the status bar's item show. */
@@ -80,12 +80,22 @@ export function lastSound(sounds: readonly PlayedSound[], now: number): PlayedSo
     return sound && now - sound.at <= LAST_SOUND_MS ? sound : undefined;
 }
 
-/** What the last sound was, for the line "♪ agent · Bash · 4s ago", and the pane to reveal; none after a minute. */
-export function lastSoundLine(entries: readonly AuditEntry[], sounds: readonly PlayedSound[], now: number): { text: string; blockId: string } | null {
+/**
+ * What the last sound was, for the line "agent · Bash · 4s ago", and the pane to reveal; none after a minute.
+ * `agentIn` names the agent in a pane, as the status bar's line does, so the two lines read the same. The row the
+ * sound came from says who only when the pane's agent is not known: the list's filter hides most of those rows
+ * (tool calls and turns are off at first), so the row alone left the name out (#47844).
+ */
+export function lastSoundLine(
+    entries: readonly AuditEntry[],
+    sounds: readonly PlayedSound[],
+    now: number,
+    agentIn: (blockId: string) => string | undefined = () => undefined
+): { text: string; blockId: string } | null {
     const sound = lastSound(sounds, now);
     if (!sound) return null;
     const row = rowOf(entries, sound);
-    const who = row ? (row.kind === "jekt" ? row.to?.agent_id : row.agent_id) : undefined;
+    const who = agentIn(sound.blockId) ?? (row ? (row.kind === "jekt" ? row.to?.agent_id : row.agent_id) : undefined);
     return { text: soundText(sound, who, now), blockId: sound.blockId };
 }
 
@@ -120,7 +130,12 @@ export function usePlayedSounds(): Accessor<readonly PlayedSound[]> {
 }
 
 /** The Audit's reading of what played: which rows show a speaker, which one is lit, and the last sound's line. */
-export function createAuditSounds(entries: Accessor<readonly AuditEntry[]>, now: Accessor<number>, focused: Accessor<string | undefined> = () => undefined) {
+export function createAuditSounds(
+    entries: Accessor<readonly AuditEntry[]>,
+    now: Accessor<number>,
+    focused: Accessor<string | undefined> = () => undefined,
+    agentIn?: (blockId: string) => string | undefined
+) {
     const badge = (entry: AuditEntry): boolean => {
         const sound = soundFor(entry);
         return sound !== null && soundIsOn(sound);
@@ -128,6 +143,6 @@ export function createAuditSounds(entries: Accessor<readonly AuditEntry[]>, now:
     const sounds = usePlayedSounds();
     // The row a sound just came from, or the one the status bar's "last sound" asked to see.
     const lit = createMemo(() => litRowId(entries(), sounds(), now()) ?? focused());
-    const last = createMemo(() => lastSoundLine(entries(), sounds(), now()));
+    const last = createMemo(() => lastSoundLine(entries(), sounds(), now(), agentIn));
     return { badge, lit, last };
 }

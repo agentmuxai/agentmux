@@ -45,7 +45,7 @@ function useRefreshedSounds(): Accessor<readonly PlayedSound[]> {
 export const LAST_SOUND_TIP = "Click to see this in the Audit. Shift-click goes to the agent's pane";
 
 /**
- * "Who was that": the last sound this window played, "♪ agent · Bash · 4s ago", for a minute after it. A click
+ * "Who was that": the last sound this window played, "agent · Bash · 4s ago", for a minute after it. A click
  * opens the Audit at the row it came from (SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md §3.3);
  * a shift-click goes to the agent's pane.
  */

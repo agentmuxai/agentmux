@@ -1108,7 +1108,7 @@ wrap_app! {
                 // showing two permission toasts on every new-version install.
                 // Suppressing the API at the command-line level prevents both
                 // registrations and eliminates the duplicate prompts.
-                cmd.append_switch(Some(&CefString::from("disable-notifications")));
+                append_quiet_switches(cmd);
 
                 // HTTP Basic / Digest auth — route the challenge to the
                 // embedder's `RequestHandler::on_auth_credentials` callback
@@ -1334,6 +1334,18 @@ wrap_browser_process_handler! {
         fn default_client(&self) -> Option<Client> {
             self.client.borrow().clone()
         }
+    }
+}
+
+/// The switches that keep a process from reaching the person through the OS: no Web Notifications
+/// (see the comment at the call), and, in a test build (AGENTMUX_TEST_OFFSCREEN), no sound whatever
+/// the app's sound setting says. A test build runs on a machine a person works at, and an agent
+/// sound through their speakers is the same intrusion as a window on their screen. Chromium forwards
+/// both audio switches to the audio service. See `test_offscreen::SILENT_SWITCHES`.
+fn append_quiet_switches(cmd: &mut CommandLine) {
+    cmd.append_switch(Some(&CefString::from("disable-notifications")));
+    for name in agentmux_common::test_offscreen::silent_switches() {
+        cmd.append_switch(Some(&CefString::from(*name)));
     }
 }
 

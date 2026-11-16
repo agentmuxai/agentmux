@@ -175,7 +175,7 @@ shows your real agents, that is a bug: stop it, check the `[dev] home:` line, an
   be shared.
 - Start over: stop the build (section 4), then delete `<clone>/.dev-home/<port>`.
 
-## 3c. A test window that never shows on a real screen
+## 3c. A test window that never shows on a real screen, and never makes a sound
 
 A tester's build runs on a machine a person works at, and a window that opens on the screen and is moved
 away a moment later has been seen (three times on 2026-11-15). Start every test build off-screen from the
@@ -195,6 +195,12 @@ AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a p
   test instance's shell cannot hide a person's windows): its log says `AGENTMUX_TEST_OFFSCREEN=1 ignored`.
   A build that honours it logs `test window mode: every window is created off-screen`; check that line in
   the host log before you trust the run.
+- **Sounds off.** The same switch keeps the build silent, whatever the app's sound setting says (it is on
+  by default): the host adds `--mute-audio` and `--disable-audio-output`, so no agent sound (turn done,
+  waiting) plays through the person's speakers and no audio device is opened, in the app and in any
+  page a pane loads. A build that honours the switch says so in its log, in the same line:
+  `test window mode: ... audio stays off`. Put that line (or "audio stayed off") in the run's report, and
+  do not drive a build whose log lacks it with sounds on: turn the sounds off in its settings first.
 - Do not start a prebuilt or packaged build without `scripts/offscreen-check.sh` passing, and do not write a
   mover script. (`task dev` compiles your own checkout and launches it in one command, so a checkout that has
   this section has the flag; the check is for binaries someone else built.)

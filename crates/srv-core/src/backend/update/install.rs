@@ -85,6 +85,15 @@ impl InstallKind {
         }
     }
 
+    /// Why this install could upgrade itself but can't here (a macOS app that can't be replaced in place), when it
+    /// can't: shown beside the button that opens the download page instead.
+    pub fn blocked_reason(&self) -> Option<&str> {
+        match self {
+            Self::MacApp { blocked, .. } => blocked.as_deref(),
+            _ => None,
+        }
+    }
+
     /// The release file that upgrades this kind to `version` on `arch`
     /// (`std::env::consts::ARCH`), as `.github/workflows/build-*.yml` name them.
     pub fn asset_name(&self, version: &str, arch: &str) -> Option<String> {
