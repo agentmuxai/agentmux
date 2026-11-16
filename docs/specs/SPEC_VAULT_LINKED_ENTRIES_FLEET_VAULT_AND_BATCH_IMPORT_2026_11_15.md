@@ -1,6 +1,6 @@
 # Spec: The Vault as the central index of keys: linked entries, a Fleet Vault, and bulk import with one approval per batch
 
-**Status:** active. The spec task is complete and the build is under way: B1 is built (#7487, with follow-ups in #7492), B3 is built (#7498, see "As built (B3)" at the end) and B2 is built by the PR that adds "As built (B2)"; B4 and B5 are not built yet.
+**Status:** active. The spec task is complete and the build is under way: B1 is built (#7487, with follow-ups in #7492), B3 is built (#7498, see "As built (B3)" at the end) and B2 is built (#7501, see "As built (B2)") and B4 is built by the PR that adds "As built (B4)"; B5 is not built yet.
 **Task:** #47647 (the build is #47648). **Author:** Agent2-6 (Vault). **Date:** 2026-11-15.
 **Asked by the operator (2026-11-14):** "lets audit all our keys and make sure they all link centeraly to the vault"; and, on the recommendation to build a bulk approval first and a second Vault: "great, go with recommendations".
 **Public repository.** This spec and its tests use invented names (`example/app`, `EXAMPLE_TOKEN`) and no counts of a real inventory. The inventory itself stays in a private report.
@@ -215,3 +215,14 @@ Agent2, 2026-11-15, task #47648. Linked entries, as §2 says, with these choices
 - **In the pane** a link has the badges "Linked" and "Readable outside the Vault", "no value kept" where the last characters go, "Kept at:" with the newest check, then who reads it, the date recorded and the other places. It has no Show or copy; "Copy the place" copies the location. The form shows no value input for one.
 - **`list` and `show`** give `link_only`, the place, `readers`, `rotated`, `copies` and the newest check; never the login.
 - **Not in this build:** a `.vault` export leaves a link out and an import skips one, as entries with no value (B5); KeePass export and import do not carry `link`, `readers`, `rotated` or `copies`; linked entries do not default to a Vault named Fleet (B4).
+
+## As built (B4)
+
+Agent2, 2026-11-15, task #47648. Fleet on the batch card, as §3.1 and §4.2 say, with these choices made while building:
+
+- **The card says who may use the Vault.** Under "saved to the Vault <name>" it says one of: "Every agent can use what is in that Vault.", "No agent can use what is in that Vault: only you.", or "Only these agents can use what is in that Vault: <ids>." A named list with nobody in it reads as "only you", as §3.1 says of a new Fleet.
+- **A batch of links goes to Fleet when left to itself.** A batch whose every item is a link, and which names no Vault, goes into the Vault named Fleet when the person has made one the asking agent may use. Otherwise, and for any batch that copies a value, it goes into the agent's first Vault as before. A Vault the batch names is the one it goes into. Nothing makes a Fleet: with none, or with one this agent is not in, the batch behaves as it did.
+- **The person may choose another Vault on the card.** The card offers the Vaults the asking agent may use, the batch's own among them, in the person's order, and the line about who may use it follows the choice. It offers only those: a Vault the agent is not in can't hold what the agent asked to save, and the card must not tell the agent's pane of a Vault it can't see. With one usable Vault there is nothing to choose and no control is shown.
+- **A batch that replaces a value offers no choice.** A row that replaces an entry's value stays with its entry, and a batch is one Vault, so such a card has no control, and an answer that names another Vault for it is refused.
+- **The choice is checked again as the same batch.** An Allow with another Vault runs every check of the batch for that Vault (names taken there, the agent's use of it) under the same batch id and references. When it can't go there the answer says so and nothing is copied; the history has the batch as failed. The answer to the agent names the Vault the entries went into.
+- **The Fleet filter is the pane's Vault filter.** With more than one Vault the pane already filters by Vault (VS1), so Fleet is one of its choices and there is no second control. The "Readable outside the Vault" badge was built with B2.

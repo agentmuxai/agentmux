@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use super::aws_import::{self, ImportRequest, Imported, Plan, Source, Target, Via, SERVICE};
 use super::{history, kinds, linked, record_row, vaults, Parts};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::vault::VaultActivityRow;
+use crate::backend::storage::vault::{VaultActivityRow, VaultInfoRow};
 use crate::identity::aws_broker::mint::Runner;
 
 /// The Activity action of the batch's own line.
@@ -37,6 +37,8 @@ const ONE_PLACE: &str = "one batch, one account and region: every secret is read
 const LINK_IS_NEW: &str = "link: true makes a new entry that records where the key lives: leave id out, or leave link out to replace that entry's value";
 /// The kind of a linked entry whose item names none.
 const LINK_KIND: &str = "api-key";
+/// The Vault a batch of links goes into when it names none and the person has made one by this name.
+pub const FLEET: &str = "Fleet";
 const OUT_OF_TIME: &str = "not reached: the batch ran out of time before this secret was read; import it again";
 
 /// What the whole batch is read under: one account and region.
@@ -166,9 +168,51 @@ fn arn_place(id: &str) -> Option<(&str, &str)> {
     Some((region, account))
 }
 
+/// The Vault a batch goes into when it names none: [`FLEET`] for a batch of links only, when the person has made
+/// one this agent may use (links describe infrastructure, which is what that Vault is for); the agent's first Vault
+/// otherwise.
+fn default_vault(store: &Store, req: &BatchRequest, agent: &str) -> Result<String, String> {
+    if req.items.iter().all(|item| item.link) {
+        if let Ok(fleet) = vaults::resolve(store, FLEET, Some(Some(agent))) {
+            return Ok(fleet.id);
+        }
+    }
+    vaults::default_for(store, Some(agent))
+}
+
 /// Every check of a batch, before the person is asked: the name, the size, the one account and region, the one Vault,
 /// and each item as `import` checks one. The first thing wrong refuses the whole batch, naming the item.
 pub fn check(store: &Store, req: &BatchRequest, agent: &str) -> Result<BatchPlan, String> {
+    let id = uuid::Uuid::new_v4().simple().to_string().chars().take(12).collect();
+    check_as(store, req, agent, id)
+}
+
+/// The batch `plan` was checked from, checked again for the Vault the person chose on the card: the same batch (its
+/// id and references), every item checked as it would be had the agent named that Vault. An item that named a Vault
+/// of its own follows the batch. A row that replaces an entry's value can't follow, and refuses the change.
+pub fn check_into(store: &Store, req: &BatchRequest, agent: &str, vault: &str, plan: &BatchPlan) -> Result<BatchPlan, String> {
+    let mut req = req.clone();
+    req.vault = Some(vault.to_string());
+    for item in &mut req.items {
+        item.vault = None;
+    }
+    check_as(store, &req, agent, plan.id.clone())
+}
+
+/// The Vaults the person may send `plan`'s rows to, the plan's own among them: the ones `agent` may use, in the
+/// person's order. None when there is no other, or when a row replaces an entry's value.
+pub fn choices(store: &Store, plan: &BatchPlan, agent: &str) -> Vec<VaultInfoRow> {
+    if plan.items.iter().any(|p| matches!(p.target, Target::Replace { .. })) {
+        return Vec::new();
+    }
+    let usable: Vec<VaultInfoRow> = store.vaults().unwrap_or_default().into_iter().filter(|v| vaults::may_use(v, Some(agent))).collect();
+    if usable.len() < 2 {
+        return Vec::new();
+    }
+    usable
+}
+
+fn check_as(store: &Store, req: &BatchRequest, agent: &str, id: String) -> Result<BatchPlan, String> {
     let reason = history::require_reason(req.reason.as_deref())?;
     let name = batch_name(&req.batch)?;
     match req.items.len() {
@@ -179,9 +223,8 @@ pub fn check(store: &Store, req: &BatchRequest, agent: &str) -> Result<BatchPlan
     let (region, profile) = aws_import::check_place(&req.source.region, &req.source.profile)?;
     let vault = match named(&req.vault) {
         Some(which) => vaults::resolve(store, which, Some(Some(agent)))?,
-        None => vaults::resolve(store, &vaults::default_for(store, Some(agent))?, Some(Some(agent)))?,
+        None => vaults::resolve(store, &default_vault(store, req, agent)?, Some(Some(agent)))?,
     };
-    let id: String = uuid::Uuid::new_v4().simple().to_string().chars().take(12).collect();
     let refs = std::iter::once(format!("{BATCH_REF}{id}")).chain(req.refs.iter().cloned()).collect();
     let mut plan = BatchPlan { id, name, vault_id: vault.id, vault_name: vault.name, reason, region, profile, refs, items: Vec::new() };
     for (i, item) in req.items.iter().enumerate() {

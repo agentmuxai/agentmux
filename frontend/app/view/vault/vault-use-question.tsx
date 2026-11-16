@@ -12,6 +12,7 @@ import { Button, Field, Select, TextInput, type SelectOption } from "@/app/eleme
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
+import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import { CardTyped } from "./vault-use-card";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
@@ -238,12 +239,22 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
     );
 }
 
+/** Who may use what is in a Vault, as the batch card says it. */
+function vaultOpenTo(agents: VaultAgents): string {
+    if (agents.mode === "all") return t("vault.batchCard.openToAll");
+    if (agents.mode === "none" || agents.agents.length === 0) return t("vault.batchCard.openToNone");
+    return t("vault.batchCard.openToNamed", { agents: clip(agents.agents.join(", "), CLIP.reason) });
+}
+
 /** A batch of imports: the one account, region and Vault, and a row for every secret with its tick. A row left
  *  unticked is not read. Every row is shown; a long list scrolls. */
 function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState }): JSX.Element {
     const b = props.batch;
     const a = props.answer;
     const links = () => linksOnly(b);
+    // The Vault the rows go into as the card stands: the one asked for, or the one the person chose.
+    const into = () => b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };
+    const offered = (): SelectOption[] => b.vaults.map((v) => ({ value: v.name, label: clip(v.name, CLIP.label) }));
     return (
         <>
             <p data-batch="source">
@@ -260,9 +271,15 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                     </span>
                 </Show>
             </p>
-            <p data-batch="vault" {...tip(clip(b.vault, CLIP.label) === b.vault ? undefined : b.vault)}>
-                <Rich k={links() ? "vault.batchCard.linksInto" : "vault.batchCard.into"} params={{ vault: clip(b.vault, CLIP.label) }} />
+            <p data-batch="vault" {...tip(clip(into().name, CLIP.label) === into().name ? undefined : into().name)}>
+                <Rich k={links() ? "vault.batchCard.linksInto" : "vault.batchCard.into"} params={{ vault: clip(into().name, CLIP.label) }} />{" "}
+                <span data-batch="agents">{vaultOpenTo(into().agents)}</span>
             </p>
+            <Show when={b.vaults.length > 1}>
+                <Field label={t("vault.batchCard.chooseVault")} layout="stacked">
+                    <Select value={a.vault()} onChange={a.setVault} options={offered()} ariaLabel={t("vault.batchCard.chooseVault")} disabled={a.busy()} />
+                </Field>
+            </Show>
             <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
                 <For each={b.items}>
                     {(item, i) => (
@@ -390,6 +407,8 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
     // The rows of a batch the person leaves ticked, by their place in its list: all of them to begin with.
     const [rows, setRows] = createSignal<number[]>(u.batch ? u.batch.items.map((_, i) => i) : []);
+    // The Vault a batch's rows go into: the one asked for, until the person chooses another the card offers.
+    const [vault, setVault] = createSignal(u.batch?.vault ?? "");
     const tickRow = (row: number, on: boolean) => setRows((was) => (on ? [...was.filter((r) => r !== row), row].sort((x, y) => x - y) : was.filter((r) => r !== row)));
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) done();
@@ -397,7 +416,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined);
             // The typed value doesn't outlive the answer.
             setTyped("");
             setAnswered(true);
@@ -413,7 +432,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered, rows, tickRow };
+    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered, rows, tickRow, vault, setVault };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
