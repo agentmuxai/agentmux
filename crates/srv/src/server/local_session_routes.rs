@@ -101,6 +101,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/auth/pending", post(handle_pending))
         .route("/auth/confirm", post(handle_confirm))
         .route("/auth/logout", post(handle_logout))
+        .route("/auth/sessions", post(handle_sessions))
         .route("/auth/enter", get(handle_page).post(handle_enter))
         .route("/auth/enter.js", get(handle_script))
         .route("/auth/enter.css", get(handle_style))
@@ -310,6 +311,15 @@ async fn handle_logout(headers: HeaderMap, body: Bytes) -> Response {
     let revoked = store().revoke_all();
     tracing::info!(revoked, "local sign-in sessions revoked");
     proved(&admitted, json!({ "revoked": revoked }))
+}
+
+/// `POST /auth/sessions`: how many browsers are signed in now. A number only; nothing that names or reaches one.
+async fn handle_sessions(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/sessions", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    proved(&admitted, json!({ "sessions": store().session_count(Instant::now()) }))
 }
 
 // ---- The browser's routes (the code) ----

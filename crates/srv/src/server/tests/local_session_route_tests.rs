@@ -348,6 +348,30 @@ async fn a_browser_signs_itself_out_and_no_other_browser_with_it() {
     assert_eq!(call(&router, signout(&[("sec-fetch-site", "same-origin")], &cookie_a, &token_a)).await.0, 403);
 }
 
+/// `sessions` answers a number, counts only browsers that are fully signed in, and goes down as they sign out.
+#[tokio::test]
+async fn the_sessions_route_counts_the_browsers_signed_in() {
+    let _only = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    open.ask(&router, "/auth/logout", "{}").await;
+    let count = |body: String| serde_json::from_str::<serde_json::Value>(&body).unwrap()["sessions"].as_u64().unwrap();
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 0);
+
+    // A browser that has entered its code but is not confirmed is not signed in.
+    let code = field(&open.ask(&router, "/auth/code", "{}").await, "code");
+    call(&router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await;
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 0, "pending is not signed in");
+
+    let (cookie, token) = signed_in_browser(&router).await;
+    signed_in_browser(&router).await;
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 2);
+    let signout = from_browser(Method::POST, "/auth/signout", &cookie, &token, &[("sec-fetch-site", "same-origin")]);
+    assert_eq!(call(&router, signout).await.0, 200);
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 1);
+}
+
 // ---- The proof of the key ----
 
 /// The key is never sent: where it used to be accepted, it is now refused, on every key route.
@@ -355,7 +379,7 @@ async fn a_browser_signs_itself_out_and_no_other_browser_with_it() {
 async fn the_key_itself_is_not_accepted_on_any_command_route() {
     ensure_shape();
     let router = build_router(test_state());
-    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout"] {
+    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout", "/auth/sessions"] {
         let req = request(Method::POST, path, &[("host", HOST), (AUTH_KEY_HEADER, KEY)], r#"{"code":"x","accept":true}"#);
         let (status, _, body) = call(&router, req).await;
         assert_eq!((status, body.as_str()), (403, "not accepted"), "{path}");
