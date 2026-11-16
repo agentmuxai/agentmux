@@ -303,6 +303,19 @@ describe("layoutBySeat for a pane", () => {
         expect(tall.height / tall.width).toBeGreaterThan(wide.height / wide.width);
         expect(shown(tall, { w: 640, h: 1700 }).k).toBeGreaterThanOrEqual(MIN_READABLE_K);
     });
+
+    it("stands the agents with no lead in the columns that match the trees' width, not in a narrow tall grid (#47748)", () => {
+        // Two leads with two reports each (trees four cards wide, nothing to wrap) and 42 agents with no lead, in a
+        // 640 x 1700 pane.
+        const agents: AtlasAgent[] = [agent("boss", "narko"), agent("chief", "narko")];
+        for (let i = 0; i < 2; i++) agents.push(agent(`r${i}`, "narko", "boss"), agent(`s${i}`, "narko", "chief"));
+        for (let i = 0; i < 42; i++) agents.push(agent(`loner${i}`, "narko"));
+        const pane = { w: 640, h: 1700 };
+        const l = layoutBySeat(buildAtlasGraph([machine("narko")], agents), pane);
+        const columns = new Set([...l.nodes].filter(([key]) => key.includes("loner")).map(([, p]) => p.x));
+        expect(columns.size).toBe(4);
+        expect(shown(l, pane).k).toBeGreaterThanOrEqual(MIN_READABLE_K);
+    });
 });
 
 
