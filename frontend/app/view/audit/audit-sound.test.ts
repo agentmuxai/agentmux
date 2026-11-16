@@ -78,6 +78,16 @@ describe("the row a sound came from", () => {
         expect(lastSoundLine(rows, [played({})], 10_100 + 60_001)).toBeNull();
         expect(lastSoundLine(rows, [], 10_000)).toBeNull();
     });
+
+    it("names the agent in the sound's pane, so a sound whose row the filter hides still says who (#47844)", () => {
+        const agentIn = (blockId: string) => (blockId === "blk-korp" ? "Korp" : undefined);
+        expect(lastSoundLine([], [played({})], 14_100, agentIn)?.text).toBe("Korp · Bash · 4s ago");
+        // The same name as the status bar's line, whether the row is in the list or not.
+        expect(lastSoundLine(rows, [played({})], 14_100, agentIn)?.text).toBe("Korp · Bash · 4s ago");
+        // A pane with no known agent: the row says who, and with no row nobody is named.
+        expect(lastSoundLine(rows, [played({})], 14_100, () => undefined)?.text).toBe("korp · Bash · 4s ago");
+        expect(lastSoundLine([], [played({})], 14_100, () => undefined)?.text).toBe("Bash · 4s ago");
+    });
 });
 
 describe("the last sound, for the status bar and the Audit's bar", () => {
