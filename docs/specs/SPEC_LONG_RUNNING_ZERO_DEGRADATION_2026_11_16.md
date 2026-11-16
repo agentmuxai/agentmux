@@ -1,6 +1,8 @@
 # Spec: hour 2,000 is as fast as hour 1: no degradation over a session's life, with budgets and local telemetry that find a slow decline
 
-Task #47819 (build: #47820). Loap-3@narko, 2026-11-16. Status: draft for the operator's "looks good"; nothing is built before it.
+**Date:** 2026-11-16
+**Status:** active. Approved 2026-11-16 (section 10); built by #47820, phase 0 first (PR #7579).
+**Task:** #47819 (build: #47820). Loap-3@narko.
 
 The operator's words (2026-11-16): "part of agentmux's main value prop is it can stay open for a year without leaking memory. in that case, it needs extremely strict memory boundaries and managemenet ... we also want to add adaquant memory telemetry since these issue can only be reproduced and uncovered after running for a long time, perahps weeks", and, widening it: "lets then generalize this to performance degradation. ideally we want zero performance degrdation, it may not necessarily be memory only".
 
