@@ -215,7 +215,8 @@ function layoutRegion(
     });
     const gridW = loners.length === 0 ? 0 : cols * (NODE_W + gaps.x) - gaps.x;
     const gridH = loners.length === 0 ? 0 : Math.ceil(loners.length / cols) * (NODE_H + gaps.x) - gaps.x;
-    return { nodes, w: Math.max(treeW, gridW), h: gridTop + gridH, wrapped };
+    // Trees alone end at their lowest node: the gap under them is only for a grid.
+    return { nodes, w: Math.max(treeW, gridW), h: loners.length === 0 ? treeH : gridTop + gridH, wrapped };
 }
 
 /** A pane's size, as the layout is formed for it. */

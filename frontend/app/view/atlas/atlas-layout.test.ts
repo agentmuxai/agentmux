@@ -71,6 +71,18 @@ describe("layoutAtlas", () => {
         expect(boss.x).toBeCloseTo((w1.x + w2.x) / 2);
     });
 
+    it("ends a machine of a lead and its reports as close under its lowest box as one with a grid under them", () => {
+        const tree = [agent("boss", "a"), agent("w1", "a", "boss"), agent("w2", "a", "boss")];
+        const under = (l: AtlasLayout) => {
+            const [box] = l.regions;
+            return box.y + box.h - Math.max(...[...l.nodes.values()].map((p) => p.y + NODE_H));
+        };
+        const alone = layoutAtlas(buildAtlasGraph([machine("a")], tree));
+        const withGrid = layoutAtlas(buildAtlasGraph([machine("a")], [...tree, agent("solo", "a")]));
+        expect(under(alone)).toBe(gapsAt().pad);
+        expect(under(withGrid)).toBe(gapsAt().pad);
+    });
+
     it("puts agents with no lead and no reports in a grid below the trees, and no two nodes overlap", () => {
         const agents = [agent("boss", "a"), agent("w", "a", "boss")];
         for (let i = 0; i < 12; i++) agents.push(agent(`solo${i}`, "a"));
