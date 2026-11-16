@@ -372,6 +372,22 @@ async fn the_sessions_route_counts_the_browsers_signed_in() {
     assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 1);
 }
 
+/// `shutdown` ends the server by the token the signal handlers use, after its answer; it is a signed command like the others.
+#[tokio::test]
+async fn the_shutdown_route_cancels_the_token_that_ends_the_server() {
+    let _only = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let token = tokio_util::sync::CancellationToken::new();
+    set_shutdown(token.clone());
+    let mut open = Open::connect(&router).await;
+    assert!(!token.is_cancelled());
+    let body = open.ask(&router, "/auth/shutdown", "{}").await;
+    assert_eq!(field(&body, "stopping"), "true");
+    tokio::time::timeout(Duration::from_secs(5), token.cancelled()).await.expect("the token is cancelled after the answer");
+    set_shutdown(tokio_util::sync::CancellationToken::new());
+}
+
 // ---- The proof of the key ----
 
 /// The key is never sent: where it used to be accepted, it is now refused, on every key route.
@@ -379,7 +395,7 @@ async fn the_sessions_route_counts_the_browsers_signed_in() {
 async fn the_key_itself_is_not_accepted_on_any_command_route() {
     ensure_shape();
     let router = build_router(test_state());
-    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout", "/auth/sessions"] {
+    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout", "/auth/sessions", "/auth/shutdown"] {
         let req = request(Method::POST, path, &[("host", HOST), (AUTH_KEY_HEADER, KEY)], r#"{"code":"x","accept":true}"#);
         let (status, _, body) = call(&router, req).await;
         assert_eq!((status, body.as_str()), (403, "not accepted"), "{path}");

@@ -5,7 +5,8 @@
 #
 # A build from before AGENTMUX_TEST_OFFSCREEN ignores the variable and opens its window on the
 # screen. Each binary given must carry the variable's name (the host and the launcher both read
-# it); one that does not is refused with exit status 1, and the caller must not start it. Run it
+# it), and the phrase a test build logs when its audio stays off; one that does not is refused with
+# exit status 1, and the caller must not start it. Run it
 # on every binary of the build under test, then start the build with AGENTMUX_TEST_OFFSCREEN=1:
 #
 #   scripts/offscreen-check.sh ./agentmux-launcher ./runtime/agentmux-cef.dll \
@@ -20,6 +21,7 @@
 set -u
 
 NAME=AGENTMUX_TEST_OFFSCREEN
+MARK="audio stays off"  # test_offscreen::AUDIO_OFF_MARK: a build with this keeps its sound off too
 
 if [ "$#" -eq 0 ]; then
   echo "usage: $0 <binary>..." >&2
@@ -33,6 +35,9 @@ for bin in "$@"; do
     status=1
   elif ! grep -aq -- "$NAME" "$bin"; then
     echo "offscreen-check: $bin does not support $NAME (an older build): it would open a window on the screen; do not launch" >&2
+    status=1
+  elif ! grep -aq -- "$MARK" "$bin"; then
+    echo "offscreen-check: $bin keeps its window off-screen but not its sound (an older build): agent sounds would play on the speakers; do not launch" >&2
     status=1
   fi
 done

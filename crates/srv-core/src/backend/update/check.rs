@@ -20,7 +20,10 @@
 //! got yet (and, once held, with its ETag, which saves the download; an
 //! unauthenticated 304 still counts against the limit, as measured). When
 //! GitHub still refuses, the check says so and when it lifts, and a newer release is
-//! still reported, without a download until the API answers.
+//! still reported. Its files and checksums then come from the release's signed
+//! manifest at its download address (`update::signed_source`), which the API's limit
+//! doesn't touch; where that gives no answer either, there is no download until the
+//! API answers.
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
 //! event when it changes, and read on demand with `app.update-status`. It
@@ -106,6 +109,12 @@ pub struct AppUpdateStatus {
     /// the release page (or the Store) is the way.
     #[serde(default)]
     pub can_download: bool,
+    /// When a newer release is on offer and this install could upgrade itself but can't now, why: a macOS app that
+    /// can't be replaced in place, a release known only by its tag (GitHub is limiting the check), or a release with
+    /// no file for this computer. The page says so beside the button that opens the download page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub download_blocked: Option<String>,
     /// A download of the latest release, once one was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -205,11 +214,37 @@ impl AppUpdateStatus {
             install: install_kind().label().to_string(),
             asset: None,
             can_download: false,
+            download_blocked: None,
             download: None,
             install_first: None,
             rev: 0,
         }
     }
+}
+
+/// Why a newer release is on offer but AgentMux can't download it itself, for an install that normally could: a
+/// macOS app that can't be replaced in place, a release known only by its tag (GitHub is limiting the check, so
+/// there is no file list or checksum yet), or a release with no file for this computer. `None` when it can, and
+/// for installs that never download (the Store, an unknown install): the release page is their way, not a fault.
+fn download_blocked(state: &str, kind: &InstallKind, release: &Release, has_asset: bool, below_floor: bool) -> Option<String> {
+    if state != "available" || below_floor {
+        return None;
+    }
+    // A macOS app that can't be replaced where it is finds its file in the release all the same, so this
+    // comes before the file is looked at.
+    if let Some(why) = kind.blocked_reason() {
+        return Some(format!("This install can't upgrade itself where it is: {why}."));
+    }
+    if has_asset || !kind.can_download() {
+        return None;
+    }
+    Some(if let Some(note) = &release.limit_note {
+        note.clone()
+    } else if release.assets.is_empty() {
+        "The release's file list isn't available yet.".to_string()
+    } else {
+        "This release has no file for this computer.".to_string()
+    })
 }
 
 /// The part of GitHub's release JSON this reads.
@@ -227,6 +262,32 @@ pub(crate) struct Release {
     prerelease: bool,
     #[serde(default)]
     assets: Vec<GithubAsset>,
+    /// Set only on a release known by its tag alone ([`release_from_tag`]): why there are no files.
+    #[serde(skip)]
+    limit_note: Option<String>,
+}
+
+impl Release {
+    /// A release whose file list was read from its signed manifest (`update::signed_source`) rather than from
+    /// GitHub's API: the file for this install, when the manifest has one, with the checksum the manifest
+    /// signs. The manifest has no notes, so the body carries only the upgrade floor this build knows.
+    pub(crate) fn from_signed(tag: &str, asset: Option<&ReleaseAsset>, floor: Option<&str>) -> Release {
+        Release {
+            body: floor.map(|f| format!("{FLOOR_MARKER}{f} -->")),
+            assets: asset
+                .map(|a| GithubAsset { name: a.name.clone(), size: a.size, browser_download_url: a.url.clone(), digest: Some(format!("sha256:{}", a.sha256)) })
+                .into_iter()
+                .collect(),
+            limit_note: asset.is_none().then(|| "This release has no file for this computer.".to_string()),
+            ..release_from_tag(tag, None)
+        }
+    }
+
+    /// Whether it lists a file called `name`.
+    #[cfg(test)]
+    pub(crate) fn has_signed_file(&self, name: &str) -> bool {
+        self.assets.iter().any(|a| a.name == name)
+    }
 }
 
 /// A file attached to a GitHub release. `digest` is `sha256:<hex>`.
@@ -315,6 +376,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         state: state.to_string(),
         current: current.to_string(),
         can_download: state == "available" && kind.can_download() && asset.is_some() && install_first.is_none(),
+        download_blocked: download_blocked(state, kind, release, asset.is_some(), install_first.is_some()),
         install_first,
         latest: Some(latest),
         url: Some(release.html_url.clone()),
@@ -441,6 +503,12 @@ fn limited_until(status: u16, headers: &reqwest::header::HeaderMap, now_ms: i64)
     Some(until.max(now_ms + 60_000))
 }
 
+/// How long GitHub's limit on this computer still has to run, when it is in force.
+pub(crate) fn limited_for() -> Option<std::time::Duration> {
+    let left = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed) - agentmux_common::time::now_ms();
+    u64::try_from(left).ok().filter(|ms| *ms > 0).map(std::time::Duration::from_millis)
+}
+
 /// What the person is told while GitHub limits the check.
 fn limited_message(until_ms: i64) -> String {
     let at = chrono::DateTime::from_timestamp_millis(until_ms)
@@ -454,11 +522,12 @@ fn release_from_tag(tag: &str, note: Option<String>) -> Release {
     Release {
         tag_name: tag.to_string(),
         html_url: format!("{RELEASE_PAGE_PREFIX}{tag}"),
-        body: note,
+        body: note.clone(),
         published_at: None,
         draft: false,
         prerelease: false,
         assets: Vec::new(),
+        limit_note: note,
     }
 }
 
@@ -501,6 +570,30 @@ async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> R
     Ok(ApiAnswer::Fresh(Box::new(release), etag))
 }
 
+/// The upgrade floor of the repo when this build was made (`UPGRADE_FLOOR`): a floor only rises, so no later
+/// release's is lower.
+const BUILD_FLOOR: &str = include_str!("../../../../../UPGRADE_FLOOR");
+
+/// The oldest version known to upgrade in place: this build's own floor, or a later one an answer from the API
+/// carried. A signed manifest doesn't carry one.
+fn known_floor() -> Option<String> {
+    let built = Some(BUILD_FLOOR.trim().to_string()).filter(|f| version_core(f).is_some());
+    let cached = RELEASE_CACHE.lock().as_ref().and_then(|(_, r)| r.body.as_deref().and_then(upgrade_floor));
+    [built, cached].into_iter().flatten().max_by_key(|f| version_core(f))
+}
+
+/// The release `tag` names, while the API gives no answer (it limits this computer or failed): its files and
+/// checksums from the signed manifest at its download address (`update::signed_source`). `None` when that
+/// gives no answer either: the release stays known by its tag.
+async fn release_without_api(client: &reqwest::Client, tag: &str, limited_until_ms: i64, now_ms: i64) -> Option<Release> {
+    use crate::backend::update::signed_source::{release_for, Got};
+    match release_for(client, tag, env!("CARGO_PKG_VERSION"), &install_kind(), known_floor().as_deref(), limited_until_ms, now_ms).await {
+        Got::Release(r) => Some(r),
+        Got::NothingNew => Some(release_from_tag(tag, None)),
+        Got::None => None,
+    }
+}
+
 /// The latest release, with as few calls to GitHub's API as possible (see the
 /// module doc). The error is what the person is told.
 async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
@@ -516,7 +609,10 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
     let limited = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed);
     match plan(tag.as_deref(), cached.as_ref(), limited, now_ms) {
         Plan::UseCache => cached.map(|(_, r)| r).ok_or_else(|| "no release held".to_string()),
-        Plan::Degraded => Ok(release_from_tag(tag.as_deref().unwrap_or_default(), Some(degraded_note(limited)))),
+        Plan::Degraded => {
+            let tag = tag.as_deref().unwrap_or_default();
+            Ok(release_without_api(client, tag, limited, now_ms).await.unwrap_or_else(|| release_from_tag(tag, Some(degraded_note(limited)))))
+        }
         Plan::Limited => Err(limited_message(limited)),
         Plan::Api(etag) => match api_get(client, etag.as_deref(), now_ms).await {
             Ok(ApiAnswer::Fresh(release, etag)) => {
@@ -528,11 +624,14 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
                 API_LIMITED_UNTIL_MS.store(until, Ordering::Relaxed);
                 tracing::info!(until_ms = until, "update check: GitHub's API is limiting this computer");
                 match tag {
-                    Some(tag) => Ok(release_from_tag(&tag, Some(degraded_note(until)))),
+                    Some(tag) => Ok(release_without_api(client, &tag, until, now_ms).await.unwrap_or_else(|| release_from_tag(&tag, Some(degraded_note(until))))),
                     None => Err(limited_message(until)),
                 }
             }
-            Err(ApiMiss::Other(e)) => Err(format!("couldn't reach GitHub: {e}")),
+            Err(ApiMiss::Other(e)) => match tag {
+                Some(tag) => release_without_api(client, &tag, 0, now_ms).await.ok_or_else(|| format!("couldn't reach GitHub: {e}")),
+                None => Err(format!("couldn't reach GitHub: {e}")),
+            },
         },
     }
 }
@@ -711,6 +810,7 @@ mod tests {
             draft: false,
             prerelease: false,
             assets: Vec::new(),
+            limit_note: None,
         }
     }
 
@@ -781,6 +881,56 @@ mod tests {
         assert_eq!(st.url.as_deref(), Some("https://github.com/agentmuxai/agentmux/releases/tag/v99.0.0"));
         assert!(!st.can_download && st.asset.is_none(), "nothing to download without the API's checksum");
         assert!(st.notes.as_deref().is_some_and(|n| n.contains("limiting update checks")));
+    }
+
+    #[test]
+    fn a_release_that_cannot_be_downloaded_says_why_for_an_install_that_normally_could() {
+        let setup = InstallKind::WindowsSetup;
+        // Known only by its tag (GitHub limiting the check): the reason is the limit's own note.
+        let degraded = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        let why = status_for("0.59.41", "stable", &degraded, 1, &setup).download_blocked.unwrap();
+        assert!(why.starts_with("GitHub is limiting update checks from this computer; try again after "), "{why}");
+        // No note at all: still a reason, never none.
+        assert!(status_for("0.59.41", "stable", &release_from_tag("v99.0.0", None), 1, &setup).download_blocked.is_some());
+        // A release with files, but none for this computer.
+        let other = with_asset(release("v99.0.0"), "agentmux-99.0.0-arm64.zip", Some("sha256:00"), "https://github.com/agentmuxai/agentmux/releases/download/v99.0.0/x");
+        assert_eq!(status_for("0.59.41", "stable", &other, 1, &setup).download_blocked.as_deref(), Some("This release has no file for this computer."));
+        // A macOS app that can't be replaced where it is names where and why.
+        let mac = InstallKind::MacApp { app: "/Applications/AgentMux.app".into(), blocked: Some("it is on a read-only volume".into()) };
+        let blocked = status_for("0.59.41", "stable", &release("v99.0.0"), 1, &mac).download_blocked.unwrap();
+        assert_eq!(blocked, "This install can't upgrade itself where it is: it is on a read-only volume.");
+        // ...also when the release does list its file (the usual case): the file is there, the app can't be replaced.
+        // (Asked directly with the file found, so the test doesn't depend on the architecture it runs on.)
+        let with_file = download_blocked("available", &mac, &release("v99.0.0"), true, false);
+        assert_eq!(with_file.as_deref(), Some("This install can't upgrade itself where it is: it is on a read-only volume."));
+        // An install that can replace itself, with its file found, has nothing to say.
+        assert_eq!(download_blocked("available", &InstallKind::WindowsSetup, &release("v99.0.0"), true, false), None);
+    }
+
+    #[test]
+    fn a_release_whose_files_are_not_up_yet_never_shows_its_notes_as_the_reason() {
+        // A real release with an empty file list and a changelog (and the floor line): the reason is the plain one.
+        let notes = "- A long changelog line\n<!-- agentmux:min-upgrade-from=0.50.0 -->\n".repeat(2000);
+        let not_up_yet = Release { body: Some(notes), ..release("v99.0.0") };
+        let why = status_for("0.59.41", "stable", &not_up_yet, 1, &InstallKind::WindowsSetup).download_blocked.unwrap();
+        assert_eq!(why, "The release's file list isn't available yet.");
+    }
+
+    #[test]
+    fn nothing_is_blocked_when_it_can_download_or_never_downloads_or_there_is_nothing_to_offer() {
+        let degraded = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        // The Store and an unknown install never download in the app: the page is their way, not a fault.
+        for kind in [InstallKind::WindowsStore, InstallKind::Unknown] {
+            assert_eq!(status_for("0.59.41", "stable", &degraded, 1, &kind).download_blocked, None, "{kind:?}");
+        }
+        // Up to date, or older than the release upgrades from: not this.
+        assert_eq!(status_for("99.0.0", "stable", &degraded, 1, &InstallKind::WindowsSetup).download_blocked, None);
+        let floor = Release { body: Some("<!-- agentmux:min-upgrade-from=98.0.0 -->".into()), ..release_from_tag("v99.0.0", None) };
+        let st = status_for("0.57.0", "stable", &floor, 1, &InstallKind::WindowsSetup);
+        assert_eq!(st.install_first.as_deref(), Some("98.0.0"));
+        assert_eq!(st.download_blocked, None);
+        // The released status says nothing before any check.
+        assert_eq!(AppUpdateStatus::initial("0.59.26").download_blocked, None);
     }
 
     #[test]

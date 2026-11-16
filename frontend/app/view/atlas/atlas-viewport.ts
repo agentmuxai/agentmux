@@ -37,6 +37,42 @@ export function zoomCentered(
     return { k, x: (w - width * k) / 2, y: (h - height * k) / 2 };
 }
 
+/**
+ * How much of each of the map's gaps is left at scale `k`, when the fitted view's scale is `fitK`: all of it up to
+ * the fitted view, and past it the share that keeps a gap the size it was on screen while the cards grow
+ * (atlas-layout.ts `gapsAt` has the least a gap closes to).
+ */
+export function gapSpread(fitK: number, k: number): number {
+    return fitK > 0 && k > fitK ? fitK / k : 1;
+}
+
+/** The key of the placed thing nearest the map point (`x`, `y`), by its top left; none when nothing is placed. */
+export function nearestPlaced(
+    placed: ReadonlyMap<string, { x: number; y: number }>,
+    x: number,
+    y: number
+): string | undefined {
+    let best: string | undefined;
+    let least = Number.POSITIVE_INFINITY;
+    for (const [key, p] of placed) {
+        const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+        if (d < least) {
+            least = d;
+            best = key;
+        }
+    }
+    return best;
+}
+
+/** `view` moved so that what was at the map point `was` and is now at `now` is where it was in the pane. */
+export function keepInPlace(
+    view: Viewport,
+    was: { x: number; y: number },
+    now: { x: number; y: number }
+): Viewport {
+    return { ...view, x: view.x - (now.x - was.x) * view.k, y: view.y - (now.y - was.y) * view.k };
+}
+
 /** Pixels a wheel "line" or "page" counts for, when a device reports its steps in them instead of pixels. */
 const LINE_PIXELS = 16;
 const PAGE_PIXELS = 400;

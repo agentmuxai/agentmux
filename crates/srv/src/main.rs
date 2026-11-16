@@ -191,6 +191,8 @@ async fn app_main() {
 
     // 8 & 9. Spawn stdin watch thread + SIGINT/SIGTERM handler (graceful shutdown).
     let stdin_token = bootstrap::install_shutdown_handlers(!headless);
+    // `agentmux stop` has no signal to send on Windows: it asks over the signed channel, which ends the server by this token.
+    server::local_session_routes::set_shutdown(stdin_token.clone());
 
     bootstrap::spawn_serving_loops(&state, headless, &stdin_token);
 

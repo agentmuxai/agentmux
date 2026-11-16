@@ -7,6 +7,11 @@ use std::sync::{Arc, RwLock};
 
 use super::types::{ConfigError, FullConfigType, SettingsType};
 
+/// Whether an error is about the user's `widgets.json`.
+fn is_widgets_error(e: &ConfigError) -> bool {
+    std::path::Path::new(&e.file).file_name().is_some_and(|n| n == "widgets.json")
+}
+
 /// Thread-safe in-memory holder for the live configuration.
 ///
 /// **This does not watch anything.** It was called `ConfigWatcher` until
@@ -74,17 +79,29 @@ impl ConfigState {
         *current = Arc::new(new_config);
     }
 
-    /// Say which config files do not parse (`configerrors`, which the Settings view's banner shows), or
-    /// clear them with an empty list. The values already loaded are left as they are: a file with a
-    /// mistake in it keeps the last good settings. Returns whether anything changed, so a caller
-    /// broadcasts only then.
+    /// Say which of `settings.json`'s files do not parse (`configerrors`, which the Settings view's banner
+    /// shows), or clear them with an empty list. The values already loaded are left as they are: a file with
+    /// a mistake in it keeps the last good settings. What `widgets.json` reported stays
+    /// (`set_widgets_config_errors`). Returns whether anything changed, so a caller broadcasts only then.
     pub fn set_config_errors(&self, errors: Vec<ConfigError>) -> bool {
+        self.replace_config_errors(|e| !is_widgets_error(e), errors)
+    }
+
+    /// The same for `widgets.json`: its errors replace its own, and the settings' stay.
+    pub fn set_widgets_config_errors(&self, errors: Vec<ConfigError>) -> bool {
+        self.replace_config_errors(is_widgets_error, errors)
+    }
+
+    /// Replace the errors `mine` picks with `errors`, keeping every other file's.
+    fn replace_config_errors(&self, mine: impl Fn(&ConfigError) -> bool, errors: Vec<ConfigError>) -> bool {
         let mut current = self.config.write().unwrap();
-        if current.config_errors == errors {
+        let mut next: Vec<ConfigError> = current.config_errors.iter().filter(|e| !mine(e)).cloned().collect();
+        next.extend(errors);
+        if current.config_errors == next {
             return false;
         }
         let mut new_config = (**current).clone();
-        new_config.config_errors = errors;
+        new_config.config_errors = next;
         *current = Arc::new(new_config);
         true
     }

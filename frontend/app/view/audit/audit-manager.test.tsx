@@ -35,6 +35,9 @@ const reconnectHandlers: Array<() => void> = [];
 vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: (h: () => void) => reconnectHandlers.push(h) }));
 const srvWroteARow = () => eventHandlers.get("audit:changed")?.(undefined);
 
+const runtimeRows: Array<{ block_id: string; name: string }> = [];
+vi.mock("@/app/store/agent-runtime-live", () => ({ sharedAgentRuntime: () => ({ rows: () => runtimeRows }) }));
+
 const revealBlock = vi.fn();
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...a: unknown[]) => revealBlock(...a) }));
 const openOrFocusHistoryTab = vi.fn();
@@ -49,6 +52,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 afterEach(() => {
     cleanup();
     __resetPlayedSounds();
+    runtimeRows.length = 0;
     for (const key of Object.keys(settings)) delete settings[key];
     vi.clearAllMocks();
 });
@@ -316,7 +320,20 @@ describe("AuditManager", () => {
 
         noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
         await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
-        const last = screen.getByRole("button", { name: /^♪ korp · Bash · / });
+        const last = screen.getByRole("button", { name: /^korp · Bash · / });
+        fireEvent.click(last);
+        expect(revealBlock).toHaveBeenCalledWith("blk-korp", { source: "audit" });
+    });
+
+    it("names who made the last sound when its row is not in the list (#47844)", async () => {
+        // The list as it first opens: tool calls are filtered out, so the sound's row is not there.
+        runtimeRows.push({ block_id: "blk-korp", name: "Korp" });
+        query.mockResolvedValue(page([entry({ id: "a", kind: "action", summary: "operator setconfig" })]));
+        render(() => <AuditManager paneBlockId="pane-1" />);
+        await waitFor(() => expect(screen.getByText("operator setconfig")).toBeInTheDocument());
+
+        noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
+        const last = await screen.findByRole("button", { name: /^Korp · Bash · / });
         fireEvent.click(last);
         expect(revealBlock).toHaveBeenCalledWith("blk-korp", { source: "audit" });
     });

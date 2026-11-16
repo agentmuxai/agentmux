@@ -286,6 +286,39 @@ fn exe_dir() -> Result<PathBuf, String> {
     exe.parent().map(Path::to_path_buf).ok_or_else(|| "cannot find this command's own folder".to_string())
 }
 
+/// Make the channel's folders. On Windows, which has no folder modes, a channel folder that is new is limited to the person
+/// first (the data and the key made inside it inherit that), and one that is not new must already be theirs alone: another
+/// account of the computer being able to open it is refused, in words that name the folder and the command that fixes it.
+fn ensure_channel_dirs(paths: &DataPaths) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use agentmux_common::owner_only;
+        let dir = &paths.instance_dir;
+        if !dir.exists() {
+            if let Some(parent) = dir.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            }
+            std::fs::create_dir(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+            owner_only::restrict_to_user(dir)?;
+        }
+        let key = paths.data_dir.join(KEY_FILE_NAME);
+        for path in [dir.clone(), key] {
+            if !path.exists() {
+                continue;
+            }
+            let others = owner_only::others_who_can_open(&path)?;
+            if !others.is_empty() {
+                let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+                    (Ok(domain), Ok(name)) if !domain.is_empty() && !name.is_empty() => format!("{domain}\\{name}"),
+                    _ => "%USERNAME%".to_string(),
+                };
+                return Err(owner_only::refusal(&path, &others, &user));
+            }
+        }
+    }
+    paths.ensure_dirs().map_err(|e| format!("cannot create the channel's folders: {e}"))
+}
+
 /// `existing` with `dir` in front of it (once), so the helpers installed beside the server are found first.
 fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> std::ffi::OsString {
     let existing = existing.unwrap_or_default();
@@ -352,11 +385,8 @@ fn cmd_version(channel: &str, json: bool) -> i32 {
 }
 
 fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if !cfg!(unix) {
-        return fail("AgentMux Headless is for Linux and macOS in this release");
-    }
-    if let Err(e) = paths.ensure_dirs() {
-        return fail(&format!("cannot create the channel's folders: {e}"));
+    if let Err(e) = ensure_channel_dirs(paths) {
+        return fail(&e);
     }
     if let Some(other) = running(paths).filter(|s| s.pid != std::process::id()) {
         warn!("AgentMux Headless is already running (pid {}) at {}", other.pid, other.url());
@@ -394,6 +424,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         key_file: paths.data_dir.join(KEY_FILE_NAME),
         data_dir: paths.data_dir.clone(),
         srv: srv.clone(),
+        supervisor: None,
     };
     if let Err(e) = state::write(&paths.instance_dir, &record) {
         return fail(&format!("cannot write the record of AgentMux Headless: {e}"));
@@ -409,7 +440,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     // The agents the server starts find their helpers (`agentmux-mcp`, `agentmux-bashwrap`) by name on the PATH.
     cmd.envs(paths.to_env_vars()).env("PATH", path_with_dir(srv.parent(), std::env::var_os("PATH"))).stdin(Stdio::null());
-    become_server(cmd)
+    become_server(cmd, paths, record)
 }
 
 /// `agentmux-srv migrate --prepare` for this version's data: carries the previous version's data
@@ -458,26 +489,48 @@ fn refused_beside_another(paths: &DataPaths) -> i32 {
 /// Replace this process with the server, so the server keeps this process id and whoever supervises
 /// this command (a service, `start`) supervises the server itself.
 #[cfg(unix)]
-fn become_server(mut cmd: Command) -> i32 {
+fn become_server(mut cmd: Command, _paths: &DataPaths, _record: ServerState) -> i32 {
     use std::os::unix::process::CommandExt;
     let e = cmd.exec();
     fail(&format!("cannot start AgentMux Headless: {e}"))
 }
 
+/// Windows has no `exec`: this process starts the server with no window, records the server's id (its own, as the
+/// supervisor), waits for it, and ends with it, so a Scheduled Task that runs this command is running while the server is.
 #[cfg(not(unix))]
-fn become_server(_cmd: Command) -> i32 {
-    fail("AgentMux Headless is for Linux and macOS in this release")
+fn become_server(mut cmd: Command, paths: &DataPaths, mut record: ServerState) -> i32 {
+    cmd.no_window();
+    // The server's output goes to the channel's log, whoever started this (a logon task has no console and no log of its own).
+    if let Some((out, err)) = state::open_log(&paths.instance_dir).ok().and_then(|out| out.try_clone().ok().map(|err| (out, err))) {
+        cmd.stdout(out).stderr(err);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return fail(&format!("cannot start the server: {e}")),
+    };
+    record.supervisor = Some(record.pid);
+    record.pid = child.id();
+    if let Err(e) = state::write(&paths.instance_dir, &record) {
+        let _ = child.kill();
+        return fail(&format!("cannot write the server's record: {e}"));
+    }
+    let code = match child.wait() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(_) => 1,
+    };
+    // The record is this server's: one a later server wrote is not removed.
+    if state::read(&paths.instance_dir).is_some_and(|s| s.pid == record.pid) {
+        state::remove(&paths.instance_dir);
+    }
+    code
 }
 
 fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if !cfg!(unix) {
-        return fail("AgentMux Headless is for Linux and macOS in this release");
-    }
     if let Some(code) = service_ignores(paths, args) {
         return code;
     }
-    if let Err(e) = paths.ensure_dirs() {
-        return fail(&format!("cannot create the channel's folders: {e}"));
+    if let Err(e) = ensure_channel_dirs(paths) {
+        return fail(&e);
     }
     if let Some(s) = running(paths) {
         println!("AgentMux is already running: {}", s.url());
@@ -526,6 +579,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     cmd.stdin(Stdio::null()).stdout(out).stderr(err).no_window();
     process::detach(&mut cmd);
+    process::keep_std_handles_private();
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot start AgentMux Headless: {e}")),
@@ -540,7 +594,7 @@ fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) ->
     let begun = Instant::now();
     loop {
         let mine = state::read(&paths.instance_dir).filter(|s| match &child {
-            Some(c) => s.pid == c.id(),
+            Some(c) => s.pid == c.id() || s.supervisor == Some(c.id()),
             None => process::is_server(s.pid),
         });
         if let Some(s) = mine {
@@ -594,15 +648,21 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
         return 0;
     }
     // A service restarts a server that exits non-zero, so a service's server is stopped through the service.
-    let stopped = match user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
+    let stopped = match user_home().ok().filter(|h| !cfg!(windows) && service::installed(h, &paths.channel)) {
         Some(home) => service::control(&home, &paths.channel, "stop"),
         None if process::terminate(record.pid) => Ok(()),
+        // Windows has no signal to send: the server is asked over its signed channel.
+        None if cfg!(windows) => ask_to_shut_down(paths),
         None => Err(format!("could not signal AgentMux Headless (pid {})", record.pid)),
     };
-    if let Err(e) = stopped {
-        return fail(&e);
+    let mut gone = false;
+    match stopped {
+        Ok(()) => gone = wait_gone(record.pid, STOP_WAIT),
+        // `--force` is for the server that does not answer: it goes on to the identity-checked end.
+        Err(e) if force && cfg!(windows) => warn!("{e}"),
+        Err(e) => return fail(&e),
     }
-    if !wait_gone(record.pid, STOP_WAIT) {
+    if !gone {
         if !force {
             warn!("AgentMux Headless has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
             return 3;
@@ -615,6 +675,14 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
     state::remove(&paths.instance_dir);
     println!("AgentMux stopped.");
     0
+}
+
+/// Ask the running server to shut down, over the channel `open` and `logout` use (the key is proved, never sent).
+fn ask_to_shut_down(paths: &DataPaths) -> Result<(), String> {
+    match run_client(paths, "shutdown", &[], true) {
+        (0, _) => Ok(()),
+        _ => Err("AgentMux Headless did not accept the request to shut down (it does not serve its own UI, or does not answer); `agentmux stop --force` ends it".to_string()),
+    }
 }
 
 fn wait_gone(pid: u32, limit: Duration) -> bool {
@@ -733,13 +801,13 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
     let key_file = record.as_ref().map(|s| s.key_file.clone()).unwrap_or_else(|| paths.data_dir.join(KEY_FILE_NAME));
     let exe = stable_exe().ok();
     let service_file = user_home().ok().and_then(|h| service::manager().map(|m| service::file_path(m, &h, &paths.channel)));
-    let service_text = service_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok());
+    let service_text = service_file.as_ref().and_then(|f| service::read_text(f));
     doctor::Facts {
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         srv: find(find_srv_in, srv_flag),
         web: find(find_web_in, web_dir_flag),
-        folders: paths.ensure_dirs().map_err(|e| format!("cannot create the channel's folders: {e}")).and_then(|()| doctor::writable(&paths.instance_dir)),
+        folders: ensure_channel_dirs(paths).and_then(|()| doctor::writable(&paths.instance_dir)),
         free_bytes: agentmux_common::disk_space::volume_free_total_bytes(&paths.instance_dir).map(|(free, _)| free),
         key_mode: doctor::mode_of(&key_file),
         port,
@@ -1203,6 +1271,7 @@ mod tests {
             key_file: "/k".into(),
             data_dir: "/d".into(),
             srv: "/s/agentmux-srv".into(),
+            supervisor: None,
         }
     }
 

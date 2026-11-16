@@ -18,19 +18,28 @@ export interface Pt {
     y: number;
 }
 
+/** The two gaps a wrapped report's line runs along the middle of. */
+export interface EdgeGaps {
+    x: number;
+    level: number;
+}
+
+const FULL: EdgeGaps = { x: GAP_X, level: GAP_Y };
+
 /** How round the corners of a wrapped report's line are. */
 const CORNER_R = 8;
 
 /**
  * The corners of the line to a report the layout wrapped onto a later row. The line leaves the lead's bottom, runs
  * along the middle of the gap above the first row, goes down the gap left of the report's column to the middle of its
- * card, and ends at the card's left edge.
+ * card, and ends at the card's left edge. `gaps` are the layout's (`AtlasLayout.gaps`): the gap under the lead's row
+ * and the one between two columns, which close up as the map is zoomed in.
  */
-export function wrappedRoute(from: Pt, to: Pt): Pt[] {
+export function wrappedRoute(from: Pt, to: Pt, gaps: EdgeGaps = FULL): Pt[] {
     const x1 = from.x + NODE_W / 2;
     const y1 = from.y + NODE_H;
-    const bus = y1 + GAP_Y / 2;
-    const railX = to.x - GAP_X / 2;
+    const bus = y1 + gaps.level / 2;
+    const railX = to.x - gaps.x / 2;
     const yMid = to.y + NODE_H / 2;
     const pts: Pt[] = [{ x: x1, y: y1 }];
     if (Math.abs(railX - x1) >= 1) pts.push({ x: x1, y: bus }, { x: railX, y: bus });
@@ -60,8 +69,8 @@ function roundedPath(pts: readonly Pt[]): string {
 }
 
 /** The path of a line from a lead's node to a report's; `wrapped`: the layout wrapped that report onto a later row. */
-export function edgePath(from: Pt, to: Pt, wrapped = false): string {
-    if (wrapped) return roundedPath(wrappedRoute(from, to));
+export function edgePath(from: Pt, to: Pt, wrapped = false, gaps: EdgeGaps = FULL): string {
+    if (wrapped) return roundedPath(wrappedRoute(from, to, gaps));
     const x1 = from.x + NODE_W / 2;
     const y1 = from.y + NODE_H;
     const x2 = to.x + NODE_W / 2;

@@ -72,6 +72,9 @@ impl Shape {
 static SHAPE: OnceLock<Shape> = OnceLock::new();
 static STORE: OnceLock<SessionStore> = OnceLock::new();
 static CHANNELS: OnceLock<Channels> = OnceLock::new();
+/// What ends the server: the token the signal handlers cancel. `agentmux stop` on Windows, which has no signal to
+/// send, asks for it through `/auth/shutdown`.
+static SHUTDOWN: std::sync::Mutex<Option<tokio_util::sync::CancellationToken>> = std::sync::Mutex::new(None);
 
 fn store() -> &'static SessionStore {
     STORE.get_or_init(SessionStore::default)
@@ -89,6 +92,11 @@ pub(crate) fn enable(port: u16, instance_id: &str) {
     }
 }
 
+/// Give the shutdown route the token that ends the server.
+pub(crate) fn set_shutdown(token: tokio_util::sync::CancellationToken) {
+    *SHUTDOWN.lock().unwrap_or_else(|e| e.into_inner()) = Some(token);
+}
+
 pub(crate) fn enabled() -> bool {
     SHAPE.get().is_some()
 }
@@ -102,6 +110,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/auth/confirm", post(handle_confirm))
         .route("/auth/logout", post(handle_logout))
         .route("/auth/sessions", post(handle_sessions))
+        .route("/auth/shutdown", post(handle_shutdown))
         .route("/auth/enter", get(handle_page).post(handle_enter))
         .route("/auth/enter.js", get(handle_script))
         .route("/auth/enter.css", get(handle_style))
@@ -320,6 +329,25 @@ async fn handle_sessions(headers: HeaderMap, body: Bytes) -> Response {
         Err(r) => return r,
     };
     proved(&admitted, json!({ "sessions": store().session_count(Instant::now()) }))
+}
+
+/// `POST /auth/shutdown`: end the server, as a termination signal does. The answer is sent first; the server leaves a
+/// moment later, by the same path as the signal (every request in flight and every agent is closed as it is then).
+async fn handle_shutdown(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/shutdown", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    let token = SHUTDOWN.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let known = token.is_some();
+    if let Some(token) = token {
+        tracing::info!("shutdown asked for by `agentmux stop`");
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            token.cancel();
+        });
+    }
+    proved(&admitted, json!({ "stopping": known }))
 }
 
 // ---- The browser's routes (the code) ----

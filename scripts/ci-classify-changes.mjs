@@ -68,6 +68,11 @@ const DOCS_INDEX_PATTERNS = [
     /^scripts\/ci-classify-changes\./,
     // Its CLI-free tests run in this job's step (ci-pr.yml).
     /^scripts\/cli-probe\//,
+    // The other tests that step runs, and what they import (scripts/lib is shared by them). A test of ci-classify-changes
+    // reads the step's list and fails when a file it covers is missing here: the job runs on Windows, and a failure
+    // only there must show on the PR, not on main.
+    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-sshsig)\./,
+    /^scripts\/lib\//,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,
     /^(vite|vitest)\.config\./,
@@ -98,8 +103,8 @@ const DOCS_ONLY_PATTERNS = [
  * R8. The files under frontend/ that the Rust crates or the Rust job's own steps read, so a change to one of them
  * must run the Rust legs: the ts-rs output and the schemas the srv tests regenerate and compare
  * (frontend/types/rpc/), the key table cef includes at build time, the manifest a srv test checks, and the widget
- * singleton file another srv test reads, and the layout vectors a third reads. scripts/ci-classify-changes.test.mjs scans the crates for paths of
- * frontend/ and fails when one is not listed here.
+ * singleton file another srv test reads, the layout vectors a third reads, and the text a new widgets.json starts with, which a
+ * fourth parses. scripts/ci-classify-changes.test.mjs scans the crates for paths of frontend/ and fails when one is not listed here.
  */
 const RUST_READS_FRONTEND = [
     /^frontend\/types\/rpc\//,
@@ -108,6 +113,7 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/store\/widget-singleton\.ts$/,
     /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
+    /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
 ];
 
 /**
