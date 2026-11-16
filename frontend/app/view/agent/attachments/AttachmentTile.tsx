@@ -126,17 +126,18 @@ function useTilePicture(tile: () => TileModel, thumbnail: () => boolean) {
     return { url: () => thumb() ?? frame() ?? clip(), clip };
 }
 
+/** What a screen reader says for a tile: its kind and number, name, size and state. */
+function tileLabel(t: TileModel): string {
+    const state =
+        t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
+    const noun = t.kind === "image" ? "Image" : "File";
+    return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
+}
+
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
     const { url, clip } = useTilePicture(() => props.tile, picture);
-    const label = () => {
-        const t = props.tile;
-        const state =
-            t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
-        const noun = t.kind === "image" ? "Image" : "File";
-        return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
-    };
     const icon = () => (
         <Show
             when={props.tile.status !== "error"}
@@ -171,7 +172,7 @@ export function AttachmentTile(props: Props) {
             <Button
                 class="agent-attachment-tile__main"
                 title={tileTooltip(props.tile)}
-                aria-label={`${label()}. Open preview`}
+                aria-label={`${tileLabel(props.tile)}. Open preview`}
                 onClick={() => props.onOpen()}
             >
                 <Show
