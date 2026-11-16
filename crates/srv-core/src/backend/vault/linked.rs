@@ -255,20 +255,21 @@ fn cannot_describe(copy: &Link, own: &str) -> Option<&'static str> {
 /// only the answer the asking agent got.
 pub fn copy_checks(store: &Store, row: &VaultRow) -> Vec<VaultCopyCheck> {
     let fields = fields_of(row);
-    let named = copies(&fields);
+    // Each line with the place it names: the pane finds a place's check by the line as the entry writes it.
+    let named: Vec<(&str, Link)> = lines(fields.get(COPIES).map_or("", String::as_str)).into_iter().filter_map(|line| Some((line, copy_of(line).ok()?))).collect();
     if named.is_empty() {
         return Vec::new();
     }
     let own = Link::of(&fields).map(|link| link.kind).unwrap_or_default();
     // Newest first. A check writes one line a copy, so this holds the last few checks of every copy.
-    let lines = store.vault_activity_for_entry(&row.id, &[CHECKED_COPY], row.updated_at, (MAX_COPIES * 4) as i64).unwrap_or_default();
+    let checks = store.vault_activity_for_entry(&row.id, &[CHECKED_COPY], row.updated_at, (MAX_COPIES * 4) as i64).unwrap_or_default();
     named
         .iter()
-        .map(|copy| match cannot_describe(copy, &own) {
-            Some(why) => VaultCopyCheck { place: place_text(copy), checked: None, cannot: why.into() },
+        .map(|(written, copy)| match cannot_describe(copy, &own) {
+            Some(why) => VaultCopyCheck { place: written.to_string(), checked: None, cannot: why.into() },
             None => {
-                let checked = lines.iter().find(|line| line.target == copy.text()).map(|line| VaultSourceCheck { at: line.at, outcome: line.outcome.clone() });
-                VaultCopyCheck { place: place_text(copy), checked, cannot: String::new() }
+                let checked = checks.iter().find(|line| line.target == copy.text()).map(|line| VaultSourceCheck { at: line.at, outcome: line.outcome.clone() });
+                VaultCopyCheck { place: written.to_string(), checked, cannot: String::new() }
             }
         })
         .collect()

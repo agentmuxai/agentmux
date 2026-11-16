@@ -324,3 +324,13 @@ fn an_agents_change_to_what_a_link_says_is_the_persons_to_allow() {
     let notes = UpdateRequest { fields: fields(&[("notes", "billing asks for it monthly")]), ..asked };
     assert_eq!(inspect::link_change(&s, &notes, "builder"), Ok(None));
 }
+
+/// The pane finds a place's check by the line as the entry writes it, so a line with no space after its kind is
+/// answered as written.
+#[test]
+fn a_copy_is_known_by_its_line_as_the_entry_writes_it() {
+    let s = store();
+    let id = linked_with(&s, &[(COPIES, "aws-secret:prod/invoice-sync-replica#api.token")]);
+    let known = copy_checks(&s, &s.vault_get(&id).unwrap().unwrap());
+    assert_eq!(known.iter().map(|c| (c.place.as_str(), c.cannot.as_str())).collect::<Vec<_>>(), [("aws-secret:prod/invoice-sync-replica#api.token", "")]);
+}

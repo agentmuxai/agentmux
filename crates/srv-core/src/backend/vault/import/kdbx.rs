@@ -257,7 +257,7 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
     // that kind, with the fields that belong to it (a card's expiry, an owner); the rest are kept
     // sealed in a note, since a custom field is often a recovery code or a PIN.
     let custom = custom_fields(e);
-    let (mut used, link, marked) = link_fields(&custom);
+    let (mut used, mut link, marked) = link_fields(&custom);
     let mut typed: Vec<Incoming> = Vec::new();
     for primary in kdbx_names::PRIMARY {
         let Some(i) = custom.iter().position(|(n, _)| kdbx_names::matches(primary.aliases, n)) else { continue };
@@ -274,9 +274,9 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
         }
         typed.push(entry);
     }
-    // An entry that has since been given a password or a secret field is not a linked entry any more.
-    if let Some(i) = marked.filter(|_| typed.is_empty() && password.is_empty()) {
-        typed.push(linked_entry(&custom[i].1, &label, site, get("UserName")));
+    match marked.filter(|_| typed.is_empty() && password.is_empty()) {
+        Some(i) => typed.push(linked_entry(&custom[i].1, &label, site, get("UserName"))),
+        None => date_stays_text(&custom, &mut used, &mut link),
     }
     // The details (an owner, a bank, an expiry) go to the entries that take them.
     for detail in kdbx_names::DETAILS {
@@ -369,9 +369,22 @@ fn linked_entry(said: &str, label: &str, site: &str, username: &str) -> Incoming
     entry
 }
 
+/// An entry that is not a linked one (it never was, or it has since been given a password or a secret field) holds
+/// a value, and the date a key last changed is a linked entry's own: the Vault's history dates a value it holds. The
+/// date goes back among the custom fields kept as text in the entry's note.
+fn date_stays_text(custom: &[(String, String)], used: &mut [bool], link: &mut Vec<(&'static str, String)>) {
+    link.retain(|(name, _)| *name != linked::ROTATED);
+    let titled = linked::TITLES.iter().find(|(name, _)| *name == linked::ROTATED).map_or("", |(_, title)| *title);
+    if let Some(i) = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(titled)) {
+        used[i] = false;
+    }
+}
+
 /// Which custom fields say where the entry's machine copy is and what is said of the key there (who reads it, when
 /// it last changed, where else it is kept), as an export from the Vault writes them: they come back as plain fields,
-/// not note text. Returns which of `custom` are used up, the fields, and which field marks a linked entry.
+/// not note text. What is said of the key is read only from an entry the Vault wrote (one that marks a link or
+/// names a place): another app's field called "Read by" stays text in the note. Returns which of `custom` are used
+/// up, the fields, and which field marks a linked entry.
 fn link_fields(custom: &[(String, String)]) -> (Vec<bool>, Vec<(&'static str, String)>, Option<usize>) {
     let mut used = vec![false; custom.len()];
     let mut link = Vec::new();
@@ -379,11 +392,17 @@ fn link_fields(custom: &[(String, String)]) -> (Vec<bool>, Vec<(&'static str, St
     if let Some(i) = marked {
         used[i] = true;
     }
-    for (name, title) in source_link::TITLES.into_iter().chain(linked::TITLES) {
-        if let Some(i) = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(title)) {
-            used[i] = true;
-            link.push((name, custom[i].1.clone()));
+    let mut take = |titles: &[(&'static str, &'static str)], link: &mut Vec<(&'static str, String)>| {
+        for (name, title) in titles {
+            if let Some(i) = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(title)) {
+                used[i] = true;
+                link.push((*name, custom[i].1.clone()));
+            }
         }
+    };
+    take(&source_link::TITLES, &mut link);
+    if marked.is_some() || !link.is_empty() {
+        take(&linked::TITLES, &mut link);
     }
     (used, link, marked)
 }

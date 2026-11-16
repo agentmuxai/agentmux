@@ -147,6 +147,39 @@ release (workflow): on a tag"),
     crate::backend::vault::transfer::cancel(&preview.token);
 }
 
+/// A linked entry that was given a password in the other app comes in holding it. The date its key last changed,
+/// which the Vault keeps for a link only, stays as text in its note; and an entry the Vault did not write keeps a
+/// field called "Read by" as text too.
+#[test]
+fn a_link_given_a_password_elsewhere_comes_in_with_it_and_keeps_its_date_as_text() {
+    let s = store();
+    let place = [("source_kind", "aws-secret"), ("source_location", "prod/invoice-sync")];
+    let was_a_link = place.iter().fold(Incoming::new("login", "Invoice console").part("password", "made-up-password-1"), |e, (k, v)| e.field(k, v))
+        .field("link", "only")
+        .field("readers", "invoice-sync (lambda): at run time")
+        .field("rotated", "2026-10-01");
+    let foreign = Incoming::new("login", "Router").part("password", "made-up-password-2").field("readers", "everyone at home").field("rotated", "last spring");
+    let bytes = build(&[was_a_link, foreign], PASS, cheap()).unwrap();
+    let back = match import::read_with(&bytes, "x.kdbx", None, Some(PASS)) {
+        Ok(i) => i,
+        Err(import::ReadError::Other(e)) => panic!("{e}"),
+        Err(_) => panic!("unexpected"),
+    };
+    assert!(back.skipped.is_empty(), "{:?}", back.skipped);
+    let by = |label: &str| back.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}: {:?}", back.entries.iter().map(|e| &e.label).collect::<Vec<_>>()));
+    let login = by("Invoice console");
+    assert_eq!((login.kind.as_str(), login.parts["password"].as_str()), ("login", "made-up-password-1"));
+    assert_eq!((login.fields.get("link"), login.fields.get("rotated")), (None, None));
+    assert_eq!((login.fields["readers"].as_str(), login.fields["source_location"].as_str()), ("invoice-sync (lambda): at run time", "prod/invoice-sync"));
+    // What the Vault takes for an entry that holds a value: the import does not skip it.
+    crate::backend::vault::linked::validate(&login.fields, true).unwrap();
+    assert_eq!(by("Invoice console (notes)").parts["text"], "Last changed: 2026-10-01");
+    // Another app's entry: nothing of it is taken for what the Vault says of a key.
+    let router = by("Router");
+    assert_eq!((router.fields.get("readers"), router.fields.get("rotated")), (None, None));
+    assert_eq!(by("Router (notes)").parts["text"], "Last changed: last spring\nRead by: everyone at home");
+}
+
 #[test]
 fn the_file_is_a_password_protected_keepass_database_with_no_plaintext() {
     let s = store();
