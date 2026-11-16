@@ -19,7 +19,7 @@ export const LAST_SOUND_TIP = "Click to see this in the Audit. Shift-click goes 
  * a shift-click goes to the agent's pane.
  */
 export function LastSoundStatus(props: { rows?: Accessor<AgentRuntime[]> }): JSX.Element {
-    const sounds = usePlayedSounds();
+    const sounds = (): readonly PlayedSound[] => [];
     const tick = useTick(1000);
     const now = createMemo(() => (tick(), Date.now()));
     const sound = createMemo(() => lastSound(sounds(), now()));
