@@ -4,14 +4,14 @@
 
 /**
  * The hover tooltip's state (tooltip.tsx): when it is open and when it is visible, driven by whether the pointer is
- * over the anchor, `disable` and `forceOpen`, with the show and hide delays and the sharing with the other tooltips
- * that tooltip-timing.ts keeps.
+ * over the anchor, whether it has been pressed, `disable` and `forceOpen`, with the show and hide delays and the
+ * sharing with the other tooltips that tooltip-timing.ts keeps.
  */
 
 import type { Placement } from "@floating-ui/dom";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
-import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
+import { isPrimaryButtonDown, isRestingAtPress, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 import { claimOpen, forgetOpen, HIDE_DELAY_MS, releaseOpen, SHOW_DELAY_MS, isWarm, type OpenTip } from "./tooltip-timing";
 
 export interface TooltipProps {
@@ -50,12 +50,18 @@ const isForced = (props: TooltipProps): boolean => props.forceOpen ?? false;
 /** Whether the tooltip shows and goes with no delay. */
 const isImmediate = (props: TooltipProps): boolean => props.immediate ?? false;
 
-/** Whether the pointer is over the anchor, and the anchor's pointer handlers. */
+/** Whether the pointer is over the anchor and whether it pressed it, and the anchor's pointer handlers. */
 function createHover(props: TooltipProps, anchor: () => HTMLElement | null) {
     // Raw pointer-over state, tracked unconditionally (even while
     // `disable` is true) so a `disable` flip while the cursor is already
     // stationary over the anchor can still react — see the effect in createOpenState.
     const [isHovering, setIsHovering] = createSignal(false);
+    // A press on the anchor (a click, a tap, the start of a drag) is the person acting, not reading: the panel goes
+    // and stays shut while the pointer rests there, until it leaves and comes back, as the tooltip for titled
+    // elements does (title-tooltip.ts). Without it the panel stayed over whatever the click opened. An anchor that
+    // came to be under a pointer still resting where it pressed counts as pressed too: a click that redraws its
+    // control must not bring the panel straight back.
+    const [isPressed, setIsPressed] = createSignal(false);
 
     // Entry (mount) no-ops while the mouse's primary button is held — a
     // text-selection drag elsewhere on the page still delivers mouseenter
@@ -72,9 +78,13 @@ function createHover(props: TooltipProps, anchor: () => HTMLElement | null) {
     // mouseleave would ever fire for an anchor the cursor had already left.
     // Hover is tracked even while `forceOpen` holds the tooltip open, so the pointer state is true when
     // the hold ends (a chip pinned by focus that the pointer has since left must close on blur).
-    const handleMouseEnter = () => {
+    const handleMouseEnter = (e: MouseEvent) => {
+        setIsPressed(isRestingAtPress(e));
         if (isPrimaryButtonDown()) return;
         setIsHovering(true);
+    };
+    const handlePointerDown = () => {
+        setIsPressed(true);
     };
 
     // The gate above drops the mouseenter that arrives mid-drag. If the drag
@@ -90,14 +100,15 @@ function createHover(props: TooltipProps, anchor: () => HTMLElement | null) {
     );
 
     const handleMouseLeave = () => {
+        setIsPressed(false);
         setIsHovering(false);
     };
 
-    return { isHovering, handleMouseEnter, handleMouseLeave };
+    return { isHovering, isPressed, handleMouseEnter, handleMouseLeave, handlePointerDown };
 }
 
 /** When the panel is open, visible and placed, and the delays and sharing with the other tooltips that go with it. */
-function createOpenState(props: TooltipProps, isHovering: Accessor<boolean>) {
+function createOpenState(props: TooltipProps, isHovering: Accessor<boolean>, isPressed: Accessor<boolean>) {
     const forceOpen = () => isForced(props);
     const immediate = () => isImmediate(props);
     const showDelayMs = () => (immediate() ? 0 : (props.delayMs ?? (isWarm(self) ? 0 : SHOW_DELAY_MS)));
@@ -128,7 +139,7 @@ function createOpenState(props: TooltipProps, isHovering: Accessor<boolean>) {
         },
     };
 
-    // Single reactive driver for open/visible, keyed off isHovering,
+    // Single reactive driver for open/visible, keyed off isHovering, isPressed,
     // props.disable, and forceOpen — NOT a per-event imperative call inside
     // the handlers above. This matters because `disable` can change without
     // any mouse event firing at all (e.g. ToolBlock's virtualized tool rows
@@ -154,6 +165,9 @@ function createOpenState(props: TooltipProps, isHovering: Accessor<boolean>) {
         } else if (forceOpen()) {
             setIsOpen(true);
             setIsVisible(true);
+        } else if (isPressed()) {
+            // Gone at once, with no linger over what the press opens.
+            self.close();
         } else if (isHovering()) {
             claimOpen(self, !immediate());
             setIsOpen(true);
@@ -186,12 +200,16 @@ export function createTooltip(props: TooltipProps) {
     const placement: Placement = props.placement ?? "top";
     let referenceEl: HTMLElement | null = null;
     const hover = createHover(props, () => referenceEl);
-    const open = createOpenState(props, hover.isHovering);
+    const open = createOpenState(props, hover.isHovering, hover.isPressed);
     return {
         placement,
         ...open,
         /** The anchor's element, once it is mounted. */
-        setReference: (el: HTMLElement) => { referenceEl = el; },
+        setReference: (el: HTMLElement) => {
+            referenceEl = el;
+            // In the capture phase, so a control inside the anchor that keeps its press to itself is still seen.
+            el.addEventListener("pointerdown", hover.handlePointerDown, true);
+        },
         reference: () => referenceEl,
         handleMouseEnter: hover.handleMouseEnter,
         handleMouseLeave: hover.handleMouseLeave,

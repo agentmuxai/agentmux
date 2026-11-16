@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it } from "vitest";
-import { isPrimaryButtonDown, onPrimaryButtonRelease } from "./pointer-drag-state";
+import { isPrimaryButtonDown, isRestingAtPress, onPrimaryButtonRelease } from "./pointer-drag-state";
 
 function pointerEvent(type: string, button = 0): PointerEvent {
     return new PointerEvent(type, { button, bubbles: true, cancelable: true });
@@ -146,6 +146,55 @@ describe("pointer-drag-state", () => {
             window.dispatchEvent(pointerEvent("pointerup", 0));
             expect(calls).toEqual(["a", "b"]);
             offB();
+        });
+    });
+
+    // A click that redraws its control puts a new element under a pointer that has not moved, and the
+    // browser reports it as entered. Hover panels ask this before they open for such an enter.
+    describe("isRestingAtPress", () => {
+        const at = (type: string, clientX: number, clientY: number, more: PointerEventInit = {}): PointerEvent =>
+            new PointerEvent(type, { clientX, clientY, bubbles: true, ...more });
+
+        afterEach(() => {
+            window.dispatchEvent(new Event("blur"));
+        });
+
+        it("is false before any press", () => {
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
+        });
+
+        it("is true where the mouse was pressed, through the release and a few pixels of drift", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20));
+            window.dispatchEvent(at("pointerup", 100, 20));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(true);
+            window.dispatchEvent(at("pointermove", 103, 18));
+            expect(isRestingAtPress({ clientX: 103, clientY: 18 })).toBe(true);
+        });
+
+        it("is false for an event somewhere else, though no move has been seen yet", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20));
+            expect(isRestingAtPress({ clientX: 180, clientY: 20 })).toBe(false);
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(true);
+        });
+
+        it("ends once the pointer has moved away, even when it comes back to the same point", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20));
+            window.dispatchEvent(at("pointermove", 140, 60));
+            window.dispatchEvent(at("pointermove", 100, 20));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
+        });
+
+        it("counts a press with any mouse button, and none by touch", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20, { button: 2 }));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(true);
+            window.dispatchEvent(at("pointerdown", 100, 20, { pointerType: "touch" }));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
+        });
+
+        it("ends when the window loses focus", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20));
+            window.dispatchEvent(new Event("blur"));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
         });
     });
 });

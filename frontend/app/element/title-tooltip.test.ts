@@ -163,6 +163,32 @@ describe("the delegated tooltip", () => {
         expect(panel()!.textContent).toBe("Save");
     });
 
+    it("stays quiet on a titled element that the click put under the resting pointer, until the pointer leaves it", async () => {
+        const at = { clientX: 100, clientY: 20, bubbles: true };
+        const el = add('<button title="Start"><i></i></button>');
+        const plain = add('<span class="plain">y</span>');
+        el.dispatchEvent(new PointerEvent("pointerover", at));
+        await settle(100);
+        expect(panel()!.textContent).toBe("Start");
+        el.dispatchEvent(new PointerEvent("pointerdown", at));
+        window.dispatchEvent(new PointerEvent("pointerup", at));
+        // The click replaces the control, and the browser reports the new one as entered at the same point.
+        el.remove();
+        const next = add('<button title="Stop"><i></i></button>');
+        next.dispatchEvent(new PointerEvent("pointerover", { ...at, clientX: 102 }));
+        await settle(150);
+        expect(panel()).toBeNull();
+        // Its title is taken, so the browser's own tooltip does not show in its place.
+        expect(next.getAttribute("title")).toBe("");
+
+        plain.dispatchEvent(new PointerEvent("pointerover", { clientX: 300, clientY: 200, bubbles: true }));
+        window.dispatchEvent(new PointerEvent("pointermove", { clientX: 300, clientY: 200 }));
+        expect(next.getAttribute("title")).toBe("Stop");
+        next.dispatchEvent(new PointerEvent("pointerover", at));
+        await settle(100);
+        expect(panel()!.textContent).toBe("Stop");
+    });
+
     it("keeps showing while the pointer moves inside an element whose title it took", async () => {
         const el = add('<button title="Save"><i class="icon"></i></button>');
         over(el);
