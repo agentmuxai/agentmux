@@ -1021,10 +1021,20 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
             Err(e) => return fail(&format!("cannot remove {}: {e}", link.display())),
         }
     }
-    if let Err(e) = std::fs::remove_dir_all(&base) {
-        return fail(&format!("cannot remove {}: {e}", base.display()));
+    // The install script put one entry on the person's own PATH (Windows); it goes with the folder.
+    #[cfg(windows)]
+    match agentmux_common::user_path::remove_under_from_user_path(&service::plain_path(&base)) {
+        Ok(true) => tell!("Removed the install folder from your PATH."),
+        Ok(false) => {}
+        Err(e) => warn!("{e}; remove the entry for {} by hand", base.display()),
     }
-    tell!("Removed {}.", base.display());
+    let shown = service::plain_path(&base);
+    match uninstall::remove_program_folder(&base, &exe) {
+        Ok(uninstall::Removal::Gone) => tell!("Removed {}.", shown.display()),
+        Ok(uninstall::Removal::RestAfterExit) => tell!("Removed {}; this program's own file goes as soon as this command has ended.", shown.display()),
+        Ok(uninstall::Removal::RestIsYours) => tell!("Removed what could be removed of {}; delete that folder once this command has ended.", shown.display()),
+        Err(e) => return fail(&e),
+    }
     match data {
         Some(dir) => match std::fs::remove_dir_all(&dir) {
             Ok(()) => tell!("Removed {}.", dir.display()),
