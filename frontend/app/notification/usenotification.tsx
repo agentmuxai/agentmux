@@ -87,6 +87,22 @@ export function hasNotificationAction(actionKey: string): boolean {
     return actionKey in notificationActions;
 }
 
+/** "Dismiss all": every toast goes as if its X were pressed, each sender told once. The ones behind "+N more"
+ *  and the ones that stay until closed go too. */
+export function closeAllNotifications(): void {
+    const all = untrack(atoms.notifications);
+    if (all.length === 0) return;
+    setNotifications([]);
+    for (const notif of all) {
+        try {
+            notif.onClose?.();
+        } catch (err) {
+            // One sender's failure must not keep the others from hearing.
+            console.error("[toasts] a toast's close handler failed", err);
+        }
+    }
+}
+
 export function useNotification() {
     const notificationPopoverMode = atoms.notificationPopoverMode;
     const notifications = atoms.notifications;
@@ -107,22 +123,6 @@ export function useNotification() {
         const notif = untrack(notifications).find((n) => n.id === id);
         removeNotification(id);
         notif?.onClose?.();
-    };
-
-    /** "Dismiss all": every toast goes as if its X were pressed, each sender told once. The ones behind "+N more"
-     *  and the ones that stay until closed go too. */
-    const closeAllNotifications = () => {
-        const all = untrack(notifications);
-        if (all.length === 0) return;
-        setNotifications([]);
-        for (const notif of all) {
-            try {
-                notif.onClose?.();
-            } catch (err) {
-                // One sender's failure must not keep the others from hearing.
-                console.error("[toasts] a toast's close handler failed", err);
-            }
-        }
     };
 
     const hideNotification = (id: string) => {
@@ -193,7 +193,6 @@ export function useNotification() {
         resumeToast,
         removeNotification,
         closeNotification,
-        closeAllNotifications,
         removeAllNotifications,
         hideNotification,
         hideAllNotifications,

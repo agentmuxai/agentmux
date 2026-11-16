@@ -27,7 +27,7 @@
     // In an expanded stack that scrolls, the row stays at the top edge and the toasts pass under it.
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-over-content);
     box-sizing: border-box;
     display: flex;
     flex: none;

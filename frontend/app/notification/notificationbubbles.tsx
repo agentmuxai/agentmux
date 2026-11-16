@@ -13,7 +13,7 @@ import "./notificationbubbles.scss";
 import { NotificationItem } from "./notificationitem";
 import { ToastAnnouncer } from "./toast-announcer";
 import { toastRight, useToastPlacement } from "./use-toast-placement";
-import { useNotification } from "./usenotification";
+import { closeAllNotifications, useNotification } from "./usenotification";
 
 /** The most toasts shown at once before "+N more". */
 export const MAX_VISIBLE_NOTIFICATIONS = 5;
@@ -54,12 +54,32 @@ const ToastStackBox = (props: { setStack: (el: HTMLDivElement) => void; style: J
     );
 };
 
+/** The stack's own row, above the toasts and, in a stack that scrolls, held at its top edge (sticky): how many
+ *  toasts are not shown, when any, and "Dismiss all". */
+const ToastStackBar = (props: { more: number; onShowMore: () => void; onDismissAll: () => void }): JSX.Element => (
+    <div class="notification-stack-bar">
+        <Show when={props.more > 0}>
+            <Button class="notification-more" tone="quiet" aria-expanded="false" onClick={props.onShowMore}>
+                {t("toasts.more", { count: props.more })}
+            </Button>
+        </Show>
+        <Button
+            class="notification-dismiss-all"
+            density="compact"
+            // A pointer press leaves the caret where it is (a composer, say).
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={props.onDismissAll}
+        >
+            {t("toasts.dismissAll")}
+        </Button>
+    </div>
+);
+
 const NotificationBubbles = (): JSX.Element => {
     const {
         notifications,
         hoveredId,
         closeNotification,
-        closeAllNotifications,
         copyNotification,
         handleActionClick,
         formatTimestamp,
@@ -116,24 +136,8 @@ const NotificationBubbles = (): JSX.Element => {
                         class="notification-bubbles-body"
                         style={maxHeight() === undefined ? undefined : { "max-height": `calc(${maxHeight()}px / var(--zoomfactor))` }}
                     >
-                        {/* Above the toasts and, in a stack that scrolls, held at its top edge (sticky). */}
                         <Show when={shownCount() > 1}>
-                            <div class="notification-stack-bar">
-                                <Show when={more() > 0}>
-                                    <Button class="notification-more" tone="quiet" aria-expanded="false" onClick={() => setExpanded(true)}>
-                                        {t("toasts.more", { count: more() })}
-                                    </Button>
-                                </Show>
-                                <Button
-                                    class="notification-dismiss-all"
-                                    density="compact"
-                                    // A pointer press leaves the caret where it is (a composer, say).
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={dismissAll}
-                                >
-                                    {t("toasts.dismissAll")}
-                                </Button>
-                            </div>
+                            <ToastStackBar more={more()} onShowMore={() => setExpanded(true)} onDismissAll={dismissAll} />
                         </Show>
                         <For each={visible()}>
                             {(notif) => (
