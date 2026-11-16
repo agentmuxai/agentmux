@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Motion</title>
+<style>
+body{margin:0;font:16px system-ui,sans-serif;overflow:hidden;background:#111;color:#eee}
+#a{position:absolute;top:30%;width:120px;height:120px;border-radius:50%;background:#4af;animation:go 4s linear infinite alternate}
+@keyframes go{from{left:0}to{left:calc(100% - 120px)}}
+#t{position:absolute;left:1rem;top:1rem}
+</style>
+<div id="t"></div><div id="a"></div>
+<script>setInterval(()=>{document.getElementById('t').textContent=new Date().toISOString()+'  '+innerWidth+'x'+innerHeight},50)</script>

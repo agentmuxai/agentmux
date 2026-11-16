@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Keys</title>
+<style>body{font:16px system-ui,sans-serif;margin:2rem}#k{font:3rem monospace;min-height:4rem}#l{font:14px monospace;white-space:pre}</style>
+<h1>Press keys</h1>
+<div id="k">-</div><div id="l"></div>
+<script>
+const lines=[];
+addEventListener('keydown',e=>{k.textContent=e.key;lines.unshift(e.type+' '+e.key+' '+e.code+(e.ctrlKey?' ctrl':'')+(e.shiftKey?' shift':'')+(e.altKey?' alt':''));l.textContent=lines.slice(0,12).join('\n')});
+</script>

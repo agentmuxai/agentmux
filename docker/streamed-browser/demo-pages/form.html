@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Form</title>
+<style>body{font:16px system-ui,sans-serif;margin:2rem;max-width:32rem}label{display:block;margin:1rem 0 .25rem}input,select,textarea{font:inherit;width:100%;box-sizing:border-box}</style>
+<h1>A form</h1>
+<label>A line of text<input id="a"></label>
+<label>Several lines (paste here)<textarea id="b" rows="4"></textarea></label>
+<label><input type="checkbox" id="c" style="width:auto"> Tick me</label>
+<label>Choose<select id="d"><option>One</option><option>Two</option><option>Three</option></select></label>
+<p id="out">Nothing typed yet.</p>
+<script>
+const show=()=>out.textContent='Line: '+a.value+' | Lines: '+b.value.length+' characters | Ticked: '+c.checked+' | Chosen: '+d.value;
+for(const e of [a,b,c,d]){e.addEventListener('input',show);e.addEventListener('change',show)}
+</script>

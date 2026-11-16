@@ -1,0 +1,21 @@
+# The streamed Browser pane's demo: a headless srv with its own web UI, a Chromium for the pages, and demo pages.
+# docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md. For our own hosts only (README.md): `--no-sandbox` is on,
+# the container is the boundary, and nothing is published except on the host's loopback.
+#
+# Build context is a folder holding: agentmux-srv (a Linux build), web/ (`node scripts/build-web.mjs --out <context>/web`),
+# demo-pages/, pages-server.js, demo-entry.sh.
+FROM debian:trixie-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends chromium nodejs socat ca-certificates fonts-liberation \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m amx
+COPY agentmux-srv /usr/local/bin/agentmux-srv
+COPY web /app/web
+COPY demo-pages /app/demo-pages
+COPY pages-server.js demo-entry.sh /app/
+RUN chmod -R a+rX /app && chmod 755 /usr/local/bin/agentmux-srv /app/demo-entry.sh
+USER amx
+ENV AGENTMUX_STREAMED_BROWSER=1 \
+    AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=1 \
+    AGENTMUX_STREAMED_BROWSER_BIN=/usr/bin/chromium
+ENTRYPOINT ["/app/demo-entry.sh"]

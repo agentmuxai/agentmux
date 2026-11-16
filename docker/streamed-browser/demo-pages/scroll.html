@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Scroll</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;margin:2rem}p{margin:0 0 1rem}.n{position:fixed;right:1rem;top:1rem;background:#222;color:#fff;padding:.25rem .5rem}</style>
+<div class="n" id="n">0</div>
+<h1>A long page</h1>
+<script>for(let i=1;i<=120;i++){const p=document.createElement('p');p.textContent='Paragraph '+i+'. The quick brown fox jumps over the lazy dog.';document.body.append(p)}
+addEventListener('scroll',()=>{n.textContent=Math.round(scrollY)})</script>
