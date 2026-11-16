@@ -17,9 +17,15 @@
 //!   (`signature::judge` and `decide`, with the same keys and signature rules, a second signature included),
 //!   so the check can't offer a file the download would refuse. Where the two could disagree on one input,
 //!   a test fails.
+//! - **The release's own upgrade floor.** A manifest carries none, so it is read from the repo's `UPGRADE_FLOOR`
+//!   file at the release's tag (the file the release notes' floor line is written from), which the API's
+//!   answer vouches for no better: GitHub over TLS, unsigned. The floor used is the higher of this build's
+//!   own and that file's, so a read can only block a download, never allow one. A tag that isn't plainly
+//!   `v<digits>.<digits>.<digits>` builds no address, and a file that can't be read or isn't a plain version
+//!   is no answer.
 //! - **Bounded.** It runs only when the API is limited or failed. A result is kept for its tag, a failed try is
-//!   not repeated before the API's limit ends (and never within [`MIN_RETRY_GAP`]), and a manifest that
-//!   fails verification is logged once per tag.
+//!   not repeated before the API's limit ends (and never within [`MIN_RETRY_GAP_MS`]), and a manifest or floor
+//!   that fails is logged once per tag.
 //!
 //! An unsigned, unverifiable or unreachable answer is no answer: the release stays known by its tag.
 
@@ -48,6 +54,38 @@ pub(crate) enum Answer {
 /// Whether `tag` is strictly newer than the running build `current`. Versions that don't parse are never newer.
 pub(crate) fn newer_than(tag: &str, current: &str) -> bool {
     matches!((version_core(tag), version_core(current)), (Some(t), Some(c)) if t > c)
+}
+
+/// Where `tag`'s upgrade floor is read: the repo's `UPGRADE_FLOOR` at that tag.
+const FLOOR_FILE_PREFIX: &str = "https://raw.githubusercontent.com/agentmuxai/agentmux/";
+
+/// A floor file is a version and a newline; anything longer is not one.
+const MAX_FLOOR_BYTES: usize = 64;
+
+/// `<digits>.<digits>.<digits>` and nothing else.
+fn plain_version(s: &str) -> bool {
+    let mut parts = s.split('.');
+    let number = |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()));
+    number(parts.next()) && number(parts.next()) && number(parts.next()) && parts.next().is_none()
+}
+
+/// The address of the floor file at `tag`, only for a tag of exactly `v<digits>.<digits>.<digits>`.
+pub(crate) fn floor_url(tag: &str) -> Option<String> {
+    plain_version(tag.strip_prefix('v')?).then(|| format!("{FLOOR_FILE_PREFIX}{tag}/UPGRADE_FLOOR"))
+}
+
+/// The floor to use for a release: the higher of this build's own (`build`) and what the floor file at the
+/// release's tag says (`file`: `Ok(None)` when there is no such file). A file that can't be read, isn't there or
+/// isn't a plain version is an error: no floor, so no answer. A lower file never lowers the build's floor.
+pub(crate) fn floor_for(build: Option<&str>, file: Result<Option<Vec<u8>>, String>) -> Result<String, String> {
+    let bytes = file.map_err(|e| format!("the release's upgrade floor couldn't be read: {e}"))?;
+    let bytes = bytes.ok_or_else(|| "the release has no upgrade floor file at its tag".to_string())?;
+    let read = std::str::from_utf8(&bytes).map(str::trim).ok().filter(|t| plain_version(t));
+    let Some(read) = read else { return Err("the release's upgrade floor isn't a version".to_string()) };
+    Ok(match build.filter(|b| version_core(b) >= version_core(read)) {
+        Some(build) => build.to_string(),
+        None => read.to_string(),
+    })
 }
 
 /// The decision for `tag`, given what was fetched (`None`: the release has no signed manifest) and the
@@ -83,6 +121,20 @@ pub(crate) fn answer(
         return Answer::NoAnswer(why);
     }
     Answer::Release(Box::new(Release::from_signed(tag, Some(&asset), floor)))
+}
+
+/// What was fetched for a release: its three signed files (`Ok(None)`: it has none), or why not.
+type Fetched = Result<Option<(Vec<u8>, String, Vec<u8>)>, String>;
+
+/// The answer for `tag` from its floor (or why there is none) and what was fetched: no floor is no answer,
+/// whatever the signed files say.
+fn verdict(keys: &[UpdateKey], tag: &str, current: &str, kind: &InstallKind, arch: &str, floor: &Result<String, String>, fetched: &Fetched) -> Answer {
+    match (floor, fetched) {
+        (Err(why), _) => Answer::NoAnswer(why.clone()),
+        (Ok(floor), Ok(Some((e, s, m)))) => answer(keys, tag, current, kind, arch, Some(floor), Some((e, s, m))),
+        (Ok(_), Ok(None)) => Answer::NoAnswer("the release has no signed manifest at its download address".into()),
+        (Ok(_), Err(e)) => Answer::NoAnswer(e.clone()),
+    }
 }
 
 /// What is kept about a release's tag between checks.
@@ -130,7 +182,7 @@ async fn get(client: &reqwest::Client, dir: &str, name: &str, cap: usize) -> Res
 }
 
 /// The three signed files of `tag`'s release, from its download address. `Ok(None)`: it has none (404).
-async fn fetch(client: &reqwest::Client, tag: &str) -> Result<Option<(Vec<u8>, String, Vec<u8>)>, String> {
+async fn fetch(client: &reqwest::Client, tag: &str) -> Fetched {
     let (envelope, signature, manifest) = file_names(tag.trim_start_matches('v'));
     let dir = format!("{RELEASE_DOWNLOAD_PREFIX}{tag}/");
     let Some(envelope) = get(client, &dir, &envelope, MAX_ENVELOPE_BYTES).await? else { return Ok(None) };
@@ -154,7 +206,7 @@ pub(crate) async fn release_for(
     tag: &str,
     current: &str,
     kind: &InstallKind,
-    floor: Option<&str>,
+    build_floor: Option<&str>,
     limited_until_ms: i64,
     now_ms: i64,
 ) -> Got {
@@ -169,15 +221,17 @@ pub(crate) async fn release_for(
             Step::Ask => tried.as_ref().is_some_and(|t| t.tag == tag && t.logged),
         }
     };
-    let fetched = fetch(client, tag).await;
-    let verdict = match &fetched {
-        Ok(Some((e, s, m))) => answer(UPDATE_KEYS, tag, current, kind, std::env::consts::ARCH, floor, Some((e, s, m))),
-        Ok(None) => Answer::NoAnswer("the release has no signed manifest at its download address".into()),
-        Err(e) => Answer::NoAnswer(e.clone()),
+    // The floor first: without it nothing is offered, and the signed files need not be asked for.
+    let floor_file = match floor_url(tag) {
+        Some(url) => fetch_small(client, &url, MAX_FLOOR_BYTES).await.map_err(|e| e.to_string()),
+        None => Err(format!("{tag} isn't a plain release tag")),
     };
-    // A manifest that was fetched and did not verify is worth a warning, once for the tag; a release that has
-    // none, or one that could not be reached, is the ordinary case.
-    let did_not_verify = matches!(fetched, Ok(Some(_))) && matches!(verdict, Answer::NoAnswer(_));
+    let floor = floor_for(build_floor, floor_file);
+    let fetched = if floor.is_ok() { fetch(client, tag).await } else { Ok(None) };
+    let verdict = verdict(UPDATE_KEYS, tag, current, kind, std::env::consts::ARCH, &floor, &fetched);
+    // A manifest that was fetched and did not verify, or a floor that could not be used, is worth a warning,
+    // once for the tag; a release that has no signed files, or one that could not be reached, is the ordinary case.
+    let did_not_verify = matches!(verdict, Answer::NoAnswer(_)) && (floor.is_err() || matches!(fetched, Ok(Some(_))));
     let mut tried = TRIED.lock();
     match verdict {
         Answer::NothingNew => Got::NothingNew,
@@ -188,7 +242,7 @@ pub(crate) async fn release_for(
         }
         Answer::NoAnswer(why) => {
             if did_not_verify && !logged_before {
-                tracing::warn!(tag, %why, "update check: the release's signed manifest did not verify, so its files are not offered");
+                tracing::warn!(tag, %why, "update check: the release's signed manifest or upgrade floor could not be used, so its files are not offered");
             }
             *tried = Some(Tried { tag: tag.to_string(), found: None, not_before_ms: retry_not_before(limited_until_ms, now_ms), logged: logged_before || did_not_verify });
             Got::None
@@ -308,6 +362,68 @@ mod tests {
             let download_ok = decide(tag.trim_start_matches('v'), &judge(&keys, tag, fetched, &asset)).is_ok();
             assert_eq!(released(&checked).is_some_and(|r| r.has_signed_file(name)), download_ok, "{label}: {checked:?}");
         }
+    }
+
+    #[test]
+    fn the_floor_is_read_only_for_a_plain_release_tag_at_that_tag() {
+        assert_eq!(floor_url("v0.60.31").as_deref(), Some("https://raw.githubusercontent.com/agentmuxai/agentmux/v0.60.31/UPGRADE_FLOOR"));
+        for tag in ["", "v", "0.60.31", "v0.60", "v0.60.31.1", "v0.60.x", "v0.60.31-rc1", "v0.60.31/../main", "v0.60.31?x=1", "v0.60.31 ", "vv0.60.31", "v0.60.-1", "latest", "v1234567890.0.0"] {
+            assert_eq!(floor_url(tag), None, "{tag:?}");
+        }
+    }
+
+    #[test]
+    fn a_floor_at_the_tag_above_the_running_build_blocks_the_download_and_names_what_to_install_first() {
+        let kind = InstallKind::WindowsSetup;
+        // This build's floor is 0.55.0; the release's file says 0.60.1, above the running 0.60.0.
+        let floor = floor_for(Some("0.55.0"), Ok(Some(b"0.60.1\n".to_vec())));
+        assert_eq!(floor.as_deref(), Ok("0.60.1"));
+        let a = answer(&keys(), "v0.60.1", NEWER_THAN_FIXTURE, &kind, "x86_64", floor.as_deref().ok(), Some((ENVELOPE.as_bytes(), SIG, MANIFEST.as_bytes())));
+        let status = crate::backend::update::check::status_for(NEWER_THAN_FIXTURE, "stable", released(&a).unwrap(), 1, &kind);
+        assert_eq!(status.install_first.as_deref(), Some("0.60.1"));
+        assert!(!status.can_download, "{status:?}");
+    }
+
+    #[test]
+    fn a_floor_that_cannot_be_read_offers_nothing_even_with_good_signed_files() {
+        let kind = InstallKind::WindowsSetup;
+        let good = Ok(Some((ENVELOPE.as_bytes().to_vec(), SIG.to_string(), MANIFEST.as_bytes().to_vec())));
+        let unreadable: Vec<Result<Option<Vec<u8>>, String>> = vec![
+            Err("HTTP 503".into()),
+            Ok(None),
+            Ok(Some(vec![])),
+            Ok(Some(b"\n".to_vec())),
+            Ok(Some(b"latest".to_vec())),
+            Ok(Some(b"0.55".to_vec())),
+            Ok(Some(b"0.55.0.1".to_vec())),
+            Ok(Some(b"v0.55.0".to_vec())),
+            Ok(Some(b"0.55.0-rc1".to_vec())),
+            Ok(Some(b"0.55.0\n0.56.0".to_vec())),
+            Ok(Some(vec![0xff, 0xfe, b'0'])),
+            Ok(Some(b"<html>404</html>".to_vec())),
+        ];
+        for file in unreadable {
+            let label = format!("{file:?}");
+            let floor = floor_for(Some("0.55.0"), file);
+            assert!(floor.is_err(), "{label}");
+            match verdict(&keys(), "v0.60.1", NEWER_THAN_FIXTURE, &kind, "x86_64", &floor, &good) {
+                Answer::NoAnswer(_) => {}
+                other => panic!("{label}: {other:?}"),
+            }
+        }
+        // With a floor, the same files are an answer.
+        let ok = floor_for(Some("0.55.0"), Ok(Some(b"0.55.0\n".to_vec())));
+        assert!(released(&verdict(&keys(), "v0.60.1", NEWER_THAN_FIXTURE, &kind, "x86_64", &ok, &good)).is_some());
+    }
+
+    #[test]
+    fn a_floor_file_lower_than_this_builds_floor_does_not_lower_it() {
+        assert_eq!(floor_for(Some("0.55.0"), Ok(Some(b"0.40.0".to_vec()))).as_deref(), Ok("0.55.0"));
+        assert_eq!(floor_for(Some("0.55.0"), Ok(Some(b"0.55.0\r\n".to_vec()))).as_deref(), Ok("0.55.0"));
+        assert_eq!(floor_for(Some("0.55.0"), Ok(Some(b"0.56.0".to_vec()))).as_deref(), Ok("0.56.0"));
+        // A build floor that isn't a version never wins.
+        assert_eq!(floor_for(Some("junk"), Ok(Some(b"0.40.0".to_vec()))).as_deref(), Ok("0.40.0"));
+        assert_eq!(floor_for(None, Ok(Some(b"0.40.0".to_vec()))).as_deref(), Ok("0.40.0"));
     }
 
     fn tried(tag: &str, found: bool, not_before_ms: i64) -> Tried {
