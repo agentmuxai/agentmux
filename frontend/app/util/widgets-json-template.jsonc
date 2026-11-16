@@ -1,0 +1,38 @@
+// Your own widget bar entries. Save the file and they apply at once.
+//
+// Every entry here is merged over the built-in ones. A new key adds a button to the
+// widget bar; a built-in key, such as "defwidget@swarm", replaces that button. The built-in
+// entries are in crates/srv-core/src/config/widgets.json in the AgentMux source.
+// Comments (// and /* */) and trailing commas are allowed. If the file has a mistake,
+// Settings names the line, and your widgets stay as they were until it is fixed.
+//
+// To add a new kind of pane, install a widget instead (Settings, Widgets): it runs
+// sandboxed and asks you first. This file only arranges the panes AgentMux already has.
+//
+// An entry's fields, all optional:
+//   "label"            the button's name
+//   "icon"             a Font Awesome icon name, without "fa-"
+//   "color"            the button's colour, such as "#5865f2"
+//   "description"      the tooltip
+//   "display:order"    where it sits on the bar: lower comes first
+//   "display:pinned"   true to pin it to the bar for a new install
+//   "blockdef"         what a click opens: "meta" holds the pane's "view" (agent, browser,
+//                      editor, files, ...) and the settings that pane reads, such as "url"
+//   "singleton"        true to bring back the pane that is already open, not open another
+//   "scope"            "window" (the default) or "app": where that open pane is looked for
+//   "children"         the short names of other entries, to make this button a menu
+//   "section"          the section of a pane with sections that a click opens on
+//   "module"           a third-party pane's module file; it runs only after you approve it in
+//                      Settings, Widgets
+//
+// An example, ready to use: remove the // from its lines, then change them.
+{
+    // "my-docs": {
+    //     "label": "Docs",
+    //     "icon": "book",
+    //     "description": "The AgentMux docs",
+    //     "display:order": 20,
+    //     "display:pinned": true,
+    //     "blockdef": { "meta": { "view": "browser", "url": "https://docs.agentmux.ai" } },
+    // },
+}
