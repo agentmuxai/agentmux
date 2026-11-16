@@ -121,7 +121,7 @@ fn link_card(change: &LinkChange, agent: &str, pane: &str) -> UseRequest {
         agent_reason: change.reason.clone(),
         kind: change.kind.clone(),
         requested_ms: agentmux_common::time::now_ms_u64(),
-        link: Some(UseLink { from: place(&change.from), to: place(&change.to) }),
+        link: Some(UseLink { from: place(&change.from), to: place(&change.to), about_from: change.about_from.clone(), about_to: change.about_to.clone(), only: change.only }),
         ..Default::default()
     }
 }
@@ -136,7 +136,10 @@ fn link_not_allowed(ended: Ended) -> String {
 
 /// Asks the person to allow `change`; a refusal is recorded in the entry's history and answered.
 async fn allow_link_change(state: &AppState, change: &LinkChange, agent: &str, pane: &str, wait: Duration) -> Result<(), Response> {
-    let headline = format!("{agent} wants to change where the machine copy of {} is", change.label);
+    let headline = match change.only {
+        true => format!("{agent} wants to change what the Vault records about the key {}", change.label),
+        false => format!("{agent} wants to change where the machine copy of {} is", change.label),
+    };
     let (ended, _) = super::vault_ask::ask(state, pane, link_card(change, agent, pane), wait, &headline).await;
     if ended.allowed() {
         return Ok(());
@@ -183,7 +186,17 @@ mod tests {
 
     fn change() -> LinkChange {
         let to = Link { kind: "aws-secret".into(), location: "staging/app".into(), key: "db.password".into(), region: "eu-west-1".into(), profile: String::new() };
-        LinkChange { entry_id: "api-key-example".into(), label: "Example".into(), kind: "api-key".into(), from: None, to: Some(to), reason: "record where the staging copy is for task 28071".into() }
+        LinkChange {
+            entry_id: "api-key-example".into(),
+            label: "Example".into(),
+            kind: "api-key".into(),
+            from: None,
+            to: Some(to),
+            about_from: String::new(),
+            about_to: "Read by: invoice-sync (lambda): at run time.".into(),
+            only: false,
+            reason: "record where the staging copy is for task 28071".into(),
+        }
     }
 
     #[test]

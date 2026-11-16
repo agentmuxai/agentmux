@@ -83,7 +83,10 @@ fn rotatable_entry(state: &AppState, id: &str, agent: &str) -> Result<crate::bac
     let none = || error(StatusCode::BAD_REQUEST, format!("no Vault entry {id:?}: Vault's list action shows the entries"));
     let row = state.identity_store.vault_get(id).map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?.ok_or_else(none)?;
     match vault::vaults::entry_row_usable(&state.identity_store, &row.vault_id, Some(agent)) {
-        Ok(true) => Ok(row),
+        Ok(true) => match vault::linked::takes_no_value(&row, "rotate the key where it lives, then record the date with update (rotated)") {
+            Some(refusal) => Err(error(StatusCode::BAD_REQUEST, refusal)),
+            None => Ok(row),
+        },
         Ok(false) => Err(none()),
         Err(e) => Err(error(StatusCode::INTERNAL_SERVER_ERROR, e)),
     }

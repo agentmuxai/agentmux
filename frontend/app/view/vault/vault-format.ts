@@ -22,7 +22,6 @@ export interface Expiry {
     warn: boolean;
 }
 
-/** An entry's `expires` field (`YYYY-MM-DD`, as srv keeps it) read against today, in local time. */
 /** Outcomes that say a line did what its action names: there is nothing more to tell. */
 const PLAIN_OUTCOMES = ["", "done", "ok"];
 /** Outcomes that are news of their own, and no trouble. */
@@ -36,6 +35,7 @@ export function outcomeOf(outcome: string): { text: string; warn: boolean } | nu
     return { text, warn: !FINE_OUTCOMES.includes(text) };
 }
 
+/** An entry's `expires` field (`YYYY-MM-DD`, as srv keeps it) read against today, in local time. */
 export function expiryOf(expires: string | undefined, now = new Date()): Expiry | null {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expires?.trim() ?? "");
     if (!m) return null;

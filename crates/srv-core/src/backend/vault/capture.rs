@@ -288,6 +288,9 @@ pub fn plan(store: &Store, rules: &[CaptureRule], agent: &str, cmd: &str) -> Res
                 if !super::vaults::entry_row_usable(store, &row.vault_id, Some(agent))? {
                     return Err(which(format!("there is no entry {id:?}")));
                 }
+                if let Some(refusal) = super::linked::takes_no_value(&row, "capture into a new entry") {
+                    return Err(which(refusal));
+                }
                 let kind = kinds::kind(&row.kind).ok_or_else(|| which(format!("entry {id} has an unknown kind")))?;
                 let part = part_of(kind, r.into.part.as_deref()).map_err(which)?;
                 if r.into.label.as_deref().is_some_and(|l| l.trim() != row.label) {

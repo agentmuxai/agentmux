@@ -19,6 +19,7 @@ import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { machineCopy, MachineCopyLine } from "./vault-source";
+import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
 import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
@@ -50,7 +51,8 @@ export function entryDetails(e: VaultEntryInfo): string {
 export function entryMatches(e: VaultEntryInfo, filter: string): boolean {
     const q = filter.trim().toLowerCase();
     if (!q) return true;
-    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), machineCopy(e.fields), e.fields.expires ?? "", ...e.tags].some((s) =>
+    const said = [e.fields.readers ?? "", e.fields.copies ?? ""];
+    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), machineCopy(e.fields), ...said, e.fields.expires ?? "", ...e.tags].some((s) =>
         s.toLowerCase().includes(q),
     );
 }
@@ -61,8 +63,9 @@ export function expiringSoon(e: VaultEntryInfo, now = new Date()): boolean {
     return x !== null && x.days <= EXPIRING_SOON_DAYS;
 }
 
-/** Has srv read the entry's machine copy and compare it with the entry's value. What it found is the entry's own
- *  line once srv has it; only a check that could not start is an error (`onError`). */
+/** Has srv read the entry's machine copy and compare it with the entry's value; for a linked entry, which holds no
+ *  value, has it read the place's description. What it found is the entry's own line once srv has it; only a check
+ *  that could not start is an error (`onError`). */
 function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: string | null) => void }): JSX.Element {
     const [busy, setBusy] = createSignal(false);
     const check = async () => {
@@ -75,7 +78,8 @@ function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: stri
         }
         setBusy(false);
     };
-    return <IconButton icon="arrows-rotate" label={t("vault.machineCopy.check")} density="compact" disabled={busy()} onClick={() => void check()} />;
+    const label = () => (isLinked(props.entry.fields) ? t("vault.linked.check") : t("vault.machineCopy.check"));
+    return <IconButton icon="arrows-rotate" label={label()} density="compact" disabled={busy()} onClick={() => void check()} />;
 }
 
 /** An entry's plain details, the Vault it is in (when the list shows more than one), its expiry and its machine copy. */
@@ -101,11 +105,12 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean; onErro
             <MachineCopyLine entry={props.entry}>
                 <CheckCopyButton entry={props.entry} onError={props.onError} />
             </MachineCopyLine>
+            <LinkedDetails entry={props.entry} />
         </>
     );
 }
 
-/** An entry's label, and a card's Default pill. */
+/** An entry's label, a card's Default pill, and a linked entry's badges. */
 function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
     return (
         <>
@@ -115,18 +120,41 @@ function EntryLabel(props: { entry: VaultEntryInfo }): JSX.Element {
                     Default
                 </Pill>
             </Show>
+            <LinkedBadges entry={props.entry} />
         </>
     );
 }
 
-/** The main value's last characters, and a card's brand before them. */
+/** The main value's last characters, and a card's brand before them. A linked entry has no value to show. */
 function EntryValue(props: { entry: VaultEntryInfo }): JSX.Element {
+    if (isLinked(props.entry.fields)) return <td class="warden-manager-dim vault-value">{t("vault.linked.noValue")}</td>;
     return (
         <td class="warden-manager-mono vault-value">
             <Show when={props.entry.kind === "card" && CARD_BRANDS[props.entry.fields.brand ?? ""]}>
                 {(brand) => <Pill>{brand()}</Pill>}
             </Show>{" "}
             <span class="vault-last-four">{props.entry.tail ? `•••• ${props.entry.tail}` : "••••"}</span>
+        </td>
+    );
+}
+
+/** What a row offers: show or copy its value (a linked entry has none: its place is copied instead), change it, move
+ *  it, read its history, put an earlier value back, delete it. */
+function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "change" | "move" | "history" | "versions" | "delete") => void; onError: (message: string | null) => void }): JSX.Element {
+    return (
+        <td class="vault-actions">
+            <Show when={!isLinked(props.entry.fields)} fallback={<CopyPlaceButton entry={props.entry} onError={props.onError} />}>
+                <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => props.on("reveal")} />
+            </Show>
+            <IconButton icon="pen" label="Change" density="compact" onClick={() => props.on("change")} />
+            <Show when={vaultList().length > 1}>
+                <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => props.on("move")} />
+            </Show>
+            <IconButton icon="book" label="History" density="compact" onClick={() => props.on("history")} />
+            <Show when={props.entry.versions > 0}>
+                <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => props.on("versions")} />
+            </Show>
+            <IconButton icon="trash" label="Delete" density="compact" onClick={() => props.on("delete")} />
         </td>
     );
 }
@@ -169,6 +197,12 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         }
+    };
+
+    const act = (what: "reveal" | "change" | "move" | "history" | "versions" | "delete", e: VaultEntryInfo) => {
+        const open = { reveal: setRevealing, move: setMoving, history: setHistoryOf, versions: setVersionsOf, delete: setDeleting };
+        if (what === "change") setForm({ mode: "edit", entry: e });
+        else open[what](e);
     };
 
     const confirmDelete = async () => {
@@ -241,18 +275,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                     </td>
                                     <EntryValue entry={e} />
                                     <td class="warden-manager-dim vault-when">{formatWhen(e.updated_at)}</td>
-                                    <td class="vault-actions">
-                                        <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
-                                        <IconButton icon="pen" label="Change" density="compact" onClick={() => setForm({ mode: "edit", entry: e })} />
-                                        <Show when={vaultList().length > 1}>
-                                            <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => setMoving(e)} />
-                                        </Show>
-                                        <IconButton icon="book" label="History" density="compact" onClick={() => setHistoryOf(e)} />
-                                        <Show when={e.versions > 0}>
-                                            <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => setVersionsOf(e)} />
-                                        </Show>
-                                        <IconButton icon="trash" label="Delete" density="compact" onClick={() => setDeleting(e)} />
-                                    </td>
+                                    <EntryActions entry={e} on={(what) => act(what, e)} onError={setError} />
                                 </tr>
                             )}
                         </For>

@@ -49,7 +49,7 @@ fn refusal(why: String) -> Response {
 /// A check that ended before the place was read, recorded like any other.
 async fn could_not_read(state: &AppState, plan: CheckPlan, why: String) -> Checked {
     let store = state.identity_store.clone();
-    let stopped = Checked { id: plan.entry_id.clone(), label: plan.label.clone(), outcome: source_link::COULD_NOT_READ, why: why.clone(), source: plan.link.text(), checked_at: agentmux_common::time::now_ms() };
+    let stopped = Checked::of(&plan, &Outcome::CouldNotRead(why.clone()));
     tokio::task::spawn_blocking(move || source_link::conclude(&store, &plan, &Outcome::CouldNotRead(why))).await.unwrap_or(stopped)
 }
 

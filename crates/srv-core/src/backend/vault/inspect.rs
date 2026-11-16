@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use super::source_link::{self, Link};
-use super::{expiry, history, kinds, record_line, seal, signins, signups, validate, vaults, Line, Parts};
+use super::{expiry, history, kinds, linked, record_line, seal, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
 
@@ -75,6 +75,12 @@ pub struct Shown {
     pub updated_at: i64,
     /// 0 when it was never used.
     pub last_used_at: i64,
+    /// The entry is a link: it holds no value, and its fields say where the key lives and who reads it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub link_only: bool,
+    /// The newest check of the place its fields name, when there is one of the entry as it is now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<source_link::VaultSourceCheck>,
 }
 
 fn expiry_state(row: &VaultRow, today: chrono::NaiveDate) -> (&'static str, Option<i64>) {
@@ -103,6 +109,8 @@ pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today
     let kept_versions = store.vault_versions(&row.id, row.created_at).map_err(|e| e.to_string())?.len();
     let vault = store.vault_info(&row.vault_id).map_err(|e| e.to_string())?.map(|v| v.name).unwrap_or_default();
     Ok(Shown {
+        link_only: linked::is_linked_row(&row),
+        checked: Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link)),
         fields: source_link::fields_for_agent(fields_of(&row)),
         tags: serde_json::from_str(&row.tags).unwrap_or_default(),
         expires: expiry::of(&row).map(|d| d.to_string()),
@@ -173,7 +181,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
         if person_only(name) {
             return Err(format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane"));
         }
-        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(name) {
+        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(name) && !linked::is_field(name) {
             return Err(format!("a {} entry has no field {name:?}", kind.name));
         }
         match value.trim() {
@@ -182,6 +190,9 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
         };
     }
     source_link::settle_kind(&mut fields, asked);
+    if linked::is_linked(&fields) != linked::is_linked(now) {
+        return Err(linked::SET_WHEN_MADE.into());
+    }
     Ok(fields)
 }
 
@@ -210,8 +221,10 @@ fn what_changed(row: &VaultRow, label: &str, fields: &BTreeMap<String, String>, 
     out
 }
 
-/// A change `update` would make to where an entry's machine copy is. The place decides what a check reads, so the
-/// person is asked before an agent changes it, and is shown the old place and the new one.
+/// A change `update` would make to where an entry's machine copy is, or to what the entry says of its key beside
+/// the place (who reads it, when it last changed, where else it is kept). The place decides what a check reads, and
+/// all of it is what the Vault tells the next agent, so the person is asked before an agent changes it, and is shown
+/// what is recorded now and what is asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkChange {
     pub entry_id: String,
@@ -219,6 +232,11 @@ pub struct LinkChange {
     pub kind: String,
     pub from: Option<Link>,
     pub to: Option<Link>,
+    /// What the entry says of its key beside the place, now and as asked (`linked::about`); empty when it says nothing.
+    pub about_from: String,
+    pub about_to: String,
+    /// The entry is a link: it holds no value.
+    pub only: bool,
     /// The agent's reason, as the person is shown it.
     pub reason: String,
 }
@@ -235,8 +253,20 @@ struct Planned {
 
 impl Planned {
     fn link_change(&self) -> Option<LinkChange> {
-        let (from, to) = (Link::of(&fields_of(&self.row)), Link::of(&self.fields));
-        (from != to).then(|| LinkChange { entry_id: self.row.id.clone(), label: self.row.label.clone(), kind: self.row.kind.clone(), from, to, reason: self.reason.clone() })
+        let before = fields_of(&self.row);
+        let (from, to) = (Link::of(&before), Link::of(&self.fields));
+        let (about_from, about_to) = (linked::about(&before), linked::about(&self.fields));
+        (from != to || about_from != about_to).then(|| LinkChange {
+            entry_id: self.row.id.clone(),
+            label: self.row.label.clone(),
+            kind: self.row.kind.clone(),
+            from,
+            to,
+            about_from,
+            about_to,
+            only: linked::is_linked(&before),
+            reason: self.reason.clone(),
+        })
     }
 }
 
@@ -334,7 +364,7 @@ fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> 
         out.push("it has no label".to_string());
     }
     for (name, value) in fields_of(row) {
-        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(&name) {
+        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(&name) && !linked::is_field(&name) {
             out.push(format!("it has a field a {} entry doesn't have: {name}", kind.name));
         } else if name == expiry::FIELD && expiry::parse(&value).is_err() {
             out.push("its expiry date isn't a date (YYYY-MM-DD)".to_string());
@@ -347,6 +377,9 @@ fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> 
     }
     if source_link::validate(&fields_of(row)).is_err() {
         out.push("where its machine copy is isn't written the way that kind of place is".to_string());
+    }
+    if linked::validate(&fields_of(row), false).is_err() {
+        out.push("what it records about its key (link, readers, rotated, copies) isn't written the way those are".to_string());
     }
     out.extend(sealed_problems(row, kind, key));
     out
@@ -364,6 +397,10 @@ fn sealed_problems(row: &VaultRow, kind: &kinds::Kind, key: &KeyResult) -> Optio
     let missing = !parts.get(main).is_some_and(|v| !v.is_empty());
     let extra: Vec<String> = parts.0.keys().filter(|p| !kind.parts.contains(&p.as_str())).cloned().collect();
     parts.0.values_mut().for_each(|v| v.zeroize());
+    // A link is the one entry with no value: having one is what is wrong with it.
+    if linked::is_linked_row(row) {
+        return (!missing).then(|| "it is a link, which holds no value, and it has one".to_string());
+    }
     if missing {
         return Some(format!("its {main} isn't set"));
     }
@@ -419,6 +456,11 @@ pub struct Health {
     pub expiring_within_14_days: usize,
     pub expired: usize,
     pub unused_for_90_days: usize,
+    /// Linked entries (they hold no value, and say where a key lives), and how their newest checks stand: the place
+    /// changed since the date recorded or is missing; never checked, or not for 30 days.
+    pub linked: usize,
+    pub linked_changed_or_missing: usize,
+    pub linked_unchecked_for_30_days: usize,
     pub history: HistoryState,
     /// This agent's own, still waiting for the person.
     pub pending_requests: usize,
@@ -432,15 +474,24 @@ pub fn health(store: &Store, agent: Option<&str>, key: &KeyResult, backend: &str
     let rows = usable(store, agent)?;
     let vaults = store.vaults().map_err(|e| e.to_string())?.iter().filter(|v| vaults::may_use(v, agent)).count();
     let (mut soon, mut expired, mut unused) = (0, 0, 0);
+    let (mut links, mut links_off, mut links_unchecked) = (0, 0, 0);
     let stale_before = now_ms() - UNUSED_DAYS * DAY_MS;
     for row in &rows {
+        // A link is never used through the Vault, so it is not counted as unused: its check says how it stands.
+        if let Some(standing) = linked::standing(store, row) {
+            links += 1;
+            match standing {
+                linked::Standing::NeedsALook => links_off += 1,
+                linked::Standing::Unchecked => links_unchecked += 1,
+                linked::Standing::Checked => {}
+            }
+        } else if row.last_used_at.max(row.created_at) < stale_before {
+            unused += 1;
+        }
         match expiry_state(row, today).0 {
             "expired" => expired += 1,
             "soon" => soon += 1,
             _ => {}
-        }
-        if row.last_used_at.max(row.created_at) < stale_before {
-            unused += 1;
         }
     }
     let chain = history::check(store)?;
@@ -452,6 +503,9 @@ pub fn health(store: &Store, agent: Option<&str>, key: &KeyResult, backend: &str
         expiring_within_14_days: soon,
         expired,
         unused_for_90_days: unused,
+        linked: links,
+        linked_changed_or_missing: links_off,
+        linked_unchecked_for_30_days: links_unchecked,
         history: HistoryState {
             intact: chain.intact,
             checked: chain.checked,

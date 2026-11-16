@@ -22,7 +22,7 @@ import "./vault-view.scss";
 /** Longest an agent's own words are shown in a question (its name, an entry's
  *  label, its reason), so they can't push the answers out of view or pass for
  *  AgentMux's own wording. The whole text is in the tooltip. */
-export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140, secret: 90 } as const;
+export const CLIP = { name: 40, label: 60, reason: 240, agent_reason: 140, secret: 90, about: 400 } as const;
 
 /** `text` cut to `max` characters, with an ellipsis when it was longer. */
 export function clip(text: string, max: number): string {
@@ -68,17 +68,28 @@ export function siteOf(origin: string): string {
     }
 }
 
+/** Whether every row of a batch is a link: nothing is read, and only where the keys live is recorded. */
+function linksOnly(batch: NonNullable<UseRequest["batch"]>): boolean {
+    return batch.items.every((item) => item.link);
+}
+
 /** The question's title: who wants to do what. `short` cuts the agent's words
  *  (`CLIP`), for where it is shown; the whole title is for its tooltip. */
 export function promptTitle(u: UseRequest, short = false): string {
     const agent = short ? clip(u.agent, CLIP.name) : u.agent;
     const label = short ? clip(u.entry_label, CLIP.label) : u.entry_label;
-    if (u.batch) return t("vault.batchCard.title", { agent, count: u.batch.items.length, service: u.batch.service, name: short ? clip(u.batch.name, CLIP.label) : u.batch.name });
+    if (u.batch) {
+        const params = { agent, count: u.batch.items.length, service: u.batch.service, name: short ? clip(u.batch.name, CLIP.label) : u.batch.name };
+        return linksOnly(u.batch) ? t("vault.batchCard.titleLinks", params) : t("vault.batchCard.title", params);
+    }
     if (u.import) {
         const from = u.import.service;
         return u.import.replaces ? `${agent} wants to replace the value of ${label} with a secret from ${from}` : `${agent} wants to copy a secret from ${from} into your Vault as ${label}`;
     }
     if (u.link) {
+        // A link holds no value, so its place is where the key itself lives; and a change that leaves the place alone
+        // is to what the entry says of the key (who reads it, when it last changed, where else it is kept).
+        if (u.link.only || u.link.from === u.link.to) return t("vault.linkCard.titleAbout", { agent, label });
         if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
         return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
     }
@@ -92,8 +103,9 @@ export function promptTitle(u: UseRequest, short = false): string {
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
-    if (u.batch) return t("vault.batchCard.note");
+    if (u.batch) return linksOnly(u.batch) ? t("vault.batchCard.noteLinks") : t("vault.batchCard.note");
     if (u.import) return "The agent never sees the value: AgentMux reads it.";
+    if (u.link?.only) return t("vault.linkCard.noteLinked");
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
@@ -159,16 +171,24 @@ function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["
     return (
         <>
             <p {...tip(clip(props.use.entry_label, CLIP.label) === props.use.entry_label ? undefined : props.use.entry_label)}>
-                <Rich k="vault.linkCard.what" params={{ label: clip(props.use.entry_label, CLIP.label) }} />
+                <Rich k={props.link.only ? "vault.linkCard.whatLinked" : "vault.linkCard.what"} params={{ label: clip(props.use.entry_label, CLIP.label) }} />
             </p>
             <p data-link="from">
                 {t("vault.linkCard.now")} <Show when={props.link.from} fallback={t("vault.linkCard.noPlaceNow")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
                 </Show>
+                <Show when={props.link.about_from}>
+                    <br />
+                    <span data-link="about-from"><Clipped text={props.link.about_from} max={CLIP.about} /></span>
+                </Show>
             </p>
             <p data-link="to">
                 {t("vault.linkCard.askedFor")} <Show when={props.link.to} fallback={t("vault.linkCard.noPlaceAsked")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
+                </Show>
+                <Show when={props.link.about_to}>
+                    <br />
+                    <span data-link="about-to"><Clipped text={props.link.about_to} max={CLIP.about} /></span>
                 </Show>
             </p>
         </>
@@ -223,22 +243,25 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
 function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState }): JSX.Element {
     const b = props.batch;
     const a = props.answer;
+    const links = () => linksOnly(b);
     return (
         <>
             <p data-batch="source">
-                <Show when={b.region} fallback={t("vault.batchCard.fromDefaultRegion", { service: b.service })}>
-                    <Rich k="vault.batchCard.from" params={{ service: b.service, region: b.region }} />
+                <Show when={b.region} fallback={t(links() ? "vault.batchCard.linksAtDefaultRegion" : "vault.batchCard.fromDefaultRegion", { service: b.service })}>
+                    <Rich k={links() ? "vault.batchCard.linksAt" : "vault.batchCard.from"} params={{ service: b.service, region: b.region }} />
                 </Show>{" "}
-                <span {...tip(clip(b.profile, CLIP.label) === b.profile ? undefined : b.profile)}>
-                    <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin")}>
-                        <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label) }} />}>
-                            <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label) }} />
+                <Show when={!links()}>
+                    <span {...tip(clip(b.profile, CLIP.label) === b.profile ? undefined : b.profile)}>
+                        <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin")}>
+                            <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label) }} />}>
+                                <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label) }} />
+                            </Show>
                         </Show>
-                    </Show>
-                </span>
+                    </span>
+                </Show>
             </p>
             <p data-batch="vault" {...tip(clip(b.vault, CLIP.label) === b.vault ? undefined : b.vault)}>
-                <Rich k="vault.batchCard.into" params={{ vault: clip(b.vault, CLIP.label) }} />
+                <Rich k={links() ? "vault.batchCard.linksInto" : "vault.batchCard.into"} params={{ vault: clip(b.vault, CLIP.label) }} />
             </p>
             <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
                 <For each={b.items}>
@@ -250,7 +273,9 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                                     <strong>
                                         <Clipped text={item.label} max={CLIP.label} />
                                     </strong>
-                                    <span class="warden-manager-dim">{item.replaces ? t("vault.batchCard.replaces") : t("vault.batchCard.new", { kind: item.kind })}</span>
+                                    <span class="warden-manager-dim" data-row={item.link ? "link" : "copy"}>
+                                        {item.link ? t("vault.batchCard.link") : item.replaces ? t("vault.batchCard.replaces") : t("vault.batchCard.new", { kind: item.kind })}
+                                    </span>
                                 </span>
                                 <span class="vault-batch-secret warden-manager-mono warden-manager-dim vault-import-id">
                                     <ClippedId text={item.secret} max={CLIP.secret} />
@@ -325,7 +350,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.link ? t("vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }

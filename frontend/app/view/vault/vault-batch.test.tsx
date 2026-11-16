@@ -22,9 +22,9 @@ const batch = (over: Partial<UseBatch> = {}): UseBatch => ({
     grant: false,
     vault: "Fleet",
     items: [
-        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false },
-        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false },
-        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", replaces: true },
+        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false, link: false },
+        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false, link: false },
+        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", replaces: true, link: false },
     ],
     ...over,
 });

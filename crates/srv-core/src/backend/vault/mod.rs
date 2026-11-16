@@ -25,6 +25,7 @@ pub mod inspect;
 pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
+pub mod linked;
 pub mod plain_export;
 pub mod requests;
 pub mod endpoint_key;
@@ -200,7 +201,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         return Err(format!("a label is at most {MAX_LABEL} characters"));
     }
     for (k, v) in fields {
-        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) {
             return Err(format!("a {} entry has no field {k:?}", kind.name));
         }
         if v.len() > MAX_FIELD {
@@ -217,6 +218,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         }
     }
     source_link::validate(fields)?;
+    linked::validate(fields, !parts.0.is_empty())?;
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
     }
@@ -417,7 +419,8 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     signins::settle_profile(kind.name, &mut fields);
     card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
-    if entry.parts.get(kind.parts[0]).is_none() {
+    // A linked entry is the one kind of entry with no value: it says where the key lives.
+    if !linked::is_linked(&fields) && entry.parts.get(kind.parts[0]).is_none() {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
     }
     let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
@@ -516,6 +519,10 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     let mut fields = trimmed(std::mem::take(&mut change.fields));
     signins::settle_profile(kind.name, &mut fields);
     validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
+    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
+        return Err(linked::SET_WHEN_MADE.into());
+    }
     if change.clear.iter().any(|p| p == kind.parts[0]) {
         return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
     }
@@ -540,7 +547,6 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     }
     card::settle(kind.name, &mut fields, &mut parts)?;
     let label = change.label.trim().to_string();
-    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
     let target = match (old_fields.get(expiry::FIELD), fields.get(expiry::FIELD)) {
         (old, Some(new)) if old != Some(new) => format!("expires {new}"),
         (Some(_), None) => "no expiry date".to_string(),
@@ -637,6 +643,9 @@ fn usable_entry(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(none)?;
     if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
         return Err(none());
+    }
+    if let Some(no_value) = linked::no_value(&row) {
+        return Err(no_value);
     }
     Ok(row)
 }

@@ -108,10 +108,14 @@ fn each_item_is_checked_as_an_import_is_and_the_refusal_names_it() {
     req.items[2].aws_secret_id = "has space".into();
     assert!(refused(&s, &req).starts_with("item 3 (Gamma): aws_secret_id is the secret's name or ARN"));
 
+    // A link is a new entry: it can't be made of an entry that holds a value.
     let mut req = three();
-    req.items[0].link = true;
+    req.items[0] = BatchItem { id: Some(entry(&s, "Stripe", "personal")), link: true, ..item("pay/stripe", "") };
     let said = refused(&s, &req);
-    assert!(said.starts_with("item 1 (Alpha): link: true") && said.contains("leave link out"), "{said}");
+    assert!(said.starts_with("item 1 (") && said.contains("link: true makes a new entry"), "{said}");
+    let mut req = three();
+    req.items[0] = BatchItem { link: true, fields: [("copies".to_string(), "somewhere".to_string())].into(), ..item("hosts/alpha", "Alpha") };
+    assert!(refused(&s, &req).starts_with("item 1 (Alpha): a line of copies is"));
 
     let mut req = three();
     req.items[0].id = Some("api-key-nowhere".into());
@@ -283,4 +287,39 @@ fn a_batch_nobody_approved_is_one_line_and_many_rows_left_out_are_counted() {
     let said = listed(&labels);
     assert!(said.chars().count() < 340 && said.ends_with(" more") && said.starts_with("A label of some length, number 0, "), "{said}");
     assert_eq!(listed(&["One".to_string(), "Two".to_string()]), "One, Two");
+}
+
+#[tokio::test]
+async fn a_link_item_records_where_the_key_lives_and_reads_nothing() {
+    let s = store();
+    let mut req = three();
+    let said = [("readers".to_string(), "invoice-sync (lambda): at run time".to_string()), ("rotated".to_string(), "2026-10-01".to_string())];
+    req.items[1] = BatchItem { aws_secret_id: "prod/invoice-sync".into(), key: Some("api.token".into()), label: "Invoice provider key".into(), link: true, fields: said.into(), ..Default::default() };
+    let plan = check(&s, &req, "builder").unwrap();
+    assert!(plan.items[1].is_link() && !plan.items[0].is_link());
+    assert_eq!(plan.items[1].kind(), "api-key", "a link is an API key when the item names no kind");
+
+    let cli = Cli::holding(&["hosts/alpha", "hosts/gamma"]);
+    let approved = plan.approved(&[0, 1, 2]);
+    let results = perform(&s, &cli, &approved.items, Via::Host, "builder", BUDGET).await;
+    assert!(results.iter().all(|r| r.id.is_some() && r.error.is_none()), "{results:?}");
+    // The two copies were read, and the link was not.
+    assert_eq!(*cli.seen.lock().unwrap(), ["hosts/alpha", "hosts/gamma"]);
+
+    let row = s.vault_get(results[1].id.as_deref().unwrap()).unwrap().unwrap();
+    assert!(linked::is_linked_row(&row) && row.vault_id == plan.vault_id);
+    assert!(seal::open(&seal::key(false).unwrap(), &row.id, &row.sealed).unwrap().0.is_empty(), "a link holds no value");
+    let fields: std::collections::BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap();
+    let field = |name: &str| fields.get(name).map(String::as_str);
+    assert_eq!((field("source_kind"), field("source_location"), field("source_key"), field("source_region")), (Some("aws-secret"), Some("prod/invoice-sync"), Some("api.token"), Some("eu-west-1")));
+    assert_eq!((field("readers"), field("rotated")), (Some("invoice-sync (lambda): at run time"), Some("2026-10-01")));
+
+    // Its line says it was linked, not imported, and carries the batch's reference and the reason.
+    let lines = s.vault_activity_all().unwrap();
+    let line = lines.iter().find(|l| l.entry_id == row.id).unwrap();
+    assert_eq!((line.action.as_str(), line.target.as_str(), line.outcome.as_str(), line.reason.as_str()), (linked::LINKED, "aws-secret:prod/invoice-sync#api.token", "done", REASON));
+    assert!(line.refs.contains(&format!("{BATCH_REF}{}", plan.id)));
+    let (outcome, text) = plan.ran_text(&approved, &results);
+    assert_eq!(outcome, "done");
+    assert!(text.starts_with("3 of 3 approved, 3 stored, 0 failed"), "{text}");
 }

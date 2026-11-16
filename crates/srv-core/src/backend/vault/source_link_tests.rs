@@ -131,7 +131,7 @@ fn an_agents_list_names_the_place_and_never_the_login_it_is_read_under() {
     add(&s, "note", "text", "Plain note", &[]);
     let list = list_for_agent(&s, Some("builder")).unwrap();
     let entry = list.iter().find(|e| e.id == linked).unwrap();
-    assert_eq!(entry.source, Some(AgentLink { kind: AWS_SECRET.into(), location: "staging/app".into(), key: "db.password".into(), checked: None }));
+    assert_eq!(entry.source, Some(AgentLink { kind: AWS_SECRET.into(), location: "staging/app".into(), key: "db.password".into(), checked: None, ..Default::default() }));
     assert!(list.iter().find(|e| e.label == "Plain note").unwrap().source.is_none());
     let shown = serde_json::to_string(&list).unwrap();
     assert!(shown.contains(r#""source":{"kind":"aws-secret","location":"staging/app","key":"db.password"}"#), "{shown}");
