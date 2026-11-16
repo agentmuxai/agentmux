@@ -440,6 +440,7 @@ mod tests {
             install: "windows-portable".into(),
             asset: None,
             can_download: true,
+            download_blocked: None,
             download,
             install_first: None,
             rev: 0,

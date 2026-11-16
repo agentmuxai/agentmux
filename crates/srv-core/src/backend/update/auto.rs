@@ -87,7 +87,7 @@ async fn run(config: Arc<ConfigState>) {
                 if on.download {
                     maybe_download(&status, &mut tries);
                 }
-                after_good_check(fraction())
+                wait_after_good_check(after_good_check(fraction()), check::limited_for())
             }
             Err(e) => {
                 failures = failures.saturating_add(1);
@@ -149,6 +149,15 @@ pub(crate) fn after_good_check(r: f64) -> Duration {
     CHECK_EVERY.mul_f64(0.8 + 0.4 * r.clamp(0.0, 1.0))
 }
 
+/// A moment after GitHub's limit lifts, so the check that follows is not itself refused.
+const AFTER_LIMIT: Duration = Duration::from_secs(30);
+
+/// The wait after a good check, shortened to end just after GitHub's limit does: a release known only by its tag
+/// (no file list while the limit holds) is then checked again as soon as the download can be offered, not hours later.
+pub(crate) fn wait_after_good_check(base: Duration, limited_for: Option<Duration>) -> Duration {
+    limited_for.map_or(base, |left| base.min(left + AFTER_LIMIT))
+}
+
 /// The wait after the `failures`th failed check in a row: 15 minutes, doubling,
 /// at most a day.
 pub(crate) fn after_failure(failures: u32) -> Duration {
@@ -181,6 +190,7 @@ mod tests {
             install: "windows-portable".into(),
             asset: None,
             can_download: true,
+            download_blocked: None,
             download: None,
             install_first: None,
             rev: 0,
@@ -200,6 +210,15 @@ mod tests {
             waiting_on: Vec::new(),
             stopping: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_limit_shortens_the_wait_to_just_after_it_lifts_and_never_lengthens_it() {
+        let base = CHECK_EVERY;
+        assert_eq!(wait_after_good_check(base, None), base);
+        assert_eq!(wait_after_good_check(base, Some(Duration::from_secs(300))), Duration::from_secs(330));
+        // A limit longer than the usual wait changes nothing.
+        assert_eq!(wait_after_good_check(base, Some(base * 2)), base);
     }
 
     #[test]

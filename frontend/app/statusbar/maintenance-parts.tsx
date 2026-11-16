@@ -38,7 +38,7 @@ function AvailableRow(props: Part): JSX.Element {
                     class="maintenance-btn maintenance-btn--primary"
                     onClick={m.handleInstallUpdate}
                 >
-                    {m.installFirst() ? `Get v${m.installFirst()}` : viaStore() ? "Update in the Store" : "Download"}
+                    {m.installFirst() ? `Get v${m.installFirst()}` : viaStore() ? "Update in the Store" : m.opensDownloadPage() ? "Open the download page" : "Download"}
                 </Button>
             </Show>
         </Show>
@@ -224,6 +224,9 @@ export function Notices(props: Part): JSX.Element {
                 <Button density="compact" class="maintenance-btn" onClick={() => void openLink(STORE_MOVE_OFF_URL)}>
                     How to move off the Store build
                 </Button>
+            </Show>
+            <Show when={m.downloadBlocked()}>
+                <div class="maintenance-row-text maintenance-row-text--dim">{m.downloadBlocked()}</div>
             </Show>
             <Show when={m.startError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{m.startError()}</div>

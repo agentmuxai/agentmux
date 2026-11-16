@@ -106,6 +106,12 @@ pub struct AppUpdateStatus {
     /// the release page (or the Store) is the way.
     #[serde(default)]
     pub can_download: bool,
+    /// When a newer release is on offer and this install could upgrade itself but can't now, why: a macOS app that
+    /// can't be replaced in place, a release known only by its tag (GitHub is limiting the check), or a release with
+    /// no file for this computer. The page says so beside the button that opens the download page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub download_blocked: Option<String>,
     /// A download of the latest release, once one was asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -205,11 +211,32 @@ impl AppUpdateStatus {
             install: install_kind().label().to_string(),
             asset: None,
             can_download: false,
+            download_blocked: None,
             download: None,
             install_first: None,
             rev: 0,
         }
     }
+}
+
+/// Why a newer release is on offer but AgentMux can't download it itself, for an install that normally could: a
+/// macOS app that can't be replaced in place, a release known only by its tag (GitHub is limiting the check, so
+/// there is no file list or checksum yet), or a release with no file for this computer. `None` when it can, and
+/// for installs that never download (the Store, an unknown install): the release page is their way, not a fault.
+fn download_blocked(state: &str, kind: &InstallKind, release: &Release, has_asset: bool, below_floor: bool) -> Option<String> {
+    if state != "available" || below_floor || has_asset {
+        return None;
+    }
+    if let Some(why) = kind.blocked_reason() {
+        return Some(format!("This install can't upgrade itself where it is: {why}."));
+    }
+    if !kind.can_download() {
+        return None;
+    }
+    Some(match release.assets.is_empty() {
+        true => release.body.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "The release's file list isn't available yet.".to_string()),
+        false => "This release has no file for this computer.".to_string(),
+    })
 }
 
 /// The part of GitHub's release JSON this reads.
@@ -315,6 +342,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         state: state.to_string(),
         current: current.to_string(),
         can_download: state == "available" && kind.can_download() && asset.is_some() && install_first.is_none(),
+        download_blocked: download_blocked(state, kind, release, asset.is_some(), install_first.is_some()),
         install_first,
         latest: Some(latest),
         url: Some(release.html_url.clone()),
@@ -439,6 +467,12 @@ fn limited_until(status: u16, headers: &reqwest::header::HeaderMap, now_ms: i64)
         .or_else(|| header("x-ratelimit-reset").and_then(|v| v.parse::<i64>().ok()).map(|s| s * 1000))
         .unwrap_or(now_ms + 15 * 60_000);
     Some(until.max(now_ms + 60_000))
+}
+
+/// How long GitHub's limit on this computer still has to run, when it is in force.
+pub(crate) fn limited_for() -> Option<std::time::Duration> {
+    let left = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed) - agentmux_common::time::now_ms();
+    u64::try_from(left).ok().filter(|ms| *ms > 0).map(std::time::Duration::from_millis)
 }
 
 /// What the person is told while GitHub limits the check.
@@ -781,6 +815,41 @@ mod tests {
         assert_eq!(st.url.as_deref(), Some("https://github.com/agentmuxai/agentmux/releases/tag/v99.0.0"));
         assert!(!st.can_download && st.asset.is_none(), "nothing to download without the API's checksum");
         assert!(st.notes.as_deref().is_some_and(|n| n.contains("limiting update checks")));
+    }
+
+    #[test]
+    fn a_release_that_cannot_be_downloaded_says_why_for_an_install_that_normally_could() {
+        let setup = InstallKind::WindowsSetup;
+        // Known only by its tag (GitHub limiting the check): the reason is the limit's own note.
+        let degraded = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        let why = status_for("0.59.41", "stable", &degraded, 1, &setup).download_blocked.unwrap();
+        assert!(why.starts_with("GitHub is limiting update checks from this computer; try again after "), "{why}");
+        // No note at all: still a reason, never none.
+        assert!(status_for("0.59.41", "stable", &release_from_tag("v99.0.0", None), 1, &setup).download_blocked.is_some());
+        // A release with files, but none for this computer.
+        let other = with_asset(release("v99.0.0"), "agentmux-99.0.0-arm64.zip", Some("sha256:00"), "https://github.com/agentmuxai/agentmux/releases/download/v99.0.0/x");
+        assert_eq!(status_for("0.59.41", "stable", &other, 1, &setup).download_blocked.as_deref(), Some("This release has no file for this computer."));
+        // A macOS app that can't be replaced where it is names where and why.
+        let mac = InstallKind::MacApp { app: "/Applications/AgentMux.app".into(), blocked: Some("it is on a read-only volume".into()) };
+        let blocked = status_for("0.59.41", "stable", &release("v99.0.0"), 1, &mac).download_blocked.unwrap();
+        assert_eq!(blocked, "This install can't upgrade itself where it is: it is on a read-only volume.");
+    }
+
+    #[test]
+    fn nothing_is_blocked_when_it_can_download_or_never_downloads_or_there_is_nothing_to_offer() {
+        let degraded = release_from_tag("v99.0.0", Some(degraded_note(1_000_000_000_000)));
+        // The Store and an unknown install never download in the app: the page is their way, not a fault.
+        for kind in [InstallKind::WindowsStore, InstallKind::Unknown] {
+            assert_eq!(status_for("0.59.41", "stable", &degraded, 1, &kind).download_blocked, None, "{kind:?}");
+        }
+        // Up to date, or older than the release upgrades from: not this.
+        assert_eq!(status_for("99.0.0", "stable", &degraded, 1, &InstallKind::WindowsSetup).download_blocked, None);
+        let floor = Release { body: Some("<!-- agentmux:min-upgrade-from=98.0.0 -->".into()), ..release_from_tag("v99.0.0", None) };
+        let st = status_for("0.57.0", "stable", &floor, 1, &InstallKind::WindowsSetup);
+        assert_eq!(st.install_first.as_deref(), Some("98.0.0"));
+        assert_eq!(st.download_blocked, None);
+        // The released status says nothing before any check.
+        assert_eq!(AppUpdateStatus::initial("0.59.26").download_blocked, None);
     }
 
     #[test]
