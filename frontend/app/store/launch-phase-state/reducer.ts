@@ -10,6 +10,7 @@
  */
 
 import type { LaunchPhase } from "@/app/agent-model/launch-phase";
+import { notStoredNotice } from "@/app/agent-model/login-store-notice";
 import { pickHandler } from "@/util/handler-map";
 
 import {
@@ -47,6 +48,9 @@ function failureView(via: LoginVia, failure: LoginFailure): FailureView {
             return view(failure.message, false);
         case "save-failed":
             return view(SAVE_FAILED_NOTICE, false, via === "relogin", true);
+        case "not-stored":
+            // The login child is already reaped: drop its URL box too.
+            return view(notStoredNotice(failure.why), false, true);
         case "unavailable":
             return via === "relogin"
                 ? view(

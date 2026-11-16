@@ -352,7 +352,7 @@
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
-111 frontend/app/view/agent/commands/global/login.ts::runLogin
+110 frontend/app/view/agent/commands/global/login.ts::runLogin
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 115 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices

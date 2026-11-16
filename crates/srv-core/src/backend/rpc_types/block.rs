@@ -673,6 +673,22 @@ pub struct CheckCliAuthResult {
     pub auth_method: Option<String>,
     /// Raw stdout from auth check command
     pub raw_output: String,
+    /// Why a sign-in could not be stored here, when the check found out (macOS: "no-default-keychain").
+    #[serde(default)]
+    pub store_problem: Option<String>,
+}
+
+impl CheckCliAuthResult {
+    /// A check that found nobody signed in, with no email, method or storage problem to report.
+    pub fn signed_out(raw_output: &str) -> Self {
+        Self {
+            authenticated: false,
+            email: None,
+            auth_method: None,
+            raw_output: raw_output.to_string(),
+            store_problem: None,
+        }
+    }
 }
 
 /// Request for `provider.ensureauthdir`.

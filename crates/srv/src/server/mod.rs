@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub(crate) mod cli_handlers;
+mod keychain_probe;
 mod file_icons;
 pub(crate) mod hook_handlers;
 mod files;

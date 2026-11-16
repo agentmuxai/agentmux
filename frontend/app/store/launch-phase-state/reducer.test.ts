@@ -322,6 +322,8 @@ describe("launch-phase-state: failures and timeouts", () => {
         ["relogin", { kind: "not-detected", stage: "terminal" }, /Opened a terminal window for login, but no login was detected/],
         ["relogin", { kind: "unavailable" }, /Couldn't start a browser login or open a terminal window/],
         ["relogin", { kind: "save-failed" }, /couldn't save the account record/],
+        ["relogin", { kind: "not-stored", why: "no-keychain" }, /no login keychain/],
+        ["relogin", { kind: "not-stored", why: "unfinished" }, /code was sent, but the sign-in didn't finish/],
         ["relogin", { kind: "error", message: "Re-login failed: boom" }, /^Re-login failed: boom$/],
         ["terminal", { kind: "not-detected", stage: "terminal" }, /^No login detected after 5 minutes/],
         ["terminal", { kind: "unavailable" }, /^Couldn't open a terminal window for login on this platform\.$/],
@@ -329,6 +331,16 @@ describe("launch-phase-state: failures and timeouts", () => {
         ["terminal", { kind: "error", message: "Terminal login failed: boom" }, /^Terminal login failed: boom$/],
     ] as const)("%s %j → notice", (via, failure, notice) => {
         expect(failed(via, failure).authNotice).toMatch(notice);
+    });
+
+    it("a sign-in that could not be kept never reads as timed out, and drops its URL box", () => {
+        const state = run([
+            { type: "LoginRequested", via: "relogin", retryAfterLogin: true },
+            { type: "AuthUrlSet", url: "https://u" },
+            { type: "LoginFailed", id: 1, failure: { kind: "not-stored", why: "no-keychain" } },
+        ]).state;
+        expect(state.authNotice).not.toMatch(/timed out/);
+        expect(state.authUrl).toBeNull();
     });
 
     it("a terminal login has no link stages: no notice for them", () => {
