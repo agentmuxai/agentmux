@@ -19,6 +19,12 @@
     overflow-y: auto;
 }
 
+// A question gets more of the pane than the other requests (the same 70% a Vault batch gets, vault-request-card.scss):
+// at 40% a narrow, zoomed pane left the options no height under the header and the answers (#47821).
+.agent-request-stack:has(.agent-question-panel) {
+    max-height: 70%;
+}
+
 .pane-request-dock {
     display: flex;
     flex-direction: column;
