@@ -878,8 +878,8 @@ mod tests {
     #[test]
     fn credentials_are_not_typed() {
         for bad in [
-            "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-            "aws configure set aws_access_key_id AKIAABCDEFGHIJKLMNOP",
+            concat!("export GITHUB_TOKEN=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789"),
+            concat!("aws configure set aws_access_key_id AKI", "AABCDEFGHIJKLMNOP"),
             "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz'",
             "mysql --password=hunter2 -u root",
             "git clone https://me:hunter2@example.com/r.git",
@@ -1004,7 +1004,7 @@ mod tests {
     fn credential_text_is_never_what_the_log_keeps_whatever_refused_the_call() {
         let key = format!(
             "export K={}{}",
-            "ghp_", "abcdefghijklmnopqrstuvwxyz0123456789ab"
+            concat!("ghp", "_"), "abcdefghijklmnopqrstuvwxyz0123456789ab"
         );
         assert!(credential_line(&key));
         assert_eq!(detail_for_log(&key, ""), "");

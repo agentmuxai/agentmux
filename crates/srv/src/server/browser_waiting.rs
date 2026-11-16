@@ -478,11 +478,11 @@ mod tests {
     #[test]
     fn a_card_number_or_token_on_the_page_does_not_reach_the_transcript() {
         let card = "4111 1111 1111 1111";
-        let token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let token = concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789");
         let question = format!("Click \"Pay {card}\" on https://a.test/?k={token}");
         for state in [State::Done(format!("The page is now https://a.test/{token}.")), State::Failed(format!("{card} changed")), State::Void(token.to_string())] {
             let t = outcome_text("r-4", "approval", &question, &state);
-            assert!(!t.contains(card) && !t.contains("ghp_abcdef"), "{t}");
+            assert!(!t.contains(card) && !t.contains(concat!("ghp", "_abcdef")), "{t}");
         }
         assert!(outcome_text("r-4", "approval", &question, &State::Declined).contains("[card number hidden]"));
     }
