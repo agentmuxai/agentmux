@@ -215,17 +215,25 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(order(await screen.findByRole("group"))).toEqual(["source", "mixed", "rows"]);
     });
 
-    it("scrolls a batch's card as a whole and keeps its answers in view", () => {
+    it("scrolls every card as a whole, keeps its answers in view and gives it more of the pane", () => {
         // What a narrow, zoomed pane needs is in the stylesheet: with the body as the scroll box, the title and
-        // the answers could fill the card and leave the rows no room at all.
-        const scss = readFileSync(join(__dirname, "vault-request-card.scss"), "utf8");
-        const start = scss.indexOf(".vault-request-card:has(.vault-batch-rows) {");
-        const rule = scss.slice(start, scss.indexOf("\n}", start)).replace(/\s+/g, " ");
-        expect(start).toBeGreaterThanOrEqual(0);
-        expect(rule).toMatch(/^\S+ \{ overflow-y: auto;/);
-        expect(rule).toMatch(/\.vault-request-card-title, \.vault-request-card-body \{ flex-shrink: 0; \}/);
-        expect(rule).toMatch(/\.vault-request-card-body \{ overflow-y: visible; \}/);
-        expect(rule).toMatch(/\.vault-request-card-actions \{ position: sticky; bottom: 0;/);
+        // the answers could fill the card and leave what it says no room at all.
+        const scss = readFileSync(join(__dirname, "vault-request-card.scss"), "utf8").replace(/\s+/g, " ");
+        expect(scss).toMatch(/ \.vault-request-card \{[^{}]* overflow-y: auto;[^{}]*\}/);
+        expect(scss).toMatch(/\.vault-request-card-title, \.vault-request-card-body \{ flex-shrink: 0; \}/);
+        // The body is no scroll box of its own, for a batch's card or any other.
+        const body = / \.vault-request-card-body \{([^{}]*) p \{/.exec(scss)?.[1];
+        expect(body).toMatch(/display: flex;/);
+        expect(body).not.toMatch(/overflow-y|min-height/);
+        expect(scss).not.toContain(".vault-request-card:has(");
+        expect(scss).toMatch(/ \.vault-request-card-actions \{ position: sticky; bottom: 0;/);
+        // The larger share gives way before the status rows under the stack do, and no further than the old share.
+        const stack = /\.agent-request-stack:has\(\.vault-request-card\) \{([^{}]*)\}/.exec(scss)?.[1];
+        expect(stack).toMatch(/max-height: 70%;/);
+        expect(stack).toMatch(/flex-shrink: 1000;/);
+        expect(stack).toMatch(/min-height: min\(40%, 6rem\);/);
+        // A scroll bar that comes or goes must not change where the card's lines wrap.
+        expect(scss).toMatch(/ \.vault-request-card \{[^{}]* scrollbar-gutter: stable;[^{}]*\}/);
     });
 
     it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {

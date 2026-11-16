@@ -227,9 +227,9 @@ describe("flowCurve", () => {
     it("keeps its label off the strip a region's title is written in", () => {
         // An agent in a region, and the review bot in the region under it: the middle of the line between them
         // is on the lower region's title.
-        const agent = { x: 16, y: 56 };
-        const bot = { x: 16, y: 204 };
-        const title = { x: 0, y: 148, w: 326, h: 30 };
+        const agent = { x: 16, y: 40 };
+        const bot = { x: 16, y: 154 };
+        const title = { x: 0, y: 114, w: 326, h: 30 };
         const middle = flowCurve(bot, agent, [agent, bot])!.label;
         expect(middle.y).toBeGreaterThan(title.y);
         const moved = flowCurve(bot, agent, [agent, bot, title])!.label;
@@ -281,8 +281,8 @@ describe("flowCurves", () => {
         const bot = { x: 16, y: 204 };
         const layout = {
             regions: [
-                { key: "m", x: 0, y: 0, w: 220, h: 120, foldY: 0 },
-                { key: "services", x: 0, y: 148, w: 220, h: 120, foldY: 0 },
+                { key: "m", x: 0, y: 0, w: 220, h: 120, foldX: 0, foldY: 0 },
+                { key: "services", x: 0, y: 148, w: 220, h: 120, foldX: 0, foldY: 0 },
             ],
             width: 220,
             height: 268,

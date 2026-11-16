@@ -74,9 +74,19 @@ describe("the row a sound came from", () => {
     });
 
     it("says who made the last sound, and nothing after a minute", () => {
-        expect(lastSoundLine(rows, [played({})], 14_100)).toEqual({ text: "♪ korp · Bash · 4s ago", blockId: "blk-korp" });
+        expect(lastSoundLine(rows, [played({})], 14_100)).toEqual({ text: "korp · Bash · 4s ago", blockId: "blk-korp" });
         expect(lastSoundLine(rows, [played({})], 10_100 + 60_001)).toBeNull();
         expect(lastSoundLine(rows, [], 10_000)).toBeNull();
+    });
+
+    it("names the agent in the sound's pane, so a sound whose row the filter hides still says who (#47844)", () => {
+        const agentIn = (blockId: string) => (blockId === "blk-korp" ? "Korp" : undefined);
+        expect(lastSoundLine([], [played({})], 14_100, agentIn)?.text).toBe("Korp · Bash · 4s ago");
+        // The same name as the status bar's line, whether the row is in the list or not.
+        expect(lastSoundLine(rows, [played({})], 14_100, agentIn)?.text).toBe("Korp · Bash · 4s ago");
+        // A pane with no known agent: the row says who, and with no row nobody is named.
+        expect(lastSoundLine(rows, [played({})], 14_100, () => undefined)?.text).toBe("korp · Bash · 4s ago");
+        expect(lastSoundLine([], [played({})], 14_100, () => undefined)?.text).toBe("Bash · 4s ago");
     });
 });
 
@@ -85,8 +95,8 @@ describe("the last sound, for the status bar and the Audit's bar", () => {
         expect(lastSound([played({ at: 1_000 }), played({ at: 5_000 })], 6_000)?.at).toBe(5_000);
         expect(lastSound([played({ at: 5_000 })], 5_000 + 60_001)).toBeUndefined();
         expect(lastSound([], 5_000)).toBeUndefined();
-        expect(soundText(played({ at: 10_000 }), "korp", 14_000)).toBe("♪ korp · Bash · 4s ago");
-        expect(soundText(played({ at: 10_000, event: "agent.turn.complete", tool: undefined }), undefined, 14_000)).toBe("♪ Agent turn completed · 4s ago");
+        expect(soundText(played({ at: 10_000 }), "korp", 14_000)).toBe("korp · Bash · 4s ago");
+        expect(soundText(played({ at: 10_000, event: "agent.turn.complete", tool: undefined }), undefined, 14_000)).toBe("Agent turn completed · 4s ago");
     });
 
     it("names the kind of row a sound comes from, so the Audit can show that kind", () => {

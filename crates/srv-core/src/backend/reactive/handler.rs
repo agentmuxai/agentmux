@@ -1439,13 +1439,11 @@ impl ReactiveHandler {
     }
 
     /// Records an action that isn't a jekt injection (fleet bulk-stop,
-    /// pane-lifecycle close/etc. — `crates/srv/src/server/app_api/{fleet,
-    /// pane}.rs`) into the SAME audit ring buffer, so it shows up in
-    /// the Audit pane exactly like an ordinary injection
-    /// (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md` §6 — fleet actions get
-    /// visibility there without the Audit pane owning any new code). `action` fills
-    /// the slot `log_audit` normally uses for the injected message text
-    /// (e.g. `"fleet.bulk-stop"`, `"pane.close"`); `target_agent` is the
+    /// pane-lifecycle close/etc., an AWS credential grant, a seat change, a rename: callers in
+    /// `crates/srv/src/server/app_api/`) into the SAME audit ring buffer, as an action row
+    /// (`action_audit.rs`): who did it, what (`action`, e.g. `"fleet.bulk-stop"`, `"pane.close"`),
+    /// to what and how it went, with no byte count (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`
+    /// §6); `target_agent` is the
     /// resolved agent name for `block_id` when known, else `block_id` itself
     /// (an unregistered/already-stopped block has no agent to name).
     ///
@@ -1465,17 +1463,7 @@ impl ReactiveHandler {
         request_id: &str,
         reason: Option<&str>,
     ) {
-        self.inner.lock().log_audit(
-            source_agent,
-            target_agent,
-            block_id,
-            action,
-            success,
-            error_message,
-            request_id,
-            None,
-            reason,
-        );
+        self.audit_fleet_action(source_agent, target_agent, block_id, action, success, error_message, request_id, reason);
     }
 }
 

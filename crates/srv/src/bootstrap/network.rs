@@ -71,10 +71,10 @@ pub async fn bind_listeners_and_network(
     let (web_listener, ws_listener) = if crate::headless::active() {
         let web_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Web);
         let ws_bind = crate::headless::startup_bind_addr(crate::headless::Listener::Ws);
-        let web = TcpListener::bind(&web_bind)
+        let web = crate::headless::bind_exclusive(&web_bind)
             .await
             .unwrap_or_else(|e| panic!("failed to bind web listener on {web_bind}: {e}"));
-        let ws = TcpListener::bind(&ws_bind)
+        let ws = crate::headless::bind_exclusive(&ws_bind)
             .await
             .unwrap_or_else(|e| panic!("failed to bind ws listener on {ws_bind}: {e}"));
         (web, ws)

@@ -418,6 +418,15 @@ export function releaseDownload(s: AppUpdateStatus | null = appUpdate()): Downlo
     return d && s?.latest && d.version === s.latest ? d : null;
 }
 
+/**
+ * The download page for this install's system (`install` is srv's label), or null when it isn't one of the desktop
+ * systems: what a button that cannot download the file itself opens, so a person lands on their own platform's files.
+ */
+export function downloadPageUrl(install: string | undefined): string | null {
+    const system = install?.startsWith("windows-") ? "windows" : install?.startsWith("macos-") ? "macos" : install?.startsWith("linux-") ? "linux" : null;
+    return system ? `https://agentmux.ai/downloads#${system}` : null;
+}
+
 /** What's new: the release's own page on GitHub, or the list of releases when the version isn't known. */
 export function releaseNotesUrl(version: string | null | undefined): string {
     return version

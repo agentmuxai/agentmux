@@ -11,6 +11,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import {
     acceptStoreProgress,
+    downloadPageUrl,
     setStoreProgress,
     STORE_ASKING_WINDOW_LINE,
     STORE_INSTALLING_LINE,
@@ -129,5 +130,15 @@ describe("the downloaded row and the restart question", () => {
         const line = storeStayedLine({ state: "stayed", from: "0.60.24", target: "", reopen_failed: true });
         expect(line).toContain("AgentMux could not arrange to open itself after the update");
         expect(storeStayedLine({ state: "stayed", from: "0.60.24", target: "" })).not.toContain("could not arrange");
+    });
+});
+
+describe("the download page a button opens when AgentMux cannot download the file itself", () => {
+    it("is the page of this install's system, and none for an install of no known system", () => {
+        expect(downloadPageUrl("macos-app")).toBe("https://agentmux.ai/downloads#macos");
+        for (const kind of ["windows-setup", "windows-portable", "windows-store"]) expect(downloadPageUrl(kind)).toBe("https://agentmux.ai/downloads#windows");
+        for (const kind of ["linux-appimage", "linux-portable", "linux-package"]) expect(downloadPageUrl(kind)).toBe("https://agentmux.ai/downloads#linux");
+        expect(downloadPageUrl("unknown")).toBeNull();
+        expect(downloadPageUrl(undefined)).toBeNull();
     });
 });
