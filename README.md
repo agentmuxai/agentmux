@@ -209,11 +209,10 @@ Splitting the window into more panes is still there (drag a header to a
 pane's edge, or the widget bar's own click target): tabs add breadth to a
 pane you already have, splits add more panes.
 
-Inspired by [cmux](https://github.com/manaflow-ai/cmux) (manaflow-ai) — an
-open-source terminal built for running multiple AI coding agents in parallel,
-whose `Workspace → Pane → Surface → Panel` hierarchy is functionally the same
-shape this generalizes AgentMux toward. Design rationale, terminology, and the
-full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
+Tabs inside each pane, so every pane holds several, come from
+[cmux](https://github.com/manaflow-ai/cmux) (manaflow-ai), an open-source
+terminal built for running multiple AI coding agents in parallel. Design
+rationale, terminology, and the full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md`](docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md).
 
 ### Not widgets — opened from elsewhere
 

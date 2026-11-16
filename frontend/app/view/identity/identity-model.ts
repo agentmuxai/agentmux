@@ -19,7 +19,9 @@ import type { AgentDefinition, IdentityAccount } from "@/app/store/rpc-api";
 import { WpsEvent } from "@/app/store/mps-events";
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux";
+// `xai` is a tile with no account of its own (Grok Build signs in inside the agent); `kimi` is the Moonshot
+// key's provider id, the one srv's key class and the agent's provider use.
+export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux" | "xai" | "kimi";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 /** `needs_reauth`: the provider refused a refresh (`invalid_grant`); the user must reconnect. */
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking" | "needs_reauth";
@@ -223,6 +225,20 @@ export function deleteResultNotice(result: {
     return parts.length > 0 ? parts.join(" ") : null;
 }
 
+/** The brands accounts are grouped under, in order: one per tile of Connectors' gallery (a test holds the two together). */
+export const ACCOUNT_BRAND_ORDER: readonly AccountProvider[] = [
+    "github",
+    "google",
+    "aws",
+    "openai",
+    "anthropic",
+    "xai",
+    "kimi",
+    "slack",
+    "custom",
+    "agentmux",
+];
+
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     github: "GitHub",
     openai: "OpenAI",
@@ -232,6 +248,8 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     slack: "Slack",
     custom: "Custom",
     agentmux: "AgentMux",
+    xai: "xAI",
+    kimi: "Moonshot",
 };
 
 export const KIND_LABELS: Record<AccountKind, string> = {
@@ -659,8 +677,7 @@ export class IdentityViewModel implements ViewModel {
     // See docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
-        const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
-        for (const p of order) {
+        for (const p of ACCOUNT_BRAND_ORDER) {
             const group = this.accountsAtom().filter((a) => brandForProvider(a.provider) === p);
             if (group.length > 0) map.set(p, group);
         }

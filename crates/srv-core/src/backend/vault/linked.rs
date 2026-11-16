@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use super::aws_import::{self, Described, Imported, Plan, Source, Target, Via, NO_SUCH_SECRET};
 use super::source_link::{self, CheckPlan, Checked, Link, Outcome, VaultSourceCheck, AWS_SECRET, GITHUB_SECRET, OTHER};
-use super::{expiry, history, insert_unrecorded, record_line, record_row, signins, Line, NewEntry, Parts};
+use super::{expiry, github_secret, history, insert_unrecorded, record_line, record_row, signins, Line, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
 use crate::identity::aws_broker::mint::Runner;
@@ -51,7 +51,7 @@ pub const UNCHECKED_DAYS: i64 = 30;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// Why a change that would make an entry a link, or a link an entry with a value, is refused.
 pub const SET_WHEN_MADE: &str = "whether an entry is a link (it holds no value) is set when it is made: make a new entry instead";
-const NOT_FROM_HERE: &str = "this kind of place can't be described from here: only an AWS secret is, today";
+const NOT_FROM_HERE: &str = "this kind of place can't be described from here: only an AWS secret and a CI secret are";
 const NOT_UNDER_AWS: &str = "an AWS copy is described under the entry's own AWS place, and this entry's place isn't in AWS";
 
 /// Whether `name` is one of a link's fields, which every kind of entry may have.
@@ -224,6 +224,9 @@ pub struct CopyChecked {
     pub outcome: &'static str,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub why: String,
+    /// `not started`: the newest check of this place as the entry is now, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored: Option<VaultSourceCheck>,
 }
 
 /// What is known of one of the other places an entry names, for its "Also kept at" line. No value.
@@ -241,10 +244,11 @@ pub struct VaultCopyCheck {
 }
 
 /// Why a check can't describe `copy` from here, for an entry whose own place is of the kind `own`; `None` when it
-/// can: a copy in AWS is described under the entry's own AWS place, and nothing else is, today.
+/// can: a CI secret is described wherever the entry's own place is, and a copy in AWS under the entry's own AWS
+/// place, whose region and login it is read with.
 fn cannot_describe(copy: &Link, own: &str) -> Option<&'static str> {
     match (copy.kind.as_str(), own) {
-        (AWS_SECRET, AWS_SECRET) => None,
+        (GITHUB_SECRET, _) | (AWS_SECRET, AWS_SECRET) => None,
         (AWS_SECRET, _) => Some(NOT_UNDER_AWS),
         _ => Some(NOT_FROM_HERE),
     }
@@ -261,55 +265,67 @@ pub fn copy_checks(store: &Store, row: &VaultRow) -> Vec<VaultCopyCheck> {
         return Vec::new();
     }
     let own = Link::of(&fields).map(|link| link.kind).unwrap_or_default();
-    // Newest first. A check writes one line a copy, so this holds the last few checks of every copy.
-    let checks = store.vault_activity_for_entry(&row.id, &[CHECKED_COPY], row.updated_at, (MAX_COPIES * 4) as i64).unwrap_or_default();
+    let checks = copy_lines(store, row);
     named
         .iter()
         .map(|(written, copy)| match cannot_describe(copy, &own) {
             Some(why) => VaultCopyCheck { place: written.to_string(), checked: None, cannot: why.into() },
-            None => {
-                let checked = checks.iter().find(|line| line.target == copy.text()).map(|line| VaultSourceCheck { at: line.at, outcome: line.outcome.clone() });
-                VaultCopyCheck { place: written.to_string(), checked, cannot: String::new() }
-            }
+            None => VaultCopyCheck { place: written.to_string(), checked: newest_of(&checks, copy), cannot: String::new() },
         })
         .collect()
 }
 
-/// What each place's description came to: the entry's own place, then its other places in order. No value is in a
-/// description.
-pub struct Found {
-    place: Result<Described, String>,
-    copies: Vec<(Link, Result<Described, String>)>,
+/// The lines of the checks of the entry's other places as the entry is now, newest first. A check writes one line a
+/// copy, so this holds the last few checks of every copy.
+fn copy_lines(store: &Store, row: &VaultRow) -> Vec<VaultActivityRow> {
+    store.vault_activity_for_entry(&row.id, &[CHECKED_COPY], row.updated_at, (MAX_COPIES * 4) as i64).unwrap_or_default()
 }
 
-async fn describe_place<R: Runner>(runner: &R, link: &Link, via: Via<'_>) -> Result<Described, String> {
-    let Some(source) = link.aws() else {
-        return Err(NOT_FROM_HERE.into());
-    };
-    aws_import::describe_secret(runner, &source, via).await
+/// The newest check of `copy` among `checks` ([`copy_lines`]).
+fn newest_of(checks: &[VaultActivityRow], copy: &Link) -> Option<VaultSourceCheck> {
+    checks.iter().find(|line| line.target == copy.text()).map(|line| VaultSourceCheck { at: line.at, outcome: line.outcome.clone() })
+}
+
+/// What each place's description came to: the entry's own place, then its other places in order. No value is in a
+/// description. `None` is a CI secret no read was started for (`CheckPlan::no_github`).
+pub struct Found {
+    place: Option<Result<Described, String>>,
+    copies: Vec<(Link, Option<Result<Described, String>>)>,
+}
+
+/// The description of one place, or `None` for a CI secret when this asker's check may not start a read of one.
+async fn describe_place<R: Runner>(runner: &R, plan: &CheckPlan, link: &Link, via: Via<'_>) -> Option<Result<Described, String>> {
+    Some(match (link.kind.as_str(), link.aws()) {
+        (GITHUB_SECRET, _) if plan.no_github.is_some() => return None,
+        (GITHUB_SECRET, _) => github_secret::describe(runner, link).await,
+        (_, Some(source)) => aws_import::describe_secret(runner, &source, via).await,
+        (_, None) => Err(NOT_FROM_HERE.into()),
+    })
 }
 
 /// Reads the description of the entry's place and of each other place it names, with the asker's access. A copy in
 /// AWS is described as the entry's own place is, under the same region and login: when the entry's place is not in
-/// AWS there is no login to describe one under, and nothing is run for it.
+/// AWS there is no login to describe one under, and nothing is run for it. A CI secret is read with the GitHub CLI
+/// of this computer, wherever the entry's own place is.
 pub async fn describe<R: Runner>(runner: &R, plan: &CheckPlan, via: Via<'_>) -> Found {
-    // The places are described together: each run of the CLI has its own time limit, and a check of an entry with
+    // The places are described together: each run of a CLI has its own time limit, and a check of an entry with
     // four copies must still answer inside the caller's wait.
     let copies = plan.copies.iter().map(|copy| async move {
         let described = match cannot_describe(copy, &plan.link.kind) {
-            None => describe_place(runner, &Link { region: plan.link.region.clone(), profile: plan.link.profile.clone(), ..copy.clone() }, via).await,
-            Some(why) => Err(why.into()),
+            Some(why) => Some(Err(why.into())),
+            None if copy.kind == AWS_SECRET => describe_place(runner, plan, &Link { region: plan.link.region.clone(), profile: plan.link.profile.clone(), ..copy.clone() }, via).await,
+            None => describe_place(runner, plan, copy, via).await,
         };
         (copy.clone(), described)
     });
-    let (place, copies) = futures_util::future::join(describe_place(runner, &plan.link, via), futures_util::future::join_all(copies)).await;
+    let (place, copies) = futures_util::future::join(describe_place(runner, plan, &plan.link, via), futures_util::future::join_all(copies)).await;
     Found { place, copies }
 }
 
 /// What a place's description says against the date the entry records: gone, changed after that date, or there.
 fn outcome_of(described: &Result<Described, String>, recorded: Option<NaiveDate>) -> Outcome {
     match (described, recorded) {
-        (Err(why), _) if why == NO_SUCH_SECRET => Outcome::Missing(why.clone()),
+        (Err(why), _) if why == NO_SUCH_SECRET || why == github_secret::NO_SUCH_SECRET => Outcome::Missing(why.clone()),
         (Err(why), _) => Outcome::CouldNotRead(why.clone()),
         (Ok(d), _) if d.deleted => Outcome::Missing("the secret is scheduled for deletion".into()),
         (Ok(Described { changed: Some(changed), .. }), Some(recorded)) if *changed > recorded => Outcome::Changed(format!("the place last changed on {changed}, after the {recorded} recorded")),
@@ -317,24 +333,55 @@ fn outcome_of(described: &Result<Described, String>, recorded: Option<NaiveDate>
     }
 }
 
+/// The answer for a place no read was started for: why, what to do, and the newest stored result when there is one.
+fn not_started(plan: &CheckPlan, stored: &Option<VaultSourceCheck>) -> Outcome {
+    let why = plan.no_github.as_deref().unwrap_or("no read was started");
+    let last = if stored.is_some() { "The newest stored result is in `stored`." } else { "It has not been checked yet." };
+    Outcome::NotStarted(format!("{why} {last}"))
+}
+
+/// The entry changed or went while its places were read: what was read says nothing of it. The copies that were
+/// read are still named, so the record of the reads is whole.
+fn overtaken(store: &Store, plan: &CheckPlan, found: &Found, why: String) -> Checked {
+    let outcome = Outcome::CouldNotRead(why);
+    let mut checked = if found.place.is_some() { source_link::conclude(store, plan, &outcome) } else { Checked::of(plan, &outcome) };
+    let read = found.copies.iter().filter(|(copy, described)| described.is_some() && cannot_describe(copy, &plan.link.kind).is_none());
+    checked.copies = read.map(|(copy, _)| CopyChecked { place: place_text(copy), outcome: outcome.word(), why: outcome.why().to_string(), stored: None }).collect();
+    checked
+}
+
 /// Records what the descriptions came to and answers it: a line for the entry's own place, and one for each other
-/// place that was asked. Never fails: a place that can't be described is an outcome.
+/// place that was asked. A place no read was started for gets no line, and answers with its newest stored result.
+/// Never fails: a place that can't be described is an outcome.
 pub fn finish(store: &Store, plan: &CheckPlan, found: Found) -> Checked {
     let row = match source_link::as_planned(store, plan) {
         Ok(row) => row,
-        Err(why) => return source_link::conclude(store, plan, &Outcome::CouldNotRead(why)),
+        Err(why) => return overtaken(store, plan, &found, why),
     };
     let recorded = fields_of(&row).get(ROTATED).and_then(|date| expiry::parse(date).ok());
+    let earlier = copy_lines(store, &row);
     let mut copies = Vec::with_capacity(found.copies.len());
     for (copy, described) in &found.copies {
+        let Some(described) = described else {
+            let stored = newest_of(&earlier, copy);
+            let outcome = not_started(plan, &stored);
+            copies.push(CopyChecked { place: place_text(copy), outcome: outcome.word(), why: outcome.why().to_string(), stored });
+            continue;
+        };
         let outcome = outcome_of(described, recorded);
         if cannot_describe(copy, &plan.link.kind).is_none() {
             record_line(store, Line { entry_id: &plan.entry_id, label: &plan.label, actor: &plan.actor, action: CHECKED_COPY, target: &copy.text(), outcome: &outcome.line(), reason: &plan.reason });
         }
-        copies.push(CopyChecked { place: place_text(copy), outcome: outcome.word(), why: outcome.why().to_string() });
+        copies.push(CopyChecked { place: place_text(copy), outcome: outcome.word(), why: outcome.why().to_string(), stored: None });
     }
-    let mut checked = source_link::conclude(store, plan, &outcome_of(&found.place, recorded));
-    if let Ok(described) = &found.place {
+    let mut checked = match &found.place {
+        Some(place) => source_link::conclude(store, plan, &outcome_of(place, recorded)),
+        None => {
+            let stored = source_link::last_check(store, &row, &plan.link);
+            Checked { stored: stored.clone(), ..Checked::of(plan, &not_started(plan, &stored)) }
+        }
+    };
+    if let Some(Ok(described)) = &found.place {
         checked.last_changed = described.changed.map(|day| day.to_string());
         checked.rotation = described.rotation;
     }

@@ -50,6 +50,14 @@
     font-size: 0.9em;
 }
 
+// The scope banner is its text and a link side by side: the gap is the space between them (not a space in the i18n string).
+.reviews-scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-2);
+}
+
 .reviews-body {
     display: flex;
     flex: 1 1 auto;

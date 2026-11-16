@@ -566,11 +566,15 @@ impl<'a> Scheduler<'a> {
         let started_at = self.begin_block(node).await;
         let spent_before = self.spent;
         // A replay does not repeat the world: a block with effects says what it said before.
-        let result = match self.stub_of(node, kind) {
-            Some(said) => Ok(said),
-            None => self.guarded(node, kind).await,
+        let (stubbed, result) = match self.stub_of(node, kind) {
+            Some(said) => (true, said),
+            None => (false, self.guarded(node, kind).await),
         };
-        self.end_block(node, kind, result, (started_at, spent_before)).await
+        let ended = self.end_block(node, kind, result, (started_at, spent_before)).await;
+        if stubbed && ended.is_ok() {
+            self.keep_stub_bits(&node.id);
+        }
+        ended
     }
 
     /// A block starts: its event and its running state. Gives when it started, which the

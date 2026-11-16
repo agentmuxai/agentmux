@@ -111,6 +111,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - name: Use the mold linker (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: rui314/setup-mold@v1
@@ -552,10 +554,10 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
-          # The install scripts are release assets too, so the signed manifest covers them
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" \) -exec cp {} dist-flat/ \;
+          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
-          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
           ls -l dist-flat/
 
       # The agent image this release pushed, by the digest of what was pushed: the app pulls
@@ -659,14 +661,14 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Say which server packages this release has
+      - name: Say which Headless packages this release has
         env:
           PACKAGE_RESULT: ${{ needs.build-server-package.result }}
         run: |
-          line="Release v${VERSION}: the server package is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --server says so."
+          line="Release v${VERSION}: AgentMux Headless is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --headless says so."
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
           if [ "$PACKAGE_RESULT" != success ]; then
-            line="Release v${VERSION}: the server package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no server package."
+            line="Release v${VERSION}: the AgentMux Headless package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no Headless package."
             echo "::warning::$line"
             echo "$line" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -689,10 +691,10 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-server-*.tar.gz" \) -exec cp {} dist-flat/ \;
-          # The install scripts are release assets too, so the signed manifest covers them
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" \) -exec cp {} dist-flat/ \;
+          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
-          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" dist-flat/; fi; done
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
           echo "--- Release artifacts ---"
           ls -lh dist-flat/
 

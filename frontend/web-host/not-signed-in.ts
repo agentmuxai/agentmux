@@ -51,7 +51,7 @@ export function notSignedInText(problem: SignInProblem): { title: string; lead: 
         title: "This browser isn't signed in",
         lead:
             problem === "ended"
-                ? "This browser's sign-in has ended. It was signed out, or the server was restarted."
+                ? "This browser's sign-in has ended. It was signed out, or AgentMux Headless was restarted."
                 : "AgentMux is running, but this browser hasn't been signed in to it.",
     };
 }

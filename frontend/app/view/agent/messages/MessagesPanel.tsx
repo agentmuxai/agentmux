@@ -102,7 +102,7 @@ function MessagesDock(props: MessagesPanelProps): JSX.Element {
         );
     };
     publishHeaderButton(props.blockId, controls, model.unread, () => model.waiting().length > 0);
-    // The Swarm row and the pane's tab show the same count (MessagesUnreadChip); they read it from here.
+    // The Swarm row shows the same count (MessagesUnreadChip); it reads it from here.
     createEffect(() => publishMessagesUnread(props.blockId, { unread: model.unread(), needsYou: model.waiting().length > 0 }));
     onCleanup(() => publishMessagesUnread(props.blockId, null));
     // Opened, the panel takes the keyboard: Esc then shuts it instead of reaching the pane. Not from under a text

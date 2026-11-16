@@ -6,6 +6,9 @@
  *  drawn from srv's record in the pane that asked, answered through the host,
  *  gone when srv's list drops them, never taking the composer's focus. */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -186,6 +189,51 @@ describe("an agent's Vault requests as cards in its pane", () => {
         const yeses = actions.querySelector(".vault-use-allow")!;
         expect([...yeses.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Allow once", "Always for Builder"]);
         expect(deny.nextElementSibling).toBe(yeses);
+    });
+
+    it("lists a batch's rows before its account and Vault in the pane, and after them in the Vault pane's list", async () => {
+        const items = ["Alpha", "Beta"].map((label, i) => ({ label, kind: "login", secret: `hosts/${label.toLowerCase()}`, key: "", replaces: false, link: i === 1 }));
+        const batch = { name: "host passwords", service: "AWS Secrets Manager", region: "eu-west-1", profile: "work-read", grant: false, vault: "Fleet", agents: { mode: "all" as const }, vaults: [], items };
+        const asked = (block_id: string) => use({ block_id, entry_id: "", entry_label: "host passwords", what: "secrets", command: "", offer_always: false, goes_ahead: false, batch });
+        // The rows, the count of what is ticked and the paragraph that names the account, in the order the page reads them.
+        const order = (card: HTMLElement) => [...card.querySelectorAll<HTMLElement>('.vault-batch-rows, [data-batch="mixed"], [data-batch="source"]')].map((e) => e.dataset.batch ?? "rows");
+
+        // A card has a share of the pane's height: in a narrow, zoomed pane only its first lines are in view.
+        uses = [asked(PANE)];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        const dock = await screen.findByTestId("pane-request-dock");
+        expect(order(dock)).toEqual(["rows", "mixed", "source"]);
+        expect(dock.querySelector('[data-batch="source"]')?.textContent).toContain("Read from AWS Secrets Manager in eu-west-1.");
+        expect(within(dock).getAllByRole("checkbox")).toHaveLength(2);
+        cleanup();
+
+        // The Vault pane's list has the pane to itself: the account and the Vault come first, as they did.
+        uses = [asked("")];
+        await refreshVault();
+        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        expect(order(await screen.findByRole("group"))).toEqual(["source", "mixed", "rows"]);
+    });
+
+    it("scrolls every card as a whole, keeps its answers in view and gives it more of the pane", () => {
+        // What a narrow, zoomed pane needs is in the stylesheet: with the body as the scroll box, the title and
+        // the answers could fill the card and leave what it says no room at all.
+        const scss = readFileSync(join(__dirname, "vault-request-card.scss"), "utf8").replace(/\s+/g, " ");
+        expect(scss).toMatch(/ \.vault-request-card \{[^{}]* overflow-y: auto;[^{}]*\}/);
+        expect(scss).toMatch(/\.vault-request-card-title, \.vault-request-card-body \{ flex-shrink: 0; \}/);
+        // The body is no scroll box of its own, for a batch's card or any other.
+        const body = / \.vault-request-card-body \{([^{}]*) p \{/.exec(scss)?.[1];
+        expect(body).toMatch(/display: flex;/);
+        expect(body).not.toMatch(/overflow-y|min-height/);
+        expect(scss).not.toContain(".vault-request-card:has(");
+        expect(scss).toMatch(/ \.vault-request-card-actions \{ position: sticky; bottom: 0;/);
+        // The larger share gives way before the status rows under the stack do, and no further than the old share.
+        const stack = /\.agent-request-stack:has\(\.vault-request-card\) \{([^{}]*)\}/.exec(scss)?.[1];
+        expect(stack).toMatch(/max-height: 70%;/);
+        expect(stack).toMatch(/flex-shrink: 1000;/);
+        expect(stack).toMatch(/min-height: min\(40%, 6rem\);/);
+        // A scroll bar that comes or goes must not change where the card's lines wrap.
+        expect(scss).toMatch(/ \.vault-request-card \{[^{}]* scrollbar-gutter: stable;[^{}]*\}/);
     });
 
     it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {

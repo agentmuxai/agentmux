@@ -227,6 +227,8 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       # A release (a tag run) keeps no build cache and takes none: it builds from what it downloads.
       - uses: Swatinem/rust-cache@v2
         if: github.ref_type != 'tag'

@@ -8,7 +8,8 @@
 //! The link is plain fields (`source_*`), allowed on every kind and never a value. The check reads the other place
 //! with the access the asker already has, compares inside srv, and answers `same`, `different` or `could not read`
 //! with why: neither value, nor a length or a hash of one, is in an answer, an error or a history line. A refusal to
-//! read is the answer, not something to get around.
+//! read is the answer, not something to get around. A CI secret's value can't be read back by anyone, so its check
+//! reads the secret's listing entry and says whether it is there and when it last changed (`github_secret`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -35,9 +36,10 @@ pub const REGION: &str = "source_region";
 pub const PROFILE: &str = "source_profile";
 pub const FIELDS: [&str; 5] = [KIND, LOCATION, KEY, REGION, PROFILE];
 
-/// A secret in AWS Secrets Manager: the one kind a check can read.
+/// A secret in AWS Secrets Manager: the one kind whose value a check can read.
 pub const AWS_SECRET: &str = "aws-secret";
-/// A repository's or an environment's Actions secret, which nothing can read back.
+/// A repository's or an environment's Actions secret. Nothing can read its value back; a check reads its listing
+/// entry (`github_secret`).
 pub const GITHUB_SECRET: &str = "github-secret";
 /// Anywhere else, as the person describes it.
 pub const OTHER: &str = "other";
@@ -60,6 +62,8 @@ pub const COULD_NOT_READ: &str = "could not read";
 pub const PRESENT: &str = "present";
 pub const CHANGED: &str = "changed since recorded";
 pub const MISSING: &str = "missing";
+/// No read was started for this asker: the answer carries the newest stored result instead.
+pub const NOT_STARTED: &str = "not started";
 
 /// How many checks agents get of one entry in an hour, all agents together: a check answers one bit about the sealed
 /// value, so it is not something to ask in a loop.
@@ -328,6 +332,23 @@ pub struct CheckPlan {
     pub reason: String,
     /// An agent's check holds its place in the hour's limit; the person's has none.
     pub slot: Option<Arc<Slot>>,
+    /// Why this asker's check may not start a read of a CI secret, and what to do instead; `None` when it may. The
+    /// read uses the GitHub login of the person on this computer, so who may start one is decided by the caller.
+    pub no_github: Option<String>,
+}
+
+impl CheckPlan {
+    /// The check reads descriptions and compares no value: the entry is a link, or its place is a CI secret, whose
+    /// value nothing can read back.
+    pub fn describes(&self) -> bool {
+        self.only || self.link.kind == GITHUB_SECRET
+    }
+
+    /// The CI secrets this check would read: the entry's own place and its other places, when it describes them.
+    pub fn github_places(&self) -> Vec<&Link> {
+        let copies = self.copies.iter().filter(|_| self.describes());
+        std::iter::once(&self.link).chain(copies).filter(|place| place.kind == GITHUB_SECRET).collect()
+    }
 }
 
 fn plan_of(row: VaultRow, actor: &str, reason: String) -> Result<CheckPlan, String> {
@@ -337,7 +358,7 @@ fn plan_of(row: VaultRow, actor: &str, reason: String) -> Result<CheckPlan, Stri
     };
     let fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
     let (only, copies) = (linked::is_linked(&fields), linked::copies(&fields));
-    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, only, copies, actor: actor.to_string(), reason, slot: None })
+    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, only, copies, actor: actor.to_string(), reason, slot: None, no_github: None })
 }
 
 /// The person's check, from the Vault pane.
@@ -390,6 +411,8 @@ pub enum Outcome {
     Changed(String),
     /// The place is not there, or is being deleted: which.
     Missing(String),
+    /// No read was started for this asker: why, and what to do. Never a history line.
+    NotStarted(String),
 }
 
 impl Outcome {
@@ -401,12 +424,13 @@ impl Outcome {
             Outcome::Present => PRESENT,
             Outcome::Changed(_) => CHANGED,
             Outcome::Missing(_) => MISSING,
+            Outcome::NotStarted(_) => NOT_STARTED,
         }
     }
 
     pub fn why(&self) -> &str {
         match self {
-            Outcome::CouldNotRead(why) | Outcome::Changed(why) | Outcome::Missing(why) => why,
+            Outcome::CouldNotRead(why) | Outcome::Changed(why) | Outcome::Missing(why) | Outcome::NotStarted(why) => why,
             _ => "",
         }
     }
@@ -425,8 +449,8 @@ impl Outcome {
 pub struct Checked {
     pub id: String,
     pub label: String,
-    /// `same`, `different` or `could not read`; for a linked entry `present`, `changed since recorded`, `missing`
-    /// or `could not read`.
+    /// `same`, `different` or `could not read`; for a linked entry or a CI secret `present`, `changed since
+    /// recorded`, `missing` or `could not read`; `not started` when no read was started for this asker.
     pub outcome: &'static str,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub why: String,
@@ -442,6 +466,9 @@ pub struct Checked {
     /// A linked entry: what was found at each other place the key is kept.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub copies: Vec<linked::CopyChecked>,
+    /// `not started`: the newest check of the place as the entry is now, when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored: Option<VaultSourceCheck>,
 }
 
 impl Checked {
@@ -457,6 +484,7 @@ impl Checked {
             last_changed: None,
             rotation: None,
             copies: Vec::new(),
+            stored: None,
         }
     }
 }
@@ -523,8 +551,9 @@ fn finish(store: &Store, plan: &CheckPlan, other: Result<Zeroizing<String>, Stri
 pub async fn check<R: Runner>(store: &Arc<Store>, runner: &R, plan: &CheckPlan, via: Via<'_>) -> Checked {
     let stopped = Checked::of(plan, &Outcome::CouldNotRead("the check stopped before it finished".into()));
     let (store, plan) = (Arc::clone(store), plan.clone());
-    // A linked entry holds no value to compare: its place is described, and nothing of the key is read.
-    if plan.only {
+    // A linked entry holds no value to compare, and a CI secret gives none back: the place is described, and nothing
+    // of the key is read.
+    if plan.describes() {
         let found = linked::describe(runner, &plan, via).await;
         return tokio::task::spawn_blocking(move || linked::finish(&store, &plan, found)).await.unwrap_or(stopped);
     }
@@ -535,7 +564,7 @@ pub async fn check<R: Runner>(store: &Arc<Store>, runner: &R, plan: &CheckPlan, 
 /// [`check`] from a thread of the blocking pool, where the pane's operations run: the read is waited for here.
 pub fn check_blocking<R: Runner>(store: &Store, runner: &R, plan: &CheckPlan, via: Via<'_>) -> Result<Checked, String> {
     let runtime = tokio::runtime::Handle::try_current().map_err(|_| "the check can't run here".to_string())?;
-    if plan.only {
+    if plan.describes() {
         return Ok(linked::finish(store, plan, runtime.block_on(linked::describe(runner, plan, via))));
     }
     Ok(finish(store, plan, runtime.block_on(read(runner, &plan.link, via))))

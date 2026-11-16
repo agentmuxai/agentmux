@@ -10,9 +10,9 @@
 #   Linux  the portable tarball, into ~/.local/share/agentmux (no root)
 #   macOS  the .dmg, copied to /Applications (or ~/Applications)
 #
-# With --server it installs the AgentMux server package (no desktop app: a server whose web UI is a browser on its own
-# loopback address) from the same signed release, into ~/.agentmux/server, on Linux x64 or arm64 and macOS arm64 (there is
-# no Intel Mac server package).
+# With --headless it installs AgentMux Headless (no desktop app: it runs in the background and its web UI is a browser on
+# its own loopback address) from the same signed release, into ~/.agentmux/headless, on Linux x64 or arm64 and macOS arm64
+# (there is no Intel Mac Headless package). --server is the same option under its old name, accepted for two more releases.
 #
 # Plain text, no prompts, ASCII only. Run it with --help for the options.
 # Design: docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md
@@ -27,6 +27,12 @@ TAP_CASK_URL="https://raw.githubusercontent.com/agentmuxai/homebrew-tap/main/Cas
 # The public keys the app pins to verify a release (crates/common/update-keys.json), as "<id>:<base64 of the 32 raw bytes>".
 # scripts/install/install.test.sh fails when this and that file disagree.
 UPDATE_KEYS="k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE="
+# The first release that carries AgentMux-<v>-envelope.json.sshsig, the same envelope signed by the same key in SSH signature
+# form, which the system's ssh-keygen can check where its openssl cannot (a stock Mac). From this release on, a release
+# without it is refused on a system that can only check that way: never a quiet fall back to hashes. scripts/release-manifest.mjs
+# has the same value (SSHSIG_FLOOR) and scripts/install/install.test.sh fails when they differ.
+SSHSIG_FLOOR="0.60.31"
+SSHSIG_NAMESPACE="agentmux-release"
 
 DRY_RUN=0
 FORCE=0
@@ -62,9 +68,9 @@ Usage: install.sh [options]
   --no-launch               do not start AgentMux when done
   --force                   install even if AgentMux is already installed
   --require-signature       fail when the release's signature cannot be checked here
-  --server                  install the AgentMux server (no desktop app) into ~/.agentmux/server, from the signed release
+  --headless                install AgentMux Headless (no desktop app) into ~/.agentmux/headless, from the signed release
                             (Linux x64 and arm64, macOS arm64)
-  --setup                   with --server: then run  agentmux setup --yes --no-open  (a user service that starts at login)
+  --setup                   with --headless: then run  agentmux setup --yes --no-open  (a user service that starts at login)
   --help                    this text
 
 Environment: AGENTMUX_INSTALL_ROOT is a prefix for the paths it looks at (used by its tests).
@@ -81,7 +87,7 @@ while [ $# -gt 0 ]; do
         --no-launch) NO_LAUNCH=1; shift ;;
         --force) FORCE=1; shift ;;
         --require-signature) REQUIRE_SIGNATURE=1; shift ;;
-        --server) SERVER=1; shift ;;
+        --headless | --server) SERVER=1; shift ;; # --server: the name before the rename, kept for two releases
         --setup) SETUP=1; shift ;;
         --interactive) shift ;; # accepted and ignored: this script never prompts
         --help | -h) usage; exit 0 ;;
@@ -90,8 +96,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$METHOD" in auto | package-manager | download) ;; *) die "--method is auto, package-manager or download" ;; esac
-if [ "$SERVER" = 1 ] && [ "$METHOD" = package-manager ]; then die "--server installs from the release download: it has no package-manager method"; fi
-if [ "$SETUP" = 1 ] && [ "$SERVER" = 0 ]; then die "--setup is for --server"; fi
+if [ "$SERVER" = 1 ] && [ "$METHOD" = package-manager ]; then die "--headless installs from the release download: it has no package-manager method"; fi
+if [ "$SETUP" = 1 ] && [ "$SERVER" = 0 ]; then die "--setup is for --headless"; fi
 if [ -n "$VERSION" ]; then
     printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || die "--version must look like 0.60.14"
 fi
@@ -112,11 +118,11 @@ case "$ARCH_RAW" in
     arm64 | aarch64) ARCH=arm64 ;;
     *) die "unsupported processor: $ARCH_RAW" ;;
 esac
-# The desktop app has no arm64 Linux or Intel Mac build; the server package has Linux x64, Linux arm64 and macOS arm64
-# (the release builds no Intel Mac server).
+# The desktop app has no arm64 Linux or Intel Mac build; Headless has Linux x64, Linux arm64 and macOS arm64
+# (the release builds no Intel Mac Headless).
 if [ "$SERVER" = 0 ] && [ "$OS" = linux ] && [ "$ARCH" != x86_64 ]; then die "there is no arm64 Linux build yet"; fi
 if [ "$SERVER" = 0 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac build: AgentMux for macOS needs Apple Silicon"; fi
-if [ "$SERVER" = 1 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac server package: the AgentMux server for macOS needs Apple Silicon (Linux x64 and arm64 have one)"; fi
+if [ "$SERVER" = 1 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac Headless package: AgentMux Headless for macOS needs Apple Silicon (Linux x64 and arm64 have one)"; fi
 
 # ---- tools ----
 have() { command -v "$1" > /dev/null 2>&1; }
@@ -243,6 +249,54 @@ verify_signature() {
     return 1
 }
 
+# Is `$1` (x.y.z, maybe with a suffix) at or above `$2` (x.y.z)? A suffix on the last part is ignored, so 0.60.31-rc1 compares
+# as 0.60.31: at the floor, never below it (a pre-release of the floor's version must carry the signature too).
+version_at_least() {
+    va="$1"; vb="$2"
+    for part in 1 2 3; do
+        na="${va%%.*}"; na="${na%%[!0-9]*}"; nb="${vb%%.*}"; nb="${nb%%[!0-9]*}"
+        [ "${na:-0}" -eq "${nb:-0}" ] || { [ "${na:-0}" -gt "${nb:-0}" ]; return; }
+        case "$va" in *.*) va="${va#*.}" ;; *) va=0 ;; esac
+        case "$vb" in *.*) vb="${vb#*.}" ;; *) vb=0 ;; esac
+    done
+    return 0
+}
+
+# Base64 with whatever is here: openssl (LibreSSL does this) or base64.
+b64_decode() { if have openssl; then openssl base64 -d -A; else base64 -d; fi; }
+b64_encode() { if have openssl; then openssl base64 -A; else base64 | tr -d '\n'; fi; }
+
+# True when this system's ssh-keygen can check an SSH signature (`-Y verify`, OpenSSH 8.0 and later).
+can_check_sshsig() {
+    have ssh-keygen || return 1
+    ck_out="$(ssh-keygen -Y verify 2>&1 < /dev/null || true)"
+    case "$ck_out" in *"illegal option"* | *"invalid option"* | *"unknown option"* | *"unsupported option"*) return 1 ;; esac
+    return 0
+}
+
+# verify_sshsig <envelope> <release base> -> 0 checked and good, 1 checked and bad, 2 cannot check (no ssh-keygen -Y, or a release
+# from before the floor). From the floor on, a missing or unreadable .sshsig is a failure (die), not a fallback: a release that
+# could have been checked this way and has no signature is not installed. The signer is only ever one of the pinned keys, put
+# in an allowed-signers file here; the key carried inside the signature is checked against them by ssh-keygen, never trusted.
+verify_sshsig() {
+    SSH_WHY=""
+    can_check_sshsig || { SSH_WHY=tool; return 2; }
+    version_at_least "$VERSION" "${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}" || { SSH_WHY=floor; return 2; }
+    if ! ( fetch "$2/AgentMux-$VERSION-envelope.json.sshsig" "$TMP/envelope.sshsig" ) > /dev/null 2>&1; then
+        die "this release ($VERSION) should carry AgentMux-$VERSION-envelope.json.sshsig (every release from $SSHSIG_FLOOR on does) and it could not be downloaded: not installing"
+    fi
+    : > "$TMP/allowed_signers"
+    keys="${AGENTMUX_INSTALL_TEST_KEYS:-$UPDATE_KEYS}"
+    for entry in $keys; do
+        b64="${entry#*:}"
+        # The key as an SSH key blob: the string "ssh-ed25519" (4-byte length 11), then the 32 raw bytes (length 32).
+        blob="$({ printf '\000\000\000\013ssh-ed25519\000\000\000\040'; printf '%s' "$b64" | b64_decode; } | b64_encode)" || return 1
+        printf '%s namespaces="%s" ssh-ed25519 %s\n' "$SSHSIG_NAMESPACE" "$SSHSIG_NAMESPACE" "$blob" >> "$TMP/allowed_signers"
+    done
+    if ssh-keygen -Y verify -f "$TMP/allowed_signers" -I "$SSHSIG_NAMESPACE" -n "$SSHSIG_NAMESPACE" -s "$TMP/envelope.sshsig" < "$1" > "$TMP/sshsig.out" 2>&1; then return 0; fi
+    return 1
+}
+
 # Pull `"key":"value"` or `"key":number` out of a JSON text with no spaces or newlines in it.
 json_field() { printf '%s' "$1" | sed -n 's/.*"'"$2"'":"\{0,1\}\([^",}]*\)"\{0,1\}.*/\1/p' | head -n 1; }
 
@@ -258,14 +312,32 @@ download_verified() {
 
     dv_sig=0
     verify_signature "$TMP/envelope.json" "$TMP/envelope.sig" || dv_sig=$?
+    dv_how=""
+    if [ "$dv_sig" = 0 ]; then
+        dv_how="Ed25519, with $("$OPENSSL" version 2> /dev/null | head -n 1)"
+    elif [ "$dv_sig" = 2 ]; then
+        # Not with openssl: the SSH signature of the same envelope, with the system's ssh-keygen, when it can.
+        dv_sig=0
+        verify_sshsig "$TMP/envelope.json" "$dv_base" || dv_sig=$?
+        if [ "$dv_sig" = 0 ]; then
+            dv_tool="ssh-keygen"
+            if have ssh; then dv_v="$(ssh -V 2>&1 | head -n 1 | sed 's/,.*//')"; case "$dv_v" in OpenSSH*) dv_tool="$dv_v" ;; esac; fi
+            dv_how="Ed25519 (SSH signature), with $dv_tool"
+        fi
+    fi
     case "$dv_sig" in
-        0) say "signature of the release checked: Ed25519, with $("$OPENSSL" version 2> /dev/null | head -n 1)" ;;
-        1) die "the release's signature does not match: not installing" ;;
+        0) say "signature of the release checked: $dv_how" ;;
+        1) die "the release's signature does not match: not installing$([ -s "$TMP/sshsig.out" ] && printf ' (ssh-keygen says: %s)' "$(head -n 1 "$TMP/sshsig.out")")" ;;
         *)
             dv_ossl="$(openssl version 2> /dev/null | head -n 1 || true)"
             [ -n "$dv_ossl" ] || dv_ossl="no openssl"
-            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl; the check needs OpenSSL 3) and --require-signature was given"
-            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it)"
+            # Why the SSH signature was not used either: this release is older than the first that has one, or there is no usable ssh-keygen.
+            case "${SSH_WHY:-tool}" in
+                floor) dv_why="this release ($VERSION) is older than ${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}, the first with an SSH signature" ;;
+                *) dv_why="there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SSHSIG_FLOOR on carry" ;;
+            esac
+            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl cannot, and $dv_why) and --require-signature was given"
+            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it), and $dv_why"
             say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
             ;;
     esac
@@ -278,7 +350,7 @@ download_verified() {
     dv_man="$(tr -d ' \n\r\t' < "$TMP/manifest.json")"
     dv_entry="$(printf '%s' "$dv_man" | grep -o '{"name":"'"$(printf '%s' "$dv_name" | sed 's/\./\\./g')"'","size":[0-9]*,"sha256":"[0-9a-f]*"}' | head -n 1 || true)"
     if [ -z "$dv_entry" ]; then
-        case "$dv_name" in agentmux-server-*) die "this release has no server package for this system (the signed manifest does not list $dv_name)" ;; esac
+        case "$dv_name" in agentmux-headless-* | agentmux-server-*) die "this release has no AgentMux Headless package for this system (the signed manifest does not list $dv_name)" ;; esac
         die "the signed manifest does not list $dv_name"
     fi
     dv_want_size="$(json_field "$dv_entry" size)"
@@ -408,34 +480,41 @@ launch_macos() {
     open -a AgentMux 2> /dev/null || open "/Applications/AgentMux.app" 2> /dev/null || open "$HOME/Applications/AgentMux.app" || true
 }
 
-# ---- the server package ----
-# Is the name `agentmux` free for the server's program? The desktop app's launcher has that name, and is not replaced.
+# ---- AgentMux Headless ----
+# Where an install from before the rename put its program (its `current` link's program): a link to it is this install's own.
+OLD_TARGET="$HOME/.agentmux/server/current/bin/agentmux"
+
+# Is the name `agentmux` free for Headless's program? The desktop app's launcher has that name, and is not replaced.
 agentmux_name_is_free() { # <the program the link points at>
     link="$HOME/.local/bin/agentmux"
     # Whatever is at the link's path that is not this install's own link (the desktop's launcher, say) is not replaced.
     if [ -e "$link" ] || [ -L "$link" ]; then
-        [ "$(readlink "$link" 2> /dev/null || true)" = "$1" ] || return 1
+        here="$(readlink "$link" 2> /dev/null || true)"
+        [ "$here" = "$1" ] || [ "$here" = "$OLD_TARGET" ] || return 1
     fi
     found="$(command -v agentmux 2> /dev/null || true)"
-    [ -z "$found" ] || [ "$found" = "$link" ] || [ "$(readlink "$found" 2> /dev/null || true)" = "$1" ]
+    if [ -z "$found" ] || [ "$found" = "$link" ]; then return 0; fi
+    there="$(readlink "$found" 2> /dev/null || true)"
+    [ "$there" = "$1" ] || [ "$there" = "$OLD_TARGET" ]
 }
 
 install_server() {
     have tar || die "tar is needed"
     resolve_version
     case "$ARCH" in x86_64) sarch=x64 ;; *) sarch="$ARCH" ;; esac
-    sname="agentmux-server-${VERSION}-${OS}-${sarch}"
-    base="$HOME/.agentmux/server"
+    sname="agentmux-headless-${VERSION}-${OS}-${sarch}"
+    base="$HOME/.agentmux/headless"
     dest="$base/$VERSION"
     target="$base/current/bin/agentmux"
-    say "installing the AgentMux server $VERSION into $dest"
+    say "installing AgentMux Headless $VERSION into $dest"
     if [ "$DRY_RUN" = 1 ]; then
         printf '+ download %s.tar.gz and check it against the signed manifest\n' "$sname"
         printf '+ tar -xzf %s.tar.gz into %s\n' "$sname" "$dest"
         printf '+ ln -sfn %s %s/current\n' "$dest" "$base"
-        printf '+ ln -sf %s %s/.local/bin/agentmux-server\n' "$target" "$HOME"
+        printf '+ ln -sf %s %s/.local/bin/agentmux-headless\n' "$target" "$HOME"
         if agentmux_name_is_free "$target"; then printf '+ ln -sf %s %s/.local/bin/agentmux\n' "$target" "$HOME"; fi
-        if [ "$SETUP" = 1 ]; then printf '+ agentmux-server setup --yes --no-open --service\n'; fi
+        if [ -d "$HOME/.agentmux/server/current" ]; then printf '+ say that the install in %s/.agentmux/server is no longer used\n' "$HOME"; fi
+        if [ "$SETUP" = 1 ]; then printf '+ agentmux-headless setup --yes --no-open --service\n'; fi
         return
     fi
     mktmp
@@ -446,26 +525,32 @@ install_server() {
     tar -xzf "$TMP/$sname.tar.gz" -C "$dest.new" --strip-components=1 || { rm -rf "$dest.new"; die "could not unpack $sname.tar.gz"; }
     if [ ! -x "$dest.new/bin/agentmux" ] || [ ! -x "$dest.new/bin/agentmux-srv" ] || [ ! -f "$dest.new/web/index.html" ]; then
         rm -rf "$dest.new"
-        die "$sname.tar.gz is not an AgentMux server package (no bin/agentmux, bin/agentmux-srv or web/index.html)"
+        die "$sname.tar.gz is not an AgentMux Headless package (no bin/agentmux, bin/agentmux-srv or web/index.html)"
     fi
-    # The server of the version being replaced keeps running from its own folder until it is restarted.
+    # The program of the version being replaced keeps running from its own folder until it is restarted.
     rm -rf "$dest"
     mv "$dest.new" "$dest"
     ln -sfn "$dest" "$base/current"
-    # `agentmux-server` is always this program's name on the PATH; `agentmux` too when nothing else has it.
-    cmd=agentmux-server
-    ln -sf "$target" "$HOME/.local/bin/agentmux-server"
+    # `agentmux-headless` is always this program's name on the PATH; `agentmux` too when nothing else has it.
+    cmd=agentmux-headless
+    ln -sf "$target" "$HOME/.local/bin/agentmux-headless"
     if agentmux_name_is_free "$target"; then
         ln -sf "$target" "$HOME/.local/bin/agentmux"
         cmd=agentmux
     else
-        say "something else is already named agentmux here (the desktop app?): run this one as  agentmux-server"
+        say "something else is already named agentmux here (the desktop app?): run this one as  agentmux-headless"
+    fi
+    # An install from before the rename lives in ~/.agentmux/server: its link name goes, its folder is named so it can be removed.
+    if [ "$(readlink "$HOME/.local/bin/agentmux-server" 2> /dev/null || true)" = "$OLD_TARGET" ]; then rm -f "$HOME/.local/bin/agentmux-server"; fi
+    if [ -d "$HOME/.agentmux/server/current" ]; then
+        say "the install in ~/.agentmux/server (from before the rename) is no longer used: stop its server, then remove it with  rm -rf ~/.agentmux/server"
+        say "a login service made by that install still points there: run  $cmd setup --service  to point it at this one"
     fi
     path_hint "$cmd"
     if [ "$SETUP" = 1 ]; then
         "$HOME/.local/bin/$cmd" setup --yes --no-open --service || die "setup did not finish: run  $cmd doctor  to see why"
     else
-        say "next: run  $cmd setup  to choose a port, start the server and sign in"
+        say "next: run  $cmd setup  to choose a port, start AgentMux Headless and sign in"
     fi
 }
 

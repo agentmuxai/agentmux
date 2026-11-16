@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::backend::storage::vault::VaultActivityRow;
 use crate::backend::vault::aws_import::{ImportRequest, Source};
+use crate::backend::vault::github_secret::tests::Gh;
 use crate::backend::vault::inspect::{self, UpdateRequest};
 use crate::backend::vault::seal;
-use crate::backend::vault::source_link::{plan_for_agent, plan_for_person, AgentLink, CHANGED, CHECKED, COULD_NOT_READ, KEY, KIND, LOCATION, MISSING, PRESENT, PROFILE, REGION};
+use crate::backend::vault::source_link::{plan_for_agent, plan_for_person, AgentLink, CHANGED, CHECKED, COULD_NOT_READ, KEY, KIND, LOCATION, MISSING, NOT_STARTED, PRESENT, PROFILE, REGION};
 use crate::backend::vault::{command_target, create, fill_target, list_for_agent, update, EntryChange};
 use crate::identity::aws_broker::mint::{RunError, RunOutput, RunSpec};
 
@@ -54,16 +55,23 @@ fn rows(s: &Store, action: &str) -> Vec<VaultActivityRow> {
     s.vault_activity_all().unwrap().into_iter().filter(|r| r.action == action).collect()
 }
 
-/// A stand-in AWS CLI: each secret it knows answers with its description, and any other with what AWS said.
+/// A stand-in AWS CLI: each secret it knows answers with its description, and any other with what AWS said. Beside
+/// it a stand-in GitHub CLI, which knows no secret and no repository unless it is given some.
 struct Cli {
     known: Vec<(&'static str, Result<&'static str, &'static str>)>,
     /// The operation and the secret of every run.
     seen: Mutex<Vec<(String, String)>>,
+    gh: Gh,
 }
 
 impl Cli {
     fn with(known: &[(&'static str, Result<&'static str, &'static str>)]) -> Self {
-        Self { known: known.to_vec(), seen: Mutex::new(Vec::new()) }
+        Self { known: known.to_vec(), seen: Mutex::new(Vec::new()), gh: Gh::with(&[]) }
+    }
+
+    /// With what GitHub answers for each endpoint: a status and a body.
+    fn github(self, known: &[(&'static str, u16, &'static str)]) -> Self {
+        Self { gh: Gh::with(known), ..self }
     }
 
     fn seen(&self) -> Vec<(String, String)> {
@@ -72,11 +80,17 @@ impl Cli {
 }
 
 impl Runner for Cli {
-    fn which(&self, _program: &str) -> Option<PathBuf> {
+    fn which(&self, program: &str) -> Option<PathBuf> {
+        if program == "gh" {
+            return self.gh.which(program);
+        }
         Some(PathBuf::from("/bin/aws"))
     }
 
     async fn run(&self, spec: RunSpec) -> Result<RunOutput, RunError> {
+        if spec.program == std::path::Path::new("/bin/gh") {
+            return self.gh.run(spec).await;
+        }
         let arg = |i: usize| spec.args.get(i).cloned().unwrap_or_default();
         let (operation, id) = (arg(1), arg(3));
         self.seen.lock().unwrap().push((operation, id.clone()));
@@ -201,34 +215,38 @@ async fn a_check_reads_the_places_description_and_never_the_key() {
     // Before any check the pane has both other places, neither checked.
     let before = copy_checks(&s, &s.vault_get(&id).unwrap().unwrap());
     assert_eq!((before.len(), before.iter().filter(|c| c.checked.is_some()).count()), (2, 0));
-    let cli = Cli::with(&[("prod/invoice-sync", Ok(UNCHANGED)), ("prod/invoice-sync-replica", Ok(CHANGED_LATER))]);
+    let cli = Cli::with(&[("prod/invoice-sync", Ok(UNCHANGED)), ("prod/invoice-sync-replica", Ok(CHANGED_LATER))]).github(&[(CI_SECRET, 200, CI_ENTRY)]);
     let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
     assert_eq!((checked.outcome, checked.why.as_str(), checked.source.as_str()), (PRESENT, "", "aws-secret:prod/invoice-sync#api.token"));
     assert_eq!((checked.last_changed.as_deref(), checked.rotation), (Some("2026-09-30"), Some(true)));
     // Each other place is in the answer; the one in AWS was described under the entry's own region, and the CI
-    // secret, which nothing here can describe, ran nothing.
+    // secret's listing entry was read with the GitHub CLI.
     let copies: Vec<(&str, &str)> = checked.copies.iter().map(|c| (c.place.as_str(), c.outcome)).collect();
-    assert_eq!(copies, [("github-secret: example-org/example-app#EXAMPLE_TOKEN", COULD_NOT_READ), ("aws-secret: prod/invoice-sync-replica#api.token", CHANGED)]);
+    assert_eq!(copies, [("github-secret: example-org/example-app#EXAMPLE_TOKEN", PRESENT), ("aws-secret: prod/invoice-sync-replica#api.token", CHANGED)]);
     assert_eq!(checked.copies[1].why, "the place last changed on 2026-11-02, after the 2026-10-01 recorded");
     let described: Vec<(String, String)> = [("describe-secret", "prod/invoice-sync"), ("describe-secret", "prod/invoice-sync-replica")].iter().map(|(o, i)| (o.to_string(), i.to_string())).collect();
     assert_eq!(cli.seen(), described);
+    assert_eq!(cli.gh.asked(), [CI_SECRET]);
 
-    // A line for the entry's own place and one for the copy that was asked, each naming its place.
+    // A line for the entry's own place and one for each copy that was asked, each naming its place.
     let own = rows(&s, CHECKED);
     assert_eq!(own.iter().map(|r| (r.target.as_str(), r.outcome.as_str(), r.actor.as_str(), r.reason.as_str())).collect::<Vec<_>>(), [("aws-secret:prod/invoice-sync#api.token", PRESENT, "builder", REASON)]);
     let other = rows(&s, CHECKED_COPY);
-    assert_eq!(other.iter().map(|r| r.target.as_str()).collect::<Vec<_>>(), ["aws-secret:prod/invoice-sync-replica#api.token"]);
-    assert!(other[0].outcome.starts_with("changed since recorded: the place last changed on 2026-11-02"));
+    assert_eq!(other.iter().map(|r| (r.target.as_str(), r.outcome.as_str())).collect::<Vec<_>>()[0], ("github-secret:example-org/example-app#EXAMPLE_TOKEN", PRESENT));
+    assert_eq!(other[1].target, "aws-secret:prod/invoice-sync-replica#api.token");
+    assert!(other[1].outcome.starts_with("changed since recorded: the place last changed on 2026-11-02"));
     // The newest check is the entry's own place's, whatever its copies' lines say.
     let row = s.vault_get(&id).unwrap().unwrap();
     assert_eq!(source_link::last_check(&s, &row, &Link::of_row(&row).unwrap()).map(|c| c.outcome), Some(PRESENT.to_string()));
     assert_eq!(standing(&s, &row), Some((Standing::Checked, false)));
-    // What the pane shows of each other place: the newest check of the one in AWS, and of the CI secret that no
-    // check can describe it, which until now was in the asking agent's answer only.
+    // What the pane shows of each other place: its newest check.
     let known = copy_checks(&s, &row);
     let said: Vec<(&str, &str, bool)> = known.iter().map(|c| (c.place.as_str(), c.cannot.as_str(), c.checked.is_some())).collect();
-    assert_eq!(said, [("github-secret: example-org/example-app#EXAMPLE_TOKEN", NOT_FROM_HERE, false), ("aws-secret: prod/invoice-sync-replica#api.token", "", true)]);
+    assert_eq!(said, [("github-secret: example-org/example-app#EXAMPLE_TOKEN", "", true), ("aws-secret: prod/invoice-sync-replica#api.token", "", true)]);
     assert!(known[1].checked.as_ref().unwrap().outcome.starts_with("changed since recorded: the place last changed on 2026-11-02"));
+    // A place a person described in words is the one kind no check describes, and the pane says so.
+    let worded = create(&s, NewEntry { label: "Mail provider key".into(), ..entry(&[place(), vec![(COPIES, "other: the build host's config file")]].concat(), None) }).unwrap();
+    assert_eq!(copy_checks(&s, &s.vault_get(&worded).unwrap().unwrap())[0].cannot, NOT_FROM_HERE);
 }
 
 #[tokio::test]
@@ -252,11 +270,12 @@ async fn a_place_that_changed_is_missing_or_refuses_is_what_the_check_says() {
     let checked = source_link::check(&s, &Cli::with(&[("prod/invoice-sync", Ok(CHANGED_LATER))]), &plan_for_person(&s, &undated).unwrap(), Via::Host).await;
     assert_eq!((checked.outcome, checked.last_changed.as_deref(), checked.rotation), (PRESENT, Some("2026-11-02"), Some(false)));
 
-    // A place that isn't in AWS can't be described from here: the check says so and runs nothing.
-    let ci = create(&s, NewEntry { label: "Store upload key".into(), ..entry(&[(LINK, ONLY), (KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app"), (KEY, "STORE_KEY"), (COPIES, "aws-secret: prod/store-key")], None) }).unwrap();
-    let cli = Cli::with(&[]);
+    // A copy in AWS under a place that isn't in AWS has no region or login to be described under: the check says
+    // so and runs nothing for it.
+    let ci = create(&s, NewEntry { label: "Store upload key".into(), ..entry(&[(LINK, ONLY), (KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app"), (KEY, "EXAMPLE_TOKEN"), (COPIES, "aws-secret: prod/store-key")], None) }).unwrap();
+    let cli = Cli::with(&[]).github(&[(CI_SECRET, 200, CI_ENTRY)]);
     let unread = source_link::check(&s, &cli, &plan_for_person(&s, &ci).unwrap(), Via::Host).await;
-    assert_eq!((unread.outcome, unread.why.as_str(), cli.seen().len()), (COULD_NOT_READ, NOT_FROM_HERE, 0));
+    assert_eq!((unread.outcome, unread.last_changed.as_deref(), cli.seen().len()), (PRESENT, Some("2026-10-01"), 0));
     assert_eq!((unread.copies[0].outcome, unread.copies[0].why.as_str()), (COULD_NOT_READ, NOT_UNDER_AWS));
     assert!(rows(&s, CHECKED_COPY).is_empty());
     // The pane says the same of that copy without a line in the history, and nothing of an entry that names none.
@@ -333,4 +352,110 @@ fn a_copy_is_known_by_its_line_as_the_entry_writes_it() {
     let id = linked_with(&s, &[(COPIES, "aws-secret:prod/invoice-sync-replica#api.token")]);
     let known = copy_checks(&s, &s.vault_get(&id).unwrap().unwrap());
     assert_eq!(known.iter().map(|c| (c.place.as_str(), c.cannot.as_str())).collect::<Vec<_>>(), [("aws-secret:prod/invoice-sync-replica#api.token", "")]);
+}
+
+const CI_SECRET: &str = "repos/example-org/example-app/actions/secrets/EXAMPLE_TOKEN";
+const CI_COLLECTION: &str = "repos/example-org/example-app/actions/secrets?per_page=1";
+/// What the collection answers: an entry of a secret nobody asked about. Nothing of it may be kept.
+const CI_NEIGHBOUR: &str = r#"{"total_count": 2, "secrets": [{"name": "NEIGHBOUR_SENTINEL_2291", "updated_at": "2026-02-02T00:00:00Z"}]}"#;
+const CI_ENTRY: &str = r#"{"name": "EXAMPLE_TOKEN", "created_at": "2026-01-05T10:00:00Z", "updated_at": "2026-10-01T09:00:00Z", "made_up_extra": "ci-sentinel-4417"}"#;
+const CI_ENTRY_LATER: &str = r#"{"name": "EXAMPLE_TOKEN", "updated_at": "2026-11-02T08:00:00Z"}"#;
+
+/// A link to a repository's CI secret.
+fn ci_place() -> Vec<(&'static str, &'static str)> {
+    vec![(LINK, ONLY), (KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app"), (KEY, "EXAMPLE_TOKEN")]
+}
+
+#[tokio::test]
+async fn a_ci_secrets_check_says_whether_it_is_there_and_when_it_last_changed() {
+    let s = store();
+    let id = create(&s, NewEntry { label: "Store upload key".into(), ..entry(&[ci_place(), vec![(ROTATED, "2026-10-01")]].concat(), None) }).unwrap();
+    let plan = plan_for_person(&s, &id).unwrap();
+    let row = || s.vault_get(&id).unwrap().unwrap();
+    for (github, outcome, why, last_changed, stands) in [
+        (vec![(CI_SECRET, 200, CI_ENTRY)], PRESENT, "", Some("2026-10-01"), Standing::Checked),
+        (vec![(CI_SECRET, 200, CI_ENTRY_LATER)], CHANGED, "the place last changed on 2026-11-02, after the 2026-10-01 recorded", Some("2026-11-02"), Standing::NeedsALook),
+        (vec![(CI_COLLECTION, 200, CI_NEIGHBOUR)], MISSING, "GitHub has no secret by that name there", None, Standing::NeedsALook),
+        (vec![], COULD_NOT_READ, "the secrets there can't be read with this computer's GitHub login", None, Standing::Checked),
+    ] {
+        let cli = Cli::with(&[]).github(&github);
+        let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
+        assert_eq!((checked.outcome, checked.why.as_str(), checked.last_changed.as_deref()), (outcome, why, last_changed));
+        // A CI secret has no rotation setting, and the AWS CLI is never run for one.
+        assert_eq!((checked.rotation, checked.source.as_str(), cli.seen().len()), (None, "github-secret:example-org/example-app#EXAMPLE_TOKEN", 0));
+        assert_eq!(standing(&s, &row()), Some((stands, false)), "{outcome}");
+    }
+    // Of GitHub's answer only found or not and the day are kept: nothing else of it is in the history or the answer,
+    // and nothing at all of the collection's answer, which names another secret. A check is one line toward the
+    // hour, however many times it asked.
+    let gone = Cli::with(&[]).github(&[(CI_COLLECTION, 200, CI_NEIGHBOUR)]);
+    let answer = serde_json::to_string(&source_link::check(&s, &gone, &plan, Via::Host).await).unwrap();
+    assert!(answer.contains("missing") && !answer.contains("NEIGHBOUR") && !answer.contains("2026-02-02"), "{answer}");
+    assert_eq!(gone.gh.asked(), [CI_SECRET, CI_COLLECTION]);
+    assert_eq!(rows(&s, CHECKED).len(), 5);
+    let kept = format!("{:?}", s.vault_activity_all().unwrap());
+    assert!(!kept.contains("ci-sentinel") && !kept.contains("2026-01-05") && !kept.contains("NEIGHBOUR") && !kept.contains("2026-02-02"), "{kept}");
+
+    // An environment's secret is read from the environment's own listing.
+    let staged = create(&s, NewEntry { label: "Release key".into(), ..entry(&[(LINK, ONLY), (KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app@production"), (KEY, "EXAMPLE_TOKEN")], None) }).unwrap();
+    let endpoint = "repos/example-org/example-app/environments/production/secrets/EXAMPLE_TOKEN";
+    let cli = Cli::with(&[]).github(&[(endpoint, 200, CI_ENTRY_LATER)]);
+    let checked = source_link::check(&s, &cli, &plan_for_person(&s, &staged).unwrap(), Via::Host).await;
+    assert_eq!((checked.outcome, checked.last_changed.as_deref(), cli.gh.asked()), (PRESENT, Some("2026-11-02"), vec![endpoint.to_string()]));
+}
+
+#[tokio::test]
+async fn an_entry_that_holds_a_value_and_names_a_ci_secret_is_described_not_compared() {
+    let s = store();
+    let fields = [(KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app"), (KEY, "EXAMPLE_TOKEN"), (COPIES, "github-secret: example-org/example-app@production#EXAMPLE_TOKEN")];
+    let id = create(&s, entry(&fields, Some(VALUE))).unwrap();
+    let plan = plan_for_agent(&s, &id, "builder", Some(REASON)).unwrap();
+    assert!(plan.describes() && !plan.only);
+    assert_eq!(plan.github_places().len(), 2);
+    let cli = Cli::with(&[]).github(&[(CI_SECRET, 200, CI_ENTRY), ("repos/example-org/example-app/environments/production/secrets?per_page=1", 200, CI_NEIGHBOUR)]);
+    let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
+    // GitHub gives no value back, so nothing is compared: the check says the secret is there and when it changed.
+    assert_eq!((checked.outcome, checked.last_changed.as_deref()), (PRESENT, Some("2026-10-01")));
+    assert_eq!((checked.copies[0].outcome, checked.copies[0].why.as_str()), (MISSING, "GitHub has no secret by that name there"));
+    let said = serde_json::to_string(&checked).unwrap() + &format!("{:?}", s.vault_activity_all().unwrap());
+    assert!(!said.contains(VALUE));
+
+    // An entry whose place is in AWS is compared with its value, and its other places are not read then.
+    let in_aws = create(&s, NewEntry { label: "Deploy token".into(), ..entry(&[(KIND, AWS_SECRET), (LOCATION, "prod/deploy"), (COPIES, "github-secret: example-org/example-app#EXAMPLE_TOKEN")], Some(VALUE)) }).unwrap();
+    let plan = plan_for_person(&s, &in_aws).unwrap();
+    assert!(!plan.describes() && plan.github_places().is_empty());
+}
+
+#[tokio::test]
+async fn a_check_that_may_not_start_a_ci_secrets_read_answers_with_the_stored_result() {
+    let s = store();
+    let id = create(&s, NewEntry { label: "Store upload key".into(), ..entry(&ci_place(), None) }).unwrap();
+    let held = |plan: CheckPlan| CheckPlan { no_github: Some("Made-up reason, and what to do.".into()), ..plan };
+    let cli = Cli::with(&[]).github(&[(CI_SECRET, 200, CI_ENTRY)]);
+
+    // Never checked: nothing is run, nothing is written, and the answer says so.
+    let first = source_link::check(&s, &cli, &held(plan_for_agent(&s, &id, "boxed", Some(REASON)).unwrap()), Via::Host).await;
+    assert_eq!((first.outcome, first.why.as_str(), first.stored.clone()), (NOT_STARTED, "Made-up reason, and what to do. It has not been checked yet.", None));
+    assert!(cli.gh.asked().is_empty() && rows(&s, CHECKED).is_empty());
+
+    // After the person's check the same answer carries what that check found and when.
+    let by_person = source_link::check(&s, &cli, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!(by_person.outcome, PRESENT);
+    let again = source_link::check(&s, &cli, &held(plan_for_agent(&s, &id, "boxed", Some(REASON)).unwrap()), Via::Host).await;
+    assert_eq!((again.outcome, again.why.as_str()), (NOT_STARTED, "Made-up reason, and what to do. The newest stored result is in `stored`."));
+    assert_eq!(again.stored.as_ref().map(|c| c.outcome.as_str()), Some(PRESENT));
+    assert_eq!((cli.gh.asked().len(), rows(&s, CHECKED).len()), (1, 1), "the held checks ran nothing and wrote nothing");
+    // A check that wrote no line does not count toward the agents' hour.
+    for _ in 0..source_link::AGENT_CHECKS_PER_HOUR + 1 {
+        let plan = held(plan_for_agent(&s, &id, "boxed", Some(REASON)).unwrap());
+        assert_eq!(source_link::check(&s, &cli, &plan, Via::Host).await.outcome, NOT_STARTED);
+    }
+
+    // A CI secret among the other places of an AWS link: the AWS place is described, and the copy is held.
+    let mixed = linked_with(&s, &[(COPIES, "github-secret: example-org/example-app#EXAMPLE_TOKEN")]);
+    let cli = Cli::with(&[("prod/invoice-sync", Ok(UNCHANGED))]).github(&[(CI_SECRET, 200, CI_ENTRY)]);
+    let checked = source_link::check(&s, &cli, &held(plan_for_agent(&s, &mixed, "boxed", Some(REASON)).unwrap()), Via::Host).await;
+    assert_eq!((checked.outcome, checked.copies[0].outcome, checked.copies[0].stored.clone()), (PRESENT, NOT_STARTED, None));
+    assert!(cli.gh.asked().is_empty());
+    assert!(rows(&s, CHECKED_COPY).iter().all(|r| r.entry_id != mixed));
 }
