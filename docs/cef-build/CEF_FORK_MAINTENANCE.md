@@ -597,7 +597,7 @@ eyeballing assembly is not.
 ## 8. Release pinning across three platforms
 
 All three pins live in one place — [`scripts/cef-build/cef-runtime-pins.sh`](../../scripts/cef-build/cef-runtime-pins.sh) —
-which `release.yml`'s `cef-runtime-pins` job reads for releases and every
+which `release-core.yml`'s `cef-runtime-pins` job reads for releases and every
 `build-*.yml` reads when its `cef-runtime-tag` is blank (nightlies, direct
 dispatches). So publishing a runtime changes no build until a PR moves the
 pins. This was a deliberate fix (PR #3086, its follow-up, and the 154 upgrade

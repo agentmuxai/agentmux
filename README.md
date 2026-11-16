@@ -54,7 +54,7 @@ AgentMux is an open-source agent operating environment. Run any agent as a first
 
 Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
-- **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Qwen, Kimi, OpenClaw, Pi, Mux Code, Antigravity, OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness and Muse Code as first-class providers, and Aider and Crush in a terminal pane of their own, alongside terminal, editor, browser, file and media panes ([all widgets](#widgets)). Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
+- **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Kimi, OpenClaw, Pi, Antigravity, OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness and Muse Code as first-class providers, and Aider and Crush in a terminal pane of their own, alongside terminal, editor, browser, file and media panes ([all widgets](#widgets)). Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
 - **Universal pane tabs** — every pane is a generic container that can hold any mix of widgets as tabs, not just more of its own type. A pane's own tab strip *is* its header (one row, not a header-plus-strip stack), and its "+" opens a picker of every widget type — agent, terminal, browser, editor, sysinfo, swarm, drone, and the rest — so you build up an agent-plus-terminal-plus-browser workspace inside a single pane instead of endlessly splitting. Inspired by [cmux](https://github.com/manaflow-ai/cmux)'s `Workspace → Pane → Surface → Panel` model. See [Panes and tabs](#panes-and-tabs) below.
 - **Agents drive the workspace** — Through MuxAPI, a running agent can open panes, rename tabs, navigate the layout, and message peer agents, using the tools of its built-in MCP server. Agents are operators, not passengers.
 - **Interagent comms** — the `Message` tool sends one agent's message into another agent's conversation, on this machine or another, so you can build hand-offs and broadcasts; its repository channel lets agents tell each other what they are changing.
@@ -62,7 +62,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Accounts** — Sign-ins and keys for providers and services (Claude, Codex, GitHub, AWS, API keys and more), kept in Connectors → Accounts and bound to each agent, at most one per provider. They survive renames; switching an agent's account restarts that agent.
 - **Bundles** — A collection of instructions, context files and skills, captured once and reused across agents. MCP servers aren't part of a bundle; they're bound to agents in Connectors. Backend: `db_bundles`; managed in the Memory pane (the widget bar's Memory, then Bundles).
 - **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. Right-click an Agent pane and choose **Personal memory** to open that agent's memory there.
-- **AgentMux owns the session state** — Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw, Pi, OpenCode, Kilo Code, Cline, goose, Grok Build and DeepSeek Harness as long-lived [ACP](https://agentclientprotocol.com/) processes, and Muse Code as a long-lived `muse serve` process speaking its own protocol, MSP. Aider and Crush run their own interface in a terminal pane. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI.
+- **AgentMux owns the session state** — Codex, Gemini, Kimi and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw, Pi, OpenCode, Kilo Code, Cline, goose, Grok Build and DeepSeek Harness as long-lived [ACP](https://agentclientprotocol.com/) processes, and Muse Code as a long-lived `muse serve` process speaking its own protocol, MSP. Aider and Crush run their own interface in a terminal pane. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI.
 - **Reducer stack** — The launcher, host and sidecar each keep their state in a reducer with a structured event log, so "what mutated this state?" has one place to look.
 - **Browser pane** — A native Chromium view, not an iframe: a child window of the AgentMux frame on Windows, a CEF Views overlay on Linux and macOS. Full Chromium fidelity (links, popups, DRM).
 - **MuxAPI** (formerly the App API) — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 450 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [MuxAPI](#muxapi).
@@ -75,7 +75,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, tear panes off into floating windows, and dock them into any window.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Run multiple versions side-by-side** — Each instance is fully isolated (separate CEF data, separate backend sidecar, separate ports). Test a new build while the old one is still running.
-- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. It checks GitHub Releases for new versions and, by default, downloads them (the `update:auto` and `update:autodownload` settings turn that off). A few features reach the network only when you turn them on: MuxBus cloud messaging, voice transcription, and installing provider CLIs.
+- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. It checks GitHub Releases for new versions and, by default, downloads them (the `update:auto` and `update:autodownload` settings turn that off). A few features reach the network only when you use them: MuxBus cloud messaging, installing provider CLIs, and voice input, whose audio goes to Groq only after you add a Groq key in Settings → Recording and start voice input.
 
 ## Quick Start
 
@@ -429,13 +429,15 @@ See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) 
 
 **Stable release** — see [GitHub Releases](https://github.com/agentmuxai/agentmux/releases/latest) for the latest published build.
 
-**Install from a terminal** (checked against the release's signed manifest):
+**Install from a terminal** (the scripts check what they download against the release's signed manifest):
 
 ```bash
-curl -fsSL https://github.com/agentmuxai/agentmux/releases/latest/download/install.sh | sh      # macOS and Linux
-irm https://github.com/agentmuxai/agentmux/releases/latest/download/install.ps1 | iex           # Windows (PowerShell)
-winget install --id 9P9QCXNNCRK3 --source msstore                                               # Windows, from the Microsoft Store
+curl -fsSL https://agentmux.ai/install.sh | sh      # macOS and Linux
+irm https://agentmux.ai/install.ps1 | iex           # Windows (PowerShell)
+winget install --id 9P9QCXNNCRK3 --source msstore   # Windows, from the Microsoft Store
 ```
+
+Every file and command for every platform, with each file's size and SHA-256 and the Linux package repositories, is on [All Downloads](https://agentmux.ai/downloads).
 
 **Nightly builds** — built daily from `main`. Windows artifacts are kept 7 days, the others for the repository's default retention. [![Nightly builds](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml)
 
