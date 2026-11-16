@@ -276,4 +276,11 @@
     .agent-question-panel-header {
         position: static;
     }
+
+    // The topic chip above the question, not beside it: beside it the question was one or two words per line.
+    .agent-question-panel-q-prompt {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-1);
+    }
 }

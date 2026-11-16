@@ -58,16 +58,18 @@ function pane(id: string, width: number, height: number, zoom: number): string {
 <label class="agent-question-panel-other"><span class="agent-question-panel-other-label">Other</span><input class="agent-question-panel-other-input ui-input" placeholder="Type a custom answer…"></label></div></fieldset></div>
 <div class="agent-question-panel-actions"><button class="ui-button agent-question-panel-btn">Cancel</button><button class="ui-button agent-question-panel-btn">Accept Recommended</button><button class="ui-button ui-tone-attention agent-question-panel-btn" disabled>Submit answer</button></div>
 </div></div>
-<div style="flex:none;height:90px;background:#222"></div>
+<div class="status" style="flex:none;height:60px;background:#262626"></div>
+<div class="composer" style="flex:none;height:90px;background:#222"></div>
 </div></div>`;
 }
 
 /** Pane sizes as the person sees them (before the zoom), then the zoom. */
-const CASES: Array<{ id: string; width: number; height: number; zoom: number }> = [
-    { id: "narrow-100", width: 372, height: 744, zoom: 1 },
-    { id: "narrow-150", width: 372, height: 744, zoom: 1.5 },
-    { id: "narrow-200", width: 372, height: 744, zoom: 2 },
-    { id: "wide-100", width: 700, height: 744, zoom: 1 },
+const CASES: Array<{ id: string; width: number; height: number; zoom: number; startsWithOptions: boolean }> = [
+    { id: "narrow-100", width: 372, height: 744, zoom: 1, startsWithOptions: true },
+    { id: "narrow-150", width: 372, height: 744, zoom: 1.5, startsWithOptions: true },
+    // At 200% the pane is 186 px wide: the header and the question fill the start of the scroll, the options follow.
+    { id: "narrow-200", width: 372, height: 744, zoom: 2, startsWithOptions: false },
+    { id: "wide-100", width: 700, height: 744, zoom: 1, startsWithOptions: true },
 ];
 
 const MEASURE = `
@@ -96,6 +98,9 @@ for (const view of document.querySelectorAll('.view')) {
     view: { width: viewBox.width, height: viewBox.height },
     stack: { height: stack.getBoundingClientRect().height, scrollWidth: stack.scrollWidth, clientWidth: stack.clientWidth },
     panel: { scrollWidth: q('.agent-question-panel').scrollWidth, clientWidth: q('.agent-question-panel').clientWidth },
+    // What the panel leaves for the question and options once the pinned answers are taken out of it.
+    room: q('.agent-question-panel').getBoundingClientRect().height - actions.getBoundingClientRect().height,
+    composerBelowPane: q('.composer').getBoundingClientRect().bottom - viewBox.bottom,
     headerOverflow: header.scrollWidth - header.clientWidth,
     headerChildrenPastEdge: [...header.children].filter((c) => c.getBoundingClientRect().right > hb.right + 0.5).length,
     headerVisible: visible(header),
@@ -114,6 +119,8 @@ interface Measured {
     view: { width: number; height: number };
     stack: { height: number; scrollWidth: number; clientWidth: number };
     panel: { scrollWidth: number; clientWidth: number };
+    room: number;
+    composerBelowPane: number;
     headerOverflow: number;
     headerChildrenPastEdge: number;
     headerVisible: Seen;
@@ -152,7 +159,14 @@ describe.skipIf(!BROWSER)("Question panel in a narrow, zoomed pane", () => {
 
             it("leaves the options room to be read", () => {
                 const m = measured[c.id];
-                expect(m.options.height, JSON.stringify(m)).toBeGreaterThanOrEqual(80);
+                if (c.startsWithOptions) expect(m.options.height, JSON.stringify(m)).toBeGreaterThanOrEqual(80);
+                // Where they start below the header, the scroll box is still tall enough to read a few lines in.
+                expect(m.room, JSON.stringify(m)).toBeGreaterThanOrEqual(150);
+            });
+
+            it("keeps the composer inside the pane", () => {
+                const m = measured[c.id];
+                expect(m.composerBelowPane, JSON.stringify(m)).toBeLessThanOrEqual(1);
             });
 
             it("never grows past the pane", () => {
