@@ -73,6 +73,8 @@ for (const tree of document.querySelectorAll('.swarm-tree')) {
     name: fits(q('.swarm-agent-label'), q('.swarm-agent-label')) && q('.swarm-agent-label').scrollWidth <= q('.swarm-agent-label').clientWidth + 0.5,
     badge: fits(badge, q('.swarm-seat-slot')) && badge.scrollWidth <= badge.clientWidth + 0.5,
     mark: fits(q('.swarm-nopane-slot .ui-tag'), q('.swarm-nopane-slot')),
+    markVisibleWidth: (() => { const t = q('.swarm-nopane-slot .ui-tag'), s = q('.swarm-nopane-slot'); if (!t) return 0; const a = t.getBoundingClientRect(), b = s.getBoundingClientRect(); const left = Math.max(a.left, b.left), right = Math.min(a.right, b.right), top = Math.max(a.top, b.top), bottom = Math.min(a.bottom, b.bottom); return right > left && bottom > top ? Math.round(right - left) : 0; })(),
+    markWidth: (() => { const t = q('.swarm-nopane-slot .ui-tag'); return t ? Math.round(t.getBoundingClientRect().width) : 0; })(),
     ctx: fits(q('.swarm-ctx-size'), q('.swarm-ctx-size')) && q('.swarm-ctx-size').getBoundingClientRect().width > 8,
     age: fits(q('.swarm-last-active'), q('.swarm-last-active')) && q('.swarm-last-active').getBoundingClientRect().width > 8,
   };
@@ -84,6 +86,8 @@ interface Measured {
     name: boolean;
     badge: boolean;
     mark: boolean;
+    markVisibleWidth: number;
+    markWidth: number;
     age: boolean;
     ctx: boolean;
 }
@@ -119,6 +123,16 @@ describe.skipIf(!BROWSER)("Swarm row in a narrow pane", () => {
     it("loses the mark before the badge: some width has the whole badge and no mark", () => {
         const widths = WIDTHS.filter((w) => measured[`parked-${w}`].badge && !measured[`parked-${w}`].mark);
         expect(widths.length).toBeGreaterThan(0);
+    });
+
+    it("shows the No pane mark whole or not at all, never a cut stub of it", () => {
+        for (const w of WIDTHS) {
+            const m = measured[`parked-${w}`];
+            if (m.markWidth > 0) {
+                const whole = m.markVisibleWidth >= m.markWidth - 1;
+                expect(whole || m.markVisibleWidth === 0, `mark cut to ${m.markVisibleWidth} of ${m.markWidth} px at ${w}px`).toBe(true);
+            }
+        }
     });
 
     it("keeps the name whole wherever the badge is", () => {

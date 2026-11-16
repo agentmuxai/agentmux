@@ -339,6 +339,13 @@
             content: "";
             height: calc(1lh + 2px);
         }
+
+        // The tag keeps its own width: the kit caps it at its container's, which would clip its words
+        // beside the empty first item instead of wrapping them under it.
+        > .ui-tag {
+            flex: none;
+            max-width: none;
+        }
     }
 
     .swarm-status-chip {
