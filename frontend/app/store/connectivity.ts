@@ -3,7 +3,7 @@
 
 /**
  * Whether each service AgentMux depends on can be reached, as srv tracks it
- * (`crates/srv/src/connectivity`): `connectivity.status` when a window opens,
+ * (`crates/srv-core/src/connectivity`): `connectivity.status` when a window opens,
  * kept live by the `connectivity:changed` event. The status bar's Offline
  * indicator reads it, and the MuxBus indicator defers to it.
  * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.1.

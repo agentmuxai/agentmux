@@ -1,0 +1,667 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Which container image an agent runs, and what happens when it can't be had.
+//!
+//! - The default and the legacy image names, and the fallback between them.
+//! - Classifying a failed pull into something a person can act on, instead of
+//!   passing bollard's text through.
+//! - An anonymous registry check ("could the daemon pull this?") for the
+//!   create flow, which has to decide before anything is pulled.
+//!
+//! Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md.
+
+use crate::backend::container::ContainerManager;
+use crate::backend::registry_probe::probe_anonymous;
+use crate::backend::rpc_types::ContainerImageAccess;
+
+/// The public base image: everything a container agent needs except the
+/// provider CLI, which is installed on first start.
+pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:latest";
+
+/// The base image's repository, without a tag.
+pub(crate) const AGENT_BASE_REPO: &str = "ghcr.io/agentmuxai/agent-base";
+
+/// The developer variant (Rust, a C toolchain, go-task, a headless display): the same repository, tagged
+/// `<version>-developer`. A stored `:developer` means this AgentMux version's, as `:latest` means its base image.
+/// Spec: docs/specs/SPEC_CONTAINER_AGENT_DEVELOPER_IMAGE_2026_10_29.md section 4.
+pub const DEFAULT_DEVELOPER_IMAGE: &str = "ghcr.io/agentmuxai/agent-base:developer";
+
+/// What a version tag of the developer variant ends with.
+const DEVELOPER_TAG_SUFFIX: &str = "-developer";
+
+/// The base image for this AgentMux version. The release workflow tags the image with the
+/// release version, so the `agentmux-mcp` and `agentmux-bashwrap` inside match this srv.
+pub fn versioned_agent_image() -> String {
+    format!("{AGENT_BASE_REPO}:{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// The developer image for this AgentMux version (the release tags it with the version, like the base image).
+pub fn versioned_developer_image() -> String {
+    format!("{AGENT_BASE_REPO}:{}{DEVELOPER_TAG_SUFFIX}", env!("CARGO_PKG_VERSION"))
+}
+
+/// Whether `image` is the developer variant: `agent-base:developer`, or a `-developer` tag (versioned or a
+/// dispatch build). A digest says nothing about the variant and is not.
+pub fn is_developer_image(image: &str) -> bool {
+    image
+        .trim()
+        .strip_prefix(AGENT_BASE_REPO)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|tag| tag == "developer" || tag.ends_with(DEVELOPER_TAG_SUFFIX))
+}
+
+/// This AgentMux's own image of the variant `image` belongs to: what a container of that kind should run.
+pub fn current_image_for(image: &str) -> String {
+    if is_developer_image(image) {
+        versioned_developer_image()
+    } else {
+        versioned_agent_image()
+    }
+}
+
+/// The floating image to fall back to when the version-specific image of `image`'s variant can't be had:
+/// `:developer` for the developer variant (the base image has no Rust), `:latest` otherwise.
+pub fn floating_image_for(image: &str) -> &'static str {
+    if is_developer_image(image) {
+        DEFAULT_DEVELOPER_IMAGE
+    } else {
+        DEFAULT_AGENT_IMAGE
+    }
+}
+
+/// Whether `image` is the base image at any tag or digest: what a container made from this
+/// AgentMux's own image runs, as opposed to an image the user chose.
+pub fn is_agent_base_image(image: &str) -> bool {
+    match image.trim().strip_prefix(AGENT_BASE_REPO) {
+        Some(rest) => rest.is_empty() || rest.starts_with(':') || rest.starts_with('@'),
+        None => false,
+    }
+}
+
+/// Whether `image` is a base image pinned to a version (`agent-base:0.60.2`), as opposed to
+/// `:latest` or anything else. Such an image can be missing: a build that has not been
+/// released has no tag yet.
+pub fn is_versioned_agent_image(image: &str) -> bool {
+    image
+        .trim()
+        .strip_prefix(AGENT_BASE_REPO)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|tag| tag.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// Repository of the earlier image that bundled Claude Code. It is private, so
+/// only machines that already hold it can use it.
+const LEGACY_AGENT_IMAGE_REPO: &str = "ghcr.io/agentmuxai/agent-claude";
+
+/// Where the provider CLI is installed inside the container.
+pub const CONTAINER_CLI_DIR: &str = "/home/agent/.agentmux/cli";
+
+/// The image a stored `agent:container_image` value means: empty, or the plain `:latest` base
+/// image that agent definitions carry by default, is this version's base image; `:developer` is this
+/// version's developer image. The retired image, at any tag, is this version's base image too: it has
+/// no `agentmux-bashwrap` or `agentmux-mcp`, and its bundled CLI shadows AgentMux's own, so a container
+/// made from it starts and cannot talk (#47725).
+pub fn resolve_container_image(stored: &str) -> String {
+    let stored = stored.trim();
+    if stored.is_empty() || stored == DEFAULT_AGENT_IMAGE || is_legacy_agent_image(stored) {
+        versioned_agent_image()
+    } else if stored == DEFAULT_DEVELOPER_IMAGE {
+        versioned_developer_image()
+    } else {
+        stored.to_string()
+    }
+}
+
+/// Whether `image` is the private legacy image, at any tag.
+pub fn is_legacy_agent_image(image: &str) -> bool {
+    let image = image.trim();
+    match image.strip_prefix(LEGACY_AGENT_IMAGE_REPO) {
+        Some(rest) => rest.is_empty() || rest.starts_with(':') || rest.starts_with('@'),
+        None => false,
+    }
+}
+
+/// Why a pull failed, as far as the daemon's text lets us tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullFailure {
+    /// The registry refused access: private image, or no such repository for
+    /// an anonymous caller.
+    Denied,
+    /// The registry says the image or tag does not exist.
+    NotFound,
+    /// The registry could not be reached.
+    Network,
+    /// The download started and then stopped: no data for [`PULL_STALL_SECS`].
+    Stalled,
+    /// The download kept going but did not finish within [`PULL_TOTAL_SECS`].
+    TooSlow,
+    /// The release's signed manifest is there and isn't trusted, so the image isn't pulled
+    /// (`agent_image_digest`).
+    Unverified,
+    Other,
+}
+
+/// A pull that gets no data from the registry for this long has stalled.
+pub const PULL_STALL_SECS: u64 = 60;
+/// A pull that has not finished after this long is given up, however much
+/// data is still arriving.
+pub const PULL_TOTAL_SECS: u64 = 600;
+
+impl PullFailure {
+    /// Whether falling back to the base image can help: the legacy image is
+    /// refused or gone, not merely unreachable right now.
+    pub fn is_unavailable_image(self) -> bool {
+        matches!(self, Self::Denied | Self::NotFound)
+    }
+}
+
+/// Classify a pull error from the daemon's HTTP status (when it had one) and text.
+pub fn classify_pull_error(status: Option<u16>, message: &str) -> PullFailure {
+    let m = message.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+
+    if matches!(status, Some(401 | 403))
+        || has(&[
+            "denied",
+            "unauthorized",
+            "authentication required",
+            "forbidden",
+            "insufficient_scope",
+        ])
+    {
+        return PullFailure::Denied;
+    }
+    if status == Some(404) || has(&["manifest unknown", "name unknown", "not found", "no such image"]) {
+        return PullFailure::NotFound;
+    }
+    if has(&[
+        "no such host",
+        "lookup ",
+        "timeout",
+        "timed out",
+        "deadline exceeded",
+        "connection refused",
+        "connection reset",
+        "tls handshake",
+        "no route to host",
+        "network is unreachable",
+        "dial tcp",
+        "proxyconnect",
+        "unexpected eof",
+    ]) {
+        return PullFailure::Network;
+    }
+    PullFailure::Other
+}
+
+/// The sentence for a failed pull. Names the image, says what happened, and
+/// says what to do next. Never carries the daemon's raw text except for
+/// `Other`, where there is nothing better to say.
+pub fn pull_failure_message(image: &str, kind: PullFailure, detail: &str) -> String {
+    match kind {
+        PullFailure::Denied => format!(
+            "Couldn't start the container for this agent: the registry refused access to {image}. \
+             AgentMux downloads images without signing in, so the image has to be public. \
+             Create the agent to run on this computer (host) instead, or use a public image."
+        ),
+        PullFailure::NotFound => format!(
+            "Couldn't start the container for this agent: {image} was not found in its registry. \
+             Check the image name in the agent's settings, or create the agent to run on this computer (host)."
+        ),
+        PullFailure::Network => format!(
+            "Couldn't start the container for this agent: couldn't reach the registry to download {image}. \
+             Check your internet connection and any proxy set in Docker, then send your message again, \
+             or create the agent to run on this computer (host)."
+        ),
+        PullFailure::Stalled => format!(
+            "Couldn't start the container for this agent: the download of {image} stopped (no data for {PULL_STALL_SECS} s). \
+             Check your internet connection and any proxy set in Docker, then send your message again, \
+             or create the agent to run on this computer (host)."
+        ),
+        PullFailure::TooSlow => format!(
+            "Couldn't start the container for this agent: the download of {image} was still not finished after {} minutes, so AgentMux gave up. \
+             Check your internet connection, then send your message again, \
+             or create the agent to run on this computer (host).",
+            PULL_TOTAL_SECS / 60
+        ),
+        PullFailure::Unverified => format!(
+            "Couldn't start the container for this agent: the signed manifest of this AgentMux release isn't trusted ({}), \
+             so {image} was not downloaded. Update AgentMux, or create the agent to run on this computer (host).",
+            truncate(detail.trim(), 200)
+        ),
+        PullFailure::Other => format!(
+            "Couldn't start the container for this agent: couldn't download {image}: {}. \
+             Send your message again, or create the agent to run on this computer (host).",
+            truncate(detail.trim(), 300)
+        ),
+    }
+}
+
+/// The sentence for a provider CLI that couldn't be installed in the container.
+pub fn cli_install_failure_message(command: &str, detail: &str) -> String {
+    format!(
+        "Couldn't start the container for this agent: couldn't install {command} in it: {}. \
+         Check your internet connection, then send your message again, \
+         or create the agent to run on this computer (host).",
+        truncate(detail.trim(), 400)
+    )
+}
+
+/// The sentence for a Docker daemon that isn't answering.
+pub fn docker_unreachable_message() -> String {
+    "Couldn't start the container for this agent: Docker isn't responding. \
+     Start Docker Desktop (or your container runtime) and send your message again, \
+     or create the agent to run on this computer (host)."
+        .to_string()
+}
+
+/// The sentence for any other Docker failure while starting the container.
+pub fn docker_error_message(detail: &str) -> String {
+    format!(
+        "Couldn't start the container for this agent: Docker reported an error: {}",
+        truncate(detail.trim(), 300)
+    )
+}
+
+/// Whether a Docker error is the daemon being unreachable, not a request it refused.
+pub fn looks_like_daemon_unreachable(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    [
+        "error trying to connect",
+        "cannot connect to the docker daemon",
+        "is the docker daemon running",
+        "the system cannot find the file specified",
+        "the system cannot find the path specified",
+        "docker.sock",
+        "docker_engine",
+    ]
+    .iter()
+    .any(|n| m.contains(n))
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let cut: String = s.chars().take(max).collect();
+    format!("{cut}...")
+}
+
+/// A parsed image reference: where to ask, which repository, which tag or digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageRef {
+    pub registry: String,
+    pub repo: String,
+    pub reference: String,
+}
+
+/// Split `image` the way Docker does. `None` for a reference we won't probe
+/// (a local or port-qualified registry, which may well speak plain HTTP).
+pub fn parse_image_ref(image: &str) -> Option<ImageRef> {
+    let image = image.trim();
+    if image.is_empty() {
+        return None;
+    }
+    let (name, reference) = if let Some((name, digest)) = image.split_once('@') {
+        (name, digest.to_string())
+    } else {
+        let last_slash = image.rfind('/').map_or(0, |i| i + 1);
+        match image[last_slash..].rfind(':') {
+            Some(i) => (&image[..last_slash + i], image[last_slash + i + 1..].to_string()),
+            None => (image, "latest".to_string()),
+        }
+    };
+    if reference.is_empty() {
+        return None;
+    }
+
+    let (registry, repo) = match name.split_once('/') {
+        Some((first, rest)) if first.contains('.') || first.contains(':') || first == "localhost" => {
+            (first.to_string(), rest.to_string())
+        }
+        _ => ("docker.io".to_string(), name.to_string()),
+    };
+    if registry == "localhost" || registry.starts_with("localhost:") || registry.contains(':') {
+        return None;
+    }
+    let (registry, repo) = if registry == "docker.io" || registry == "index.docker.io" {
+        let repo = if repo.contains('/') { repo } else { format!("library/{repo}") };
+        ("registry-1.docker.io".to_string(), repo)
+    } else {
+        (registry, repo)
+    };
+    if repo.is_empty() || repo.contains("..") {
+        return None;
+    }
+    Some(ImageRef { registry, repo, reference })
+}
+
+/// The pieces of a `WWW-Authenticate: Bearer ...` challenge.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BearerChallenge {
+    pub realm: String,
+    pub service: Option<String>,
+    pub scope: Option<String>,
+}
+
+/// Parse a Bearer challenge; `None` for any other scheme or a missing realm.
+pub fn parse_bearer_challenge(header: &str) -> Option<BearerChallenge> {
+    let rest = header.trim().strip_prefix("Bearer ").or_else(|| header.trim().strip_prefix("bearer "))?;
+    let mut out = BearerChallenge::default();
+    for part in split_challenge_params(rest) {
+        let Some((key, value)) = part.split_once('=') else { continue };
+        let value = value.trim().trim_matches('"').to_string();
+        match key.trim().to_ascii_lowercase().as_str() {
+            "realm" => out.realm = value,
+            "service" => out.service = Some(value),
+            "scope" => out.scope = Some(value),
+            _ => {}
+        }
+    }
+    (!out.realm.is_empty()).then_some(out)
+}
+
+/// Split on commas that are outside double quotes (a scope can hold `,`).
+fn split_challenge_params(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let (mut start, mut in_quotes) = (0, false);
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                parts.push(s[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(s[start..].trim());
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// Whether `image` can be had here. A stored legacy image is also checked
+/// against the base image it falls back to, so the answer matches what a
+/// start would actually do.
+pub async fn check_image_access(manager: Option<&ContainerManager>, image: &str) -> ContainerImageAccess {
+    let image = resolve_container_image(image);
+    let mut candidates = vec![image.clone()];
+    if is_legacy_agent_image(&image) {
+        candidates.push(DEFAULT_AGENT_IMAGE.to_string());
+    } else if is_versioned_agent_image(&image) {
+        candidates.push(floating_image_for(&image).to_string());
+    }
+    let mut best: Option<ContainerImageAccess> = None;
+    for candidate in &candidates {
+        let local = match manager {
+            Some(m) => m.has_image_locally(candidate).await,
+            None => false,
+        };
+        let access = if local { ContainerImageAccess::Local } else { probe_anonymous(candidate).await };
+        best = Some(match best {
+            Some(prev) => better_access(prev, access),
+            None => access,
+        });
+    }
+    best.unwrap_or(ContainerImageAccess::Unknown)
+}
+
+/// The better of two answers for "can this be had": something usable beats
+/// something unknown, which beats a refusal.
+pub fn better_access(a: ContainerImageAccess, b: ContainerImageAccess) -> ContainerImageAccess {
+    fn rank(x: ContainerImageAccess) -> u8 {
+        match x {
+            ContainerImageAccess::Local => 4,
+            ContainerImageAccess::Public => 3,
+            ContainerImageAccess::Unknown => 2,
+            ContainerImageAccess::Denied => 1,
+            ContainerImageAccess::NotFound => 0,
+        }
+    }
+    if rank(b) > rank(a) { b } else { a }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_stored_image_means_this_versions_base_image() {
+        let versioned = format!("ghcr.io/agentmuxai/agent-base:{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(resolve_container_image(""), versioned);
+        assert_eq!(resolve_container_image("  "), versioned);
+        assert_eq!(resolve_container_image(DEFAULT_AGENT_IMAGE), versioned, "the default definitions carry :latest");
+        assert_eq!(resolve_container_image("my/own:1"), "my/own:1");
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1"), "ghcr.io/agentmuxai/agent-base:0.59.1");
+    }
+
+    #[test]
+    fn the_retired_image_is_never_what_a_container_is_made_from() {
+        let versioned = versioned_agent_image();
+        for legacy in ["ghcr.io/agentmuxai/agent-claude:latest", "ghcr.io/agentmuxai/agent-claude", "ghcr.io/agentmuxai/agent-claude:2026-06-14", "ghcr.io/agentmuxai/agent-claude@sha256:abc"] {
+            assert_eq!(resolve_container_image(legacy), versioned, "{legacy}");
+        }
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-claude-extra:latest"), "ghcr.io/agentmuxai/agent-claude-extra:latest");
+    }
+
+    #[test]
+    fn the_developer_variant_resolves_to_this_versions_developer_image() {
+        let developer = format!("ghcr.io/agentmuxai/agent-base:{}-developer", env!("CARGO_PKG_VERSION"));
+        assert_eq!(versioned_developer_image(), developer);
+        assert_eq!(resolve_container_image(DEFAULT_DEVELOPER_IMAGE), developer);
+        assert_eq!(resolve_container_image("ghcr.io/agentmuxai/agent-base:0.59.1-developer"), "ghcr.io/agentmuxai/agent-base:0.59.1-developer");
+        assert_eq!(resolve_container_image(""), versioned_agent_image(), "the base image stays the default");
+    }
+
+    #[test]
+    fn the_developer_variant_is_told_apart_by_its_tag() {
+        assert!(is_developer_image(DEFAULT_DEVELOPER_IMAGE));
+        assert!(is_developer_image(&versioned_developer_image()));
+        assert!(is_developer_image(" ghcr.io/agentmuxai/agent-base:0.59.41-developer "));
+        assert!(is_developer_image("ghcr.io/agentmuxai/agent-base:dispatch-1ddc56f-developer"));
+        assert!(!is_developer_image(DEFAULT_AGENT_IMAGE));
+        assert!(!is_developer_image(&versioned_agent_image()));
+        assert!(!is_developer_image("ghcr.io/agentmuxai/agent-base@sha256:abc"), "a digest names no variant");
+        assert!(!is_developer_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0-developer"));
+        assert!(!is_developer_image("my/own:developer"));
+        assert!(is_agent_base_image(&versioned_developer_image()), "it is the same repository, so the update rules see an agent image");
+        assert_eq!(current_image_for(DEFAULT_DEVELOPER_IMAGE), versioned_developer_image());
+        assert_eq!(current_image_for(DEFAULT_AGENT_IMAGE), versioned_agent_image());
+    }
+
+    #[test]
+    fn a_missing_versioned_developer_image_falls_back_to_the_floating_developer_image_not_the_base() {
+        assert!(is_versioned_agent_image(&versioned_developer_image()));
+        assert_eq!(floating_image_for(&versioned_developer_image()), DEFAULT_DEVELOPER_IMAGE);
+        assert_eq!(floating_image_for(&versioned_agent_image()), DEFAULT_AGENT_IMAGE);
+        assert!(!is_versioned_agent_image(DEFAULT_DEVELOPER_IMAGE));
+    }
+
+    #[test]
+    fn the_base_image_is_recognised_at_any_tag_and_nothing_else_is() {
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:0.59.41"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base:latest"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base"));
+        assert!(is_agent_base_image("ghcr.io/agentmuxai/agent-base@sha256:abc"));
+        assert!(!is_agent_base_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0"));
+        assert!(!is_agent_base_image("my/own:1"));
+    }
+
+    #[test]
+    fn only_a_version_pinned_base_image_can_fall_back_to_latest() {
+        assert!(is_versioned_agent_image(&versioned_agent_image()));
+        assert!(is_versioned_agent_image("ghcr.io/agentmuxai/agent-base:0.59.41"));
+        assert!(is_versioned_agent_image(" ghcr.io/agentmuxai/agent-base:1.0.0-beta.1 "));
+        assert!(!is_versioned_agent_image(DEFAULT_AGENT_IMAGE));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base:dispatch-1ddc56f"));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base"));
+        assert!(!is_versioned_agent_image("ghcr.io/agentmuxai/agent-base-extra:1.0.0"));
+        assert!(!is_versioned_agent_image("my/own:1.0.0"));
+    }
+
+    #[test]
+    fn the_legacy_image_is_recognised_at_any_tag_and_nothing_else_is() {
+        assert!(is_legacy_agent_image("ghcr.io/agentmuxai/agent-claude:latest"));
+        assert!(is_legacy_agent_image("ghcr.io/agentmuxai/agent-claude:2026-06-14"));
+        assert!(is_legacy_agent_image("ghcr.io/agentmuxai/agent-claude"));
+        assert!(is_legacy_agent_image("ghcr.io/agentmuxai/agent-claude@sha256:abc"));
+        assert!(!is_legacy_agent_image("ghcr.io/agentmuxai/agent-claude-extra:latest"));
+        assert!(!is_legacy_agent_image(DEFAULT_AGENT_IMAGE));
+        assert!(!is_legacy_agent_image("someone/agent-claude:latest"));
+    }
+
+    #[test]
+    fn real_daemon_texts_classify_as_denied() {
+        for text in [
+            "Head \"https://ghcr.io/v2/agentmuxai/agent-claude/manifests/latest\": denied",
+            "Error response from daemon: Head \"https://ghcr.io/v2/x/manifests/latest\": unauthorized",
+            "pull access denied for x, repository does not exist or may require 'docker login'",
+            "unauthorized: authentication required",
+            "denied: requested access to the resource is denied",
+        ] {
+            assert_eq!(classify_pull_error(Some(500), text), PullFailure::Denied, "{text}");
+        }
+        assert_eq!(classify_pull_error(Some(401), ""), PullFailure::Denied);
+        assert_eq!(classify_pull_error(Some(403), "whatever"), PullFailure::Denied);
+    }
+
+    #[test]
+    fn missing_images_classify_as_not_found() {
+        assert_eq!(classify_pull_error(Some(404), ""), PullFailure::NotFound);
+        assert_eq!(
+            classify_pull_error(Some(500), "manifest for ghcr.io/x/y:nope not found: manifest unknown: manifest unknown"),
+            PullFailure::NotFound
+        );
+        assert_eq!(classify_pull_error(None, "No such image: foo"), PullFailure::NotFound);
+    }
+
+    #[test]
+    fn unreachable_registries_classify_as_network() {
+        for text in [
+            "Get \"https://ghcr.io/v2/\": dial tcp: lookup ghcr.io on 127.0.0.11:53: no such host",
+            "Get \"https://ghcr.io/v2/\": net/http: TLS handshake timeout",
+            "Get \"https://ghcr.io/v2/\": context deadline exceeded",
+            "dial tcp 140.82.112.34:443: connect: connection refused",
+            "proxyconnect tcp: dial tcp 10.0.0.1:3128: i/o timeout",
+        ] {
+            assert_eq!(classify_pull_error(Some(500), text), PullFailure::Network, "{text}");
+        }
+    }
+
+    #[test]
+    fn denied_wins_over_not_found_when_both_words_appear() {
+        // Docker's own text for a private or missing repo mentions both.
+        assert_eq!(
+            classify_pull_error(Some(500), "pull access denied for x, repository does not exist or not found"),
+            PullFailure::Denied
+        );
+    }
+
+    #[test]
+    fn anything_else_is_other() {
+        assert_eq!(classify_pull_error(Some(500), "toomanyrequests: rate limit"), PullFailure::Other);
+        assert_eq!(classify_pull_error(None, ""), PullFailure::Other);
+    }
+
+    #[test]
+    fn only_a_refused_or_missing_image_is_worth_a_fallback() {
+        assert!(PullFailure::Denied.is_unavailable_image());
+        assert!(PullFailure::NotFound.is_unavailable_image());
+        assert!(!PullFailure::Network.is_unavailable_image());
+        assert!(!PullFailure::Other.is_unavailable_image());
+    }
+
+    #[test]
+    fn every_message_names_the_image_and_a_next_step_and_never_a_raw_docker_error() {
+        for kind in [PullFailure::Denied, PullFailure::NotFound, PullFailure::Network, PullFailure::Other] {
+            let msg = pull_failure_message("ghcr.io/x/y:1", kind, "some detail");
+            assert!(msg.starts_with("Couldn't start the container for this agent"), "{msg}");
+            assert!(msg.contains("ghcr.io/x/y:1"), "{msg}");
+            assert!(msg.contains("(host)"), "offers the host fallback: {msg}");
+            assert!(!msg.contains("Docker API error"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn only_the_catch_all_message_carries_the_daemons_text() {
+        let denied = pull_failure_message("img", PullFailure::Denied, "Head https://secret-host/v2: denied");
+        assert!(!denied.contains("secret-host"));
+        let other = pull_failure_message("img", PullFailure::Other, "odd failure");
+        assert!(other.contains("odd failure"));
+    }
+
+    #[test]
+    fn a_long_detail_is_cut() {
+        let msg = pull_failure_message("img", PullFailure::Other, &"x".repeat(2000));
+        assert!(msg.len() < 700, "{}", msg.len());
+    }
+
+    #[test]
+    fn daemon_down_texts_are_recognised() {
+        assert!(looks_like_daemon_unreachable("error trying to connect: The system cannot find the file specified. (os error 2)"));
+        assert!(looks_like_daemon_unreachable("Cannot connect to the Docker daemon at unix:///var/run/docker.sock"));
+        assert!(!looks_like_daemon_unreachable("Docker responded with status code 409: name conflict"));
+    }
+
+    #[test]
+    fn image_refs_split_like_docker_does() {
+        let r = parse_image_ref("ghcr.io/agentmuxai/agent-base:latest").unwrap();
+        assert_eq!((r.registry.as_str(), r.repo.as_str(), r.reference.as_str()), ("ghcr.io", "agentmuxai/agent-base", "latest"));
+
+        let r = parse_image_ref("ghcr.io/agentmuxai/agent-base").unwrap();
+        assert_eq!(r.reference, "latest");
+
+        let r = parse_image_ref("alpine").unwrap();
+        assert_eq!((r.registry.as_str(), r.repo.as_str(), r.reference.as_str()), ("registry-1.docker.io", "library/alpine", "latest"));
+
+        let r = parse_image_ref("someone/tool:1.2").unwrap();
+        assert_eq!((r.registry.as_str(), r.repo.as_str(), r.reference.as_str()), ("registry-1.docker.io", "someone/tool", "1.2"));
+
+        let r = parse_image_ref("docker.io/library/node:24-slim").unwrap();
+        assert_eq!((r.registry.as_str(), r.repo.as_str()), ("registry-1.docker.io", "library/node"));
+
+        let r = parse_image_ref("ghcr.io/o/r@sha256:0123").unwrap();
+        assert_eq!((r.repo.as_str(), r.reference.as_str()), ("o/r", "sha256:0123"));
+    }
+
+    #[test]
+    fn local_and_port_registries_are_not_probed() {
+        assert_eq!(parse_image_ref("localhost/foo:1"), None);
+        assert_eq!(parse_image_ref("localhost:5000/foo:1"), None);
+        assert_eq!(parse_image_ref("registry.local:5000/foo:1"), None);
+        assert_eq!(parse_image_ref(""), None);
+        assert_eq!(parse_image_ref("foo:"), None);
+    }
+
+    #[test]
+    fn a_bearer_challenge_is_parsed_including_a_scope_with_a_comma() {
+        let c = parse_bearer_challenge(
+            r#"Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:agentmuxai/agent-base:pull""#,
+        )
+        .unwrap();
+        assert_eq!(c.realm, "https://ghcr.io/token");
+        assert_eq!(c.service.as_deref(), Some("ghcr.io"));
+        assert_eq!(c.scope.as_deref(), Some("repository:agentmuxai/agent-base:pull"));
+
+        let c = parse_bearer_challenge(r#"Bearer realm="https://auth.example/t",scope="repository:a/b:pull,push""#).unwrap();
+        assert_eq!(c.scope.as_deref(), Some("repository:a/b:pull,push"));
+        assert_eq!(c.service, None);
+    }
+
+    #[test]
+    fn a_challenge_that_is_not_bearer_or_has_no_realm_is_none() {
+        assert_eq!(parse_bearer_challenge("Basic realm=\"x\""), None);
+        assert_eq!(parse_bearer_challenge("Bearer service=\"x\""), None);
+        assert_eq!(parse_bearer_challenge(""), None);
+    }
+
+    #[test]
+    fn a_usable_answer_beats_unknown_which_beats_a_refusal() {
+        use ContainerImageAccess::*;
+        assert_eq!(better_access(Denied, Public), Public);
+        assert_eq!(better_access(Public, Denied), Public);
+        assert_eq!(better_access(Denied, Unknown), Unknown);
+        assert_eq!(better_access(NotFound, Denied), Denied);
+        assert_eq!(better_access(Local, Public), Local);
+    }
+}

@@ -33,12 +33,17 @@ export interface AttentionItem {
     what: string;
     /** When it began to wait (unix ms) as this window saw it. */
     since: number;
+    /** The srv kinds of what it waits on (`vault`, `browser`, `consent`…); empty for its own question or permission. */
+    kinds?: string[];
     /** False only when the pane is known to be in another window; a pane this window cannot place counts as here. */
     local: boolean;
 }
 
 /** An agent colour as readable text on the toast and the list in the current theme (the palette identity colour). */
 export const attentionTint = (hex?: string) => paneRoleColor(undefined, hex, isLightThemeActive(), "identity");
+
+/** What a pane's asker is called when neither its agent's row nor its own name is known. */
+export const UNKNOWN_NAME = "An agent";
 
 /** What an agent that srv says waits on the user, with no words of its own, wants. */
 const REMOTE_WHAT = "is waiting for you";
@@ -58,11 +63,12 @@ export function mergeAttention(
         const own = row ? undefined : paneName(p.blockId);
         return {
             blockId: p.blockId,
-            name: row?.name || own || "An agent",
+            name: row?.name || own || UNKNOWN_NAME,
             agentId: row?.agent_id,
             color: row?.color,
             what: p.what,
             since: p.since,
+            kinds: p.kinds ?? [],
             local: true,
             ...(own ? { pane: true as const } : {}),
         };
@@ -77,11 +83,14 @@ export function mergeAttention(
         have.add(blockId);
         items.push({
             blockId,
-            name: r.name || "An agent",
+            name: r.name || UNKNOWN_NAME,
             agentId: r.waiting_in ? undefined : r.agent_id,
             color: r.color,
             what: r.waiting_in ? BROWSER_WHAT : REMOTE_WHAT,
             since: seen(blockId),
+            // A wait only srv's row reports says nothing of what it waits on, so it is kept as an ask: a pending Vault
+            // request of that pane does not prove it waits on nothing else (it may have asked a question since).
+            kinds: r.waiting_in ? ["browser"] : [],
             local: here(blockId) !== false,
         });
     }
@@ -125,6 +134,14 @@ export function attentionRows(rows: AgentRuntime[], browserWaits: boolean): Agen
 
 /** srv's runtime rows for the list and the status bar's counts; reactive. */
 export const sharedAttentionRows = (): AgentRuntime[] => attentionRows(sharedAgentRuntime().rows(), browserWaitsShown());
+
+/** Who owns pane `blockId`, by name and colour: its agent, or the pane's own name; for a request that names no pane, "AgentMux". */
+export function attentionWho(blockId: string): { name: string; color?: string } {
+    const row = sharedAgentRuntime()
+        .rows()
+        .find((r) => r.block_id === blockId);
+    return { name: row?.name || ownPaneName(blockId) || UNKNOWN_NAME, color: row?.color };
+}
 
 /** The panes that wait on the person, anywhere on this machine; reactive. */
 export function attentionItems(): AttentionItem[] {

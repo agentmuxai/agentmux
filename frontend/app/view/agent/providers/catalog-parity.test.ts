@@ -19,12 +19,12 @@ import {
 
 const source = readSrvProviders();
 const statics = srvStatics(source);
-const providersRs = read("crates/srv/src/backend/providers.rs");
+const providersRs = read("crates/srv-core/src/backend/providers.rs");
 
 /** The providers srv installs itself: the `provider_id` of each entry in cli_download.rs (release downloads) and cli_uv.rs (uv venvs). */
 const srvDownloads = new Set(
     ["cli_download.rs", "cli_uv.rs"].flatMap((f) =>
-        [...read(`crates/srv/src/backend/${f}`).matchAll(/^\s{4,8}provider_id: "([^"]+)",/gm)].map((m) => m[1])
+        [...read(`crates/srv-core/src/backend/${f}`).matchAll(/^\s{4,8}provider_id: "([^"]+)",/gm)].map((m) => m[1])
     )
 );
 

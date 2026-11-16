@@ -66,9 +66,23 @@ Source: "{#SourceDir}\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion
 Source: "{#IconFile}"; DestDir: "{app}"; DestName: "agentmux.ico"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\agentmux.ico"
-Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+; /NOICONS means no Start Menu folder. Setup only honours that switch itself on the program group page,
+; which this script turns off, so the two group entries read it here.
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\agentmux.ico"; Check: not NoIconsRequested
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"; Check: not NoIconsRequested
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\agentmux.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// True when setup was started with /NOICONS (winget or a script may pass it).
+function NoIconsRequested: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/NOICONS') = 0 then
+      Result := True;
+end;

@@ -4,7 +4,7 @@
 /**
  * The turn as the user sees it: from the agent leaving idle to its return
  * there with nothing queued, over however many CLI passes that took. srv keeps
- * it (`TurnLedger` in crates/srv/src/backend/blockcontroller/health.rs) and
+ * it (`TurnLedger` in crates/srv-core/src/backend/blockcontroller/health.rs) and
  * publishes it as the persisted `agentturn` event; the pane only reads it.
  *
  * Within a turn, the reducer's `turnTokens` and `TurnEnd` stay per pass.

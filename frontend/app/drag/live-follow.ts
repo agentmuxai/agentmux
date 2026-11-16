@@ -14,7 +14,7 @@
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 
-type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd" | "liveFollowResize" | "liveFollowCapture">;
+type Api = Pick<AppApi, "liveFollowBegin" | "liveFollowEnd" | "liveFollowResize" | "liveFollowCapture" | "liveFollowQuiet" | "liveFollowFade">;
 
 export interface LiveFollowSpec {
     sourceWindowLabel: string;
@@ -26,8 +26,13 @@ export interface LiveFollowSpec {
     /** Cursor to the window's top-left, DIP. */
     offsetX: number;
     offsetY: number;
-    /** The viewport y below which a window tab's picture shows, DIP; none for a pane, shown everywhere from its first move. */
+    /** The viewport y below which a window tab's picture shows, DIP; none for a pane. */
     tearLineY?: number;
+    /**
+     * A pane: the body of the layout its drag began in, in the viewport's CSS px, and the viewport's width. The
+     * picture is not shown while the cursor is over it. None: shown everywhere from its first move.
+     */
+    quiet?: { left: number; top: number; width: number; height: number; viewportWidth: number };
 }
 
 /** Hand the host the picture and where it goes. A failure only means no picture: the tear-off is unchanged. */
@@ -38,6 +43,35 @@ export async function beginLiveFollow(api: Api, spec: LiveFollowSpec): Promise<v
     } catch (e) {
         Logger.warn("dnd", "live follow begin failed", { error: String(e) });
     }
+}
+
+/**
+ * Turn a pane picture's quiet area on or off. Calls go out in order, so the last one asked is the one that
+ * holds. A failure only leaves the area as it was.
+ */
+let quiets: Promise<unknown> = Promise.resolve();
+export function quietLiveFollow(api: Pick<Api, "liveFollowQuiet">, on: boolean): Promise<void> {
+    if (!isWindows()) return Promise.resolve();
+    quiets = quiets.then(() => api.liveFollowQuiet({ on })).catch((e) => Logger.debug("dnd", "live follow quiet failed", { error: String(e) }));
+    return quiets as Promise<void>;
+}
+
+/** How much of the picture shows over a layout's drop guides: they are in the page, under the picture. */
+export const GUIDED_OPACITY = 0.3;
+
+/**
+ * Fade the picture (`on`) or show it solid again. The drop guides ask (dropGuides.ts): the picture is the dragged
+ * pane at its own size, and it covered the spots a drop is chosen by (the operator, 2026-11-15: "when the follow
+ * pane is over the guide, can you make the follow pane 70% transparent?"). Asked before the picture is made, it
+ * holds for that picture. Calls go out in order; a failure only leaves the picture as it was.
+ */
+let fades: Promise<unknown> = Promise.resolve();
+export function fadeLiveFollow(api: Pick<Api, "liveFollowFade">, on: boolean): Promise<void> {
+    if (!isWindows()) return Promise.resolve();
+    fades = fades
+        .then(() => api.liveFollowFade({ opacity: on ? GUIDED_OPACITY : 1 }))
+        .catch((e) => Logger.debug("dnd", "live follow fade failed", { error: String(e) }));
+    return fades as Promise<void>;
 }
 
 /** The real window is up (or the tear-off failed): drop the picture now. */

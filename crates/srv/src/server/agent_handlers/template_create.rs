@@ -12,15 +12,60 @@
 
 use crate::backend::mps::Broker;
 use crate::backend::rpc_types::{AgentDefCreateFromTemplateResult, CommandAgentDefCreateFromTemplateData};
-use crate::backend::storage::store::Store;
+use crate::backend::storage::store::{IdentityAccount, Store};
 use crate::backend::storage::AgentDefinition;
 
 use super::template::{former_name_of_another, name_taken};
+
+/// Link a new agent to the account it is created with, for its own provider: `chosen` (the account the caller
+/// picked) when it is one of this channel's accounts for that provider, else the provider's only account.
+/// Two or more accounts with none chosen leave it unbound: that is a choice, made in Accounts.
+///
+/// The launch writes this link too (`linkLaunchAccount`), but only after it has started the controller, so
+/// the new agent's first spawn found no link, refused with "no credentials", and nothing started it again
+/// once the link landed, while Accounts already counted the agent as using the account. The same race
+/// `inherit_source_account_links` closes for a fork. Best-effort: a failure is logged and leaves the agent
+/// unbound, as before.
+fn link_new_agent_account(id_store: &Store, identity_store: &Store, broker: &Broker, def: &AgentDefinition, chosen: &str) {
+    use crate::backend::providers::resolve_provider_alias;
+    let provider = resolve_provider_alias(&def.provider);
+    if provider.is_empty() {
+        return;
+    }
+    let same_provider = |a: &IdentityAccount| resolve_provider_alias(&a.provider) == provider;
+    let chosen = chosen.trim();
+    let account = if chosen.is_empty() {
+        let mut mine = match id_store.identity_list(None) {
+            Ok(all) => all.into_iter().filter(same_provider),
+            Err(e) => {
+                tracing::warn!(target: "identity", agent = %def.id, error = %e, "agentdefcreatefromtemplate: could not read the accounts; the new agent starts unbound");
+                return;
+            }
+        };
+        match (mine.next(), mine.next()) {
+            (Some(only), None) => only,
+            _ => return,
+        }
+    } else {
+        match id_store.identity_get(chosen) {
+            Ok(Some(a)) if same_provider(&a) => a,
+            _ => return,
+        }
+    };
+    match identity_store.agent_identity_link(&def.id, &account.id, &def.provider) {
+        Ok(()) => {
+            tracing::info!(target: "identity", agent = %def.id, provider = %provider, "agentdefcreatefromtemplate: new agent linked to its account");
+            broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&def.id, &(), vec![], 0);
+        }
+        Err(e) => tracing::warn!(target: "identity", agent = %def.id, account_id = %account.id, error = %e, "agentdefcreatefromtemplate: could not link the new agent to its account"),
+    }
+}
 
 /// Clone the template `cmd.template_id` into a new agent named `cmd.name`.
 pub(crate) fn create_from_template(
     mstore: &Store,
     id_store: &Store,
+    identity_store: &Store,
     broker: &Broker,
     cmd: CommandAgentDefCreateFromTemplateData,
 ) -> Result<AgentDefCreateFromTemplateResult, String> {
@@ -155,6 +200,7 @@ pub(crate) fn create_from_template(
             .map_err(|e| format!("agentdefcreatefromtemplate: bundles: {e}"))?;
     }
 
+    link_new_agent_account(id_store, identity_store, broker, &new_def, cmd.identity_id.as_deref().unwrap_or(""));
     broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
     let resp = AgentDefCreateFromTemplateResult {

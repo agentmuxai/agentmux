@@ -21,7 +21,8 @@
  * A change of size alone never opens a pass: a window or splitter resize, a zoom, a pane resized by a
  * command. The trigger is the arrangement (which panes, in which order, which of them minimized).
  *
- * A pass never opens over a drag's reflow: a drop and a tear-off commit what the panes already show.
+ * A pass never opens over a drag's reflow: a drop and a tear-off commit what the panes already show. That holds
+ * for a drop srv commits too, whose pane comes a moment after the release (heldDrop.ts).
  * docs/specs/SPEC_PANE_REFLOW_GLIDE_2026_11_01.md §6.
  */
 
@@ -31,12 +32,12 @@ import { scaledMs } from "@/app/motion/motion";
 import { DURATION_BASE_MS } from "@/app/motion/tokens";
 import { tabSwitching } from "@/app/store/tab-reveal";
 import type { LayoutModel } from "./layoutModel";
-import { pillReflowIn } from "./pillDragState";
 import {
     liveReflowEnabled,
     movesWithReflow,
     REFLOW_EDGES,
     REFLOW_MAX_PANES,
+    reflowDragIn,
     reflowSettleMs,
     shownPx,
 } from "./liveReflow";
@@ -90,8 +91,8 @@ const states = new WeakMap<LayoutModel, State>();
 
 type Props = Record<string, LayoutNodeAdditionalProps>;
 
-/** Whether a drag is showing its result in `model`'s layout now: a pane's, a tab pill's being placed, or a tear-off. */
-const dragShows = (model: LayoutModel): boolean => model.activeDrag() || pillReflowIn(model) || !!model.tearOffLayout();
+/** Whether a drag is showing its result in `model`'s layout now: a drop (liveReflow.ts `reflowDragIn`), or a tear-off. */
+const dragShows = (model: LayoutModel): boolean => reflowDragIn(model) || !!model.tearOffLayout();
 
 /** The settling pass open on `model`'s layout, or none. Made in the model's reactive owner, once per model. */
 export function createSettlingPass(model: LayoutModel): Accessor<SettlingPass | undefined> {

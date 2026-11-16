@@ -237,9 +237,9 @@ describe("the baseline", () => {
 
 describe("facts", () => {
     const code = {
-        "crates/srv/src/migrations/m0000_a.rs": "",
-        "crates/srv/src/migrations/m0001_b.rs": "",
-        "crates/srv/src/backend/storage/wan_identity.rs": "const SCHEMA_VERSION: i64 = 5;\n",
+        "crates/srv-core/src/migrations/m0000_a.rs": "",
+        "crates/srv-core/src/migrations/m0001_b.rs": "",
+        "crates/srv-core/src/backend/storage/wan_identity.rs": "const SCHEMA_VERSION: i64 = 5;\n",
         "crates/cef/src/reducer/mod.rs": "pub enum HostCommand {\n    /// one\n    A { x: u8 },\n    B(u8),\n    C,\n}\n",
         "crates/common/src/ipc/types.rs": "pub enum HwndDriftKind {\n    First,\n    Second,\n}\n",
         "crates/cef/src/ipc.rs": [
@@ -256,7 +256,7 @@ describe("facts", () => {
         "crates/cef/src/commands/stubs.rs": 'pub fn is_stub_command(cmd: &str) -> bool {\n    matches!(cmd, "download_file")\n}\n',
         "crates/mcp/src/tool_schemas.rs": '[\n  {\n  "name": "Pane",\n    "properties": { "name": { "type": "string" } }\n  },\n  {\n  "name": "UI"\n  }\n]\n',
         "frontend/app/element/modal-layer.ts": 'type A = { kind: "alpha-one" } | { kind: "bundle-import-select" } | { kind: "bundle-import-confirm" };\n',
-        "crates/srv/src/backend/pane_env.rs": 'pub const PANE_ENV_KEEP: &[&str] = &[\n    "AGENTMUX_A",\n    "AGENTMUX_B",\n];\n',
+        "crates/srv-core/src/backend/pane_env.rs": 'pub const PANE_ENV_KEEP: &[&str] = &[\n    "AGENTMUX_A",\n    "AGENTMUX_B",\n];\n',
     };
 
     it("reads the variants of an enum and the arms of route_command", () => {

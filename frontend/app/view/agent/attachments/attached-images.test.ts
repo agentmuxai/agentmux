@@ -58,6 +58,22 @@ describe("splitAttachedImages", () => {
         ]);
     });
 
+    it("reads a container agent's rehomed paths the same way (#7434)", () => {
+        // A container agent's copy lives under its workspace mount, not a host attachment-store path, but
+        // keeps the same trailing shape (crates/srv's rehome_for_container): the id and, for an image, the
+        // .send. suffix survive the move, which is what this parser and the image counter both key on.
+        const msg = [
+            "<attached_files>",
+            `1. a.png — /workspace/.agentmux-attachments/${A}.v1.send.png`,
+            `2. report.pdf — /workspace/.agentmux-attachments/named/${C}/report.pdf`,
+            "</attached_files>",
+        ].join("\n");
+        expect(splitAttachedImages(msg).attachments).toEqual([
+            { id: A, name: "a.png", image: true },
+            { id: C, name: "report.pdf" },
+        ]);
+    });
+
     it("needs matching open and close tags", () => {
         const msg = `<attached_files>\n1. x.png — /p/${A}.v1-e2000.send.png\n</attached_images>`;
         expect(splitAttachedImages(msg).attachments).toEqual([]);

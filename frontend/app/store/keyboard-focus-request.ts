@@ -25,8 +25,8 @@ export const requestKeyboardRow = (command: string | null, blockId?: string): vo
 
 export const clearKeyboardRowRequest = (): void => void setRequest(() => null);
 
-/** Open Settings at Keyboard shortcuts, scrolled to `command`'s line when one is given. */
+/** Open Settings at Keyboard shortcuts, scrolled to `command`'s line when one is given. A Settings pane in another tab is gone to, not copied. */
 export async function openKeyboardSettings(command?: string): Promise<void> {
-    const blockId = await openOrFocusPaneIdByView("settings", { meta: { view: "settings", "settings:section": "keyboard" } }, { "settings:section": "keyboard" });
+    const blockId = await openOrFocusPaneIdByView("settings", { meta: { view: "settings", "settings:section": "keyboard" } }, { "settings:section": "keyboard" }, { switchTabs: true });
     requestKeyboardRow(command ?? null, blockId);
 }

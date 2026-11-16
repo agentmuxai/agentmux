@@ -1,0 +1,42 @@
+{
+    "surface": {
+        "--main-bg-color": "color-mix(in srgb, var(--surface) calc(var(--window-opacity, 1) * 100%), transparent)",
+        "--block-bg-color": "color-mix(in srgb, var(--surface) calc(var(--window-opacity, 1) * 100%), transparent)",
+        "--elevated-bg-color": "var(--surface-raised)",
+        "--modal-bg-color": "var(--surface-overlay)",
+        "--panel-bg-color": "color-mix(in srgb, var(--surface-raised) 50%, transparent)",
+        "--block-bg-solid-color": "var(--surface)",
+        "--tab-strip-bg": "color-mix(in srgb, var(--ink-text) 3%, transparent)"
+    },
+    "ink": {
+        "--main-text-color": "--ink-text",
+        "--secondary-text-color": "--ink-muted",
+        "--tertiary-text-color": "--ink-faint",
+        "--border-color": "--ink-border",
+        "--accent-color": "--ink-accent",
+        "--accent-fg-color": "--ink-accent",
+        "--link-color": "--ink-accent",
+        "--error-color": "--ink-error",
+        "--error-text-color": "--ink-error",
+        "--warning-color": "--ink-warning",
+        "--warning-text-color": "--ink-warning",
+        "--success-color": "--ink-success",
+        "--success-text-color": "--ink-success",
+        "--hover-bg-color": "--ink-hover",
+        "--grey-text-color": "--ink-faint"
+    },
+    "channels": [
+        "--accent-color-rgb"
+    ],
+    "ansi": [
+        "--term-blue",
+        "--term-bright-blue",
+        "--term-bright-cyan",
+        "--term-bright-green",
+        "--term-bright-magenta",
+        "--term-cyan",
+        "--term-green",
+        "--term-magenta",
+        "--term-yellow"
+    ]
+}

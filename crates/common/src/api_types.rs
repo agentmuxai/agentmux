@@ -1363,7 +1363,7 @@ mod app_api_manifest_contract_tests {
     //! Rust half of the DRY contract check for the `shell.*` routes,
     //! described in docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md
     //! §2.8 — same mechanism and rationale as
-    //! `crates/srv/src/backend/rpc_types/block.rs`'s
+    //! `crates/srv-core/src/backend/rpc_types/block.rs`'s
     //! `app_api_manifest_contract_tests` module for `pane.open`. A Node-side
     //! test (`muxsh.contract.test.mjs`) makes the matching assertion against
     //! the same manifest.

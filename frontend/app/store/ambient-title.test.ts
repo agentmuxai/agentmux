@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isUsableTitle } from "./ambient-title";
 
-// The one corpus the Rust validator also loads (crates/srv/src/ambient/validate.rs,
+// The one corpus the Rust validator also loads (crates/srv-core/src/ambient/validate.rs,
 // `the_shared_corpus_is_honoured`), so the two implementations cannot drift.
 const corpus = JSON.parse(
-    readFileSync(join(__dirname, "../../../crates/srv/src/ambient/title_corpus.json"), "utf8"),
+    readFileSync(join(__dirname, "../../../crates/srv-core/src/ambient/title_corpus.json"), "utf8"),
 ) as { rejected: string[]; accepted: string[] };
 
 describe("isUsableTitle", () => {

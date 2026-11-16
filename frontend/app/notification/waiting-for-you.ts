@@ -39,7 +39,12 @@ interface WaitEntry {
     text?: string;
     /** What it wants in a few words, led by a verb ("asks to approve a Bash call"), for the toast and the list. */
     what: string;
+    /** The kind srv announced it as (`vault`, `browser`, `consent`…); absent for an agent's own question or permission. */
+    kind?: string;
 }
+
+/** In a pane's `kinds`, a wait that srv did not announce: the agent's own question, permission or shutdown ask, or a pane's card. */
+export const OWN_WAIT = "own";
 
 const waiting = new Map<string, Map<string, WaitEntry>>();
 /** `blockId` → when its first source began waiting (unix ms). */
@@ -61,6 +66,8 @@ export interface WaitingOptions {
     stillWaiting?: () => boolean;
     /** What it wants in a few words, led by a verb. Absent, a default from the source's name. */
     what?: string;
+    /** The kind srv announced it as; the status bar's summary sorts a wait into a part by it. */
+    kind?: string;
 }
 
 /** The default `what` of a source that gives none. */
@@ -85,7 +92,7 @@ export function startWaitingForYou(blockId: string, source: string, text?: strin
         waiting.set(blockId, sources);
     }
     const first = sources.size === 0;
-    sources.set(source, { text, what: opts.what ?? defaultWhat(source, text) });
+    sources.set(source, { text, what: opts.what ?? defaultWhat(source, text), kind: opts.kind });
     if (first) since.set(blockId, Date.now());
     bump();
     if (opts.stillWaiting) watch(blockId, source, opts.stillWaiting);
@@ -107,6 +114,25 @@ function watch(blockId: string, source: string, stillWaiting: () => boolean): vo
     watches.set(key, dispose);
 }
 
+/** A pane's last wait that has just ended: what it was and how long it lasted (the status bar's list of asks that already ended). */
+export interface EndedWait {
+    blockId: string;
+    what: string;
+    /** The kind srv announced it as, or [`OWN_WAIT`] for a question or permission. */
+    kind: string;
+    /** When it began (unix ms). */
+    since: number;
+    reason: "submitted" | "closed";
+}
+
+const endListeners = new Set<(ended: EndedWait) => void>();
+
+/** Calls `listener` when a pane's last wait ends, with the pane still known to the rest of the window. Returns the way to stop. */
+export function onWaitingEnded(listener: (ended: EndedWait) => void): () => void {
+    endListeners.add(listener);
+    return () => void endListeners.delete(listener);
+}
+
 /** `source` no longer waits in pane `blockId`: `submitted` when the user
  *  answered, `closed` when it went away unanswered. */
 export function endWaitingForYou(blockId: string, source: string, reason: "submitted" | "closed" = "submitted"): void {
@@ -114,12 +140,20 @@ export function endWaitingForYou(blockId: string, source: string, reason: "submi
     watches.get(key)?.();
     watches.delete(key);
     const sources = waiting.get(blockId);
+    const entry = sources?.get(source);
     if (!sources?.delete(source)) return;
-    if (sources.size > 0) return;
+    if (sources.size > 0) {
+        // What the pane still waits on changed (its kinds), though it still waits.
+        bump();
+        return;
+    }
+    const began = since.get(blockId) ?? 0;
     waiting.delete(blockId);
     since.delete(blockId);
     bump();
     firePaneEvent(blockId, { type: "waiting-ended", reason });
+    const ended: EndedWait = { blockId, what: entry?.what ?? "", kind: entry?.kind || OWN_WAIT, since: began, reason };
+    for (const listener of endListeners) listener(ended);
 }
 
 /** A pane that waits on the user in this window. */
@@ -128,6 +162,18 @@ export interface WaitingPane {
     /** What it wants, in a few words, led by a verb. */
     what: string;
     /** When it began to wait (unix ms). */
+    since: number;
+    /** The kind of each of its waits: srv's (`vault`, `browser`…), or [`OWN_WAIT`] for a question or permission. */
+    kinds?: string[];
+}
+
+/** A call to action that belongs to no pane (an `app:` request): a consent, an install, an upgrade ask with no pane. */
+export interface WaitingApp {
+    /** srv's key for it. */
+    key: string;
+    kind: string;
+    what: string;
+    /** When it began (unix ms). */
     since: number;
 }
 
@@ -139,7 +185,22 @@ export function waitingPanes(): WaitingPane[] {
     for (const [blockId, sources] of waiting) {
         if (blockId.startsWith(APP_KEY_PREFIX)) continue;
         const first = sources.values().next().value;
-        if (first) out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0 });
+        if (!first) continue;
+        const kinds = [...new Set([...sources.values()].map((e) => e.kind || OWN_WAIT))];
+        out.push({ blockId, what: first.what, since: since.get(blockId) ?? 0, kinds });
+    }
+    return out.sort((a, b) => a.since - b.since);
+}
+
+/** The requests that belong to no pane, oldest first; reactive. They play the tone while the window is not in front, so
+ *  the status bar lists them: a tone must have a row to find. */
+export function waitingApps(): WaitingApp[] {
+    version();
+    const out: WaitingApp[] = [];
+    for (const [blockId, sources] of waiting) {
+        if (!blockId.startsWith(APP_KEY_PREFIX)) continue;
+        const first = sources.values().next().value;
+        if (first) out.push({ key: blockId.slice(APP_KEY_PREFIX.length), kind: first.kind ?? "", what: first.what, since: since.get(blockId) ?? 0 });
     }
     return out.sort((a, b) => a.since - b.since);
 }
@@ -180,13 +241,17 @@ function whatForKind(kind: string): string {
             return "asks to install a widget";
         case "vault":
             return "needs a secret from you";
+        case "upgrade":
+            return "asks to upgrade AgentMux";
+        case "desktop":
+            return "asks to use your desktop";
         default:
             return "needs you";
     }
 }
 
 /** srv's announcement of a call to action it holds open (`userattention`,
- *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
+ *  crates/srv-core/src/backend/user_attention.rs), as its Rust type. */
 export type UserAttention = UserAttentionEvent;
 
 /** Apply one of srv's announcements, if it's for this window: one that
@@ -200,7 +265,7 @@ export function applyUserAttention(a: UserAttention, thisWindow: string): void {
     if (a.active && a.kind === "browser" && !browserWaitsShown()) return;
     const agentWaits = AGENT_WAITS.has(a.kind);
     const source = agentWaits ? `${AGENT_SOURCE}${a.key}` : `srv:${a.key}`;
-    if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind) });
+    if (a.active) startWaitingForYou(blockId, source, a.text, { what: whatForKind(a.kind), kind: a.kind });
     else endWaitingForYou(blockId, source, "submitted");
     if (agentWaits && a.block_id) {
         // Loaded when used: the pane hooks that keep the meta import this registry.
@@ -214,6 +279,8 @@ let installed = false;
 export function installWaitingForYou(): void {
     if (installed) return;
     installed = true;
+    // The asks that end are kept for two minutes for the status bar's list. Loaded when used: it reads this registry's ends.
+    void import("./ended-asks").then((m) => m.installEndedAsks()).catch(() => {});
     onMuxEvent(WpsEvent.UserAttention, (data) => applyUserAttention(data, windowId()));
     // What was already open when this window started.
     void RpcApi.NotifyAttentionCommand(TabRpcClient)

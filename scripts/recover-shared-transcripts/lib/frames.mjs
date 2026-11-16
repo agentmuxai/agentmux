@@ -5,7 +5,7 @@
 // §4, §8): a row of `db_file_frame` holds up to 64 consecutive whole 64 KB parts of
 // one file, and those parts have no row in `db_file_data`. A part's row always
 // wins over a frame. This is the tool's own decoder for both codecs, written from
-// crates/srv/src/backend/storage/filestore/frames.rs and deltas.rs; the test vector
+// crates/srv-core/src/backend/storage/filestore/frames.rs and deltas.rs; the test vector
 // in testdata/frames.json, written by the Rust encoder, keeps the two in step.
 
 import { createHash } from "node:crypto";
@@ -172,7 +172,7 @@ export function partIndex(db, zone, name) {
 /**
  * Whether a file's parts hold more bytes than its recorded `size` only because its last part's
  * row is longer than the content: the slack srv leaves in a line-oriented file's tail row so a
- * line is appended in place (`tail_capacity` in crates/srv/src/backend/storage/filestore/parts.rs).
+ * line is appended in place (`tail_capacity` in crates/srv-core/src/backend/storage/filestore/parts.rs).
  * True when the parts run 0..N, every part before the last is a whole part, the last holds at
  * least one content byte and has bytes past it, and every byte past `size` is a space. Anything
  * else (an extra byte in an earlier part, a whole part past the size, a NUL or text in the slack)

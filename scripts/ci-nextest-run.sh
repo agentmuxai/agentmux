@@ -71,7 +71,9 @@ CEILING_RAM="${CI_MEM_MAX:-14G}"
 CEILING_SWAP="${CI_SWAP_MAX:-7G}"
 GAP_SECONDS=20
 GAP_MEM_MB=2048
-CRATES="-p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
+CRATES="-p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats"
+# What the merge queue's run builds and tests (see attempt()).
+QUEUE_CRATES="-p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-mcp"
 
 # Whether the machine is out of memory: below 512 MB available and 1 GB of swap free, or below 300 MB available
 # whatever the swap. The second rule is for the stall that left no log (2026-11-12 and 11-13, nine times: a job ran to
@@ -230,18 +232,36 @@ attempt() {
     fi
     # Two LLVM threads in the srv test compile instead of four: see 4. in the header.
     export CARGO_BUILD_JOBS="$CARGO_JOBS"
+    # The packages the run at the end names: the queue's four, or all of them on a PR. Both builds before it name the
+    # same ones, because cargo builds a dependency with the features of every package named in the call: named with
+    # the core and the server layer only, agentmux-common is built without `local-http` (agentmux-mcp turns it on), and
+    # the run then needs another common and compiles the core and the server layer a second time on top of it, both at
+    # once. That is the build the two below exist to prevent (2026-11-15, queue run 43774916459: 22 minutes, 14.3 GB
+    # held of the 14 GB ceiling, the first attempt ended by its time limit).
+    local pkgs="$CRATES"
+    [ "${IN_QUEUE:-}" = true ] && pkgs="$QUEUE_CRATES"
+    # The core's test harness first: it is the biggest compile (rustc reaches about 10 GB), and cargo would otherwise
+    # run it beside the server layer's test harness (another 8 GB) on a 16 GB runner (2026-11-15, the PR that split the
+    # core into its own package: both at once, the machine paging, the sampler starved 879 s). `--lib` builds the unit
+    # tests of the packages that have a library (the others' are small) and leaves the server layer's own targets for
+    # the build after it. The core gets the `test-support` feature the server layer's tests turn on.
+    # shellcheck disable=SC2086 # pkgs is a list of arguments
+    cargo nextest run --no-run $pkgs --lib 2>&1 | tee -a "$BUILD_LOG" || return $?
+    # Then the server layer's own test harness: with the other crates' tests beside it the build held 13.9 GB of
+    # a 14 GB ceiling (a 9 GB rustc and a second one) and the machine paged for 15 minutes (run 43768804420).
+    # shellcheck disable=SC2086
+    cargo nextest run --no-run $pkgs --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
     if [ "${IN_QUEUE:-}" = true ]; then
         # The queue builds only what its tests need: srv's unit tests (where most guards are), mcp's unit tests and
         # common's one integration test. The other crates keep the cheaper check (srv's own is covered by its test
         # build).
         cargo check --tests -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats 2>&1 | tee -a "$BUILD_LOG" || return $?
-        cargo nextest run --profile queue -p agentmux-common -p agentmux-srv -p agentmux-mcp --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
+        # shellcheck disable=SC2086
+        cargo nextest run --profile queue $pkgs --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
-    # shellcheck disable=SC2086 # CRATES is a list of arguments
-    cargo nextest run --no-run $CRATES --bin agentmux-srv 2>&1 | tee -a "$BUILD_LOG" || return $?
     # shellcheck disable=SC2086
-    cargo nextest run --profile ci $CRATES 2>&1 | tee -a "$BUILD_LOG"
+    cargo nextest run --profile ci $pkgs 2>&1 | tee -a "$BUILD_LOG"
 }
 
 # The command prefix that runs the attempt in its own cgroup with the memory ceiling (sets CONFINE_BASE, an array; empty

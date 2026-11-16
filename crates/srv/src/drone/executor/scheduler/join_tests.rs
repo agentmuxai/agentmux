@@ -127,3 +127,36 @@ fn a_join_with_one_branch_or_a_count_it_cannot_reach_is_refused_before_the_run_s
     let issues = schedule::analyze(&many).unwrap_err();
     assert!(issues.iter().any(|i| i.message.contains("only 2 branches")), "{issues:?}");
 }
+
+#[tokio::test]
+async fn a_branch_that_failed_in_one_pass_of_a_loop_and_did_not_run_in_the_next_is_pruned_then() {
+    // Each pass: `ok` always runs, and `bad` (which fails) only while n is "x". The join leaves failures out.
+    let graph = DroneGraph {
+        nodes: vec![
+            node("start", json!({ "kind": "variables", "entries": [{ "name": "n", "value": "" }] })),
+            node("step", json!({ "kind": "variables", "entries": [{ "name": "n", "value": "{{var.n}}x" }] })),
+            works("ok"),
+            node("pick", json!({ "kind": "condition", "expr": "{{var.n}} == x" })),
+            breaks("bad"),
+            join(json!({ "mode": "any", "on_branch_error": "skip" })),
+            node("guard", json!({ "kind": "condition", "expr": "{{var.n}} == xx" })),
+            node("out", json!({ "kind": "response", "template": "failed={{j.failed}};pruned={{j.pruned}}" })),
+        ],
+        edges: vec![
+            edge("e1", "start", "step", None),
+            edge("e2", "step", "ok", None),
+            edge("e3", "step", "pick", None),
+            edge("e4", "pick", "bad", Some("true")),
+            edge("e5", "ok", "j", None),
+            edge("e6", "bad", "j", None),
+            edge("e7", "j", "guard", None),
+            edge("e8", "guard", "out", Some("true")),
+            edge("e9", "guard", "step", Some("false")),
+        ],
+    };
+    let said = run(graph).await.unwrap();
+    let said = said.as_str().unwrap().to_string();
+    let (failed, pruned) = said.split_once(';').unwrap();
+    assert!(!failed.contains("bad"), "it did not fail in the last pass: {said}");
+    assert!(pruned.contains("bad"), "it did not run in the last pass: {said}");
+}

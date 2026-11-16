@@ -25,7 +25,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // `region`: only the lines from `start` (directly after a line matching
 // `after`) up to the next `end` are checked; no region means the whole file.
 const FILES = [
-    { path: "crates/srv/src/backend/agent_config.rs" },
+    { path: "crates/srv-core/src/backend/agent_config.rs" },
     { path: "crates/srv/src/server/app_api/agent_open.rs" },
     // The `writeagentconfig` handler. editor_handlers/file_io.rs holds the editor pane's own saves, which write
     // wherever the user points them, not into a workdir, so it is not listed.

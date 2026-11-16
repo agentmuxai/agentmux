@@ -3,7 +3,7 @@
 
 // A minimized pane (a chip) moves and swaps like any pane and stays a chip; a strip of chips
 // does not move or swap; only a chip may go into a chip or a strip of them.
-// SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B. srv's side: crates/srv/src/backend/layout/intent/tests.rs.
+// SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B. srv's side: crates/srv-core/src/backend/layout/intent/tests.rs.
 
 import { describe, expect, it } from "vitest";
 import { balanceNode, findNode, newLayoutNode } from "../lib/layoutNode";

@@ -401,7 +401,7 @@ describe("minimized panes are untargetable by tree mutations", () => {
 // ── Legacy migration ─────────────────────────────────────────────────────────
 
 // The conversion of the legacy minimize fields is srv's (`migrate_legacy_minimize`, tested in
-// crates/srv/src/backend/layout/intent/tests.rs); the window only seeds its set from the flags.
+// crates/srv-core/src/backend/layout/intent/tests.rs); the window only seeds its set from the flags.
 describe("rebuildMinimizedSet", () => {
     it("rebuilds the set from existing flags without touching anything", () => {
         const { root, paneA2 } = buildTwoColumnLayout();

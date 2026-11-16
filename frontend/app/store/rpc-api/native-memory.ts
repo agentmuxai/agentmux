@@ -17,7 +17,7 @@
 // has always treated as an OPTIONAL property, and ts-rs refuses
 // `#[ts(optional)]` on anything that is not `Option<T>`, so the shape is not
 // expressible by the generator. See the long note on the Rust struct in
-// crates/srv/src/backend/rpc_types/native_memory.rs.
+// crates/srv-core/src/backend/rpc_types/native_memory.rs.
 export type { NativeMemoryAdoptionCandidate } from "@/types/rpc/NativeMemoryAdoptionCandidate";
 export type { NativeMemoryAdoptionFile } from "@/types/rpc/NativeMemoryAdoptionFile";
 export type { NativeMemoryAdoptionList } from "@/types/rpc/NativeMemoryAdoptionList";

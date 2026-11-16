@@ -188,7 +188,8 @@ async fn credential(node: &FlowNode, scope: &ExecutionScope, url_raw: &str, url:
         return Err(format!("the node sets the {name} header and also takes it from the Vault: leave it out of `headers`"));
     }
     let state = crate::drone::host::state()?;
-    let resolved = crate::server::drone_vault::resolve(state, &scope.drone_id, &auth.entry, &site).await?;
+    let asking = if scope.never_ask { crate::server::drone_vault::Asking::Never } else { crate::server::drone_vault::Asking::Person };
+    let resolved = crate::server::drone_vault::resolve_with(state, &scope.drone_id, &auth.entry, &site, asking).await?;
     let value = auth.how.value(&resolved.value)?;
     Ok(Some(Credential { name, value, scrubber: resolved.scrubber }))
 }

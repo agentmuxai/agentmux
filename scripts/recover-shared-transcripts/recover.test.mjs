@@ -245,7 +245,7 @@ suite("the offline recovery tool", () => {
 
 describe("the fixture", () => {
     it("builds its tables and triggers from the same SQL as srv's migrations", () => {
-        const rust = readFileSync(new URL("../../crates/srv/src/backend/storage/migrations.rs", import.meta.url), "utf8").replace(/\s+/g, " ");
+        const rust = readFileSync(new URL("../../crates/srv-core/src/backend/storage/migrations.rs", import.meta.url), "utf8").replace(/\s+/g, " ");
         const norm = (s) => s.replace(/\s+/g, " ").trim();
         for (const t of TRIGGERS) expect(rust, norm(t).slice(0, 60)).toContain(norm(t).replace(/;$/, ""));
         for (const col of TABLES.match(/ALTER TABLE db_wave_file ADD COLUMN [^;]+/g)) expect(rust).toContain(col.replace("ALTER TABLE db_wave_file ADD COLUMN ", '"ALTER TABLE db_wave_file ADD COLUMN ') + '"');

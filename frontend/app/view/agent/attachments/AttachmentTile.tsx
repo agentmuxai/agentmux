@@ -15,6 +15,7 @@ import { formatBytes } from "@/util/format-bytes";
 import type { TileReorder } from "./attachment-tile-reorder";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, hasThumbnail, kindIcon, type FileKind } from "./file-kind";
+import { wantsFrame } from "./first-frame";
 import { tip } from "@/app/element/tip";
 
 export interface TileModel {
@@ -94,7 +95,7 @@ function TextThumb(props: { id: string; fallback: JSX.Element }) {
     );
 }
 
-/** The ring over a tile while it is copying, uploading or decoding; an arc that spins when the progress is not known. */
+/** The ring over a tile that is still being processed; it spins while its progress is unknown. */
 function ProgressRing(props: { progress?: number }) {
     return (
         <span class="agent-attachment-tile__progress" aria-hidden="true">
@@ -113,10 +114,22 @@ function ProgressRing(props: { progress?: number }) {
     );
 }
 
+/** The picture a tile shows, when it has one: a thumbnail, or a PDF's first page or a video's first frame. */
+function useTilePicture(tile: () => TileModel, thumbnail: () => boolean) {
+    // `tile` is read inside each accessor: the tray hands a new model on every progress tick, to a tile that stays mounted.
+    const ready = () => tile().status === "ready" && !!tile().id;
+    const thumb = useAttachmentUrl(() => (thumbnail() ? tile().id : undefined), "thumb");
+    // A PDF's first page or a video's first frame, when the file is small enough to read for it.
+    const framed = () => ready() && wantsFrame(tile().kind, tile().bytes);
+    const frame = useAttachmentUrl(() => (framed() && tile().kind === "pdf" ? tile().id : undefined), "pdf-frame");
+    const clip = useAttachmentUrl(() => (framed() && tile().kind === "video" ? tile().id : undefined), "video-frame");
+    return { url: () => thumb() ?? frame() ?? clip(), clip };
+}
+
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
-    const url = useAttachmentUrl(() => (picture() ? props.tile.id : undefined), "thumb");
+    const { url, clip } = useTilePicture(() => props.tile, picture);
     const label = () => {
         const t = props.tile;
         const state =
@@ -178,6 +191,11 @@ export function AttachmentTile(props: Props) {
                 <Show when={props.tile.pageCount && !hasThumbnail(props.tile.kind)}>
                     <span class="agent-attachment-tile__pages" aria-hidden="true">
                         {props.tile.pageCount} p
+                    </span>
+                </Show>
+                <Show when={props.tile.kind === "video" && !!clip()}>
+                    <span class="agent-attachment-tile__play" aria-hidden="true">
+                        <i class="fa-solid fa-play" />
                     </span>
                 </Show>
                 <Show when={props.tile.macros}>

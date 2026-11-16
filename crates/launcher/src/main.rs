@@ -43,6 +43,8 @@ mod mem_supervisor;
 // Windows and Linux supervisors; macOS has no backend yet (§6.2).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod notify;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod old_versions;
 mod start_at_login;
 mod other_instances;
 mod reducer;
@@ -139,6 +141,7 @@ fn main() {
         std::process::exit(code);
     }
     agentmux_common::dev_home_guard::refuse_or_continue_current_exe(); // a dev build by hand has no isolated home
+    agentmux_common::test_offscreen::begin("launcher"); // a test build that cannot keep its windows off the screen refuses to start
     // Before any thread or child exists: an instance key inherited from the shell that
     // started this launcher goes no further; the launcher mints its own for srv and the host.
     agentmux_common::secret_env::discard_startup_secrets();
@@ -487,6 +490,8 @@ async fn launcher_main(startup_sink: Option<startup_events::StartupEventSink>) {
     #[cfg(target_os = "windows")]
     {
         let _ = startup_sink;
+        // The old versions' files a setup.exe install keeps beside this one's, once this one has stayed up.
+        old_versions::prune_when_healthy(exe_dir.to_path_buf(), runtime_dir.clone(), agentmux_common::srv_binary::VERSION);
         supervisor::run_windows(exe_dir, &real_exe, &args).await;
     }
 

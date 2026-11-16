@@ -580,7 +580,7 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
 ///
 /// `rect` is Win32 screen-coordinate `left/top/right/bottom`
 /// (`agentmux_common::ipc::Rect`); converted here to srv's `pos: {x, y}` /
-/// `size: {width, height}` shape (`crates/srv/src/backend/obj.rs`'s
+/// `size: {width, height}` shape (`crates/srv-core/src/backend/obj.rs`'s
 /// `Point`/`WinSize`) since the two crates don't share these types directly
 /// — the wire format is plain JSON either way.
 #[cfg(target_os = "windows")]

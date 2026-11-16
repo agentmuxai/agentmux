@@ -44,22 +44,23 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 
 /// Who is asking, as the request's signed identity proves: the agent's id, its pane, its slug and whether it runs in a
 /// container. An unproven request, or an agent AgentMux has no row for, is refused with the reason.
-struct Who {
-    agent: String,
-    pane: String,
-    slug: String,
-    uid: String,
-    container: bool,
+pub(super) struct Who {
+    pub(super) agent: String,
+    pub(super) pane: String,
+    pub(super) slug: String,
+    pub(super) uid: String,
+    pub(super) container: bool,
 }
 
-fn asker(state: &AppState, body: &ImportBody) -> Result<Who, Response> {
-    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("import needs the agent's signed identity: {why}"));
-    let Some(auth) = body.auth.as_ref() else { return Err(refuse("the Vault records who copied each secret".into())) };
+/// `what` is the action asked for (`import`, `check`) and `records` what the Vault's record of it names.
+pub(super) fn asker(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>, what: &str, records: &str) -> Result<Who, Response> {
+    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs the agent's signed identity: {why}"));
+    let Some(auth) = auth else { return Err(refuse(format!("the Vault records {records}"))) };
     let pane = super::ui_handlers::verified_block_id(state, None, auth).map_err(refuse)?;
     let agent: String = auth.agent_id.chars().take(64).collect();
     let uid = crate::backend::reactive::handler::get_global_handler().get_agent(&auth.agent_id).and_then(|r| r.uid);
     let def = uid.as_deref().and_then(|u| state.mstore.agent_def_get(u).ok().flatten());
-    let Some(def) = def else { return Err(error(StatusCode::FORBIDDEN, "import couldn't tell which agent this is")) };
+    let Some(def) = def else { return Err(error(StatusCode::FORBIDDEN, format!("{what} couldn't tell which agent this is"))) };
     Ok(Who { agent, pane, slug: def.slug.clone(), uid: uid.unwrap_or_default(), container: def.runtime().is_container() })
 }
 
@@ -126,14 +127,14 @@ fn refused(state: &AppState, plan: &Plan, who: &Who, outcome: &str, status: Stat
     error(status, said)
 }
 
-/// How the CLI is given credentials: the host's own, or a session minted for the container agent's grant (the
-/// broker's checks, hourly cap and Audit row apply as for any mint, with the import's reason).
-async fn credentials(state: &AppState, plan: &Plan, who: &Who) -> Result<Option<crate::identity::aws_broker::mint::Minted>, String> {
+/// How the CLI is given credentials: the host's own, or a session minted for the container agent's grant `profile`
+/// (the broker's checks, hourly cap and Audit row apply as for any mint, with the agent's reason).
+pub(super) async fn credentials(state: &AppState, who: &Who, profile: &str, reason: &str) -> Result<Option<crate::identity::aws_broker::mint::Minted>, String> {
     if !who.container {
         return Ok(None);
     }
     let current = tokio::task::spawn_blocking(policy::current).await.unwrap_or_else(|e| Err(e.to_string()));
-    let ask = Ask { agent_uid: &who.uid, agent_slug: &who.slug, in_container: true, profile: plan.source.profile.as_deref().unwrap_or_default(), reason: Some(&plan.reason), seconds: None };
+    let ask = Ask { agent_uid: &who.uid, agent_slug: &who.slug, in_container: true, profile, reason: Some(reason), seconds: None };
     match credentials_for(current, sessions::global(), &HostRunner, &ask, chrono::Utc::now()).await {
         Ok(granted) => {
             super::app_api::aws_credentials::audit_granted(state, &who.slug, &who.uid, &granted);
@@ -148,7 +149,7 @@ async fn credentials(state: &AppState, plan: &Plan, who: &Who) -> Result<Option<
 
 /// `POST /api/v1/vault/import`
 pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body): Json<ImportBody>) -> Response {
-    let who = match asker(&state, &body) {
+    let who = match asker(&state, body.auth.as_ref(), "import", "who copied each secret") {
         Ok(who) => who,
         Err(refusal) => return refusal,
     };
@@ -161,7 +162,7 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body
     if !ended.allowed() {
         return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
     }
-    let minted = match credentials(&state, &plan, &who).await {
+    let minted = match credentials(&state, &who, plan.source.profile.as_deref().unwrap_or_default(), &plan.reason).await {
         Ok(minted) => minted,
         Err(why) => return refused(&state, &plan, &who, "failed", StatusCode::SERVICE_UNAVAILABLE, why),
     };

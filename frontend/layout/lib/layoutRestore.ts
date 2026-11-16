@@ -16,7 +16,7 @@ import { DefaultNodeSize, FlexDirection, type LayoutNode } from "./types";
  * docked onto the same pane move into that pane's column, in the order they were stacked, so they
  * are chips in a column (which render in place) and the restored one grows vertically in its own
  * spot, keeping the column's width. The other panes in the column give up height by the usual
- * rules. srv does the same (`restore_node`, crates/srv/src/backend/layout/intent.rs).
+ * rules. srv does the same (`restore_node`, crates/srv-core/src/backend/layout/intent.rs).
  */
 
 /** The chips a restore of `node` takes along, in stacking order, and the pane they dock onto.

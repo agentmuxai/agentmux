@@ -18,9 +18,9 @@ on:
     pull_request:
         paths:
             - "crates/bashwrap/**"
-            - "crates/srv/src/backend/providers.rs"
-            - "crates/srv/src/backend/providers/**"
-            - "crates/srv/src/backend/mcp_observed.rs"
+            - "crates/srv-core/src/backend/providers.rs"
+            - "crates/srv-core/src/backend/providers/**"
+            - "crates/srv-core/src/backend/mcp_observed.rs"
             - "frontend/app/view/agent/providers/catalog.ts"
             - "scripts/cli-contract/**"
             - ".github/workflows/cli-hook-contract.yml"
@@ -54,7 +54,7 @@ jobs:
 
             - name: Install the Claude Code CLI (the pinned version; latest on the weekly run)
               run: |
-                  pinned=$(awk '/npm_package: "@anthropic-ai\/claude-code"/ { f = 1 } f && /pinned_version:/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); exit }' crates/srv/src/backend/providers/claude.rs)
+                  pinned=$(awk '/npm_package: "@anthropic-ai\/claude-code"/ { f = 1 } f && /pinned_version:/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2); exit }' crates/srv-core/src/backend/providers/claude.rs)
                   if [ -z "$pinned" ]; then echo "::error::no Claude Code pin found in providers/claude.rs"; exit 1; fi
                   version=$pinned
                   if [ "${{ github.event_name }}" = "schedule" ]; then version=latest; fi

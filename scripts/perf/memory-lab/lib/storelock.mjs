@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // How long srv's transcript store kept everyone waiting during a run. The store has one write
-// connection behind a lock that every store operation waits for (crates/srv/src/backend/storage/
+// connection behind a lock that every store operation waits for (crates/srv-core/src/backend/storage/
 // filestore/core.rs); srv logs a warning when it was held 500 ms or more ("connection held a long
 // time", held_ms) and when a caller waited that long for it ("slow to get the connection",
 // waited_ms). The longest of those is a direct measure of the lock: a change that makes it worse
@@ -27,7 +27,7 @@ export function parseStoreLock(text) {
             out.holds++;
             if (f.held_ms > out.longestHeldMs) {
                 out.longestHeldMs = f.held_ms;
-                out.longestHeldSite = String(f.site ?? "").replace(/\\/g, "/").replace(/^crates\/srv\/src\//, "");
+                out.longestHeldSite = String(f.site ?? "").replace(/\\/g, "/").replace(/^crates\/srv(?:-core)?\/src\//, "");
             }
         } else if (f.message === "filestore: slow to get the connection" && Number.isFinite(f.waited_ms)) {
             out.waits++;

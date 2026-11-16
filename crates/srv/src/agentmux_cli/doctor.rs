@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use agentmux_common::win32::NoWindow;
 use serde::Serialize;
 
 use crate::state::ServerState;
@@ -55,6 +56,10 @@ pub struct Facts {
     /// the system always has a store).
     pub certs_found: Option<bool>,
     pub installed_version: &'static str,
+    /// What `node --version` says, when node is on the PATH and answers.
+    pub node_version: Option<String>,
+    /// The note a start left when another AgentMux's version held the shared folder.
+    pub blocked: Option<crate::state::Blocked>,
     /// The service: whether its file exists, and whether it names this command's program.
     pub service_installed: bool,
     pub service_names_exe: Option<bool>,
@@ -105,6 +110,7 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
             check("tools", Level::Warn, format!("{tool} is not on the PATH"), Some("agent command-line tools are installed through npm: install Node.js and git with your package manager"))
         });
     }
+    out.extend(node_version_check(f.node_version.as_deref()));
     match f.certs_found {
         Some(true) => out.push(check("certificates", Level::Ok, "the system's certificates are found", None)),
         Some(false) => out.push(check(
@@ -123,6 +129,16 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
             Some("install them with your package manager (Debian and Ubuntu: `apt install libdbus-1-3 libxcb1`; Fedora: `dnf install dbus-libs libxcb`)"),
         ));
     }
+    if let Some(b) = f.blocked.as_ref().filter(|_| f.running.is_none()) {
+        // A warning, not a failure: this is the note of an earlier start, which may have cleared since (the other AgentMux
+        // closed). `setup` stops on a failure before it starts the server, and the start is what finds out and clears it.
+        out.push(check(
+            "shared folder",
+            Level::Warn,
+            format!("the last start was refused: {} is using it, and this version's data needs preparing first", b.owner),
+            Some(&format!("close {} and run `agentmux start`, or update one of the two so both are the same version", b.owner)),
+        ));
+    }
     if let Some(s) = &f.running {
         if s.version != f.installed_version {
             out.push(check("version", Level::Warn, format!("running {}, installed {}", s.version, f.installed_version), Some("`agentmux restart` runs the installed version")));
@@ -134,6 +150,44 @@ pub fn evaluate(f: &Facts) -> Vec<Check> {
         (true, _) => check("service", Level::Ok, "installed, and it runs this install", None),
     });
     out
+}
+
+/// The least Node.js any agent of the new-agent panel asks for: the lowest `minVersion` in
+/// `frontend/app/view/agent/providers/catalog.ts` (a test keeps the two the same). Some agents ask for more.
+pub const NODE_MIN: &str = "20.0.0";
+
+/// `v22.1.0` or `22.1.0` as numbers; `None` for anything else.
+fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = text.trim().trim_start_matches('v').split('.');
+    let mut next = || parts.next()?.split(['-', '+']).next()?.parse::<u64>().ok();
+    Some((next()?, next()?, next()?))
+}
+
+/// What the installed Node.js comes to against the one the panel asks for; nothing when it is not known.
+fn node_version_check(found: Option<&str>) -> Option<Check> {
+    let found = found?.trim();
+    let have = parse_version(found)?;
+    let need = parse_version(NODE_MIN)?;
+    let shown = found.trim_start_matches('v');
+    Some(if have >= need {
+        check("node version", Level::Ok, format!("Node.js {shown}; the new-agent panel needs at least {NODE_MIN}, and some agents need a newer one"), None)
+    } else {
+        check(
+            "node version",
+            Level::Warn,
+            format!("Node.js {shown} is older than the {NODE_MIN} that is the least any agent in the new-agent panel needs"),
+            Some(&format!("install Node.js {NODE_MIN} or newer (nodejs.org, or your package manager's NodeSource repository), then run this again")),
+        )
+    })
+}
+
+/// `node --version`, when node is on the PATH and answers.
+pub fn node_version() -> Option<String> {
+    if !on_path("node") {
+        return None;
+    }
+    let out = std::process::Command::new("node").arg("--version").no_window().stdin(std::process::Stdio::null()).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// Is any check a failure?
@@ -258,6 +312,8 @@ mod tests {
             missing_libs: vec![],
             certs_found: Some(true),
             installed_version: "0.60.26",
+            node_version: None,
+            blocked: None,
             service_installed: false,
             service_names_exe: None,
         }
@@ -379,6 +435,50 @@ mod tests {
         assert_eq!(level_of(&evaluate(&facts), "version"), vec![Level::Warn]);
         let same = Facts { running: Some(running("0.60.26")), answering: true, ..good() };
         assert!(level_of(&evaluate(&same), "version").is_empty());
+    }
+
+    #[test]
+    fn a_start_refused_beside_another_version_is_a_warning_that_says_what_to_do_and_never_stops_setup() {
+        let blocked = crate::state::Blocked { owner: "AgentMux 0.60.27 (stable)".into(), reason: "29 migration(s) pending".into(), version: "0.60.28".into(), since_unix: 1 };
+        let facts = Facts { blocked: Some(blocked.clone()), ..good() };
+        let checks = evaluate(&facts);
+        assert_eq!(level_of(&checks, "shared folder"), vec![Level::Warn]);
+        // `setup` refuses to go on after a failure; the note is the last start's, and the next start clears or renews it.
+        assert!(!failed(&checks), "a remembered refusal must not stop setup from retrying");
+        let text = lines(&checks).join("\n");
+        assert!(text.contains("the last start was refused: AgentMux 0.60.27 (stable) is using it") && text.contains("-> close AgentMux 0.60.27 (stable) and run `agentmux start`"), "{text}");
+        // A server that is running again has no refusal to report.
+        let up = Facts { blocked: Some(blocked), running: Some(running("0.60.26")), answering: true, ..good() };
+        assert!(level_of(&evaluate(&up), "shared folder").is_empty());
+    }
+
+    #[test]
+    fn a_node_older_than_the_panel_needs_is_a_warning_with_the_same_number() {
+        let old = Facts { node_version: Some("v18.20.4".into()), ..good() };
+        let checks = evaluate(&old);
+        assert_eq!(level_of(&checks, "node version"), vec![Level::Warn]);
+        let text = lines(&checks).join("\n");
+        assert!(text.contains("Node.js 18.20.4 is older than the 20.0.0 that is the least any agent in the new-agent panel needs") && text.contains("install Node.js 20.0.0 or newer"), "{text}");
+        for fine in ["v20.0.0", "v22.1.0", "v24.9.0", "23.0.0-nightly"] {
+            let ok = Facts { node_version: Some(fine.into()), ..good() };
+            assert_eq!(level_of(&evaluate(&ok), "node version"), vec![Level::Ok], "{fine}");
+        }
+        let none = Facts { node_version: Some("not a version".into()), ..good() };
+        assert!(level_of(&evaluate(&none), "node version").is_empty(), "an answer that is no version says nothing");
+        assert!(level_of(&evaluate(&good()), "node version").is_empty(), "no node, no version line");
+    }
+
+    #[test]
+    fn the_minimum_node_is_the_one_the_agent_panel_names() {
+        let catalog = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../frontend/app/view/agent/providers/catalog.ts")).unwrap();
+        let mut lowest: Option<(u64, u64, u64)> = None;
+        for part in catalog.split("minVersion: \"").skip(1) {
+            let version = part.split('"').next().unwrap_or("");
+            if let Some(v) = parse_version(version) {
+                lowest = Some(lowest.map_or(v, |l| l.min(v)));
+            }
+        }
+        assert_eq!(lowest, parse_version(NODE_MIN), "the lowest Node.js catalog.ts asks for is no longer {NODE_MIN}: change NODE_MIN in doctor.rs with it");
     }
 
     #[test]

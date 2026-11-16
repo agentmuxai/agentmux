@@ -201,6 +201,7 @@ pub(crate) fn register(engine: &std::sync::Arc<crate::backend::rpc::engine::WshR
         let state = st.clone();
         async move {
             ctx.operator_only("only the person chooses to make a password for a sign-up")?;
+            super::browser_signin_list::close(&state, &req.block_id);
             make(&state, &req.block_id).await.map(|_| ())
         }
     });

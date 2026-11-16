@@ -11,7 +11,7 @@
  * something else (a resumed agent on the CLI default, Opus, under a menu that
  * read Sonnet — docs/retro/RETRO_RESUMED_AGENT_SPAWNS_WITHOUT_RUNTIME_FLAGS_2026_09_30.md).
  * srv publishes the runtime flags of the argv it spawned each process with
- * (`agentruntime`, crates/srv/src/backend/agent_runtime.rs); this module says
+ * (`agentruntime`, crates/srv-core/src/backend/agent_runtime.rs); this module says
  * whether the menu and that agree.
  *
  * "What the menu should have produced" is computed with the SAME function that

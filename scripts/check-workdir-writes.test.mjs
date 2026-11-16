@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { makeFixture } from "./lib/check-fixture.mjs";
 
-const AGENT_CONFIG = "crates/srv/src/backend/agent_config.rs";
+const AGENT_CONFIG = "crates/srv-core/src/backend/agent_config.rs";
 const AGENT_OPEN = "crates/srv/src/server/app_api/agent_open.rs";
 const EDITOR = "crates/srv/src/server/editor_handlers/agent_config.rs";
 

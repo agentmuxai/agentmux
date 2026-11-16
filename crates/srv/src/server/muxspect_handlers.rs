@@ -8,7 +8,7 @@
 //!
 //! Diagnostic-only surface: a thin read composition over `ProcessBroker`
 //! (Phase A of the process-tracking consolidation,
-//! `crates/srv/src/broker/process.rs`) and its sibling registries — never
+//! `crates/srv-core/src/broker/process.rs`) and its sibling registries — never
 //! a new independent snapshot of process/turn state (spec §5.1/§3 point 8).
 //! Reached the same way `agentmux-mcp` already reaches every other
 //! `/api/v1/*` route: plain HTTP, `X-AuthKey` header, `$AGENTMUX_LOCAL_URL`/

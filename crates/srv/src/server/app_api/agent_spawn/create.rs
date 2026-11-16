@@ -125,7 +125,7 @@ pub(super) fn make(
         model_vendor_base_url: None,
         container_image: None,
     };
-    let made = crate::server::agent_handlers::create_from_template(&state.mstore, &state.id_store, &state.broker, cmd).map_err(|e| {
+    let made = crate::server::agent_handlers::create_from_template(&state.mstore, &state.id_store, &state.identity_store, &state.broker, cmd).map_err(|e| {
         let status = if e.contains("already exists") || e.contains("still addresses") { StatusCode::CONFLICT } else { StatusCode::INTERNAL_SERVER_ERROR };
         refuse(status, e)
     })?;
