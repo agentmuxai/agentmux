@@ -15,7 +15,7 @@
 
 import { getApi } from "@/app/store/global";
 import { pushFlashError } from "@/app/store/flash-notifications";
-import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { reasonWithHold, recycleBlockers } from "@/app/store/recycle-blockers";
 import { saveForReload } from "@/app/store/recycle-savers";
 
 function ownWindowLabel(): string {
@@ -119,7 +119,7 @@ const IDLE_MS = 10 * 60_000;
  */
 export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
     const decline = (reasons: string[]) => {
-        void getApi().windows.recycleDeclined(ownWindowLabel(), reasons.join("; ")).catch(() => {});
+        void getApi().windows.recycleDeclined(ownWindowLabel(), reasons.map((r) => reasonWithHold(r)).join("; ")).catch(() => {});
     };
     const [{ msSinceLastInput }, { anyAgentWaitingForYou }, { modalsModel }, { anyModalOpen }, { isAnyUnderway, ALL_DRAG_KINDS }] =
         await Promise.all([
