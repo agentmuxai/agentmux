@@ -6,7 +6,7 @@
  * covers only that pane, so the window-level ways to open one only go down. It counts, per source file, the places
  * that draw a modal over the whole window:
  *
- *  - `window-scope`:   `scope="window"` (a `<Modal>`, `<ConfirmModal>` or `<ClaudeLoginPanel>` that says so);
+ *  - `window-scope`:   `scope="window"` (a `<Modal>`, `<ConfirmModal>` or `<ProviderLoginPanel>` that says so);
  *  - `default-scope`:  a `<Modal>` or `<ConfirmModal>` with no `scope` at all (the default is the window);
  *  - `open-modal`:     a call to the imperative `openModal(` / `modalsModel.openModal(`, which renders at the window root;
  *  - `native-dialog`:  `window.confirm`, `window.alert` or `window.prompt`, which freeze the whole renderer.

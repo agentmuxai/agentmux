@@ -12,7 +12,7 @@ import { createMemo, For, Show, type JSX } from "solid-js";
 import { PROVIDER_LABELS } from "./identity-model";
 import { statusBadge } from "./identity-manager";
 import type { AgentIdentityRow } from "./agent-identities-model";
-import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
+import { ProviderLoginPanel } from "@/app/view/accounts/ProviderLoginPanel";
 import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 import { Button } from "@/app/element/ui";
@@ -71,7 +71,7 @@ function LinkRow(props: Part & { row: AgentIdentityRow }): JSX.Element {
             </td>
             <td>
                 {/* Claude-only for now — the in-app session
-                    (InAppLoginPanel/ClaudeLoginPanel) only
+                    (InAppLoginPanel/ProviderLoginPanel) only
                     exists for Claude; other providers still
                     route through the launch dialog. Canonicalize
                     — db_agent_identity_links can carry a
@@ -183,7 +183,7 @@ export function ClaudeLogin(props: Part & { agentId: string | undefined }): JSX.
                 scope="pane" — "pane" here stacks this dialog correctly
                 over that modal instead of both competing for the same
                 window-level backdrop. */}
-            <ClaudeLoginPanel
+            <ProviderLoginPanel
                 onClose={() => t.setClaudePanelOpen(false)}
                 existingAccountId={t.claudeRefreshAccountId()}
                 linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}

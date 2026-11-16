@@ -69,7 +69,7 @@ function createClaudeLogin() {
     // Connect/Re-login panel is open.
     const [claudePanelOpen, setClaudePanelOpen] = createSignal(false);
     const [claudeRefreshAccountId, setClaudeRefreshAccountId] = createSignal<string | undefined>(undefined);
-    // reagent P0 on PR #2414: see ClaudeLoginPanel's staleAliasProvider doc
+    // See ProviderLoginPanel's staleAliasProvider doc (#2414)
     // comment — set when the row being acted on carries a legacy-alias
     // provider string, so the panel can unlink it after a successful login
     // instead of leaving an orphaned row that silently blocks every future

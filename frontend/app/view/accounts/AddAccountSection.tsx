@@ -15,7 +15,10 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 import { modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import { AgentMuxConnectBody, type MuxBusController } from "./AgentMuxConnectPanel";
-import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { PROVIDERS } from "@/app/view/agent/providers/catalog";
+import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetails";
+import { ProviderLoginPanel } from "./ProviderLoginPanel";
+import { guideFor, optionForMode, shown } from "./provider-guide";
 import { githubStatusLine } from "./github-account-copy";
 
 export function AddAccountSection(props: {
@@ -26,10 +29,17 @@ export function AddAccountSection(props: {
     onClose: () => void;
 }): JSX.Element {
     const { tile, model } = props;
-    // Anthropic's sign-in is the CLI login (its own panel); every other choice is the account form,
+    // A provider CLI's sign-in (Anthropic, OpenAI) is its own panel; every other choice is the account form,
     // preset to the provider and kind.
     const [mode, setMode] = createSignal<AuthMode | null>(null);
-    const claudeSignIn = () => tile.id === "anthropic" && mode() === "oauth";
+    const signInProvider = () => (tile.signIn && mode() === "oauth" ? PROVIDERS[tile.signIn.provider] : undefined);
+    const guide = guideFor(tile.id);
+    // A way to connect says what it is in the guide's words; a tile with none keeps the generic two.
+    const labelFor = (m: AuthMode) => {
+        const o = optionForMode(guide, m);
+        const what = shown(o?.what);
+        return o && what ? { title: o.title, sub: what.value } : modeLabel(m, tile.id);
+    };
     // Whether this computer has gh-agent, which srv knows and the frontend can't: it is GitHub's status then.
     const [ghAgentHere, setGhAgentHere] = createSignal(false);
     if (tile.id === "github") {
@@ -40,7 +50,7 @@ export function AddAccountSection(props: {
 
     let openedForm = false;
     const pick = (picked: AuthMode) => {
-        if (!(tile.id === "anthropic" && picked === "oauth")) {
+        if (!(tile.signIn && picked === "oauth")) {
             const kind: AccountKind = picked === "oauth" ? "oauth" : tile.keyKind;
             model.openAddFormFor(tile.id, kind);
             openedForm = true;
@@ -73,12 +83,13 @@ export function AddAccountSection(props: {
                     <p>{githubStatusLine(model.accountsByProvider().get("github") ?? [], ghAgentHere())}</p>
                 </div>
             </Show>
+            <Show when={guide}>{(g) => <ProviderGuideInside guide={g()} />}</Show>
             <Show when={tile.id !== "agentmux" && mode() === null}>
                 <div class="accounts-chooser accounts-chooser--inline">
                     <div class="accounts-chooser-modes">
                         <For each={tile.authModes}>
                             {(m) => {
-                                const label = modeLabel(m, tile.id);
+                                const label = labelFor(m);
                                 return (
                                     <Button tone="neutral" class="accounts-chooser-mode" onClick={() => pick(m)}>
                                         <span class="accounts-chooser-mode-title">{label.title}</span>
@@ -90,12 +101,15 @@ export function AddAccountSection(props: {
                     </div>
                 </div>
             </Show>
-            <Show when={claudeSignIn()}>
-                <ClaudeLoginPanel inline onClose={() => props.onClose()} />
+            <Show when={signInProvider()}>
+                {(p) => (
+                    <ProviderLoginPanel inline provider={p()} brand={tile.signIn?.brand} onClose={() => props.onClose()} />
+                )}
             </Show>
-            <Show when={mode() !== null && !claudeSignIn() && model.formOpenAtom() && !model.editingAccountAtom()}>
+            <Show when={mode() !== null && !signInProvider() && model.formOpenAtom() && !model.editingAccountAtom()}>
                 <AccountForm model={model} inline />
             </Show>
+            <Show when={guide}>{(g) => <ProviderGuideDetails guide={g()} />}</Show>
         </div>
     );
 }

@@ -282,7 +282,7 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
                 {(url) => (
                     // AgentQuestionPanel-style card chrome (border/bg/shadow) —
                     // InAppLoginPanel itself ships with none, since its other
-                    // caller (ClaudeLoginPanel, in Connectors)
+                    // caller (ProviderLoginPanel, in Connectors)
                     // already provides its own box. This is the one context
                     // that renders it bare in normal document flow, so it
                     // needs its own card here to read as a distinct prompt

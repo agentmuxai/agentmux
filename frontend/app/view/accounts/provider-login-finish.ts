@@ -7,8 +7,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import type { ProviderLoginOutcome } from "@/app/view/agent/flows/run-provider-login";
-import { CLAUDE_PROVIDER } from "./claude-login-model";
-import type { LoginState } from "./claude-login-state";
+import { loginProviderOf } from "./provider-login-model";
+import type { LoginState } from "./provider-login-state";
 
 /**
  * Whether the account is really linked to the agent. finalizeAccount (run-provider-login.ts) catches and logs
@@ -34,9 +34,9 @@ export async function confirmLink(s: LoginState): Promise<boolean> {
         // unlink, deleting the one link that actually worked — leaving the
         // agent with ZERO identity links, worse than the orphaned-alias bug
         // this panel exists to fix.
-        return links.some((l) => l.account_id === s.registeredAccountId && l.provider === CLAUDE_PROVIDER.id);
+        return links.some((l) => l.account_id === s.registeredAccountId && l.provider === loginProviderOf(s.props).id);
     } catch (e) {
-        console.warn(`[claude-login] failed to verify the agent link: ${(e as Error)?.message ?? String(e)}`);
+        console.warn(`[provider-login] failed to verify the agent link: ${(e as Error)?.message ?? String(e)}`);
         return false;
     }
 }
@@ -56,7 +56,7 @@ function unlinkStaleAlias(s: LoginState): void {
         provider: staleAliasProvider,
         silent: true,
     }).catch((e) => {
-        console.warn(`[claude-login] failed to unlink stale alias "${staleAliasProvider}": ${e?.message ?? String(e)}`);
+        console.warn(`[provider-login] failed to unlink stale alias "${staleAliasProvider}": ${e?.message ?? String(e)}`);
     });
 }
 

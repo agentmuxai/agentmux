@@ -57,25 +57,25 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Qwen, Kimi, OpenClaw, Pi, Mux Code, Antigravity, OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness and Muse Code as first-class providers, and Aider and Crush in a terminal pane of their own, alongside terminal, editor, browser, file and media panes ([all widgets](#widgets)). Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
 - **Universal pane tabs** — every pane is a generic container that can hold any mix of widgets as tabs, not just more of its own type. A pane's own tab strip *is* its header (one row, not a header-plus-strip stack), and its "+" opens a picker of every widget type — agent, terminal, browser, editor, sysinfo, swarm, drone, and the rest — so you build up an agent-plus-terminal-plus-browser workspace inside a single pane instead of endlessly splitting. Inspired by [cmux](https://github.com/manaflow-ai/cmux)'s `Workspace → Pane → Surface → Panel` model. See [Panes and tabs](#panes-and-tabs) below.
 - **Agents drive the workspace** — Through MuxAPI, a running agent can open panes, rename tabs, navigate the layout, and message peer agents, using the tools of its built-in MCP server. Agents are operators, not passengers.
-- **Interagent comms** — the `Message` tool routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
+- **Interagent comms** — the `Message` tool sends one agent's message into another agent's conversation, on this machine or another, so you can build hand-offs and broadcasts; its repository channel lets agents tell each other what they are changing.
 - **Swarm** — A live view of every agent and its subagents, background tasks and todos, including agents on other machines you're connected to. Follow one agent, or broadcast a message to several at once.
 - **Accounts** — Sign-ins and keys for providers and services (Claude, Codex, GitHub, AWS, API keys and more), kept in Connectors → Accounts and bound to each agent, at most one per provider. They survive renames; switching an agent's account restarts that agent.
-- **Bundles** — A collection of instructions, context files and skills, captured once and reused across agents (renamed from "presets"). MCP servers aren't part of a bundle; they're bound to agents in Connectors. Backend: `db_bundles`; managed in the Memory pane (widget bar or AgentMux logo → Memory → Bundles).
-- **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. Right-click an Agent pane and choose **Personal memory** to open that agent's memory there. Deeper cross-session memory is actively in development.
-- **AgentMux owns the session state** — Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw, Pi, OpenCode, Kilo Code, Cline, goose, Grok Build and DeepSeek Harness as long-lived [ACP](https://agentclientprotocol.com/) processes, and Muse Code as a long-lived `muse serve` process speaking its own protocol, MSP. Aider and Crush run their own interface in a terminal pane. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI. Measured memory use is in [#4714](https://github.com/agentmuxai/agentmux/issues/4714): an idle AgentMux with one terminal commits about 740 MB on Windows, against about 1,010 MB for an idle VS Code.
+- **Bundles** — A collection of instructions, context files and skills, captured once and reused across agents. MCP servers aren't part of a bundle; they're bound to agents in Connectors. Backend: `db_bundles`; managed in the Memory pane (the widget bar's Memory, then Bundles).
+- **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. Right-click an Agent pane and choose **Personal memory** to open that agent's memory there.
+- **AgentMux owns the session state** — Codex, Gemini, Qwen, Kimi, Mux Code and Antigravity are invoked once per turn. Claude Code runs as a persistent stream, and Copilot, OpenClaw, Pi, OpenCode, Kilo Code, Cline, goose, Grok Build and DeepSeek Harness as long-lived [ACP](https://agentclientprotocol.com/) processes, and Muse Code as a long-lived `muse serve` process speaking its own protocol, MSP. Aider and Crush run their own interface in a terminal pane. Either way AgentMux holds the durable session state, so a conversation survives a restart of its CLI.
 - **Reducer stack** — The launcher, host and sidecar each keep their state in a reducer with a structured event log, so "what mutated this state?" has one place to look.
-- **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
-- **MuxAPI** (formerly the App API) — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 250 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [MuxAPI](#muxapi).
+- **Browser pane** — A native Chromium view, not an iframe: a child window of the AgentMux frame on Windows, a CEF Views overlay on Linux and macOS. Full Chromium fidelity (links, popups, DRM).
+- **MuxAPI** (formerly the App API) — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and about 450 lower-level commands (panes, files, memory, skills, bundles, fleet, and more). Agents reach it through the built-in `agentmux` MCP server; external tools can call it directly. See [MuxAPI](#muxapi).
 - **Build your own widgets** — A widget is a folder with a `widget.json` and web files. It runs sandboxed, and installing it asks you to approve each permission it wants; an agent can build one and install it the same way. Manage them in Settings → Widgets. See [Build a widget](https://docs.agentmux.ai/build-a-widget/) and [`sdk/widget-sdk/`](sdk/widget-sdk).
-- **Kanban, Vault, History and Audit** — Four panes for overseeing agents. The **Kanban** shows what every agent is working on, what waits for them, and what needs you; agents keep their cards current through the `Tasks` tool. The **Vault** holds your secrets (ID numbers, cards and bank accounts, API keys, logins, notes), which agents use by name without ever seeing a value. **History** is every agent's recorded conversation, what you typed, and where it is kept. The **Audit** shows what agents did: every jekt, fleet and pane action, and what they did with your secrets. Jobs (what runs by itself) are in the **Jobs** pane. See [Warden](https://docs.agentmux.ai/warden/).
-- **Pin any section** — Panes with sections (Connectors, Memory, Settings, the Vault) can be opened on one from the widget bar. Right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry with `"section"` to your `widgets.json`. See [Sections](#sections).
-- **Across machines** — Find other AgentMux instances on your network (opt-in), message agents across machines over MuxBus, run terminals on SSH and WSL hosts (Connectors → Remotes), and watch a live agent feed from a paired phone. See [LAN discovery](https://docs.agentmux.ai/lan-discovery/) and [Warden](https://docs.agentmux.ai/warden/).
-- **Work queue and schedules** — Agents can enqueue, claim and finish shared tasks, and run prompts on a schedule with cron, which catches up on runs missed while the app was closed.
+- **Kanban, Vault, History and Audit** — Four panes for overseeing agents. The **Kanban** shows what every agent is working on, what waits for them, and what needs you; agents keep their cards current through the `Tasks` tool. The **Vault** holds your secrets (ID numbers, cards and bank accounts, API keys, logins, notes), which agents use by name without ever seeing a value. **History** is every agent's recorded conversation, what you typed, and where it is kept. The **Audit** shows what agents did: every jekt, fleet and pane action, and what they did with your secrets. Jobs (what runs by itself) are in the **Jobs** pane. See [Kanban](https://docs.agentmux.ai/kanban/), [Vault](https://docs.agentmux.ai/vault/), [History](https://docs.agentmux.ai/history/), [Audit](https://docs.agentmux.ai/audit/) and [Jobs](https://docs.agentmux.ai/jobs/).
+- **Pin any section** — Panes with sections (Connectors, Memory, Settings, the Vault, Swarm) can be opened on one from the widget bar. Right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry with `"section"` to your `widgets.json`. See [Sections](#sections).
+- **Across machines** — Find other AgentMux instances on your network (opt-in), message agents across machines over MuxBus, run terminals on SSH and WSL hosts (Connectors → Remotes), and watch a live agent feed from a paired phone. See [LAN discovery](https://docs.agentmux.ai/lan-discovery/) and [Connectors](https://docs.agentmux.ai/connectors/).
+- **Work queue and schedules** — Agents can enqueue, claim and finish shared tasks, and run prompts on a schedule with cron; a run missed while the app was closed is recorded as missed, and a schedule can ask for the latest one to be delivered when the agent returns.
 - **Bundle import and export** — Move an agent's setup between machines as a single file ([ABF](https://docs.agentmux.ai/abf/)).
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, tear panes off into floating windows, and dock them into any window.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Run multiple versions side-by-side** — Each instance is fully isolated (separate CEF data, separate backend sidecar, separate ports). Test a new build while the old one is still running.
-- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. A few features reach the network only when you turn them on: MuxBus cloud messaging, voice transcription, and installing provider CLIs. Without them it runs air-gapped.
+- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. It checks GitHub Releases for new versions and, by default, downloads them (the `update:auto` and `update:autodownload` settings turn that off). A few features reach the network only when you turn them on: MuxBus cloud messaging, voice transcription, and installing provider CLIs.
 
 ## Quick Start
 
@@ -83,14 +83,14 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | 24.11+ (see [`.nvmrc`](.nvmrc)) | Frontend build |
-| **Rust** | 1.77+ | Backend + CEF host |
+| **Node.js** | 24.11+ (CI uses the exact version in [`.nvmrc`](.nvmrc)) | Frontend build |
+| **Rust** | pinned by [`rust-toolchain.toml`](rust-toolchain.toml); rustup installs it on first use | Backend + CEF host |
 | **[Task](https://taskfile.dev/)** | Latest | Build orchestration |
 | **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
 | **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 Platform-specific:
-- **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see [BUILD.md](./BUILD.md))
+- **Windows:** Visual Studio Build Tools, and 7-Zip for `task package`. `task dev` finds Ninja itself (see [BUILD.md](./BUILD.md))
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
 - **Linux:** build essentials, CMake, Ninja and the GTK/Wayland development packages; the full `apt install` line is in [BUILD.md](./BUILD.md#platform-specific-setup). Running AgentMux on Linux: [docs/linux.md](docs/linux.md).
 - **Optional:** [zig](https://ziglang.org/) and `cargo-zigbuild`, to bundle the SSH remote helpers into a package. Without them, packaging prints a warning and skips the helpers.
@@ -99,8 +99,8 @@ Platform-specific:
 
 Starting from nothing (no Task, no toolchain installed yet)? See
 [BUILD.md](./BUILD.md#bootstrap-and-initialize) for [`scripts/bootstrap.sh`](scripts/bootstrap.sh) /
-[`scripts/bootstrap.ps1`](scripts/bootstrap.ps1) and `task init`, which verify/install the
-prerequisites above before you run anything else.
+[`scripts/bootstrap.ps1`](scripts/bootstrap.ps1), which install Task (and Git on Windows), and `task init`,
+which verifies the prerequisites above before you run anything else.
 
 ```bash
 task init           # verify toolchain, install frontend dependencies
@@ -110,16 +110,16 @@ task dev            # CEF host + Vite hot reload
 ### Production Build
 
 ```bash
-task package            # Windows portable (.7z)
-task package:macos      # macOS .dmg
-task package:linux      # Linux AppImage
+task package            # Windows portable (.7z), on Windows
+task package:macos      # macOS .dmg, on macOS
+task package:linux      # Linux AppImage, on Linux
 ```
 
 Each writes to `~/Desktop`. `task package` builds a local portable with a unique build label — no version bump, no git changes. See [SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) for the full build labeling and data-isolation details.
 
 ### Logs
 
-The `muxlog` helper (shipped in every AgentMux terminal) **discovers and renders logs across every running instance** — the shared dir, each `task dev` instance (`~/.agentmux/dev/<branch>/`), and per-build channels — so you never hunt for a file or guess a version. It defaults to the **most-recently-active** instance and renders the NDJSON logs as compact `time  level  target  message`.
+The `muxlog` helper (shipped in every AgentMux terminal) **discovers and renders logs across every running instance** — the shared dir, each `task dev` instance (`~/.agentmux/dev/<branch>/`), and per-build channels — so you never hunt for a file or guess a version. It defaults to your own instance (in an agent pane) and otherwise to the **most-recently-active** one and renders the NDJSON logs as compact `time  level  target  message`.
 
 | What | Command |
 |------|---------|
@@ -146,36 +146,38 @@ The canonical list is [`crates/srv-core/src/config/widgets.json`](crates/srv-cor
 |--------|------|------|-------------|
 | **Agent** | wand-magic-sparkles | `agent` | An AI agent with streaming output and tool execution |
 | **Swarm** | people-group | `swarm` | Every agent, its subagents and background work, across machines |
-| **Kanban** | table-columns | `kanban` | What every agent is working on, what waits for them, and what needs you |
 | **Memory** | brain | `memory` | Global and Personal Memory, Skills and Bundles |
-| **Files** | folder-open | `files` | File browser |
 | **Connectors** | plug | `connectors` | Accounts, MCP servers, and SSH/WSL remotes |
-| **Terminal** | terminal | `term` | Terminal with xterm.js and a real PTY |
-| **Editor** | file-code | `editor` | Code editor with syntax highlighting |
-| **Browser** | globe | `browser` | Embedded native `CefBrowserView` |
-| **Messengers** | comments | — | A group: Discord, Slack, Telegram, WhatsApp and Teams, each a browser pane on the app's web client |
-| **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) |
+| **Files** | folder-open | `files` | File browser |
+| **Browser** | globe | `browser` | A native Chromium view |
+| **Settings** | cog | `settings` | App settings |
 | **Help** | circle-question | `help` | Built-in documentation |
 
-**In the widget bar's "More" menu:**
+**In the widget bar's "More" menu**, in this order:
 
 | Widget | Icon | View | What it is |
 |--------|------|------|-------------|
+| **Kanban** | table-columns | `kanban` | What every agent is working on, what waits for them, and what needs you |
+| **Terminal** | terminal | `term` | Terminal with xterm.js and a real PTY |
+| **Editor** | file-code | `editor` | Code editor with syntax highlighting; images and video open here too and update live as the file changes on disk |
+| **Messengers** | comments | — | A group: Discord, Slack, Telegram, WhatsApp and Teams, each a browser pane on the app's web client |
+| **Sysinfo** | chart-line | `sysinfo` | Live system metrics (CPU, memory, network, disk) |
 | **Drone** | diagram-project | `drone` | Visual DAG-of-blocks engine |
-| **Jobs** | calendar-check | `warden` | Everything that runs by itself: scheduled jobs, their runs and what they cost. Opened from the command palette ("Open Jobs"), not the widget bar, until it moves into Drone |
 | **Vault** | lock | `vault` | Your secrets, which agents use without seeing them |
 | **History** | clock-rotate-left | `history` | Every agent's recorded conversation, what you typed to it, and where it is kept |
-| **Audit** | list-check | `audit` | What agents did: every jekt, fleet and pane action, and what they did with your secrets |
-| **Media** | photo-film | `media` | Images and video, updated live as the file changes on disk |
 | **Toolchain** | wrench | `toolchain` | Node, npm, Git, Docker, provider CLIs and installed widgets |
 | **Tower** | tower-observation | `tower` | CPU and memory per pane and per process (a read-only task manager) |
-| **Settings** | cog | `settings` | App settings (also in the ≡ menu) |
+| **Audit** | list-check | `audit` | What agents did: every jekt, fleet and pane action, and what they did with your secrets |
+| **Atlas** | map | `atlas` | Every agent on every machine, as a map |
+| **Reviews** | code-pull-request | `reviews` | Every task's pull request and review state |
 
-Right-click a widget to pin or unpin it. As the title bar narrows, the widget bar drops its labels, then moves what doesn't fit into a "…" overflow button. Widgets you [build yourself](https://docs.agentmux.ai/build-a-widget/) appear alongside these.
+**Jobs** (what runs by itself: scheduled jobs, their runs and what they cost) is not a widget: open it from the command palette ("Open Jobs"). Its view id is `warden`.
+
+Right-click a widget to pin it to the bar or unpin it, or to hide it. Opening one of the management panes (Settings, Memory, Vault and the like) focuses it if it is already open in the window; Shift-click opens another. As the title bar narrows, the widget bar drops its labels, then moves what doesn't fit into a "…" overflow button. Widgets you [build yourself](https://docs.agentmux.ai/build-a-widget/) appear alongside these.
 
 ### Sections
 
-Some panes are a row of sections: **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles), **Settings** and the **Vault** (Personal, Cards and banks, API keys, Logins, Notes, Kept, Activity). A widget-bar entry can open one of them on a given section. To add your own, right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry to your `widgets.json`, next to `settings.json`:
+Some panes are a row of sections: **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles), **Settings** (Appearance, Animations, Window & Panes, Browser, Terminal, Keyboard shortcuts, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Advanced), **Swarm** (Supervise, Broadcast) and the **Vault** (Personal data, Cards and banks, API keys, Logins, Notes, Kept by AgentMux, Activity). A widget-bar entry can open one of them on a given section. To add your own, right-click the pane's header and choose **Pin “Remotes” to bar**, or add an entry to your `widgets.json`, next to `settings.json`:
 
 ```json
 {
@@ -188,7 +190,7 @@ Some panes are a row of sections: **Connectors** (Accounts, MCP servers, Remotes
 }
 ```
 
-`"section": "cards"` on `"view": "vault"` opens the Vault on Cards and banks. A link that names Warden's old Vault, History or Audit section still opens that pane. Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/store/pane-sections.ts`](frontend/app/store/pane-sections.ts)); a widget opens one with `am.panes.open("vault", { "vault:section": "cards" })`.
+`"section": "cards"` on `"view": "vault"` opens the Vault on Cards and banks. Settings ▸ Widgets flags a section the pane doesn't have. Each pane declares its sections on its manifest ([`frontend/app/store/pane-sections.ts`](frontend/app/store/pane-sections.ts)); a widget opens one with `am.panes.open("vault", { "vault:section": "cards" })`.
 
 ### Panes and tabs
 
@@ -217,10 +219,10 @@ full rollout plan: [`docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_1
 
 | Surface | How to reach it |
 |---|---|
-| **Agent setup** | Right-click an Agent pane for **Seat…**, **Bundles…** (in order, the bundles the agent starts with) and **Personal memory**; **My Agents** has the same, plus **Environment…**. The accounts an agent signs in with are in **Connectors → Accounts**, its MCP servers in **Connectors → MCP servers**, its skills in **Memory → Skills**, its registration for messages between machines in the **Swarm** (the row's badge), and the agents hidden from paired devices in **Settings → Paired devices**. |
-| **The ≡ menu** | In the top tab bar: New Tab, New Window, Theme, Opacity, Layouts, Settings, Command Palette, Connectors, Memory, Toolchain, DevTools, Online Docs, Exit. Settings has ten sections (Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Advanced); a footer button opens the raw `settings.json` in your default editor. |
-| **Command Palette** | **Ctrl+Shift+P** (also **Ctrl+P** outside a terminal; **⌘P** on macOS), or the ≡ menu. Every keyboard shortcut is listed in Help and in [docs/keybindings.md](docs/keybindings.md). |
-| **DevTools** | ≡ menu → DevTools. Toggles Chromium DevTools. |
+| **Agent setup** | Right-click an Agent pane for **Seat…**, **Bundles…** (in order, the bundles the agent starts with) and **Personal memory**; **My Agents** has **Seat…**, **Bundles…** and **Environment…**, plus Rename, Duplicate and View History. The accounts an agent signs in with are in **Connectors → Accounts**, its MCP servers in **Connectors → MCP servers**, its skills in **Memory → Skills**, its registration for messages between machines in the **Swarm** (the row's badge), and the agents hidden from paired devices in **Settings → Paired devices**. |
+| **The AgentMux menu** | The logo button in the top tab bar: New Tab, New Window, Theme, Opacity, Workspaces, Command Palette, DevTools, Online Docs, Reload Window, Exit. Settings, Connectors, Memory and Toolchain open from the widget bar or the command palette. Settings' footer has **Open raw settings.json** and **Open raw widgets.json**, which open in AgentMux's Editor. |
+| **Command Palette** | **Ctrl+Shift+P** (also **Ctrl+P** outside a terminal; **⌘P** on macOS), or the AgentMux menu. Every keyboard shortcut is listed in Help and in [docs/keybindings.md](docs/keybindings.md). |
+| **DevTools** | AgentMux menu → DevTools, or **Toggle DevTools** in the command palette, when developer mode is on (the default in dev builds). Toggles Chromium DevTools. |
 
 ## Agents
 
@@ -243,9 +245,9 @@ You can also rename an agent pane's tab. Nothing on disk moves — the working d
 
 ### Agent identity (accounts)
 
-Assign an agent its accounts (a GitHub sign-in, an AWS profile, an Anthropic API key, and so on) in **Connectors → Accounts**. An agent has at most one account per provider. Accounts survive renames. Switching an agent's account restarts that agent, so let its current turn finish first.
+Assign an agent its accounts (a GitHub sign-in, an AWS profile, an Anthropic API key, and so on) in **Connectors → Accounts**. An agent has at most one account per provider. Accounts survive renames. Switching an agent's account restarts that agent, so let its current turn finish first. When a provider's usage limit is hit, AgentMux can move an agent to another signed-in account of that provider and restart it (`agent:accountfailover`, on by default).
 
-An agent's own `gh` is deliberately not signed in as you: AgentMux points it at an empty config so an agent can't act on GitHub with your login by accident.
+When an agent has a GitHub identity of its own, AgentMux points its plain `gh` at an empty config, so it can't act on GitHub with your login by accident.
 
 ### Message security — sender identity
 
@@ -255,7 +257,7 @@ Agents message each other ("jekts"). Every incoming message arrives wrapped in a
 [JEKT:FROM=korp TO=agenta TIER=coord DELIVERY=host TRUST=host-verified MSGID=... PRIORITY=normal TS=...]
 ```
 
-Depending on the route it can also carry `HELD_FOR=` (delivered late), `INSTANCE=` / `INSTANCE_STATUS=` (which install sent it), `SIG=` and `FILES=` (how many attached files were delivered). `ESCALATE=` appears only when `TIER=sensitive`: `required` means stop and ask a human, `none` means the sender is verified and the tag is only a warning.
+Depending on the route it can also carry `HELD_FOR=` (delivered late), `INSTANCE=` / `INSTANCE_STATUS=` (which install sent it, and whether it is `approved`, `new` or `revoked`), `SIG=`, `FILES=` (how many attached files were delivered) and `REPLY=none` (the sender asked for no answer, and a reply is refused). `ESCALATE=` appears only when `TIER=sensitive`: `required` means stop and ask a human, `none` means the sender is verified and the tag is only a warning.
 
 Read `TRUST=` before acting. Only these mean the sender is cryptographically proven to be who it claims:
 
@@ -271,7 +273,7 @@ Everything else — `self-declared`, `network-claimed`, or a **failed** `unverif
 
 **The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
 
-This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv-core/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full marker, tier and escalation rules are the [jekt protocol specification](https://docs.agentmux.ai/internals/jekt-protocol/); the `SPEC_JEKT_*` documents in [`docs/specs/`](docs/specs) are the design records behind it. Agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+This is enforced in code ([`agentmux-srv-core`'s reactive handler](crates/srv-core/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full marker, tier and escalation rules are the [jekt protocol specification](https://docs.agentmux.ai/internals/jekt-protocol/); the `SPEC_JEKT_*` documents in [`docs/specs/`](docs/specs) are the design records behind it. Agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
 
 ## MuxAPI
 
@@ -291,7 +293,7 @@ ws.send(JSON.stringify({
 
 ## Architecture
 
-AgentMux is a four-process desktop app. Each process owns one concern, end-to-end. See [Architecture overview](https://docs.agentmux.ai/architecture-overview/) for the full topology.
+AgentMux is a four-process desktop app. Each process owns one concern, end-to-end. See [Architecture overview](https://docs.agentmux.ai/internals/architecture/) for the full topology.
 
 <p align="center">
   <img src="./assets/architecture.svg" alt="AgentMux four-process architecture: agentmux-launcher (×1 per channel, single-instance lock) spawns agentmux-cef (×1 per launcher) and agentmux-srv (×1 per launcher, dynamic port). Host embeds Chromium via CEF (×1 main renderer + ×N per browser pane). The SolidJS frontend runs in the main renderer and talks to srv over WebSocket. Multiple AgentMux instances can run side-by-side, each with its own full stack keyed on data-dir channel." width="860">
@@ -301,10 +303,10 @@ AgentMux is a four-process desktop app. Each process owns one concern, end-to-en
 |---|---|---|
 | **launcher** | [`agentmux-launcher`](crates/launcher) | Sets DLL search path; spawns the host; tracks Window Reality Reconciliation; durable event log for OS-level facts. |
 | **host** | [`agentmux-cef`](crates/cef) | Embeds Chromium via CEF; owns the OS window, the browser panes, the JS bridge, and IPC fan-out to the renderer. |
-| **sidecar** | [`agentmux-srv`](crates/srv) | App domain: workspaces, tabs, blocks, layouts, agents, identity. Persists to SQLite. Spawned by the launcher on a dynamic port (under `task dev`, by the host). |
+| **sidecar** | [`agentmux-srv`](crates/srv) on [`agentmux-srv-core`](crates/srv-core) | App domain: workspaces, tabs, blocks, layouts, agents, identity. Persists to SQLite. Spawned by the launcher on a dynamic port (under `task dev`, by the host). `agentmux-srv` is the server layer (routes, sagas, Drone, messaging, bootstrap) and also builds the `agentmux` command-line program; `agentmux-srv-core` holds storage, the provider registry, identity and the event bus. |
 | **renderer** | [`frontend/`](frontend) | SolidJS UI running inside CEF. Stateless — projects what the sidecar/host expose, dispatches user actions back through them. |
 
-Four more crates support them:
+Five more crates support them:
 
 | Crate | Role |
 |---|---|
@@ -316,7 +318,7 @@ Four more crates support them:
 
 **Stack:**
 - **Frontend:** SolidJS + TypeScript + Vite (state in SolidJS signals; the launcher, host and sidecar keep theirs in reducers)
-- **Desktop:** CEF via cef-rs — bundles its own Chromium; the pinned version is in [`scripts/cef-build/cef-runtime-pins.sh`](scripts/cef-build/cef-runtime-pins.sh) and shown in the app's version panel. The Windows portable is a `.7z` of about 127 MiB.
+- **Desktop:** CEF via cef-rs — bundles its own Chromium; the pinned version is in [`scripts/cef-build/cef-runtime-pins.sh`](scripts/cef-build/cef-runtime-pins.sh) and shown in the app's version panel.
 - **Backend:** Rust (Tokio + Axum + SQLite + portable-pty)
 - **Terminal:** xterm.js
 
@@ -331,7 +333,7 @@ Four more crates support them:
 | `task build:backend` | Build agentmux-srv |
 | `task build:frontend` | Build frontend only |
 | `npm test` | Run the frontend and script tests (vitest) |
-| `cargo test` | Run the Rust tests |
+| `cargo nextest run -p <crate>` | Run the Rust tests (what CI runs; install with `cargo install cargo-nextest`) |
 | `task clean` | Remove `dist/` (`clean:host` and `clean:cef` go further) |
 
 ### Build Outputs
@@ -340,16 +342,16 @@ Local build outputs:
 
 | Platform | Task | Artifact |
 |----------|------|----------|
-| **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.7z` |
+| **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>.<pid>-x64-portable/` and `.7z` |
 | **macOS** | `task package:macos` | `~/Desktop/AgentMux_<version>_arm64.dmg` |
 | **Linux** | `task package:linux` | `~/Desktop/AgentMux_*_amd64.AppImage` |
 
-Release artifacts (macOS DMG; Windows installer, portable and MSIX; Linux AppImage, `.deb`, `.rpm` and `.tar.gz`) are built by CI workflows in this repo. See [§Releases](#releases).
+Release artifacts (macOS DMG; Windows installer, portable and MSIX; Linux AppImage, `.deb`, `.rpm` and `.tar.xz`; the server packages) are built by CI workflows in this repo. See [§Releases](#releases).
 
 ## CEF Fork — read before touching the Chromium layer
 
-AgentMux ships a **fork of CEF** ([`agentmuxai/cef`](https://github.com/agentmuxai/cef)) carrying five AgentMux-specific
-changes — 20 CEF source files plus 3 Chromium-side patches. Every Chromium
+AgentMux ships a **fork of CEF** ([`agentmuxai/cef`](https://github.com/agentmuxai/cef)) carrying eight AgentMux-specific
+changes — 28 CEF source files plus 3 Chromium-side patches. Every Chromium
 milestone upgrade must carry all of them forward, for Windows,
 Linux and macOS together. We have lost pieces twice, both times **silently** — no
 error, no conflict, no failed build. Full practice:
@@ -400,7 +402,8 @@ Layer B is where both incidents happened. Nothing checks it.
    and by any build with a blank `cef-runtime-tag`) and
    [`scripts/cef-build/windows-runtime-pin.sh`](scripts/cef-build/windows-runtime-pin.sh) (what local Windows builds fetch
    and accept). Bump them together, from **one** fork commit. The release job
-   only cross-checks the leading milestone, so two tags can agree on the
+   requires the two Windows pins to be identical, but across Windows, Linux and macOS it
+   compares only the leading milestone, so tags can agree on the
    milestone and still come from different fork commits with different carry-sets.
 
 ## Version Management (Changesets)
@@ -426,12 +429,20 @@ See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) 
 
 **Stable release** — see [GitHub Releases](https://github.com/agentmuxai/agentmux/releases/latest) for the latest published build.
 
+**Install from a terminal** (checked against the release's signed manifest):
+
+```bash
+curl -fsSL https://github.com/agentmuxai/agentmux/releases/latest/download/install.sh | sh      # macOS and Linux
+irm https://github.com/agentmuxai/agentmux/releases/latest/download/install.ps1 | iex           # Windows (PowerShell)
+winget install --id 9P9QCXNNCRK3 --source msstore                                               # Windows, from the Microsoft Store
+```
+
 **Nightly builds** — built daily from `main`. Windows artifacts are kept 7 days, the others for the repository's default retention. [![Nightly builds](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml)
 
 | Platform | Nightly artifact |
 |----------|-----------------|
 | 🍎 macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
-| 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage`, `AgentMux_*_amd64.deb`, `AgentMux-*-1.x86_64.rpm` |
+| 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage`, `AgentMux_*_amd64.deb`, `AgentMux-*-1.x86_64.rpm`, `AgentMux_*_amd64-portable.tar.xz` |
 | 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
 | 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.7z` |
 | 🪟 Windows x64 (MSIX / Store) | `AgentMux_*_x64.msix` |
@@ -453,7 +464,10 @@ Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. 
 | Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
 | Linux x64 (Debian/Ubuntu) | `AgentMux_*_amd64.deb` |
 | Linux x64 (Fedora/RHEL) | `AgentMux-*-1.x86_64.rpm` |
-| Linux x64 (portable) | `AgentMux_*_amd64-portable.tar.gz` |
+| Linux x64 (portable) | `AgentMux_*_amd64-portable.tar.xz` |
+| Server, no desktop (Linux x64, Linux arm64, macOS Apple Silicon) | `agentmux-server-*-linux-x64.tar.gz`, `agentmux-server-*-linux-arm64.tar.gz`, `agentmux-server-*-macos-arm64.tar.gz` |
+| Install scripts | `install.sh` (macOS and Linux), `install.ps1` (Windows) |
+| Signed manifest | `AgentMux-*-manifest.json`, `AgentMux-*-envelope.json` and `AgentMux-*-envelope.json.sig`: the size and SHA-256 of every file, signed; the install scripts check downloads against them |
 
 ### Release checklist
 
@@ -465,9 +479,9 @@ git commit -m "chore: release v0.X.Y"
 git push -u origin <branch>/release-v0.X.Y
 # open PR, merge to main after review
 
-# 2. Tag once merged
-git checkout main && git pull
-git tag v0.X.Y && git push origin v0.X.Y
+# 2. Merging the release PR is enough: the release workflow tags and builds it.
+#    If you must tag by hand, the release gate refuses the tag until the push CI run
+#    on the release commit is green.
 ```
 
 ## Contact Us
