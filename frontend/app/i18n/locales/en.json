@@ -651,5 +651,6 @@
     "reviews.fact.noReviews": "none yet",
     "reviews.fact.noChecks": "not reported",
     "reviews.open.github": "Open on GitHub",
-    "reviews.open.task": "Open the task"
+    "reviews.open.task": "Open the task",
+    "kanban.openPrs": "Open PRs"
 }
