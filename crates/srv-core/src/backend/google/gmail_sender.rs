@@ -10,7 +10,10 @@
 //!   a forged one lower in the mail is never read. The same goes for `ARC-Authentication-Results`, which
 //!   says what an earlier hop saw (mail forwarded or delivered through an alias). A mail with none gets no
 //!   verdict, and nothing is made up.
-//! - Everything returned is a short, plain value: a verdict is letters only, a domain is letters, digits,
+//! - A header that can't be read with certainty is not read at all (`verdict_unreadable`): one with a quote or
+//!   a backslash in it (a sender-chosen address can carry `;`, `(` and `=` inside quotes, and so forge a result
+//!   inside Google's own header), an unbalanced comment, a result named twice, or one cut for length.
+//! - Everything returned is a plain value: a verdict is letters only, a domain is letters, digits,
 //!   dots and hyphens, an address has an ordinary local part. Header text is never copied through as a
 //!   sentence, and the raw headers come in their own field, one line per header, with control characters
 //!   (so a line break inside a value) turned into spaces.
@@ -45,6 +48,8 @@ struct Verdict {
 
 #[derive(Debug, Default)]
 struct Results {
+    /// Google's header was found but can't be read with certainty: no verdict is taken from it.
+    unreadable: bool,
     spf: Option<Verdict>,
     dkim: Vec<Verdict>,
     dmarc: Option<Verdict>,
@@ -63,24 +68,20 @@ impl Results {
     }
 }
 
-/// `v` without its parenthesised comments (which nest, and may hold `;` and `=`).
-fn without_comments(v: &str) -> String {
-    let (mut depth, mut escaped) = (0usize, false);
+/// `v` without its parenthesised comments (which nest, and may hold `;` and `=`), and whether every
+/// comment was closed.
+fn without_comments(v: &str) -> (String, bool) {
+    let mut depth = 0usize;
     let mut out = String::with_capacity(v.len());
     for c in v.chars() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
         match c {
-            '\\' if depth > 0 => escaped = true,
             '(' => depth += 1,
             ')' if depth > 0 => depth -= 1,
             _ if depth == 0 => out.push(c),
             _ => {}
         }
     }
-    out
+    (out, depth == 0)
 }
 
 /// A host name in lower case, or none when it isn't a plain ASCII one (letters, digits, `-`, dots).
@@ -104,7 +105,7 @@ fn token(v: &str) -> String {
 /// The results in an `Authentication-Results` value (or, with `arc`, an `ARC-Authentication-Results`
 /// one, which starts `i=<n>;`) when its authserv-id is Google's; its instance (0 when not ARC).
 fn parse(value: &str, arc: bool) -> Option<(u32, Results)> {
-    let clean = without_comments(&value.chars().take(RESULTS_CHARS).collect::<String>());
+    let (clean, closed) = without_comments(&value.chars().take(RESULTS_CHARS).collect::<String>());
     let mut parts = clean.split(';');
     let mut instance = 0u32;
     if arc {
@@ -114,17 +115,28 @@ fn parse(value: &str, arc: bool) -> Option<(u32, Results)> {
     if !id.eq_ignore_ascii_case(GOOGLE_AUTHSERV) {
         return None;
     }
+    let segs: Vec<&str> = parts.collect();
+    // Quotes and backslashes are where a sender-chosen address can hide a `;`, `(` or `=`; a value cut for
+    // length, too many results or an open comment may have hidden a result. None of these is read.
+    let unreadable = !closed || segs.len() > RESULTS_MAX || value.chars().nth(RESULTS_CHARS).is_some() || value.contains('"') || value.contains('\\');
+    if unreadable {
+        return Some((instance, Results { unreadable, ..Results::default() }));
+    }
     let mut r = Results::default();
-    for seg in parts.take(RESULTS_MAX) {
+    for seg in segs {
         let mut toks = seg.split_whitespace();
         let Some((method, result)) = toks.next().and_then(|t| t.split_once('=')) else { continue };
         let props: Vec<(String, &str)> = toks.filter_map(|t| t.split_once('=')).map(|(k, v)| (k.to_ascii_lowercase(), v.trim_matches('"'))).collect();
         let prop = |k: &str| props.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
         let verdict = |domain: Option<&str>| Verdict { result: token(result), domain: domain.and_then(clean_domain) };
         match method.to_ascii_lowercase().as_str() {
-            "spf" if r.spf.is_none() => r.spf = Some(verdict(prop("smtp.mailfrom").or(prop("smtp.helo")))),
+            // Google names SPF and DMARC once each: a second one is not Google's, and nothing is read.
+            "spf" | "dmarc" if (r.spf.is_some() && method.eq_ignore_ascii_case("spf")) || (r.dmarc.is_some() && method.eq_ignore_ascii_case("dmarc")) => {
+                return Some((instance, Results { unreadable: true, ..Results::default() }));
+            }
+            "spf" => r.spf = Some(verdict(prop("smtp.mailfrom").or(prop("smtp.helo")))),
             "dkim" => r.dkim.push(verdict(prop("header.d").or(prop("header.i")))),
-            "dmarc" if r.dmarc.is_none() => r.dmarc = Some(verdict(prop("header.from"))),
+            "dmarc" => r.dmarc = Some(verdict(prop("header.from"))),
             _ => {}
         }
     }
@@ -302,17 +314,21 @@ pub fn sender_check(payload: &Value, labels: &[&str]) -> Value {
     if labels.iter().any(|l| matches!(*l, "SENT" | "DRAFT")) {
         out.insert("own_mail".into(), json!(true));
     } else if let Some((_, r)) = google_results(payload, "Authentication-Results", false) {
-        put_results(&mut out, &r);
         if google_result_headers(payload) > 1 {
             flags.push("several_google_results");
         }
-        let aligned = from_domain.as_deref().is_some_and(|f| r.passing_domains().iter().any(|d| same_site(d, f)));
-        if !aligned {
-            flags.push("not_aligned");
-        }
-        let judged = r.dmarc.as_ref().and_then(|v| v.domain.as_deref());
-        if matches!((judged, from_domain.as_deref()), (Some(j), Some(f)) if j != f) {
-            flags.push("dmarc_domain_differs");
+        if r.unreadable {
+            flags.push("verdict_unreadable");
+        } else {
+            put_results(&mut out, &r);
+            let aligned = from_domain.as_deref().is_some_and(|f| r.passing_domains().iter().any(|d| same_site(d, f)));
+            if !aligned {
+                flags.push("not_aligned");
+            }
+            let judged = r.dmarc.as_ref().and_then(|v| v.domain.as_deref());
+            if matches!((judged, from_domain.as_deref()), (Some(j), Some(f)) if j != f) {
+                flags.push("dmarc_domain_differs");
+            }
         }
     } else {
         flags.push("no_verdict");
@@ -320,7 +336,11 @@ pub fn sender_check(payload: &Value, labels: &[&str]) -> Value {
     if let Some((instance, r)) = google_results(payload, "ARC-Authentication-Results", true) {
         let mut arc = Map::new();
         arc.insert("instance".into(), json!(instance));
-        put_results(&mut arc, &r);
+        if r.unreadable {
+            arc.insert("unreadable".into(), json!(true));
+        } else {
+            put_results(&mut arc, &r);
+        }
         out.insert("arc".into(), Value::Object(arc));
     }
     out.insert("flags".into(), json!(flags));

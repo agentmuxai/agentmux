@@ -89,6 +89,34 @@ fn a_mail_with_no_header_from_google_has_no_verdict() {
 }
 
 #[test]
+fn a_header_that_cannot_be_read_with_certainty_is_not_read() {
+    let unreadable = |v: &str| {
+        let c = check(&[("Authentication-Results", v), FROM]);
+        assert!(flags(&c).contains(&"verdict_unreadable".to_string()), "{v}: {c}");
+        assert!(!flags(&c).contains(&"no_verdict".to_string()));
+        assert!(c.get("dmarc").is_none() && c.get("spf").is_none() && c.get("dkim").is_none(), "{v}: {c}");
+    };
+    // A sender-chosen address copied into Google's header with `;` and `=` inside quotes.
+    unreadable(r#"mx.google.com; spf=pass smtp.mailfrom="x;dmarc=pass header.from=@vendor.com;"@evil.test; dmarc=fail header.from=vendor.com"#);
+    // A `(` inside quotes would otherwise swallow what follows.
+    unreadable(r#"mx.google.com; spf=pass smtp.mailfrom="a(b"@evil.test; dmarc=fail header.from=vendor.com"#);
+    unreadable(r"mx.google.com; spf=pass smtp.mailfrom=a\;b@evil.test; dmarc=fail header.from=vendor.com");
+    // A comment that never closes.
+    unreadable("mx.google.com; dkim=pass header.i=(@vendor.com; spf=fail smtp.mailfrom=a@vendor.com; dmarc=fail header.from=vendor.com");
+    // A result named twice: Google names each once.
+    unreadable("mx.google.com; dmarc=pass header.from=vendor.com; dmarc=fail header.from=vendor.com");
+    unreadable("mx.google.com; spf=pass smtp.mailfrom=a@vendor.com; spf=fail smtp.mailfrom=b@vendor.com");
+    // Too long to have been read whole, and too many results.
+    unreadable(&format!("mx.google.com; dmarc=fail header.from=vendor.com; x={}", "a".repeat(RESULTS_CHARS)));
+    unreadable(&format!("mx.google.com; {}dmarc=fail header.from=vendor.com", "x=y; ".repeat(RESULTS_MAX + 1)));
+    // The same for ARC: the instance shows, no verdict does.
+    let c = check(&[("ARC-Authentication-Results", r#"i=1; mx.google.com; spf=pass smtp.mailfrom="a;b"@evil.test; dmarc=pass header.from=vendor.com"#), FROM]);
+    assert_eq!(c["arc"], json!({ "instance": 1, "unreadable": true }));
+    // A readable header is still read.
+    assert_eq!(check(&[("Authentication-Results", PASS), FROM])["dmarc"]["result"], "pass");
+}
+
+#[test]
 fn a_comment_in_the_results_cannot_make_a_verdict() {
     let sneaky = "mx.google.com; spf=fail (google.com: x; dmarc=pass header.from=vendor.com (nested; dkim=pass)) smtp.mailfrom=a@vendor.com; dmarc=fail header.from=vendor.com";
     let c = check(&[("Authentication-Results", sneaky), FROM]);
