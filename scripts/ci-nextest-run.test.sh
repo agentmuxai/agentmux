@@ -100,7 +100,7 @@ judge 2 4000 15000 5
 
 echo "the sampler starts no process and reads real figures"
 sample
-echo "$SAMPLE" | grep -Eq '^\[resources\] [0-9]{2}:[0-9]{2}:[0-9]{2} mem_avail=[0-9]+MB swap_free=[0-9]+MB mem_used=[0-9]+MB swap_used=[0-9]+MB demand=[0-9]+MB top=[^ ]+:[0-9]+MB psi_full10=[0-9.na]+$' && ok "a sample line has every field" || bad "a sample line has every field" "$SAMPLE"
+echo "$SAMPLE" | grep -Eq '^\[resources\] [0-9]{2}:[0-9]{2}:[0-9]{2} mem_avail=[0-9]+MB swap_free=[0-9]+MB mem_used=[0-9]+MB swap_used=[0-9]+MB demand=[0-9]+MB top=[^ ]+:[0-9]+MB top2=[^ ]+:[0-9]+MB psi_full10=[0-9.na]+$' && ok "a sample line has every field" || bad "a sample line has every field" "$SAMPLE"
 read_mem
 [ "$MEM_AVAIL_MB" -gt 0 ] && [ "$MEM_USED_MB" -gt 0 ] && [ "$SWAP_USED_MB" -ge 0 ] && ok "memory figures are read" || bad "memory figures are read" "$MEM_AVAIL_MB $MEM_USED_MB $SWAP_USED_MB"
 top_process
@@ -111,7 +111,7 @@ case "$TOP_COMM" in bash | ps | awk | Runner* | dotnet* | systemd* | sshd*) bad 
 echo "the cargo job limit"
 STUB_BIN="$TMP/stubbin"
 mkdir -p "$STUB_BIN"
-printf '#!/usr/bin/env bash\necho "cargo $1: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-unset}"\n' > "$STUB_BIN/cargo"
+printf '#!/usr/bin/env bash\necho "cargo $*: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-unset}"\n' > "$STUB_BIN/cargo"
 chmod +x "$STUB_BIN/cargo"
 for mode in pr queue; do
     for jobs in "" 3; do
@@ -123,6 +123,19 @@ for mode in pr queue; do
         if grep -q "CARGO_BUILD_JOBS=$want" "$log" && ! grep -q "CARGO_BUILD_JOBS=unset" "$log"; then ok "$mode lane builds with $want jobs"; else bad "$mode lane builds with $want jobs" "$(cat "$log")"; fi
     done
 done
+
+echo "the last build of a PR attempt (2026-11-16: two rustc at once peaked at 14.5 GB of 15.6)"
+log="$TMP/final-pr.log"
+rm -f "$log"
+env PATH="$STUB_BIN:$PATH" IN_QUEUE="" CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" bash "$SCRIPT" --attempt > /dev/null 2>&1
+if grep -E -- '--no-run --profile ci' "$log" | grep -q 'CARGO_BUILD_JOBS=1$'; then ok "the PR lane's last build runs with one job"; else bad "the PR lane's last build runs with one job" "$(cat "$log")"; fi
+if grep -E -- 'nextest run --profile ci' "$log" | grep -v -- '--no-run' | grep -q 'CARGO_BUILD_JOBS=2$'; then ok "the run after it keeps the attempt's jobs"; else bad "the run after it keeps the attempt's jobs" "$(cat "$log")"; fi
+rm -f "$log"
+env PATH="$STUB_BIN:$PATH" IN_QUEUE="" CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" CI_FINAL_JOBS=2 bash "$SCRIPT" --attempt > /dev/null 2>&1
+if grep -E -- '--no-run --profile ci' "$log" | grep -q 'CARGO_BUILD_JOBS=2$'; then ok "CI_FINAL_JOBS sets the last build's jobs"; else bad "CI_FINAL_JOBS sets the last build's jobs" "$(cat "$log")"; fi
+rm -f "$log"
+env PATH="$STUB_BIN:$PATH" IN_QUEUE="" CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/final.trace" bash "$SCRIPT" --attempt 1 > /dev/null 2>&1
+if ! grep -q 'CARGO_BUILD_JOBS=2' "$log" && grep -q 'CARGO_BUILD_JOBS=1' "$log"; then ok "the retry builds everything with one job"; else bad "the retry builds everything with one job" "$(cat "$log")"; fi
 
 echo "the build order"
 # cargo builds a dependency with the features of every package named in a call. A build that names fewer packages than
@@ -141,11 +154,15 @@ for mode in pr queue; do
     env PATH="$ARGS_BIN:$PATH" IN_QUEUE=$in_queue CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/order.trace" bash "$SCRIPT" --attempt > /dev/null 2>&1
     mapfile -t calls < <(grep "^cargo nextest run" "$log")
     sets=$(for call in "${calls[@]}"; do echo "$call" | packages; echo; done | sort -u | grep -c .)
-    [ "${#calls[@]}" -eq 3 ] && [ "$sets" = 1 ] && ok "$mode lane: the two builds and the run name the same packages" \
+    # A PR attempt has one call more than the queue's: the last build, with its own job count, before the run.
+    want_calls=3
+    [ "$mode" = pr ] && want_calls=4
+    [ "${#calls[@]}" -eq "$want_calls" ] && [ "$sets" = 1 ] && ok "$mode lane: the two builds and the run name the same packages" \
         || bad "$mode lane: the two builds and the run name the same packages" "$(cat "$log")"
     case "${calls[0]:-}" in *"--no-run"*"--lib") ok "$mode lane: the core's harness is built first" ;; *) bad "$mode lane: the core's harness is built first" "${calls[0]:-}" ;; esac
     case "${calls[1]:-}" in *"--no-run"*"--bin agentmux-srv") ok "$mode lane: the server layer's harness is built second" ;; *) bad "$mode lane: the server layer's harness is built second" "${calls[1]:-}" ;; esac
-    case "${calls[2]:-}" in *"--no-run"*) bad "$mode lane: the run comes last" "${calls[2]:-}" ;; *"--profile"*) ok "$mode lane: the run comes last" ;; *) bad "$mode lane: the run comes last" "${calls[2]:-}" ;; esac
+    last="${calls[$((want_calls - 1))]:-}"
+    case "$last" in *"--no-run"*) bad "$mode lane: the run comes last" "$last" ;; *"--profile"*) ok "$mode lane: the run comes last" ;; *) bad "$mode lane: the run comes last" "$last" ;; esac
 done
 echo "cargo nextest run --profile queue -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-mcp" | packages | grep -q "^agentmux-common agentmux-mcp agentmux-srv agentmux-srv-core $" \
     && ok "the package list of a call is read" || bad "the package list of a call is read"

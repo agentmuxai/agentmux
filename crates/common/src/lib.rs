@@ -70,6 +70,7 @@ pub mod tls_provider;
 pub mod tokens;
 pub mod toolchain_path;
 pub mod update_manifest;
+pub mod user_path;
 pub mod win32;
 #[cfg(target_os = "linux")]
 pub mod xauthority;

@@ -80,10 +80,15 @@ pub fn private_sddl(user_sid: &str, folder: bool) -> String {
 /// The words to a person whose folder lets others in: which folder, who, and the one command that fixes it: it stops what
 /// is inherited from above, takes away each of those named, and gives the folder to the person and the system.
 pub fn refusal(folder: &Path, others: &[Other], user: &str) -> String {
+    refusal_because(folder, others, user, "AgentMux Headless keeps your agents' data and its sign-in key there, so only you may")
+}
+
+/// `refusal` for a place kept for another reason, which is said in `why` (a sentence without its closing full stop).
+pub fn refusal_because(folder: &Path, others: &[Other], user: &str, why: &str) -> String {
     let names: Vec<&str> = others.iter().map(|o| o.name.as_str()).collect();
     let removals: String = others.iter().map(|o| format!(" /remove:g \"*{}\"", o.sid)).collect();
     format!(
-        "{} can be opened by {} as well as you. AgentMux Headless keeps your agents' data and its sign-in key there, so only you may. To fix it, run: icacls \"{}\" /inheritance:r{removals} /grant:r \"{user}:(OI)(CI)F\" /grant:r \"SYSTEM:(OI)(CI)F\"",
+        "{} can be opened by {} as well as you. {why}. To fix it, run: icacls \"{}\" /inheritance:r{removals} /grant:r \"{user}:(OI)(CI)F\" /grant:r \"SYSTEM:(OI)(CI)F\"",
         folder.display(),
         names.join(", "),
         folder.display()

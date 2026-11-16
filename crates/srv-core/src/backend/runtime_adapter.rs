@@ -22,6 +22,7 @@
 //! [`RuntimeKind`] is the one place `agentMode` / `agent_type` is read as "host or container".
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::blockcontroller::subprocess::{StartupStep, SubprocessController, SubprocessSpawnConfig};
 use super::container::{ContainerManager, CONTAINER_CLAUDE_DIR, CONTAINER_WORKSPACE_DIR};
@@ -177,7 +178,9 @@ impl RuntimeAdapter for NativeAdapter {
         bare_tool_name(tool).to_string()
     }
 
-    fn materialize(&self, _ctrl: &SubprocessController) {}
+    fn materialize(&self, ctrl: &SubprocessController) {
+        ctrl.remember_adapter(Arc::new(*self));
+    }
 
     fn launch(&self, ctrl: &SubprocessController, config: SubprocessSpawnConfig) -> Result<(), String> {
         ctrl.spawn_turn(config)
@@ -272,6 +275,7 @@ impl RuntimeAdapter for ContainerAdapter {
     }
 
     fn materialize(&self, ctrl: &SubprocessController) {
+        ctrl.remember_adapter(Arc::new(self.clone()));
         if let Some(launch) = &self.launch {
             ctrl.set_container_startup(launch.startup.clone());
         }

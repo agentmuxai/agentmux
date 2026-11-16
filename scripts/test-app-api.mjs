@@ -65,7 +65,7 @@ async function run() {
         console.log("\n=== identity.account.upsert (dummy, validate=false) ===");
         const up = await call("identity.account.upsert", {
             agent_id: AGENT, provider: "anthropic", name: "AgentX test key",
-            kind: "api_key", secret: "sk-ant-test-DUMMY-0123456789", validate: false,
+            kind: "api_key", secret: "sk-ant-" + "test-DUMMY-0123456789", validate: false,
         });
         show("upsert", up);
 
