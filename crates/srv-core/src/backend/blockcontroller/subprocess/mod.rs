@@ -214,6 +214,8 @@ pub struct SubprocessController {
     adapter: Mutex<Option<Arc<dyn crate::backend::runtime_adapter::RuntimeAdapter>>>,
     /// The replaced controller's run lock, until the replacement has waited for its killed turn to exit.
     left_old_run_lock: Mutex<Option<Arc<AtomicBool>>>,
+    /// The container, and the command, the last container turn ran with (replace.rs).
+    container_context: Mutex<Option<replace::ContainerContext>>,
 }
 
 /// A container turn's first step: ready the container. `Err` carries the text
@@ -254,8 +256,8 @@ impl SubprocessController {
                 .ok()
         });
         let left = replace::take_left_for_replacement(&block_id);
-        let (held, queued, session_id, adapter, old_run_lock) = match left {
-            Some(l) => (l.held, l.queued, l.session_id, l.adapter, l.old_run_lock),
+        let (held, queued, session_id, adapter, old_run_lock, container) = match left {
+            Some(l) => (l.held, l.queued, l.session_id, l.adapter, l.old_run_lock, l.container),
             None => Default::default(),
         };
         Self {
@@ -265,6 +267,7 @@ impl SubprocessController {
             container_startup: Mutex::new(None),
             adapter: Mutex::new(adapter),
             left_old_run_lock: Mutex::new(old_run_lock),
+            container_context: Mutex::new(container),
             inner: Arc::new(Mutex::new(SubprocessControllerInner {
                 proc_status: STATUS_INIT.to_string(),
                 proc_exit_code: 0,

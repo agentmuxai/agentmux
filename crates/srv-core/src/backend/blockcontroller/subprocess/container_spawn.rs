@@ -229,6 +229,9 @@ impl SubprocessController {
         if super::codex_compact::is_compact_request(&config) {
             return Err("Compacting a Codex agent that runs in a container isn't supported yet.".to_string());
         }
+        // What a queued message runs with (its own args were taken into `base_cmd`), kept for a replacement
+        // controller to run the queue with (replace.rs).
+        self.remember_container_context(&cm, &container_name, &base_cmd);
         if !self.take_run_lock_for_turn() {
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(

@@ -597,14 +597,20 @@ fn adapter_for(fake: &FakeDocker, container: &str) -> crate::backend::runtime_ad
     })
 }
 
+/// The CLI arguments a real message carries: the adapter takes them into the command, so a queued message has none left.
+fn with_cli_args(mut c: SubprocessSpawnConfig) -> SubprocessSpawnConfig {
+    c.cli_args = vec!["-p".into(), "--output-format".into(), "stream-json".into()];
+    c
+}
+
 /// A controller that is running a held-open turn with one message queued behind it, launched through its adapter.
 async fn running_with_one_queued(fake: &FakeDocker, block: &str, adapter: &crate::backend::runtime_adapter::ContainerAdapter) -> Arc<SubprocessController> {
     use crate::backend::runtime_adapter::RuntimeAdapter;
     let old = controller(block, None);
     adapter.materialize(&old);
-    adapter.launch(&old, config("running")).unwrap();
+    adapter.launch(&old, with_cli_args(config("running"))).unwrap();
     wait_for("the CLI to be started", || old.session_id().as_deref() == Some("sid-one")).await;
-    adapter.launch(&old, config("queued behind")).unwrap();
+    adapter.launch(&old, with_cli_args(config("queued behind"))).unwrap();
     assert_eq!(old.inner.lock().unwrap().pending_messages.len(), 1);
     let _ = fake;
     old
@@ -635,6 +641,9 @@ async fn a_replace_that_is_not_a_stop_hands_the_queue_to_the_replacement_which_r
     wait_for("the queued turn", || fake.execs(Kind::Turn).len() == 2 && !fresh.run_lock.load(Ordering::SeqCst)).await;
     let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
     assert_eq!(texts, ["running", "queued behind"]);
+    for (cmd, _) in fake.execs(Kind::Turn) {
+        assert!(cmd.iter().any(|a| a == "stream-json"), "the replacement's turn runs the CLI in the same mode: {cmd:?}");
+    }
 }
 
 // With no way to launch the queued messages (nothing was ever launched through an adapter here), they are held
@@ -683,4 +692,32 @@ async fn what_a_replaced_controller_left_is_dropped_when_its_block_is_deleted_or
         }
         assert_eq!(crate::backend::blockcontroller::subprocess::replace::left_for_replacement_count(&block), 0, "aged: {aged}");
     }
+}
+
+// While the replacement waits for the old turn to be gone, a message that arrives is queued behind the handed-over
+// ones: it does not take the free run lock and run ahead of them.
+#[tokio::test]
+async fn a_message_that_arrives_while_the_replacement_waits_runs_after_the_handed_over_queue() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT], 0) }, Turn::says(&[RESULT_OK], 0), Turn::says(&[RESULT_OK], 0)]);
+    let (block, name) = (unique("blk"), unique("c"));
+    let adapter = adapter_for(&fake, &name);
+    let old = running_with_one_queued(&fake, &block, &adapter).await;
+    Controller::stop_for_replace(old.as_ref(), STATUS_DONE).unwrap();
+    wait_done(&old).await;
+    old.hand_over_held_to_replacement();
+    // The killed turn is still winding down, as far as the replacement can tell.
+    old.run_lock.store(true, Ordering::SeqCst);
+
+    let fresh = controller(&block, None);
+    fresh.run_queue_left_by_replaced();
+    assert!(fresh.turn_in_flight(), "the lock is held while it waits");
+    fresh.spawn_container_turn(fake.manager(), name, cli(), config("late")).unwrap();
+    assert_eq!(fresh.inner.lock().unwrap().pending_messages.len(), 2, "the late message is queued behind the older one");
+    assert_eq!(fake.execs(Kind::Turn).len(), 1, "nothing has run ahead of the queue");
+
+    old.run_lock.store(false, Ordering::SeqCst);
+    wait_for("all three turns", || fake.execs(Kind::Turn).len() == 3 && !fresh.run_lock.load(Ordering::SeqCst)).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["running", "queued behind", "late"]);
 }

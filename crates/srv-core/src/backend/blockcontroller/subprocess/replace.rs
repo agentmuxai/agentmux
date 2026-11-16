@@ -30,6 +30,15 @@ const LEFT_FOR_REPLACEMENT_TTL: Duration = Duration::from_secs(300);
 /// How long the replacement waits for the replaced controller's killed turn to be gone before it starts its own.
 const OLD_TURN_EXIT_WAIT: Duration = Duration::from_secs(10);
 
+/// The container a container turn ran in and the command it ran: a queued message's own CLI arguments were taken
+/// into that command when it was queued, so the queue is run with it again, not through the adapter.
+#[derive(Clone)]
+pub(super) struct ContainerContext {
+    cm: crate::backend::container::ContainerManager,
+    container_name: String,
+    base_cmd: Vec<String>,
+}
+
 /// What one replaced controller leaves for the next one of its block.
 pub(super) struct LeftForReplacement {
     /// Held by a user stop; stay held.
@@ -42,6 +51,8 @@ pub(super) struct LeftForReplacement {
     pub(super) adapter: Option<Arc<dyn RuntimeAdapter>>,
     /// The old controller's run lock: set while its killed turn is still winding down.
     pub(super) old_run_lock: Option<Arc<AtomicBool>>,
+    /// For a container agent: how its queued messages are launched.
+    pub(super) container: Option<ContainerContext>,
     left_at: Instant,
 }
 
@@ -82,6 +93,12 @@ impl SubprocessController {
     /// How the next queued message is launched: remembered from the last message that was accepted.
     pub fn remember_adapter(&self, adapter: Arc<dyn RuntimeAdapter>) {
         *self.adapter.lock().unwrap() = Some(adapter);
+    }
+
+    /// A container turn is starting or queuing: remember what it runs in and with.
+    pub(super) fn remember_container_context(&self, cm: &crate::backend::container::ContainerManager, container_name: &str, base_cmd: &[String]) {
+        *self.container_context.lock().unwrap() =
+            Some(ContainerContext { cm: cm.clone(), container_name: container_name.to_string(), base_cmd: base_cmd.to_vec() });
     }
 
     /// `stop_for_replace`: end the turn, but keep what was queued behind it for the replacement. Unlike `stop`
@@ -134,6 +151,7 @@ impl SubprocessController {
             session_id: None,
             adapter: None,
             old_run_lock: None,
+            container: None,
             left_at: Instant::now(),
         });
         left.held.extend(held);
@@ -141,6 +159,7 @@ impl SubprocessController {
         left.session_id = session_id.or_else(|| left.session_id.take());
         left.adapter = adapter.or_else(|| left.adapter.take());
         left.old_run_lock = Some(Arc::clone(&self.run_lock));
+        left.container = self.container_context.lock().unwrap().clone().or_else(|| left.container.take());
         left.left_at = Instant::now();
     }
 
@@ -151,6 +170,7 @@ impl SubprocessController {
     pub(crate) fn run_queue_left_by_replaced(self: &Arc<Self>) {
         let adapter = self.adapter.lock().unwrap().clone();
         let old_run_lock = self.left_old_run_lock.lock().unwrap().take();
+        let container = self.container_context.lock().unwrap().clone();
         let handle = tokio::runtime::Handle::try_current().ok();
         let (Some(adapter), Some(handle)) = (adapter, handle) else {
             let mut inner = self.inner.lock().unwrap();
@@ -168,6 +188,9 @@ impl SubprocessController {
         if self.inner.lock().unwrap().pending_messages.is_empty() {
             return;
         }
+        // The run lock is held while the old turn winds down, so a message that arrives meanwhile queues behind
+        // the handed-over ones instead of running ahead of them. (It was just built: the lock is free.)
+        let holding = self.try_lock_run();
         let ctrl = Arc::clone(self);
         handle.spawn(async move {
             if let Some(lock) = old_run_lock {
@@ -176,10 +199,18 @@ impl SubprocessController {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }
+            // The first queued message takes the lock back through the launch.
             let first = ctrl.inner.lock().unwrap().pending_messages.pop_front();
+            if holding {
+                ctrl.unlock_run();
+            }
             let Some(first) = first else { return };
             adapter.materialize(&ctrl);
-            if let Err(e) = adapter.launch(&ctrl, first) {
+            let launched = match container {
+                Some(c) => ctrl.spawn_container_turn(c.cm, c.container_name, c.base_cmd, first),
+                None => adapter.launch(&ctrl, first),
+            };
+            if let Err(e) = launched {
                 tracing::warn!(block_id = %ctrl.block_id, error = %e, "failed to start the replaced controller's queued turn");
                 SubprocessController::publish_queued_spawn_error(&ctrl.block_id, &e, &ctrl.broker, &ctrl.filestore, &ctrl.mstore);
             }
