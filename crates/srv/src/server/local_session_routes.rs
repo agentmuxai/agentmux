@@ -405,12 +405,17 @@ fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     hval(headers, "cookie")?.split(';').filter_map(|c| c.trim().split_once('=')).find(|(n, _)| *n == name).map(|(_, v)| v)
 }
 
-/// The token a request carries: `X-AM-Session`, or on `/ws` the protocol offered beside [`WS_PROTOCOL`].
+/// The routes a browser opens as a WebSocket, which can carry no header: the token travels as a protocol.
+fn is_websocket_route(path: &str) -> bool {
+    path == "/ws" || path == super::streamed_browser::ROUTE
+}
+
+/// The token a request carries: `X-AM-Session`, or on a WebSocket route the protocol offered beside [`WS_PROTOCOL`].
 fn session_token<'a>(headers: &'a HeaderMap, path: &str) -> Option<&'a str> {
     if let Some(t) = hval(headers, TOKEN_HEADER) {
         return Some(t);
     }
-    if path != "/ws" {
+    if !is_websocket_route(path) {
         return None;
     }
     hval(headers, "sec-websocket-protocol")?.split(',').map(str::trim).find(|p| !p.is_empty() && *p != WS_PROTOCOL)

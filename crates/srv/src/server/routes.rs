@@ -393,6 +393,11 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
             "/ws",
             get(websocket::handle_ws).route_layer(middleware::from_fn(ws_origin_guard)),
         )
+        // The streamed Browser pane of a headless server's web UI; 404 unless switched on.
+        .route(
+            "/agentmux/streamed-browser",
+            get(super::streamed_browser::handle).route_layer(middleware::from_fn(ws_origin_guard)),
+        )
         .route("/agentmux/service", post(service::handle_service))
         .route("/agentmux/file", get(files::handle_mux_file))
         .route("/agentmux/stream-file", get(stub_501))

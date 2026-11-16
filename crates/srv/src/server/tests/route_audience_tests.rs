@@ -62,6 +62,7 @@ fn todays_refused() -> Vec<(Match, &'static str)> {
         (Match::Prefix("/webhook/"), APP_ONLY),
         (Match::Exact("/agentmux/service"), GATEWAY),
         (Match::Exact("/ws"), GATEWAY),
+        (Match::Exact("/agentmux/streamed-browser"), STREAMED_BROWSER),
         (Match::Exact("/agentmux/wps/publish"), GATEWAY),
         (Match::Exact("/agentmux/stream-local-file"), HOST_FILES),
         (Match::Exact("/agentmux/file"), HOST_FILES),
@@ -105,4 +106,12 @@ fn the_refused_set_is_the_one_before_audiences() {
     // Entry for entry: the same number of refusals, none added, none dropped.
     let refused_now = ROUTES.iter().filter(|(_, a)| !matches!(a, Audience::Everyone)).count();
     assert_eq!(refused_now, todays_refused().len());
+}
+
+/// A container agent is told why it cannot open a streamed pane and what to use instead.
+#[test]
+fn a_container_agent_is_refused_the_streamed_browser_in_words() {
+    let why = refusal("/agentmux/streamed-browser").expect("refused");
+    assert!(why.contains("server's own network reach"), "{why}");
+    assert!(why.contains("Use your own Browser tool"), "{why}");
 }
