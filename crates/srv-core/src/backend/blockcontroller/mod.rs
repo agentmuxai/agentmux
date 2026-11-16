@@ -594,6 +594,8 @@ pub fn delete_controller(block_id: &str) {
     }
     release_block_processes(block_id);
     term_size::forget(block_id);
+    // Messages a replaced subprocess controller left for a replacement that will not come.
+    subprocess::forget_left_for_replacement(block_id);
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` and hand it back, without

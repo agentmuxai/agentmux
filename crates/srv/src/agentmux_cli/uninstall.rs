@@ -120,6 +120,8 @@ fn later_removal(base: &Path) -> bool {
         .raw_arg(format!(
             "/d /s /c \"for /l %n in (1,1,120) do (ping -n 2 127.0.0.1 >nul & rmdir /s /q \"{text}\" 2>nul & if not exist \"{text}\" exit)\""
         ))
+        // Not the folder this command was run from: a helper that stands inside `base` would hold it and never remove it.
+        .current_dir(std::env::temp_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
