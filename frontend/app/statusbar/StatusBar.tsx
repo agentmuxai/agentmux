@@ -127,7 +127,6 @@ function registerBuiltinStatusBarItems(): void {
         ["backend", "left", () => <BackendStatus />],
         ["system-stats", "left", () => <SystemStats />],
         ["gpu", "left", () => <GpuStatus />],
-        ["last-sound", "right", () => <LastSoundStatus />],
         ["agent-counts", "right", () => <AgentCountsStatus />],
         ["vault-requests", "right", () => <VaultRequestsStatus />],
         ["browser-pause-all", "right", () => <BrowserPauseAllStatus />],
