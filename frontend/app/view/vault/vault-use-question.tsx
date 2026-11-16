@@ -9,6 +9,8 @@ import { createEffect, createSignal, onCleanup, Show, type Accessor, type Compon
 
 import { tip } from "@/app/element/tip";
 import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import { CardTyped } from "./vault-use-card";
 import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
@@ -154,16 +156,16 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
 function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["link"]> }): JSX.Element {
     return (
         <>
-            <p>
-                The machine copy of <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong> is a copy of its value that a service or a build reads.
+            <p {...tip(clip(props.use.entry_label, CLIP.label) === props.use.entry_label ? undefined : props.use.entry_label)}>
+                <Rich k="vault.linkCard.what" params={{ label: clip(props.use.entry_label, CLIP.label) }} />
             </p>
             <p data-link="from">
-                Now: <Show when={props.link.from} fallback="no place is recorded.">
+                {t("vault.linkCard.now")} <Show when={props.link.from} fallback={t("vault.linkCard.noPlaceNow")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
                 </Show>
             </p>
             <p data-link="to">
-                Asked for: <Show when={props.link.to} fallback="no place (the record is removed).">
+                {t("vault.linkCard.askedFor")} <Show when={props.link.to} fallback={t("vault.linkCard.noPlaceAsked")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
                 </Show>
             </p>
@@ -271,7 +273,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : props.use.link ? "the place is not changed without a yes." : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.import ? "nothing is copied without a yes." : props.use.link ? t("vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }

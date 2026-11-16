@@ -8,6 +8,7 @@ import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { Button, FilterInput, IconButton, Pill } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
@@ -74,7 +75,7 @@ function CheckCopyButton(props: { entry: VaultEntryInfo; onError: (message: stri
         }
         setBusy(false);
     };
-    return <IconButton icon="arrows-rotate" label="Check the machine copy" density="compact" disabled={busy()} onClick={() => void check()} />;
+    return <IconButton icon="arrows-rotate" label={t("vault.machineCopy.check")} density="compact" disabled={busy()} onClick={() => void check()} />;
 }
 
 /** An entry's plain details, the Vault it is in (when the list shows more than one), its expiry and its machine copy. */

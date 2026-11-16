@@ -651,5 +651,19 @@
     "reviews.fact.noReviews": "none yet",
     "reviews.fact.noChecks": "not reported",
     "reviews.open.github": "Open on GitHub",
-    "reviews.open.task": "Open the task"
+    "reviews.open.task": "Open the task",
+    "vault.machineCopy.line": "Machine copy:",
+    "vault.machineCopy.notChecked": "not checked yet",
+    "vault.machineCopy.check": "Check the machine copy",
+    "vault.machineCopy.label": "Machine copy",
+    "vault.machineCopy.description": "Where a copy of this value lives for a service or a build to read. Only the place is kept here, never the value.",
+    "vault.machineCopy.region": "Region",
+    "vault.machineCopy.profile": "AWS profile",
+    "vault.machineCopy.profileDescription": "The login a check reads it with; empty for this computer's default.",
+    "vault.linkCard.what": "The machine copy of <strong>{{label}}</strong> is a copy of its value that a service or a build reads.",
+    "vault.linkCard.now": "Now:",
+    "vault.linkCard.noPlaceNow": "no place is recorded.",
+    "vault.linkCard.askedFor": "Asked for:",
+    "vault.linkCard.noPlaceAsked": "no place (the record is removed).",
+    "vault.linkCard.needsYes": "the place is not changed without a yes."
 }

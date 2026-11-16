@@ -11,6 +11,7 @@ import { Show, type JSX } from "solid-js";
 import type { SetStoreFunction } from "solid-js/store";
 
 import { Field, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { formatWhen } from "./vault-format";
@@ -81,8 +82,8 @@ export function MachineCopyLine(props: { entry: VaultEntryInfo; children?: JSX.E
             {(place) => (
                 <div class="vault-machine-copy">
                     <span class="vault-machine-copy-text">
-                        Machine copy: <span class="warden-manager-mono vault-import-id">{place()}</span>
-                        <Show when={sourceCheck(props.entry)} fallback={<span class="vault-machine-copy-check"> · not checked yet</span>}>
+                        {t("vault.machineCopy.line")} <span class="warden-manager-mono vault-import-id">{place()}</span>
+                        <Show when={sourceCheck(props.entry)} fallback={<span class="vault-machine-copy-check"> · {t("vault.machineCopy.notChecked")}</span>}>
                             {(check) => (
                                 <span class={check().state === "same" ? "vault-machine-copy-check" : "vault-machine-copy-check vault-expiry-warn"} data-check={check().state}>
                                     {" "}
@@ -124,9 +125,9 @@ export function MachineCopyFields(props: { fields: Record<string, string>; setFi
     return (
         <>
             <Field
-                label="Machine copy"
+                label={t("vault.machineCopy.label")}
                 layout="stacked"
-                description="Where a copy of this value lives for a service or a build to read. Only the place is kept here, never the value."
+                description={t("vault.machineCopy.description")}
             >
                 <Select value={kind()} onChange={(v) => props.setFields("source_kind", v)} options={KIND_OPTIONS} />
             </Field>
@@ -138,10 +139,10 @@ export function MachineCopyFields(props: { fields: Record<string, string>; setFi
                     {input("source_key", (KEY[kind()] ?? KEY.other).placeholder)}
                 </Field>
                 <Show when={kind() === AWS}>
-                    <Field label="Region" layout="stacked">
+                    <Field label={t("vault.machineCopy.region")} layout="stacked">
                         {input("source_region", "e.g. us-east-1; empty for this computer's default")}
                     </Field>
-                    <Field label="AWS profile" layout="stacked" description="The login a check reads it with; empty for this computer's default.">
+                    <Field label={t("vault.machineCopy.profile")} layout="stacked" description={t("vault.machineCopy.profileDescription")}>
                         {input("source_profile", "optional")}
                     </Field>
                 </Show>
