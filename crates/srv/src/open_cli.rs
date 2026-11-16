@@ -30,11 +30,13 @@ pub(crate) async fn exit_if_requested() {
     let (name, port, key_file, print, origin) = match cli.command {
         Some(SrvCommand::Open { port, key_file, print, origin }) => ("open", port, key_file, print, origin),
         Some(SrvCommand::Logout { port, key_file }) => ("logout", port, key_file, false, None),
+        Some(SrvCommand::Sessions { port, key_file }) => ("sessions", port, key_file, false, None),
         _ => return,
     };
     let code = match prepare(cli.wavedata.as_deref(), port, key_file, origin) {
         Ok(target) => match HttpServer::connect(&target).await {
             Ok(server) if name == "logout" => logout(&server).await,
+            Ok(server) if name == "sessions" => sessions(&server).await,
             Ok(server) => run(&server, &target.origin, print, &mut Stdio).await,
             Err(e) => {
                 eprintln!("agentmux-srv {name}: {e}");
@@ -59,6 +61,26 @@ async fn logout(server: &HttpServer) -> i32 {
         }
         Err(e) => {
             eprintln!("agentmux-srv logout: {e}");
+            3
+        }
+    }
+}
+
+/// How many browsers are signed in (`sessions`): prints the number alone, 0 done, 3 could not.
+async fn sessions(server: &HttpServer) -> i32 {
+    match server.post("/auth/sessions", serde_json::json!({})).await {
+        Ok(v) => match v["sessions"].as_u64() {
+            Some(n) => {
+                println!("{n}");
+                0
+            }
+            None => {
+                eprintln!("agentmux-srv sessions: the server's answer had no count");
+                3
+            }
+        },
+        Err(e) => {
+            eprintln!("agentmux-srv sessions: {e}");
             3
         }
     }

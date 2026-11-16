@@ -611,6 +611,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
     let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
     let service = user_home().is_ok_and(|h| service::installed(&h, &paths.channel));
+    let browsers = if healthy { browser_sessions(paths) } else { None };
     if json {
         println!(
             "{}",
@@ -625,6 +626,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
                 "service": service,
+                "browser_sessions": browsers,
                 "blocked": blocked.as_ref().map(|b| serde_json::json!({ "owner": b.owner, "reason": b.reason, "since_unix": b.since_unix, "what_to_do": b.sentence() })),
             })
         );
@@ -633,6 +635,9 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
         println!("  service: {}", service_line(service));
+        if let Some(n) = browsers {
+            println!("  browsers: {}", browsers_line(n));
+        }
         if s.version != VERSION {
             tell!("  installed version is {VERSION}: `agentmux restart` runs it");
         }
@@ -642,6 +647,24 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
+}
+
+/// What `status` says of the browsers signed in.
+fn browsers_line(n: u64) -> String {
+    match n {
+        0 => "none signed in (`agentmux open` signs one in)".to_string(),
+        n => format!("{n} signed in"),
+    }
+}
+
+/// How many browsers are signed in now, asked of the running server; None when it cannot say (the server does not
+/// serve its own UI, or does not answer).
+fn browser_sessions(paths: &DataPaths) -> Option<u64> {
+    let (code, out) = run_client(paths, "sessions", &[], true);
+    if code != 0 {
+        return None;
+    }
+    out.trim().parse().ok()
 }
 
 /// What `status` says of the service: whether the server starts by itself at every login.
@@ -815,20 +838,30 @@ fn setup_server_args(args: &setup::SetupArgs) -> ServerArgs {
 
 /// `agentmux-srv open` or `logout`, run for the server of this channel with the same terminal.
 fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
+    run_client(paths, name, extra, false).0
+}
+
+/// Runs a client command of `agentmux-srv`. With `capture` its output comes back to the caller and nothing is shown;
+/// without, it keeps the person's terminal. The code is the command's exit code.
+fn run_client(paths: &DataPaths, name: &str, extra: &[String], capture: bool) -> (i32, String) {
     let Some(record) = running(paths) else {
-        warn!("the server is not running. Start it with `agentmux start`.");
-        return 1;
+        if !capture {
+            warn!("the server is not running. Start it with `agentmux start`.");
+        }
+        return (1, String::new());
     };
     let srv = if record.srv.is_file() { record.srv.clone() } else { exe_dir().and_then(|d| find_srv_in(&d, None)).unwrap_or(record.srv.clone()) };
-    let status = Command::new(&srv)
-        .arg(name)
-        .args(["--port", &record.web_port.to_string(), "--key-file"])
-        .arg(&record.key_file)
-        .args(extra)
-        .status();
-    match status {
-        Ok(s) => s.code().unwrap_or(3),
-        Err(e) => fail(&format!("cannot run {}: {e}", srv.display())),
+    let mut command = Command::new(&srv);
+    command.arg(name).args(["--port", &record.web_port.to_string(), "--key-file"]).arg(&record.key_file).args(extra);
+    if capture {
+        return match command.stdin(Stdio::null()).stderr(Stdio::null()).output() {
+            Ok(out) => (out.status.code().unwrap_or(3), String::from_utf8_lossy(&out.stdout).into_owned()),
+            Err(_) => (3, String::new()),
+        };
+    }
+    match command.status() {
+        Ok(s) => (s.code().unwrap_or(3), String::new()),
+        Err(e) => (fail(&format!("cannot run {}: {e}", srv.display())), String::new()),
     }
 }
 
@@ -885,6 +918,13 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn status_says_how_many_browsers_are_signed_in() {
+        assert!(browsers_line(0).contains("none") && browsers_line(0).contains("agentmux open"));
+        assert_eq!(browsers_line(1), "1 signed in");
+        assert_eq!(browsers_line(3), "3 signed in");
+    }
 
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from([&["agentmux"], args].concat())

@@ -351,7 +351,7 @@ async fn flooded_srv(lose: usize) -> (u16, std::sync::Arc<std::sync::atomic::Ato
     let port = listener.local_addr().unwrap().port();
     let channels = std::sync::Arc::new(Mutex::new(Channels::default()));
     let hellos = std::sync::Arc::new(AtomicUsize::new(0));
-    let (c1, h1, c2, c3) = (channels.clone(), hellos.clone(), channels.clone(), channels.clone());
+    let (c1, h1, c2, c3, c4) = (channels.clone(), hellos.clone(), channels.clone(), channels.clone(), channels.clone());
     let app = axum::Router::new()
         .route(
             "/auth/hello",
@@ -375,6 +375,10 @@ async fn flooded_srv(lose: usize) -> (u16, std::sync::Arc<std::sync::atomic::Ato
         .route("/auth/logout", axum::routing::post(move |headers: HeaderMap, body: Bytes| {
             let channels = c3.clone();
             async move { admit_and_answer(&channels, "/auth/logout", &headers, &body, serde_json::json!({ "revoked": 3 })) }
+        }))
+        .route("/auth/sessions", axum::routing::post(move |headers: HeaderMap, body: Bytes| {
+            let channels = c4.clone();
+            async move { admit_and_answer(&channels, "/auth/sessions", &headers, &body, serde_json::json!({ "sessions": 2 })) }
         }));
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (port, hellos)
@@ -393,6 +397,15 @@ async fn open_begins_again_once_when_its_first_request_is_refused() {
     let err = server.mint_code().await.unwrap_err();
     assert!(err.contains("did not accept"), "{err}");
     assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 2, "one more hello, no more");
+}
+
+/// `sessions` proves the key like `open` and asks how many browsers are signed in.
+#[tokio::test]
+async fn sessions_asks_how_many_browsers_are_signed_in() {
+    let (port, _) = flooded_srv(0).await;
+    let server = HttpServer::connect(&target(port, None)).await.unwrap();
+    assert_eq!(sessions(&server).await, 0);
+    assert_eq!(server.post("/auth/sessions", serde_json::json!({})).await.unwrap()["sessions"], 2);
 }
 
 /// `logout` proves the key like `open` and reports how many sessions the server ended.
