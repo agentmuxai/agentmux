@@ -18,7 +18,7 @@ import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
-import { machineCopy, MachineCopyLine } from "./vault-source";
+import { copyCheck, machineCopy, MachineCopyLine } from "./vault-source";
 import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
@@ -105,7 +105,7 @@ function EntryDetails(props: { entry: VaultEntryInfo; showVault: boolean; onErro
             <MachineCopyLine entry={props.entry}>
                 <CheckCopyButton entry={props.entry} onError={props.onError} />
             </MachineCopyLine>
-            <LinkedDetails entry={props.entry} />
+            <LinkedDetails entry={props.entry} copyNote={(line) => copyCheck(props.entry, line)} />
         </>
     );
 }

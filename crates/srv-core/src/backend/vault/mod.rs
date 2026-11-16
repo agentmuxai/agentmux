@@ -88,6 +88,10 @@ pub struct VaultEntryInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub source_checked: Option<source_link::VaultSourceCheck>,
+    /// What is known of each other place the entry names (`linked::copy_checks`); absent when it names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub copies_checked: Option<Vec<linked::VaultCopyCheck>>,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -769,8 +773,10 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             _ => (Vec::new(), String::new()),
         };
         let source_checked = source_link::Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link));
+        let copies_checked = Some(linked::copy_checks(store, &row)).filter(|copies| !copies.is_empty());
         out.push(VaultEntryInfo {
             source_checked,
+            copies_checked,
             fields: serde_json::from_str(&row.fields).unwrap_or_default(),
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,

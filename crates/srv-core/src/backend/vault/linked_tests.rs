@@ -198,6 +198,9 @@ async fn a_check_reads_the_places_description_and_never_the_key() {
     let s = store();
     let id = linked_with(&s, &[(ROTATED, "2026-10-01"), (COPIES, COPIES_TEXT)]);
     let plan = plan_for_agent(&s, &id, "builder", Some(REASON)).unwrap();
+    // Before any check the pane has both other places, neither checked.
+    let before = copy_checks(&s, &s.vault_get(&id).unwrap().unwrap());
+    assert_eq!((before.len(), before.iter().filter(|c| c.checked.is_some()).count()), (2, 0));
     let cli = Cli::with(&[("prod/invoice-sync", Ok(UNCHANGED)), ("prod/invoice-sync-replica", Ok(CHANGED_LATER))]);
     let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
     assert_eq!((checked.outcome, checked.why.as_str(), checked.source.as_str()), (PRESENT, "", "aws-secret:prod/invoice-sync#api.token"));
@@ -220,6 +223,12 @@ async fn a_check_reads_the_places_description_and_never_the_key() {
     let row = s.vault_get(&id).unwrap().unwrap();
     assert_eq!(source_link::last_check(&s, &row, &Link::of_row(&row).unwrap()).map(|c| c.outcome), Some(PRESENT.to_string()));
     assert_eq!(standing(&s, &row), Some((Standing::Checked, false)));
+    // What the pane shows of each other place: the newest check of the one in AWS, and of the CI secret that no
+    // check can describe it, which until now was in the asking agent's answer only.
+    let known = copy_checks(&s, &row);
+    let said: Vec<(&str, &str, bool)> = known.iter().map(|c| (c.place.as_str(), c.cannot.as_str(), c.checked.is_some())).collect();
+    assert_eq!(said, [("github-secret: example-org/example-app#EXAMPLE_TOKEN", NOT_FROM_HERE, false), ("aws-secret: prod/invoice-sync-replica#api.token", "", true)]);
+    assert!(known[1].checked.as_ref().unwrap().outcome.starts_with("changed since recorded: the place last changed on 2026-11-02"));
 }
 
 #[tokio::test]
@@ -250,6 +259,10 @@ async fn a_place_that_changed_is_missing_or_refuses_is_what_the_check_says() {
     assert_eq!((unread.outcome, unread.why.as_str(), cli.seen().len()), (COULD_NOT_READ, NOT_FROM_HERE, 0));
     assert_eq!((unread.copies[0].outcome, unread.copies[0].why.as_str()), (COULD_NOT_READ, NOT_UNDER_AWS));
     assert!(rows(&s, CHECKED_COPY).is_empty());
+    // The pane says the same of that copy without a line in the history, and nothing of an entry that names none.
+    let known = copy_checks(&s, &s.vault_get(&ci).unwrap().unwrap());
+    assert_eq!(known, [VaultCopyCheck { place: "aws-secret: prod/store-key".into(), checked: None, cannot: NOT_UNDER_AWS.into() }]);
+    assert!(copy_checks(&s, &row()).is_empty());
     // A link nobody has checked as it is now is unchecked.
     let never = create(&s, NewEntry { label: "Queue key".into(), ..entry(&place(), None) }).unwrap();
     assert_eq!(standing(&s, &s.vault_get(&never).unwrap().unwrap()), Some((Standing::Unchecked, true)));
@@ -302,7 +315,8 @@ fn an_agents_change_to_what_a_link_says_is_the_persons_to_allow() {
     let change = inspect::link_change(&s, &asked, "builder").unwrap().expect("a change to the readers is asked about");
     assert!(change.only && change.from == change.to);
     assert_eq!(change.about_from, "Read by: invoice-sync (lambda): at run time.");
-    assert_eq!(change.about_to, "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag. Last changed: 2026-11-02.");
+    // One thing a line: the card shows the date on a line of its own.
+    assert_eq!(change.about_to, "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag.\nLast changed: 2026-11-02.");
     assert!(inspect::update_details(&s, &asked, "builder").unwrap_err().contains("the person is asked before it changes"));
     let updated = inspect::update_details_allowed(&s, &asked, "builder", &change).unwrap();
     assert_eq!(updated.changed, ["field readers", "field rotated"]);

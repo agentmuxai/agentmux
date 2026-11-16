@@ -97,6 +97,56 @@ fn every_kind_leaves_as_a_keepass_entry_and_comes_back_as_the_same_entry() {
     assert_eq!(note.tags, vec!["Websites".to_string()]);
 }
 
+// Every place and name here is made up.
+#[test]
+fn a_linked_entry_leaves_with_no_secret_field_and_comes_back_a_link() {
+    let s = store();
+    let said = [
+        ("link", "only"),
+        ("source_kind", "aws-secret"),
+        ("source_location", "prod/invoice-sync"),
+        ("source_key", "api.token"),
+        ("source_region", "eu-west-1"),
+        ("readers", "invoice-sync (lambda): at run time
+release (workflow): on a tag"),
+        ("rotated", "2026-10-01"),
+        ("copies", "github-secret: example-org/example-app#EXAMPLE_TOKEN"),
+        ("service", "Invoices"),
+    ];
+    add(&s, "api-key", "Invoice provider key", &said, &["Work"], &[]);
+    // An entry that holds its value and says who reads its machine copy keeps both, and is no link.
+    let held = [("source_kind", "aws-secret"), ("source_location", "stage/db"), ("readers", "db-migrate (workflow): on a release")];
+    add(&s, "api-key", "Staging database", &held, &[], &[("value", "made-up-value-1234")]);
+
+    let bytes = exported(&s);
+    let back = match import::read_with(&bytes, "x.kdbx", None, Some(PASS)) {
+        Ok(i) => i,
+        Err(import::ReadError::Other(e)) => panic!("{e}"),
+        Err(_) => panic!("unexpected"),
+    };
+    assert!(back.skipped.is_empty(), "{:?}", back.skipped);
+    assert_eq!(back.entries.len(), 2, "{:?}", back.entries.iter().map(|e| (&e.label, &e.kind)).collect::<Vec<_>>());
+    let by = |label: &str| back.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}"));
+    let link = by("Invoice provider key");
+    assert_eq!(link.kind, "api-key");
+    assert!(link.parts.is_empty(), "a link brings no value");
+    for (name, want) in said {
+        assert_eq!(link.fields.get(name).map(String::as_str), Some(want), "{name}");
+    }
+    assert_eq!(link.tags, vec!["Work".to_string()]);
+    let kept = by("Staging database");
+    assert_eq!((kept.parts["value"].as_str(), kept.fields["readers"].as_str(), kept.fields["source_location"].as_str()), ("made-up-value-1234", "db-migrate (workflow): on a release", "stage/db"));
+    assert!(!kept.fields.contains_key("link"));
+
+    // Through the import itself: both are taken (none skipped), and each is known again as the one the Vault has.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("links.kdbx");
+    export_with(&s, None, PASS, &path, cheap()).unwrap();
+    let preview = crate::backend::vault::transfer::inspect(&s, &path, Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.duplicates, preview.skipped.len()), (2, 2, 0), "{:?}", preview.skipped);
+    crate::backend::vault::transfer::cancel(&preview.token);
+}
+
 #[test]
 fn the_file_is_a_password_protected_keepass_database_with_no_plaintext() {
     let s = store();

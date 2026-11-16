@@ -45,11 +45,15 @@ export function sourceFields(fields: Record<string, string>): Record<string, str
     return Object.fromEntries(names.map((n) => [n, (fields[n] ?? "").trim()]).filter(([, v]) => v !== ""));
 }
 
-/** The place in a line, as a person reads it; empty when the entry has no link. */
+/** The place in a line, as a person reads it; empty when the entry has no link. An AWS secret of the same name is
+ *  another secret in another region or account, so its region and the profile it is read with are part of the place. */
 export function machineCopy(fields: Record<string, string>): string {
     const { source_kind: kind, source_location: location = "", source_key: key = "" } = fields;
     if (!kind) return "";
-    if (kind === AWS) return `AWS secret ${location}${key ? `, key ${key}` : ""}`;
+    if (kind === AWS) {
+        const { source_region: region, source_profile: profile } = fields;
+        return `AWS secret ${location}${key ? `, key ${key}` : ""}${region ? `, region ${region}` : ""}${profile ? `, profile ${profile}` : ""}`;
+    }
     if (kind === GITHUB) return `GitHub secret ${key} of ${location}`;
     return key ? `${location}, ${key}` : location;
 }
@@ -80,6 +84,17 @@ export function sourceCheck(e: Pick<VaultEntryInfo, "source_checked">, now = Dat
     }
     const why = checked.outcome.replace(/^could not read:?\s*/, "");
     return { state: "unread", text: `could not be read, checked ${when}${why ? `: ${why}` : ""}` };
+}
+
+/** What is said after one of an entry's other places (a line of `copies`, as written): what the newest check of it
+ *  found, that it was not checked yet, or that no check can describe it from here. Null when srv says nothing of
+ *  it. `warn` marks a place found changed or missing, or one that could not be read. */
+export function copyCheck(e: Pick<VaultEntryInfo, "copies_checked">, line: string, now = Date.now()): { text: string; warn: boolean } | null {
+    const known = e.copies_checked?.find((c) => c.place === line);
+    if (!known) return null;
+    if (known.cannot) return { text: t("vault.linked.copyCannot"), warn: false };
+    const check = sourceCheck({ source_checked: known.checked }, now);
+    return check ? { text: check.text, warn: !["same", "present"].includes(check.state) } : { text: t("vault.machineCopy.notChecked"), warn: false };
 }
 
 /**

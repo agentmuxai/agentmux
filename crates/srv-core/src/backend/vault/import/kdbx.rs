@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use keepass::db::GroupRef;
 use keepass::{Database, DatabaseKey};
 
-use super::super::{kdbx_names, kinds, source_link};
+use super::super::{kdbx_names, kinds, linked, source_link};
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 
 pub const MAGIC: [u8; 4] = [0x03, 0xD9, 0xA2, 0x9A];
@@ -256,17 +256,8 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
     // Custom fields: one named like a kind's secret (SSN, Card number, API key, …) makes an entry of
     // that kind, with the fields that belong to it (a card's expiry, an owner); the rest are kept
     // sealed in a note, since a custom field is often a recovery code or a PIN.
-    let mut custom: Vec<(String, String)> = e
-        .fields
-        .keys()
-        .filter(|k| !STANDARD.contains(&k.as_str()) && !k.starts_with("TimeOtp-") && !k.starts_with("KPH: ") && !k.starts_with("_etm_"))
-        .filter_map(|k| {
-            let v = e.get(k).map(str::trim).unwrap_or("");
-            (!v.is_empty()).then(|| (k.clone(), v.to_string()))
-        })
-        .collect();
-    custom.sort();
-    let (mut used, link) = link_fields(&custom);
+    let custom = custom_fields(e);
+    let (mut used, link, marked) = link_fields(&custom);
     let mut typed: Vec<Incoming> = Vec::new();
     for primary in kdbx_names::PRIMARY {
         let Some(i) = custom.iter().position(|(n, _)| kdbx_names::matches(primary.aliases, n)) else { continue };
@@ -282,6 +273,10 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
             }
         }
         typed.push(entry);
+    }
+    // An entry that has since been given a password or a secret field is not a linked entry any more.
+    if let Some(i) = marked.filter(|_| typed.is_empty() && password.is_empty()) {
+        typed.push(linked_entry(&custom[i].1, &label, site, get("UserName")));
     }
     // The details (an owner, a bank, an expiry) go to the entries that take them.
     for detail in kdbx_names::DETAILS {
@@ -348,18 +343,49 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
     entries.extend(with_link(made, link).into_iter().map(|m| m.tag(tag)));
 }
 
-/// Which custom fields say where the entry's machine copy is, as an export from the Vault writes them: they come
-/// back as plain fields, not note text. Returns which of `custom` are used up, and the link's fields.
-fn link_fields(custom: &[(String, String)]) -> (Vec<bool>, Vec<(&'static str, String)>) {
+/// The entry's custom fields that hold something, by name: not the standard ones, nor another app's own.
+fn custom_fields(e: &keepass::db::Entry) -> Vec<(String, String)> {
+    let mut custom: Vec<(String, String)> = e
+        .fields
+        .keys()
+        .filter(|k| !STANDARD.contains(&k.as_str()) && !k.starts_with("TimeOtp-") && !k.starts_with("KPH: ") && !k.starts_with("_etm_"))
+        .filter_map(|k| {
+            let v = e.get(k).map(str::trim).unwrap_or("");
+            (!v.is_empty()).then(|| (k.clone(), v.to_string()))
+        })
+        .collect();
+    custom.sort();
+    custom
+}
+
+/// A linked entry, as an export from the Vault writes one: no secret, and a field that says its kind (`said`). It
+/// comes back as a link of that kind, an API key when the kind isn't one the Vault has.
+fn linked_entry(said: &str, label: &str, site: &str, username: &str) -> Incoming {
+    let kind = kinds::kind(said.trim()).map(|k| k.name).unwrap_or("api-key");
+    let entry = Incoming::new(kind, label).field(linked::LINK, linked::ONLY);
+    if kind == "login" {
+        return entry.field("site", site).field("username", username);
+    }
+    entry
+}
+
+/// Which custom fields say where the entry's machine copy is and what is said of the key there (who reads it, when
+/// it last changed, where else it is kept), as an export from the Vault writes them: they come back as plain fields,
+/// not note text. Returns which of `custom` are used up, the fields, and which field marks a linked entry.
+fn link_fields(custom: &[(String, String)]) -> (Vec<bool>, Vec<(&'static str, String)>, Option<usize>) {
     let mut used = vec![false; custom.len()];
     let mut link = Vec::new();
-    for (name, title) in source_link::TITLES {
+    let marked = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(linked::KIND_TITLE));
+    if let Some(i) = marked {
+        used[i] = true;
+    }
+    for (name, title) in source_link::TITLES.into_iter().chain(linked::TITLES) {
         if let Some(i) = custom.iter().position(|(n, _)| n.trim().eq_ignore_ascii_case(title)) {
             used[i] = true;
             link.push((name, custom[i].1.clone()));
         }
     }
-    (used, link)
+    (used, link, marked)
 }
 
 /// `made` with the link on its first entry: the one the KeePass entry is about.

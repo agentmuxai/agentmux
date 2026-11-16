@@ -33,6 +33,10 @@ pub const ROTATED: &str = "rotated";
 /// Other places the same key is kept, one line each: `kind: location#key`.
 pub const COPIES: &str = "copies";
 pub const FIELDS: [&str; 4] = [LINK, READERS, ROTATED, COPIES];
+/// What is said of the key, as a KeePass export names it, so a database written from the Vault brings it back.
+pub const TITLES: [(&str, &str); 3] = [(READERS, "Read by"), (ROTATED, "Last changed"), (COPIES, "Also kept at")];
+/// The KeePass field that marks a linked entry. It holds the entry's kind: a link has no secret field to say it.
+pub const KIND_TITLE: &str = "Linked entry kind";
 pub const MAX_READERS: usize = 8;
 pub const MAX_COPIES: usize = 4;
 const MAX_LINE: usize = 200;
@@ -151,12 +155,13 @@ pub fn takes_no_value(row: &VaultRow, instead: &str) -> Option<String> {
     is_linked_row(row).then(|| format!("{} is a linked entry, which holds no value: {instead}", row.label))
 }
 
-/// What an entry records about its key beside the place, in a line the person reads before an agent changes it: who
-/// reads it, when it last changed, where else it is kept. Empty when it records none of them.
+/// What an entry records about its key beside the place, as the person reads it before an agent changes it: who
+/// reads it, when it last changed, where else it is kept, one of them a line, so the card can show each on its own
+/// line and mark the ones a change touches. Empty when it records none of them.
 pub fn about(fields: &BTreeMap<String, String>) -> String {
     let joined = |name: &str| lines(fields.get(name).map_or("", String::as_str)).join("; ");
     let said = [("Read by", joined(READERS)), ("Last changed", joined(ROTATED)), ("Also kept at", joined(COPIES))];
-    said.into_iter().filter(|(_, text)| !text.is_empty()).map(|(what, text)| format!("{what}: {text}.")).collect::<Vec<_>>().join(" ")
+    said.into_iter().filter(|(_, text)| !text.is_empty()).map(|(what, text)| format!("{what}: {text}.")).collect::<Vec<_>>().join("\n")
 }
 
 /// The fields of a linked entry for the secret at `source`: the mark, the place, and what the asker says of it
@@ -221,6 +226,54 @@ pub struct CopyChecked {
     pub why: String,
 }
 
+/// What is known of one of the other places an entry names, for its "Also kept at" line. No value.
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct VaultCopyCheck {
+    /// The place, as the entry's `copies` line writes it.
+    pub place: String,
+    /// The newest check of that place as the entry is now; absent when it was never checked, or can't be.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub checked: Option<VaultSourceCheck>,
+    /// Why no check can describe this place from here; empty when one can.
+    pub cannot: String,
+}
+
+/// Why a check can't describe `copy` from here, for an entry whose own place is of the kind `own`; `None` when it
+/// can: a copy in AWS is described under the entry's own AWS place, and nothing else is, today.
+fn cannot_describe(copy: &Link, own: &str) -> Option<&'static str> {
+    match (copy.kind.as_str(), own) {
+        (AWS_SECRET, AWS_SECRET) => None,
+        (AWS_SECRET, _) => Some(NOT_UNDER_AWS),
+        _ => Some(NOT_FROM_HERE),
+    }
+}
+
+/// Each other place the entry names, with the newest check of it as the entry is now. A check leaves a line for a
+/// copy it can describe; for one it can't, that is said here in place of a check, so the pane shows it and not
+/// only the answer the asking agent got.
+pub fn copy_checks(store: &Store, row: &VaultRow) -> Vec<VaultCopyCheck> {
+    let fields = fields_of(row);
+    let named = copies(&fields);
+    if named.is_empty() {
+        return Vec::new();
+    }
+    let own = Link::of(&fields).map(|link| link.kind).unwrap_or_default();
+    // Newest first. A check writes one line a copy, so this holds the last few checks of every copy.
+    let lines = store.vault_activity_for_entry(&row.id, &[CHECKED_COPY], row.updated_at, (MAX_COPIES * 4) as i64).unwrap_or_default();
+    named
+        .iter()
+        .map(|copy| match cannot_describe(copy, &own) {
+            Some(why) => VaultCopyCheck { place: place_text(copy), checked: None, cannot: why.into() },
+            None => {
+                let checked = lines.iter().find(|line| line.target == copy.text()).map(|line| VaultSourceCheck { at: line.at, outcome: line.outcome.clone() });
+                VaultCopyCheck { place: place_text(copy), checked, cannot: String::new() }
+            }
+        })
+        .collect()
+}
+
 /// What each place's description came to: the entry's own place, then its other places in order. No value is in a
 /// description.
 pub struct Found {
@@ -242,10 +295,9 @@ pub async fn describe<R: Runner>(runner: &R, plan: &CheckPlan, via: Via<'_>) -> 
     // The places are described together: each run of the CLI has its own time limit, and a check of an entry with
     // four copies must still answer inside the caller's wait.
     let copies = plan.copies.iter().map(|copy| async move {
-        let described = match (copy.kind.as_str(), plan.link.kind.as_str()) {
-            (AWS_SECRET, AWS_SECRET) => describe_place(runner, &Link { region: plan.link.region.clone(), profile: plan.link.profile.clone(), ..copy.clone() }, via).await,
-            (AWS_SECRET, _) => Err(NOT_UNDER_AWS.into()),
-            _ => Err(NOT_FROM_HERE.into()),
+        let described = match cannot_describe(copy, &plan.link.kind) {
+            None => describe_place(runner, &Link { region: plan.link.region.clone(), profile: plan.link.profile.clone(), ..copy.clone() }, via).await,
+            Some(why) => Err(why.into()),
         };
         (copy.clone(), described)
     });
@@ -275,7 +327,7 @@ pub fn finish(store: &Store, plan: &CheckPlan, found: Found) -> Checked {
     let mut copies = Vec::with_capacity(found.copies.len());
     for (copy, described) in &found.copies {
         let outcome = outcome_of(described, recorded);
-        if (copy.kind.as_str(), plan.link.kind.as_str()) == (AWS_SECRET, AWS_SECRET) {
+        if cannot_describe(copy, &plan.link.kind).is_none() {
             record_line(store, Line { entry_id: &plan.entry_id, label: &plan.label, actor: &plan.actor, action: CHECKED_COPY, target: &copy.text(), outcome: &outcome.line(), reason: &plan.reason });
         }
         copies.push(CopyChecked { place: place_text(copy), outcome: outcome.word(), why: outcome.why().to_string() });

@@ -640,6 +640,13 @@
     white-space: nowrap;
 }
 
+// What a link says now and what is asked for: one thing a line, so a date is not lost at the end of a long list of
+// readers.
+.vault-link-said-line {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
 // A batch of imports: a row for every secret, each with its tick. A long list scrolls inside the question, so the
 // answers stay in view; no row is summarised.
 .vault-batch-rows {

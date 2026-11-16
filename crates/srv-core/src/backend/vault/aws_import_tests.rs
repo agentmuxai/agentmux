@@ -229,7 +229,7 @@ async fn an_import_makes_an_entry_and_answers_with_ids_never_the_value() {
     assert_eq!(reveal(&s, &done.id, "value", "revealed").unwrap().as_str(), VALUE, "the secret's field is the entry's main value");
     let history = history::history_for(&s, &done.id, Asker::Person, 10).unwrap();
     let imported = history.iter().find(|r| r.action == IMPORTED).expect("an imported line");
-    assert_eq!((imported.actor.as_str(), imported.target.as_str(), imported.outcome.as_str()), ("builder", "aws-sm:staging/db-creds#db.password", "done"));
+    assert_eq!((imported.actor.as_str(), imported.target.as_str(), imported.outcome.as_str()), ("builder", "aws-secret:staging/db-creds#db.password", "done"));
     assert_eq!((imported.reason.as_str(), imported.version, imported.refs.as_slice()), (REASON, 1, ["task 28071".to_string()].as_slice()));
     nothing_leaked(&s, &[&answer, &format!("{imported:?}")]);
 }
@@ -306,7 +306,7 @@ fn a_denied_import_is_a_line_with_the_reason_and_no_value() {
     note(&s, &plan, "", plan.label(), "builder", "denied");
     let all = rows(&s);
     let line = all.last().unwrap();
-    assert_eq!((line.action.as_str(), line.outcome.as_str(), line.reason.as_str(), line.target.as_str()), (IMPORTED, "denied", REASON, "aws-sm:staging/db"));
+    assert_eq!((line.action.as_str(), line.outcome.as_str(), line.reason.as_str(), line.target.as_str()), (IMPORTED, "denied", REASON, "aws-secret:staging/db"));
     assert_eq!(line.version, 0, "a denied import set no value");
 }
 

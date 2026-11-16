@@ -186,6 +186,14 @@ fn a_batch_of_links_goes_to_fleet_when_it_names_no_vault_and_the_agent_may_use_i
     let plan = check(&s, &links(), "builder").unwrap();
     assert_eq!((plan.vault_id.as_str(), plan.vault_name.as_str()), (fleet.id.as_str(), "Fleet"));
     assert!(plan.items.iter().all(|p| matches!(&p.target, Target::Link { vault_id, .. } if *vault_id == fleet.id)));
+    // A list of links only reads and copies nothing: its lines say what was asked for and done as a record.
+    assert!(plan.links_only());
+    assert_eq!(plan.asked_text(), "where 2 keys live in AWS Secrets Manager");
+    let one = BatchPlan { items: plan.items[..1].to_vec(), ..plan.clone() };
+    assert_eq!(one.asked_text(), "where 1 key lives in AWS Secrets Manager");
+    let approved = plan.approved(&[0, 1]);
+    let made: Vec<ItemResult> = approved.items.iter().map(|p| ItemResult { label: p.label().to_string(), id: Some("made".into()), error: None }).collect();
+    assert_eq!(plan.ran_text(&approved, &made), ("done", format!("2 of 2 approved, 2 recorded, 0 failed; list {}", approved.list)));
     // A Vault the batch names is the one it goes into, and a batch that copies anything keeps the agent's first.
     assert_eq!(check(&s, &BatchRequest { vault: Some("Personal".into()), ..links() }, "builder").unwrap().vault_name, "Personal");
     let mut mixed = links();
@@ -231,13 +239,13 @@ fn no_entry_and_no_secret_is_in_a_batch_twice() {
     assert!(refused(&s, &req).contains("two items are for"), "labels differing only in case and spaces are one entry to a reader");
     let mut req = three();
     req.items[2].aws_secret_id = "hosts/alpha".into();
-    assert!(refused(&s, &req).contains("two items copy aws-sm:hosts/alpha"));
+    assert!(refused(&s, &req).contains("two items copy aws-secret:hosts/alpha"));
 
     // Two fields of one JSON secret are two rows.
     let user = BatchItem { key: Some("username".into()), ..item("hosts/alpha", "Alpha user") };
     let password = BatchItem { key: Some("password".into()), ..item("hosts/alpha", "Alpha password") };
     assert!(check(&s, &batch(vec![user.clone(), password]), "builder").is_ok());
-    assert!(refused(&s, &batch(vec![user.clone(), BatchItem { label: "Again".into(), ..user }])).contains("two items copy aws-sm:hosts/alpha#username"));
+    assert!(refused(&s, &batch(vec![user.clone(), BatchItem { label: "Again".into(), ..user }])).contains("two items copy aws-secret:hosts/alpha#username"));
 
     let stripe = entry(&s, "Stripe", "personal");
     let replace = |secret: &str| BatchItem { aws_secret_id: secret.into(), id: Some(stripe.clone()), ..Default::default() };
@@ -284,8 +292,8 @@ async fn only_the_approved_rows_are_read_and_a_failed_one_does_not_stop_the_rest
     let of = |action: &str, outcome: &str| rows.iter().filter(|r| r.action == action && r.outcome == outcome).collect::<Vec<_>>();
     let (stored, failed, whole) = (of(aws_import::IMPORTED, "done"), of(aws_import::IMPORTED, "failed"), of(IMPORTED_BATCH, "partly done"));
     assert_eq!((stored.len(), failed.len(), whole.len()), (1, 1, 1));
-    assert_eq!((stored[0].entry_id.as_str(), stored[0].target.as_str(), stored[0].reason.as_str()), (kept.as_str(), "aws-sm:hosts/gamma", REASON));
-    assert_eq!((failed[0].entry_label.as_str(), failed[0].target.as_str()), ("Alpha", "aws-sm:hosts/alpha"));
+    assert_eq!((stored[0].entry_id.as_str(), stored[0].target.as_str(), stored[0].reason.as_str()), (kept.as_str(), "aws-secret:hosts/gamma", REASON));
+    assert_eq!((failed[0].entry_label.as_str(), failed[0].target.as_str()), ("Alpha", "aws-secret:hosts/alpha"));
     assert_eq!((whole[0].entry_label.as_str(), whole[0].entry_id.as_str(), whole[0].actor.as_str()), ("host passwords", "", "builder"));
     for row in [stored[0], failed[0], whole[0]] {
         assert_eq!(history::refs_of(&row.refs), [batch_ref.clone(), "task 31007".to_string()], "every line of a batch names it: {row:?}");
@@ -353,6 +361,10 @@ async fn a_link_item_records_where_the_key_lives_and_reads_nothing() {
     let approved = plan.approved(&[0, 1, 2]);
     let results = perform(&s, &cli, &approved.items, Via::Host, "builder", BUDGET).await;
     assert!(results.iter().all(|r| r.id.is_some() && r.error.is_none()), "{results:?}");
+    // A list that copies anything is "stored", and what it asked for is so many secrets.
+    assert!(!plan.links_only());
+    assert_eq!(plan.asked_text(), "3 secrets from AWS Secrets Manager");
+    assert!(plan.ran_text(&approved, &results).1.starts_with("3 of 3 approved, 3 stored, 0 failed"));
     // The two copies were read, and the link was not.
     assert_eq!(*cli.seen.lock().unwrap(), ["hosts/alpha", "hosts/gamma"]);
 

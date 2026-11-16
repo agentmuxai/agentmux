@@ -21,7 +21,7 @@ use super::vault_import::{asker, credentials, error, not_allowed, Who, ANSWER_WA
 use super::AppState;
 use crate::backend::vault::aws_import::{self, Target, Via, SERVICE};
 use crate::backend::vault::aws_import_batch::{self, secrets, Approved, BatchPlan, BatchRequest, ItemResult, BUDGET};
-use crate::backend::vault::uses::{Decision, UseBatch, UseBatchItem, UseBatchVault, UseRequest};
+use crate::backend::vault::uses::{Decision, Ended, UseBatch, UseBatchItem, UseBatchVault, UseRequest};
 use crate::backend::vault::vaults::{self, VaultAgents};
 use crate::identity::aws_broker::mint::HostRunner;
 use crate::identity::aws_broker::policy;
@@ -155,11 +155,30 @@ async fn vault_lines(state: &AppState, plan: &BatchPlan, who: &Who) -> Into {
 
 /// `plan`'s batch, checked again for the Vault the person chose; why not, when it can't go there.
 async fn rechecked(state: &AppState, request: &BatchRequest, who: &Who, chosen: String, plan: &BatchPlan) -> Result<BatchPlan, String> {
+    let nothing = nothing(plan);
     let (store, agent, req, plan, name) = (state.identity_store.clone(), who.agent.clone(), request.clone(), plan.clone(), chosen.clone());
     tokio::task::spawn_blocking(move || aws_import_batch::check_into(&store, &req, &agent, &chosen, &plan))
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|why| format!("the person chose the Vault {name}, and the batch can't go there: {why}; nothing was copied"))
+        .map_err(|why| format!("the person chose the Vault {name}, and the batch can't go there: {why}; {nothing}"))
+}
+
+/// What is said of a batch that did nothing. A list of links only copies nothing to begin with: nothing was recorded.
+fn nothing(plan: &BatchPlan) -> &'static str {
+    if plan.links_only() {
+        "nothing was recorded"
+    } else {
+        "nothing was copied"
+    }
+}
+
+/// What the agent is told when the batch's card didn't end in a yes: silence is a no, whatever the rows.
+fn batch_not_allowed(plan: &BatchPlan, ended: Ended) -> String {
+    match ended {
+        Ended::Expired if plan.links_only() => "nobody answered, and a record of where keys live needs a yes: nothing was recorded; ask the person".to_string(),
+        Ended::Expired => not_allowed(ended),
+        other => other.refusal(nothing(plan)),
+    }
 }
 
 /// Records what became of a batch that read nothing, and tells the agent.
@@ -218,7 +237,7 @@ pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, Jso
     let into = vault_lines(&state, &plan, &who).await;
     let (ended, said) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who, &into), wait, &headline(&plan, &who)).await;
     if !ended.allowed() {
-        return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
+        return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, batch_not_allowed(&plan, ended));
     }
     // The person may have sent the rows to another Vault: the batch is checked again for it, as the same batch.
     let plan = match said.as_ref().and_then(|a| a.vault.clone()) {
@@ -230,7 +249,7 @@ pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, Jso
     };
     let approved = plan.approved(said.as_ref().and_then(|a| a.rows.as_deref()).unwrap_or_default());
     if approved.items.is_empty() {
-        return refused(&state, &plan, &who, "denied", StatusCode::FORBIDDEN, "the person approved no row: nothing was copied".into());
+        return refused(&state, &plan, &who, "denied", StatusCode::FORBIDDEN, format!("the person approved no row: {}", nothing(&plan)));
     }
     run(&state, &plan, &approved, &who).await
 }
@@ -299,6 +318,12 @@ mod tests {
         let mixed = BatchPlan { items: vec![link("Mail provider key"), item("hosts/alpha", Some("password"), "Alpha", false)], ..plan() };
         assert!(reads_aws(&mixed));
         assert!(headline(&mixed, &who()).starts_with("builder wants to copy 2 secrets from"));
+        // A list of links only copies nothing, so a no leaves nothing recorded; any other list, nothing copied.
+        assert_eq!(batch_not_allowed(&links, Ended::Denied), "the person said no: nothing was recorded");
+        assert_eq!(batch_not_allowed(&links, Ended::Expired), "nobody answered, and a record of where keys live needs a yes: nothing was recorded; ask the person");
+        assert_eq!(batch_not_allowed(&mixed, Ended::Denied), "the person said no: nothing was copied");
+        assert_eq!(batch_not_allowed(&mixed, Ended::Expired), not_allowed(Ended::Expired));
+        assert_eq!((nothing(&links), nothing(&plan())), ("nothing was recorded", "nothing was copied"));
     }
 
     #[test]
