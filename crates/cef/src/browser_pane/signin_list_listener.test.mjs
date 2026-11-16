@@ -105,6 +105,14 @@ describe("the list of saved sign-ins, page side", () => {
         expect(l.lists().filter((r) => r.kind === "open").map((r) => r.role)).toEqual(["password"]);
     });
 
+    it("does not offer the list in a user name field with no password field (the first step of a user-name-first sign-in)", () => {
+        document.body.innerHTML = `<form><input id=first type=email name=email autocomplete="username"><button>Next</button></form>`;
+        const l = install();
+        l.fire("pointerdown", { target: field("first") });
+        l.fire("keydown", { key: "ArrowDown", target: field("first") });
+        expect(l.lists()).toEqual([]);
+    });
+
     it("a press anywhere else closes it, once", () => {
         document.body.innerHTML = SIGNIN + "<p id=else>text</p>";
         const l = install();

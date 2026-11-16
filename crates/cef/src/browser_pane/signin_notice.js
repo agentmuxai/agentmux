@@ -102,8 +102,9 @@
       return changeField(group) === el ? null : "password";
     }
     if (!typed(el) || passwords.some(newPasswordField)) return null;
-    if (passwords.length) return userIn(inputs, passwords[0]) === el ? "username" : null;
-    return namedLikeUser(el) ? "username" : null;
+    // A user name field with no password field (the first step of a user-name-first sign-in) gets no list: a
+    // pick types into a form with a password field, so there it would only fail (docs/specs/SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md row 27).
+    return passwords.length && userIn(inputs, passwords[0]) === el ? "username" : null;
   };
   const listState = () => window.__agentmuxList || {};
   let askedList = false;
