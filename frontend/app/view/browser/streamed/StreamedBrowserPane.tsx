@@ -105,13 +105,16 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
     return (
         <div class="browser-view streamed-browser">
             <StreamedBar pane={pane} />
-            <Show when={pane.error()}>
-                <Notice tone="warning" icon="triangle-exclamation" onDismiss={pane.dismissError}>
-                    {pane.error()}
-                </Notice>
-            </Show>
             <div class="streamed-stage" ref={stage} tabindex={0}>
                 <canvas class="streamed-canvas" ref={canvas} />
+                {/* Over the page, not above it: showing or dismissing it must not resize the page. */}
+                <Show when={pane.error()}>
+                    <div class="streamed-notice">
+                        <Notice tone="warning" icon="triangle-exclamation" onDismiss={pane.dismissError}>
+                            {pane.error()}
+                        </Notice>
+                    </div>
+                </Show>
                 <Show when={message()}>
                     <div class="streamed-status" role="status">
                         <span>{message()}</span>
