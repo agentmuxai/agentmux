@@ -10,6 +10,7 @@ use std::time::Duration;
 
 mod low_disk;
 mod renderer_memory_log;
+mod ui_stall;
 
 /// Latest observed system commit-free (available page file) in MB. Published by
 /// the heartbeat loop and by the on-demand probe; read by the gated renderer
@@ -166,6 +167,8 @@ fn check_low_disk(state: &std::sync::Arc<crate::state::AppState>, root: &std::pa
 pub fn start(state: std::sync::Arc<crate::state::AppState>) {
     // The renderer recycle governor watches the same budget on its own thread.
     crate::commands::recycle_governor::start(state.clone());
+    // A UI thread that stops for seconds is written to the log with what the machine looked like (ui_stall.rs).
+    ui_stall::start(agentmux_common::data_paths::agentmux_root().ok());
     std::thread::Builder::new()
         .name("mem-heartbeat".into())
         .spawn(move || {
