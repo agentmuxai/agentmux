@@ -365,6 +365,7 @@ fn bus_routes() -> Router<AppState> {
 fn authed_routes(state: &AppState) -> Router<AppState> {
     Router::new()
         .merge(service_shell_and_vault_routes())
+        .merge(streamed_browser_routes())
         .merge(agent_api_routes())
         .merge(muxspect_routes())
         .merge(memory_and_identity_routes())
@@ -386,17 +387,20 @@ fn authed_routes(state: &AppState) -> Router<AppState> {
         ))
 }
 
+/// The streamed Browser pane of a headless server's web UI; 404 unless switched on.
+fn streamed_browser_routes() -> Router<AppState> {
+    Router::new().route(
+        "/agentmux/streamed-browser",
+        get(super::streamed_browser::handle).route_layer(middleware::from_fn(ws_origin_guard)),
+    )
+}
+
 /// The websocket and service calls, files, shells, widgets, the Vault and Google.
 fn service_shell_and_vault_routes() -> Router<AppState> {
     Router::new()
         .route(
             "/ws",
             get(websocket::handle_ws).route_layer(middleware::from_fn(ws_origin_guard)),
-        )
-        // The streamed Browser pane of a headless server's web UI; 404 unless switched on.
-        .route(
-            "/agentmux/streamed-browser",
-            get(super::streamed_browser::handle).route_layer(middleware::from_fn(ws_origin_guard)),
         )
         .route("/agentmux/service", post(service::handle_service))
         .route("/agentmux/file", get(files::handle_mux_file))
