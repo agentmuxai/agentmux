@@ -450,6 +450,12 @@ $gap: 6px;
         .agent-attachment-tray__tiles {
             padding-top: 2px;
         }
+
+        // "+N" opened: the tiles wrap onto more rows, at the same size, instead of running past the bubble's edge.
+        &.is-expanded .agent-attachment-tray__tiles {
+            flex-wrap: wrap;
+            overflow: visible;
+        }
     }
 }
 
