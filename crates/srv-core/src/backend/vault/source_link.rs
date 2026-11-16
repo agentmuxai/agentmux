@@ -11,7 +11,7 @@
 //! read is the answer, not something to get around.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use agentmux_common::time::now_ms;
 use serde::Serialize;
@@ -225,10 +225,13 @@ pub struct VaultSourceCheck {
     pub outcome: String,
 }
 
-/// The newest check of `row`'s link. A check of a place the link no longer names says nothing about this one.
+/// The newest check of `row`'s link, when it is of the entry as it is now. A check of a place the link no longer
+/// names says nothing about this one, and neither does a check made before the entry last changed: the change may
+/// be the link's region or profile, which the history line does not name (an agent reads the history, and is never
+/// told the profile), or the entry's own value, which an older "same" was not compared with.
 pub fn last_check(store: &Store, row: &VaultRow, link: &Link) -> Option<VaultSourceCheck> {
     let newest = store.vault_activity_for_entry(&row.id, &[CHECKED], row.created_at, 1).ok()?.into_iter().next()?;
-    (newest.target == link.text()).then_some(VaultSourceCheck { at: newest.at, outcome: newest.outcome })
+    (newest.target == link.text() && newest.at >= row.updated_at).then_some(VaultSourceCheck { at: newest.at, outcome: newest.outcome })
 }
 
 /// The link as `list` gives it to an agent: the place, and the newest check. Which login reads it is left out.
@@ -248,6 +251,32 @@ pub fn for_agent(store: &Store, row: &VaultRow) -> Option<AgentLink> {
     Some(AgentLink { kind: link.kind, location: link.location, key: link.key, checked })
 }
 
+/// Agents' checks that are planned and have not written their history line yet, by store and entry. They count
+/// toward the hour's limit with the lines already written: counted by the lines alone, checks started together each
+/// saw fewer than the limit, and all of them ran.
+static RUNNING: Mutex<BTreeMap<(usize, String), usize>> = Mutex::new(BTreeMap::new());
+
+/// An agent's place among an entry's checks of the hour: held by the plan (and its clones) from the moment the check
+/// is allowed until the plan is dropped, which is after the check's line is written.
+#[derive(Debug, PartialEq)]
+pub struct Slot {
+    store: usize,
+    entry_id: String,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (self.store, std::mem::take(&mut self.entry_id));
+        match running.get_mut(&key) {
+            Some(n) if *n > 1 => *n -= 1,
+            _ => {
+                running.remove(&key);
+            }
+        }
+    }
+}
+
 /// A check that has been allowed to run: which entry, which place, for whom.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CheckPlan {
@@ -260,6 +289,8 @@ pub struct CheckPlan {
     /// The agent's id, or the person.
     pub actor: String,
     pub reason: String,
+    /// An agent's check holds its place in the hour's limit; the person's has none.
+    pub slot: Option<Arc<Slot>>,
 }
 
 fn plan_of(row: VaultRow, actor: &str, reason: String) -> Result<CheckPlan, String> {
@@ -267,7 +298,7 @@ fn plan_of(row: VaultRow, actor: &str, reason: String) -> Result<CheckPlan, Stri
     let Some(link) = Link::of_row(&row) else {
         return Err(format!("{} has no machine copy recorded: set {KIND}, {LOCATION} and {KEY} on it first", row.label));
     };
-    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, actor: actor.to_string(), reason })
+    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, actor: actor.to_string(), reason, slot: None })
 }
 
 /// The person's check, from the Vault pane.
@@ -277,7 +308,8 @@ pub fn plan_for_person(store: &Store, id: &str) -> Result<CheckPlan, String> {
 }
 
 /// An agent's check of an entry in a Vault it may use: its reason is required, and agents together get
-/// [`AGENT_CHECKS_PER_HOUR`] checks of one entry in an hour.
+/// [`AGENT_CHECKS_PER_HOUR`] checks of one entry in an hour, counting the ones still running. The count and the new
+/// check's place are taken under one lock, so checks asked for at the same moment are counted one after the other.
 pub fn plan_for_agent(store: &Store, id: &str, agent: &str, reason: Option<&str>) -> Result<CheckPlan, String> {
     let reason = history::require_reason(reason)?;
     let no_entry = || format!("no entry {id}");
@@ -285,11 +317,25 @@ pub fn plan_for_agent(store: &Store, id: &str, agent: &str, reason: Option<&str>
     if !vaults::entry_row_usable(store, &row.vault_id, Some(agent))? {
         return Err(no_entry());
     }
-    let recent = store.vault_activity_for_entry(&row.id, &[CHECKED], now_ms() - HOUR_MS, 100).map_err(|e| e.to_string())?;
-    if recent.iter().filter(|r| r.actor != PERSON).count() >= AGENT_CHECKS_PER_HOUR {
-        return Err(format!("{} was checked {AGENT_CHECKS_PER_HOUR} times by agents in the last hour, which is the limit: its history has what they found", row.label));
-    }
-    plan_of(row, agent, reason)
+    let key = (store as *const Store as usize, row.id.clone());
+    let slot = {
+        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        let recent = store.vault_activity_for_entry(&row.id, &[CHECKED], now_ms() - HOUR_MS, 100).map_err(|e| e.to_string())?;
+        let done = recent.iter().filter(|r| r.actor != PERSON).count();
+        let now = running.get(&key).copied().unwrap_or(0);
+        if done >= AGENT_CHECKS_PER_HOUR {
+            return Err(format!("{} was checked {AGENT_CHECKS_PER_HOUR} times by agents in the last hour, which is the limit: its history has what they found", row.label));
+        }
+        if done + now >= AGENT_CHECKS_PER_HOUR {
+            return Err(format!(
+                "{} has {done} check(s) by agents in the last hour and {now} more running, which is the limit of {AGENT_CHECKS_PER_HOUR}: its history has what they find",
+                row.label
+            ));
+        }
+        *running.entry(key.clone()).or_insert(0) += 1;
+        Arc::new(Slot { store: key.0, entry_id: key.1 })
+    };
+    plan_of(row, agent, reason).map(|plan| CheckPlan { slot: Some(slot), ..plan })
 }
 
 /// What a check found.

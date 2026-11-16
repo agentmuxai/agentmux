@@ -214,6 +214,36 @@ async fn agents_get_six_checks_of_an_entry_an_hour_between_them_and_the_person_i
     assert!(plan_for_agent(&s, &other, "builder", Some(REASON)).is_ok(), "the limit is per entry");
 }
 
+#[tokio::test]
+async fn checks_asked_for_together_count_toward_the_limit_before_any_has_finished() {
+    let s = store();
+    let id = key_entry(&s, &aws());
+    let plan = |agent: &str| plan_for_agent(&s, &id, agent, Some(REASON));
+    // Six checks allowed and none run yet. Counted by the history's lines alone, a seventh would be let in too.
+    let mut planned: Vec<CheckPlan> = (0..AGENT_CHECKS_PER_HOUR).map(|_| plan("builder").unwrap()).collect();
+    let err = plan("deployer").unwrap_err();
+    assert!(err.contains("0 check(s) by agents in the last hour and 6 more running"), "{err}");
+    assert!(plan_for_person(&s, &id).is_ok(), "the person's own check is not limited");
+    assert!(plan_for_agent(&s, &key_entry(&s, &aws()), "builder", Some(REASON)).is_ok(), "the limit is per entry");
+
+    // A check given up before it ran frees its place. One that ran keeps it, as its line in the history.
+    drop(planned.pop());
+    let ran = plan("deployer").unwrap();
+    assert!(plan("builder").is_err());
+    check(&s, &Fake::ok(secret_with(VALUE)), &ran, Via::Host).await;
+    drop(ran);
+    let err = plan("builder").unwrap_err();
+    assert!(err.contains("1 check(s) by agents in the last hour and 5 more running"), "{err}");
+    drop(planned);
+    let rest: Vec<CheckPlan> = (0..AGENT_CHECKS_PER_HOUR - 1).map(|_| plan("builder").unwrap()).collect();
+    assert!(plan("builder").is_err());
+    // The check runs on a clone of its plan, which shares the place: dropping one of the two frees nothing.
+    drop(rest[0].clone());
+    assert!(plan("builder").is_err());
+    drop(rest);
+    assert!(plan("builder").is_ok());
+}
+
 #[test]
 fn a_check_needs_a_link_a_reason_and_an_entry_the_agent_may_use() {
     let s = store();
@@ -245,6 +275,46 @@ async fn the_newest_check_is_shown_until_the_link_names_another_place() {
     let (pane, _) = list_for_pane(&s).unwrap();
     assert!(pane[0].source_checked.is_none());
     assert!(list_for_agent(&s, Some("builder")).unwrap()[0].source.as_ref().unwrap().checked.is_none());
+}
+
+#[tokio::test]
+async fn a_check_made_before_the_entry_last_changed_is_not_its_newest_check() {
+    let s = store();
+    let mut place = aws();
+    place.push((PROFILE, "work-read"));
+    let id = key_entry(&s, &place);
+    let shown = |s: &Store| list_for_pane(s).unwrap().0[0].source_checked.clone().map(|c| c.outcome);
+    let to_agents = |s: &Store| list_for_agent(s, Some("builder")).unwrap()[0].source.as_ref().unwrap().checked.clone().map(|c| c.outcome);
+    let change = |f: BTreeMap<String, String>, parts: Parts| {
+        // A change is later than the check before it, as it is outside a test.
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        update(&s, EntryChange { id: id.clone(), label: "Staging database".into(), fields: f, tags: vec![], parts, clear: vec![] }).unwrap();
+    };
+    let same = Fake::ok(secret_with(VALUE));
+    check(&s, &same, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!((shown(&s).as_deref(), to_agents(&s).as_deref()), (Some(SAME), Some(SAME)));
+
+    // Only the region changes. The history names the place the same way, and another secret is read from now on.
+    let mut f = fields(&place);
+    f.insert(REGION.into(), "us-east-1".into());
+    change(f.clone(), Parts::default());
+    assert_eq!(link_of(&s, &id).unwrap().text(), "aws-secret:staging/app#db.password");
+    assert_eq!((shown(&s), to_agents(&s)), (None, None));
+    check(&s, &same, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!(shown(&s).as_deref(), Some(SAME));
+
+    // Only the profile, which no history line names.
+    f.insert(PROFILE.into(), "work-admin".into());
+    change(f.clone(), Parts::default());
+    assert_eq!((shown(&s), to_agents(&s)), (None, None));
+    check(&s, &same, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!(shown(&s).as_deref(), Some(SAME));
+
+    // The entry's own value: the "same" before it was a comparison with the old one.
+    change(f, Parts([("value".to_string(), OTHER_VALUE.to_string())].into()));
+    assert_eq!((shown(&s), to_agents(&s)), (None, None));
+    check(&s, &same, &plan_for_person(&s, &id).unwrap(), Via::Host).await;
+    assert_eq!((shown(&s).as_deref(), to_agents(&s).as_deref()), (Some(DIFFERENT), Some(DIFFERENT)));
 }
 
 #[test]
