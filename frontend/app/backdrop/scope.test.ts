@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import { contrastRatio } from "../block/pane-color-scheme";
 import { ANSI_TOKENS } from "./ansi";
 import { BUILTINS, deriveBuiltin } from "./builtins";
+import { deriveInk } from "./ink";
+import { oklchToHex } from "../theme/oklch";
 import { getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
 
 // Any built-in will do: the first, on each of the app's two themes.
@@ -117,6 +119,35 @@ describe("scopeVars with the theme's terminal palette", () => {
         const pale = deriveBuiltin("yellow", "light")!;
         const moved = scopeVars(pale, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"];
         expect(moved).not.toBe("#34e2e2");
+    });
+});
+
+describe("the transcript's palette on a mid-tone custom backdrop", () => {
+    it("holds 4.5:1 on all three layers, not only the one it started closest to (Latte's bright magenta on #5f5f5f)", () => {
+        const d = deriveInk("#5f5f5f");
+        const moved = scopeVars(d, { "--term-bright-magenta": "#8839ef" })["--term-bright-magenta"];
+        for (const layer of Object.values(d.surfaces)) {
+            expect(contrastRatio(moved, layer), `${moved} on ${layer}`).toBeGreaterThanOrEqual(4.5);
+        }
+    });
+
+    it("holds across a sweep of mid-tone custom colours, for hues from the default and the Latte palettes", () => {
+        const palette = ["#3465a4", "#32afff", "#34e2e2", "#58c142", "#ad7fa8", "#06989a", "#4e9a06", "#bc3fbc", "#c4a000", "#8839ef", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5"];
+        const bad: string[] = [];
+        for (let l = 0.3; l <= 0.75; l += 0.0125) {
+            for (const c of [0, 0.03, 0.08]) {
+                const d = deriveInk(oklchToHex(l, c, 280));
+                const best = Math.max(...Object.values(d.surfaces).map((s) => Math.max(contrastRatio("#ffffff", s), contrastRatio("#000000", s))));
+                if (best < 4.5 + 0.1) continue; // no lightness reads there at all
+                for (const hex of palette) {
+                    const moved = scopeVars(d, { "--term-red": hex })["--term-red"];
+                    for (const layer of Object.values(d.surfaces)) {
+                        if (contrastRatio(moved, layer) < 4.5) bad.push(`${d.chosen}: ${hex} -> ${moved} on ${layer}`);
+                    }
+                }
+            }
+        }
+        expect(bad.slice(0, 8)).toEqual([]);
     });
 });
 
