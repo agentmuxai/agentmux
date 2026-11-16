@@ -40,6 +40,25 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 }
 
 /// The file the host chose, which must be an absolute path.
+/// The host's export to the file the person chose: the entries named (all when none is), in the format asked for.
+fn export(store: &crate::backend::storage::store::Store, body: &Value) -> Result<vault::transfer::ExportResult, String> {
+    let path = file_path(body)?;
+    let pass = body.get("passphrase").and_then(Value::as_str).unwrap_or("");
+    let ids: Option<Vec<String>> = body.get("ids").and_then(|v| serde_json::from_value(v.clone()).ok());
+    // The linked entries only, in a `.vault` file with no value in it: no other format carries a link.
+    let links_only = body.get("links_only").and_then(Value::as_bool).unwrap_or(false);
+    // `.vault` (an age file), or a KeePass database for the person to take to another manager.
+    match body.get("format").and_then(Value::as_str).unwrap_or("vault") {
+        "vault" if links_only => vault::transfer::export_links(store, ids.as_deref(), pass, &path),
+        other if links_only => Err(format!("the linked entries are exported as a Vault file, not as {other:?}")),
+        "kdbx" => vault::kdbx_export::export(store, ids.as_deref(), pass, &path),
+        "vault" => vault::transfer::export(store, ids.as_deref(), pass, &path),
+        // Unencrypted, for another manager. The host asked the person and the OS first.
+        plain @ ("csv" | "json") => vault::plain_export::export(store, ids.as_deref(), plain, &path),
+        other => Err(format!("unknown export format {other:?}")),
+    }
+}
+
 fn file_path(body: &Value) -> Result<std::path::PathBuf, String> {
     let p = std::path::PathBuf::from(body.get("path").and_then(Value::as_str).unwrap_or(""));
     if !p.is_absolute() {
@@ -323,17 +342,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
             // passes the path, so no agent chooses one (spec section 8.1).
             "suggest_passphrase" => Ok((json!({ "passphrase": vault::transfer::suggest_passphrase()? }), false)),
             "export" => {
-                let path = file_path(&body)?;
-                let pass = body.get("passphrase").and_then(Value::as_str).unwrap_or("").to_string();
-                let ids: Option<Vec<String>> = body.get("ids").and_then(|v| serde_json::from_value(v.clone()).ok());
-                // `.vault` (an age file), or a KeePass database for the person to take to another manager.
-                let out = match body.get("format").and_then(Value::as_str).unwrap_or("vault") {
-                    "kdbx" => vault::kdbx_export::export(&store, ids.as_deref(), &pass, &path)?,
-                    "vault" => vault::transfer::export(&store, ids.as_deref(), &pass, &path)?,
-                    // Unencrypted, for another manager. The host asked the person and the OS first.
-                    plain @ ("csv" | "json") => vault::plain_export::export(&store, ids.as_deref(), plain, &path)?,
-                    other => return Err(format!("unknown export format {other:?}")),
-                };
+                let out = export(&store, &body)?;
                 Ok((json!({ "count": out.count, "file_name": out.file_name }), true))
             }
             "import_inspect" => {
