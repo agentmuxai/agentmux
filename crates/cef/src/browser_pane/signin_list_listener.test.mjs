@@ -105,6 +105,27 @@ describe("the list of saved sign-ins, page side", () => {
         expect(l.lists().filter((r) => r.kind === "open").map((r) => r.role)).toEqual(["password"]);
     });
 
+    it("keeps the offer for a new password on the field it was made for when focus moves to its confirm field", () => {
+        document.body.innerHTML =
+            `<form><input id=a type=password autocomplete="new-password"><input id=b type=password autocomplete="new-password"></form>` +
+            `<form><input id=c type=password autocomplete="new-password"></form>`;
+        const l = install();
+        const offers = () => l.reports.filter((r) => r.kind === "newpassword");
+        l.fire("focusin", { target: field("a") });
+        const token = field("a").getAttribute("data-agentmux-signup");
+        expect(offers()).toHaveLength(1);
+        // Tab to the confirm field of the same form: the fill the pick started still finds the first field.
+        l.fire("focusin", { target: field("b") });
+        expect(offers()).toHaveLength(1);
+        expect(field("a").getAttribute("data-agentmux-signup")).toBe(token);
+        expect(field("b").hasAttribute("data-agentmux-signup")).toBe(false);
+        // Another form's field for a new password is its own offer, and the first goes.
+        l.fire("focusin", { target: field("c") });
+        expect(offers()).toHaveLength(2);
+        expect(field("a").hasAttribute("data-agentmux-signup")).toBe(false);
+        expect(field("c").getAttribute("data-agentmux-signup")).not.toBe(token);
+    });
+
     it("a press anywhere else closes it, once", () => {
         document.body.innerHTML = SIGNIN + "<p id=else>text</p>";
         const l = install();
