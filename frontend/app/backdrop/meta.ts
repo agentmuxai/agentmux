@@ -62,6 +62,20 @@ export function parseBackdrop(raw: unknown): BackdropMeta | undefined {
     return undefined;
 }
 
+/** Whether two records are the same backdrop, field by field: `parseBackdrop` makes a new object each time, so identity says nothing. */
+export function sameBackdrop(a: BackdropMeta | undefined, b: BackdropMeta | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a.kind === b.kind && a.id === b.id && a.hex === b.hex && a.imageId === b.imageId && a.polarity === b.polarity && a.version === b.version;
+}
+
+/** Whether two resolved backdrops are the same one: the same origin and the same colours, not the same object. */
+export function sameResolved(a: ResolvedBackdrop | undefined, b: ResolvedBackdrop | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a.id === b.id && JSON.stringify(a.derived) === JSON.stringify(b.derived);
+}
+
 /** A backdrop ready to apply: where it came from, and the surfaces and ink for the pane. */
 export interface ResolvedBackdrop {
     /** What the pane's `data-backdrop` says: `builtin:teal`, `color` or `legacy`. */

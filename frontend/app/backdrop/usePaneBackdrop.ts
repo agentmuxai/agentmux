@@ -5,7 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from
 import { isLightThemeActive } from "../block/pane-identity";
 import { currentWindowTheme } from "../store/window-appearance";
 import { themeAnsi } from "./ansi";
-import { resolveBackdrop, type ResolvedBackdrop } from "./meta";
+import { resolveBackdrop, sameResolved, type ResolvedBackdrop } from "./meta";
 import { registerPaneScope, releasePaneScope, scopeVars } from "./scope";
 
 /** The app theme backdrops step aside for: it has its own fixed contrast (spec §8, §12). */
@@ -43,7 +43,8 @@ export function useResolvedBackdrop(
     meta: () => { backdrop?: unknown; bg?: unknown } | undefined,
     suppressed: Accessor<boolean> = useBackdropSuppressed()
 ): Accessor<ResolvedBackdrop | undefined> {
-    return createMemo(() => (suppressed() ? undefined : resolveBackdrop(meta(), isLightThemeActive() ? "light" : "dark")));
+    // The same backdrop is not a new one: every block-data update (a title, a cwd) makes a new object, and must not re-register the scope.
+    return createMemo(() => (suppressed() ? undefined : resolveBackdrop(meta(), isLightThemeActive() ? "light" : "dark")), undefined, { equals: sameResolved });
 }
 
 /**

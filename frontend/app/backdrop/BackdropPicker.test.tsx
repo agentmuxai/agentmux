@@ -225,6 +225,48 @@ describe("BackdropPicker", () => {
         }
     });
 
+    it("leaves a hex being typed alone when the pane's other meta changes: a new bg, or the same record handed over again", () => {
+        const t = mount({});
+        const input = t.container.querySelector<HTMLInputElement>("input[placeholder='#rrggbb']")!;
+        fireEvent.input(input, { target: { value: "#33" } });
+        t.setMeta({ bg: "linear-gradient(red, blue)" });
+        expect(input.value).toBe("#33");
+        t.setMeta({ bg: 7, title: "renamed" } as never);
+        expect(input.value).toBe("#33");
+        cleanup();
+        const withRecord = mount({ backdrop: { kind: "color", hex: "#336699", polarity: "follow", version: 1 } });
+        const field = withRecord.container.querySelector<HTMLInputElement>("input[placeholder='#rrggbb']")!;
+        fireEvent.input(field, { target: { value: "#3366" } });
+        withRecord.setMeta({ backdrop: { kind: "color", hex: "#336699", polarity: "follow", version: 1 }, bg: "x" });
+        expect(field.value).toBe("#3366");
+    });
+
+    it("leaves a polarity just chosen alone when the pane's other meta changes before its write lands, with a record or none", () => {
+        // With a record: the click writes the new polarity, and the meta still says Follow when an unrelated update arrives.
+        const withRecord = mount({ backdrop: teal });
+        fireEvent.click(button(withRecord.container, "Dark"));
+        expect(written()).toEqual([{ ...teal, polarity: "dark" }]);
+        withRecord.setMeta({ backdrop: { ...teal }, title: "renamed" } as never);
+        expect(button(withRecord.container, "Dark").getAttribute("aria-checked")).toBe("true");
+        cleanup();
+        h.set.mockClear();
+        // With none: the choice is only local, and is used by the next swatch.
+        const none = mount({});
+        fireEvent.click(button(none.container, "Dark"));
+        none.setMeta({ bg: "linear-gradient(red, blue)" });
+        expect(button(none.container, "Dark").getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(radios(none.container)[0]);
+        expect(written()).toEqual([{ kind: "builtin", id: BUILTINS[0].id, polarity: "dark", version: 1 }]);
+    });
+
+    it("still follows the pane's record when it really changes", () => {
+        const t = mount({ backdrop: teal });
+        t.setMeta({ backdrop: { ...teal, polarity: "dark", id: "crimson" } });
+        expect(button(t.container, "Dark").getAttribute("aria-checked")).toBe("true");
+        t.setMeta({});
+        expect(button(t.container, "Follow").getAttribute("aria-checked")).toBe("true");
+    });
+
     it("takes focus when it opens, so Esc works at once", () => {
         const { container } = mount();
         expect(document.activeElement).toBe(container.querySelector("[role=dialog]"));

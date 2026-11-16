@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
-import { BACKDROP_VERSION, parseBackdrop, resolveBackdrop, supportsBackdrop } from "./meta";
+import { BACKDROP_VERSION, parseBackdrop, resolveBackdrop, sameBackdrop, sameResolved, supportsBackdrop } from "./meta";
 
 const teal = { kind: "builtin", id: "teal", polarity: "follow", version: BACKDROP_VERSION };
 
@@ -88,5 +88,31 @@ describe("supportsBackdrop", () => {
     it("is the agent pane for now, and no terminal, widget or browser view", () => {
         expect(supportsBackdrop("agent")).toBe(true);
         for (const view of ["term", "files", "browser", "sysinfo", "kanban", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
+    });
+});
+
+describe("sameBackdrop and sameResolved", () => {
+    it("compares records by their fields, not by identity: a re-parsed record is the same one", () => {
+        expect(sameBackdrop(parseBackdrop(teal), parseBackdrop({ ...teal }))).toBe(true);
+        expect(sameBackdrop(undefined, undefined)).toBe(true);
+    });
+
+    it("sees every field that makes it another backdrop", () => {
+        const base = parseBackdrop(teal)!;
+        expect(sameBackdrop(base, undefined)).toBe(false);
+        expect(sameBackdrop(undefined, base)).toBe(false);
+        for (const other of [{ ...teal, id: "crimson" }, { ...teal, polarity: "dark" }, { kind: "color", hex: "#336699" }]) {
+            expect(sameBackdrop(base, parseBackdrop(other)), JSON.stringify(other)).toBe(false);
+        }
+        expect(sameBackdrop(parseBackdrop({ kind: "color", hex: "#336699" }), parseBackdrop({ kind: "color", hex: "#336698" }))).toBe(false);
+    });
+
+    it("treats a backdrop resolved again from the same record as the same, and another colour or side as another", () => {
+        const a = resolveBackdrop({ backdrop: teal }, "dark");
+        expect(sameResolved(a, resolveBackdrop({ backdrop: { ...teal } }, "dark"))).toBe(true);
+        expect(sameResolved(a, resolveBackdrop({ backdrop: teal }, "light"))).toBe(false);
+        expect(sameResolved(a, resolveBackdrop({ backdrop: { ...teal, id: "crimson" } }, "dark"))).toBe(false);
+        expect(sameResolved(a, undefined)).toBe(false);
+        expect(sameResolved(undefined, undefined)).toBe(true);
     });
 });

@@ -8,7 +8,7 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } fro
 import { isLightThemeActive } from "../block/pane-identity";
 import { deriveBuiltin } from "./builtins";
 import type { DerivedBackdrop } from "./ink";
-import { parseBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
+import { parseBackdrop, sameBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
 import { builtinOptions, builtinRecord, colorRecord, contrastReadout, parseHexInput, schemeFor } from "./picker-model";
 import { useDialogKeys } from "./picker-state";
 import { themeAnsi } from "./ansi";
@@ -108,7 +108,9 @@ function ContrastReadout(props: { derived: DerivedBackdrop | undefined; missed: 
  */
 export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     const appScheme = () => (isLightThemeActive() ? "light" : "dark");
-    const record = createMemo(() => parseBackdrop(props.meta()?.backdrop));
+    // Field-wise equal, so the controls below follow the pane's record only when it really changes: any other block-data
+    // update (a title, a cwd, another meta key) must not reset a hex being typed or a polarity chosen before a swatch.
+    const record = createMemo(() => parseBackdrop(props.meta()?.backdrop), undefined, { equals: sameBackdrop });
     // The same suppression as the pane's own scope: under High Contrast or forced colours nothing is registered, not even a preview.
     const suppressed = useBackdropSuppressed();
     const resolved = useResolvedBackdrop(props.meta, suppressed);
