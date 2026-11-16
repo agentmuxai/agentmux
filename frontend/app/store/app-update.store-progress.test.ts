@@ -14,6 +14,7 @@ import {
     setStoreProgress,
     STORE_ASKING_WINDOW_LINE,
     STORE_INSTALLING_LINE,
+    storeClosesLine,
     storeDownloadedLine,
     storeProgress,
     storeProgressLine,
@@ -90,6 +91,17 @@ describe("the version a Store update will be", () => {
     it("is empty when the Store named none (the 2026-11-12 run left the marker's target empty): GitHub's latest is not guessed", () => {
         expect(storeTargetVersion(offer(""))).toBe("");
         expect(storeTargetVersion(null)).toBe("");
+    });
+});
+
+describe("the line under Update in the Store, before it is pressed", () => {
+    it("says what the button does, and names Restart now only as a button that appears later", () => {
+        expect(storeClosesLine("0.60.30")).toBe(
+            "Update in the Store asks the Microsoft Store to download v0.60.30. When it is downloaded, a Restart now button appears here: it installs the update and opens AgentMux again.",
+        );
+        expect(storeClosesLine("")).toContain("to download the update. When it is downloaded");
+        // "Restart now" is never a sentence's subject here: that button is not on the row yet.
+        expect(storeClosesLine("0.60.30")).not.toMatch(/(^|\. )Restart now\b/);
     });
 });
 
