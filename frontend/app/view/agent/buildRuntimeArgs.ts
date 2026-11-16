@@ -38,7 +38,7 @@ const PERMISSION_STRIP = new Set([
  *
  * Both provider catalogs state the same invariant in capitals — see
  * `providers/catalog.ts`'s `claude` entry and `static CLAUDE` in
- * `crates/srv/src/backend/providers.rs`:
+ * `crates/srv-core/src/backend/providers.rs`:
  *
  * > `--dangerously-skip-permissions` DISABLES that routing (it bypasses
  * > canUseTool), so it must NOT be in persistent_launch_args.

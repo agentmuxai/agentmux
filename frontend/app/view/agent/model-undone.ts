@@ -3,7 +3,7 @@
 
 /**
  * A model change srv undid because the new place refused the conversation on its first turn: block meta
- * `agent:model_switch_undone` (`crates/srv/src/backend/model_gateway/trial.rs`). The pane says what was tried, why it was
+ * `agent:model_switch_undone` (`crates/srv-core/src/backend/model_gateway/trial.rs`). The pane says what was tried, why it was
  * refused and where the agent is again, and offers to compact the conversation and try again.
  */
 

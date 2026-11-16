@@ -4,7 +4,7 @@
 //! Shape-based, best-effort secret redaction — the one Rust implementation
 //! `SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md` §4.5 asks every formatter that
 //! puts error/log text on the clipboard to share, instead of each inventing
-//! its own. Moved here from `crates/srv/src/backend/continuity.rs`, which
+//! its own. Moved here from `crates/srv-core/src/backend/continuity.rs`, which
 //! only recognized credential-prefixed tokens and PEM private keys — enough
 //! for a continuation packet, not enough for raw stderr and request details
 //! (Codex P1 on #3689).

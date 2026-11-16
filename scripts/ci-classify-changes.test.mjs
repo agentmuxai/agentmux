@@ -14,7 +14,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { classifyChanges, classifyPullFiles, isDocsOnlyPath, isFrontendOnlyPath, versionOnlyChange } from "./ci-classify-changes.mjs";
+import {
+    classifyChanges,
+    classifyPullFiles,
+    isDocsOnlyPath,
+    isFrontendOnlyPath,
+    isRustOnlyPath,
+    versionOnlyChange,
+} from "./ci-classify-changes.mjs";
 
 describe("isDocsOnlyPath — things that genuinely cannot affect a build", () => {
     it("accepts documentation and licence files", () => {
@@ -465,5 +472,88 @@ describe("R8 — every frontend path a crate names is one the classifier sends t
         expect(found.size).toBeGreaterThanOrEqual(4);
         const unlisted = [...found].filter(([path]) => isFrontendOnlyPath(path)).map(([path, file]) => `${path} (${file})`);
         expect(unlisted, "add these to RUST_READS_FRONTEND in scripts/ci-classify-changes.mjs").toEqual([]);
+    });
+});
+
+describe("R9 — the production frontend build runs unless only Rust files changed", () => {
+    it("does not run for Rust sources, their manifests and documentation alone", () => {
+        const r = classifyChanges([
+            "crates/srv/src/lib.rs",
+            "crates/cef/Cargo.toml",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            ".cargo/config.toml",
+            ".config/nextest.toml",
+            "docs/specs/SPEC_X.md",
+            ".changesets/1-x.md",
+        ]);
+        // The frontend legs still run for it (vitest reads files of crates/); only the build is left out.
+        expect(r).toMatchObject({ rust: true, frontend: true, frontend_build: false });
+        expect(r.reason).toMatch(/R9/);
+    });
+
+    it("runs when one file rides along that is not a Rust file: what the build reads, and anything unnamed", () => {
+        const riders = [
+            "frontend/app/app.tsx",
+            "frontend/app/app.scss",
+            "index.html",
+            "vite.config.ts",
+            "tsconfig.json",
+            "package.json",
+            "package-lock.json",
+            "scripts/vite-build.sh",
+            "scripts/third-party-notices.mjs",
+            "schema/color-palette.json",
+            "licenses/bundled/x.txt",
+            ".github/workflows/ci-pr.yml",
+            "Taskfile.yml",
+            "some/new/place.txt",
+        ];
+        for (const rider of riders) {
+            const r = classifyChanges(["crates/srv/src/lib.rs", rider]);
+            expect(r.frontend_build, rider).toBe(true);
+            expect(r.frontend, rider).toBe(true);
+        }
+    });
+
+    it("runs for a frontend-only PR, and not where the frontend legs do not run at all", () => {
+        expect(classifyChanges(["frontend/app/app.tsx"])).toMatchObject({ rust: false, frontend: true, frontend_build: true });
+        expect(classifyChanges(["docs/a.md"])).toMatchObject({ frontend: false, frontend_build: false });
+        const patch = '@@ -1,3 +1,3 @@\n-  "version": "0.60.14",\n+  "version": "0.60.15",';
+        expect(classifyPullFiles([{ filename: "package.json", patch }])).toMatchObject({ version_only: true, frontend_build: false });
+    });
+
+    it("R2: runs on an empty, missing or malformed list", () => {
+        expect(classifyChanges([]).frontend_build).toBe(true);
+        expect(classifyChanges(undefined).frontend_build).toBe(true);
+        expect(classifyChanges(["crates/srv/src/lib.rs", 5]).frontend_build).toBe(true);
+        expect(classifyPullFiles([{ patch: "" }]).frontend_build).toBe(true);
+    });
+
+    it("counts a renamed file under its old name too, and takes look-alike paths for not Rust", () => {
+        const moved = classifyPullFiles([{ filename: "crates/srv/src/x.rs", previous_filename: "frontend/app/x.ts", patch: "" }]);
+        expect(moved.frontend_build).toBe(true);
+        for (const p of ["Crates/srv/x.rs", "crates", "cratesx/a.rs", "frontend/crates/a.rs", "docs/Cargo.toml", "crates-old/a.rs", ""]) {
+            expect(isRustOnlyPath(p), p).toBe(false);
+        }
+        expect(isRustOnlyPath("crates\\srv\\src\\lib.rs")).toBe(true);
+    });
+
+    it("holds: nothing the build bundles is read out of crates/", () => {
+        // The promise BUILD_NEVER_READS makes. What the build bundles: index.html, the frontend's sources and
+        // styles (not its tests, which vitest runs and which do read files of crates/), and the vite config.
+        const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+        const bundled = (dir) =>
+            readdirSync(dir).flatMap((name) => {
+                const full = join(dir, name);
+                if (name === "node_modules") return [];
+                if (statSync(full).isDirectory()) return bundled(full);
+                return /\.(tsx?|s?css|html)$/.test(name) && !/\.test\./.test(name) ? [full] : [];
+            });
+        const files = [...bundled(join(repo, "frontend")), join(repo, "index.html"), join(repo, "vite.config.ts")];
+        expect(files.length).toBeGreaterThan(500);
+        const reaching = files.filter((file) => /(?:\.\.\/)+crates\//.test(readFileSync(file, "utf8")));
+        expect(reaching, "the build reads these out of crates/: take crates/ out of BUILD_NEVER_READS, or list what is read").toEqual([]);
     });
 });

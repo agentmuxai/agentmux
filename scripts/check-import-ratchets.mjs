@@ -70,7 +70,7 @@ export const LAYER_RULES = [
 
 // ── Rust: backend/ naming server/ ───────────────────────────────────────────
 
-const RUST_BACKEND = "crates/srv/src/backend/";
+const RUST_BACKEND = "crates/srv-core/src/backend/";
 const SERVER_PATH = /\bcrate::server\b/g;
 
 /** `crate::server` paths in one Rust file's production code. */
@@ -308,7 +308,7 @@ function lines(rows) {
 
 export function formatCounts(counts) {
     const rows = [...counts].sort(([a], [b]) => byText(a, b)).map(([path, n]) => `${n} ${path}`);
-    return header("Files under crates/srv/src/backend/ that name crate::server, and how many times", "A file may not name it more often than this, and a file not listed may not name it at all.") + lines(rows);
+    return header("Files under crates/srv-core/src/backend/ that name crate::server, and how many times", "A file may not name it more often than this, and a file not listed may not name it at all.") + lines(rows);
 }
 
 export function formatSet(entries, title, how) {

@@ -1,5 +1,5 @@
 {
-  "comment": "Rows for agent_state::decide, read by crates/srv/src/backend/agent_state.rs and frontend/app/store/pane-tab-progress.test.ts. `expected` is the agent state, or `none`.",
+  "comment": "Rows for agent_state::decide, read by crates/srv-core/src/backend/agent_state.rs and frontend/app/store/pane-tab-progress.test.ts. `expected` is the agent state, or `none`.",
   "rows": [
     {
       "name": "a turn runs",

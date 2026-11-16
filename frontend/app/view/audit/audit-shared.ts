@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What the Audit pane asks `audit.query` for, and how it words the answer. The query itself, its paging and
-// its filters are srv's (crates/srv/src/backend/audit_query.rs).
+// its filters are srv's (crates/srv-core/src/backend/audit_query.rs).
 
 import type { AuditCost } from "@/types/rpc/AuditCost";
 import type { AuditEnd } from "@/types/rpc/AuditEnd";

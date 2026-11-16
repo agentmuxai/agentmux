@@ -60,7 +60,7 @@ export { isNodeLocked, isEffectivelyMinimized };
  *
  * Legacy trees (with `minimizedSize`/`slipMinimize`/`columnDissolve`/
  * `minimizedLockedSize`/`_slipAnchor`) are migrated by srv when it loads them
- * (`migrate_legacy_minimize`, crates/srv/src/backend/layout/intent.rs); the
+ * (`migrate_legacy_minimize`, crates/srv-core/src/backend/layout/intent.rs); the
  * window never sees those fields.
  */
 

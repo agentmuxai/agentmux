@@ -15,6 +15,7 @@ import { getNodeRectById } from "./layoutNodeModels";
 import { effectiveStack, splitOutStackMember } from "./layoutStack";
 import { computeMoveNode } from "./layoutTree";
 import type { LayoutModel } from "./layoutModel";
+import { GUIDE_GRACE_MS, hideGuide } from "./dropGuides";
 import { clearPlacement, placementDirection, showPlacement, sideOfDirection, type PlacementSide } from "./placementPreview";
 import {
     DefaultNodeSize,
@@ -61,21 +62,41 @@ export interface PillZoneInput {
 const inside = (p: { x: number; y: number }, r: NonNullable<PillZoneInput["headerRect"]>): boolean =>
     p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
 
+/**
+ * What a dragged tab is to the layout: the pane it is in, whether it is that pane's only tab, and what its
+ * drop is tracked and previewed as. A pane's only tab moves the pane itself; a tab that leaves others behind,
+ * or comes from another window tab, is in no node of its own, and a stand-in is placed for it. One reading for
+ * every reader of a tab's drag (the pane it is over, and the layout once it has the drag), so both list the
+ * same drops for it.
+ */
+export function pillSubject(model: LayoutModel, blockId: string): { sourceNodeId: string; lone: boolean; standIn: LayoutNode; draggedId: string } {
+    const root = model.treeState.rootNode;
+    const source = root ? findNodeByBlockId(root, blockId) : undefined;
+    const lone = !!source?.data && effectiveStack(source.data).length <= 1;
+    const standIn = pillStandIn(blockId);
+    return { sourceNodeId: source?.id ?? "", lone, standIn, draggedId: lone && source ? source.id : standIn.id };
+}
+
 /** What the pill would do if released at the pointer. */
 export function pillZone(input: PillZoneInput): PillZone {
     const join: PillZone = input.ownPane ? { kind: "none" } : { kind: "join" };
-    if (input.headerRect && inside(input.pointer, input.headerRect)) return join;
-    if (!input.hasBody) return join;
     const container = input.model.displayContainerRef?.current;
     const rect = getNodeRectById(input.model, input.nodeId);
-    if (!container || !rect) return join;
+    if ((input.headerRect && inside(input.pointer, input.headerRect)) || !input.hasBody || !container || !rect) {
+        // Over the header the pane's own glow says what a release does: no spots.
+        hideGuide(input.model, GUIDE_GRACE_MS);
+        return join;
+    }
     const box = container.getBoundingClientRect();
+    const subject = pillSubject(input.model, input.blockId);
     const direction = placementDirection(input.model, {
         targetId: input.nodeId,
         rect,
         offset: { x: input.pointer.x - box.x, y: input.pointer.y - box.y },
-        draggedId: pillStandIn(input.blockId).id,
-        foreignNode: pillStandIn(input.blockId),
+        draggedId: subject.draggedId,
+        foreignNode: subject.lone ? undefined : subject.standIn,
+        pill: true,
+        center: input.ownPane ? "none" : "join",
     });
     const side = sideOfDirection(direction);
     if (direction === undefined || !side) return join;

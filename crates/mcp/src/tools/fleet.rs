@@ -187,7 +187,7 @@ async fn run_fleet_broadcast(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Stri
     // how many targets fail. Sent in chunks with a pause between
     // them — `/agentmux/reactive/inject` shares ReactiveHandler's
     // global rate limiter (10/sec, hard reset per second, not a
-    // smooth refill — crates/srv/src/backend/reactive/mod.rs's
+    // smooth refill — crates/srv-core/src/backend/reactive/mod.rs's
     // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
     // otherwise deterministically fail the tail of any larger
     // broadcast with "rate limit exceeded" (Codex P1, same review).
@@ -267,7 +267,7 @@ fn broadcast_args(arguments: &Value) -> Result<(Vec<String>, &str)> {
 ///
 /// `/agentmux/reactive/inject`'s `target_agent` resolves by
 /// agent UID or registered AGENT NAME only (`resolve_target`,
-/// crates/srv/src/backend/reactive/handler.rs) — never by
+/// crates/srv-core/src/backend/reactive/handler.rs) — never by
 /// block_id, even though this tool's own advertised contract
 /// (MESSAGE_TOOL, broadcast) is block_id values from Agents list, to
 /// stay consistent with Stop agents' targeting scheme. The

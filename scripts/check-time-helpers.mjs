@@ -20,7 +20,7 @@
 //   node scripts/check-time-helpers.mjs --list     print today's matching files
 //
 // Migrations are exempt on purpose: they freeze copies of live logic
-// (crates/srv/src/migrations/mod.rs).
+// (crates/srv-core/src/migrations/mod.rs).
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 
 // fileURLToPath, not `.pathname`: on Windows the latter is "/C:/…" and every read fails.
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const CRATES = ["crates/srv", "crates/mcp", "crates/launcher", "crates/bashwrap", "crates/cef"];
+const CRATES = ["crates/srv", "crates/srv-core", "crates/mcp", "crates/launcher", "crates/bashwrap", "crates/cef"];
 const INLINE = /SystemTime::now\(\)\s*\.duration_since\(\s*(?:std::time::)?UNIX_EPOCH/;
 const OWN_FN = /\bfn\s+(?:now_ms|now_secs|now_unix_secs|now_millis)\b/;
 const LIST_FILE = join(ROOT, "scripts/check-time-helpers.allow");

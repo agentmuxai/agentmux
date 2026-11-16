@@ -4,7 +4,7 @@
 //! Reclaim the data dir from an srv that an earlier launcher left behind.
 //!
 //! srv takes an exclusive `flock` on `<data_dir>/srv.lock` and writes its PID
-//! into it (`crates/srv/src/backend/base.rs`, `acquire_data_dir_lock`). If an
+//! into it (`crates/srv-core/src/backend/base.rs`, `acquire_data_dir_lock`). If an
 //! srv outlives its launcher, every later launch's srv fails on that lock and
 //! the app cannot be opened (2026-10-11: macOS "Quit & Reopen" left one
 //! behind). An srv still holding the lock whose launcher is gone (it was
@@ -21,7 +21,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// Name of srv's data-dir lock file. Mirrors `SRV_DATA_LOCK_FILE` in
-/// `crates/srv/src/backend/base.rs`.
+/// `crates/srv-core/src/backend/base.rs`.
 const SRV_LOCK_FILE: &str = "srv.lock";
 
 /// How long a stale srv gets to exit after SIGTERM (it closes its agents

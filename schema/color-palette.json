@@ -1,5 +1,5 @@
 {
-  "note": "The shared identity palette: 16 hues evenly spaced by CIEDE2000 around the sRGB-limited identity ring (SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md). hue is OKLCH degrees; hex is the stored, theme-neutral value (OKLCH L 0.70, C 0.14 at that hue). Every surface derives its own tones from the hue (pane-color-scheme.ts). Read by frontend/app/theme/palette.ts and crates/srv/src/backend/palette.rs; do not copy this list.",
+  "note": "The shared identity palette: 16 hues evenly spaced by CIEDE2000 around the sRGB-limited identity ring (SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md). hue is OKLCH degrees; hex is the stored, theme-neutral value (OKLCH L 0.70, C 0.14 at that hue). Every surface derives its own tones from the hue (pane-color-scheme.ts). Read by frontend/app/theme/palette.ts and crates/srv-core/src/backend/palette.rs; do not copy this list.",
   "version": 1,
   "swatch": {
     "l": 0.7,

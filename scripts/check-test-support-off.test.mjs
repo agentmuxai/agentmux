@@ -10,7 +10,8 @@ import { commandFiles, commandProblems, resolvedProblems } from "./check-test-su
 
 const tree = (srvFeatures, extra = "") =>
     `agentmux-common v0.60.27 (/w/crates/common) features=[ts,tls-provider]\n` +
-    `agentmux-srv v0.60.27 (/w/crates/srv) features=[${srvFeatures}]\n` +
+    `agentmux-srv-core v0.60.27 (/w/crates/srv-core) features=[${srvFeatures}]\n` +
+    `agentmux-srv v0.60.27 (/w/crates/srv) features=[]\n` +
     `serde v1.0.0 features=[derive]\n` +
     `ctor v1.0.0 features=[]\n${extra}`;
 
@@ -56,6 +57,7 @@ describe("check-test-support-off: the files", () => {
                 "scripts/other.test.mjs",
                 "scripts/notes.md",
                 "crates/srv/Cargo.toml",
+                "crates/srv-core/Cargo.toml",
             ]) {
                 put(rel);
             }
@@ -81,8 +83,8 @@ describe("check-test-support-off: the resolve", () => {
     });
 
     it("names a package here that has it on, once", () => {
-        expect(resolvedProblems(tree("test-support"))).toEqual(["agentmux-srv resolves with test-support on in a normal build"]);
-        expect(resolvedProblems(tree("a, test-support"))).toEqual(["agentmux-srv resolves with test-support on in a normal build"]);
+        expect(resolvedProblems(tree("test-support"))).toEqual(["agentmux-srv-core resolves with test-support on in a normal build"]);
+        expect(resolvedProblems(tree("a, test-support"))).toEqual(["agentmux-srv-core resolves with test-support on in a normal build"]);
         expect(resolvedProblems(tree("test-support") + tree("test-support"))).toHaveLength(1);
     });
 
@@ -92,7 +94,7 @@ describe("check-test-support-off: the resolve", () => {
     });
 
     it("fails an empty or unreadable answer instead of passing it", () => {
-        expect(resolvedProblems("")).toEqual(["the resolve did not list agentmux-srv: the check read nothing"]);
+        expect(resolvedProblems("")).toEqual(["the resolve did not list agentmux-srv-core: the check read nothing"]);
         expect(resolvedProblems("error: no\n")).toHaveLength(1);
     });
 });

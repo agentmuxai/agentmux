@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// MPS event names: every `EVENT_*` constant in crates/srv/src/backend/mps.rs,
+// MPS event names: every `EVENT_*` constant in crates/srv-core/src/backend/mps.rs,
 // plus the events other backend modules publish by name (`files:changed`,
 // `waveobj:batchedupdates`, …). mps-events.test.ts checks them against the
 // backend source and fails a subscription that spells a name by hand.
@@ -29,13 +29,13 @@ export const WpsEvent = {
     // pair) — applied in one Solid batch() flush so the UI can't paint a
     // half-applied intermediate state. Mirrors
     // WS_EVENT_MUX_OBJ_BATCHED_UPDATES in
-    // crates/srv/src/backend/eventbus.rs. See
+    // crates/srv-core/src/backend/eventbus.rs. See
     // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
     MuxObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
     Config: "config",
     // Sent once per WebSocket connect, after config: the srv reached and its
-    // machine (crates/srv/src/srv_info.rs). Handled as it arrives, before any
+    // machine (crates/srv-core/src/srv_info.rs). Handled as it arrives, before any
     // subscription exists (app/store/srv-info.ts noteSrvInfoMessage).
     SrvInfo: "srvinfo",
     // srv dropped events for this window (its WebSocket lane was full); sent straight to the socket,
@@ -158,7 +158,7 @@ export const WpsEvent = {
     AgentReactiveRegistered: "agent:reactive-registered",
     AgentReactiveUnregistered: "agent:reactive-unregistered",
     AgentsChanged: "agents:changed",
-    /** An Audit row was written; the Audit asks `audit.query` for the newest rows (crates/srv/src/backend/audit_live.rs). */
+    /** An Audit row was written; the Audit asks `audit.query` for the newest rows (crates/srv-core/src/backend/audit_live.rs). */
     AuditChanged: "audit:changed",
     HistorySessionsChanged: "history:sessions:changed",
     CronChanged: "cron_changed",
@@ -189,7 +189,7 @@ export const WpsEvent = {
     LspMessage: "lsp:message",
     McpChanged: "mcp:changed",
     // The MCP servers a running agent's CLI reports changed
-    // (crates/srv/src/backend/mcp_observed.rs).
+    // (crates/srv-core/src/backend/mcp_observed.rs).
     McpObserved: "mcp:observed",
     MemoriesChanged: "memories:changed",
     OpenFloatingPane: "openfloatingpane",
@@ -228,11 +228,11 @@ export const WpsEvent = {
     BrowserProfilesChanged: "browserprofiles:changed",
     PinsChanged: "pins:changed",
     ViewerDevicesChanged: "viewerdevices:changed",
-    /** What srv knows about newer AgentMux releases (crates/srv/src/backend/update/check.rs). */
+    /** What srv knows about newer AgentMux releases (crates/srv-core/src/backend/update/check.rs). */
     AppUpdateStatus: "app:updatestatus",
-    /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv/src/backend/upgrade_request.rs). */
+    /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv-core/src/backend/upgrade_request.rs). */
     AppUpgradeRequests: "app:upgraderequests",
-    /** Agents' requests to drive a native app, and the grants in force (crates/srv/src/backend/desktop_gate.rs). */
+    /** Agents' requests to drive a native app, and the grants in force (crates/srv-core/src/backend/desktop_gate.rs). */
     AppDesktop: "app:desktop",
     AgentEndpointNotice: "agent:endpoint-notice",
     /** An account episode opened, changed or closed: agents out of quota or signed out on one account
@@ -249,7 +249,7 @@ export const WpsEvent = {
     AgentNotice: "agent:notice",
     /** A question srv asks the person in a pane, as a modal over that pane, and its end (crates/srv/src/sagas/pane_confirm.rs). */
     PaneConfirm: "pane:confirm",
-    /** The agents the person said "Always" to, after a change (crates/srv/src/backend/agent_grants.rs). */
+    /** The agents the person said "Always" to, after a change (crates/srv-core/src/backend/agent_grants.rs). */
     AgentGrants: "agent:grants",
     AmbientSpent: "ambient:spent",
     BlockReveal: "block:reveal",

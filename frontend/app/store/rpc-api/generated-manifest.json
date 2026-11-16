@@ -444,6 +444,10 @@
             "method": "SigninStopCommand"
         },
         {
+            "command": "browser.signin_list_close",
+            "method": "SigninListCloseCommand"
+        },
+        {
             "command": "browser.signup_password",
             "method": "SignupPasswordCommand"
         },

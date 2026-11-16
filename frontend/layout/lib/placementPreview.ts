@@ -4,9 +4,13 @@
 /**
  * Where a dragged pane or pane tab would be placed next to the pane under the pointer, and the
  * ghost that shows it. The one place a pointer position becomes a `DropDirection` and a pending
- * `ComputeMove`: the tile overlay (`OverlayNode`, and its dead-spot fallback) and a tab pill
- * dragged over a pane's body (`paneBodyDrop`) both call it, so the ghost is the standard one.
+ * action: the tile overlay (`OverlayNode`, and its dead-spot fallback) and a tab pill dragged over a
+ * pane's body (`paneBodyDrop`) both call it, so the ghost is the standard one.
  * docs/specs/SPEC_PANE_TAB_DRAG_BODY_PLACEMENT_AND_EDGE_GLOW_2026_10_29.md §3.2.
+ *
+ * The pointer is read against the hot spots of the hovered pane's guide (dropGuides.ts), one per layout a
+ * release there can leave (dropOptions.ts, which also makes the action each one commits). Off the spots a
+ * pane has no drop.
  *
  * It is also the one place a shown drop is taken down again, and the one place that says when: `clearPlacement`
  * at once, `leavePlacement` after the grace a pointer needs to cross from one pane's zones to the next.
@@ -18,82 +22,52 @@
  */
 
 import { ELEMENT_DRAG_KINDS, isAnyUnderway, onSessionEnded } from "@/app/drag/drag-session";
+import { fadeFollowedPane } from "@/app/drag/pane-live-follow";
 import { chipOverChipDirection } from "./chipPlaceholder";
 import { DEFAULT_TRACKER, DropIntentTracker } from "./dropIntentTracker";
+import { dropHeldIn, forgetHeldDrop } from "./heldDrop";
 import { dragState } from "./tilelayout-drag-state";
-import { clampCrossTabDirection } from "./crossTabDrag";
 import type { LayoutModel } from "./layoutModel";
 import { pillDragIn } from "./pillDragState";
 import { leaveOwnPane, pointerOutsideWindow } from "./tearOffPreview";
 import {
-    DropDirection,
     LayoutTreeActionType,
-    type LayoutNode,
-    type LayoutTreeAction,
+    type DropDirection,
     type LayoutTreeComputeMoveNodeAction,
     type LayoutTreeSetPendingAction,
     type LayoutTreeStayAction,
 } from "./types";
-import { determineDropDirection } from "./utils";
+import { GUIDE_GRACE_MS, activeFor, guideSpotsFor, hideAllGuides, hideGuide, markGuideActive, onGuidesShown, showGuide, spotAt } from "./dropGuides";
+import { computeFor, dropOptionsOf, dropsBySplit, layoutShape, resetDropOptions, splitFor, type DropSubject } from "./dropOptions";
 
-export interface PlacementInput {
-    /** The pane the pointer is over. */
-    targetId: string;
-    /** Its rectangle in the layout container's coordinates. */
+export { layoutShape, sideOfDirection, type PlacementSide } from "./dropOptions";
+
+export interface PlacementInput extends DropSubject {
+    /** The hovered pane's rectangle in the layout container's coordinates. */
     rect: Dimensions;
     /** The pointer, in the layout container's coordinates. */
     offset: { x: number; y: number };
-    /** The dragged node's id: a pane in this tree, or the stand-in id of a node that is not in it. */
-    draggedId: string;
-    /**
-     * Set when the dragged node is not in this tree (a pane from another tab, a tab pill): the ghost
-     * is previewed from it, and `Outer*` is clamped to the inner direction, because the commit can only
-     * split the hovered pane in half (`clampCrossTabDirection`).
-     */
-    foreignNode?: LayoutNode;
-    /**
-     * The dragged thing is a tab pill of this layout being placed as a pane (pillPlacement.ts). It is steadied
-     * as a pane of the tree is, and it lands beside the hovered pane, never across the whole row (`Outer*` is
-     * clamped). With `foreignNode` (its stand-in) the tab leaves a pane that keeps other tabs, and the drop is
-     * shown as the split the release makes; without, the tab is its pane's only one and the pane itself moves.
-     */
-    pill?: boolean;
-}
-
-/** The direction under the pointer, or undefined where there is none (outside the pane, on a diagonal). */
-export function placementDirection(model: LayoutModel, input: PlacementInput): DropDirection | undefined {
-    const besideOnly = !!input.foreignNode || !!input.pill;
-    const raw =
-        (besideOnly
-            ? undefined
-            : chipOverChipDirection(
-                  model.treeState.rootNode,
-                  input.targetId,
-                  input.draggedId,
-                  input.rect,
-                  input.offset
-              )) ?? determineDropDirection(input.rect, input.offset);
-    return besideOnly ? clampCrossTabDirection(raw) : raw;
 }
 
 /**
- * The drop of a tab pill that leaves a pane with other tabs: the hovered pane is split in half and the new
- * pane takes the half on the pointer's side, which is what the release does (`splitOutStackMember`,
- * layoutStack.ts). Shown as that split and not as a move: a move puts the new pane beside the hovered one at
- * a size of its own, which is another layout than the one the release makes.
+ * The direction of the drop under the pointer, or undefined where there is none. A drop is under the pointer
+ * only on its spot of the hovered pane's guide (dropGuides.ts), and this is where that guide is shown: every
+ * reader of a drag comes through here, so the spots on screen are the ones the pointer is read against. A chip
+ * over a chip keeps its own rule (the chip's halves), with no guide.
  */
-function pillSplit(input: PlacementInput, direction: DropDirection | undefined): LayoutTreeAction {
-    const side = sideOfDirection(direction);
-    if (!side) return { type: LayoutTreeActionType.ClearPendingAction };
-    const horizontal = side === "left" || side === "right";
-    const split = {
-        type: horizontal ? LayoutTreeActionType.SplitHorizontal : LayoutTreeActionType.SplitVertical,
-        targetNodeId: input.targetId,
-        newNode: input.foreignNode,
-        position: side === "left" || side === "up" ? "before" : "after",
-        sizeFraction: 0.5,
-    } as LayoutTreeAction;
-    return { type: LayoutTreeActionType.SetPendingAction, action: split } as LayoutTreeSetPendingAction;
+export function placementDirection(model: LayoutModel, input: PlacementInput): DropDirection | undefined {
+    const inTree = !input.foreignNode && !input.pill;
+    const chip = inTree
+        ? chipOverChipDirection(model.treeState.rootNode, input.targetId, input.draggedId, input.rect, input.offset)
+        : undefined;
+    if (chip !== undefined) {
+        hideGuide(model);
+        return chip;
+    }
+    const spots = guideSpotsFor(model, input.rect, input.targetId, dropOptionsOf(model, input));
+    const direction = spotAt(spots, input.offset)?.direction;
+    showGuide(model, { targetId: input.targetId, spots, active: activeFor(spots, direction) });
+    return direction;
 }
 
 /**
@@ -105,15 +79,7 @@ export function showPlacement(
     input: PlacementInput,
     direction: DropDirection | undefined
 ): LayoutTreeComputeMoveNodeAction {
-    const compute = {
-        type: LayoutTreeActionType.ComputeMove,
-        nodeId: input.targetId,
-        nodeToMoveId: input.draggedId,
-        direction,
-        // The dragged node isn't in this tree: pass it so the ghost can still be computed. Preview
-        // only; the drop never commits this pending action locally.
-        nodeToMove: input.foreignNode,
-    } as LayoutTreeComputeMoveNodeAction;
+    const compute = computeFor(input, direction);
     // A sample the throttle held back past the pointer's exit: the pointer is outside now, and what the
     // window shows is the tear-off (tearOffPreview.ts), which a placement would replace. Coming back is
     // the window's `dragenter`, not a stale sample.
@@ -122,7 +88,21 @@ export function showPlacement(
     leaveOwnPane(model);
     // A drop is shown again: the zones the pointer left a moment ago clear nothing (`leavePlacement`).
     cancelLeave(model);
-    model.treeReducer(input.pill && input.foreignNode ? pillSplit(input, direction) : compute);
+    // And it is this drag's: a drop still held from the last one (heldDrop.ts) is no longer what is shown.
+    forgetHeldDrop(model);
+    if (dropsBySplit(input)) {
+        const split = splitFor(input, direction);
+        model.treeReducer(
+            split
+                ? ({ type: LayoutTreeActionType.SetPendingAction, action: split } as LayoutTreeSetPendingAction)
+                : { type: LayoutTreeActionType.ClearPendingAction }
+        );
+    } else if (direction === undefined) {
+        // Off every spot: no drop is shown, and the tree is not asked for a move in no direction.
+        model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+    } else {
+        model.treeReducer(compute);
+    }
     return compute;
 }
 
@@ -144,6 +124,8 @@ export function showStay(model: LayoutModel, nodeId: string): void {
     leaveOwnPane(model);
     resetDropIntent(model);
     cancelLeave(model);
+    // Over the dragged pane's own place: no other pane's guide stays.
+    hideGuide(model);
     const stay: LayoutTreeStayAction = { type: LayoutTreeActionType.Stay, nodeId };
     model.treeReducer({ type: LayoutTreeActionType.SetPendingAction, action: stay } as LayoutTreeSetPendingAction);
 }
@@ -156,24 +138,6 @@ interface Steadying {
     timer?: ReturnType<typeof setTimeout>;
     /** The layout the armed candidate belongs to (`layoutShape`): another one means the tree changed under the drag. */
     shape?: string;
-}
-
-/**
- * The frozen hit-test snapshot: the panes and rects a drag is hit-tested against. They are the layout model's
- * own rects (`additionalProps().rect`, `getNodeRectById`), which no drag changes (the tree is written only by
- * the commit on drop, and a live reflow moves panes with transforms the layout never reads), so a candidate is
- * always chosen against the layout the drag started on. The one way they change under a drag is srv or another
- * window changing the tree; then the armed candidate belongs to a layout that is gone, and the tracker starts
- * again on the new one.
- */
-export function layoutShape(model: LayoutModel): string {
-    const leafs = model.leafs?.() ?? [];
-    let shape = "";
-    for (const leaf of leafs) {
-        const r = model.getNodeRectById?.(leaf.id);
-        shape += r ? `${leaf.id}:${r.left},${r.top},${r.width},${r.height};` : `${leaf.id};`;
-    }
-    return shape;
 }
 
 const steadying = new WeakMap<LayoutModel, Steadying>();
@@ -204,11 +168,18 @@ export function resetDropIntent(model: LayoutModel): void {
 /**
  * Clear the ghost. A candidate still waiting must not bring it back, so its timer goes too; `reset` also drops
  * the armed candidate (the pointer is over the dragged pane itself, where there is none).
+ *
+ * A drop that was released and that srv has still to commit stays shown (heldDrop.ts): everything the drag
+ * kept goes, and the drop itself is taken down by the layout that brings the pane. So whichever handler of
+ * the ended drag comes here, and in whichever order, none of them takes the landing back.
  */
 export function clearPlacement(model: LayoutModel, reset = false): void {
     if (reset) resetDropIntent(model);
     else clearTimeout(steadying.get(model)?.timer);
     cancelLeave(model);
+    // The next sample shows the guide again within a frame when the pointer is still over a pane.
+    hideGuide(model, isAnyUnderway(ELEMENT_DRAG_KINDS) ? GUIDE_GRACE_MS : 0);
+    if (dropHeldIn(model)) return;
     model.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
 }
 
@@ -255,10 +226,16 @@ export function leavePlacement(model: LayoutModel): void {
     );
 }
 
+// The picture of the dragged pane that the cursor carries (pane-live-follow.ts) is over the page, guides and all:
+// it fades while a layout shows a guide, so the spots are seen through it.
+onGuidesShown(fadeFollowedPane);
+
 // The drag is over. A drop has committed what was shown and cleared it; a cancelled drag left it to the grace,
 // and nothing shows a drop of a drag that is over.
 onSessionEnded(() => {
     for (const model of [...leaves.keys()]) clearPlacement(model);
+    hideAllGuides();
+    resetDropOptions();
 });
 
 /** The drag is over, in whichever tab it was steadied (a pane dragged to another tab has two). */
@@ -293,6 +270,7 @@ export function previewPlacement(
     }
     const shown = held.inputs.get(armed.targetId) ?? input;
     notePillDrop(model, shown, armed);
+    markGuideActive(model, armed.targetId, armed.direction);
     return { direction: armed.direction, compute: showPlacement(model, shown, armed.direction), targetId: armed.targetId };
 }
 
@@ -303,6 +281,7 @@ function showWaiting(model: LayoutModel, held: Steadying, draggedId: string): vo
     const shown = armed && held.inputs.get(armed.targetId);
     if (!armed || !shown) return;
     notePillDrop(model, shown, armed);
+    markGuideActive(model, armed.targetId, armed.direction);
     showPlacement(model, shown, armed.direction);
 }
 
@@ -316,26 +295,4 @@ export function settleDropIntent(model: LayoutModel, draggedId: string): void {
     if (!held) return;
     clearTimeout(held.timer);
     showWaiting(model, held, draggedId);
-}
-
-/** The side of the hovered pane a direction puts the new pane on; undefined for the centre and for none. */
-export type PlacementSide = "left" | "right" | "up" | "down";
-
-export function sideOfDirection(direction: DropDirection | undefined): PlacementSide | undefined {
-    switch (direction) {
-        case DropDirection.Left:
-        case DropDirection.OuterLeft:
-            return "left";
-        case DropDirection.Right:
-        case DropDirection.OuterRight:
-            return "right";
-        case DropDirection.Top:
-        case DropDirection.OuterTop:
-            return "up";
-        case DropDirection.Bottom:
-        case DropDirection.OuterBottom:
-            return "down";
-        default:
-            return undefined;
-    }
 }

@@ -18,11 +18,11 @@ mod open_cli;
 #[cfg(windows)]
 mod crash_monitor;
 
-use agentmux_srv::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, http_client, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
+use agentmux_srv_core::{adoption, agents, ambient, backend, boot_timing, broker, connectivity, event_log, http_client, identity, migrations, muxbus, persist, persist_subscriber, reducer, registry, srv_info, state, util};
 use server::build_routers;
 
 #[cfg(test)]
-use agentmux_srv::test_support;
+use agentmux_srv_core::test_support;
 
 #[cfg(test)]
 mod tls_test_init;

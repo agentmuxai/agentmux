@@ -4,7 +4,7 @@
 /**
  * The token popover's AgentMux internal row (AmbientPurposes.tsx): how AgentMux's own
  * model calls (session titles, names, prompt suggestions, narration) have gone
- * since srv started, from `ambient.outcomes` (crates/srv/src/ambient/outcome.rs),
+ * since srv started, from `ambient.outcomes` (crates/srv-core/src/ambient/outcome.rs),
  * so "the swarm has been blank for an hour" is visible without copying a database.
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.8.
  */
@@ -13,7 +13,7 @@
 export type AmbientOutcomes = Record<string, Record<string, number>>;
 
 /** Display names, in display order, for the purposes srv records
- *  (crates/srv/src/ambient/purpose.rs). A purpose not listed here still shows,
+ *  (crates/srv-core/src/ambient/purpose.rs). A purpose not listed here still shows,
  *  after these, under its own tag. */
 const PURPOSE_NAMES: ReadonlyArray<readonly [purpose: string, name: string]> = [
     ["activity_summary", "Session titles"],

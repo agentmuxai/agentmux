@@ -9,7 +9,7 @@
 //! together, so all three get it), and on a Linux machine with none it refuses to build the client: `agentmux-mcp`
 //! panicked at start on such a machine. These programs never make an https request, so their clients are built to
 //! trust nothing: no certificates are read, and a build cannot fail for want of them. srv, which does make https
-//! requests, has its own helper (`crates/srv/src/http_client.rs`); `scripts/check-srv-http-clients.mjs` fails CI on a
+//! requests, has its own helper (`crates/srv-core/src/http_client.rs`); `scripts/check-srv-http-clients.mjs` fails CI on a
 //! client built any other way in these crates.
 
 /// A client builder that trusts nothing and reads no certificates: set what the site needs and `build()`.

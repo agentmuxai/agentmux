@@ -10,7 +10,8 @@
  * `TearOffBlock` moves the SAME block into a new workspace+tab (a live agent
  * session, terminal or editor buffer survives), and
  * `open_floating_pane_window` shows it. What's specific to a single tab:
- * - an in-window drop never tears off (macOS/Linux have no host hit-test);
+ * - an in-window drop never tears off (macOS/Linux have no host hit-test), but for a release over the tab's
+ *   own place in its pane while that offers the tear-off (`selfRelease`);
  * - the source pane keeps its other tabs (stack-safe removal);
  * - a failed window open is rolled back, and the tab goes back where it was.
  *
@@ -21,6 +22,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { findNodeByBlockId } from "@/layout/lib/layoutNode";
+import { endTabTearOff } from "@/layout/lib/tabTearOff";
 import { effectiveStack } from "@/layout/lib/stackMembers";
 import { atoms, getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
@@ -38,6 +40,11 @@ export interface PaneTabDragPayload {
     sourceNodeId: string;
     sourceTabId: string;
     paneSize?: { width: number; height: number };
+    /**
+     * Released over the tab's own place in its pane while that offered the tear-off (layout/lib/tabTearOff.ts):
+     * it tears off wherever the pointer is, as a pane released over its own place does (pane-self-release.ts).
+     */
+    selfRelease?: boolean;
 }
 
 export type Platform = "win32" | "darwin" | "linux";
@@ -71,7 +78,22 @@ export async function handlePaneTabDragEnd(
     point: { x: number; y: number },
     platform: Platform
 ): Promise<void> {
-    if (platform !== "win32" && isInsideWindow(point.x, point.y)) {
+    try {
+        await endPaneTabDrag(payload, sourceWindow, point, platform);
+    } finally {
+        // Torn off or not, the pane is as its tabs say from here (layout/lib/tabTearOff.ts).
+        endTabTearOff();
+    }
+}
+
+async function endPaneTabDrag(
+    payload: PaneTabDragPayload,
+    sourceWindow: string | null,
+    point: { x: number; y: number },
+    platform: Platform
+): Promise<void> {
+    const self = payload.selfRelease === true;
+    if (!self && platform !== "win32" && isInsideWindow(point.x, point.y)) {
         Logger.info("dnd:cross", "pane-tab drop inside the window with no target — cancel", { blockId: payload.blockId });
         return;
     }
@@ -87,7 +109,7 @@ export async function handlePaneTabDragEnd(
     try {
         dragId = await api.startCrossDrag("pane", src, workspace.oid, payload.sourceTabId, { blockId: payload.blockId });
         const targetWindow = await api.updateCrossDrag(dragId, point.x, point.y);
-        if (targetWindow) {
+        if (targetWindow && !self) {
             Logger.info("dnd:cross", "pane-tab dropped on an AgentMux window — cancel", {
                 blockId: payload.blockId,
                 targetWindow,

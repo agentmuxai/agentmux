@@ -3,7 +3,7 @@
 
 /**
  * The pane's recent conversation in the form the ambient digest uses
- * (`crates/srv/src/ambient/digest.rs`): one entry per message, tool call or
+ * (`crates/srv-core/src/ambient/digest.rs`): one entry per message, tool call or
  * error, oldest first. Built from the document, which the pane has already
  * translated from its provider's stream, so the server can suggest a next
  * message for a Codex or Gemini pane as well as a Claude one. A hidden memory

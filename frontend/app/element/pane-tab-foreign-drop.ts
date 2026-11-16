@@ -9,11 +9,12 @@
 
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { clearPillGhost, showPillGhost, type PillZone } from "@/layout/lib/paneBodyDrop";
 import { pillPlacingIn } from "@/layout/lib/pillDragState";
 import { beginPillPlacement, dropPill, followPill, panePillZone, registerPillPane, type PillRelease } from "@/layout/lib/pillPlacement";
+import { holdTabTearOff, tabTearOffOffered, tabTearOffShown } from "@/layout/lib/tabTearOff";
 import type { DropDirection } from "@/layout/lib/types";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { edgeFlashArea } from "./drop-blink-clock";
@@ -144,6 +145,12 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
     let ghost: DropDirection | undefined;
     let lastFollow = -Infinity;
     const singlePill = (args?: PillArgs) => !!body && !!args?.source && !multiIdsOf(args.source.data);
+    /**
+     * What the pointer means to this pane. While the tab's own place in its own pane still offers the tear-off
+     * (layout/lib/tabTearOff.ts), that pane places nothing for it, as a dragged pane's own place does not.
+     */
+    const zoneOf = (input: ReturnType<typeof zoneInput>): PillZone =>
+        input.ownPane && tabTearOffOffered(input.blockId) ? { kind: "none" } : panePillZone(input);
     const zoneInput = (args: PillArgs) => {
         const { clientX, clientY } = args.location.current.input;
         return {
@@ -167,7 +174,9 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
             followPill(input.model, input.pointer);
             if (pillPlacingIn(input.model)) return;
         }
-        zone = panePillZone(input);
+        zone = zoneOf(input);
+        // Another pane takes the tab, or a drop is shown for it: its own place no longer offers the tear-off.
+        if (zone.kind !== "none") tabTearOffShown();
         // The header glows where the pill would join, and nowhere else.
         if (zone.kind === "join") {
             if (!hover.hovering()) hover.begin(args.source);
@@ -206,9 +215,18 @@ function createPillPlacement(opts: { body: PaneTabBodyDrop | undefined; paneKey:
     /** Where the pointer was released, not where the throttled drag last looked. */
     const zoneAtDrop = (args: PillArgs): PillZone => {
         if (!singlePill(args)) return zone;
-        return panePillZone(zoneInput(args));
+        return zoneOf(zoneInput(args));
     };
-    return { singlePill, follow, end, zoneAtDrop, dropInLayout };
+    /**
+     * Whether a release here tears the tab off: over the body of its own pane, while that still offers it. The
+     * header is the strip's own (a reorder, or nothing).
+     */
+    const tearsOff = (args: PillArgs): boolean => {
+        if (!singlePill(args) || !body!.hasBody()) return false;
+        const input = zoneInput(args);
+        return input.ownPane && tabTearOffOffered(input.blockId) && input.pointer.y > input.headerRect.bottom;
+    };
+    return { singlePill, follow, end, zoneAtDrop, dropInLayout, tearsOff };
 }
 
 type Placement = ReturnType<typeof createPillPlacement>;
@@ -243,13 +261,23 @@ function dropForeign<T>(props: ForeignTabDropProps<T>, paneKey: string, placemen
     const { source } = args;
     endHover();
     const dropZone = placement.dropInLayout(args) ? undefined : placement.zoneAtDrop(args);
+    const tearsOff = !!dropZone && dropZone.kind === "none" && placement.tearsOff(args);
     placement.end();
     if (!dropZone) return;
     const blockId = source.data.blockId as string | undefined;
     const body = props.bodyDrop;
     if (body && blockId && !multiIdsOf(source.data)) {
-        // Over this pane's header, or the pill's own pane where it cannot be placed.
-        if (dropZone.kind === "none") return;
+        // Over this pane's header, or the pill's own pane where it cannot be placed. Over the tab's own place
+        // while that offers the tear-off, the release tears the tab off where it is (pane-tab-tearoff.ts).
+        if (dropZone.kind === "none") {
+            const payload = tearsOff ? getCurrentDragPayload() : null;
+            if (payload?.kind === "pane-tab" && payload.blockId === blockId) {
+                setCurrentDragPayload({ ...payload, selfRelease: true });
+                // The pane shows the tab gone from here until the tear-off is done.
+                holdTabTearOff();
+            }
+            return;
+        }
         if (dropZone.kind === "place") {
             setCurrentDragPayload(null);
             // Next task, like a join: the move unmounts the dragged pill.

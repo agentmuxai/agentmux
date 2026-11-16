@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { cardBrand, cardCvcLength, cardGroup, cardLuhn, expiryParts, expiryYears } from "./vault-card";
 
-// The same numbers crates/srv/src/backend/vault/card.rs tests: the form's badge and srv's brand must agree.
+// The same numbers crates/srv-core/src/backend/vault/card.rs tests: the form's badge and srv's brand must agree.
 const BRANDS: [string, string][] = [
     ["4111111111111111", "visa"],
     ["5555555555554444", "mastercard"],

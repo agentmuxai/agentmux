@@ -3,7 +3,7 @@
 
 // A small shared transcript store and the per-channel stores around it, built the
 // way srv builds them (the DDL below is copied from `run_filestore_migrations` in
-// crates/srv/src/backend/storage/migrations.rs; recover.test.mjs checks it still
+// crates/srv-core/src/backend/storage/migrations.rs; recover.test.mjs checks it still
 // matches), for testing recover.mjs. Not used by the tool itself.
 
 import { mkdirSync } from "node:fs";
@@ -101,7 +101,7 @@ export function transcript(tag, bytes) {
     return Buffer.from(lines.join(""));
 }
 
-/** The frame table, as `ensure_schema` in crates/srv/src/backend/storage/filestore/frames.rs creates it. */
+/** The frame table, as `ensure_schema` in crates/srv-core/src/backend/storage/filestore/frames.rs creates it. */
 export const FRAME_TABLE = `CREATE TABLE IF NOT EXISTS db_file_frame (
              zoneid      TEXT    NOT NULL,
              name        TEXT    NOT NULL,

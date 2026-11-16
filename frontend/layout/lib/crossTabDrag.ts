@@ -19,6 +19,7 @@ import * as MOS from "@/app/store/mos";
 import { redockFloaterPane } from "@/app/workspace/floater-panes";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
+import { holdDrop, releaseHeldDrop } from "./heldDrop";
 import { getLayoutModelForTabById } from "./layoutModelHooks";
 import { reconcileWithStoredLayout } from "./layoutIntents";
 import { DropDirection } from "./types";
@@ -83,10 +84,11 @@ export function takeCrossTabDropFor(targetTabId: string | undefined): CrossTabDr
 
 /** The tab of this window's workspace that holds `blockId`, when one does. */
 export function tabOfBlock(blockId: string): string | undefined {
-    for (const tabId of atoms.workspace()?.tabids ?? []) {
-        if (MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId))?.blockids?.includes(blockId)) return tabId;
-    }
-    return undefined;
+    // The workspace lists its pinned window tabs apart from the others. Read without them, a pane tab dragged
+    // out of a pinned window tab had no tab, and its drop on another window tab moved nothing.
+    const ws = atoms.workspace();
+    const tabIds = [...(ws?.tabids ?? []), ...(ws?.pinnedtabids ?? [])];
+    return tabIds.find((tabId) => MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId))?.blockids?.includes(blockId));
 }
 
 /**
@@ -96,6 +98,10 @@ export function tabOfBlock(blockId: string): string | undefined {
  * and `direction` name one, or as a tab of `targetBlockId`'s pane with `asTab`; the rest follow it in
  * order, and `activeBlockId` ends visible. Fire-and-forget: the layout updates arrive via each tab's
  * pendingbackendactions, so there is nothing to await here.
+ *
+ * Where the target tab's layout shows the drop (a release in it, after the spring switch), what it shows
+ * stays shown until the pane arrives (heldDrop.ts), for every caller: the pane's own release and a tab
+ * pill's alike.
  */
 export function moveBlocksToTab(opts: {
     blockIds: readonly string[];
@@ -115,6 +121,9 @@ export function moveBlocksToTab(opts: {
     Logger.info("dnd", "cross-tab move", { ...opts, wsId });
     const pane = { blockId: lead, members: [...opts.blockIds], activeBlockId: opts.activeBlockId ?? lead };
     const ghost = { blockId: opts.targetBlockId ?? null, dir: opts.direction ?? null, asTab: opts.asTab };
+    // A tab that joins a pane's tabs moves no pane: there is no drop of the layout's to hold.
+    const target = opts.asTab || opts.direction == null ? undefined : getLayoutModelForTabById(opts.targetTabId);
+    if (target) holdDrop(target, lead);
     fireAndForget(async () => {
         try {
             await redockFloaterPane(pane, { tabId: opts.sourceTabId, workspaceId: wsId }, { tabId: opts.targetTabId, workspaceId: wsId }, ghost);
@@ -127,6 +136,8 @@ export function moveBlocksToTab(opts: {
             // queues the matching delete for this window.
         } catch (e) {
             Logger.error("dnd", "cross-tab move failed", { error: String(e) });
+            // No pane is coming: the drop that was shown for it goes.
+            if (target) releaseHeldDrop(target);
             // The characteristic failure here is "block X is in tab Y,
             // not <sourceTabId>": the source tab showed a leaf srv doesn't
             // hold. Show the source tab as srv stores it; if the drag hasn't

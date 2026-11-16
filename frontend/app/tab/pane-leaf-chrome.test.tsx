@@ -594,7 +594,7 @@ describe("PaneLeafChrome — keep-alive (agent)", () => {
 
         render(() => <PaneLeafChrome nodeModel={nodeModel} />);
 
-        const slotFor = (blockId: string) => screen.getByTestId(`block-${blockId}`).parentElement as HTMLElement;
+        const slotFor = (blockId: string) => screen.getByTestId(`block-${blockId}`).closest(".pane-leaf-keepalive-slot") as HTMLElement;
         expect(slotFor("b1").style.visibility).toBe("inherit"); // not "visible": it would show through a hidden window tab
         expect(slotFor("b2").style.visibility).toBe("hidden");
         // Opacity too: content can paint through visibility:hidden (a

@@ -11,12 +11,12 @@
       "gate": "user_version (SHARED_STORE_SCHEMA_VERSION, IDENTITY_STORE_SCHEMA_VERSION): a build refuses a newer file (check_schema_compat) before it opens it, and the person is told.",
       "lock": "SQLite WAL between srvs of one version; shared/locks/srv-writers keeps a srv of another version out (registry/shared_guard.rs); migrations.lock.db for a migration batch.",
       "users": [
-        "crates/srv/src/registry/paths.rs",
-        "crates/srv/src/registry/mod.rs",
+        "crates/srv-core/src/registry/paths.rs",
+        "crates/srv-core/src/registry/mod.rs",
         "crates/srv/src/bootstrap/store_attach.rs",
         "crates/srv/src/bootstrap/stores.rs",
         "crates/srv/src/bootstrap/shared_root.rs",
-        "crates/srv/src/registry/shared_guard.rs"
+        "crates/srv-core/src/registry/shared_guard.rs"
       ]
     },
     {
@@ -32,7 +32,7 @@
       "gate": "Each migration is recorded as applied in the store it changed; the runner reads the user_version of each store before it writes.",
       "lock": "migrations.lock.db: BEGIN IMMEDIATE for the whole batch, released by the OS when the holder dies.",
       "users": [
-        "crates/srv/src/migrations/*.rs"
+        "crates/srv-core/src/migrations/*.rs"
       ]
     },
     {
@@ -45,10 +45,10 @@
       "gate": "user_version 2, or 3 once it holds compressed frames; a build older than the SQLite 3.51.3 that wrote it refuses it.",
       "lock": "SQLite WAL between srvs of one version; the srv-writers rule for another version; readers/<pid>.json marks which srvs read compressed frames; a reclaim waits for other srvs.",
       "users": [
-        "crates/srv/src/backend/agent_bundle_sidecar.rs",
-        "crates/srv/src/backend/transcript/damage.rs",
-        "crates/srv/src/backend/history_usage.rs",
-        "crates/srv/src/backend/history/*.rs",
+        "crates/srv-core/src/backend/agent_bundle_sidecar.rs",
+        "crates/srv-core/src/backend/transcript/damage.rs",
+        "crates/srv-core/src/backend/history_usage.rs",
+        "crates/srv-core/src/backend/history/*.rs",
         "crates/cef/src/memory_heartbeat.rs",
         "crates/cef/src/memory_heartbeat/low_disk.rs"
       ]
@@ -63,11 +63,11 @@
       "gate": "None in the files; a srv of another version does not use the folder (the srv-writers rule), so it does not write them.",
       "lock": "One JSON file per agent, replaced by atomic rename; srv-writers across versions.",
       "users": [
-        "crates/srv/src/backend/agent_registry_lookup.rs",
-        "crates/srv/src/backend/memory/dir_claims.rs",
-        "crates/srv/src/backend/swarm_remote.rs",
-        "crates/srv/src/backend/slug_migration/home.rs",
-        "crates/srv/src/backend/session_backfill.rs",
+        "crates/srv-core/src/backend/agent_registry_lookup.rs",
+        "crates/srv-core/src/backend/memory/dir_claims.rs",
+        "crates/srv-core/src/backend/swarm_remote.rs",
+        "crates/srv-core/src/backend/slug_migration/home.rs",
+        "crates/srv-core/src/backend/session_backfill.rs",
         "crates/srv/src/server/reactive/former_slug.rs"
       ]
     },
@@ -82,12 +82,12 @@
       "gate": "None; entries are ephemeral, one per live channel, and a startup sweep drops what a crashed srv left.",
       "lock": "One file per entry; srv-writers across versions.",
       "users": [
-        "crates/srv/src/backend/agent_admission.rs",
-        "crates/srv/src/backend/fleet_source.rs",
-        "crates/srv/src/backend/reactive/audit_store.rs",
-        "crates/srv/src/backend/reactive/registry.rs",
-        "crates/srv/src/backend/work_facts/cross_channel.rs",
-        "crates/srv/src/backend/jobs/mod.rs",
+        "crates/srv-core/src/backend/agent_admission.rs",
+        "crates/srv-core/src/backend/fleet_source.rs",
+        "crates/srv-core/src/backend/reactive/audit_store.rs",
+        "crates/srv-core/src/backend/reactive/registry.rs",
+        "crates/srv-core/src/backend/work_facts/cross_channel.rs",
+        "crates/srv-core/src/backend/jobs/mod.rs",
         "crates/srv/src/bootstrap/delivery.rs",
         "crates/srv/src/bootstrap/network.rs",
         "crates/srv/src/server/app_api/agent_io.rs",
@@ -110,7 +110,7 @@
       "gate": "None; a record that does not parse or names a non-loopback address is ignored, and a record is listed only while its process is alive and it was written in the last minute.",
       "lock": "One file per instance, written atomically, rewritten every 20 s, removed at exit and by the reader once its process is gone.",
       "users": [
-        "crates/srv/src/backend/instance_registry.rs",
+        "crates/srv-core/src/backend/instance_registry.rs",
         "crates/srv/src/server/muxspect_instances.rs"
       ]
     },
@@ -123,7 +123,7 @@
       "gate": "None; one small file per LAN-enabled instance.",
       "lock": "One file per instance, removed at exit and swept at start.",
       "users": [
-        "crates/srv/src/backend/lan/discovery/lan_instances.rs"
+        "crates/srv-core/src/backend/lan/discovery/lan_instances.rs"
       ]
     },
     {
@@ -137,9 +137,9 @@
       "gate": "None.",
       "lock": "Written to a temporary file and renamed; srv-writers across versions.",
       "users": [
-        "crates/srv/src/backend/bookmarks_store.rs",
-        "crates/srv/src/backend/browser_profiles_store.rs",
-        "crates/srv/src/backend/browser_start_page.rs"
+        "crates/srv-core/src/backend/bookmarks_store.rs",
+        "crates/srv-core/src/backend/browser_profiles_store.rs",
+        "crates/srv-core/src/backend/browser_start_page.rs"
       ]
     },
     {
@@ -168,17 +168,17 @@
       "gate": "None of ours; the provider CLI owns the format of its folder.",
       "lock": "None beyond the provider's own; srv-writers across versions for what srv writes.",
       "users": [
-        "crates/srv/src/adoption.rs",
-        "crates/srv/src/backend/memory/adopt.rs",
-        "crates/srv/src/backend/memory/history_import.rs",
-        "crates/srv/src/backend/memory/native_files.rs",
-        "crates/srv/src/backend/continuity_relocate.rs",
+        "crates/srv-core/src/adoption.rs",
+        "crates/srv-core/src/backend/memory/adopt.rs",
+        "crates/srv-core/src/backend/memory/history_import.rs",
+        "crates/srv-core/src/backend/memory/native_files.rs",
+        "crates/srv-core/src/backend/continuity_relocate.rs",
         "crates/srv/src/server/agent_handlers/bundle.rs",
         "crates/srv/src/server/agent_handlers/identity_delete.rs",
-        "crates/srv/src/identity/auth_dirs.rs",
+        "crates/srv-core/src/identity/auth_dirs.rs",
         "crates/srv/src/server/providers_handlers.rs",
-        "crates/srv/src/backend/providers.rs",
-        "crates/srv/src/backend/codex_models.rs"
+        "crates/srv-core/src/backend/providers.rs",
+        "crates/srv-core/src/backend/codex_models.rs"
       ]
     },
     {
@@ -192,12 +192,12 @@
       "gate": "Each CLI install is a versioned folder; the uv is too.",
       "lock": "A per-provider version.lock for installs, and one beside the uv folder.",
       "users": [
-        "crates/srv/src/backend/cli_install.rs",
-        "crates/srv/src/backend/cli_uv.rs",
-        "crates/srv/src/backend/cli_prune.rs",
+        "crates/srv-core/src/backend/cli_install.rs",
+        "crates/srv-core/src/backend/cli_uv.rs",
+        "crates/srv-core/src/backend/cli_prune.rs",
         "crates/srv/src/server/install_task.rs",
         "crates/srv/src/headless.rs",
-        "crates/srv/src/identity/secret_store.rs"
+        "crates/srv-core/src/identity/secret_store.rs"
       ]
     },
     {
@@ -211,8 +211,8 @@
       "lock": "An OS file lock, released when its holder dies.",
       "users": [
         "crates/common/src/build_slot.rs",
-        "crates/srv/src/backend/build_cache_service.rs",
-        "crates/srv/src/backend/storage/muxbus.rs",
+        "crates/srv-core/src/backend/build_cache_service.rs",
+        "crates/srv-core/src/backend/storage/muxbus.rs",
         "crates/srv/src/server/agent_lifecycle.rs"
       ]
     },
@@ -225,7 +225,7 @@
       "gate": "None; files are named by their SHA-256.",
       "lock": "Content-addressed: a second write of the same file is the same file.",
       "users": [
-        "crates/srv/src/backend/task_media.rs"
+        "crates/srv-core/src/backend/task_media.rs"
       ]
     },
     {

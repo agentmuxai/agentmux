@@ -187,7 +187,7 @@ Commands of the reducer.
 ### `ReconcileTurnActive`
 
 Reconciliation from `BlockControllerRuntimeStatus.turn_active` (backend-verified, from the
-health monitor on the NDJSON stream, `crates/srv/src/backend/blockcontroller/health.rs`),
+health monitor on the NDJSON stream, `crates/srv-core/src/backend/blockcontroller/health.rs`),
 fetched via `GetControllerStatus` at mount and dispatched on every live `controllerstatus`
 MPS event (useControllerStatusEvents). Bidirectional:
 - `active: true` promotes the mount-default `Idle` to `Streaming` when the backend reports a

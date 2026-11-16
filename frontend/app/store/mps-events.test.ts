@@ -28,7 +28,7 @@ const PUBLISHED_BY_THE_FRONTEND = new Set<string>([WpsEvent.SingletonClaim]);
 
 describe("WpsEvent", () => {
     it("has every EVENT_* name mps.rs declares", () => {
-        const rust = readFileSync(resolve(repoRoot, "crates/srv/src/backend/mps.rs"), "utf8");
+        const rust = readFileSync(resolve(repoRoot, "crates/srv-core/src/backend/mps.rs"), "utf8");
         const declared = [...rust.matchAll(/pub const EVENT_\w+: &str = "([^"]+)";/g)].map((m) => m[1]);
         expect(declared.length).toBeGreaterThan(20);
         expect(declared.filter((n) => !names.has(n))).toEqual([]);

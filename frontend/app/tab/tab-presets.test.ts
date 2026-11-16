@@ -161,12 +161,12 @@ describe("applyTabPreset concurrent creation", () => {
 });
 
 // DEFAULT_TAB_PRESET mirrors srv's first-window layout, `default_three_pane_tree`
-// in crates/srv/src/backend/wcore/mod.rs, by hand (no shared code). This reads
+// in crates/srv-core/src/backend/wcore/mod.rs, by hand (no shared code). This reads
 // that builder, so a change to one side without the other fails here. Only the
 // shape is compared: the preset can't express the Rust tree's 20/80 sizes.
 describe("DEFAULT_TAB_PRESET mirrors default_three_pane_tree", () => {
     const repoRoot = resolve(__dirname, "../../..");
-    const wcore = readFileSync(resolve(repoRoot, "crates/srv/src/backend/wcore/mod.rs"), "utf8").replace(/\/\/.*$/gm, "");
+    const wcore = readFileSync(resolve(repoRoot, "crates/srv-core/src/backend/wcore/mod.rs"), "utf8").replace(/\/\/.*$/gm, "");
 
     /** `horizontal(agent,vertical(sysinfo,swarm))`: splits and leaf views, in order. */
     function presetShape(node: PresetNode): string {
@@ -215,11 +215,11 @@ describe("DEFAULT_TAB_PRESET mirrors default_three_pane_tree", () => {
 
     it("names panes by the view each one opens on both sides", () => {
         // srv seeds `<name>_block` with view "<name>"; the preset's
-        // `defwidget@<name>` opens view "<name>" (crates/srv/src/config/widgets.json).
+        // `defwidget@<name>` opens view "<name>" (crates/srv-core/src/config/widgets.json).
         const seeded = new Map(
             [...wcore.matchAll(/(\w+)_meta\.insert\("view"\.to_string\(\), serde_json::json!\("(\w+)"\)\)/g)].map((m) => [m[1], m[2]])
         );
-        const widgetsJson = JSON.parse(readFileSync(resolve(repoRoot, "crates/srv/src/config/widgets.json"), "utf8"));
+        const widgetsJson = JSON.parse(readFileSync(resolve(repoRoot, "crates/srv-core/src/config/widgets.json"), "utf8"));
         const leaves = presetShape(DEFAULT_TAB_PRESET).match(/\w+(?=[,)]|$)/g) ?? [];
         expect(leaves.length).toBeGreaterThan(0);
         for (const leaf of leaves) {

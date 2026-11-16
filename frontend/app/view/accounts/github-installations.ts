@@ -3,7 +3,7 @@
 //
 // The installations of the AgentMux GitHub App a GitHub account is linked to, in its details
 // (Connect with GitHub, phase G2): what each row says, and the calls the section makes.
-// srv does the work (`github.installations`, crates/srv/src/identity/github_installs.rs).
+// srv does the work (`github.installations`, crates/srv-core/src/identity/github_installs.rs).
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

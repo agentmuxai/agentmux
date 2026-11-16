@@ -3,7 +3,7 @@
 
 /**
  * Pane rows for an agent's CLI, from srv's own `system` frames
- * (`crates/srv/src/backend/cli_notice.rs`;
+ * (`crates/srv-core/src/backend/cli_notice.rs`;
  * SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md §6.3):
  *
  * - `agentmux_cli_install` — "Installing Claude Code 2.1.285…", then
@@ -29,7 +29,7 @@
  *   output) hold 20 GiB or more ("This agent's build caches hold 24.0 GB") with a "Container settings" button. Sent
  *   once per agent per run of srv.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
- *   AgentMux is repairing it (`crates/srv/src/backend/mcp_health.rs`). Every
+ *   AgentMux is repairing it (`crates/srv-core/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
  *
  * Shared by the live path (`useAgentStream.ts`) and replay

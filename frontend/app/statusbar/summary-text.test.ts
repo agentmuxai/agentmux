@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { summarize } from "./summary";
-import { goesAheadText, partTip, rowButton, rowButtonLabel, summaryTip } from "./summary-text";
+import { endedLine, endedTip, goesAheadText, partTip, rowButton, rowButtonLabel, summaryTip } from "./summary-text";
 
 describe("summary text", () => {
     it("spells each part's count out, in the singular for one", () => {
@@ -37,5 +37,17 @@ describe("summary text", () => {
         expect(goesAheadText(72_000, 0)).toBe("goes ahead in 1:12 unless you deny");
         expect(goesAheadText(5_000, 0)).toBe("goes ahead in 0:05 unless you deny");
         expect(goesAheadText(0, 9_000)).toBe("goes ahead in 0:00 unless you deny");
+    });
+
+    it("says how an ask that ended ended, and the asks that ended in the tooltip", () => {
+        expect(endedLine({ how: "answered", since: 0, endedAt: 72_000 })).toBe("answered after 1:12");
+        expect(endedLine({ how: "closed", since: 10_000, endedAt: 17_000 })).toBe("closed unanswered after 0:07");
+        expect(endedTip(1)).toBe("1 ask ended in the last 2 minutes");
+        expect(endedTip(3)).toBe("3 asks ended in the last 2 minutes");
+        const gone = { key: "k", blockId: "b", name: "n", what: "w", since: 0, endedAt: 10_000, how: "answered" as const };
+        const none = summarize({ running: 0, items: [], apps: [], uses: [], requests: [], tasks: 0, ended: [gone] });
+        expect(summaryTip(none)).toBe("1 ask ended in the last 2 minutes. Click to see them");
+        const some = summarize({ running: 2, items: [], apps: [], uses: [], requests: [], tasks: 0, ended: [gone] });
+        expect(summaryTip(some)).toBe("2 agents are running, 1 ask ended in the last 2 minutes. Click to see them");
     });
 });

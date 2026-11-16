@@ -15,7 +15,7 @@ afterEach(() => fx?.remove());
 
 d("check-bundled-tools.sh", () => {
     const GATE = "check-bundled-tools.sh";
-    const CONFIG = "crates/srv/src/backend/agent_config.rs";
+    const CONFIG = "crates/srv-core/src/backend/agent_config.rs";
     const TOOLS = ["agentmux-mcp", "agentmux-bashwrap"];
     const PACKAGERS = ["scripts/package-portable.sh", "scripts/package-macos.sh", "scripts/stage-linux-runtime.sh"];
 
