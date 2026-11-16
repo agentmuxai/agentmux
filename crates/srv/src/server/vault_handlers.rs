@@ -39,7 +39,6 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
-/// The file the host chose, which must be an absolute path.
 /// The host's export to the file the person chose: the entries named (all when none is), in the format asked for.
 fn export(store: &crate::backend::storage::store::Store, body: &Value) -> Result<vault::transfer::ExportResult, String> {
     let path = file_path(body)?;
@@ -59,6 +58,7 @@ fn export(store: &crate::backend::storage::store::Store, body: &Value) -> Result
     }
 }
 
+/// The file the host chose, which must be an absolute path.
 fn file_path(body: &Value) -> Result<std::path::PathBuf, String> {
     let p = std::path::PathBuf::from(body.get("path").and_then(Value::as_str).unwrap_or(""));
     if !p.is_absolute() {

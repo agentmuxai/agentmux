@@ -200,7 +200,7 @@ export async function exportVault(args: { ids?: string[]; passphrase: string; de
     const relay = getApi()?.approvals?.vaultExport;
     if (!relay) throw new Error("Export needs the AgentMux desktop app.");
     // `links_only`: a `.vault` file of the linked entries, which hold no value; srv leaves every other entry out.
-    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format, ...(args.linksOnly ? { links_only: true } : {}) })) as {
+    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format, links_only: args.linksOnly || undefined })) as {
         cancelled?: boolean;
         count?: number;
         file_name?: string;

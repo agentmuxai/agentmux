@@ -303,7 +303,8 @@ const PREVIEW_FIRST: usize = 5;
 fn fingerprint(kind: &kinds::Kind, fields: &BTreeMap<String, String>, parts: &Parts) -> Option<String> {
     if linked::is_linked(fields) {
         let place = Link::of(fields)?;
-        return Some(format!("link|{}|{}|{}", kind.name, place.text(), place.region));
+        // Each field on its own: a `#` or a `|` in a location must not make two places one.
+        return serde_json::to_string(&("link", kind.name, &place.kind, &place.location, &place.key, &place.region)).ok();
     }
     if kind.name == "login" {
         let site = fields.get("site")?.trim().trim_end_matches('/').to_lowercase();

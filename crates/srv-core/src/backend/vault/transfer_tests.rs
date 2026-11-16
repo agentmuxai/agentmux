@@ -198,6 +198,19 @@ fn an_import_takes_a_link_as_a_link_and_knows_it_again_by_its_place() {
     let said = fields_of(&s, &invoice);
     assert_eq!((said["link"].as_str(), said["rotated"].as_str(), said["readers"].lines().count()), ("only", "2026-11-02", 2));
     assert!(all_parts(&s, &invoice).is_empty());
+
+    // A place is its fields, not the line it is written as: a `#` in a location is not a key.
+    let other = |label: &str, location: &str, key: &str| {
+        let said = [("link", "only"), ("source_kind", "other"), ("source_location", location), ("source_key", key)];
+        create(&s, NewEntry { kind: "api-key".into(), label: label.into(), fields: fields(&said), tags: vec![], parts: Parts::default() }).unwrap()
+    };
+    other("Console token", "https://example.com/#token", "");
+    let lookalike = r#"{"format":"agentmux-vault","version":1,"exported_at":0,"entries":[
+        {"kind":"api-key","label":"Another token","fields":{"link":"only","source_kind":"other","source_location":"https://example.com/","source_key":"token"},"parts":{}}
+    ]}"#;
+    let preview = inspect(&s, &vault_file(&dir, "lookalike.vault", lookalike), Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.duplicates), (1, 0));
+    cancel(&preview.token);
 }
 
 #[test]
