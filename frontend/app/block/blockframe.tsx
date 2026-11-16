@@ -1390,7 +1390,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     );
     const backdropVars = getPaneScope(nodeModel.blockId);
     const pickerOpen = isBackdropPickerOpen(nodeModel.blockId);
-    onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
+    // Only the live frame owns the picker's flag: a drag preview is a second frame for the same block, and its unmounting
+    // must not close the live pane's picker or delete the flag the live frame still holds.
+    if (!props.preview) onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
 
     return (
         <div

@@ -667,5 +667,6 @@
     "backdrop.polarity.dark": "Dark",
     "backdrop.polarity.light": "Light",
     "backdrop.readout": "text {{text}}, muted {{muted}}",
-    "backdrop.reset": "Reset"
+    "backdrop.reset": "Reset",
+    "backdrop.suppressed": "A backdrop isn't shown while High Contrast or forced colours are on."
 }

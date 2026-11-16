@@ -7,16 +7,21 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ set: vi.fn(async (..._a: unknown[]) => {}), light: false }));
+const h = vi.hoisted(() => ({ set: vi.fn(async (..._a: unknown[]) => {}), light: false, theme: "default" }));
 vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (...a: unknown[]) => h.set(...a) }));
 vi.mock("../block/pane-identity", () => ({ isLightThemeActive: () => h.light }));
+vi.mock("../store/window-appearance", () => ({ currentWindowTheme: () => h.theme }));
 
 import { BackdropPicker } from "./BackdropPicker";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
 import { getPaneScope, registerPaneScope, releasePaneScope, scopeVars } from "./scope";
 
+const realMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
 afterEach(() => {
+    h.theme = "default";
+    if (realMatchMedia) Object.defineProperty(window, "matchMedia", realMatchMedia);
+    else delete (window as { matchMedia?: unknown }).matchMedia;
     cleanup();
     h.set.mockClear();
     h.light = false;
@@ -176,6 +181,31 @@ describe("BackdropPicker", () => {
         fireEvent.click(swatch);
         fireEvent.focusIn(swatch);
         expect(seen).toEqual([]);
+    });
+
+    it("registers no scope while backdrops are suppressed, not for a preview and not when it closes: High Contrast, and forced colours", () => {
+        for (const how of ["high-contrast", "forced-colors"] as const) {
+            if (how === "high-contrast") h.theme = "high-contrast";
+            else Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: (q: string) => ({ matches: q === "(forced-colors: active)", addEventListener() {}, removeEventListener() {} }) });
+            const t = mount({ backdrop: teal });
+            expect(t.container.textContent, how).toContain("A backdrop isn't shown while High Contrast or forced colours are on.");
+            fireEvent.focus(radios(t.container)[1]);
+            fireEvent.mouseEnter(radios(t.container)[2]);
+            expect(getPaneScope("pk")(), `${how} preview`).toBeUndefined();
+            fireEvent.keyDown(radios(t.container)[1], { key: "Escape" });
+            expect(t.onClose, how).toHaveBeenCalledTimes(1);
+            expect(getPaneScope("pk")(), `${how} closed`).toBeUndefined();
+            cleanup();
+            h.theme = "default";
+            delete (window as { matchMedia?: unknown }).matchMedia;
+        }
+    });
+
+    it("says nothing about suppression, and previews as usual, when backdrops are showing", () => {
+        const t = mount({ backdrop: teal });
+        expect(t.container.textContent).not.toContain("isn't shown while High Contrast");
+        fireEvent.focus(radios(t.container)[1]);
+        expect(getPaneScope("pk")()?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
     });
 
     it("takes focus when it opens, so Esc works at once", () => {

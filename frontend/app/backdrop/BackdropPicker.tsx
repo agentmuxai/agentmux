@@ -8,10 +8,11 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, type JSX } fro
 import { isLightThemeActive } from "../block/pane-identity";
 import { deriveBuiltin } from "./builtins";
 import type { DerivedBackdrop } from "./ink";
-import { parseBackdrop, resolveBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
+import { parseBackdrop, type BackdropMeta, type BackdropPolarity } from "./meta";
 import { builtinOptions, builtinRecord, colorRecord, contrastReadout, parseHexInput, schemeFor } from "./picker-model";
 import { useDialogKeys } from "./picker-state";
 import { registerPaneScope, scopeVars } from "./scope";
+import { useBackdropSuppressed, useResolvedBackdrop } from "./usePaneBackdrop";
 
 import "./backdrop-picker.scss";
 
@@ -107,7 +108,9 @@ function ContrastReadout(props: { derived: DerivedBackdrop | undefined; missed: 
 export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     const appScheme = () => (isLightThemeActive() ? "light" : "dark");
     const record = createMemo(() => parseBackdrop(props.meta()?.backdrop));
-    const resolved = createMemo(() => resolveBackdrop(props.meta(), appScheme()));
+    // The same suppression as the pane's own scope: under High Contrast or forced colours nothing is registered, not even a preview.
+    const suppressed = useBackdropSuppressed();
+    const resolved = useResolvedBackdrop(props.meta, suppressed);
 
     const [polarity, setPolarity] = createSignal<BackdropPolarity>(record()?.polarity ?? "follow");
     const [hexText, setHexText] = createSignal(record()?.kind === "color" ? (record()!.hex ?? "") : "");
@@ -129,7 +132,7 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
     onCleanup(restore);
 
     const preview = (id: string | undefined) => {
-        const derived = id ? deriveBuiltin(id, scheme()) : undefined;
+        const derived = id && !suppressed() ? deriveBuiltin(id, scheme()) : undefined;
         if (derived) registerPaneScope(props.blockId, scopeVars(derived));
         else restore();
     };
@@ -174,6 +177,10 @@ export function BackdropPicker(props: BackdropPickerProps): JSX.Element {
                 onChange={choose}
                 onPreview={preview}
             />
+
+            <Show when={suppressed()}>
+                <Notice tone="accent">{t("backdrop.suppressed")}</Notice>
+            </Show>
 
             <CustomColourField
                 text={hexText()}
