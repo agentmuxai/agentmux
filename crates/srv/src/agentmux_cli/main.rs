@@ -16,6 +16,7 @@
 
 mod doctor;
 mod logs;
+mod uninstall;
 mod process;
 mod service;
 mod settings;
@@ -35,14 +36,19 @@ use state::ServerState;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// What this command is called where the person runs it: `agentmux`, or `agentmux-server`, the name
+/// What this command is called where the person runs it: `agentmux`, or `agentmux-headless`, the name
 /// the install always links and the one to use on a machine whose `agentmux` is the desktop app's.
+/// (`agentmux-server` is the name of an install from before the rename, kept as it was typed.)
 fn invoked_name() -> &'static str {
     static NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     NAME.get_or_init(|| {
         let argv0 = std::env::args_os().next().map(PathBuf::from);
         let name = argv0.as_deref().and_then(Path::file_stem).map(|n| n.to_string_lossy().into_owned());
-        if name.as_deref() == Some("agentmux-server") { "agentmux-server" } else { "agentmux" }
+        match name.as_deref() {
+            Some("agentmux-headless") => "agentmux-headless",
+            Some("agentmux-server") => "agentmux-server",
+            _ => "agentmux",
+        }
     })
 }
 
@@ -72,7 +78,7 @@ const START_WAIT: Duration = Duration::from_secs(120);
 const STOP_WAIT: Duration = Duration::from_secs(30);
 
 #[derive(Parser, Debug)]
-#[command(name = "agentmux", version, about = "Run and manage the AgentMux server on this machine")]
+#[command(name = "agentmux", version, about = "Run and manage AgentMux Headless on this machine")]
 struct Cli {
     /// The server's channel: its own data, settings and agents, apart from a desktop AgentMux's.
     #[arg(long, global = true, default_value = DEFAULT_CHANNEL)]
@@ -102,11 +108,11 @@ struct ServerArgs {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Run the server in this terminal (what a service runs): prepare this version's data, then become the server.
+    /// Run AgentMux Headless in this terminal (what a service runs): prepare this version's data, then become the server.
     Run(ServerArgs),
-    /// Start the server in the background.
+    /// Start AgentMux Headless in the background.
     Start(ServerArgs),
-    /// Ask the server to shut down.
+    /// Ask AgentMux Headless to shut down.
     Stop {
         /// End it at once if it has not left 30 seconds after being asked.
         #[arg(long)]
@@ -116,28 +122,28 @@ enum Cmd {
     Restart(ServerArgs),
     /// The first-run choices: port, where secrets live, a service that starts it at login; then start it and sign in.
     Setup(setup::SetupArgs),
-    /// Check this machine for the server, and say what to do about each problem.
+    /// Check this machine for AgentMux Headless, and say what to do about each problem.
     Doctor {
         #[arg(long)]
         json: bool,
     },
-    /// Is the server running, and where.
+    /// Is AgentMux Headless running, and where.
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Sign a browser in: opens it at the server's address, then asks you to confirm in this terminal.
+    /// Sign a browser in: opens it at AgentMux Headless's address, then asks you to confirm in this terminal.
     Open {
         /// Print the one-time line for your own browser instead of opening one.
         #[arg(long)]
         print: bool,
-        /// The address your browser reaches the server on, when it is not the server's own (the end of a tunnel).
+        /// The address your browser reaches AgentMux Headless on, when it is not its own (the end of a tunnel).
         #[arg(long)]
         origin: Option<String>,
     },
     /// Sign every browser out.
     Logout,
-    /// The server's log.
+    /// The log of AgentMux Headless.
     Logs {
         /// How many of the last lines to show (50 when `--since` is not given).
         #[arg(long)]
@@ -148,6 +154,18 @@ enum Cmd {
         /// Keep showing new lines until interrupted.
         #[arg(short, long)]
         follow: bool,
+    },
+    /// How to update: the install command that replaces this version.
+    Update,
+    /// Remove AgentMux Headless that the install command put here: its login service and its program folder.
+    Uninstall {
+        /// Also delete this channel's own folder (its settings, key and log). Your agents, accounts and history
+        /// are in the shared folder and are never removed.
+        #[arg(long)]
+        remove_data: bool,
+        /// Do not ask before deleting with --remove-data.
+        #[arg(long)]
+        yes: bool,
     },
     /// The version.
     Version {
@@ -197,6 +215,11 @@ fn dispatch(cli: Cli) -> i32 {
                 2
             }
         },
+        Cmd::Update => {
+            tell!("{}", uninstall::update_text());
+            0
+        }
+        Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
         Cmd::Version { .. } => unreachable!("answered above"),
     }
 }
@@ -281,10 +304,10 @@ fn find_srv_in(bin_dir: &Path, flag: Option<&Path>) -> Result<PathBuf, String> {
             if abs.file_name().is_some_and(|n| n == wanted) {
                 Ok(abs)
             } else {
-                Err(format!("the server program must be named {wanted} (it is found by that name), not {}", abs.display()))
+                Err(format!("the program that runs AgentMux Headless must be named {wanted} (it is found by that name), not {}", abs.display()))
             }
         }
-        _ => Err(format!("the server program is not at {} (--srv-bin names another)", path.display())),
+        _ => Err(format!("the program that runs AgentMux Headless is not at {} (--srv-bin names another)", path.display())),
     }
 }
 
@@ -317,13 +340,13 @@ fn cmd_version(channel: &str, json: bool) -> i32 {
 
 fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if !cfg!(unix) {
-        return fail("the server package is for Linux and macOS in this release");
+        return fail("AgentMux Headless is for Linux and macOS in this release");
     }
     if let Err(e) = paths.ensure_dirs() {
         return fail(&format!("cannot create the channel's folders: {e}"));
     }
     if let Some(other) = running(paths).filter(|s| s.pid != std::process::id()) {
-        warn!("the server is already running (pid {}) at {}", other.pid, other.url());
+        warn!("AgentMux Headless is already running (pid {}) at {}", other.pid, other.url());
         return 1;
     }
     let bin_dir = match exe_dir() {
@@ -342,7 +365,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     let secret_store = args.secret_store.unwrap_or(settings.secret_store);
     let public_origin = args.public_origin.clone().or(settings.public_origin);
     if doctor::system_certs_found() == Some(false) {
-        warn!("no system certificates found: the server's https requests will fail. Install the ca-certificates package, or run `agentmux doctor`.");
+        warn!("no system certificates found: its https requests will fail. Install the ca-certificates package, or run `agentmux doctor`.");
     }
     if let Err(code) = prepare_data(paths, &srv) {
         return code;
@@ -360,7 +383,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         srv: srv.clone(),
     };
     if let Err(e) = state::write(&paths.instance_dir, &record) {
-        return fail(&format!("cannot write the server's record: {e}"));
+        return fail(&format!("cannot write the record of AgentMux Headless: {e}"));
     }
     let mut cmd = Command::new(&srv);
     cmd.arg("--headless")
@@ -379,7 +402,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
 /// `agentmux-srv migrate --prepare` for this version's data: carries the previous version's data
 /// forward and runs the pending migrations. It does nothing when there is nothing to do.
 fn prepare_data(paths: &DataPaths, srv: &Path) -> Result<(), i32> {
-    let log = |e: std::io::Error| fail(&format!("cannot open the server's log: {e}"));
+    let log = |e: std::io::Error| fail(&format!("cannot open the log of AgentMux Headless: {e}"));
     let out = state::open_log(&paths.instance_dir).map_err(log)?;
     let err = out.try_clone().map_err(log)?;
     let status = Command::new(srv)
@@ -425,17 +448,17 @@ fn refused_beside_another(paths: &DataPaths) -> i32 {
 fn become_server(mut cmd: Command) -> i32 {
     use std::os::unix::process::CommandExt;
     let e = cmd.exec();
-    fail(&format!("cannot start the server: {e}"))
+    fail(&format!("cannot start AgentMux Headless: {e}"))
 }
 
 #[cfg(not(unix))]
 fn become_server(_cmd: Command) -> i32 {
-    fail("the server package is for Linux and macOS in this release")
+    fail("AgentMux Headless is for Linux and macOS in this release")
 }
 
 fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if !cfg!(unix) {
-        return fail("the server package is for Linux and macOS in this release");
+        return fail("AgentMux Headless is for Linux and macOS in this release");
     }
     if let Some(code) = service_ignores(paths, args) {
         return code;
@@ -462,7 +485,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if let Err(e) = exe_dir().and_then(|d| find_srv_in(&d, args.srv_bin.as_deref()).and_then(|_| find_web_in(&d, args.web_dir.as_deref()))) {
         return fail(&e);
     }
-    let log = |e: std::io::Error| fail(&format!("cannot open the server's log: {e}"));
+    let log = |e: std::io::Error| fail(&format!("cannot open the log of AgentMux Headless: {e}"));
     let out = match state::open_log(&paths.instance_dir) {
         Ok(f) => f,
         Err(e) => return log(e),
@@ -492,7 +515,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     process::detach(&mut cmd);
     let child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return fail(&format!("cannot start the server: {e}")),
+        Err(e) => return fail(&format!("cannot start AgentMux Headless: {e}")),
     };
     wait_for_server(paths, Some(child))
 }
@@ -519,7 +542,7 @@ fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) ->
             return 3;
         }
         if let Some(Ok(Some(status))) = child.as_mut().map(std::process::Child::try_wait) {
-            warn!("the server stopped while starting ({status}). The end of its log:");
+            warn!("AgentMux Headless stopped while starting ({status}). The end of its log:");
             show_log_tail(paths, 15);
             if log_mentions(paths, "Address already in use") {
                 warn!("that port is in use by another program: choose another with `agentmux setup --port <port>`.");
@@ -527,7 +550,7 @@ fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) ->
             return 3;
         }
         if begun.elapsed() > START_WAIT {
-            warn!("the server has not answered after {} seconds; it is still starting. See `agentmux logs`.", START_WAIT.as_secs());
+            warn!("AgentMux Headless has not answered after {} seconds; it is still starting. See `agentmux logs`.", START_WAIT.as_secs());
             return 3;
         }
         std::thread::sleep(Duration::from_millis(300));
@@ -561,19 +584,19 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
     let stopped = match user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
         Some(home) => service::control(&home, &paths.channel, "stop"),
         None if process::terminate(record.pid) => Ok(()),
-        None => Err(format!("could not signal the server (pid {})", record.pid)),
+        None => Err(format!("could not signal AgentMux Headless (pid {})", record.pid)),
     };
     if let Err(e) = stopped {
         return fail(&e);
     }
     if !wait_gone(record.pid, STOP_WAIT) {
         if !force {
-            warn!("the server has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
+            warn!("AgentMux Headless has not left after {} seconds. `agentmux stop --force` ends it at once.", STOP_WAIT.as_secs());
             return 3;
         }
         process::kill(record.pid);
         if !wait_gone(record.pid, Duration::from_secs(5)) {
-            return fail("the server did not end");
+            return fail("AgentMux Headless did not end");
         }
     }
     state::remove(&paths.instance_dir);
@@ -803,7 +826,7 @@ fn setup_server_args(args: &setup::SetupArgs) -> ServerArgs {
 /// `agentmux-srv open` or `logout`, run for the server of this channel with the same terminal.
 fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
     let Some(record) = running(paths) else {
-        warn!("the server is not running. Start it with `agentmux start`.");
+        warn!("AgentMux Headless is not running. Start it with `agentmux start`.");
         return 1;
     };
     let srv = if record.srv.is_file() { record.srv.clone() } else { exe_dir().and_then(|d| find_srv_in(&d, None)).unwrap_or(record.srv.clone()) };
@@ -817,6 +840,67 @@ fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
         Ok(s) => s.code().unwrap_or(3),
         Err(e) => fail(&format!("cannot run {}: {e}", srv.display())),
     }
+}
+
+/// Remove what the install command put in place: stop it, take away its login service, its links and its program
+/// folder, and (only with `--remove-data`, asked first) this channel's own folder.
+fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
+    let exe = match std::env::current_exe().and_then(|p| p.canonicalize()) {
+        Ok(p) => p,
+        Err(e) => return fail(&format!("cannot find this command: {e}")),
+    };
+    let Some(base) = uninstall::install_of(&exe) else {
+        return fail("this copy of AgentMux Headless was not put here by the install command, so there is no install folder to remove (a copy you unpacked yourself is removed by deleting its folder)");
+    };
+    let home = match user_home() {
+        Ok(h) => h,
+        Err(e) => return fail(&e),
+    };
+    let data = if remove_data {
+        match uninstall::data_to_remove(&paths.instance_dir, &paths.channel) {
+            Some(d) => Some(d),
+            None => return fail(&format!("{} is not a channel folder, so --remove-data will not delete it", paths.instance_dir.display())),
+        }
+    } else {
+        None
+    };
+    if let (Some(dir), false) = (&data, yes) {
+        let mut terminal = setup::Terminal;
+        if !setup::Ask::interactive(&terminal) {
+            return fail("--remove-data deletes this channel's settings, key and log, and there is no terminal to ask on: add --yes");
+        }
+        if !setup::Ask::yes_no(&mut terminal, &format!("Also delete {} (its settings, key and log)?", dir.display()), false) {
+            tell!("Nothing was removed.");
+            return 1;
+        }
+    }
+    match service::remove(&home, &paths.channel) {
+        Ok(Some(file)) => tell!("Removed the login service ({}).", file.display()),
+        Ok(None) => {}
+        Err(e) => return fail(&e),
+    }
+    let code = cmd_stop(paths, false);
+    if code != 0 {
+        return code;
+    }
+    for link in uninstall::links_into(&home.join(".local").join("bin"), &base) {
+        match std::fs::remove_file(&link) {
+            Ok(()) => tell!("Removed {}.", link.display()),
+            Err(e) => return fail(&format!("cannot remove {}: {e}", link.display())),
+        }
+    }
+    if let Err(e) = std::fs::remove_dir_all(&base) {
+        return fail(&format!("cannot remove {}: {e}", base.display()));
+    }
+    tell!("Removed {}.", base.display());
+    match data {
+        Some(dir) => match std::fs::remove_dir_all(&dir) {
+            Ok(()) => tell!("Removed {}.", dir.display()),
+            Err(e) => return fail(&format!("cannot remove {}: {e}", dir.display())),
+        },
+        None => tell!("This channel's settings, key and log stay in {} (`--remove-data` deletes them). Your agents, accounts and history are in the shared folder and were not touched.", paths.instance_dir.display()),
+    }
+    0
 }
 
 fn cmd_logs(paths: &DataPaths, lines: Option<usize>, since: Option<Duration>, follow: bool) -> i32 {
@@ -1087,6 +1171,19 @@ mod tests {
             state::clear_blocked(&paths.instance_dir);
             assert!(state::read_blocked(&paths.instance_dir).is_none());
         });
+    }
+
+    #[test]
+    fn update_and_uninstall_parse_and_remove_data_is_never_the_default() {
+        assert!(matches!(Cli::try_parse_from(["agentmux", "update"]).unwrap().command, Cmd::Update));
+        match Cli::try_parse_from(["agentmux", "uninstall"]).unwrap().command {
+            Cmd::Uninstall { remove_data, yes } => assert!(!remove_data && !yes),
+            _ => panic!("not uninstall"),
+        }
+        match Cli::try_parse_from(["agentmux", "uninstall", "--remove-data", "--yes"]).unwrap().command {
+            Cmd::Uninstall { remove_data, yes } => assert!(remove_data && yes),
+            _ => panic!("not uninstall"),
+        }
     }
 
     #[test]

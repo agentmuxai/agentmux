@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16`](SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md) | Spec: AgentMux Headless: one name for the server package, offered next to Standard on Windows, macOS and Linux (task #2598, build #2599) | active | 2026-11-16 |  |
 | [`SPEC_PANE_BACKGROUND_THEMES_2026_11_15`](SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md) | Spec: Pane backdrops: a background that brings its own readable foreground | active | 2026-11-15 |  |
 | [`SPEC_REVIEWS_PANE_2026_11_15`](SPEC_REVIEWS_PANE_2026_11_15.md) | Spec: a Reviews pane, every task's pull request and its review state in one viewer | active | 2026-11-15 |  |
 | [`SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15`](SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md) | Spec: one compact status bar summary, and Vault requests that notify there | active | 2026-11-15 |  |

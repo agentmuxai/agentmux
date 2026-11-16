@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Assemble the AgentMux server package: the programs and the built web UI, as one tarball per platform.
+# Assemble the AgentMux Headless package: the programs and the built web UI, as one tarball per platform.
 #
 #   scripts/package-server.sh --os <linux|macos> --arch <x64|arm64> --bin-dir <dir> --web-dir <dir> --out <dir> [--version X.Y.Z]
 #
 # --bin-dir holds the four built programs (agentmux, agentmux-srv, agentmux-mcp, agentmux-bashwrap), e.g. target/release;
 # --web-dir is the web UI build (node scripts/build-web.mjs, dist/web). It writes
-#   <out>/agentmux-server-<version>-<os>-<arch>.tar.gz
-# whose one top folder holds bin/, web/ and VERSION. scripts/install/install.sh --server installs it, after checking it
+#   <out>/agentmux-headless-<version>-<os>-<arch>.tar.gz
+# whose one top folder holds bin/, web/ and VERSION. scripts/install/install.sh --headless installs it, after checking it
 # against the release's signed manifest. Design: docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md §4.
 set -euo pipefail
 
@@ -40,7 +40,7 @@ if [ -z "$VERSION" ]; then
 fi
 printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || die "the version '$VERSION' does not look like 0.60.14"
 
-TOP="agentmux-server-${VERSION}-${OS}-${ARCH}"
+TOP="agentmux-headless-${VERSION}-${OS}-${ARCH}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$TOP/bin" "$OUT"

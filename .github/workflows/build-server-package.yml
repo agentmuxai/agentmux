@@ -275,7 +275,7 @@ jobs:
         if: ${{ !(matrix.os == 'macos' && needs.plan.outputs.sign == 'true') }}
         run: |
           set -eu
-          tarball=$(ls dist-server/agentmux-server-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
+          tarball=$(ls dist-server/agentmux-headless-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
           test "$(ls dist-server/*.tar.gz | wc -l | tr -d ' ')" = 1
           mkdir unpacked
           tar -xzf "$tarball" -C unpacked
@@ -322,7 +322,7 @@ jobs:
         if: ${{ !(matrix.os == 'macos' && needs.plan.outputs.sign == 'true') }}
         with:
           name: server-package-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist-server/agentmux-server-*.tar.gz
+          path: dist-server/agentmux-headless-*.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -514,7 +514,7 @@ jobs:
       - name: Run the package
         run: |
           set -eu
-          tarball=$(ls dist-server/agentmux-server-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
+          tarball=$(ls dist-server/agentmux-headless-*-${{ matrix.os }}-${{ matrix.arch }}.tar.gz)
           test "$(ls dist-server/*.tar.gz | wc -l | tr -d ' ')" = 1
           mkdir unpacked
           tar -xzf "$tarball" -C unpacked
@@ -559,6 +559,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: server-package-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist-server/agentmux-server-*.tar.gz
+          path: dist-server/agentmux-headless-*.tar.gz
           if-no-files-found: error
           retention-days: 14

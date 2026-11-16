@@ -10,9 +10,9 @@
 #   Linux  the portable tarball, into ~/.local/share/agentmux (no root)
 #   macOS  the .dmg, copied to /Applications (or ~/Applications)
 #
-# With --server it installs the AgentMux server package (no desktop app: a server whose web UI is a browser on its own
-# loopback address) from the same signed release, into ~/.agentmux/server, on Linux x64 or arm64 and macOS arm64 (there is
-# no Intel Mac server package).
+# With --headless it installs AgentMux Headless (no desktop app: it runs in the background and its web UI is a browser on
+# its own loopback address) from the same signed release, into ~/.agentmux/headless, on Linux x64 or arm64 and macOS arm64
+# (there is no Intel Mac Headless package). --server is the same option under its old name, accepted for two more releases.
 #
 # Plain text, no prompts, ASCII only. Run it with --help for the options.
 # Design: docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md
@@ -62,9 +62,9 @@ Usage: install.sh [options]
   --no-launch               do not start AgentMux when done
   --force                   install even if AgentMux is already installed
   --require-signature       fail when the release's signature cannot be checked here
-  --server                  install the AgentMux server (no desktop app) into ~/.agentmux/server, from the signed release
+  --headless                install AgentMux Headless (no desktop app) into ~/.agentmux/headless, from the signed release
                             (Linux x64 and arm64, macOS arm64)
-  --setup                   with --server: then run  agentmux setup --yes --no-open  (a user service that starts at login)
+  --setup                   with --headless: then run  agentmux setup --yes --no-open  (a user service that starts at login)
   --help                    this text
 
 Environment: AGENTMUX_INSTALL_ROOT is a prefix for the paths it looks at (used by its tests).
@@ -81,7 +81,7 @@ while [ $# -gt 0 ]; do
         --no-launch) NO_LAUNCH=1; shift ;;
         --force) FORCE=1; shift ;;
         --require-signature) REQUIRE_SIGNATURE=1; shift ;;
-        --server) SERVER=1; shift ;;
+        --headless | --server) SERVER=1; shift ;; # --server: the name before the rename, kept for two releases
         --setup) SETUP=1; shift ;;
         --interactive) shift ;; # accepted and ignored: this script never prompts
         --help | -h) usage; exit 0 ;;
@@ -90,8 +90,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$METHOD" in auto | package-manager | download) ;; *) die "--method is auto, package-manager or download" ;; esac
-if [ "$SERVER" = 1 ] && [ "$METHOD" = package-manager ]; then die "--server installs from the release download: it has no package-manager method"; fi
-if [ "$SETUP" = 1 ] && [ "$SERVER" = 0 ]; then die "--setup is for --server"; fi
+if [ "$SERVER" = 1 ] && [ "$METHOD" = package-manager ]; then die "--headless installs from the release download: it has no package-manager method"; fi
+if [ "$SETUP" = 1 ] && [ "$SERVER" = 0 ]; then die "--setup is for --headless"; fi
 if [ -n "$VERSION" ]; then
     printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || die "--version must look like 0.60.14"
 fi
@@ -112,11 +112,11 @@ case "$ARCH_RAW" in
     arm64 | aarch64) ARCH=arm64 ;;
     *) die "unsupported processor: $ARCH_RAW" ;;
 esac
-# The desktop app has no arm64 Linux or Intel Mac build; the server package has Linux x64, Linux arm64 and macOS arm64
-# (the release builds no Intel Mac server).
+# The desktop app has no arm64 Linux or Intel Mac build; Headless has Linux x64, Linux arm64 and macOS arm64
+# (the release builds no Intel Mac Headless).
 if [ "$SERVER" = 0 ] && [ "$OS" = linux ] && [ "$ARCH" != x86_64 ]; then die "there is no arm64 Linux build yet"; fi
 if [ "$SERVER" = 0 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac build: AgentMux for macOS needs Apple Silicon"; fi
-if [ "$SERVER" = 1 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac server package: the AgentMux server for macOS needs Apple Silicon (Linux x64 and arm64 have one)"; fi
+if [ "$SERVER" = 1 ] && [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then die "there is no Intel Mac Headless package: AgentMux Headless for macOS needs Apple Silicon (Linux x64 and arm64 have one)"; fi
 
 # ---- tools ----
 have() { command -v "$1" > /dev/null 2>&1; }
@@ -278,7 +278,7 @@ download_verified() {
     dv_man="$(tr -d ' \n\r\t' < "$TMP/manifest.json")"
     dv_entry="$(printf '%s' "$dv_man" | grep -o '{"name":"'"$(printf '%s' "$dv_name" | sed 's/\./\\./g')"'","size":[0-9]*,"sha256":"[0-9a-f]*"}' | head -n 1 || true)"
     if [ -z "$dv_entry" ]; then
-        case "$dv_name" in agentmux-server-*) die "this release has no server package for this system (the signed manifest does not list $dv_name)" ;; esac
+        case "$dv_name" in agentmux-headless-* | agentmux-server-*) die "this release has no AgentMux Headless package for this system (the signed manifest does not list $dv_name)" ;; esac
         die "the signed manifest does not list $dv_name"
     fi
     dv_want_size="$(json_field "$dv_entry" size)"
@@ -408,34 +408,41 @@ launch_macos() {
     open -a AgentMux 2> /dev/null || open "/Applications/AgentMux.app" 2> /dev/null || open "$HOME/Applications/AgentMux.app" || true
 }
 
-# ---- the server package ----
-# Is the name `agentmux` free for the server's program? The desktop app's launcher has that name, and is not replaced.
+# ---- AgentMux Headless ----
+# Where an install from before the rename put its program (its `current` link's program): a link to it is this install's own.
+OLD_TARGET="$HOME/.agentmux/server/current/bin/agentmux"
+
+# Is the name `agentmux` free for Headless's program? The desktop app's launcher has that name, and is not replaced.
 agentmux_name_is_free() { # <the program the link points at>
     link="$HOME/.local/bin/agentmux"
     # Whatever is at the link's path that is not this install's own link (the desktop's launcher, say) is not replaced.
     if [ -e "$link" ] || [ -L "$link" ]; then
-        [ "$(readlink "$link" 2> /dev/null || true)" = "$1" ] || return 1
+        here="$(readlink "$link" 2> /dev/null || true)"
+        [ "$here" = "$1" ] || [ "$here" = "$OLD_TARGET" ] || return 1
     fi
     found="$(command -v agentmux 2> /dev/null || true)"
-    [ -z "$found" ] || [ "$found" = "$link" ] || [ "$(readlink "$found" 2> /dev/null || true)" = "$1" ]
+    if [ -z "$found" ] || [ "$found" = "$link" ]; then return 0; fi
+    there="$(readlink "$found" 2> /dev/null || true)"
+    [ "$there" = "$1" ] || [ "$there" = "$OLD_TARGET" ]
 }
 
 install_server() {
     have tar || die "tar is needed"
     resolve_version
     case "$ARCH" in x86_64) sarch=x64 ;; *) sarch="$ARCH" ;; esac
-    sname="agentmux-server-${VERSION}-${OS}-${sarch}"
-    base="$HOME/.agentmux/server"
+    sname="agentmux-headless-${VERSION}-${OS}-${sarch}"
+    base="$HOME/.agentmux/headless"
     dest="$base/$VERSION"
     target="$base/current/bin/agentmux"
-    say "installing the AgentMux server $VERSION into $dest"
+    say "installing AgentMux Headless $VERSION into $dest"
     if [ "$DRY_RUN" = 1 ]; then
         printf '+ download %s.tar.gz and check it against the signed manifest\n' "$sname"
         printf '+ tar -xzf %s.tar.gz into %s\n' "$sname" "$dest"
         printf '+ ln -sfn %s %s/current\n' "$dest" "$base"
-        printf '+ ln -sf %s %s/.local/bin/agentmux-server\n' "$target" "$HOME"
+        printf '+ ln -sf %s %s/.local/bin/agentmux-headless\n' "$target" "$HOME"
         if agentmux_name_is_free "$target"; then printf '+ ln -sf %s %s/.local/bin/agentmux\n' "$target" "$HOME"; fi
-        if [ "$SETUP" = 1 ]; then printf '+ agentmux-server setup --yes --no-open --service\n'; fi
+        if [ -d "$HOME/.agentmux/server/current" ]; then printf '+ say that the install in %s/.agentmux/server is no longer used\n' "$HOME"; fi
+        if [ "$SETUP" = 1 ]; then printf '+ agentmux-headless setup --yes --no-open --service\n'; fi
         return
     fi
     mktmp
@@ -446,26 +453,32 @@ install_server() {
     tar -xzf "$TMP/$sname.tar.gz" -C "$dest.new" --strip-components=1 || { rm -rf "$dest.new"; die "could not unpack $sname.tar.gz"; }
     if [ ! -x "$dest.new/bin/agentmux" ] || [ ! -x "$dest.new/bin/agentmux-srv" ] || [ ! -f "$dest.new/web/index.html" ]; then
         rm -rf "$dest.new"
-        die "$sname.tar.gz is not an AgentMux server package (no bin/agentmux, bin/agentmux-srv or web/index.html)"
+        die "$sname.tar.gz is not an AgentMux Headless package (no bin/agentmux, bin/agentmux-srv or web/index.html)"
     fi
-    # The server of the version being replaced keeps running from its own folder until it is restarted.
+    # The program of the version being replaced keeps running from its own folder until it is restarted.
     rm -rf "$dest"
     mv "$dest.new" "$dest"
     ln -sfn "$dest" "$base/current"
-    # `agentmux-server` is always this program's name on the PATH; `agentmux` too when nothing else has it.
-    cmd=agentmux-server
-    ln -sf "$target" "$HOME/.local/bin/agentmux-server"
+    # `agentmux-headless` is always this program's name on the PATH; `agentmux` too when nothing else has it.
+    cmd=agentmux-headless
+    ln -sf "$target" "$HOME/.local/bin/agentmux-headless"
     if agentmux_name_is_free "$target"; then
         ln -sf "$target" "$HOME/.local/bin/agentmux"
         cmd=agentmux
     else
-        say "something else is already named agentmux here (the desktop app?): run this one as  agentmux-server"
+        say "something else is already named agentmux here (the desktop app?): run this one as  agentmux-headless"
+    fi
+    # An install from before the rename lives in ~/.agentmux/server: its link name goes, its folder is named so it can be removed.
+    if [ "$(readlink "$HOME/.local/bin/agentmux-server" 2> /dev/null || true)" = "$OLD_TARGET" ]; then rm -f "$HOME/.local/bin/agentmux-server"; fi
+    if [ -d "$HOME/.agentmux/server/current" ]; then
+        say "the install in ~/.agentmux/server (from before the rename) is no longer used: stop its server, then remove it with  rm -rf ~/.agentmux/server"
+        say "a login service made by that install still points there: run  $cmd setup --service  to point it at this one"
     fi
     path_hint "$cmd"
     if [ "$SETUP" = 1 ]; then
         "$HOME/.local/bin/$cmd" setup --yes --no-open --service || die "setup did not finish: run  $cmd doctor  to see why"
     else
-        say "next: run  $cmd setup  to choose a port, start the server and sign in"
+        say "next: run  $cmd setup  to choose a port, start AgentMux Headless and sign in"
     fi
 }
 
