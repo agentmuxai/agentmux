@@ -11,7 +11,7 @@
 // tooltip, StatusBarTip.tsx, and is left alone.)
 
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
-import { isPrimaryButtonDown } from "@/app/util/pointer-drag-state";
+import { isPrimaryButtonDown, isRestingAtPress } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 import "./anchored-popover.scss";
 
@@ -239,6 +239,13 @@ function onPointerOver(t: TipState, e: Event): void {
     if (isPrimaryButtonDown()) return;
     const text = takeTitle(el);
     if (!text) return scheduleClose(t);
+    if (isRestingAtPress(e as PointerEvent)) {
+        // It came to be under a pointer still resting where it pressed (the click redrew the control):
+        // quiet, like the element that was clicked, until the pointer leaves it.
+        if (t.current) closeNow(t);
+        t.held = el;
+        return;
+    }
     openFor(t, el, text);
 }
 

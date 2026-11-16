@@ -14,7 +14,13 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
+import { forgetPressPoint } from "../frontend/app/util/pointer-drag-state";
+
+// jsdom gives every pointer event the position 0,0 unless a test says otherwise, so a hover in one test would
+// read as a pointer still resting where an earlier test clicked, and hover panels stay shut for that
+// (isRestingAtPress). Each test starts with no press.
+beforeEach(() => forgetPressPoint());
 
 // A closed dialog leaves a stand-in backdrop in the page for 120 ms while it fades (element/modal-exit-fade.ts).
 // Tests that snapshot the body or query `.modal-backdrop` after a close would see it, so it is off here;

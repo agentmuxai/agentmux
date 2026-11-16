@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { autoUpdate, computePosition } from "@floating-ui/dom";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { Tooltip } from "./tooltip";
 import * as pointerDragState from "@/app/util/pointer-drag-state";
 
@@ -105,6 +105,165 @@ describe("Tooltip", () => {
 
         spy.mockReturnValue(false);
         fireEvent.mouseEnter(screen.getByText("anchor").parentElement!);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+    });
+});
+
+/** A press is the person acting on the anchor, not reading it, as with the tooltip for titled elements. */
+describe("Tooltip and a press on its anchor", () => {
+    afterEach(() => {
+        cleanup();
+        // Lets go of the button and of the press point, which the pointer state keeps for the whole page.
+        fireEvent.pointerUp(window);
+        window.dispatchEvent(new Event("blur"));
+    });
+
+    const AT = { clientX: 100, clientY: 20 };
+    const AWAY = { clientX: 300, clientY: 200 };
+    const mount = (inner = <button type="button">anchor</button>, forceOpen?: () => boolean) => {
+        render(() => (
+            <Tooltip content={<span>tip content</span>} forceOpen={forceOpen?.()}>
+                {inner}
+            </Tooltip>
+        ));
+        return screen.getByText("anchor").parentElement!;
+    };
+    const click = (el: Element) => {
+        fireEvent.pointerDown(el, AT);
+        fireEvent.pointerUp(el, AT);
+        fireEvent.click(el, AT);
+    };
+
+    it("goes at once when the anchor is pressed, and stays shut while the pointer rests there", async () => {
+        const anchor = mount();
+        fireEvent.mouseEnter(anchor);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+
+        fireEvent.pointerDown(screen.getByText("anchor"), AT);
+        await tick();
+        // No linger: the panel is out of the page, not fading over what the press opened.
+        expect(screen.queryByText("tip content")).toBeNull();
+
+        fireEvent.pointerUp(screen.getByText("anchor"), AT);
+        fireEvent.click(screen.getByText("anchor"), AT);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(screen.queryByText("tip content")).toBeNull();
+    });
+
+    it("shows again once the pointer has left the anchor and come back", async () => {
+        const anchor = mount();
+        fireEvent.mouseEnter(anchor, AT);
+        click(anchor);
+        await tick();
+        expect(screen.queryByText("tip content")).toBeNull();
+
+        fireEvent.mouseLeave(anchor, AWAY);
+        fireEvent.pointerMove(document.body, AWAY);
+        fireEvent.mouseEnter(anchor, AT);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+    });
+
+    // The top bar redraws its widgets when one is clicked: the new element is under a pointer that has not
+    // moved, and the browser reports it as entered.
+    it("stays shut on an anchor that the click put under the resting pointer", async () => {
+        const [round, setRound] = createSignal(1);
+        render(() => (
+            <Show when={round()} keyed>
+                {(n) => (
+                    <Tooltip content={<span>tip content</span>}>
+                        <button type="button" onClick={() => setRound(n + 1)}>
+                            anchor {n}
+                        </button>
+                    </Tooltip>
+                )}
+            </Show>
+        ));
+        const first = screen.getByText("anchor 1");
+        fireEvent.mouseEnter(first.parentElement!, AT);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+
+        click(first);
+        const second = screen.getByText("anchor 2");
+        expect(second).not.toBe(first);
+        // A few pixels of drift during the click are still resting.
+        fireEvent.mouseEnter(second.parentElement!, { clientX: AT.clientX + 2, clientY: AT.clientY - 1 });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(screen.queryByText("tip content")).toBeNull();
+
+        fireEvent.mouseLeave(second.parentElement!, AWAY);
+        fireEvent.pointerMove(document.body, AWAY);
+        fireEvent.mouseEnter(second.parentElement!, AT);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+    });
+
+    it("shows on another anchor reached in one fast move from the press, whose enter comes before its move", async () => {
+        render(() => (
+            <>
+                <Tooltip content={<span>first tip</span>}>
+                    <button type="button">one</button>
+                </Tooltip>
+                <Tooltip content={<span>second tip</span>}>
+                    <button type="button">two</button>
+                </Tooltip>
+            </>
+        ));
+        const one = screen.getByText("one").parentElement!;
+        const two = screen.getByText("two").parentElement!;
+        fireEvent.mouseEnter(one, AT);
+        click(one);
+        fireEvent.mouseLeave(one, AWAY);
+        fireEvent.mouseEnter(two, AWAY);
+        await tick();
+        expect(screen.getByText("second tip")).toBeInTheDocument();
+    });
+
+    it("sees the press even when the control inside keeps the event to itself", async () => {
+        const anchor = mount(
+            <button type="button" on:pointerdown={(e) => e.stopPropagation()}>
+                anchor
+            </button>,
+        );
+        fireEvent.mouseEnter(anchor, AT);
+        await tick();
+        fireEvent.pointerDown(screen.getByText("anchor"), AT);
+        await tick();
+        expect(screen.queryByText("tip content")).toBeNull();
+    });
+
+    it("closes for a press with any button, such as the one that opens a context menu", async () => {
+        const anchor = mount();
+        fireEvent.mouseEnter(anchor, AT);
+        await tick();
+        fireEvent.pointerDown(anchor, { ...AT, button: 2 });
+        await tick();
+        expect(screen.queryByText("tip content")).toBeNull();
+    });
+
+    it("stays while it is held open, as a chip's detail is after a tap", async () => {
+        const [held, setHeld] = createSignal(false);
+        const anchor = mount(<span>anchor</span>, held);
+        fireEvent.mouseEnter(anchor, AT);
+        fireEvent.pointerDown(anchor, AT);
+        setHeld(true);
+        await tick();
+        expect(screen.getByText("tip content")).toBeInTheDocument();
+
+        // The hold ends with the pointer still on the pressed anchor: it does not fall back to a hover tooltip.
+        setHeld(false);
+        await tick();
+        expect(screen.queryByText("tip content")).toBeNull();
+    });
+
+    it("shows for a tap, whose hover arrives after its press and at the same point", async () => {
+        const anchor = mount();
+        fireEvent.pointerDown(anchor, { ...AT, pointerType: "touch" });
+        fireEvent.pointerUp(anchor, { ...AT, pointerType: "touch" });
+        fireEvent.mouseEnter(anchor, AT);
         await tick();
         expect(screen.getByText("tip content")).toBeInTheDocument();
     });
