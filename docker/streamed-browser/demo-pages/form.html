@@ -1,14 +1,15 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>Form</title>
-<style>body{font:16px system-ui,sans-serif;margin:2rem;max-width:32rem}label{display:block;margin:1rem 0 .25rem}input,select,textarea{font:inherit;width:100%;box-sizing:border-box}</style>
+<style>body{font:16px system-ui,sans-serif;margin:0}h1{position:fixed;left:40px;top:10px;margin:0}input,select,textarea{font:inherit;box-sizing:border-box;position:fixed;left:40px;width:400px}#a{top:80px;height:32px}#b{top:130px;height:100px}#c{top:250px;width:auto}#d{top:290px;height:32px}#out{position:fixed;left:40px;top:340px;margin:0}.l{position:fixed;left:460px;top:88px}</style>
 <h1>A form</h1>
-<label>A line of text<input id="a"></label>
-<label>Several lines (paste here)<textarea id="b" rows="4"></textarea></label>
-<label><input type="checkbox" id="c" style="width:auto"> Tick me</label>
-<label>Choose<select id="d"><option>One</option><option>Two</option><option>Three</option></select></label>
+<input id="a" aria-label="A line of text"><span class="l">A line of text</span>
+<textarea id="b" aria-label="Several lines"></textarea>
+<input type="checkbox" id="c" aria-label="Tick me">
+<select id="d" aria-label="Choose"><option>One</option><option>Two</option><option>Three</option></select>
 <p id="out">Nothing typed yet.</p>
 <script>
 const show=()=>out.textContent='Line: '+a.value+' | Lines: '+b.value.length+' characters | Ticked: '+c.checked+' | Chosen: '+d.value;
 for(const e of [a,b,c,d]){e.addEventListener('input',show);e.addEventListener('change',show)}
 </script>
+<script src="/beacon.js"></script>

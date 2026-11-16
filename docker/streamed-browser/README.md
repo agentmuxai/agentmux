@@ -31,3 +31,11 @@ Open it, from your own machine, with the same port at both ends (srv accepts onl
 4. In the app, open a Browser pane and type `http://127.0.0.1:8200/` (the demo pages), or any address you like.
 
 Stop it: `docker rm -f streamed-demo`.
+
+## A scripted pass, recorded
+
+`demo-pass.mjs` runs one pass through the web UI itself (sign in, open a Browser pane, the four pages, one resize), headless with synthetic
+input, and records a video. Each step is checked against what the demo page itself reported (`/log` on the pages server). Run it where
+Playwright and its Chromium are installed, in the demo's network namespace so that `127.0.0.1:8190` is srv's own address:
+`docker run --rm --network container:streamed-demo -v <context>:/work -w /work <image with Playwright> node demo-pass.mjs --out /work/pass`.
+It needs `docker` and `script` to reach the demo container for the sign-in (the same `agentmux-srv open --print` as above).
