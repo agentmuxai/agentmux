@@ -412,11 +412,11 @@ impl ContainerStartup {
                 StartEvent::Starting => start_row(ContainerStartState::Starting, None, &image, None),
             }
         };
-        if let Err(e) = self
-            .cm
-            .ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe)
-            .await
-        {
+        let ensured = async {
+            self.cm.ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe).await?;
+            self.cm.check_image_tools(&self.container_name, &image).await
+        };
+        if let Err(e) = ensured.await {
             if shown.load(Ordering::Relaxed) {
                 start_row(ContainerStartState::Failed, None, &image, Some(&e.user_message()));
             }

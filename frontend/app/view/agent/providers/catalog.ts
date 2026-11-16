@@ -116,7 +116,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Claude. The flag itself remains in ProviderDefinition as a
         // behavior-gate for providers whose CLI genuinely never prints one.
         npmPackage: "@anthropic-ai/claude-code",
-        // Keep in sync with crates/srv/src/backend/providers.rs `pinned_version`,
+        // Keep in sync with crates/srv-core/src/backend/providers.rs `pinned_version`,
         // enforced by ./pin-consistency.test.ts.
         pinnedVersion: "2.1.321",
         docsUrl: "https://docs.anthropic.com/claude-code",
@@ -128,7 +128,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authDirName: "claude",
         // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
         // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
-        // Mirrors crates/srv/src/backend/providers.rs `base_url_env_var`.
+        // Mirrors crates/srv-core/src/backend/providers.rs `base_url_env_var`.
         baseUrlEnvVar: "ANTHROPIC_BASE_URL",
         supportedVendors: ["anthropic"],
         startupInstructionsFilename: "CLAUDE.md",
@@ -146,9 +146,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // DISABLES that routing, so it must NOT be here. The persistent controller's
         // control-frame handler (`handle_control_frame`) auto-allows ordinary tools to
         // preserve today's yolo UX and surfaces only AskUserQuestion to the user. Keep
-        // in sync with `static CLAUDE` in crates/srv/src/backend/providers.rs.
+        // in sync with `static CLAUDE` in crates/srv-core/src/backend/providers.rs.
         // `--replay-user-messages`: a message another session sends this agent arrives in the
-        // stream (crates/srv/src/backend/cli_native); srv keeps the replays out of the transcript.
+        // stream (crates/srv-core/src/backend/cli_native); srv keeps the replays out of the transcript.
         // controllerType selects persistentLaunchArgs over launchArgs in agent-model.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",
@@ -480,7 +480,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Pi",
         // pi speaks no ACP itself; the pi-acp adapter does, driving the pi
         // CLI installed beside it (`companionNpmPackages`). Mirrors
-        // crates/srv/src/backend/providers.rs `static PI`;
+        // crates/srv-core/src/backend/providers.rs `static PI`;
         // SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
         cliCommand: "pi-acp",
         defaultArgs: [],
@@ -526,7 +526,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // (`agy-stream-json`); it ignores stdin and takes the prompt as `-p
     // <prompt>` (`promptArgFlag`); auto-approve is
     // `--dangerously-skip-permissions` and resume is `--conversation <id>`.
-    // Mirrors crates/srv/src/backend/providers.rs `static ANTIGRAVITY`.
+    // Mirrors crates/srv-core/src/backend/providers.rs `static ANTIGRAVITY`.
     antigravity: {
         id: "antigravity",
         displayName: "Antigravity (AGY)",
@@ -581,7 +581,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     kilo: {
         id: "kilo",
         displayName: "Kilo Code CLI",
-        // `kilo acp`: ACP over stdio. Mirrors crates/srv/src/backend/providers/kilo.rs.
+        // `kilo acp`: ACP over stdio. Mirrors crates/srv-core/src/backend/providers/kilo.rs.
         cliCommand: "kilo",
         defaultArgs: [],
         styledArgs: [],
@@ -615,7 +615,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     cline: {
         id: "cline",
         displayName: "Cline CLI",
-        // `cline --acp`: ACP over stdio. Mirrors crates/srv/src/backend/providers/cline.rs.
+        // `cline --acp`: ACP over stdio. Mirrors crates/srv-core/src/backend/providers/cline.rs.
         cliCommand: "cline",
         defaultArgs: [],
         styledArgs: [],
@@ -649,7 +649,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "opencode",
         displayName: "OpenCode",
         // `opencode acp`: ACP over stdio (the V1 line upstream's installer and docs
-        // ship). Mirrors crates/srv/src/backend/providers/opencode.rs.
+        // ship). Mirrors crates/srv-core/src/backend/providers/opencode.rs.
         cliCommand: "opencode",
         defaultArgs: [],
         styledArgs: [],
@@ -685,7 +685,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "goose",
         // `goose acp`: ACP over stdio. Not on npm: AgentMux downloads the pinned
         // release itself (managedInstall); the install command below is for a copy the
-        // person installs on their own. Mirrors crates/srv/src/backend/providers/goose.rs.
+        // person installs on their own. Mirrors crates/srv-core/src/backend/providers/goose.rs.
         cliCommand: "goose",
         defaultArgs: [],
         styledArgs: [],
@@ -722,7 +722,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Grok Build",
         // `grok agent stdio`: ACP over stdio. Not on npm: AgentMux downloads the pinned
         // release itself (managedInstall); the install command below is for a copy the
-        // person installs on their own. Mirrors crates/srv/src/backend/providers/grok.rs.
+        // person installs on their own. Mirrors crates/srv-core/src/backend/providers/grok.rs.
         cliCommand: "grok",
         defaultArgs: [],
         styledArgs: [],
@@ -774,7 +774,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "dsh",
         displayName: "DeepSeek Harness",
         // `dsh --profile acp`: ACP over stdio. A prerelease upstream, shown as a
-        // preview. Mirrors crates/srv/src/backend/providers/dsh.rs.
+        // preview. Mirrors crates/srv-core/src/backend/providers/dsh.rs.
         cliCommand: "dsh",
         defaultArgs: [],
         styledArgs: [],
@@ -802,7 +802,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
-        // Keep the minimum in step with DSH_MIN_NODE in crates/srv/src/backend/blockcontroller/acp_prelaunch.rs, which
+        // Keep the minimum in step with DSH_MIN_NODE in crates/srv-core/src/backend/blockcontroller/acp_prelaunch.rs, which
         // refuses to restart an already-installed dsh agent on an older Node.
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.9.0" }, NPM_PREREQ],
     },
@@ -810,7 +810,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         id: "aider",
         displayName: "Aider",
         // Terminal tier: Aider's own UI in a terminal pane. Not on npm: AgentMux
-        // installs the pinned release itself (managedInstall), through uv. Mirrors crates/srv/src/backend/providers/aider.rs.
+        // installs the pinned release itself (managedInstall), through uv. Mirrors crates/srv-core/src/backend/providers/aider.rs.
         cliCommand: "aider",
         defaultArgs: [],
         styledArgs: [],
@@ -845,7 +845,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Crush",
         // Terminal tier: Crush's own UI in a terminal pane (no ACP in this version).
         // Installed from Charm's own npm package, never bundled (its license).
-        // Mirrors crates/srv/src/backend/providers/crush.rs.
+        // Mirrors crates/srv-core/src/backend/providers/crush.rs.
         cliCommand: "crush",
         defaultArgs: [],
         styledArgs: [],
@@ -881,7 +881,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // ACP), driven by srv's MspController. Not on npm: AgentMux downloads the
         // pinned native binary itself (managedInstall); the install command below is
         // for a copy the person installs on their own. Mirrors
-        // crates/srv/src/backend/providers/muse.rs.
+        // crates/srv-core/src/backend/providers/muse.rs.
         cliCommand: "muse",
         defaultArgs: [],
         styledArgs: [],

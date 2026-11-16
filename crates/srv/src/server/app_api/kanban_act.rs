@@ -94,6 +94,7 @@ impl Act<'_> {
         let t = self.task()?;
         let id = &t.item.id;
         // First: a refused list changes nothing.
+        let payload = req.payload.as_deref().map(crate::server::work_tasks::payload_text).transpose()?;
         let after = req.after.as_ref().map(|given| resolve_after(state, given)).transpose()?;
         if let Some(after) = &after {
             if let Some(why) = store.work_deps_set(id, after).map_err(|e| e.to_string())? {
@@ -104,7 +105,7 @@ impl Act<'_> {
             .work_task_edit(
                 id,
                 req.title.as_deref().map(clean).as_deref(),
-                req.payload.as_deref().map(clean).as_deref(),
+                payload.as_deref(),
                 req.kind.as_deref(),
                 req.priority,
                 now,

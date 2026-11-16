@@ -66,7 +66,24 @@ describe("starting the page", () => {
     it("sends the tab's session token, and nothing else, to the server", async () => {
         const fetchMock = vi.fn(async (_input: string, _init: RequestInit) => ({ status: 200 }));
         await signInProblem("tok", fetchMock);
-        expect(fetchMock).toHaveBeenCalledWith("/api/bus/agents", { headers: { "X-AM-Session": "tok" }, credentials: "same-origin" });
+        expect(fetchMock).toHaveBeenCalledWith("/api/bus/agents", {
+            headers: { "X-AM-Session": "tok" },
+            credentials: "same-origin",
+            signal: expect.any(AbortSignal),
+        });
+    });
+
+    it("stops asking after three seconds, so the app can start inside the five seconds it waits for the host API", async () => {
+        vi.useFakeTimers();
+        try {
+            const never = (_input: string, init: RequestInit) =>
+                new Promise<{ status: number }>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new Error("aborted"))));
+            const pending = signInProblem("tok", never);
+            await vi.advanceTimersByTimeAsync(3000);
+            expect(await pending).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("goes on, and shows nothing, when the server accepts it", async () => {

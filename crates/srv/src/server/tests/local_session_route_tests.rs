@@ -546,3 +546,30 @@ fn the_served_ui_files_get_the_same_headers() {
     assert_eq!(r.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
     assert_eq!(r.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
 }
+
+#[test]
+fn the_ui_files_are_for_the_servers_own_addresses_only() {
+    let shape = ensure_shape();
+    assert!(ui_host_ok(shape, &headers(&[("host", HOST)])));
+    assert!(ui_host_ok(shape, &headers(&[("host", "127.0.0.1:8080")])), "the one declared address");
+    for bad in ["localhost:7777", "evil.example:7777", "127.0.0.1:7778", "127.0.0.1", ""] {
+        assert!(!ui_host_ok(shape, &headers(&[("host", bad)])), "{bad:?}");
+    }
+    assert!(!ui_host_ok(shape, &HeaderMap::new()), "no Host is not the server's address");
+}
+
+#[tokio::test]
+async fn a_ui_file_asked_for_by_another_name_is_refused_and_by_the_servers_own_is_served() {
+    ensure_shape();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.html"), "<!doctype html>agentmux-ui").unwrap();
+    let router = crate::server::routes::with_frontend(Router::new(), dir.path()).with_state(test_state());
+    let (status, _, body) = call(&router, request(Method::GET, "/", &[("host", "evil.example:7777")], "")).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(!body.contains("agentmux-ui"));
+    let (status, _, _) = call(&router, request(Method::GET, "/assets/app.js", &[("host", "localhost:7777")], "")).await;
+    assert_eq!(status, 403);
+    let (status, hs, body) = call(&router, request(Method::GET, "/", &[("host", HOST)], "")).await;
+    assert_eq!(status, 200);
+    assert!(body.contains("agentmux-ui") && hs.get(header::CONTENT_SECURITY_POLICY).is_some());
+}

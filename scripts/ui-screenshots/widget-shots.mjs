@@ -7,7 +7,7 @@
 //   node scripts/ui-screenshots/capture.mjs --suite widgets --port N
 //
 // The list is built from the app's own widget config
-// (crates/srv/src/config/widgets.json), so a new widget is captured without
+// (crates/srv-core/src/config/widgets.json), so a new widget is captured without
 // editing this file; EXCLUDE names the ones that make no sense as a shot.
 //
 // Each shot opens a new window tab, opens its widget there, maximizes the
@@ -23,7 +23,7 @@ const WIDGETS_JSON = join(
     "..",
     "..",
     "crates",
-    "srv",
+    "srv-core",
     "src",
     "config",
     "widgets.json"

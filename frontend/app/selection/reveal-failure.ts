@@ -43,3 +43,18 @@ export function revealFailureText(result: SelectionFailure): string {
 export function isWorkspaceClosedFailure(result: SelectionResult): boolean {
     return isFailure(result) && result.reason === "remote-failed" && result.detail === WORKSPACE_CLOSED;
 }
+
+/** The reveals that ran out of time waiting for the page (its layout, its tab, its lookup): the window was slow, and
+ *  nothing is wrong with the pane or its tab. */
+const SLOW_SHOW_REASONS = new Set(["layout-timeout", "tab-timeout", "resolve-timeout"]);
+
+/** Whether a reveal only ran out of time waiting for the page. For a pane whose open had already worked (its block
+ *  is back in its tab), that is not a failure of the open: the pane shows when the window catches up. */
+export function isSlowShow(result: SelectionResult): boolean {
+    return isFailure(result) && SLOW_SHOW_REASONS.has(result.reason);
+}
+
+/** The neutral notice for a pane that is open and not yet shown because the window is slow. */
+export function slowShowText(name: string): string {
+    return `${name} is open, but its tab was too slow to show it. Click it again to bring it to the front.`;
+}

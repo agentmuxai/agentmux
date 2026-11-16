@@ -9,8 +9,10 @@
  * (switch tab) and a drag source (move the tab to another pane or window). The pane grip is a drag
  * handle first, so it moves the window like the rest of the header.
  */
+import { CONTROL_SELECTOR } from "@/app/util/press-on-control";
+
 const HEADER_SELECTOR = '[data-role="block-header"]';
-const OWN_PRESS_SELECTOR = "button, a, input, select, textarea, [role='button'], .pane-tab";
+const OWN_PRESS_SELECTOR = `${CONTROL_SELECTOR}, .pane-tab`;
 const GRIP_SELECTOR = ".pane-grip";
 
 export function isFloaterHeaderMovePress(target: EventTarget | null): boolean {

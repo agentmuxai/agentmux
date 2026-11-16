@@ -12,7 +12,8 @@
 //! Screen and system-audio capture are not offered: the agent would be sharing the person's screen.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -20,6 +21,9 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::{json, Value};
 
+use crate::backend::mps::Broker;
+use crate::backend::storage::store::Store;
+use crate::backend::user_attention::Asking;
 use crate::server::browser_dialog::record;
 use crate::server::ui_handlers::{banner_for, err_response, from_host};
 use crate::server::AppState;
@@ -168,6 +172,35 @@ fn remember(ask: Ask) {
     a.push(ask);
 }
 
+/// How often the countdown of a request is looked at, and how long a request may wait for its countdown (the super
+/// agent reviews it first) before nobody is told of it any more.
+const COUNTDOWN_POLL: Duration = Duration::from_millis(500);
+const COUNTDOWN_WAIT: Duration = Duration::from_secs(30 * 60);
+
+/// Tells the person, as a Browser ask in the pane, while the request's countdown runs: the tone, the status bar's list and
+/// its Browser count then say where the question is, as they do for a hand-off. It is announced for the length of the
+/// countdown, which is when the person can still veto (not after it ends, when the page is already allowed), and not while
+/// the super agent is still reviewing, which is not the person's to answer. Ends when the countdown does, however it ends.
+fn announce_countdown(state: &AppState, request_id: String, target: String, text: String) {
+    announce_countdown_with(state.broker.clone(), state.mstore.clone(), request_id, target, text, COUNTDOWN_POLL);
+}
+
+fn announce_countdown_with(broker: Arc<Broker>, store: Arc<Store>, request_id: String, target: String, text: String, poll: Duration) {
+    use crate::backend::sensitive_requests::{registry, Status};
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let mut asking = None;
+        while started.elapsed() < COUNTDOWN_WAIT {
+            match registry().get(&request_id).map(|r| r.status) {
+                Some(Status::Pending) if asking.is_none() => asking = Some(Asking::start(&broker, &store, &target, "browser", &text)),
+                Some(Status::Asked | Status::Pending) => {}
+                _ => break,
+            }
+            tokio::time::sleep(poll).await;
+        }
+    });
+}
+
 /// The facts of the request, from what AgentMux saw: only the site is the page's, cleaned as every fact is.
 fn facts_for(agent: &str, site: &str, kinds: &[&str]) -> BTreeMap<String, String> {
     let what = what_of(kinds);
@@ -250,6 +283,7 @@ pub(crate) async fn handle_host_browser_permission(
     match crate::server::sensitive_handlers::file_request(&state, &uid, &agent, "os_prompt_answer", &facts, &reason).await {
         Ok(filed) => {
             let request_id = filed["id"].as_str().unwrap_or_default().to_string();
+            announce_countdown(&state, request_id.clone(), target.clone(), format!("{agent} needs you: {site} wants to use {what}"));
             remember(Ask { request_id, uid, agent: agent.clone(), target: target.clone(), site: site.clone(), kinds });
             record(&agent, &target, "permission", &message, "denied for now", &asked_reason(&site, &what));
         }
@@ -355,6 +389,27 @@ mod tests {
         assert!(is_granted("bp-agent", "pane-1", &site, &["camera"], now_ms()));
         assert!(!is_granted("bp-agent", "pane-1", &site, &["microphone"], now_ms()), "the microphone was not asked for");
         assert!(grant_after_countdown(&state, &id).is_err(), "a second run finds nothing to grant");
+    }
+
+    #[tokio::test]
+    async fn the_countdown_is_announced_in_its_pane_for_its_length_only() {
+        use crate::backend::sensitive_requests::{registry, Status};
+        let state = crate::server::tests::test_state();
+        let uid = format!("u-bp-{}", uuid::Uuid::new_v4().simple());
+        let site = format!("https://{}.example", uuid::Uuid::new_v4().simple());
+        let pane = format!("pane-{}", uuid::Uuid::new_v4().simple());
+        let facts = facts_for("bp-agent", &site, &["camera"]);
+        let id = registry().request(&uid, "bp-agent", "os_prompt_answer", &facts, "", now_ms()).unwrap().id;
+        let mine = |pane: &str| crate::backend::user_attention::open_requests().into_iter().filter(|a| a.block_id == pane && a.kind == "browser").count();
+        announce_countdown_with(state.broker.clone(), state.mstore.clone(), id.clone(), pane.clone(), "bp-agent needs you".into(), Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(mine(&pane), 0, "the super agent is still reviewing: not the person's to answer");
+        registry().approve(&id, "super", now_ms()).unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(mine(&pane), 1, "announced while the countdown runs");
+        registry().finish(&id, Status::Vetoed, now_ms()).unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(mine(&pane), 0, "ended with the countdown");
     }
 
     #[tokio::test]

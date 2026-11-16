@@ -14,7 +14,7 @@ const reveal = vi.hoisted(() => vi.fn());
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: reveal }));
 
 import { __resetPlayedSounds, noteSound } from "@/app/notification/sound/sound-history";
-import { LAST_SOUND_TIP, LastSoundStatus } from "./LastSoundStatus";
+import { LAST_SOUND_TIP, LastSoundStatus, SOUND_REFRESH_MS } from "./LastSoundStatus";
 
 afterEach(() => {
     cleanup();
@@ -67,6 +67,38 @@ describe("LastSoundStatus", () => {
         } finally {
             bar.remove();
             vi.unstubAllGlobals();
+        }
+    });
+
+    it("draws the first sound at once and the sounds after it once a second, however many play", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+        try {
+            const { container } = render(() => <LastSoundStatus rows={() => []} />);
+            const text = () => container.querySelector(".status-last-sound")?.textContent ?? "";
+            noteSound({ blockId: "blk-a", event: "tool", tool: "Bash", at: Date.now() });
+            expect(text()).toMatch(/Bash/);
+            for (const tool of ["Read", "Edit", "Grep"]) noteSound({ blockId: "blk-a", event: "tool", tool, at: Date.now() });
+            expect(text()).toMatch(/Bash/);
+            vi.advanceTimersByTime(SOUND_REFRESH_MS - 1);
+            expect(text()).toMatch(/Bash/);
+            vi.advanceTimersByTime(1);
+            expect(text()).toMatch(/Grep/);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("stops waiting for the interval when the item goes away", () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+        try {
+            const { unmount } = render(() => <LastSoundStatus rows={() => []} />);
+            noteSound({ blockId: "blk-a", event: "tool", tool: "Bash", at: Date.now() });
+            noteSound({ blockId: "blk-a", event: "tool", tool: "Read", at: Date.now() });
+            expect(vi.getTimerCount()).toBe(1);
+            unmount();
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
         }
     });
 

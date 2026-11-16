@@ -11,7 +11,7 @@
 // storage/bundles.rs / app_api/bundle/mod.rs), so never apply this check to
 // a memory_id (#2464).
 //
-// Real account ids ARE always UUID v4 strings (crates/srv/src/identity/
+// Real account ids ARE always UUID v4 strings (crates/srv-core/src/identity/
 // oauth_client.rs, crates/srv/src/server/app_api/identity.rs). Legacy
 // rows can carry "", the "blank" singleton, the pre-#1624-PR-C "default"
 // sentinel, or any other now-meaningless literal from an older identity

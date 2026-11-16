@@ -149,7 +149,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     const bindCandidates = createMemo(() => {
         const providerId = opts.providerId();
         if (!providerId) return [];
-        return computeAccountBindCandidates(providerId, accountCache(), linkedAccountId());
+        return computeAccountBindCandidates(providerId, accountCache(), opts.signedOut?.() ? undefined : linkedAccountId());
     });
 
     // A flat picker of accounts to bind, anchored at the click — same

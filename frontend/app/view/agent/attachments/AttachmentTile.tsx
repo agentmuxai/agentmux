@@ -12,8 +12,10 @@ import clsx from "clsx";
 import { Button, CloseButton, Tag } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import { formatBytes } from "@/util/format-bytes";
+import type { TileReorder } from "./attachment-tile-reorder";
 import { useAttachmentText, useAttachmentUrl } from "./attachment-url";
 import { extLabel, hasThumbnail, kindIcon, type FileKind } from "./file-kind";
+import { wantsFrame } from "./first-frame";
 import { tip } from "@/app/element/tip";
 
 export interface TileModel {
@@ -47,6 +49,8 @@ interface Props {
     flash?: boolean;
     caption?: boolean;
     ref?: (el: HTMLLIElement) => void;
+    /** Present in the composer's tray, where tiles can be dragged into a new order. */
+    reorder?: TileReorder;
 }
 
 export function tileTooltip(t: TileModel): string {
@@ -91,17 +95,49 @@ function TextThumb(props: { id: string; fallback: JSX.Element }) {
     );
 }
 
+/** The ring over a tile that is still being processed; it spins while its progress is unknown. */
+function ProgressRing(props: { progress?: number }) {
+    return (
+        <span class="agent-attachment-tile__progress" aria-hidden="true">
+            <svg viewBox="0 0 32 32" class={clsx({ "is-indeterminate": props.progress == null })}>
+                <circle class="track" cx="16" cy="16" r={RING_R} />
+                <circle
+                    class="bar"
+                    cx="16"
+                    cy="16"
+                    r={RING_R}
+                    stroke-dasharray={`${RING_C}`}
+                    stroke-dashoffset={`${RING_C * (1 - (props.progress ?? 0.25))}`}
+                />
+            </svg>
+        </span>
+    );
+}
+
+/** The picture a tile shows, when it has one: a thumbnail, or a PDF's first page or a video's first frame. */
+function useTilePicture(tile: () => TileModel, thumbnail: () => boolean) {
+    // `tile` is read inside each accessor: the tray hands a new model on every progress tick, to a tile that stays mounted.
+    const ready = () => tile().status === "ready" && !!tile().id;
+    const thumb = useAttachmentUrl(() => (thumbnail() ? tile().id : undefined), "thumb");
+    // A PDF's first page or a video's first frame, when the file is small enough to read for it.
+    const framed = () => ready() && wantsFrame(tile().kind, tile().bytes);
+    const frame = useAttachmentUrl(() => (framed() && tile().kind === "pdf" ? tile().id : undefined), "pdf-frame");
+    const clip = useAttachmentUrl(() => (framed() && tile().kind === "video" ? tile().id : undefined), "video-frame");
+    return { url: () => thumb() ?? frame() ?? clip(), clip };
+}
+
+/** What a screen reader says for a tile: its kind and number, name, size and state. */
+function tileLabel(t: TileModel): string {
+    const state =
+        t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
+    const noun = t.kind === "image" ? "Image" : "File";
+    return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
+}
+
 export function AttachmentTile(props: Props) {
     const ready = () => props.tile.status === "ready" && !!props.tile.id;
     const picture = () => ready() && (props.tile.kind === "image" || props.tile.kind === "svg");
-    const url = useAttachmentUrl(() => (picture() ? props.tile.id : undefined), "thumb");
-    const label = () => {
-        const t = props.tile;
-        const state =
-            t.status === "processing" ? ", processing" : t.status === "error" ? `, failed: ${t.error ?? "error"}` : "";
-        const noun = t.kind === "image" ? "Image" : "File";
-        return `${noun} ${t.number}: ${t.name}${t.bytes != null ? `, ${formatBytes(t.bytes)}` : ""}${state}`;
-    };
+    const { url, clip } = useTilePicture(() => props.tile, picture);
     const icon = () => (
         <Show
             when={props.tile.status !== "error"}
@@ -122,13 +158,21 @@ export function AttachmentTile(props: Props) {
                 "is-processing": props.tile.status === "processing",
                 "is-error": props.tile.status === "error",
                 "is-flash": props.flash,
+                "is-dragging": props.reorder?.dragging,
+                "is-drop-before": props.reorder?.drop === "before",
+                "is-drop-after": props.reorder?.drop === "after",
             })}
+            draggable={props.reorder ? true : undefined}
+            onDragStart={props.reorder?.onDragStart}
+            onDragOver={props.reorder?.onDragOver}
+            onDrop={props.reorder?.onDrop}
+            onDragEnd={props.reorder?.onDragEnd}
             onKeyDown={props.onKeyDown}
         >
             <Button
                 class="agent-attachment-tile__main"
                 title={tileTooltip(props.tile)}
-                aria-label={`${label()}. Open preview`}
+                aria-label={`${tileLabel(props.tile)}. Open preview`}
                 onClick={() => props.onOpen()}
             >
                 <Show
@@ -142,24 +186,17 @@ export function AttachmentTile(props: Props) {
                     <TextThumb id={props.tile.id!} fallback={icon()} />
                 </Show>
                 <Show when={props.tile.status === "processing"}>
-                    <span class="agent-attachment-tile__progress" aria-hidden="true">
-                        <svg viewBox="0 0 32 32" class={clsx({ "is-indeterminate": props.tile.progress == null })}>
-                            <circle class="track" cx="16" cy="16" r={RING_R} />
-                            <circle
-                                class="bar"
-                                cx="16"
-                                cy="16"
-                                r={RING_R}
-                                stroke-dasharray={`${RING_C}`}
-                                stroke-dashoffset={`${RING_C * (1 - (props.tile.progress ?? 0.25))}`}
-                            />
-                        </svg>
-                    </span>
+                    <ProgressRing progress={props.tile.progress} />
                 </Show>
                 <span class="agent-attachment-tile__badge-wrap" aria-hidden="true"><Tag kind="count" corner="top-left" class="agent-attachment-tile__badge">{props.tile.number}</Tag></span>
                 <Show when={props.tile.pageCount && !hasThumbnail(props.tile.kind)}>
                     <span class="agent-attachment-tile__pages" aria-hidden="true">
                         {props.tile.pageCount} p
+                    </span>
+                </Show>
+                <Show when={props.tile.kind === "video" && !!clip()}>
+                    <span class="agent-attachment-tile__play" aria-hidden="true">
+                        <i class="fa-solid fa-play" />
                     </span>
                 </Show>
                 <Show when={props.tile.macros}>

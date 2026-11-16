@@ -60,7 +60,11 @@
 //                   black and white (shadows, scrims) and colours built from
 //                   a token (`rgba(var(--x-rgb), 0.2)`, `rgb(from var(…) …)`),
 //                   a palette token set on `:root`, and lines under a
-//                   `stylelint-disable color-no-hex` don't count.
+//                   `stylelint-disable color-no-hex` don't count. A literal in a
+//                   SCSS `$variable` (a map too) or an `@include` argument counts.
+//
+//                   `node scripts/check-ui-primitives.mjs --list colours` (or `tsColours`)
+//                   prints each file's literals with line numbers and a total, and checks nothing.
 //
 //  11. tsColours    colour literals in .ts/.tsx (an inline `style`, a canvas or SVG
 //                   fill, a generated palette), per file, other than pure black and
@@ -538,9 +542,11 @@ export function resolveSelector(parent, child) {
  * the selector; @mixin and @function bodies are skipped, since their
  * selectors only mean something where they are included. Checks that don't
  * look at the selector (the scale ratchets) pass `{ includeMixins: true }`,
- * so a raw value written inside a mixin counts too.
+ * so a raw value written inside a mixin counts too. `scssStatements: true` also returns a top-level or
+ * nested `$var: value` (the value may be a map) and an `@include name(args)` call, as property `$var` or
+ * `@include`, with the whole argument list as its value: where a colour literal can hide outside a rule.
  */
-export function declarations(scss, { includeMixins = false } = {}) {
+export function declarations(scss, { includeMixins = false, scssStatements = false } = {}) {
     const text = stripComments(scss);
     const stack = []; // { selector, skip, conditional }
     const out = [];
@@ -560,6 +566,10 @@ export function declarations(scss, { includeMixins = false } = {}) {
             const head = buf.trim();
             const parent = stack.length ? stack[stack.length - 1] : { selector: "", skip: false, conditional: false };
             const skip = parent.skip || (!includeMixins && /^@(mixin|function)\b/.test(head));
+            // `@include name(#abc) { … }`: the arguments are a statement of their own, ahead of the block.
+            if (scssStatements && !parent.skip && /^@include\b/.test(head)) {
+                out.push({ selector: parent.selector, property: "@include", value: head, line: bufLine, conditional: parent.conditional });
+            }
             const selector = head.startsWith("@") ? parent.selector : resolveSelector(parent.selector, head);
             // Inside @media, @include, @if and the like; @layer always applies.
             const conditional = parent.conditional || (head.startsWith("@") && !/^@layer\b/.test(head));
@@ -584,9 +594,13 @@ export function declarations(scss, { includeMixins = false } = {}) {
 
     function flush() {
         const decl = buf.trim();
-        const top = stack[stack.length - 1];
+        const top = stack[stack.length - 1] ?? (scssStatements ? { selector: "", skip: false, conditional: false } : undefined);
         if (!top || top.skip) return;
-        const m = /^([a-z0-9-]+)\s*:\s*([\s\S]+)$/i.exec(decl);
+        if (scssStatements && /^@include\b/.test(decl)) {
+            out.push({ selector: top.selector, property: "@include", value: decl, line: bufLine, conditional: top.conditional });
+            return;
+        }
+        const m = (scssStatements ? /^(\$?[a-z0-9_-]+)\s*:\s*([\s\S]+)$/i : /^([a-z0-9-]+)\s*:\s*([\s\S]+)$/i).exec(decl);
         if (!m) return;
         out.push({
             selector: top.selector,
@@ -735,13 +749,13 @@ function allowedColourLines(scss) {
 }
 
 /**
- * Colour literals in a stylesheet's declarations, other than pure black and
- * white, a palette token defined on `:root` (that is where a colour is set),
+ * Colour literals in a stylesheet's declarations, SCSS `$variables` (maps too) and `@include`
+ * arguments, other than pure black and white, a palette token defined on `:root` (that is where a colour is set),
  * and the lines marked fixed above.
  */
 export function colourLiterals(scss) {
     const allowed = allowedColourLines(scss);
-    return declarations(scss, { includeMixins: true })
+    return declarations(scss, { includeMixins: true, scssStatements: true })
         .filter((d) => !allowed.has(d.line) && !(d.property.startsWith("--") && d.selector.includes(":root")))
         .flatMap((d) =>
             [...(d.value.match(COLOUR_LITERAL) ?? []).filter((literal) => !isNeutral(literal)), ...namedColours(d.property, d.value)].map(
@@ -1111,6 +1125,38 @@ function sortObject(obj) {
     return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
+// ── The per-file list of colour literals (`--list`) ─────────────────────────
+
+const LIST_KINDS = { colours: "colour literals in stylesheets, outside the theme files", tsColours: "colour literals in .ts/.tsx" };
+
+/**
+ * Each file's colour literals, for the `--list` report: `colours` (stylesheets, other than the theme files) or
+ * `tsColours` (scripts). Most literals first, then by path; a file with none is left out.
+ */
+export function colourList(files, kind) {
+    const rows = [];
+    for (const { path, source } of files) {
+        if (isTest(path)) continue;
+        let found = [];
+        if (kind === "colours" && /\.s?css$/.test(path) && !THEME_FILE.test(path)) found = colourLiterals(source);
+        else if (kind === "tsColours" && /\.tsx?$/.test(path) && !path.endsWith(".d.ts")) found = tsColourLiterals(source);
+        if (found.length > 0) rows.push({ path, literals: found.map(({ line, literal }) => ({ line, literal })) });
+    }
+    return rows.sort((a, b) => b.literals.length - a.literals.length || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** The `--list` report as text: a line per file with its count, the literals under it with their line numbers, then the total. */
+export function formatColourList(rows, kind) {
+    const total = rows.reduce((n, r) => n + r.literals.length, 0);
+    const lines = [];
+    for (const { path, literals } of rows) {
+        lines.push(`${String(literals.length).padStart(5)}  ${path}`);
+        for (const { line, literal } of literals) lines.push(`         L${line}  ${literal}`);
+    }
+    lines.push(`${total} ${LIST_KINDS[kind]}, in ${rows.length} files`);
+    return lines.join("\n");
+}
+
 // ── Compare ─────────────────────────────────────────────────────────────────
 
 const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours", "tsColours", "tags", "nativeTitles", "textFields", "controlTitles", "menus", "closeControls"];
@@ -1237,6 +1283,18 @@ function filesAtRef(ref) {
 // ── Main ────────────────────────────────────────────────────────────────────
 
 if (isMain(import.meta.url)) {
+    const listAt = process.argv.indexOf("--list");
+    if (listAt !== -1) {
+        // A read-only report on the working tree: no base branch needed.
+        const kind = process.argv[listAt + 1];
+        if (!Object.hasOwn(LIST_KINDS, kind)) {
+            console.error(`usage: check-ui-primitives.mjs --list <${Object.keys(LIST_KINDS).join("|")}>`);
+            process.exit(2);
+        }
+        const files = walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") }));
+        console.log(formatColourList(colourList(files, kind), kind));
+        process.exit(0);
+    }
     const base = baseCommit();
     if (!base) {
         console.log("check-ui-primitives: cannot resolve the base branch (shallow clone?) — skipping.");

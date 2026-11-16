@@ -6,8 +6,8 @@
  * a capture of the window as it is drawn when the capture runs, which is some 50 to 250 ms after the press,
  * and a quick drag starts inside that time. Whatever the drag draws over the pane by then is in the picture
  * the user then holds: on 2026-11-10 the operator held a blurred pane, because the dragged tile's blur
- * (tilelayout.scss `.dragging`) was on screen before the capture ran. So the drag's own drawing (that blur,
- * the live reflow, the landing zone) waits for this to clear. A capture that stalls stops holding it back
+ * (tilelayout.scss `.dragging`, a blur since removed) was on screen before the capture ran. So the drag's own
+ * drawing (the tear-off place, the live reflow, the landing zone) waits for this to clear. A capture that stalls stops holding it back
  * after `CAPTURE_GATE_MAX_MS`. No dependencies, so the layout can read it without the drag modules.
  */
 

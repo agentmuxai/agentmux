@@ -5,11 +5,13 @@
 import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
+import { createSlowHandlerWatch } from "./ws-slow-handler";
 
 const dlog = debugLog("wave:ws");
 
 const WarnWebSocketSendSize = 1024 * 1024; // 1MB
 const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
+const watchSlowHandler = createSlowHandlerWatch();
 const reconnectHandlers: (() => void)[] = [];
 const StableConnTime = 2000;
 // Gap between queued `blockinput` chunks when the queue drains after a
@@ -208,6 +210,7 @@ class WSControl {
     }
 
     onmessage(event: MessageEvent) {
+        const handlingStart = performance.now();
         let eventData = null;
         if (event.data != null) {
             eventData = JSON.parse(event.data);
@@ -230,6 +233,8 @@ class WSControl {
                 console.log("[error] messageCallback", e);
             }
         }
+        // A message handled in 200 ms or more is named in the log (ws-slow-handler.ts).
+        watchSlowHandler(handlingStart, eventData, typeof event.data === "string" ? event.data.length : 0);
     }
 
     sendPing() {

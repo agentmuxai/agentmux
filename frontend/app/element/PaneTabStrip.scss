@@ -413,6 +413,13 @@
         opacity: 0.4;
     }
 
+    // A tab dragged out of its pane, once it has left it (layout/lib/tabTearOff.ts): its place in the strip
+    // stays, empty, so the other tabs do not move under a drag that may still come back. Not removed: the
+    // pill is the drag's own source.
+    &--gone {
+        visibility: hidden;
+    }
+
     &--drop-before {
         box-shadow: inset 2px 0 0 0 var(--drop-target-border);
     }

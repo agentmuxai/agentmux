@@ -23,7 +23,7 @@
 //! signs WAN jekts itself, at the origin) and `agentmux-srv` (the reactive
 //! handler verifies an incoming jekt's claimed signature against the
 //! claimed sender's key, looked up server-side by agent_id — see
-//! `crates/srv/src/backend/storage/agent_jekt_keys.rs` and
+//! `crates/srv-core/src/backend/storage/agent_jekt_keys.rs` and
 //! `agent_lan_keys.rs`). Living here, not in either binary, is what
 //! guarantees the two can never independently drift on the signed-material
 //! format.

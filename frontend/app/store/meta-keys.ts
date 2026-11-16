@@ -8,7 +8,7 @@
  * Keys owned by one module stay with it (`swarm-line.ts`, `title-schedule.ts`).
  */
 
-/** The session title. Written by the backend only (`crates/srv/src/ambient/title.rs`,
+/** The session title. Written by the backend only (`crates/srv-core/src/ambient/title.rs`,
  *  `META_TITLE`); cleared here when the session ends (useBlockActivity.ts). */
 export const META_TITLE = "term:ambient_summary";
 

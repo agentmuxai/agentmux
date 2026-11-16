@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
-    COMMAND_LIST_DRONE_RUNS, COMMAND_REPLAY_DRONE_RUN, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
+    COMMAND_GET_DRONE_PAYLOAD_SCHEMA, COMMAND_LIST_DRONE_RUNS, COMMAND_REPLAY_DRONE_RUN, COMMAND_RESOLVE_DRONE_RUN, COMMAND_RESUME_DRONE_WAIT, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -562,6 +562,12 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_REPLAY_DRONE_RUN, move |cmd: crate::server::drone_replay::ReplayRunReq, _ctx| {
         let s = s.clone();
         async move { crate::server::drone_replay::replay_drone_run(&s, cmd).await }
+    });
+
+    let s = state.clone();
+    engine.register_typed(COMMAND_GET_DRONE_PAYLOAD_SCHEMA, move |cmd: crate::server::drone_payload::PayloadSchemaReq, _ctx| {
+        let s = s.clone();
+        async move { crate::server::drone_payload::get_payload_schema(&s, cmd) }
     });
 
     let s = state.clone();

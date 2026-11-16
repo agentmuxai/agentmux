@@ -16,7 +16,8 @@ import { PaneRequestModals } from "@/app/view/agent/pane-requests/PaneRequestDoc
 import { PaneMediaCaptureIndicator } from "./pane-media-capture-indicator";
 import { PaneMediaPermissionPrompt } from "./pane-media-permission-prompt";
 
-vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou: () => {}, endWaitingForYou: () => {} }));
+const startWaitingForYou = vi.hoisted(() => vi.fn());
+vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou, endWaitingForYou: () => {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn(async () => ({})) }));
 const panes = new Map<string, ReturnType<typeof createSignal<object | undefined>>>();
 const pane = (id: string) => {
@@ -78,6 +79,13 @@ afterEach(() => {
 });
 
 describe("media permission prompt", () => {
+    it("waits on the person as a Browser ask that says what the page wants", async () => {
+        ask(1, "a", VIDEO | AUDIO);
+        await vi.waitFor(() => expect(startWaitingForYou).toHaveBeenCalledTimes(1));
+        expect(startWaitingForYou.mock.calls[0][0]).toBe("a");
+        expect(startWaitingForYou.mock.calls[0][3]).toEqual({ what: "asks to use your camera and microphone", kind: "browser" });
+    });
+
     it("is drawn over the pane that asked, not the window or its sibling", () => {
         ask(7, "a");
         const dialog = screen.getByText(TITLE);

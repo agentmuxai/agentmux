@@ -183,9 +183,10 @@ export async function copyVaultPart(id: string, part: string, label: string): Pr
 
 export type UseDecision = "once" | "always" | "deny";
 
-/** The person's answer to an agent's use of an entry; srv takes it only from the host. */
-export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string) =>
-    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}) });
+/** The person's answer to an agent's use of an entry; srv takes it only from the host. `rows` are the rows of a
+ *  batch left ticked, by their place in its list. */
+export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, rows?: number[], vault?: string) =>
+    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(rows ? { rows } : {}), ...(vault ? { vault } : {}) });
 /** The person is reading or acting in use `id`'s prompt: srv holds its countdown. */
 export const holdUse = (id: string) => call<unknown>("hold_use", { id });
 /** Stops an agent filling an entry on a site without asking. */
@@ -308,6 +309,19 @@ export const updateVault = (id: string, name: string, agents: VaultAgents) => ca
 export const deleteVault = (id: string) => call<unknown>("vault_delete", { id });
 /** Puts an entry in another Vault. Only the person does this: a move can open a value to more agents. */
 export const moveEntry = (id: string, vaultId: string) => call<unknown>("move_entry", { id, vault_id: vaultId });
+
+/** What a check of an entry's machine copy found: `same`, `different` or `could not read` with why. No value. */
+export interface SourceChecked {
+    id: string;
+    label: string;
+    outcome: "same" | "different" | "could not read";
+    why?: string;
+    source: string;
+    checked_at: number;
+}
+
+/** Has srv read the entry's machine copy and compare it with the entry's value. The list shows the outcome. */
+export const checkSource = async (id: string) => (await call<{ checked: SourceChecked }>("check_source", { id })).checked;
 /** The Vault a browser profile saves its sign-ins to and offers them from. */
 export const setSigninVault = (profile: string, vaultId: string) => call<unknown>("signin_vault", { profile, vault_id: vaultId });
 /** An entry's earlier values, kept 7 days: when and by whom each was replaced, and its last characters. */

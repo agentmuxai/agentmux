@@ -12,7 +12,7 @@
  * `backend_started_at` (`chrono::Utc::now()`, stamped once by the host in
  * `crates/cef/src/sidecar.rs` when it spawns the sidecar, never
  * re-stamped) and the sysinfo event's `ts` (`SystemTime::now()` on every
- * tick in `crates/srv/src/backend/sysinfo.rs`). Subtracting them is only
+ * tick in `crates/srv-core/src/backend/sysinfo.rs`). Subtracting them is only
  * correct while the system clock is monotonic across the backend's whole
  * lifetime, which it is not: an NTP correction, a manual clock set, or a VM
  * resume steps it, and any BACKWARDS step makes the difference negative for

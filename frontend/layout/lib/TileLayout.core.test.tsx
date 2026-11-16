@@ -512,13 +512,13 @@ describe("createTileLayout: a tile", () => {
             expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
         });
 
-        it("shows the dragged pane's own tile in its landing rect, unblurred and never hidden, so no slot is empty", () => {
+        it("shows the dragged pane's own tile in its landing rect, as it is and never hidden, so no slot is empty", () => {
             const { el } = mountWithTile(makePlatform());
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", { ...entry, moved: true }]]));
             expect(el.style.visibility).toBe("");
             expect(edgesOf(el)).toEqual(["300px", "0px", "340px", "20px"]);
-            expect(el.style.filter).toBe("none");
-            // Another pane keeps whatever the stylesheet gives a dragged tile.
+            // Nothing is drawn over a dragged pane, in its landing rect or out of it.
+            expect(el.style.filter).toBe("");
             h.model.set.setReflow(new Map<string, ReflowEntry>([["n1", entry]]));
             expect(el.style.filter).toBe("");
         });
@@ -634,6 +634,19 @@ describe("createTileLayout: a tile", () => {
             expect(document.elementFromPoint).toHaveBeenCalledWith(5, 5);
         });
 
+        it("refuses it when the press began on a header button, and allows one that began on the header", () => {
+            const { el, cfg } = start();
+            const header = el.querySelector<HTMLElement>('[data-role="block-header"]')!;
+            const close = document.createElement("button");
+            close.setAttribute("aria-label", "Close pane");
+            header.appendChild(close);
+            // The drag's own start comes after the pointer left the button, so only where the press began counts.
+            close.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            expect(cfg.canDrag({ input: { clientX: 5, clientY: 5 } })).toBe(false);
+            header.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+            expect(cfg.canDrag({ input: { clientX: 5, clientY: 5 } })).toBe(true);
+        });
+
         it("refuses it for an ephemeral or a magnified pane", () => {
             const { cfg } = start();
             const nm = h.nodeModels.get("n1")!;
@@ -714,7 +727,7 @@ describe("createTileLayout: a tile", () => {
             cfg.onDrop();
         });
 
-        it("blurs the dragged tile only once the pane's picture has been taken, so the picture is of the pane as it stood", () => {
+        it("marks the tile dragged only once the pane's picture has been taken, so the picture is of the pane as it stood", () => {
             const { cfg, el } = start();
             const captured = beginPaneCapture();
             cfg.onDragStart();

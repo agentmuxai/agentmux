@@ -37,21 +37,29 @@ pub(crate) fn place_within(cursor: (i32, i32), offset: (i32, i32), size: (i32, i
     (x, y)
 }
 
-/// Whether the picture is shown for a cursor at `cursor_y`. A window tab's shows below the tear line (the
-/// strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over another
-/// AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the dragged pane
-/// itself, shown from the drag's first move wherever the cursor is, over the layout making room for it as much
-/// as over the desktop, so no translucent ghost ever stands in for it (the live reflow spec's "what the user sees").
+/// Whether the picture is shown for a cursor at `cursor` (screen pixels). A window tab's shows below the tear
+/// line (the strip's bottom edge plus the tear threshold, the same rule `decideTabRelease` uses) and not over
+/// another AgentMux window, where a release merges the tab. A pane has no tear line: its picture is the
+/// dragged pane itself, at the pane's own size, and it shows wherever the cursor is except over `quiet`, the
+/// body of the layout the drag began in (left, top, right, bottom). There the layout already shows the pane
+/// where it would land, so the hand holds nothing and the cursor alone says a drag is on (the operator,
+/// 2026-11-13: "it does not need to show at all while a user is hovering over the main window tab body ...
+/// when going off window or into another tab, thats when we want to see its original shape").
 #[cfg(any(target_os = "windows", test))]
-pub(crate) fn picture_wanted(cursor_y: i32, tear_line_y: Option<i32>, over_other_window: bool) -> bool {
+pub(crate) fn picture_wanted(
+    cursor: (i32, i32),
+    tear_line_y: Option<i32>,
+    over_other_window: bool,
+    quiet: Option<(i32, i32, i32, i32)>,
+) -> bool {
     match tear_line_y {
-        Some(line) => cursor_y > line && !over_other_window,
-        None => true,
+        Some(line) => cursor.1 > line && !over_other_window,
+        None => !quiet.is_some_and(|(l, t, r, b)| cursor.0 >= l && cursor.0 < r && cursor.1 >= t && cursor.1 < b),
     }
 }
 
 #[cfg(target_os = "windows")]
-pub use win::{begin, capture, end, landing, on_cursor, on_escape, on_session_end, picture_shown, resize};
+pub use win::{begin, capture, end, fade, landing, on_cursor, on_escape, on_session_end, picture_held, picture_shown, quiet, resize};
 
 #[cfg(not(target_os = "windows"))]
 pub fn begin(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -69,17 +77,29 @@ pub fn resize(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+pub fn quiet(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn fade(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(serde_json::Value::Null)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub async fn capture(_state: &Arc<AppState>, _args: &serde_json::Value) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "staged": false }))
 }
 
-/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`, and
-/// `live_follow_end` for any other.
+/// The picture's commands by name: `live_follow_begin`, `live_follow_resize`, `live_follow_capture`,
+/// `live_follow_quiet`, `live_follow_fade`, and `live_follow_end` for any other.
 pub async fn route(cmd: &str, state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     match cmd {
         "live_follow_begin" => begin_blocking(state, args).await,
         "live_follow_resize" => resize_blocking(args).await,
         "live_follow_capture" => capture(state, args).await,
+        "live_follow_quiet" => quiet(args),
+        "live_follow_fade" => fade(args),
         _ => end(),
     }
 }
@@ -100,6 +120,28 @@ pub async fn resize_blocking(args: &serde_json::Value) -> Result<serde_json::Val
         .map_err(|e| format!("live_follow_resize join error: {}", e))?
 }
 
+/// The alpha (0 to 255) of a picture shown at `opacity` (0 to 1). Never under `MIN_ALPHA`: a picture the page
+/// asked to fade is still a picture, and one that cannot be seen would read as the drag having dropped it.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn alpha_of(opacity: f64) -> u8 {
+    const MIN_ALPHA: f64 = 26.0;
+    if opacity.is_nan() {
+        return 255;
+    }
+    (opacity * 255.0).round().clamp(MIN_ALPHA, 255.0) as u8
+}
+
+/// The next alpha of a fade from `shown` to `target`: one step of `FADE_STEP` toward it, never past it.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn fade_step(shown: u8, target: u8) -> u8 {
+    const FADE_STEP: u8 = 24;
+    if shown < target {
+        shown.saturating_add(FADE_STEP).min(target)
+    } else {
+        shown.saturating_sub(FADE_STEP).max(target)
+    }
+}
+
 /// Where the cursor holds a picture of `size`, made from one of `source_size` that was pressed at `grab`: the
 /// same spot of the pane, so the grab scales with the picture, and is kept inside it. Always from the original
 /// grab, never from a previous size's offset, so the pane's own size has the original alignment back.
@@ -114,10 +156,12 @@ pub(crate) fn offset_within(grab: (i32, i32), source_size: (i32, i32), size: (i3
 
 #[cfg(target_os = "windows")]
 mod win {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+    use windows_sys::Win32::Foundation::{
+        GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+    };
     use windows_sys::Win32::Graphics::Gdi::{
         ClientToScreen, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
         BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
@@ -125,8 +169,9 @@ mod win {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage,
-        RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage, UpdateLayeredWindow, HWND_TOP, MSG, SWP_ASYNCWINDOWPOS,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW, PostMessageW,
+        PostQuitMessage,
+        KillTimer, RegisterClassExW, SetTimer, SetWindowPos, TranslateMessage, UpdateLayeredWindow, HWND_TOP, MSG, SWP_ASYNCWINDOWPOS,
         SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, ULW_ALPHA, WM_APP,
         WM_ERASEBKGND, WM_DESTROY, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
         WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_POPUP,
@@ -142,7 +187,12 @@ mod win {
     const WM_FOLLOW_GRACE: u32 = WM_APP + 0x62;
     /// Sent to the picture's window: paint the picture waiting in `PENDING_REPAINT`, at its size.
     const WM_FOLLOW_RESIZE: u32 = WM_APP + 0x63;
+    /// Sent to the picture's window: fade to the opacity in `TARGET_ALPHA`.
+    const WM_FOLLOW_FADE: u32 = WM_APP + 0x64;
     const TIMER_ID: usize = 1;
+    /// The timer of a fade: a step of `fade_step` every `FADE_TICK_MS`, about 120 ms from solid to faded.
+    const FADE_TIMER_ID: usize = 2;
+    const FADE_TICK_MS: u32 = 15;
     /// The longest a picture lives if nothing ends it (a drag that never reports its end).
     const FAILSAFE_MS: u32 = 120_000;
     /// How long a picture stays after the drag ends: the real window is promoted at its place meanwhile.
@@ -175,6 +225,12 @@ mod win {
         /// out of the monitor agentmux is running on, so it behaves like a typical edge of the screen").
         /// A window tab has none: it is torn off onto whichever monitor it is carried to.
         home: Option<(i32, i32, i32, i32)>,
+        /// The body of the layout a pane's drag began in, screen pixels (left, top, right, bottom): the picture
+        /// is not shown over it (`picture_wanted`). None for a window tab, and for a pane whose page gave none.
+        quiet: Option<(i32, i32, i32, i32)>,
+        /// Whether `quiet` holds now: the page turns it off while the window shows another window tab, whose
+        /// layout shows nothing of the pane (`quiet`).
+        quiet_on: bool,
         /// Where the hook last saw the cursor, screen pixels: a new size is placed around it (`resize`).
         cursor: Option<(i32, i32)>,
         shown: bool,
@@ -192,6 +248,14 @@ mod win {
     static FOLLOWER: Mutex<Option<Follower>> = Mutex::new(None);
     /// Whether the picture is on screen, readable without the lock the hook thread holds on every move.
     static PICTURE_SHOWN: AtomicBool = AtomicBool::new(false);
+    /// Whether a pane's picture is held out of sight over its own layout at times (`quiet`): the drag then
+    /// shows no picture there at all, not the shell's either (`picture_held`).
+    static PICTURE_HELD: AtomicBool = AtomicBool::new(false);
+    /// The opacity the page asked for (`fade`), as an alpha. It is the page's to set and outlives a picture: a
+    /// drop guide can show before the picture of its drag is made. Solid again when a drag ends.
+    static TARGET_ALPHA: AtomicU8 = AtomicU8::new(255);
+    /// The alpha the picture is painted with now: on its way to `TARGET_ALPHA` during a fade.
+    static SHOWN_ALPHA: AtomicU8 = AtomicU8::new(255);
     /// The picture `resize` composed, for the window's thread to paint (`WM_FOLLOW_RESIZE`); a newer one
     /// replaces an unpainted one, and the end of the picture clears it.
     static PENDING_REPAINT: Mutex<Option<Repaint>> = Mutex::new(None);
@@ -247,11 +311,13 @@ mod win {
             .map_err(|e| format!("picture is not base64: {}", e))?;
         let source = unsafe { crate::commands::window::resolve_window_hwnd_strict(state, label) }
             .ok_or_else(|| format!("no window for {}", label))?;
-        let (scale, client_top) = unsafe {
+        let (scale, client_left, client_top, client_width) = unsafe {
             let dpi = GetDpiForWindow(source);
             let mut origin = POINT { x: 0, y: 0 };
             ClientToScreen(source, &mut origin);
-            (if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }, origin.y)
+            let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetClientRect(source, &mut client);
+            (if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }, origin.x, origin.y, client.right - client.left)
         };
         let px = |dip: f64| (dip * scale).round() as i32;
         let size = (
@@ -261,9 +327,12 @@ mod win {
         let offset = (px(num(args, "offsetX")?), px(num(args, "offsetY")?));
         let tear_line_y = args.get("tearLineY").and_then(|v| v.as_f64()).map(|line| client_top + px(line));
         let home = if tear_line_y.is_none() { crate::app::window_work_area_physical(source as isize) } else { None };
+        let quiet = if tear_line_y.is_none() { quiet_area(args, (client_left, client_top), client_width)? } else { None };
         let bgra = Arc::new(decode_bgra(&jpeg, size.0 as u32, size.1 as u32)?);
 
         end_now();
+        // A new picture starts at the opacity asked for, with no fade to it.
+        SHOWN_ALPHA.store(TARGET_ALPHA.load(Ordering::Acquire), Ordering::Release);
         let hwnd = spawn_overlay(bgra.clone(), size)?;
         *FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())? = Some(Follower {
             hwnd,
@@ -276,6 +345,8 @@ mod win {
             source_size: size,
             tear_line_y,
             home,
+            quiet,
+            quiet_on: true,
             cursor: None,
             shown: false,
             last: (0, 0),
@@ -283,9 +354,10 @@ mod win {
             shows: None,
             pictures: LandedPictures::default(),
         });
+        PICTURE_HELD.store(quiet.is_some(), Ordering::Release);
         tracing::info!(
             target: "dnd:tearoff",
-            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y,
+            label = %label, width = size.0, height = size.1, tear_line_y = ?tear_line_y, quiet = ?quiet,
             "[live-follow] picture ready; it shows with the cursor's next move"
         );
         // The drag ended while the picture was being made: nothing will move it, so it goes.
@@ -298,12 +370,14 @@ mod win {
     /// Drop the picture now (the page's drag is over and its real window is up, or the drag was cancelled).
     pub fn end() -> Result<serde_json::Value, String> {
         end_now();
+        TARGET_ALPHA.store(255, Ordering::Release);
         Ok(serde_json::Value::Null)
     }
 
     fn end_now() {
         let taken = FOLLOWER.lock().ok().and_then(|mut g| g.take());
         PICTURE_SHOWN.store(false, Ordering::Release);
+        PICTURE_HELD.store(false, Ordering::Release);
         if let Ok(mut pending) = PENDING_REPAINT.lock() {
             *pending = None;
         }
@@ -368,9 +442,62 @@ mod win {
     pub fn on_cursor(x: i32, y: i32, over_other_window: bool) {
         let Ok(mut guard) = FOLLOWER.try_lock() else { return };
         let Some(f) = guard.as_mut() else { return };
+        track(f, x, y, over_other_window);
+    }
+
+    /// The body of the layout a pane's drag began in, as the page gave it (`quiet`: `left`, `top`, `width`,
+    /// `height` in CSS px of a viewport `viewportWidth` wide), in screen pixels (left, top, right, bottom). The
+    /// page's px are scaled by the window's client width, as a picture of the window is (`capture`), so a
+    /// zoomed page is read right. None when the page gave none.
+    fn quiet_area(
+        args: &serde_json::Value,
+        client_origin: (i32, i32),
+        client_width: i32,
+    ) -> Result<Option<(i32, i32, i32, i32)>, String> {
+        let Some(area) = args.get("quiet").filter(|q| !q.is_null()) else { return Ok(None) };
+        let viewport_width = num(area, "viewportWidth")?;
+        if !(viewport_width > 0.0) || client_width <= 0 {
+            return Ok(None);
+        }
+        let ratio = client_width as f64 / viewport_width;
+        let px = |css: f64| (css * ratio).round() as i32;
+        let (left, top) = (client_origin.0 + px(num(area, "left")?), client_origin.1 + px(num(area, "top")?));
+        Ok(Some((left, top, left + px(num(area, "width")?), top + px(num(area, "height")?))))
+    }
+
+    /// Turn the quiet area on or off (`on`): off while the window shows another window tab than the one the
+    /// drag began in, where nothing on screen shows the pane; on again when it is back. The picture is shown or
+    /// hidden for the cursor where it is, without waiting for its next move. A no-op with no picture.
+    pub fn quiet(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let on = args.get("on").and_then(|v| v.as_bool()).ok_or_else(|| "missing on".to_string())?;
+        let mut guard = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?;
+        let Some(f) = guard.as_mut() else { return Ok(serde_json::Value::Null) };
+        f.quiet_on = on;
+        if let Some((x, y)) = f.cursor {
+            track(f, x, y, false);
+        }
+        Ok(serde_json::Value::Null)
+    }
+
+    /// Show the picture at `opacity` (0 to 1, 1 is solid): the page fades it while its layout shows drop guides,
+    /// which are drawn in the page, under the picture (the operator, 2026-11-15: "when the follow pane is over
+    /// the guide, can you make the follow pane 70% transparent?"). The picture fades to it over a few frames,
+    /// where it is, shown or not. With no picture yet, the next one starts at it.
+    pub fn fade(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+        TARGET_ALPHA.store(super::alpha_of(num(args, "opacity")?), Ordering::Release);
+        let hwnd = FOLLOWER.lock().map_err(|_| "follower state poisoned".to_string())?.as_ref().map(|f| f.hwnd);
+        if let Some(hwnd) = hwnd {
+            unsafe { PostMessageW(hwnd as HWND, WM_FOLLOW_FADE, 0, 0) };
+        }
+        Ok(serde_json::Value::Null)
+    }
+
+    /// Show, move or hide the picture for a cursor at (x, y).
+    fn track(f: &mut Follower, x: i32, y: i32, over_other_window: bool) {
         f.cursor = Some((x, y));
         let hwnd = f.hwnd as HWND;
-        if !super::picture_wanted(y, f.tear_line_y, over_other_window) {
+        let quiet = if f.quiet_on { f.quiet } else { None };
+        if !super::picture_wanted((x, y), f.tear_line_y, over_other_window, quiet) {
             if f.shown {
                 f.shown = false;
                 PICTURE_SHOWN.store(false, Ordering::Release);
@@ -506,6 +633,12 @@ mod win {
         PICTURE_SHOWN.load(Ordering::Acquire)
     }
 
+    /// Whether a pane's picture exists that is held out of sight over its own layout: the shell's picture must
+    /// not stand in for it there. Read from the drag's own thread on every cursor move, so a flag, as above.
+    pub fn picture_held() -> bool {
+        PICTURE_HELD.load(Ordering::Acquire)
+    }
+
     /// Where the real window should open: the picture's last place, if the picture is on screen. Handed out
     /// once, so a later tear-off can't reuse it.
     pub fn landing() -> Option<(i32, i32)> {
@@ -518,11 +651,14 @@ mod win {
     /// Escape: the tear-off is cancelled, so the picture goes at once.
     pub fn on_escape() {
         end_now();
+        TARGET_ALPHA.store(255, Ordering::Release);
     }
 
     /// The drag's hook session is over (release, Escape, or stopped). A hidden picture goes now; a shown one
     /// stays for its grace time, under the window about to be promoted at its place.
     pub fn on_session_end() {
+        // The drag is over, and its guides with it: the next drag's picture is solid until the page says otherwise.
+        TARGET_ALPHA.store(255, Ordering::Release);
         let state = FOLLOWER.lock().ok().and_then(|g| g.as_ref().map(|f| (f.hwnd, f.shown)));
         match state {
             Some((hwnd, true)) => {
@@ -639,7 +775,7 @@ mod win {
             let old = SelectObject(mem, dib as _);
             let dest_size = SIZE { cx: w, cy: h };
             let src = POINT { x: 0, y: 0 };
-            let blend = BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: 0 };
+            let blend = blend_at(SHOWN_ALPHA.load(Ordering::Acquire));
             let dest = at.map(|(x, y)| POINT { x, y });
             let dest_ptr = dest.as_ref().map_or(std::ptr::null(), |p| p as *const POINT);
             let ok = UpdateLayeredWindow(hwnd, screen, dest_ptr, &dest_size, mem, &src, 0, &blend, ULW_ALPHA);
@@ -654,6 +790,34 @@ mod win {
         result
     }
 
+    fn blend_at(alpha: u8) -> BLENDFUNCTION {
+        BLENDFUNCTION { BlendOp: 0, BlendFlags: 0, SourceConstantAlpha: alpha, AlphaFormat: 0 }
+    }
+
+    /// One step of the picture's fade toward `TARGET_ALPHA`: the picture it holds, blended at the next alpha
+    /// (no source: the picture and its place stay as they are). True when the fade has arrived.
+    unsafe fn fade_tick(hwnd: HWND) -> bool {
+        let target = TARGET_ALPHA.load(Ordering::Acquire);
+        let next = super::fade_step(SHOWN_ALPHA.load(Ordering::Acquire), target);
+        SHOWN_ALPHA.store(next, Ordering::Release);
+        let blend = blend_at(next);
+        let ok = UpdateLayeredWindow(
+            hwnd,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            0,
+            &blend,
+            ULW_ALPHA,
+        );
+        if ok == 0 {
+            tracing::warn!(target: "dnd:tearoff", error = GetLastError(), "[live-follow] the picture could not be faded");
+        }
+        next == target
+    }
+
     unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         match msg {
             // -1 is HTTRANSPARENT: the point belongs to whatever is beneath.
@@ -661,6 +825,18 @@ mod win {
             // MA_NOACTIVATE.
             WM_MOUSEACTIVATE => 3,
             WM_ERASEBKGND => 1,
+            WM_FOLLOW_FADE => {
+                if !fade_tick(hwnd) {
+                    SetTimer(hwnd, FADE_TIMER_ID, FADE_TICK_MS, None);
+                }
+                0
+            }
+            WM_TIMER if wp == FADE_TIMER_ID => {
+                if fade_tick(hwnd) {
+                    KillTimer(hwnd, FADE_TIMER_ID);
+                }
+                0
+            }
             WM_FOLLOW_END | WM_TIMER => {
                 DestroyWindow(hwnd);
                 0
@@ -723,7 +899,37 @@ mod win {
 
 #[cfg(test)]
 mod tests {
-    use super::{follow_origin, offset_within, picture_wanted, place_within};
+    use super::{alpha_of, fade_step, follow_origin, offset_within, picture_wanted, place_within};
+
+    #[test]
+    fn a_faded_picture_is_never_solid_or_gone_by_accident() {
+        assert_eq!(alpha_of(1.0), 255);
+        assert_eq!(alpha_of(0.3), 77);
+        // Out of range, or not a number: solid, or the least a picture is shown at.
+        assert_eq!(alpha_of(7.0), 255);
+        assert_eq!(alpha_of(0.0), 26);
+        assert_eq!(alpha_of(-1.0), 26);
+        assert_eq!(alpha_of(f64::NAN), 255);
+    }
+
+    #[test]
+    fn a_fade_steps_to_its_target_both_ways_and_stops_on_it() {
+        let run = |from: u8, to: u8| {
+            let (mut at, mut steps) = (from, 0);
+            while at != to {
+                let next = fade_step(at, to);
+                assert!(if from < to { next > at && next <= to } else { next < at && next >= to });
+                at = next;
+                steps += 1;
+            }
+            steps
+        };
+        assert_eq!(run(255, 77), 8);
+        assert_eq!(run(77, 255), 8);
+        assert_eq!(fade_step(77, 77), 77);
+        assert_eq!(fade_step(250, 255), 255);
+        assert_eq!(fade_step(5, 0), 0);
+    }
 
     #[test]
     fn a_panes_picture_stops_whole_at_the_edge_of_its_monitor_while_the_cursor_goes_on() {
@@ -774,21 +980,39 @@ mod tests {
 
     #[test]
     fn a_window_tabs_picture_shows_only_below_the_tear_line() {
-        assert!(picture_wanted(301, Some(300), false));
-        assert!(!picture_wanted(300, Some(300), false));
-        assert!(!picture_wanted(120, Some(300), false));
+        assert!(picture_wanted((0, 301), Some(300), false, None));
+        assert!(!picture_wanted((0, 300), Some(300), false, None));
+        assert!(!picture_wanted((0, 120), Some(300), false, None));
     }
 
     #[test]
     fn a_window_tabs_picture_stays_hidden_over_another_window() {
-        assert!(!picture_wanted(900, Some(300), true));
+        assert!(!picture_wanted((0, 900), Some(300), true, None));
     }
 
     #[test]
-    fn a_panes_picture_shows_everywhere_from_the_first_move() {
-        assert!(picture_wanted(0, None, false));
-        assert!(picture_wanted(-5_000, None, false));
-        // Over its own window, where the layout makes room, and over another AgentMux window too.
-        assert!(picture_wanted(0, None, true));
+    fn a_panes_picture_with_no_quiet_area_shows_everywhere_from_the_first_move() {
+        assert!(picture_wanted((0, 0), None, false, None));
+        assert!(picture_wanted((0, -5_000), None, false, None));
+        // Over another AgentMux window too.
+        assert!(picture_wanted((0, 0), None, true, None));
+    }
+
+    #[test]
+    fn a_panes_picture_is_not_shown_over_the_body_of_its_own_layout() {
+        // The layout's body on screen: 100..1300 across, 133..933 down.
+        let body = Some((100, 133, 1300, 933));
+        // Over the body, to its last pixel: the layout shows the pane where it would land.
+        assert!(!picture_wanted((700, 500), None, false, body));
+        assert!(!picture_wanted((100, 133), None, false, body));
+        assert!(!picture_wanted((1299, 932), None, false, body));
+        // Over the window's tab bar above it, and outside the window on every side: the pane, as it is.
+        assert!(picture_wanted((700, 120), None, false, body));
+        assert!(picture_wanted((1300, 500), None, false, body));
+        assert!(picture_wanted((99, 500), None, false, body));
+        assert!(picture_wanted((700, 933), None, false, body));
+        assert!(picture_wanted((-400, 500), None, false, body));
+        // A window tab has a tear line and no quiet area: the body is where its picture shows.
+        assert!(picture_wanted((700, 500), Some(133), false, body));
     }
 }

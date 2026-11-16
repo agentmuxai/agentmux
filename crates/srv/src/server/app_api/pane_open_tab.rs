@@ -156,8 +156,9 @@ mod tests {
             }
         }
         let mut hits = Vec::new();
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        walk(&root, &root, &mut hits);
+        for root in crate::test_support::server_src_roots() {
+            walk(&root, &root, &mut hits);
+        }
         assert!(
             hits.is_empty(),
             "resolve_tab_id picks the first workspace's tab when it is given none, which may be another window's. Use pane_open_tab::resolve_open_tab, or name the tab. Found: {hits:?}"

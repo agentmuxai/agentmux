@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The widget bar a fresh install shows (crates/srv/src/config/widgets.json),
+ * The widget bar a fresh install shows (crates/srv-core/src/config/widgets.json),
  * and the Armory widget's move to Connectors and Memory (then named Knowledge).
  * SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md §4.3, §4.8.
  */
@@ -20,7 +20,7 @@ vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import defaults from "../../../crates/srv/src/config/widgets.json";
+import defaults from "../../../crates/srv-core/src/config/widgets.json";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { BUILTIN_SINGLETON_VIEWS } from "@/app/store/widget-singleton";
 import { getMoreWidgets, getPinnedKeys, openWidget } from "./action-widgets-config";
@@ -62,6 +62,7 @@ describe("the default widget bar", () => {
             "tower",
             "audit",
             "atlas",
+            "reviews",
         ]);
     });
 
@@ -85,7 +86,7 @@ describe("the singleton flag in the default widget config", () => {
 
     it("marks the management panes", () => {
         expect(keys(flagged)).toEqual(
-            ["atlas", "audit", "connectors", "drone", "help", "history", "kanban", "memory", "settings", "swarm", "toolchain", "tower", "vault"].sort()
+            ["atlas", "audit", "connectors", "drone", "help", "history", "kanban", "memory", "reviews", "settings", "swarm", "toolchain", "tower", "vault"].sort()
         );
     });
 

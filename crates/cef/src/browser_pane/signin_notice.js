@@ -293,6 +293,11 @@
     (e) => {
       if (!e.isTrusted || !newPasswordField(e.target)) return;
       const field = e.target;
+      // Moving on to another field for a new password in the same form (its confirm field, by Tab or a click)
+      // keeps the offer on the field it was made for while that field is still shown: the offer's fill is still
+      // on its way and looks for that field. A hidden one (a later step of the form) makes this field's own offer.
+      const held = document.querySelector(`[${SIGNUP_ATTR}]`);
+      if (held && held !== field && held.isConnected && shown(held) && newPasswordField(held) && held.form && held.form === field.form) return;
       const user = userIn(inputsOf(groupOf(field)), field);
       const limit = (n) => (n > 0 ? n : undefined);
       const token = freshToken();

@@ -382,9 +382,9 @@ describe("Global Memory as the startup block's sections", () => {
 describe("GLOBAL_SECTION_SEPARATOR — frontend/backend consistency", () => {
     it("equals storage/bundles.rs's GLOBAL_SECTION_SEPARATOR", () => {
         const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-        const source = readFileSync(resolve(repoRoot, "crates/srv/src/backend/storage/bundles.rs"), "utf8");
+        const source = readFileSync(resolve(repoRoot, "crates/srv-core/src/backend/storage/bundles.rs"), "utf8");
         const match = /pub const GLOBAL_SECTION_SEPARATOR: &str = "((?:[^"\\]|\\.)*)";/.exec(source);
-        if (!match) throw new Error("GLOBAL_SECTION_SEPARATOR not found in crates/srv/src/backend/storage/bundles.rs");
+        if (!match) throw new Error("GLOBAL_SECTION_SEPARATOR not found in crates/srv-core/src/backend/storage/bundles.rs");
         // Only the escapes a Rust string literal like this one uses.
         const rust = match[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
         expect(GLOBAL_SECTION_SEPARATOR).toBe(rust);
@@ -392,7 +392,7 @@ describe("GLOBAL_SECTION_SEPARATOR — frontend/backend consistency", () => {
 
     it("RUNNING_SUMMARY_HEADING is how continuity_state.rs's summary heading starts", () => {
         const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-        const source = readFileSync(resolve(repoRoot, "crates/srv/src/backend/continuity_state.rs"), "utf8");
+        const source = readFileSync(resolve(repoRoot, "crates/srv-core/src/backend/continuity_state.rs"), "utf8");
         expect(source).toContain(`# ${RUNNING_SUMMARY_HEADING} (`);
     });
 });
@@ -414,7 +414,7 @@ describe("replay of a compaction reinjection that carries the running summary", 
 });
 
 describe("composeReinjectionMessage — srv's compose_fallback writes the same (CD2b)", () => {
-    // crates/srv/src/backend/memory/delivery.rs's
+    // crates/srv-core/src/backend/memory/delivery.rs's
     // compose_fallback_writes_the_frontends_exact_message pins this same
     // literal for the same entries: the fallback's wire format must not drift
     // between the two composers.

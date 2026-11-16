@@ -3,7 +3,7 @@
 //
 // A chip docked onto a pane of its Row grows in that pane's column when it is restored, not in a
 // column of its own where it was minimized from (layoutRestore.ts). srv does the same
-// (crates/srv/src/backend/layout/intent.rs); layoutIntentVectors.test.ts checks the two agree.
+// (crates/srv-core/src/backend/layout/intent.rs); layoutIntentVectors.test.ts checks the two agree.
 
 import { describe, expect, it } from "vitest";
 import { withDerivedNodeIds } from "../lib/layoutNode";

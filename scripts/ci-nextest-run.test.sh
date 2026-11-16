@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # ci-nextest-run.test.sh — tests for ci-nextest-run.sh: the retry of a stalled attempt, no retry of a failure, the
-# memory-pressure rule, the readings the stalled run of 2026-11-14 produced, the sampler, and the cargo job limit. The
+# memory-pressure rule, the readings the stalled run of 2026-11-14 produced, the sampler, the cargo job limit and the build order. The
 # cargo commands are replaced by CI_ATTEMPT_CMD (or a stub cargo) and the monitor is off.
 #
 # Usage: bash scripts/ci-nextest-run.test.sh   (exit 0 = all pass)
@@ -123,6 +123,34 @@ for mode in pr queue; do
         if grep -q "CARGO_BUILD_JOBS=$want" "$log" && ! grep -q "CARGO_BUILD_JOBS=unset" "$log"; then ok "$mode lane builds with $want jobs"; else bad "$mode lane builds with $want jobs" "$(cat "$log")"; fi
     done
 done
+
+echo "the build order"
+# cargo builds a dependency with the features of every package named in a call. A build that names fewer packages than
+# the run after it is thrown away: the run compiles the core and the server layer again, both at once (2026-11-15).
+# So every nextest call of an attempt names the same packages, the core's harness is built first and the server
+# layer's second, and the run comes last.
+ARGS_BIN="$TMP/argsbin"
+mkdir -p "$ARGS_BIN"
+printf '#!/usr/bin/env bash\necho "cargo $*"\n' > "$ARGS_BIN/cargo"
+chmod +x "$ARGS_BIN/cargo"
+packages() { tr ' ' '\n' | grep -A1 -x -e '-p' | grep -v -x -e '-p' -e '--' | sort | tr '\n' ' '; }
+for mode in pr queue; do
+    log="$TMP/order-$mode.log"
+    in_queue=""
+    [ "$mode" = queue ] && in_queue=true
+    env PATH="$ARGS_BIN:$PATH" IN_QUEUE=$in_queue CI_BUILD_LOG="$log" CI_TRACE_FILE="$TMP/order.trace" bash "$SCRIPT" --attempt > /dev/null 2>&1
+    mapfile -t calls < <(grep "^cargo nextest run" "$log")
+    sets=$(for call in "${calls[@]}"; do echo "$call" | packages; echo; done | sort -u | grep -c .)
+    [ "${#calls[@]}" -eq 3 ] && [ "$sets" = 1 ] && ok "$mode lane: the two builds and the run name the same packages" \
+        || bad "$mode lane: the two builds and the run name the same packages" "$(cat "$log")"
+    case "${calls[0]:-}" in *"--no-run"*"--lib") ok "$mode lane: the core's harness is built first" ;; *) bad "$mode lane: the core's harness is built first" "${calls[0]:-}" ;; esac
+    case "${calls[1]:-}" in *"--no-run"*"--bin agentmux-srv") ok "$mode lane: the server layer's harness is built second" ;; *) bad "$mode lane: the server layer's harness is built second" "${calls[1]:-}" ;; esac
+    case "${calls[2]:-}" in *"--no-run"*) bad "$mode lane: the run comes last" "${calls[2]:-}" ;; *"--profile"*) ok "$mode lane: the run comes last" ;; *) bad "$mode lane: the run comes last" "${calls[2]:-}" ;; esac
+done
+echo "cargo nextest run --profile queue -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-mcp" | packages | grep -q "^agentmux-common agentmux-mcp agentmux-srv agentmux-srv-core $" \
+    && ok "the package list of a call is read" || bad "the package list of a call is read"
+grep -q -- "-p agentmux-mcp" "$TMP/order-queue.log" && grep -q -- "-p agentmux-launcher" "$TMP/order-pr.log" && ! grep "^cargo nextest" "$TMP/order-queue.log" | grep -q -- "-p agentmux-launcher" \
+    && ok "the queue names its four packages, a PR all of them" || bad "the queue names its four packages, a PR all of them" "$(cat "$TMP/order-queue.log")"
 
 echo "the memory ceiling"
 # A stub sudo: it records its arguments, runs what follows "--" (the build) for systemd-run, and only records for

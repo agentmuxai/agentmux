@@ -20,11 +20,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ALLOWED=(
-    "crates/srv/src/backend/name_resolution.rs"
+    "crates/srv-core/src/backend/name_resolution.rs"
     "crates/srv/src/server/name_resolution.rs"
 )
 
-violations=$(grep -rn --include='*.rs' 'resolve_name_to_uid' crates/srv crates/mcp crates/common crates/launcher crates/bashwrap 2>/dev/null \
+violations=$(grep -rn --include='*.rs' 'resolve_name_to_uid' crates/srv crates/srv-core crates/mcp crates/common crates/launcher crates/bashwrap 2>/dev/null \
     | grep -v -F "${ALLOWED[0]}" \
     | grep -v -F "${ALLOWED[1]}" \
     || true)

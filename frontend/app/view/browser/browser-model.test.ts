@@ -175,8 +175,24 @@ describe("BrowserViewModel lifecycle gating", () => {
     // in this pane's URL bar". The shared guard (userCaretInBlock, in
     // giveBlockFocus) now decides that, scoped to this block, before
     // giveFocus is ever called (SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS §4.3).
+    // One request per open, when the page exists: before that the host has no pane to give the keyboard
+    // to, and the layout insert, the block and the stand-in each used to ask anyway (audit finding 6).
+    it("giveFocus() asks the host for nothing until the page exists, and nothing again once it is closed", () => {
+        const vm = makeVM();
+        vi.mocked(invokeCommand).mockClear();
+        expect(vm.giveFocus()).toBe(false);
+        expect(invokeCommand).not.toHaveBeenCalledWith("input_select", expect.anything());
+        vm.setPageLive(true);
+        expect(vm.giveFocus()).toBe(true);
+        expect(invokeCommand).toHaveBeenCalledTimes(1);
+        vm.setPageLive(false);
+        expect(vm.giveFocus()).toBe(false);
+        expect(invokeCommand).toHaveBeenCalledTimes(1);
+    });
+
     it("giveFocus() hands keyboard focus to the pane even with an input focused elsewhere", () => {
         const vm = makeVM();
+        vm.setPageLive(true);
         const other = document.createElement("input");
         document.body.appendChild(other);
         other.focus();

@@ -136,7 +136,7 @@ export function confirmedSend(
 
 /**
  * Model APIs srv reports on from the CLI's own frames before any status
- * reaches the pane (`connectivity::ANTHROPIC` in crates/srv/src/connectivity/mod.rs).
+ * reaches the pane (`connectivity::ANTHROPIC` in crates/srv-core/src/connectivity/mod.rs).
  */
 const TRACKED_MODEL_APIS = new Set(["model_api:anthropic"]);
 

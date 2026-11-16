@@ -157,6 +157,12 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
             vault::setting_key::allow(store, &s("entry_id"), &s("setting"), vault::PERSON)?;
             Ok((json!({}), true))
         }
+        // The person's check of an entry's machine copy against its value, read with this computer's own AWS login.
+        "check_source" => {
+            let plan = vault::source_link::plan_for_person(store, &s("id"))?;
+            let checked = vault::source_link::check_blocking(store, &crate::identity::aws_broker::mint::HostRunner, &plan, vault::aws_import::Via::Host)?;
+            Ok((json!({ "checked": checked }), true))
+        }
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
         "versions" => Ok((json!({ "versions": vault::versions::list(store, &s("id"))? }), false)),
         // An entry's history, and whether the record of it still holds together (the History dialog).
@@ -234,7 +240,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -264,7 +270,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)? };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)?, rows: super::vault_import_batch::ticked_rows(&request, body.get("rows"), decision)?, vault: super::vault_import_batch::chosen_vault(&request, body.get("vault").and_then(Value::as_str), decision)? };
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }

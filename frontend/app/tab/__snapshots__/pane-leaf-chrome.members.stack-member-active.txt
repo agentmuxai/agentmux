@@ -17,7 +17,7 @@ Block a2 memberActive=false
 -- show the pane, switch to a2
 Block a1 memberActive=true
 Block a2 memberActive=false
-setKeepAliveBlockDormant a2 false
 setKeepAliveBlockDormant a1 true
+setKeepAliveBlockDormant a2 false
 Block a1 memberActive=false
 Block a2 memberActive=true
