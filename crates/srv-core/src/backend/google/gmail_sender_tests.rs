@@ -132,7 +132,7 @@ fn forwarded_mail_shows_googles_arc_verdict_from_the_topmost_google_set() {
     let c = check(&[
         ("ARC-Authentication-Results", third.as_str()),
         ("ARC-Authentication-Results", two.as_str()),
-        ("Authentication-Results", "mx.google.com; dkim=pass header.i=@vendor.com; spf=fail smtp.mailfrom=asaf@agentmux.ai; dmarc=pass header.from=vendor.com"),
+        ("Authentication-Results", "mx.google.com; dkim=pass header.i=@vendor.com; spf=fail smtp.mailfrom=user@forwarder.example; dmarc=pass header.from=vendor.com"),
         ("ARC-Authentication-Results", one.as_str()),
         FROM,
     ]);
@@ -140,7 +140,7 @@ fn forwarded_mail_shows_googles_arc_verdict_from_the_topmost_google_set() {
     assert_eq!(c["arc"]["dmarc"]["result"], "fail");
     assert_eq!(c["arc"]["spf"], json!({ "result": "pass", "domain": "vendor.com" }));
     // The final hop's own result is reported as it is, beside it.
-    assert_eq!(c["spf"], json!({ "result": "fail", "domain": "agentmux.ai" }));
+    assert_eq!(c["spf"], json!({ "result": "fail", "domain": "forwarder.example" }));
     assert_eq!(c["dmarc"]["result"], "pass");
 }
 
