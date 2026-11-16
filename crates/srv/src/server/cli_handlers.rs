@@ -410,14 +410,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         #[cfg(not(target_os = "macos"))]
                         {
                             tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
-                            let result = CheckCliAuthResult {
-                                authenticated: false,
-                                email: None,
-                                auth_method: None,
-                                raw_output: "no credentials found".to_string(),
-                                store_problem: None,
-                            };
-                            return Ok(result);
+                            return Ok(CheckCliAuthResult::signed_out("no credentials found"));
                         }
                         #[cfg(target_os = "macos")]
                         {
