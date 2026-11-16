@@ -181,8 +181,9 @@ async fn a_place_that_refuses_or_cant_be_read_back_is_the_answer_not_an_error() 
     let no_key = check(&s, &Fake::ok(serde_json::to_string(r#"{"user":"app"}"#).unwrap()), &plan, Via::Host).await;
     assert_eq!((no_key.outcome, no_key.why.as_str()), (COULD_NOT_READ, "that secret has no key db.password"));
 
-    // A CI secret is written, never read: the check says so and runs nothing.
-    let ci = key_entry(&s, &[(KIND, GITHUB_SECRET), (LOCATION, "example-org/example-app"), (KEY, "DEPLOY_TOKEN")]);
+    // A place a person described in words is read by nothing: the check says so and runs nothing. (A CI secret's
+    // check reads its listing entry: `linked_tests`.)
+    let ci = key_entry(&s, &[(KIND, OTHER), (LOCATION, "the build host's config file")]);
     let runner = Fake::ok(secret_with(VALUE));
     let unread = check(&s, &runner, &plan_for_agent(&s, &ci, "builder", Some(REASON)).unwrap(), Via::Host).await;
     assert_eq!((unread.outcome, unread.why.as_str(), runner.runs()), (COULD_NOT_READ, "this kind of place can't be read back from here", 0));

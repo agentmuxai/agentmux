@@ -19,6 +19,7 @@ pub mod card_target;
 pub mod expiry;
 pub mod files;
 pub mod generate;
+pub mod github_secret;
 pub mod history;
 pub mod import;
 pub mod inspect;
