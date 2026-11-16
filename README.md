@@ -75,7 +75,7 @@ Cross-platform (Windows, macOS, Linux). Rust backend (Tokio + Axum). CEF host (b
 - **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, tear panes off into floating windows, and dock them into any window.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Run multiple versions side-by-side** — Each instance is fully isolated (separate CEF data, separate backend sidecar, separate ports). Test a new build while the old one is still running.
-- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. It checks GitHub Releases for new versions and, by default, downloads them (the `update:auto` and `update:autodownload` settings turn that off). A few features reach the network only when you turn them on: MuxBus cloud messaging, voice transcription, and installing provider CLIs.
+- **Local-first** — Agents run on your machine, and AgentMux sends no telemetry. It checks GitHub Releases for new versions and, by default, downloads them (the `update:auto` and `update:autodownload` settings turn that off). A few features reach the network only when you use them: MuxBus cloud messaging, installing provider CLIs, and voice input, whose audio goes to Groq only after you add a Groq key in Settings → Recording and start voice input.
 
 ## Quick Start
 
