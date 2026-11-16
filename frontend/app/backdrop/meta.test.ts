@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { deriveInk } from "./ink";
-import { BACKDROP_VERSION, parseBackdrop, resolveBackdrop } from "./meta";
+import { BACKDROP_VERSION, parseBackdrop, resolveBackdrop, supportsBackdrop } from "./meta";
 
 const teal = { kind: "builtin", id: "teal", polarity: "follow", version: BACKDROP_VERSION };
 
@@ -81,5 +81,12 @@ describe("resolveBackdrop", () => {
     it("lets a readable record win over the old bg, and falls back to bg when the record can't be read", () => {
         expect(resolveBackdrop({ backdrop: teal, bg: "#336699" }, "dark")?.id).toBe("builtin:teal");
         expect(resolveBackdrop({ backdrop: { kind: "builtin", id: "nope" }, bg: "#336699" }, "dark")?.id).toBe("legacy");
+    });
+});
+
+describe("supportsBackdrop", () => {
+    it("is the agent pane for now, and no terminal, widget or browser view", () => {
+        expect(supportsBackdrop("agent")).toBe(true);
+        for (const view of ["term", "files", "browser", "sysinfo", "kanban", "", undefined, null, 7]) expect(supportsBackdrop(view), String(view)).toBe(false);
     });
 });

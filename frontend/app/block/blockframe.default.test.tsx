@@ -264,7 +264,7 @@ describe("the backdrop", () => {
     });
 
     it("a built-in in the pane's meta puts its surface, ink and the re-pointed tokens on the frame, named by its id", () => {
-        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        const t = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
         const el = frame(t.view.container);
         expect(el.getAttribute("data-backdrop")).toBe("builtin:teal");
         expect(el.style.getPropertyValue("--surface")).toMatch(/^#[0-9a-f]{6}$/);
@@ -273,10 +273,10 @@ describe("the backdrop", () => {
     });
 
     it("a plain colour in the block's own bg meta is a legacy backdrop; a gradient is left untouched", () => {
-        const plain = setup({ meta: { view: "term", bg: "#336699" } });
+        const plain = setup({ meta: { view: "agent", bg: "#336699" } });
         expect(frame(plain.view.container).getAttribute("data-backdrop")).toBe("legacy");
         cleanup();
-        const gradient = setup({ meta: { view: "term", bg: "linear-gradient(red, blue)" } });
+        const gradient = setup({ meta: { view: "agent", bg: "linear-gradient(red, blue)" } });
         expect(frame(gradient.view.container).hasAttribute("data-backdrop")).toBe(false);
     });
 
@@ -288,7 +288,7 @@ describe("the backdrop", () => {
     });
 
     it("a drag preview of a block reads its live scope, and its unmounting leaves that scope", () => {
-        const meta = { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } };
+        const meta = { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } };
         const live = setup({ meta });
         const scope = getPaneScope(live.blockId)();
         expect(scope?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
@@ -331,8 +331,20 @@ describe("the backdrop", () => {
         }
     });
 
+    it("a terminal, a files pane and the browser ignore a backdrop record and an old plain bg: no vars, no data-backdrop, nothing registered", () => {
+        const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+        for (const view of ["term", "files", "browser", "sysinfo"]) {
+            const t = setup({ meta: { view, backdrop: record, bg: "#336699" } });
+            expect(frame(t.view.container).hasAttribute("data-backdrop"), view).toBe(false);
+            expect(style(t.view.container).getPropertyValue("--surface"), view).toBe("");
+            expect(style(t.view.container).getPropertyValue("--main-text-color"), view).toBe("");
+            expect(getPaneScope(t.blockId)(), view).toBeUndefined();
+            cleanup();
+        }
+    });
+
     it("a record that can't be read is no backdrop", () => {
-        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
+        const t = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
         expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
     });
 });

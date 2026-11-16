@@ -11,6 +11,16 @@ import { hexToRgb } from "../theme/oklch";
 import { BUILTINS, deriveBuiltin, type AppScheme } from "./builtins";
 import { deriveInk, type DerivedBackdrop } from "./ink";
 
+/**
+ * The pane views whose own colours follow a backdrop (spec §6, §14). Phase 1 is the agent pane. A terminal keeps its
+ * default text and ANSI colours, so a backdrop on one is unreadable; the other panes come with phase 2. A view is added
+ * here only when its text can be shown to follow the ink.
+ */
+const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent"]);
+
+/** Whether a pane of this view takes a backdrop: it is offered in its menu, and a record on any other view is ignored. */
+export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && BACKDROP_VIEWS.has(view);
+
 /** The shape the record is written in. A reader that finds a newer `version` ignores the record. */
 export const BACKDROP_VERSION = 1;
 
