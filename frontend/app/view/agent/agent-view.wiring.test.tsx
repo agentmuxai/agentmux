@@ -683,7 +683,8 @@ describe("AgentPresentationView callbacks", () => {
         live.canPage = false;
         note("hasOlderHistory, paging not allowed", TR.hasOlderHistory());
         TR.followingRef(true);
-        same("highlightNodeId", TR.highlightNodeId, F.search.highlightId);
+        // The search's current match, else the row "Show message" marked (hooks/useShowMessage.ts): none of either here.
+        note("highlightNodeId", TR.highlightNodeId());
         same("scrollCommand", TR.scrollCommand, F.scroll.command);
         note("zoomFactor", TR.zoomFactor());
         note("new activity before the list reports", seen.NewActivityPill.visible());
