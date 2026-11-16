@@ -292,7 +292,13 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
         "action" => {
             // The actor is `agent:<id>`, `operator` or `unproven`: only an agent has an id and a history.
             let source = e.source_agent.as_deref().unwrap_or("").trim();
-            let actor = source.strip_prefix("agent:").map(route).filter(|a| !a.is_empty());
+            // A recorded call names its actor `agent:<id>`; a fleet action (`log_fleet_action_audit`) gives the bare agent
+            // id, or `you` for the person.
+            let actor = source
+                .strip_prefix("agent:")
+                .or_else(|| Some(source).filter(|s| !matches!(*s, "" | "operator" | "unproven" | "you") && !s.contains(|c: char| c.is_whitespace() || c == '@')))
+                .map(route)
+                .filter(|a| !a.is_empty());
             let target = Some(to.clone()).filter(|t| !t.is_empty());
             let name = actor.clone().unwrap_or_else(|| if source.is_empty() { "unknown".to_string() } else { source.to_string() });
             AuditEntry {

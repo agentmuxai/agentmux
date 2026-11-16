@@ -288,6 +288,30 @@ fn an_action_names_its_actor_only_when_the_actor_is_an_agent() {
 }
 
 #[test]
+fn a_fleet_action_is_an_action_row_with_no_byte_count_or_token_estimate() {
+    // `log_fleet_action_audit` names its actor by the bare agent id, or `you` for the person.
+    let mut failed = action(300, "Korp", "agent.rename", "Opaz");
+    failed.success = false;
+    let world = World::new(&[
+        AuditLogEntry { message_length: 0, ..action(100, "Korp", "aws.credentials", "Korp") },
+        AuditLogEntry { message_length: 0, ..action(200, "you", "agent.spend", "Opaz") },
+        AuditLogEntry { message_length: 0, ..failed },
+        // A request from another computer's agent names itself `name@host`: not an agent of this one.
+        AuditLogEntry { message_length: 0, ..action(400, "rop@peer", "app.version", "") },
+    ]);
+    let got = world.all(AuditQueryReq::default());
+    assert!(got.iter().all(|e| e.kind == "action" && e.cost.is_none() && !e.summary.contains("bytes")), "{got:?}");
+    let by_ts = |ts: u64| got.iter().find(|e| e.ts_ms == ts).unwrap();
+    assert_eq!(by_ts(100).agent_id.as_deref(), Some("korp"));
+    assert_eq!(by_ts(100).summary, "korp aws.credentials on korp");
+    assert_eq!(by_ts(200).agent_id, None, "the person has no agent history");
+    assert_eq!(by_ts(200).summary, "you agent.spend on opaz");
+    assert_eq!(by_ts(300).summary, "korp agent.rename on opaz (failed)");
+    assert_eq!(by_ts(400).agent_id, None);
+    assert_eq!(world.all(AuditQueryReq { agent_id: Some("korp".into()), ..Default::default() }).len(), 2);
+}
+
+#[test]
 fn a_file_out_of_time_order_neither_repeats_nor_loses_entries_across_pages() {
     // The newest line of the file is not the newest entry: a later write carries an earlier time.
     let world = World::new(&[audit_entry(110, "Korp", "Opaz"), audit_entry(100, "Korp", "Opaz"), audit_entry(90, "Korp", "Opaz")]);
