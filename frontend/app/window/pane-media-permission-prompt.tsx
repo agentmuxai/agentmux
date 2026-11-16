@@ -150,7 +150,7 @@ export function PaneMediaPermissionPrompt(): JSX.Element {
                     MediaPermissionAsk,
                     { req, onAnswer: (allow: boolean) => finish(req.blockId, req.requestId, allow) },
                     // Closing the pane with the question open denies it.
-                    { source: "media-permission", text: question(req), onGone: deny }
+                    { source: "media-permission", text: question(req), what: `asks to use your ${describeRequestedDevices(req.requested)}`, kind: "browser", onGone: deny }
                 ),
                 // The host has denied by now: take the stale question away rather than leave it for
                 // a pane that was out of sight.
