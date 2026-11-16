@@ -16,6 +16,9 @@ const SCHEMES: AppScheme[] = ["dark", "light"];
 
 const layers = (d: DerivedBackdrop) => Object.values(d.surfaces);
 
+/** The alpha a `#rrggbbaa` token paints with. */
+const alphaOf = (token: string) => parseInt(token.slice(7, 9), 16) / 255;
+
 /** A layer with the ink washed over it by `t`: what a selected row looks like. */
 function washed(layer: string, ink: string, t: number): string {
     const [a, b] = [hexToRgb(layer)!, hexToRgb(ink.slice(0, 7))!];
@@ -129,8 +132,8 @@ describe("any colour", () => {
                         const floor = d.level === "high" ? INK_TARGETS.text.floor : 4.5;
                         if (contrastRatio(d.ink.text, layer) < floor) bad.push(`${hex}: text on ${layer}`);
                         // The text keeps 4.5:1 over a hovered and a selected row, at every level.
-                        for (const t of [0.08, 0.16]) {
-                            if (contrastRatio(d.ink.text, washed(layer, d.ink.text, t)) < 4.5) bad.push(`${hex}: text on ${layer} washed ${t}`);
+                        for (const token of [d.ink.hover, d.ink.selected]) {
+                            if (contrastRatio(d.ink.text, washed(layer, d.ink.text, alphaOf(token))) < 4.5) bad.push(`${hex}: text on ${layer} washed ${token}`);
                         }
                     }
                     expect(d.chosen).toBe(hex);
@@ -166,7 +169,16 @@ describe("any colour", () => {
         expect(d.level).toBe("readable");
         expect(d.unmet).toEqual([]);
         for (const layer of layers(d)) {
-            expect(contrastRatio(d.ink.text, washed(layer, d.ink.text, 0.16)), `on ${layer}`).toBeGreaterThanOrEqual(4.5);
+            expect(contrastRatio(d.ink.text, washed(layer, d.ink.text, alphaOf(d.ink.selected))), `on ${layer}`).toBeGreaterThanOrEqual(4.5);
+        }
+    });
+
+    it("judges the wash by the alpha the token encodes, not the unrounded 16 percent", () => {
+        // 0.16 is 41/255 = 0.16078 once written as a byte; a colour near the line passes at one and fails at the other.
+        const d = deriveInk("#89557b");
+        expect(alphaOf(d.ink.selected)).toBeCloseTo(41 / 255, 6);
+        for (const layer of layers(d)) {
+            expect(contrastRatio(d.ink.text, washed(layer, d.ink.text, alphaOf(d.ink.selected))), `on ${layer}`).toBeGreaterThanOrEqual(4.5);
         }
     });
 

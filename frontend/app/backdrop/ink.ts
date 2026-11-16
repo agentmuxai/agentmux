@@ -175,12 +175,15 @@ function nudgeSurface(base: Oklch, light: boolean): { base: Oklch; high: boolean
     return { base, high: false };
 }
 
-/** `surface` with `ink` washed over it by `t`: what a hovered or selected row paints, as `#rrggbb`. */
+/**
+ * `surface` with `ink` washed over it by `t`: what a hovered or selected row paints, as `#rrggbb`. The alpha is the
+ * 8-bit one `withAlpha` writes into the token (16 percent is 41/255), so the check judges the painted colour.
+ */
 function washedOver(surface: string, ink: string, t: number): string {
     const [a, b] = [hexToRgb(surface), hexToRgb(ink.slice(0, 7))];
     if (!a || !b) return surface;
     const ch = (i: number) =>
-        Math.round((a[i] + (b[i] - a[i]) * t) * 255)
+        Math.round((a[i] + (b[i] - a[i]) * (Math.round(t * 255) / 255)) * 255)
             .toString(16)
             .padStart(2, "0");
     return `#${ch(0)}${ch(1)}${ch(2)}`;
