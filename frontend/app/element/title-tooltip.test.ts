@@ -292,6 +292,16 @@ describe("the delegated tooltip", () => {
         spy.mockRestore();
     });
 
+    it("shows again after a press whose release went to a native select's list", async () => {
+        const select = add("<select><option>one</option><option>two</option></select>");
+        const el = add('<button title="Save">x</button>');
+        // The press opens the list, a window of its own, which takes the release: no pointerup, no blur.
+        select.dispatchEvent(new PointerEvent("pointerdown", { button: 0, buttons: 1, pointerType: "mouse", clientX: 10, clientY: 10, bubbles: true }));
+        el.dispatchEvent(new PointerEvent("pointerover", { buttons: 0, pointerType: "mouse", clientX: 200, clientY: 90, bubbles: true }));
+        await settle(100);
+        expect(panel()!.textContent).toBe("Save");
+    });
+
     it("stops listening, and removes its panel, when stopped", async () => {
         const el = add('<button title="Save">x</button>');
         over(el);
