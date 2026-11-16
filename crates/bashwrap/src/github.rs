@@ -368,10 +368,24 @@ pub fn run_github_owner_tag(gh_args: &[String]) -> i32 {
     0
 }
 
+/// Whether a `gh` command is one that acts on a repository (a pull request, an issue, a run, a release, an API
+/// call...), so a repository it does not name and the working directory does not give leaves it with no token.
+/// `gh --version`, `gh auth status`, `gh search` and the like need none.
+fn acts_on_a_repository(gh_args: &[String]) -> bool {
+    let word = gh_args.iter().map(String::as_str).find(|a| !a.starts_with('-'));
+    matches!(word, Some("pr" | "issue" | "run" | "workflow" | "release" | "label" | "cache" | "secret" | "variable" | "ruleset" | "repo" | "api" | "browse"))
+}
+
+/// What a command that acts on a repository, and found none, is told: where the repository comes from.
+const NO_REPOSITORY: &str = "agentmux: this gh command has no GitHub token: it names no repository, and this directory has no github.com remote, so AgentMux can't tell which repository to sign in for. Add -R owner/repo, or run it inside a clone of the repository.";
+
 /// `github-token -- <gh args>`: print a token for the repository the `gh` command is about; with
-/// none, say why on stderr (when there is a repository) and print nothing.
+/// none, say why on stderr (when there is a repository, or the command needed one) and print nothing.
 pub fn run_github_token(gh_args: &[String]) -> i32 {
     let Some((owner, repo)) = repo_of_command_here(gh_args) else {
+        if acts_on_a_repository(gh_args) {
+            eprintln!("{NO_REPOSITORY}");
+        }
         return 0;
     };
     match ask(&owner, &repo) {
@@ -597,5 +611,17 @@ pub(crate) mod tests {
         }
         // Not in a git checkout: no origin, no token.
         assert_eq!(repo_of_gh_command(&args(&["pr", "list"]), None, || None), None);
+    }
+
+    #[test]
+    fn a_command_that_needed_a_repository_and_found_none_is_told_where_it_comes_from() {
+        for a in [&["pr", "create"][..], &["issue", "list"], &["api", "/user"], &["release", "view"]] {
+            assert!(acts_on_a_repository(&args(a)), "{a:?}");
+        }
+        for a in [&["--version"][..], &["auth", "status"], &["search", "repos", "x"], &["config", "list"], &[]] {
+            assert!(!acts_on_a_repository(&args(a)), "{a:?}");
+        }
+        assert!(NO_REPOSITORY.contains("-R owner/repo") && NO_REPOSITORY.contains("clone"), "it says what to do");
+        assert!(!NO_REPOSITORY.contains("gh auth login"));
     }
 }
