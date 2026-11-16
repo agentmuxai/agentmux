@@ -30,6 +30,10 @@ pub struct ServerState {
     pub data_dir: PathBuf,
     /// The server binary, so `open` and `logout` run the one that belongs to this install.
     pub srv: PathBuf,
+    /// Where the server cannot take the place of `agentmux run` (Windows has no `exec`), the process that runs it and
+    /// ends with it; `pid` is always the server's. `start` finds its own server by either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervisor: Option<u32>,
 }
 
 impl ServerState {
@@ -157,6 +161,7 @@ mod tests {
             key_file: "/h/data/srv-auth-key".into(),
             data_dir: "/h/data".into(),
             srv: "/i/bin/agentmux-srv".into(),
+            supervisor: None,
         }
     }
 

@@ -35,7 +35,27 @@ fn image_of(pid: u32) -> Option<String> {
     (out.status.success() && !text.is_empty()).then_some(text)
 }
 
-#[cfg(not(unix))]
+/// The path Windows reports for the process with this id. A process this user may not look at, or one that is gone,
+/// has none.
+#[cfg(windows)]
+fn image_of(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: the handle is closed on every path; the buffer is as long as the length it is told.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let mut buf = vec![0u16; 4096];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(handle);
+        (ok != 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn image_of(_pid: u32) -> Option<String> {
     None
 }
@@ -64,12 +84,34 @@ fn signal(pid: u32, sig: libc::c_int) -> bool {
     pid > 0 && unsafe { libc::kill(pid, sig) } == 0
 }
 
+/// There is no signal to send on Windows: `agentmux stop` asks the server to shut down over its signed channel.
 #[cfg(not(unix))]
 pub fn terminate(_pid: u32) -> bool {
     false
 }
 
-#[cfg(not(unix))]
+/// End the process at once (`TerminateProcess`), for `stop --force` after the server did not leave in time. Only a
+/// process that is the server is ended: the id is looked at again here.
+#[cfg(windows)]
+pub fn kill(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE};
+    if !is_server(pid) {
+        return false;
+    }
+    // SAFETY: the handle is closed on every path.
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let ended = TerminateProcess(handle, 1) != 0;
+        CloseHandle(handle);
+        ended
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn kill(_pid: u32) -> bool {
     false
 }
@@ -88,8 +130,38 @@ pub fn detach(cmd: &mut std::process::Command) {
     }
 }
 
-#[cfg(not(unix))]
+/// On Windows: its own process group (a Ctrl+C or Ctrl+Break in the terminal that started it does not reach it) and no
+/// console window, so it keeps running after the terminal closes.
+#[cfg(windows)]
+pub fn detach(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn detach(_cmd: &mut std::process::Command) {}
+
+/// Before the server is started to outlive this command: this command's own input, output and error handles are made
+/// not inheritable. A program started with a handle table inherits every inheritable handle of its parent, whatever
+/// it is given as its own input and output, so a server started by a command whose output is a pipe (a script, a CI
+/// step) would keep the pipe open for as long as it runs, and the reader of the pipe would never see the end.
+#[cfg(windows)]
+pub fn keep_std_handles_private() {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT};
+    let handles = [std::io::stdin().as_raw_handle(), std::io::stdout().as_raw_handle(), std::io::stderr().as_raw_handle()];
+    for handle in handles {
+        if !handle.is_null() {
+            // SAFETY: a handle this process holds; if it is not one the call fails and nothing changes.
+            unsafe { SetHandleInformation(handle as HANDLE, HANDLE_FLAG_INHERIT, 0) };
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn keep_std_handles_private() {}
 
 /// Does the server answer `/health` on this loopback port? A plain request over a socket: nothing
 /// is sent but the one line, and nothing but the status is read.
@@ -131,10 +203,43 @@ mod tests {
         assert!(!is_server(u32::MAX - 1));
     }
 
-    #[cfg(unix)]
     #[test]
     fn this_test_binary_is_not_the_server() {
         assert!(!is_server(std::process::id()));
+    }
+
+    /// A command's own input, output and error are not handed on to a server it starts.
+    #[cfg(windows)]
+    #[test]
+    fn the_commands_own_handles_are_not_inherited_by_the_server_it_starts() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT};
+        keep_std_handles_private();
+        for handle in [std::io::stdin().as_raw_handle(), std::io::stdout().as_raw_handle(), std::io::stderr().as_raw_handle()] {
+            let mut flags = 0u32;
+            // SAFETY: a handle this process holds, and a place for the flags.
+            if !handle.is_null() && unsafe { GetHandleInformation(handle as HANDLE, &mut flags) } != 0 {
+                assert_eq!(flags & HANDLE_FLAG_INHERIT, 0, "a standard handle is still inheritable");
+            }
+        }
+    }
+
+    /// The system names the image of a live process: this test program's own file, found by its id.
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_the_image_of_a_live_process() {
+        let image = image_of(std::process::id()).expect("an image for this process");
+        let exe = std::env::current_exe().unwrap();
+        assert!(image.to_lowercase().ends_with(&exe.file_name().unwrap().to_string_lossy().to_lowercase()), "{image} is not {}", exe.display());
+        assert!(image_of(u32::MAX - 1).is_none());
+    }
+
+    /// Only a process whose image is the server's is ended: this test program is not, and is still here afterwards.
+    #[cfg(windows)]
+    #[test]
+    fn a_process_that_is_not_the_server_is_never_ended() {
+        assert!(!kill(std::process::id()));
+        assert!(!kill(u32::MAX - 1));
     }
 
     #[cfg(unix)]

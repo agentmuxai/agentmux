@@ -352,9 +352,6 @@ fn cmd_version(channel: &str, json: bool) -> i32 {
 }
 
 fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if !cfg!(unix) {
-        return fail("AgentMux Headless is for Linux and macOS in this release");
-    }
     if let Err(e) = paths.ensure_dirs() {
         return fail(&format!("cannot create the channel's folders: {e}"));
     }
@@ -394,6 +391,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
         key_file: paths.data_dir.join(KEY_FILE_NAME),
         data_dir: paths.data_dir.clone(),
         srv: srv.clone(),
+        supervisor: None,
     };
     if let Err(e) = state::write(&paths.instance_dir, &record) {
         return fail(&format!("cannot write the record of AgentMux Headless: {e}"));
@@ -409,7 +407,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     // The agents the server starts find their helpers (`agentmux-mcp`, `agentmux-bashwrap`) by name on the PATH.
     cmd.envs(paths.to_env_vars()).env("PATH", path_with_dir(srv.parent(), std::env::var_os("PATH"))).stdin(Stdio::null());
-    become_server(cmd)
+    become_server(cmd, paths, record)
 }
 
 /// `agentmux-srv migrate --prepare` for this version's data: carries the previous version's data
@@ -458,21 +456,39 @@ fn refused_beside_another(paths: &DataPaths) -> i32 {
 /// Replace this process with the server, so the server keeps this process id and whoever supervises
 /// this command (a service, `start`) supervises the server itself.
 #[cfg(unix)]
-fn become_server(mut cmd: Command) -> i32 {
+fn become_server(mut cmd: Command, _paths: &DataPaths, _record: ServerState) -> i32 {
     use std::os::unix::process::CommandExt;
     let e = cmd.exec();
     fail(&format!("cannot start AgentMux Headless: {e}"))
 }
 
+/// Windows has no `exec`: this process starts the server with no window, records the server's id (its own, as the
+/// supervisor), waits for it, and ends with it, so a Scheduled Task that runs this command is running while the server is.
 #[cfg(not(unix))]
-fn become_server(_cmd: Command) -> i32 {
-    fail("AgentMux Headless is for Linux and macOS in this release")
+fn become_server(mut cmd: Command, paths: &DataPaths, mut record: ServerState) -> i32 {
+    cmd.no_window();
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return fail(&format!("cannot start the server: {e}")),
+    };
+    record.supervisor = Some(record.pid);
+    record.pid = child.id();
+    if let Err(e) = state::write(&paths.instance_dir, &record) {
+        let _ = child.kill();
+        return fail(&format!("cannot write the server's record: {e}"));
+    }
+    let code = match child.wait() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(_) => 1,
+    };
+    // The record is this server's: one a later server wrote is not removed.
+    if state::read(&paths.instance_dir).is_some_and(|s| s.pid == record.pid) {
+        state::remove(&paths.instance_dir);
+    }
+    code
 }
 
 fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if !cfg!(unix) {
-        return fail("AgentMux Headless is for Linux and macOS in this release");
-    }
     if let Some(code) = service_ignores(paths, args) {
         return code;
     }
@@ -526,6 +542,7 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     }
     cmd.stdin(Stdio::null()).stdout(out).stderr(err).no_window();
     process::detach(&mut cmd);
+    process::keep_std_handles_private();
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot start AgentMux Headless: {e}")),
@@ -540,7 +557,7 @@ fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) ->
     let begun = Instant::now();
     loop {
         let mine = state::read(&paths.instance_dir).filter(|s| match &child {
-            Some(c) => s.pid == c.id(),
+            Some(c) => s.pid == c.id() || s.supervisor == Some(c.id()),
             None => process::is_server(s.pid),
         });
         if let Some(s) = mine {
@@ -597,6 +614,8 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
     let stopped = match user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
         Some(home) => service::control(&home, &paths.channel, "stop"),
         None if process::terminate(record.pid) => Ok(()),
+        // Windows has no signal to send: the server is asked over its signed channel.
+        None if cfg!(windows) => ask_to_shut_down(paths),
         None => Err(format!("could not signal AgentMux Headless (pid {})", record.pid)),
     };
     if let Err(e) = stopped {
@@ -615,6 +634,14 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
     state::remove(&paths.instance_dir);
     println!("AgentMux stopped.");
     0
+}
+
+/// Ask the running server to shut down, over the channel `open` and `logout` use (the key is proved, never sent).
+fn ask_to_shut_down(paths: &DataPaths) -> Result<(), String> {
+    match run_client(paths, "shutdown", &[], true) {
+        (0, _) => Ok(()),
+        _ => Err("AgentMux Headless did not accept the request to shut down (it does not serve its own UI, or does not answer); `agentmux stop --force` ends it".to_string()),
+    }
 }
 
 fn wait_gone(pid: u32, limit: Duration) -> bool {
@@ -1203,6 +1230,7 @@ mod tests {
             key_file: "/k".into(),
             data_dir: "/d".into(),
             srv: "/s/agentmux-srv".into(),
+            supervisor: None,
         }
     }
 

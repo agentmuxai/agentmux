@@ -31,12 +31,14 @@ pub(crate) async fn exit_if_requested() {
         Some(SrvCommand::Open { port, key_file, print, origin }) => ("open", port, key_file, print, origin),
         Some(SrvCommand::Logout { port, key_file }) => ("logout", port, key_file, false, None),
         Some(SrvCommand::Sessions { port, key_file }) => ("sessions", port, key_file, false, None),
+        Some(SrvCommand::Shutdown { port, key_file }) => ("shutdown", port, key_file, false, None),
         _ => return,
     };
     let code = match prepare(cli.wavedata.as_deref(), port, key_file, origin) {
         Ok(target) => match HttpServer::connect(&target).await {
             Ok(server) if name == "logout" => logout(&server).await,
             Ok(server) if name == "sessions" => sessions(&server).await,
+            Ok(server) if name == "shutdown" => shutdown(&server).await,
             Ok(server) => run(&server, &target.origin, print, &mut Stdio).await,
             Err(e) => {
                 eprintln!("agentmux-srv {name}: {e}");
@@ -81,6 +83,21 @@ async fn sessions(server: &HttpServer) -> i32 {
         },
         Err(e) => {
             eprintln!("agentmux-srv sessions: {e}");
+            3
+        }
+    }
+}
+
+/// Ask the server to shut down (`shutdown`): 0 it said it is stopping, 3 could not.
+async fn shutdown(server: &HttpServer) -> i32 {
+    match server.post("/auth/shutdown", serde_json::json!({})).await {
+        Ok(v) if v["stopping"].as_bool() == Some(true) => 0,
+        Ok(_) => {
+            eprintln!("agentmux-srv shutdown: the server did not say it is stopping");
+            3
+        }
+        Err(e) => {
+            eprintln!("agentmux-srv shutdown: {e}");
             3
         }
     }
