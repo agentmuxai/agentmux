@@ -21,6 +21,7 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useJektsAwaitingYou } from "./hooks/useJektsAwaitingYou";
 import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
+import { useShowMessage } from "./hooks/useShowMessage";
 import { showInPanelIfHeld } from "./messages/messages-state";
 import { createSearchReveal } from "./search-reveal";
 import { focusSearchField, registerSearchControls, restoreFocusToMagnifier } from "./search/search-bridge";
@@ -42,8 +43,11 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         jumpTo: scroll.jumpTo,
     });
 
+    // "Show message" from the card, the panel's strip and rows (hooks/useShowMessage.ts).
+    const { show, marked } = useShowMessage({ blockId: model.blockId, document: paneModel.document, shown: p.shown.shownDocument, jumpTo: reveal.jumpTo });
+
     // A sensitive jekt that waits on the person: a card above the composer and a wait for the pane (jekts-awaiting-you.ts).
-    useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: scroll.jumpTo });
+    useJektsAwaitingYou({ blockId: model.blockId, getDocument: p.shown.getDocument, jumpTo: show });
 
     // In-session search over the loaded document slice: matches, navigation, highlight. A new query starts at the
     // first match from the row at the top of the screen; a query with no match closes what a jump opened.
@@ -105,5 +109,8 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
         log: found.shell.log,
     });
 
-    return { scroll, search, zoomFactor };
+    // The row the transcript marks: the search's current match, else the message "Show message" just took the person to.
+    const highlightId = createMemo(() => search.highlightId() ?? marked());
+
+    return { scroll, search, zoomFactor, show, highlightId };
 }
