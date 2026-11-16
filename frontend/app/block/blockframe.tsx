@@ -27,6 +27,7 @@ import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { BackdropPicker } from "@/app/backdrop/BackdropPicker";
+import { supportsBackdrop } from "@/app/backdrop/meta";
 import { closeBackdropPicker, isBackdropPickerOpen, openBackdropPicker, releaseBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
@@ -207,7 +208,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // A backdrop is offered on the pane types whose own colours follow it. Phase 1 is the agent pane; a terminal keeps its
     // own default text colour until phase 2 gives it the backdrop's, and would be unreadable on a pale one (spec §6, §14).
     const backdropItems =
-        blockData?.meta?.view === "agent" ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
+        supportsBackdrop(blockData?.meta?.view) ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
     return [
         { type: "separator" as const },
         { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
@@ -1383,7 +1384,8 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // is not a backdrop. A drag preview is a second frame for the same block: it reads the live scope, never owns it.
     const backdrop = usePaneBackdrop(
         nodeModel.blockId,
-        () => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg }),
+        // A view that doesn't follow a backdrop yet (a terminal, a widget, the browser) gets none, whatever its meta says.
+        () => (supportsBackdrop(s.blockData()?.meta?.view) ? { backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg } : {}),
         { owner: !props.preview }
     );
     const backdropVars = getPaneScope(nodeModel.blockId);
