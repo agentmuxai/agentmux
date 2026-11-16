@@ -196,17 +196,18 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 value={state.draft()}
                 onInput={(e) => state.setDraft(e.currentTarget.value)}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                        e.preventDefault();
-                        void send();
-                    }
+                    // Enter sends and Shift+Enter adds a line, as in an agent's composer. An IME that is converting
+                    // owns Enter (keyCode 229 is Safari's synthetic keydown for it).
+                    if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+                    e.preventDefault();
+                    void send();
                 }}
             />
             <div class="swarm-broadcast-actions">
                 <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
                     <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
                 </Button>
-                <span class="swarm-broadcast-hint">{keyLabel("mod+Enter")} sends</span>
+                <span class="swarm-broadcast-hint">Enter sends · {keyLabel("shift+Enter")} adds a line</span>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
                 <Show when={hidden() > 0}>
                     <span class="swarm-fleet-broadcast-gap">{hidden()} hidden by the filter, not included</span>
