@@ -22,9 +22,26 @@ pub struct Replay {
     pub fork: Fork,
     /// What each block said in the run replayed, by block id (its newest output).
     pub original: BTreeMap<String, Value>,
+    /// The taint bits each block's output had there, which a stub keeps: what the block said is as
+    /// clean or as tainted as it was.
+    pub bits: BTreeMap<String, (bool, bool)>,
 }
 
 impl Replay {
+    /// What a stubbed block comes to: what it said there, or, when it failed there and its graph
+    /// handled the failure, that failure again, so the replay takes the same road out of it.
+    pub fn said(&self, block_id: &str) -> Result<Value, String> {
+        if let Some(Value::Object(said)) = self.original.get(block_id) {
+            if said.get("failed") == Some(&json!(true)) {
+                let error = said.get("error").and_then(Value::as_str).unwrap_or("it failed");
+                // The block's end wraps an error as `block <id> failed: ...`; that wrapper is put back there.
+                let wrapper = format!("block {block_id} failed: ");
+                return Err(error.strip_prefix(wrapper.as_str()).unwrap_or(error).to_string());
+            }
+        }
+        Ok(self.stub(block_id))
+    }
+
     /// What a stubbed block says: what it said in the run replayed, marked `stubbed`, without what
     /// it cost there (nothing ran, so the replay spends nothing); a block that said nothing there
     /// (it had not run, or failed) says only that it was stubbed.
@@ -68,6 +85,7 @@ pub fn fork_checkpoint(at: &Checkpoint, run_id: &str, fork: Fork) -> Checkpoint 
     c.cost_usd = 0.0;
     c.elapsed_ms = 0;
     c.position.spent_by.clear();
+    c.position.loop_elapsed_ms.clear();
     c
 }
 

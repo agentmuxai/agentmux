@@ -13,7 +13,7 @@ fn fork(real: bool) -> Fork {
 }
 
 fn replay(original: &[(&str, serde_json::Value)]) -> Replay {
-    Replay { fork: fork(false), original: original.iter().map(|(id, v)| (id.to_string(), v.clone())).collect::<BTreeMap<_, _>>() }
+    Replay { fork: fork(false), original: original.iter().map(|(id, v)| (id.to_string(), v.clone())).collect::<BTreeMap<_, _>>(), bits: BTreeMap::new() }
 }
 
 #[test]
@@ -65,4 +65,20 @@ fn a_replaying_checkpoint_survives_being_written_and_read() {
     let back = crate::drone::checkpoint::decode(&crate::drone::checkpoint::encode(&c).unwrap()).unwrap();
     assert_eq!(back.fork, Some(fork(false)));
     assert!(crate::drone::checkpoint::decode(&crate::drone::checkpoint::encode(&sample(2)).unwrap()).unwrap().fork.is_none());
+}
+
+#[test]
+fn a_block_that_failed_and_was_handled_says_it_failed_again_without_wrapping_the_error_twice() {
+    let r = replay(&[("send", json!({ "error": "block send failed: nowhere to go", "failed": true })), ("ok", json!({ "delivered": true }))]);
+    assert_eq!(r.said("send"), Err("nowhere to go".to_string()), "the block's end puts its own wrapper back");
+    assert_eq!(r.said("ok"), Ok(json!({ "delivered": true, "stubbed": true })));
+    assert_eq!(r.said("never_ran"), Ok(json!({ "stubbed": true })));
+}
+
+#[test]
+fn the_time_a_loop_had_taken_is_not_charged_to_the_new_run() {
+    let mut at = sample(4);
+    at.position.loop_elapsed_ms.insert("guard".into(), 59_000);
+    let c = fork_checkpoint(&at, "run-2", fork(false));
+    assert!(c.position.loop_elapsed_ms.is_empty(), "a guard's max_minutes is the whole budget again");
 }

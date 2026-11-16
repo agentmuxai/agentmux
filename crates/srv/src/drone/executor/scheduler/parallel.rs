@@ -96,7 +96,7 @@ impl<'a> Scheduler<'a> {
             .iter()
             .map(|(node, kind, _)| match self.stub_of(node, *kind) {
                 // A replay does not repeat the world: the block says what it said before.
-                Some(said) => Box::pin(async move { Pure { result: Ok(said), cancelled: false, bits: None } }) as Pin<Box<dyn Future<Output = Pure> + Send + '_>>,
+                Some(said) => Box::pin(async move { Pure { result: said, cancelled: false, bits: None } }) as Pin<Box<dyn Future<Output = Pure> + Send + '_>>,
                 None => Box::pin(run_pure(node, *kind, self.scope.clone(), self.cancel.clone())),
             })
             .collect();
@@ -107,7 +107,11 @@ impl<'a> Scheduler<'a> {
             if let Some(bits) = pure.bits {
                 self.scope.bits.insert(node.id.clone(), bits);
             }
+            let stubbed = self.stub_of(node, kind).is_some();
             let ran = self.end_block(node, kind, pure.result, (started_at, spent_before)).await;
+            if stubbed && ran.is_ok() {
+                self.keep_stub_bits(&node.id);
+            }
             if let Err(e) = self.finish_step(node, ran) {
                 first_failure.get_or_insert(e);
             }

@@ -54,14 +54,15 @@ pub struct ReplayRunResp {
 /// gone cannot be taken up again (what its stubs said is not kept anywhere else).
 pub(crate) fn replay_for(state: &AppState, c: &Checkpoint) -> Result<Option<Arc<Replay>>, String> {
     let Some(fork) = c.fork.clone() else { return Ok(None) };
-    let original = if fork.real {
+    let (original, bits) = if fork.real {
         Default::default()
     } else {
         let rows = state.mstore.drone_checkpoints_for(&fork.run_id).map_err(|e| format!("the run it replays cannot be read: {e}"))?;
         let newest = load(&rows).map_err(|e| format!("the run it replays is unusable: {e}"))?;
-        newest.ok_or_else(|| format!("the run it replays ({}) kept no checkpoints any more", fork.run_id))?.outputs
+        let newest = newest.ok_or_else(|| format!("the run it replays ({}) kept no checkpoints any more", fork.run_id))?;
+        (newest.outputs, newest.bits)
     };
-    Ok(Some(Arc::new(Replay { fork, original })))
+    Ok(Some(Arc::new(Replay { fork, original, bits })))
 }
 
 /// `replaydronerun`.
@@ -87,10 +88,10 @@ pub(crate) async fn replay_drone_run(state: &AppState, cmd: ReplayRunReq) -> Res
     let run_id = uuid::Uuid::new_v4().to_string();
     let fork = Fork { run_id: cmd.run_id.clone(), step: cmd.from_step, real: cmd.do_it_for_real };
     let first = fork_checkpoint(&at, &run_id, fork.clone());
-    let original = if cmd.do_it_for_real { Default::default() } else { newest.outputs };
+    let (original, bits) = if cmd.do_it_for_real { Default::default() } else { (newest.outputs, newest.bits) };
     let persist = Persist { sink: state.mstore.clone(), graph: at.graph.clone() };
     let trigger = first.trigger.clone();
-    let handle = replay_drone(graph, first, persist, Arc::new(Replay { fork, original })).await.map_err(why)?;
+    let handle = replay_drone(graph, first, persist, Arc::new(Replay { fork, original, bits })).await.map_err(why)?;
     let started_at = now_ms();
     crate::server::drone_handlers::insert_run_placeholder(state, &run_id, &drone_id, started_at).map_err(why)?;
     let ledger = state.cron_scheduler.runs().cloned();
