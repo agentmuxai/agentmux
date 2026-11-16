@@ -79,6 +79,12 @@ mod tests {
         }
     }
 
+    /// `gh` on PATH is `agentmux-bashwrap` (crates/bashwrap/src/gh_shim.rs): `timeout gh` and scripts skip the shell function.
+    #[test]
+    fn the_image_puts_agentmux_bashwrap_on_path_as_gh() {
+        assert!(DOCKERFILE.lines().any(|l| l.trim() == "RUN ln -s agentmux-bashwrap /usr/local/bin/gh"));
+    }
+
     #[test]
     fn the_dockerfile_installs_what_the_lock_lists() {
         let lock = lock();

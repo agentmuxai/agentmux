@@ -21,6 +21,9 @@ pub const GH_FUNCTION_NAME: &str = "BASH_FUNC_gh%%";
 /// `github-container`: srv does the merge for it, and the API writes its token cannot make are refused with what to do
 /// (`crates/bashwrap/src/container_verbs.rs`). The command word is read after a leading `-R`/`--repo` (`gh -R o/r pr merge 7`),
 /// for the container step, the text check and the owner tag alike. Without the variable it is plain `gh`.
+/// The real `gh` it runs is told (`AGENTMUX_GH_SHIM_DONE`) that these steps are done: in a container's image
+/// `gh` on PATH is `agentmux-bashwrap` too (`crates/bashwrap/src/gh_shim.rs`, for `timeout gh`, `xargs gh`, scripts),
+/// and it does the same steps, once, for a caller that did not come through this function.
 pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}" ]; then
     local _amx_t _amx_x _amx_n _amx_r _amx_c0 _amx_c1 _amx_a=();
     if [ "$1" = auth ] && [ "$2" = status ] && [ "$#" -eq 2 ]; then
@@ -56,9 +59,9 @@ pub const GH_FUNCTION_BODY: &str = r#"() {  if [ -n "${AGENTMUX_GITHUB_BROKER:-}
       if [ "${#_amx_a[@]}" -gt 0 ]; then set -- "${_amx_a[@]}"; fi;
     fi;
     if [ -n "$_amx_t" ]; then
-      GH_TOKEN="$_amx_t" GITHUB_TOKEN="$_amx_t" command gh "$@";
+      GH_TOKEN="$_amx_t" GITHUB_TOKEN="$_amx_t" AGENTMUX_GH_SHIM_DONE=1 command gh "$@";
     else
-      GH_TOKEN= GITHUB_TOKEN= command gh "$@";
+      GH_TOKEN= GITHUB_TOKEN= AGENTMUX_GH_SHIM_DONE=1 command gh "$@";
     fi;
   else
     command gh "$@";

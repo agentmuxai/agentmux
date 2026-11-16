@@ -105,7 +105,9 @@ RUN git config --system core.autocrlf input
 
 # The GitHub CLI, from GitHub's own apt repository (the keyring is fetched over HTTPS and pinned by
 # apt's signed-by). It is free software; agents use it for issues and PRs from inside the sandbox.
-# The host's GitHub tokens are not passed in (container_exec_env), so `gh auth login` is the agent's own.
+# The host's GitHub tokens are not passed in (container_exec_env): each gh command asks srv for a short-lived token for its
+# repository (agentmux-bashwrap github-token). The `gh` function does that in a shell; `gh` on PATH, below, does it for
+# `timeout gh`, `xargs gh` and scripts.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y --no-install-recommends gh \
@@ -159,6 +161,9 @@ LABEL ai.agentmux.cache-dirs="/home/agent/.cache/ms-playwright:/home/agent/.npm:
 # sets, since these are invoked by the (non-root) `agent` user.
 COPY --from=mcp-builder --chmod=755 /build/target/release/agentmux-mcp /usr/local/bin/agentmux-mcp
 COPY --from=mcp-builder --chmod=755 /build/target/release/agentmux-bashwrap /usr/local/bin/agentmux-bashwrap
+# `gh` on PATH ahead of the real one in /usr/bin: agentmux-bashwrap started under that name does the per-call token steps
+# and then runs the real gh (crates/bashwrap/src/gh_shim.rs).
+RUN ln -s agentmux-bashwrap /usr/local/bin/gh
 
 # /workspace is the default mount point for the agent's working directory.
 # AgentMux bind-mounts the host workspace path here at container start.

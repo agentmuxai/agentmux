@@ -69,6 +69,7 @@ mod bash_wrap;
 mod cwd_state;
 mod exec_args;
 mod aws;
+mod gh_shim;
 mod git_hooks;
 mod bash_timeout;
 mod github;
@@ -174,6 +175,11 @@ enum Command {
 mod tls_test_init;
 
 fn main() -> Result<()> {
+    // Started as `gh` (a container image's symlink): the GitHub CLI with the per-call token, before anything else
+    // (gh_shim.rs).
+    if let Some(code) = gh_shim::run_if_invoked_as_gh() {
+        std::process::exit(code);
+    }
     agentmux_common::tls_provider::install_ring_provider(); // reqwest 0.13 builds no client without it
     init_tracing();
     // Before any bash is started, by the prefix or exec path alike (shim_functions.rs).
