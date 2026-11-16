@@ -349,7 +349,7 @@ jobs:
 
       # The throwaway machine for what a person does at install: the package goes where the install puts it (under the
       # profile: the logon task only runs a program there), `setup` registers the task, the task is run once on demand,
-      # then `setup --no-service` and `uninstall` take it all away. The task firing at a real sign-in, and Defender and
+      # then `uninstall` takes it all away: the task, the `current` junction, the program folder and the PATH entry. The task firing at a real sign-in, and Defender and
       # SmartScreen on a downloaded copy, are what a runner cannot show: the first run on the operator's own machine does.
       # Its own step and not a gate: if the runner's scheduler misbehaves, the step above has already proved the package.
       - name: Install, logon task and uninstall (Windows)
@@ -363,10 +363,18 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath unpacked
           $top = (Get-ChildItem unpacked -Directory | Select-Object -First 1).FullName
           $version = (Get-Content (Join-Path $top 'VERSION') -Raw).Trim()
-          $install = Join-Path $env:LOCALAPPDATA "AgentMux\Headless\$version"
-          New-Item -ItemType Directory -Force -Path (Split-Path $install) | Out-Null
+          # The install's layout: Headless\<version>\bin, `Headless\current` a junction to it, and `current\bin` the one entry on
+          # the person's own PATH. The command is run by the `current` path, as a person who installed it runs it.
+          $base = Join-Path $env:LOCALAPPDATA 'AgentMux\Headless'
+          $install = Join-Path $base $version
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
           Copy-Item -Recurse -Force $top $install
-          $agentmux = Join-Path $install 'bin\agentmux.exe'
+          $current = Join-Path $base 'current'
+          New-Item -ItemType Junction -Path $current -Target $install | Out-Null
+          $binDir = Join-Path $current 'bin'
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          [Environment]::SetEnvironmentVariable('Path', (($userPath + ';' + $binDir).TrimStart(';')), 'User')
+          $agentmux = Join-Path $binDir 'agentmux.exe'
           $task = 'AgentMux Headless'
           $port = 17390
 
@@ -400,18 +408,15 @@ jobs:
             & $agentmux status
             & $agentmux stop
             if (-not (Wait-Health $false)) { throw 'the server still answers after stop' }
-            # Uninstall. If this build's `uninstall` does not know the Windows install folder, take the same things away by hand
-            # and say so, so the run still proves the task and the files go.
             & $agentmux uninstall --yes
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "::warning::agentmux uninstall exited $LASTEXITCODE on Windows; removing the task and the folder by hand"
-              & $agentmux setup --yes --no-service --no-start --no-open
-              if ($LASTEXITCODE -ne 0) { throw "agentmux setup --no-service failed ($LASTEXITCODE)" }
-              Remove-Item -Recurse -Force $install
-            }
+            if ($LASTEXITCODE -ne 0) { throw "agentmux uninstall failed ($LASTEXITCODE)" }
+            # Windows does not let a running program's own file go: a helper removes the last of it once the command has ended.
+            for ($i = 0; $i -lt 30 -and (Test-Path $base); $i++) { Start-Sleep -Seconds 1 }
             if (Test-Task) { throw "the task '$task' is still registered after uninstall" }
-            if (Test-Path $install) { throw "$install is still there after uninstall" }
-            Write-Host "uninstalled: the task and the files are gone"
+            if (Test-Path $base) { throw "$base is still there after uninstall: $((Get-ChildItem -Recurse -Force $base | Select-Object -First 5 -ExpandProperty FullName) -join ', ')" }
+            $after = [Environment]::GetEnvironmentVariable('Path', 'User')
+            if ($after -and $after.ToLower().Contains($base.ToLower())) { throw "the install is still on the PATH after uninstall: $after" }
+            Write-Host "uninstalled: the task, the folder, the junction and the PATH entry are gone"
           } finally {
             # Whatever happened, leave nothing running or registered.
             if (Test-Path $agentmux) { & $agentmux stop *> $null }
