@@ -478,13 +478,10 @@ pub fn health(store: &Store, agent: Option<&str>, key: &KeyResult, backend: &str
     let stale_before = now_ms() - UNUSED_DAYS * DAY_MS;
     for row in &rows {
         // A link is never used through the Vault, so it is not counted as unused: its check says how it stands.
-        if let Some(standing) = linked::standing(store, row) {
+        if let Some((standing, unchecked)) = linked::standing(store, row) {
             links += 1;
-            match standing {
-                linked::Standing::NeedsALook => links_off += 1,
-                linked::Standing::Unchecked => links_unchecked += 1,
-                linked::Standing::Checked => {}
-            }
+            links_off += usize::from(standing == linked::Standing::NeedsALook);
+            links_unchecked += usize::from(unchecked);
         } else if row.last_used_at.max(row.created_at) < stale_before {
             unused += 1;
         }

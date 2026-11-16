@@ -134,10 +134,17 @@ fn link_not_allowed(ended: Ended) -> String {
     }
 }
 
+/// Whether `change` leaves the place as it is: the entry is a link, or only what it says of its key changes. The
+/// card's title asks the same of what it shows, so the headline and the card say one thing.
+fn about_only(change: &LinkChange) -> bool {
+    let place = |link: &Option<Link>| link.as_ref().map(Link::describe);
+    change.only || place(&change.from) == place(&change.to)
+}
+
 /// Asks the person to allow `change`; a refusal is recorded in the entry's history and answered.
 async fn allow_link_change(state: &AppState, change: &LinkChange, agent: &str, pane: &str, wait: Duration) -> Result<(), Response> {
-    let headline = match change.only {
-        true => format!("{agent} wants to change what the Vault records about the key {}", change.label),
+    let headline = match about_only(change) {
+        true => format!("{agent} wants to change what the Vault says about the key {}", change.label),
         false => format!("{agent} wants to change where the machine copy of {} is", change.label),
     };
     let (ended, _) = super::vault_ask::ask(state, pane, link_card(change, agent, pane), wait, &headline).await;
@@ -209,6 +216,20 @@ mod tests {
         // An api-key use goes ahead on silence; a new place for its machine copy never does.
         assert!(crate::backend::vault::uses::goes_ahead_on_silence("api-key", false));
         assert!(!card.offer_always && !crate::backend::vault::uses::goes_ahead(&card));
+    }
+
+    #[test]
+    fn a_change_that_leaves_the_place_as_it_is_is_about_what_the_vault_says() {
+        // A new place: the headline speaks of the machine copy.
+        assert!(!about_only(&change()));
+        // The same place, other readers, on an entry that holds a value: the card's title rule, and the headline's.
+        let same = LinkChange { from: change().to, ..change() };
+        assert!(about_only(&same));
+        let card = link_card(&same, "builder", "block-1");
+        let link = card.link.as_ref().unwrap();
+        assert!(!link.only && link.from == link.to);
+        // A link holds no value, so any change to it is about what the Vault says.
+        assert!(about_only(&LinkChange { only: true, ..change() }));
     }
 
     #[test]

@@ -650,8 +650,9 @@
     box-shadow: inset 3px 0 0 var(--border-color);
 }
 
-// Who did it and what they did are a word or two. Beside a long place they keep their words whole ("teste / r" and
-// "importe / d" in the Linux look check), and still break when one is longer than the pane.
+// When it happened, who did it and what they did are a word or two. Beside a long place they keep their words whole
+// ("teste / r" and "importe / d" in one Linux look check; "just no / w" in a batch's set-in lines in the next), and
+// still break when one is longer than the pane.
 .vault-table td.vault-activity-word {
     overflow-wrap: break-word;
 }

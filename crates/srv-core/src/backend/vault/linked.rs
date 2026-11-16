@@ -17,7 +17,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::aws_import::{self, Described, Imported, Plan, Source, Target, Via, NO_SUCH_SECRET};
-use super::source_link::{self, CheckPlan, Checked, Link, Outcome, AWS_SECRET, GITHUB_SECRET, OTHER};
+use super::source_link::{self, CheckPlan, Checked, Link, Outcome, VaultSourceCheck, AWS_SECRET, GITHUB_SECRET, OTHER};
 use super::{expiry, history, insert_unrecorded, record_line, record_row, signins, Line, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
@@ -239,16 +239,17 @@ async fn describe_place<R: Runner>(runner: &R, link: &Link, via: Via<'_>) -> Res
 /// AWS is described as the entry's own place is, under the same region and login: when the entry's place is not in
 /// AWS there is no login to describe one under, and nothing is run for it.
 pub async fn describe<R: Runner>(runner: &R, plan: &CheckPlan, via: Via<'_>) -> Found {
-    let place = describe_place(runner, &plan.link, via).await;
-    let mut copies = Vec::with_capacity(plan.copies.len());
-    for copy in &plan.copies {
+    // The places are described together: each run of the CLI has its own time limit, and a check of an entry with
+    // four copies must still answer inside the caller's wait.
+    let copies = plan.copies.iter().map(|copy| async move {
         let described = match (copy.kind.as_str(), plan.link.kind.as_str()) {
             (AWS_SECRET, AWS_SECRET) => describe_place(runner, &Link { region: plan.link.region.clone(), profile: plan.link.profile.clone(), ..copy.clone() }, via).await,
             (AWS_SECRET, _) => Err(NOT_UNDER_AWS.into()),
             _ => Err(NOT_FROM_HERE.into()),
         };
-        copies.push((copy.clone(), described));
-    }
+        (copy.clone(), described)
+    });
+    let (place, copies) = futures_util::future::join(describe_place(runner, &plan.link, via), futures_util::future::join_all(copies)).await;
     Found { place, copies }
 }
 
@@ -299,18 +300,26 @@ pub enum Standing {
     Unchecked,
 }
 
-/// How `row` stands, when it is a linked entry.
-pub fn standing(store: &Store, row: &VaultRow) -> Option<Standing> {
+/// How a link stands by its newest check as it is now, and whether it has gone unchecked: that check is older than
+/// [`UNCHECKED_DAYS`], or there is none. A place found changed or missing that long ago is both.
+fn stands(checked: Option<&VaultSourceCheck>, now: i64) -> (Standing, bool) {
+    let unchecked = checked.is_none_or(|c| now - c.at > UNCHECKED_DAYS * DAY_MS);
+    let how = match checked {
+        Some(c) if c.outcome.starts_with(source_link::CHANGED) || c.outcome.starts_with(source_link::MISSING) => Standing::NeedsALook,
+        Some(_) if !unchecked => Standing::Checked,
+        _ => Standing::Unchecked,
+    };
+    (how, unchecked)
+}
+
+/// How `row` stands and whether it has gone unchecked ([`stands`]), when it is a linked entry.
+pub fn standing(store: &Store, row: &VaultRow) -> Option<(Standing, bool)> {
     let fields = fields_of(row);
     if !is_linked(&fields) {
         return None;
     }
     let checked = Link::of(&fields).and_then(|link| source_link::last_check(store, row, &link));
-    Some(match checked {
-        Some(c) if c.outcome.starts_with(source_link::CHANGED) || c.outcome.starts_with(source_link::MISSING) => Standing::NeedsALook,
-        Some(c) if now_ms() - c.at <= UNCHECKED_DAYS * DAY_MS => Standing::Checked,
-        _ => Standing::Unchecked,
-    })
+    Some(stands(checked.as_ref(), now_ms()))
 }
 
 #[cfg(test)]

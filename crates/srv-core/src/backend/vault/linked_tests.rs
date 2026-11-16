@@ -219,7 +219,7 @@ async fn a_check_reads_the_places_description_and_never_the_key() {
     // The newest check is the entry's own place's, whatever its copies' lines say.
     let row = s.vault_get(&id).unwrap().unwrap();
     assert_eq!(source_link::last_check(&s, &row, &Link::of_row(&row).unwrap()).map(|c| c.outcome), Some(PRESENT.to_string()));
-    assert_eq!(standing(&s, &row), Some(Standing::Checked));
+    assert_eq!(standing(&s, &row), Some((Standing::Checked, false)));
 }
 
 #[tokio::test]
@@ -236,7 +236,7 @@ async fn a_place_that_changed_is_missing_or_refuses_is_what_the_check_says() {
     ] {
         let checked = source_link::check(&s, &Cli::with(&[("prod/invoice-sync", said)]), &plan, Via::Host).await;
         assert_eq!((checked.outcome, checked.why.as_str()), (outcome, why));
-        assert_eq!(standing(&s, &row()), Some(stands), "{outcome}");
+        assert_eq!(standing(&s, &row()), Some((stands, false)), "{outcome}");
     }
     // A link with no date recorded is present, and the answer says when the place last changed.
     let undated = create(&s, NewEntry { label: "Mail provider key".into(), ..entry(&place(), None) }).unwrap();
@@ -252,8 +252,21 @@ async fn a_place_that_changed_is_missing_or_refuses_is_what_the_check_says() {
     assert!(rows(&s, CHECKED_COPY).is_empty());
     // A link nobody has checked as it is now is unchecked.
     let never = create(&s, NewEntry { label: "Queue key".into(), ..entry(&place(), None) }).unwrap();
-    assert_eq!(standing(&s, &s.vault_get(&never).unwrap().unwrap()), Some(Standing::Unchecked));
+    assert_eq!(standing(&s, &s.vault_get(&never).unwrap().unwrap()), Some((Standing::Unchecked, true)));
     assert_eq!(standing(&s, &s.vault_get(&create(&s, NewEntry { label: "Deploy token".into(), ..entry(&[], Some(VALUE)) }).unwrap()).unwrap().unwrap()), None);
+}
+
+#[test]
+fn an_old_check_is_unchecked_whatever_it_found() {
+    let now = 1_800_000_000_000;
+    let at = |days: i64, outcome: &str| VaultSourceCheck { at: now - days * DAY_MS, outcome: outcome.into() };
+    assert_eq!(stands(Some(&at(1, PRESENT)), now), (Standing::Checked, false));
+    assert_eq!(stands(Some(&at(UNCHECKED_DAYS, PRESENT)), now), (Standing::Checked, false));
+    assert_eq!(stands(Some(&at(UNCHECKED_DAYS + 1, PRESENT)), now), (Standing::Unchecked, true));
+    // A place found changed or missing long ago still needs a look, and is unchecked too: health counts it in both.
+    assert_eq!(stands(Some(&at(2, "changed since recorded: the place last changed on 2026-11-02")), now), (Standing::NeedsALook, false));
+    assert_eq!(stands(Some(&at(UNCHECKED_DAYS + 1, "missing: AWS has no secret by that id")), now), (Standing::NeedsALook, true));
+    assert_eq!(stands(None, now), (Standing::Unchecked, true));
 }
 
 #[tokio::test]

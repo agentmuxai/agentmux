@@ -24,8 +24,8 @@ export interface Expiry {
 
 /** Outcomes that say a line did what its action names: there is nothing more to tell. */
 const PLAIN_OUTCOMES = ["", "done", "ok"];
-/** Outcomes that are news of their own, and no trouble. */
-const FINE_OUTCOMES = ["asked", "same"];
+/** Outcomes that are news of their own, and no trouble: a check that found the value the same, or the place there. */
+const FINE_OUTCOMES = ["asked", "same", "present"];
 
 /** What became of a history line, when its action alone does not say: an import that failed reads "imported" like
  *  one that worked. `warn` marks one where the action did not happen, or not as asked. */
