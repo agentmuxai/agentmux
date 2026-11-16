@@ -45,6 +45,8 @@ jobs:
               with:
                   node-version: "24"
             - uses: dtolnay/rust-toolchain@1.99.1
+              with:
+                components: clippy, rustfmt
             - uses: Swatinem/rust-cache@v2
               with:
                   shared-key: cli-hook-contract
