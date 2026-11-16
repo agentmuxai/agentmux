@@ -20,6 +20,10 @@
     padding: var(--space-3) var(--space-3) 0;
     min-height: 0;
     overflow-y: auto;
+    // The scroll bar's width is kept free whether it shows or not. Without that a card with room for all it says
+    // could keep a scroll bar: with the bar a line that just fitted wraps, so the card is a line taller than the
+    // height it was given, which was measured with no bar (the Linux look: its last line sat under the answers).
+    scrollbar-gutter: stable;
     container-type: inline-size;
 }
 
@@ -72,6 +76,11 @@
 // had room for the title and the answers alone, and a batch showed two or three rows at a time in any pane.
 .agent-request-stack:has(.vault-request-card) {
     max-height: 70%;
+    // The larger share is the first thing to give way when the pane is too short for it: the rows under the stack
+    // (the working line, the status rows, the composer) keep their height, and the card scrolls in what is left.
+    // It gives way no further than a title and the answers need, or the 40% every stack has.
+    flex-shrink: 1000;
+    min-height: min(40%, 6rem);
 }
 
 .vault-request-card-why {

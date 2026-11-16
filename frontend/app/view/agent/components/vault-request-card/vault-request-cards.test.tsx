@@ -227,7 +227,13 @@ describe("an agent's Vault requests as cards in its pane", () => {
         expect(body).not.toMatch(/overflow-y|min-height/);
         expect(scss).not.toContain(".vault-request-card:has(");
         expect(scss).toMatch(/ \.vault-request-card-actions \{ position: sticky; bottom: 0;/);
-        expect(scss).toMatch(/\.agent-request-stack:has\(\.vault-request-card\) \{ max-height: 70%; \}/);
+        // The larger share gives way before the status rows under the stack do, and no further than the old share.
+        const stack = /\.agent-request-stack:has\(\.vault-request-card\) \{([^{}]*)\}/.exec(scss)?.[1];
+        expect(stack).toMatch(/max-height: 70%;/);
+        expect(stack).toMatch(/flex-shrink: 1000;/);
+        expect(stack).toMatch(/min-height: min\(40%, 6rem\);/);
+        // A scroll bar that comes or goes must not change where the card's lines wrap.
+        expect(scss).toMatch(/ \.vault-request-card \{[^{}]* scrollbar-gutter: stable;[^{}]*\}/);
     });
 
     it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {
