@@ -10,9 +10,9 @@ import { createSignal, onCleanup } from "solid-js";
 
 import { loginBackend } from "@/app/view/agent/flows/login-backend";
 import type { InAppLoginPhase } from "@/app/view/agent/components/InAppLoginPanel";
-import type { ClaudeLoginProps } from "./claude-login-model";
+import type { ProviderLoginProps } from "./provider-login-model";
 
-export function createLoginState(props: ClaudeLoginProps) {
+export function createLoginState(props: ProviderLoginProps) {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
     const [authUrl, setAuthUrl] = createSignal<string | undefined>(undefined);
     const [error, setError] = createSignal<string | null>(null);

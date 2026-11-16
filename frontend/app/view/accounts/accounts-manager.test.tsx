@@ -119,10 +119,22 @@ describe("Accounts as cards", () => {
         await waitFor(() => expect(cards()).toHaveLength(4));
         fireEvent.click(screen.getByRole("button", { name: /^AWS/ }));
         await screen.findByRole("group", { name: "Connect AWS" });
-        fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
-        const section = await screen.findByRole("group", { name: "Connect OpenAI" });
+        fireEvent.click(screen.getByRole("button", { name: /^Custom/ }));
+        const section = await screen.findByRole("group", { name: "Connect Custom" });
         expect(screen.queryByRole("group", { name: "Connect AWS" })).toBeNull();
         expect(section.querySelector(".identity-form--inline")).toBeTruthy();
+    });
+
+    it("offers OpenAI's ChatGPT sign-in as well as its API key, with the explanation", async () => {
+        render(() => <AccountsManager />);
+        await waitFor(() => expect(cards()).toHaveLength(4));
+        fireEvent.click(screen.getByRole("button", { name: /^OpenAI/ }));
+        const section = await screen.findByRole("group", { name: "Connect OpenAI" });
+        expect(within(section).getByRole("button", { name: /Sign in with ChatGPT/ })).toBeTruthy();
+        expect(within(section).getByRole("button", { name: /API key/ })).toBeTruthy();
+        expect(within(section).getByText("Which one should I pick?")).toBeTruthy();
+        // Nothing opens until one is picked.
+        expect(section.querySelector(".identity-form--inline")).toBeNull();
     });
 
     it("signs in to AgentMux in the section under its card, not in a dialog", async () => {

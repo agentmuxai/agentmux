@@ -44,7 +44,7 @@
           <button>
             "inapp-terminal"
       <span class="modal-focus-sentinel" aria-hidden="true">
-  console log [claude-login] opened the browser
+  console log [provider-login] opened the browser
 == link cleared
 <body>
   <div>

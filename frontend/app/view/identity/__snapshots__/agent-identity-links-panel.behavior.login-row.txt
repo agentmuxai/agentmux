@@ -2,7 +2,7 @@ rpc ListAllAgentIdentities
 subscribeAccountChanges
 subscribe agentidentities:changed:claude-agent
 row buttons: Re-login, Re-login, Connect
-ClaudeLoginPanel opened existingAccountId=acc-claude linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
+ProviderLoginPanel opened existingAccountId=acc-claude linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
 -- canonical row
 <div>
   <div class="identity-pane">
@@ -65,8 +65,8 @@ ClaudeLoginPanel opened existingAccountId=acc-claude linkTarget={"agentDefinitio
     <div data-login-panel="">
       <button>
         "close login"
-ClaudeLoginPanel opened existingAccountId=acc-nodisplay linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=claude-code scope=pane
-ClaudeLoginPanel opened existingAccountId=acc-gone-claude linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
+ProviderLoginPanel opened existingAccountId=acc-nodisplay linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=claude-code scope=pane
+ProviderLoginPanel opened existingAccountId=acc-gone-claude linkTarget={"agentDefinitionId":"claude-agent"} staleAliasProvider=undefined scope=pane
 -- a row whose account is not cached
 <div>
   <div class="identity-pane">

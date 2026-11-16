@@ -20,7 +20,7 @@
   call refreshAccountCache []
   run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
   console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
-  console warn [claude-login] failed to unlink stale alias "claude-code": unlink refused
+  console warn [provider-login] failed to unlink stale alias "claude-code": unlink refused
 == link not confirmed: the stale alias is kept
 <body>
   <div>
@@ -65,4 +65,4 @@
   call ListAgentIdentities [{},{"agent_id":"agent-1"}]
   run provider=claude cliPath=/usr/bin/claude authEnv={"CLAUDE_CONFIG_DIR":"/tmp/claude-auth"} existingAccountId=undefined linkTarget={"agentDefinitionId":"agent-1"} skipTier1=false awaitTier1Completion=true
   console warn [login-window] reserve failed: Cannot read properties of undefined (reading 'reserveExternalWindow')
-  console warn [claude-login] failed to verify the agent link: list failed
+  console warn [provider-login] failed to verify the agent link: list failed
