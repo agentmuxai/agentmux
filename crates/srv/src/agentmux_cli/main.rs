@@ -305,12 +305,25 @@ fn running(paths: &DataPaths) -> Option<ServerState> {
     state::read(&paths.instance_dir).filter(|s| process::is_server(s.pid))
 }
 
+/// The commit this build was made from (the release workflow sets AGENTMUX_COMMIT); `None` for a build that was not given one.
+fn build_commit() -> Option<&'static str> {
+    option_env!("AGENTMUX_COMMIT").filter(|c| !c.is_empty())
+}
+
+/// What `agentmux version` says: the version and channel, and the commit when the build has one.
+fn version_line(name: &str, channel: &str, commit: Option<&str>) -> String {
+    match commit {
+        Some(commit) => format!("{name} {VERSION} (channel {channel}, commit {commit})"),
+        None => format!("{name} {VERSION} (channel {channel})"),
+    }
+}
+
 fn cmd_version(channel: &str, json: bool) -> i32 {
     let build = option_env!("BUILD_TIME").unwrap_or("dev");
     if json {
-        println!("{}", serde_json::json!({ "version": VERSION, "channel": channel, "build": build }));
+        println!("{}", serde_json::json!({ "version": VERSION, "channel": channel, "build": build, "commit": build_commit() }));
     } else {
-        println!("{} {VERSION} (channel {channel})", invoked_name());
+        println!("{}", version_line(&invoked_name(), channel, build_commit()));
     }
     0
 }
@@ -1087,6 +1100,12 @@ mod tests {
             state::clear_blocked(&paths.instance_dir);
             assert!(state::read_blocked(&paths.instance_dir).is_none());
         });
+    }
+
+    #[test]
+    fn version_names_the_commit_when_the_build_has_one() {
+        assert_eq!(version_line("agentmux", "stable", Some("3f9c2a1b7d")), format!("agentmux {VERSION} (channel stable, commit 3f9c2a1b7d)"));
+        assert_eq!(version_line("agentmux", "stable", None), format!("agentmux {VERSION} (channel stable)"));
     }
 
     #[test]
