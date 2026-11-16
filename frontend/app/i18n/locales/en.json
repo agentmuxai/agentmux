@@ -652,6 +652,7 @@
     "reviews.fact.noChecks": "not reported",
     "reviews.open.github": "Open on GitHub",
     "reviews.open.task": "Open the task",
+    "kanban.openPrs": "Open PRs",
     "vault.machineCopy.line": "Machine copy:",
     "vault.machineCopy.notChecked": "not checked yet",
     "vault.machineCopy.check": "Check the machine copy",
