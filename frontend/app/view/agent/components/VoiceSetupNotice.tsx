@@ -45,7 +45,7 @@ export function VoiceSetupNotice(props: { blockId: string }): JSX.Element {
                     tone="warning"
                     icon="microphone-slash"
                     class="agent-voice-setup-notice"
-                    title="Voice input isn't set up"
+                    title={g().missing === "off" ? t("voice.setupNotice.offTitle") : "Voice input isn't set up"}
                     actions={
                         <Button tone="accent" onClick={() => void openSettingsAt("recording")}>
                             Open Recording settings

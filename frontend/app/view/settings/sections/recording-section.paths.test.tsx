@@ -693,6 +693,23 @@ describe("RecordingSection microphone test", () => {
         expect(enumerateDevices).toHaveBeenCalledTimes(2);
     });
 
+    it("stops, and lets the microphone go, when voice input is switched off while it runs", async () => {
+        await start();
+        expect(startBtn().textContent).toBe("Listening…");
+        setSettings({ "voice:enabled": false });
+        await flush();
+        for (const track of st.tracks) expect(track.stop).toHaveBeenCalled();
+        // The clip that was due is never recorded, and nothing is sent to be transcribed.
+        await flush(5000);
+        expect(FakeRecorder.instances).toEqual([]);
+        expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/voice/transcribe"))).toEqual([]);
+        // Back on, the test is there again, idle.
+        setSettings({});
+        await flush();
+        expect(startBtn().textContent).toBe("Start test");
+        expect(cancelBtn()).toBeNull();
+    });
+
     it("clears an earlier result when a new test starts", async () => {
         getUserMedia.mockRejectedValueOnce(Object.assign(new Error("x"), { name: "NotAllowedError" }));
         await start();

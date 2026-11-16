@@ -37,7 +37,7 @@ import {
     syncUpdaterStatus,
     setFullConfigAtom,
 } from "@/app/store/global";
-import { APP_LOCALE_KEY, bindAppLocaleSetting } from "@/app/i18n/i18n";
+import { APP_LOCALE_KEY, bindAppLocaleSetting, t } from "@/app/i18n/i18n";
 import { devModeOn } from "@/app/store/dev-mode";
 import * as MOS from "@/app/store/mos";
 import { createEffect, createRoot, createSignal } from "solid-js";
@@ -979,6 +979,7 @@ function installVoiceInputErrorListener(): void {
         // for a feature. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §Phase 4.
         let title = "Voice input unavailable";
         let message: string | null = null;
+        let type: "error" | "info" = "error";
         switch (detail) {
             case "not-allowed":
                 title = "Microphone access blocked";
@@ -989,6 +990,12 @@ function installVoiceInputErrorListener(): void {
             case "audio-capture":
                 title = "No microphone detected";
                 message = "Connect a microphone and click the mic again.";
+                break;
+            case "voice-off":
+                // The shortcut was pressed with voice input switched off, in a pane that has no line of its own.
+                title = t("voice.setupNotice.offTitle");
+                message = t("voice.setupNotice.off");
+                type = "info";
                 break;
             case "not-configured":
             case "service-not-allowed":
@@ -1005,7 +1012,7 @@ function installVoiceInputErrorListener(): void {
             title,
             message,
             timestamp: new Date().toISOString(),
-            type: "error",
+            type,
             expiration: Date.now() + 12000,
         });
     });
