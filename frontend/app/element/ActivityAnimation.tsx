@@ -13,17 +13,30 @@ import { createEffect, onCleanup, type JSX } from "solid-js";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { formatDurationShort } from "@/util/format-time";
 import { bucketFrame, bucketTooltip, type Bucket } from "./activity-bucket";
-import { acquireTicker, sharedTick } from "./shared-ticker";
+import { acquireTicker, registerMark, sharedTick } from "./shared-ticker";
 import { Tooltip } from "./tooltip";
 import "./ActivityAnimation.scss";
 
 /** `class` styles the glyph where it sits; `since` (Unix ms) turns on the tooltip. */
 export function ActivityAnimation(props: { bucket: Bucket; since?: number; class?: string }): JSX.Element {
     const reducedMotion = () => shouldReduceMotion("status");
+    let drew: (tick: number) => void = () => {};
     createEffect(() => {
         if (reducedMotion()) return;
+        const mark = registerMark();
+        drew = mark.drew;
         onCleanup(acquireTicker());
+        onCleanup(() => {
+            drew = () => {};
+            mark.release();
+        });
     });
+    const frame = () => {
+        if (reducedMotion()) return props.bucket.still;
+        const t = sharedTick();
+        drew(t);
+        return bucketFrame(props.bucket, t);
+    };
     return (
         <Tooltip
             disable={props.since == null}
@@ -31,7 +44,7 @@ export function ActivityAnimation(props: { bucket: Bucket; since?: number; class
             content={bucketTooltip(props.bucket, formatDurationShort(Date.now() - (props.since ?? Date.now())))}
         >
             <span class={`activity-animation${props.class ? ` ${props.class}` : ""}`} data-bucket={props.bucket.id} aria-hidden="true">
-                {reducedMotion() ? props.bucket.still : bucketFrame(props.bucket, sharedTick())}
+                {frame()}
             </span>
         </Tooltip>
     );

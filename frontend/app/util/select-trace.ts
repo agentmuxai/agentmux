@@ -19,6 +19,7 @@
  */
 
 import { untrack, type Accessor, type Setter } from "solid-js";
+import { markHealth } from "@/app/element/shared-ticker";
 
 const MAX_ENTRIES = 100;
 const SUMMARY_MS = 60_000;
@@ -45,6 +46,8 @@ export interface SelectTraceOptions {
     log?: (line: string) => void;
     setTimer?: (fn: () => void, ms: number) => unknown;
     clearTimer?: (handle: unknown) => void;
+    /** The animated marks on screen and how many stopped following the clock (shared-ticker.ts). */
+    marks?: () => { marks: number; frozen: number; tick: number };
 }
 
 const short = (id: string | null | undefined): string => (id ? id.slice(0, 8) : "-");
@@ -66,6 +69,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
     const log = opts.log ?? ((line: string) => console.info(line));
     const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
     const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+    const marks = opts.marks ?? markHealth;
 
     const entries: TraceEntry[] = [];
     let counters = emptyCounters();
@@ -83,6 +87,12 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
         if (alsoLog) log(line);
     };
 
+    // The working marks drawn now and how many are behind the clock; two lines with the same tick mean it stopped.
+    const marksText = () => {
+        const m = marks();
+        return m.marks > 0 ? ` marks=${m.marks} frozen=${m.frozen} tick=${m.tick}` : "";
+    };
+
     const flushSummary = () => {
         const c = counters;
         if (c.rebuilds === 0 && c.presses === 0 && c.reveals === 0 && c.lostClicks === 0) return;
@@ -93,7 +103,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
         record(
             `[swarm] last ${Math.round(SUMMARY_MS / 1000)}s: rebuilds=${c.rebuilds}${causes ? ` (${causes})` : ""} ` +
                 `presses=${c.presses} lost=${c.lostClicks} (row gone=${c.lostClicksRowGone}) ` +
-                `reveals=${c.reveals} overlapping=${c.overlappingReveals}`,
+                `reveals=${c.reveals} overlapping=${c.overlappingReveals}${marksText()}`,
             true
         );
         counters = emptyCounters();
