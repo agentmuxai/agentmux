@@ -55,6 +55,9 @@ type Format = "vault" | "links" | "kdbx" | PlainFormat;
 
 type Group = { section: VaultSection; entries: VaultEntryInfo[] };
 
+/** What was saved. `whole`: the links alone were asked for and a whole export was written, values and all. */
+type Saved = { count: number; file_name: string; whole?: boolean };
+
 /** The dialog's signals and the entries it can export: which are chosen, the passphrase typed twice, the format, and for an unencrypted file the place and the word. */
 interface ExportState {
     onClose: () => void;
@@ -73,8 +76,8 @@ interface ExportState {
     setBusy: Setter<boolean>;
     error: Accessor<string | null>;
     setError: Setter<string | null>;
-    done: Accessor<{ count: number; file_name: string } | null>;
-    setDone: Setter<{ count: number; file_name: string } | null>;
+    done: Accessor<Saved | null>;
+    setDone: Setter<Saved | null>;
     // An AgentMux `.vault` file, or a KeePass database to take to another manager.
     format: Accessor<Format>;
     setFormat: Setter<Format>;
@@ -96,7 +99,7 @@ function createExportState(props: { onClose: () => void }): ExportState {
     const [show, setShow] = createSignal(false);
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
-    const [done, setDone] = createSignal<{ count: number; file_name: string } | null>(null);
+    const [done, setDone] = createSignal<Saved | null>(null);
     const [format, setFormat] = createSignal<Format>("vault");
     const [place, setPlace] = createSignal<PlainPlace | null>(null);
     const [typed, setTyped] = createSignal("");
@@ -227,7 +230,11 @@ async function save(s: ExportState) {
             linksOnly: links,
         });
         if (res) {
-            s.setDone(res);
+            // "No value is in the file" is said on srv's word that it wrote the links alone, not on what was asked
+            // for. Without it the file is a whole export, and the dialog says that.
+            const whole = links && !res.links_only;
+            if (whole) s.setFormat("vault");
+            s.setDone({ count: res.count, file_name: res.file_name, whole });
             s.setPass("");
             s.setAgain("");
         }
@@ -261,7 +268,10 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
             />
             <ModalBody>
                 <Show when={!s.done()} fallback={<ExportDone s={s} />}>
-                    <FormatPicker s={s} />
+                    {/* The list is laid out by the dialog's own width (`vault-dialog-scope`), which chrome zoom narrows. */}
+                    <div class="vault-dialog-scope">
+                        <FormatPicker s={s} />
+                    </div>
                     <EntryChoices s={s} />
                     <Show when={!plainFormat(s)}>
                         <PassphraseFields s={s} />
@@ -297,6 +307,11 @@ function ExportDone(props: { s: ExportState }): JSX.Element {
                 Saved {s.done()!.count} {s.done()!.count === 1 ? "entry" : "entries"} to{" "}
                 <strong>{s.done()!.file_name}</strong>.
             </p>
+            <Show when={s.done()!.whole}>
+                <p class="warden-manager-error" role="alert">
+                    {t("vault.export.linksNotWritten")}
+                </p>
+            </Show>
             <Show when={plainFormat(s)}>
                 <p class="warden-manager-error" role="alert">
                     This file isn't encrypted. Import it into the other manager, then delete it, and empty the trash or

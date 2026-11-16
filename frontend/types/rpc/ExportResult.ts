@@ -3,4 +3,9 @@
 /**
  * What an export reported.
  */
-export type ExportResult = { count: number, file_name: string, };
+export type ExportResult = { count: number, file_name: string, 
+/**
+ * The file holds linked entries only, and so no value. The dialog says "no value is in the file" only on this
+ * word, never on what it asked for: a part of the app that does not know the option writes a whole export.
+ */
+links_only: boolean, };

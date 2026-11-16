@@ -163,7 +163,7 @@ describe("Export", () => {
 
         listed = [...ENTRIES, link("api-key-invoice", "Invoice provider key"), link("api-key-mail", "Mail provider key")];
         await refreshVault();
-        vaultExport.mockResolvedValue({ count: 2, file_name: "agentmux-links-test.vault" });
+        vaultExport.mockResolvedValue({ count: 2, file_name: "agentmux-links-test.vault", links_only: true });
         await open();
         fireEvent.click(within(screen.getByRole("radiogroup", { name: "File format" })).getByRole("radio", { name: /Linked entries only/ }));
         expect(screen.getByRole("dialog").textContent).toContain("No value is in the file.");
@@ -178,6 +178,10 @@ describe("Export", () => {
         await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(1));
         expect(vaultExport.mock.calls[0][0]).toMatchObject({ format: "vault", links_only: true, ids: undefined, passphrase: "a long enough passphrase" });
         expect(vaultExport.mock.calls[0][0].default_name).toMatch(/^agentmux-links-\d{4}-\d{2}-\d{2}$/);
+        // srv said it wrote the links alone: the dialog goes on saying no value is in the file.
+        expect((await screen.findByRole("status")).textContent).toContain("Saved 2 entries to agentmux-links-test.vault");
+        expect(screen.getByRole("dialog").textContent).toContain("No value is in the file.");
+        expect(screen.queryByRole("alert")).toBeNull();
         cleanup();
 
         // One link left out: the other is named. A whole export says nothing of links.
@@ -196,6 +200,23 @@ describe("Export", () => {
         await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(3));
         expect(vaultExport.mock.calls[2][0]).toMatchObject({ format: "vault", ids: undefined });
         expect(vaultExport.mock.calls[2][0].links_only).toBeUndefined();
+    });
+
+    it("says the file is a full backup when the links alone were asked for and the answer does not say they were written", async () => {
+        listed = [...ENTRIES, link("api-key-invoice", "Invoice provider key")];
+        await refreshVault();
+        // The answer of a part of the app that does not know the option: it wrote a whole export and says no more.
+        vaultExport.mockResolvedValue({ count: 3, file_name: "agentmux-links-test.vault" });
+        await open();
+        fireEvent.click(within(screen.getByRole("radiogroup", { name: "File format" })).getByRole("radio", { name: /Linked entries only/ }));
+        fill("a long enough passphrase");
+        fireEvent.click(save());
+        const saved = await screen.findByRole("status");
+        expect(saved.textContent).toContain("Saved 3 entries to agentmux-links-test.vault");
+        expect(within(saved).getByRole("alert").textContent).toContain("This is not a file of links only. It is a full backup, with the value of every entry in it");
+        const said = screen.getByRole("dialog").textContent;
+        expect(said).not.toContain("No value is in the file.");
+        expect(said).toContain("Anyone with the file and its passphrase can read every secret in it.");
     });
 
     it("says where it saved, how to open it without AgentMux, and forgets the passphrase", async () => {

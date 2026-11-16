@@ -5,7 +5,7 @@
  *  of its place found, the form's inputs for one, and the questions that make or change one. Every place named here
  *  is invented. */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -142,6 +142,24 @@ describe("a linked entry in the list", () => {
         await waitFor(() => expect(copied).toHaveBeenCalledWith("prod/invoice-sync"));
         fireEvent.click(screen.getByRole("button", { name: "Check the place" }));
         await waitFor(() => expect(calls("check_source")).toEqual([{ id: "api-key-invoice" }]));
+    });
+
+    it("says a delete removes the record of where the key lives, and for an entry that holds a value, the value", async () => {
+        entries = [entry(), entry({ id: "api-key-staging", label: "Staging database", fields: { ...PLACE }, parts_set: ["value"], tail: "k4vz" })];
+        await refreshVault();
+        render(() => <VaultEntries section="api-keys" />);
+        fireEvent.click(within(row("api-key-invoice")).getByRole("button", { name: "Delete" }));
+        const asked = await screen.findByRole("dialog");
+        expect(asked.textContent).toContain("Delete Invoice provider key?");
+        expect(asked.textContent).toContain("This entry holds no value. Deleting it removes the record of where the key lives from this computer. The key itself is not touched.");
+        expect(asked.textContent).not.toContain("Its value is deleted");
+        fireEvent.click(within(asked).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+        fireEvent.click(within(row("api-key-staging")).getByRole("button", { name: "Delete" }));
+        const other = await screen.findByRole("dialog");
+        expect(other.textContent).toContain("Its value is deleted from this computer.");
+        expect(other.textContent).not.toContain("holds no value");
     });
 
     it("leaves an entry that holds its value as it was", async () => {

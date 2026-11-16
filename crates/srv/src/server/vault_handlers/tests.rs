@@ -360,6 +360,7 @@ async fn export_and_import_work_through_the_host_without_a_value_in_any_answer()
     let (s, body) = send(&app, host(export)).await;
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!((body["data"]["count"].clone(), body["data"]["file_name"].clone()), (json!(1), json!("out.vault")));
+    assert_eq!(body["data"]["links_only"], false, "the answer says a whole export is not links only: {body}");
 
     let (_, body) = send(&app, host(json!({ "op": "import_inspect", "path": path }))).await;
     assert_eq!(body["data"]["needs_passphrase"], true);

@@ -40,7 +40,13 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 }
 
 /// The host's export to the file the person chose: the entries named (all when none is), in the format asked for.
-fn export(store: &crate::backend::storage::store::Store, body: &Value) -> Result<vault::transfer::ExportResult, String> {
+/// The answer's `links_only` is what was written, not what was asked for: the dialog says "no value" on this word.
+fn export(store: &crate::backend::storage::store::Store, body: &Value) -> Result<Value, String> {
+    let out = export_to(store, body)?;
+    Ok(json!({ "count": out.count, "file_name": out.file_name, "links_only": out.links_only }))
+}
+
+fn export_to(store: &crate::backend::storage::store::Store, body: &Value) -> Result<vault::transfer::ExportResult, String> {
     let path = file_path(body)?;
     let pass = body.get("passphrase").and_then(Value::as_str).unwrap_or("");
     let ids: Option<Vec<String>> = body.get("ids").and_then(|v| serde_json::from_value(v.clone()).ok());
@@ -341,10 +347,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
             // Export and import: the host picks the file in its native dialog and
             // passes the path, so no agent chooses one (spec section 8.1).
             "suggest_passphrase" => Ok((json!({ "passphrase": vault::transfer::suggest_passphrase()? }), false)),
-            "export" => {
-                let out = export(&store, &body)?;
-                Ok((json!({ "count": out.count, "file_name": out.file_name }), true))
-            }
+            "export" => Ok((export(&store, &body)?, true)),
             "import_inspect" => {
                 let path = file_path(&body)?;
                 let pass = body.get("passphrase").and_then(Value::as_str);

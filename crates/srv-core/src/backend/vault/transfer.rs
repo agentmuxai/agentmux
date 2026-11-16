@@ -94,6 +94,9 @@ pub fn suggest_passphrase() -> Result<String, String> {
 pub struct ExportResult {
     pub count: usize,
     pub file_name: String,
+    /// The file holds linked entries only, and so no value. The dialog says "no value is in the file" only on this
+    /// word, never on what it asked for: a part of the app that does not know the option writes a whole export.
+    pub links_only: bool,
 }
 
 /// Writes the chosen entries (all when `ids` is `None`) to `path`, encrypted to
@@ -132,7 +135,7 @@ fn export_of(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pat
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let what = if links_only { format!("{count} linked entries, no values") } else { format!("{count} entries") };
     record(store, "", "", PERSON, "exported", &file_name, &what);
-    Ok(ExportResult { count, file_name })
+    Ok(ExportResult { count, file_name, links_only })
 }
 
 /// The linked entries among the chosen ones (among all when `ids` is `None`), for a file that holds no value.
@@ -258,6 +261,8 @@ pub struct PreviewEntry {
     pub label: String,
     pub kind: String,
     pub duplicate: bool,
+    /// A linked entry: it says where a key lives and brings no value.
+    pub linked: bool,
 }
 
 #[derive(Debug, Serialize, ts_rs::TS)]
@@ -283,6 +288,8 @@ pub struct ImportPreview {
     pub file_name: String,
     pub total: usize,
     pub duplicates: usize,
+    /// How many of `duplicates` are linked entries: one is a duplicate by its kind and place, having no value.
+    pub duplicate_links: usize,
     pub sections: Vec<PreviewSection>,
     pub skipped: Vec<Skipped>,
     /// What the file is, found from its contents.
@@ -401,6 +408,7 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
         file_name: file_name.clone(),
         total: entries.len(),
         duplicates: entries.iter().filter(|e| e.duplicate_of.is_some()).count(),
+        duplicate_links: entries.iter().filter(|e| e.duplicate_of.is_some() && linked::is_linked(&e.fields)).count(),
         sections,
         skipped,
         source,
@@ -432,7 +440,7 @@ fn preview_sections(entries: &[StagedEntry]) -> Vec<PreviewSection> {
         };
         sections[slot].count += 1;
         if sections[slot].first.len() < PREVIEW_FIRST {
-            sections[slot].first.push(PreviewEntry { label: e.label.clone(), kind: e.kind.name.into(), duplicate: e.duplicate_of.is_some() });
+            sections[slot].first.push(PreviewEntry { label: e.label.clone(), kind: e.kind.name.into(), duplicate: e.duplicate_of.is_some(), linked: linked::is_linked(&e.fields) });
         }
     }
     sections
