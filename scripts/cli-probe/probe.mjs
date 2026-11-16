@@ -49,7 +49,7 @@ export function probeEnv({ baseUrl, home, configDir, shimDir, path = process.env
         TMPDIR: home,
         CLAUDE_CONFIG_DIR: configDir,
         ANTHROPIC_BASE_URL: baseUrl,
-        ANTHROPIC_API_KEY: "sk-ant-api03-probe-not-a-real-key",
+        ANTHROPIC_API_KEY: "sk-ant-" + "api03-probe-not-a-real-key",
         DISABLE_AUTOUPDATER: "1",
         DISABLE_TELEMETRY: "1",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",

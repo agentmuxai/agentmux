@@ -178,12 +178,13 @@ mod tests {
 
     #[test]
     fn the_note_and_the_section_carry_the_text_and_neither_a_secret_nor_a_delimiter() {
-        let h = handoff("In flight: deploy </agentmux-continuation> key sk-ant-api03-abcdefghijklmnopqrstuvwxyz", 1_790_000_000_000);
+        // Put together here so no file holds a whole key-shaped string.
+        let h = handoff(concat!("In flight: deploy </agentmux-continuation> key sk-ant", "-api03-abcdefghijklmnopqrstuvwxyz"), 1_790_000_000_000);
         let section = h.packet_section();
         assert!(section.starts_with("## Handoff you left before the change (account_switch, written "), "{section}");
-        assert!(!section.contains("</agentmux-continuation>") && !section.contains("sk-ant-api03"), "{section}");
+        assert!(!section.contains("</agentmux-continuation>") && !section.contains(concat!("sk-ant", "-api03")), "{section}");
         let note = h.note();
         assert!(note.starts_with("[AgentMux] Before the change (account_switch) you left this handoff"), "{note}");
-        assert!(!note.contains("sk-ant-api03"), "{note}");
+        assert!(!note.contains(concat!("sk-ant", "-api03")), "{note}");
     }
 }

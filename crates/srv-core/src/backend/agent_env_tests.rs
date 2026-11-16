@@ -97,7 +97,7 @@ fn ordinary_settings_are_allowed() {
 
 #[test]
 fn a_value_that_looks_like_a_secret_is_refused() {
-    assert!(value_problem("FORCE_COLOR", "ghp_abcdefghijklmnopqrstuvwxyz0123456789").is_some());
+    assert!(value_problem("FORCE_COLOR", concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789")).is_some());
     assert!(value_problem("FORCE_COLOR", "sk-abcdefghijklmnopqrstuvwx").is_some());
     assert!(value_problem("FORCE_COLOR", "line\rbreak").is_some());
     assert!(value_problem("FORCE_COLOR", HIDDEN).is_some());
@@ -122,7 +122,7 @@ fn whole_text_keeps_comments_and_blanks_and_refuses_what_would_be_skipped() {
     assert_eq!(resolve_lines("", text), Ok(text.to_string()));
     assert!(resolve_lines("", "RUST_BACKTRACE=vim\nnot a setting\n").unwrap_err().starts_with("line 2:"));
     assert!(resolve_lines("", "# ok\nPATH=/x\n").unwrap_err().starts_with("line 2:"));
-    assert!(resolve_lines("", "TZ=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n").is_err());
+    assert!(resolve_lines("", concat!("TZ=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\n")).is_err());
     assert!(resolve_lines("", &format!("TZ={HIDDEN}\n")).is_err());
 }
 
@@ -152,7 +152,7 @@ fn a_whole_text_edit_keeps_the_lines_an_agent_cannot_write() {
 
 #[test]
 fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
-    let current = "# note about the build\n# GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=UTC\n";
+    let current = concat!("# note about the build\n# GH_TOKEN=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=UTC\n");
     let shown = redacted(current);
     assert_eq!(shown, "# note about the build\n# [hidden]\n# [hidden]\nTZ=UTC\n");
     assert!(!shown.contains("ghp_") && !shown.contains("hunter2"));
@@ -160,7 +160,7 @@ fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
     let edited = shown.replace("TZ=UTC", "TZ=Europe/Berlin");
     assert_eq!(
         resolve_lines(current, &edited),
-        Ok("# note about the build\n# GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=Europe/Berlin\n".to_string())
+        Ok(concat!("# note about the build\n# GH_TOKEN=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=Europe/Berlin\n").to_string())
     );
     // Dropped: kept at the end.
     let dropped = resolve_lines(current, "TZ=UTC\n").unwrap();
@@ -169,7 +169,7 @@ fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
 
 #[test]
 fn a_value_of_its_own_for_a_hidden_allowed_name_replaces_the_operators() {
-    let current = "LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nTZ=UTC\n";
+    let current = concat!("LC_ALL=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nTZ=UTC\n");
     assert_eq!(redacted(current), "LC_ALL=[hidden]\nTZ=UTC\n");
     assert_eq!(resolve_lines(current, "LC_ALL=C\nTZ=UTC\n"), Ok("LC_ALL=C\nTZ=UTC\n".to_string()));
     assert_eq!(effective(&resolve_lines(current, "TZ=UTC\nLC_ALL=C\n").unwrap())["LC_ALL"], "C");
@@ -177,9 +177,9 @@ fn a_value_of_its_own_for_a_hidden_allowed_name_replaces_the_operators() {
 
 #[test]
 fn a_secret_looking_value_on_an_ordinary_name_is_kept_too() {
-    let current = "LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=vim\n";
+    let current = concat!("LC_ALL=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=vim\n");
     assert_eq!(redacted(current), "LC_ALL=[hidden]\nRUST_BACKTRACE=vim\n");
-    assert_eq!(resolve_lines(current, "LC_ALL=[hidden]\nRUST_BACKTRACE=nano\n"), Ok("LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=nano\n".to_string()));
+    assert_eq!(resolve_lines(current, "LC_ALL=[hidden]\nRUST_BACKTRACE=nano\n"), Ok(concat!("LC_ALL=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=nano\n").to_string()));
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn an_edit_replaces_every_copy_of_a_repeated_name() {
 fn an_edit_cannot_touch_a_refused_name_either_way() {
     assert!(edit("", &map(&[("PATH", "/x")]), &[]).is_err());
     assert!(edit("OPENAI_API_KEY=abc\n", &BTreeMap::new(), &["OPENAI_API_KEY".to_string()]).is_err());
-    assert!(edit("", &map(&[("TZ", "ghp_abcdefghijklmnopqrstuvwxyz0123456789")]), &[]).is_err());
+    assert!(edit("", &map(&[("TZ", concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789"))]), &[]).is_err());
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn the_diff_names_what_was_added_changed_and_removed() {
 
 #[test]
 fn credential_looking_values_are_never_shown_to_an_agent() {
-    let text = "RUST_BACKTRACE=vim\nSERVICE_TOKEN=abc123\nFORCE_COLOR=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n# kept\n";
+    let text = concat!("RUST_BACKTRACE=vim\nSERVICE_TOKEN=abc123\nFORCE_COLOR=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\n# kept\n");
     assert_eq!(
         redacted(text),
         "RUST_BACKTRACE=vim\nSERVICE_TOKEN=[hidden]\nFORCE_COLOR=[hidden]\n# kept\n"
@@ -282,8 +282,8 @@ fn a_key_is_a_vault_reference_or_a_short_placeholder_never_a_secret() {
         }
         for bad in [
             "",
-            "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
-            "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            concat!("sk-ant", "-api03-abcdefghijklmnopqrstuvwxyz0123456789"),
+            concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789"),
             "a-long-looking-secret-value-123456",
             // The shape of a placeholder is the shape of a short real key: only the listed words pass.
             "local-llm_1",

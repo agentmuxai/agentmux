@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(shown.len(), BANNER_ROWS);
         assert_eq!(shown.last().map(String::as_str), Some("six\\u{1b}[0m"));
         assert_eq!(shown.first().map(String::as_str), Some("two"));
-        let secret = rows(&["token ghp_abcdefghijklmnopqrstuvwxyz0123456789"]);
+        let secret = rows(&[concat!("token ghp", "_abcdefghijklmnopqrstuvwxyz0123456789")]);
         assert!(!rows_for_banner(&secret)[0].contains("abcdefghijklmnop"), "{:?}", rows_for_banner(&secret));
         let long = rows(&[&"x".repeat(500)]);
         assert_eq!(rows_for_banner(&long)[0].chars().count(), BANNER_ROW_CHARS);

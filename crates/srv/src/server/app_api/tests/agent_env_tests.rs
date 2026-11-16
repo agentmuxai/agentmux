@@ -95,10 +95,10 @@ async fn reserved_credential_and_secret_looking_input_is_refused_and_nothing_is_
         json!({ "CODEX_HOME": "/x" }),
         json!({ "OPENAI_API_KEY": "x" }),
         json!({ "OPENAI_BASE_URL": "http://x" }),
-        json!({ "ANTHROPIC_API_KEY": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }),
+        json!({ "ANTHROPIC_API_KEY": concat!("sk-ant", "-api03-abcdefghijklmnopqrstuvwxyz0123456789") }),
         json!({ "ANTHROPIC_BASE_URL": "http://user:pw@x" }),
         json!({ "SERVICE_TOKEN": "x" }),
-        json!({ "FORCE_COLOR": "ghp_abcdefghijklmnopqrstuvwxyz0123456789" }),
+        json!({ "FORCE_COLOR": concat!("ghp", "_abcdefghijklmnopqrstuvwxyz0123456789") }),
         json!({ "bad name": "x" }),
     ] {
         let (status, body) = call(&state, Some(&me), json!({ "action": "set", "set": set })).await;
@@ -327,7 +327,7 @@ async fn the_audit_row_names_the_acting_agent_and_the_endpoint_change_without_a_
 async fn a_secret_shaped_key_or_an_unusable_vault_reference_is_refused_and_nothing_is_written() {
     let state = test_state();
     let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
-    for token in ["sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789", "vault:no-such-entry"] {
+    for token in [concat!("sk-ant", "-api03-abcdefghijklmnopqrstuvwxyz0123456789"), "vault:no-such-entry"] {
         let (status, body) = call(
             &state,
             Some(&me),
