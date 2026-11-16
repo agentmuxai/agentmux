@@ -12,6 +12,8 @@ import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
+import { t } from "@/app/i18n/i18n";
+import { groupBatches, type ActivityGroup } from "./vault-activity-batches";
 import { VaultEntries } from "./vault-entries";
 import { VaultHistoryDialog, whoOf, whyOf } from "./vault-history";
 import { VaultManageDialog } from "./vault-manage";
@@ -22,7 +24,7 @@ import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
-import { formatWhen } from "./vault-format";
+import { formatWhen, outcomeOf } from "./vault-format";
 import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -131,19 +133,36 @@ function VaultKept(props: { visible: boolean }): JSX.Element {
     );
 }
 
-/** One line of the Activity tab; an entry that still exists opens its History. */
-function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) => void }): JSX.Element {
+/** One line of the Activity tab; an entry that still exists opens its History. A batch's own line (`secrets`
+ *  lines of its own) opens and closes the lines of its secrets; `nested` is one of those. */
+function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) => void; secrets?: number; open?: boolean; onToggle?: () => void; nested?: boolean }): JSX.Element {
     const a = () => props.row;
     const exists = () => (vaultEntries() ?? []).some((e) => e.id === a().entry_id);
     return (
-        <tr data-outcome={a().outcome}>
+        <tr data-outcome={a().outcome} classList={{ "vault-activity-nested": !!props.nested }}>
             <td class="warden-manager-dim">{formatWhen(a().at)}</td>
-            <td>{whoOf(a())}</td>
-            <td>{a().action}</td>
+            <td class="vault-activity-word">{whoOf(a())}</td>
+            <td class="vault-activity-word">
+                {a().action}
+                <Show when={outcomeOf(a().outcome)}>
+                    {(o) => (
+                        <span class={o().warn ? "vault-activity-outcome vault-expiry-warn" : "vault-activity-outcome"}>
+                            {" · "}
+                            {o().text}
+                        </span>
+                    )}
+                </Show>
+            </td>
             <td>
                 <Show when={exists()} fallback={a().entry_label}>
                     <Button density="compact" onClick={() => props.onHistory(a())}>
                         {a().entry_label}
+                    </Button>
+                </Show>
+                <Show when={props.secrets}>
+                    {" "}
+                    <Button density="compact" aria-expanded={!!props.open} onClick={() => props.onToggle?.()}>
+                        {t("vault.activity.batchSecrets", { count: props.secrets ?? 0 })}
                     </Button>
                 </Show>
             </td>
@@ -153,8 +172,23 @@ function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) 
     );
 }
 
+/** A line of the Activity tab and, under a batch's own line once it is opened, the line of each of its secrets. */
+function ActivityLines(props: { group: ActivityGroup; open: boolean; onToggle: () => void; onHistory: (a: VaultActivity) => void }): JSX.Element {
+    return (
+        <>
+            <ActivityRow row={props.group.row} onHistory={props.onHistory} secrets={props.group.items.length} open={props.open} onToggle={props.onToggle} />
+            <Show when={props.open}>
+                <For each={props.group.items}>{(a) => <ActivityRow row={a} onHistory={props.onHistory} nested />}</For>
+            </Show>
+        </>
+    );
+}
+
 function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
+    // The batches whose secrets' lines are shown: kept by batch, so a reload of the list leaves them open.
+    const [openBatches, setOpenBatches] = createSignal<string[]>([]);
+    const toggleBatch = (batch: string) => setOpenBatches((was) => (was.includes(batch) ? was.filter((b) => b !== batch) : [...was, batch]));
     const [historyOf, setHistoryOf] = createSignal<VaultActivity | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const load = () =>
@@ -192,7 +226,9 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
                         </tr>
                     </thead>
                     <tbody>
-                        <For each={rows()}>{(a) => <ActivityRow row={a} onHistory={setHistoryOf} />}</For>
+                        <For each={groupBatches(rows() ?? [])}>
+                            {(g) => <ActivityLines group={g} open={openBatches().includes(g.batch)} onToggle={() => toggleBatch(g.batch)} onHistory={setHistoryOf} />}
+                        </For>
                     </tbody>
                 </table>
             </Show>

@@ -147,15 +147,22 @@ pub fn check_source(source: &Source) -> Result<Source, String> {
             return Err("key is a field of a JSON secret, as a dotted path (db.password): letters, digits, _ and - only".into());
         }
     }
-    let region = clean(&source.region);
+    let (region, profile) = check_place(&source.region, &source.profile)?;
+    Ok(Source { aws_secret_id: id.to_string(), key, region, profile })
+}
+
+/// The region and the profile a read runs under, trimmed, or why one can't be used.
+pub fn check_place(region: &Option<String>, profile: &Option<String>) -> Result<(Option<String>, Option<String>), String> {
+    let clean = |s: &Option<String>| s.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+    let region = clean(region);
     if region.as_deref().is_some_and(|r| !is_region(r)) {
         return Err("region is an AWS region such as us-east-1".into());
     }
-    let profile = clean(&source.profile);
+    let profile = clean(profile);
     if profile.as_deref().is_some_and(|p| !plain(p, MAX_PROFILE, |c| c.is_ascii_alphanumeric() || "_.@:/+=-".contains(c))) {
         return Err("profile is the name of an AWS grant (a container agent) or of a profile on this computer (a native one)".into());
     }
-    Ok(Source { aws_secret_id: id.to_string(), key, region, profile })
+    Ok((region, profile))
 }
 
 /// Every check of an import, before the person is asked: the reason, the source, and the entry or Vault the value goes
@@ -226,6 +233,7 @@ pub fn check_grant(policy: &Result<Option<Arc<Policy>>, String>, profile: Option
 }
 
 /// How the CLI is given its credentials.
+#[derive(Clone, Copy)]
 pub enum Via<'a> {
     /// The host's own AWS setup (a native agent), under `profile` if one is named.
     Host,

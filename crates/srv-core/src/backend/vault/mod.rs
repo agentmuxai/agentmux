@@ -10,6 +10,7 @@
 //! is blocking (the store, the keychain): call it off the async runtime.
 
 pub mod aws_import;
+pub mod aws_import_batch;
 pub mod capture;
 pub mod changes;
 pub mod card;
