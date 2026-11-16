@@ -21,7 +21,7 @@ A Browser pane in the web UI of a headless AgentMux server shows a real page run
 3. The streamed browser has **its own profile** under srv's data directory (`<data dir>/streamed-browser/profile`). Never a desktop profile, never a host directory mounted in.
 4. Remaining measurements (a longer run, a real link) are a lab and need the operator's OK through AgentY. The demo's own checks run on charlie in a container with no real screen, mouse or keyboard.
 5. Heavy builds on charlie, not narko.
-6. **The address policy and the sandbox are settled with the security lead before any PR that turns this on by default or ships it to users** (recorded privately). The demo's pages are ones we choose, served from this machine.
+6. **A security review with the security lead (recorded privately) comes before any PR that turns this on by default or ships it to users.**
 7. **The route is the signed-in person's, not an agent's.** It is registered for the app audience only; a container agent's request is refused in words (why, and to use its own Browser tool). Nothing an agent can set turns the flags on: `AGENTMUX_STREAMED_BROWSER`, `AGENTMUX_STREAMED_BROWSER_NO_SANDBOX` and `AGENTMUX_STREAMED_BROWSER_BIN` are srv's own environment, and an agent's environment settings refuse every name that starts `AGENTMUX_`.
 
 ## 3. Shape
