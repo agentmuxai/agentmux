@@ -198,11 +198,16 @@ AGENTMUX_TEST_OFFSCREEN=1 task dev             # or the same variable before a p
 - Do not start a prebuilt or packaged build without `scripts/offscreen-check.sh` passing, and do not write a
   mover script. (`task dev` compiles your own checkout and launches it in one command, so a checkout that has
   this section has the flag; the check is for binaries someone else built.)
-- **macOS is not supported yet, and refuses.** AppKit puts a window onto a display when it is first shown
-  and clamps every later move, so a window there can only be kept off the screen by never ordering it in.
-  With the variable set, a dev or local build on macOS prints one line and exits with status 2 before any
-  window or splash exists. Start a macOS build without the variable, and never while someone records or
-  works at that machine.
+- **On macOS no window is shown at all.** AppKit puts a window onto a display when it is first shown and
+  clamps every later move, so nothing can be parked off-screen there: the launcher and the host replace
+  every way to order a window in (`orderFront:`, `makeKeyAndOrderFront:`, `orderFrontRegardless`,
+  `orderWindow:relativeTo:`, `setIsVisible:`, `deminiaturize:`, and app activation) with ones that do nothing,
+  and a watchdog stops the process (exit 2) if a normal window of it is ever on the window server's on-screen
+  list. If the replacements cannot be installed and read back, the process prints one line and exits 2
+  before any window or splash exists. The log says `test window mode: no window is ever shown`. The page
+  still loads and the Browser and UI tools read it, but nothing is on a display to look at: for a visual
+  check use a screenshot tool that reads the page, not the screen. A build from before this still ignores
+  the variable and shows its window, so run `scripts/offscreen-check.sh` on a prebuilt macOS build too.
 - Not covered: the OS's own message boxes (the quit confirmation, the upgrade confirmation) cannot be
   placed by the host. A test run does not reach them. On Linux/Wayland a window cannot be placed at all:
   use X11 (or XWayland) for a test build.
