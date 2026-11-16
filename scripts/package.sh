@@ -165,6 +165,12 @@ task build:frontend
 # the runtime source-map resolver works during local testing.
 # Set STRIP_MAPS=1 explicitly (task package:release does this automatically).
 if [ "${STRIP_MAPS:-0}" = "1" ]; then
+    # The maps leave the portable but not the release: they are packed into one archive beside the installers
+    # (AgentMux_<version>_windows-frontend-maps.tar.xz), which decodes a stack from an installed build
+    # (`node scripts/source-maps.mjs resolve`). The pack checks every map first, and fails the build if one is missing.
+    if [ -n "$OUTDIR" ]; then
+        bash scripts/pack-frontend-maps.sh windows "$VERSION" "$OUTDIR"
+    fi
     echo "  maps    : stripping .map files (release portable)"
     find dist/frontend -name "*.map" -delete
 fi
