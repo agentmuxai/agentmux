@@ -8,14 +8,28 @@
 
 @use "../../styles/attention-card" as *;
 
+// The card is one scroll box above its answers. It has a share of its pane's height, and in a narrow pane at a
+// large zoom the title and the answers can fill that share: a body that scrolled on its own then had no room for
+// a line, and the person could answer without reading what the answer allows. So the title scrolls away with the
+// body, and the answers stay in view.
 .vault-request-card {
     @include attention-card;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-3);
+    padding: var(--space-3) var(--space-3) 0;
     min-height: 0;
+    overflow-y: auto;
+    // The scroll bar's width is kept free whether it shows or not. Without that a card with room for all it says
+    // could keep a scroll bar: with the bar a line that just fitted wraps, so the card is a line taller than the
+    // height it was given, which was measured with no bar (the Linux look: its last line sat under the answers).
+    scrollbar-gutter: stable;
     container-type: inline-size;
+}
+
+.vault-request-card-title,
+.vault-request-card-body {
+    flex-shrink: 0;
 }
 
 .vault-request-card-title {
@@ -35,14 +49,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
-    min-height: 0;
-    overflow-y: auto;
 
     p {
         margin: 0;
     }
 
-    // Its own scroll box at full height: the body scrolls, the command the
+    // Its own scroll box at full height: the card scrolls, the command the
     // person must read never shrinks to a line.
     .vault-command {
         flex-shrink: 0;
@@ -50,7 +62,7 @@
         overflow: auto;
     }
 
-    // A batch's rows at their full height: the body is the one scroll box, so the list never shrinks to a row
+    // A batch's rows at their full height: the card is the one scroll box, so the list never shrinks to a row
     // and a row is never behind a second scroll bar.
     .vault-batch-rows {
         flex-shrink: 0;
@@ -59,44 +71,16 @@
     }
 }
 
-// A list the person reads row by row gets more of the pane than the other requests, which share 40% of it
-// (pane-requests.scss): at 40% a batch showed two or three rows at a time, however large the pane (both look checks).
-.agent-request-stack:has(.vault-batch-rows) {
+// A Vault card gets more of the pane than the other requests, which share 40% of it (pane-requests.scss). The
+// person answers for a secret, so what the card says comes before the transcript: at 40% a narrow, zoomed pane
+// had room for the title and the answers alone, and a batch showed two or three rows at a time in any pane.
+.agent-request-stack:has(.vault-request-card) {
     max-height: 70%;
-}
-
-// A batch's card is one scroll box above its answers. In a narrow, zoomed pane the title and the answers can fill
-// the card's share of the pane, and a body that scrolls on its own then has no room for a row: the person could
-// answer and not see what the answer allows. Here the title scrolls away with the rows, and the answers stay in view.
-.vault-request-card:has(.vault-batch-rows) {
-    overflow-y: auto;
-    padding-bottom: 0;
-
-    .vault-request-card-title,
-    .vault-request-card-body {
-        flex-shrink: 0;
-    }
-
-    .vault-request-card-body {
-        overflow-y: visible;
-    }
-
-    // The card's own bottom padding is the answers', so nothing scrolls into view under them.
-    .vault-request-card-actions {
-        position: sticky;
-        bottom: 0;
-        margin-top: calc(-1 * var(--space-2));
-        padding-block: var(--space-2) var(--space-3);
-        background: var(--modal-bg-color);
-
-        &:not(:last-child) {
-            padding-bottom: var(--space-1);
-        }
-    }
-
-    .vault-request-card-deny-all {
-        margin-bottom: var(--space-3);
-    }
+    // The larger share is the first thing to give way when the pane is too short for it: the rows under the stack
+    // (the working line, the status rows, the composer) keep their height, and the card scrolls in what is left.
+    // It gives way no further than a title and the answers need, or the 40% every stack has.
+    flex-shrink: 1000;
+    min-height: min(40%, 6rem);
 }
 
 .vault-request-card-why {
@@ -104,13 +88,24 @@
 }
 
 // Deny at the start, the yeses at the end, wrapping as one group: Always is
-// never beside or under Deny, however narrow the pane.
+// never beside or under Deny, however narrow the pane. Pinned to the card's
+// bottom edge, with the card's bottom padding as their own, so nothing scrolls
+// into view under them.
 .vault-request-card-actions {
+    position: sticky;
+    bottom: 0;
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-2);
     flex-shrink: 0;
+    margin-top: calc(-1 * var(--space-2));
+    padding-block: var(--space-2) var(--space-3);
+    background: var(--modal-bg-color);
+
+    &:not(:last-child) {
+        padding-bottom: var(--space-1);
+    }
 
     > :first-child {
         margin-inline-end: auto;
@@ -152,6 +147,7 @@
 // "Deny all from <agent>", under the card's answers, apart from them.
 .vault-request-card-deny-all {
     align-self: flex-start;
+    margin-bottom: var(--space-3);
 }
 
 // A parked agent's line on its My agents row: its own controls, above the
