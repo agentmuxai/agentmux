@@ -15,7 +15,7 @@
 
 import { getApi } from "@/app/store/global";
 import { pushFlashError } from "@/app/store/flash-notifications";
-import { recycleBlockers } from "@/app/store/recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, recycleBlockers } from "@/app/store/recycle-blockers";
 import { saveForReload } from "@/app/store/recycle-savers";
 
 function ownWindowLabel(): string {
@@ -135,8 +135,9 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
         const busy: string[] = [];
         if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
         if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
-        // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
-        if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
+        // `openModal` dialogs and declarative `<Modal>`s are tracked apart. One left open for hours with no input in
+        // the window is forgotten, not waited for.
+        if ((modalsModel.hasOpenModals() || anyModalOpen()) && msSinceLastInput() < IN_FLIGHT_IDLE_LIMIT_MS) busy.push("a dialog is open");
         if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
         return busy;
     };

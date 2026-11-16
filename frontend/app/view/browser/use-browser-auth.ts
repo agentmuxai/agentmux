@@ -3,7 +3,7 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { getApi } from "@/util/app-api";
-import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import type { ModalLayerApi } from "@/element/modal-layer";
 import type { BrowserViewModel } from "./browser-model";
 
@@ -49,8 +49,9 @@ export function useBrowserAuth(params: {
     // The queue lives in this page while CEF's callback waits in the host: a
     // reload would leave the browser pane waiting for a prompt never shown.
     onCleanup(
-        registerRecycleBlocker(() =>
-            authActive || authQueue.length > 0 || pendingAuthIds.size > 0 ? "a browser pane is asking for a sign-in" : null
+        registerRecycleBlocker(
+            () => (authActive || authQueue.length > 0 || pendingAuthIds.size > 0 ? "a browser pane is asking for a sign-in" : null),
+            { idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS }
         )
     );
 

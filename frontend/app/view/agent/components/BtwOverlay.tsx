@@ -44,7 +44,7 @@ import { CloseButton } from "@/app/element/ui";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { type Accessor, type JSX, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
-import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { eventBelongsToPaneOf } from "@/util/focusutil";
 import type { BtwAnswerChunkEvent } from "@/types/rpc/BtwAnswerChunkEvent";
 
@@ -117,10 +117,12 @@ function useBtwStream(props: BtwOverlayProps): BtwStream {
     const [streamError, setStreamError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal(false);
     const stream: BtwStream = { answer, streamError, done, setAnswer, setStreamError, setDone };
-    // The answer streams into this component only: a reload would cut it off.
+    // The answer streams into this component only: a reload would cut it off. One still coming in after hours with
+    // no input in the window is stuck.
     onCleanup(
-        registerRecycleBlocker(() =>
-            !done() && !props.error && !streamError() ? "a /btw answer is still coming in" : null
+        registerRecycleBlocker(
+            () => (!done() && !props.error && !streamError() ? "a /btw answer is still coming in" : null),
+            { idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS }
         )
     );
 

@@ -27,7 +27,8 @@ vi.mock("@/app/drag/drag-session", () => ({ ALL_DRAG_KINDS: [], isAnyUnderway: (
 const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
-import { recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, PLACE_IDLE_LIMIT_MS, recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
+import { registerSearchForReload, takeStoredSearch } from "@/app/view/agent/search/search-reload";
 import { registerReloadSaver } from "./recycle-savers";
 import { answerRecycleRequest, recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
 
@@ -40,6 +41,7 @@ beforeEach(() => {
     saved.drafts = true;
     saved.snapshots = true;
     saved.attachments = true;
+    sessionStorage.clear();
     Object.assign(idle, { sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false });
     order.length = 0;
     unregister.push(
@@ -223,5 +225,84 @@ describe("answerRecycleRequest (the governor's request)", () => {
         expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a file is still uploading");
         expect(pushFlashError).not.toHaveBeenCalled();
         expect(api.reloadWindow).not.toHaveBeenCalled();
+    });
+});
+
+describe("recycle blockers that let go", () => {
+    const MIN = 60_000;
+
+    it("a place in a pane holds the recycle while the window is used, and lets go after an hour without input", () => {
+        const off = registerRecycleBlocker(() => "an agent pane is scrolled up into older history", { idleLimitMs: PLACE_IDLE_LIMIT_MS });
+        idle.sinceInputMs = 59 * MIN;
+        expect(recycleBlockers()).toEqual(["an agent pane is scrolled up into older history"]);
+        idle.sinceInputMs = 61 * MIN;
+        expect(recycleBlockers()).toEqual([]);
+        off();
+    });
+
+    it("work in flight lets go after hours without input, so a flag that never cleared cannot hold a window for good", () => {
+        const off = registerRecycleBlocker(() => "a file is still uploading", { idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS });
+        idle.sinceInputMs = 5 * 60 * MIN;
+        expect(recycleBlockers()).toEqual(["a file is still uploading"]);
+        idle.sinceInputMs = 7 * 60 * MIN;
+        expect(recycleBlockers()).toEqual([]);
+        off();
+    });
+
+    it("what the person wrote and has not sent or saved never lets go", () => {
+        const off = registerRecycleBlocker(() => "an editor has unsaved changes");
+        idle.sinceInputMs = 30 * 24 * 60 * MIN;
+        expect(recycleBlockers()).toEqual(["an editor has unsaved changes"]);
+        off();
+    });
+
+    it("a dialog left open for hours no longer holds an idle window", async () => {
+        idle.modal = true;
+        idle.sinceInputMs = 5 * 60 * MIN;
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a dialog is open");
+        resetRecycleForTests();
+        idle.sinceInputMs = 7 * 60 * MIN;
+        await expect(answerRecycleRequest()).resolves.toBe(true);
+    });
+});
+
+describe("an open find bar and a recycle (task #47824)", () => {
+    const MIN = 60_000;
+    let off: () => void;
+    beforeEach(() => {
+        // What useInSessionSearch registers for a pane whose bar is open with a query and a current match.
+        off = registerSearchForReload("block-a", () => ({ text: "Needle", matchId: "n-42", dim: false }));
+    });
+    afterEach(() => off());
+
+    it("does not hold the recycle: an idle window with an open bar reloads, and the bar is written down", async () => {
+        idle.sinceInputMs = 11 * MIN;
+        expect(recycleBlockers()).toEqual([]);
+        await expect(answerRecycleRequest()).resolves.toBe(true);
+        expect(api.reloadWindow).toHaveBeenCalled();
+        // The reloaded page reads it, once.
+        expect(takeStoredSearch("block-a")).toEqual({ text: "Needle", matchId: "n-42", dim: false });
+        expect(takeStoredSearch("block-a")).toBeUndefined();
+    });
+
+    it("a search in use delays the recycle, and it runs once the use stops", async () => {
+        // Typing in the bar is input in the window: the governor's idle time has not passed.
+        idle.sinceInputMs = 20_000;
+        await expect(answerRecycleRequest()).resolves.toBe(false);
+        expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "the window was used recently");
+        expect(api.reloadWindow).not.toHaveBeenCalled();
+        expect(takeStoredSearch("block-a")).toBeUndefined();
+        resetRecycleForTests();
+        idle.sinceInputMs = 10 * MIN + 1;
+        await expect(answerRecycleRequest()).resolves.toBe(true);
+        expect(takeStoredSearch("block-a")?.text).toBe("Needle");
+    });
+
+    it("a closed bar leaves nothing behind", async () => {
+        off();
+        off = registerSearchForReload("block-b", () => null);
+        await expect(answerRecycleRequest()).resolves.toBe(true);
+        expect(takeStoredSearch("block-b")).toBeUndefined();
     });
 });

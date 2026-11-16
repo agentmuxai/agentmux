@@ -26,7 +26,7 @@ import { authHeaders } from "@/app/store/auth-headers";
 import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 import { onMuxEvent } from "@/app/store/mps";
-import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { registerReloadSaver } from "@/app/store/recycle-savers";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -532,9 +532,11 @@ export class AttachmentDraft {
 
 const drafts = new Map<string, AttachmentDraft>();
 
-// An upload in progress is an XHR in this page: a reload would cancel it.
-registerRecycleBlocker(() =>
-    [...drafts.values()].some((d) => d.processingCount() > 0 || d.ingestInFlight()) ? "a file is still uploading" : null
+// An upload in progress is an XHR in this page: a reload would cancel it. One that is still "in progress" after
+// hours with no input in the window is stuck, and must not hold the window for good.
+registerRecycleBlocker(
+    () => ([...drafts.values()].some((d) => d.processingCount() > 0 || d.ingestInFlight()) ? "a file is still uploading" : null),
+    { idleLimitMs: IN_FLIGHT_IDLE_LIMIT_MS }
 );
 
 /** Store every pane's ready attachments, for a recycle; false when one couldn't be stored. */
