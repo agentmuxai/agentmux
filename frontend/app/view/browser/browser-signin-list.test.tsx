@@ -9,18 +9,46 @@
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fill = vi.fn(() => Promise.resolve());
 const strong = vi.fn(() => Promise.resolve());
+const close = vi.fn(() => Promise.resolve());
 const openVault = vi.fn(() => Promise.resolve());
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SigninFillCommand: (...a: unknown[]) => fill(...(a as [])),
         SignupPasswordCommand: (...a: unknown[]) => strong(...(a as [])),
+        SigninListCloseCommand: (...a: unknown[]) => close(...(a as [])),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+// The host's `browser-pane-clicked` events, which the test fires itself.
+const paneClicks = new Set<(p: { block_id: string }) => void>();
+vi.mock("@/util/app-api", () => ({
+    getApi: () => ({
+        listen: (_name: string, cb: (p: { block_id: string }) => void) => {
+            paneClicks.add(cb);
+            return Promise.resolve(() => paneClicks.delete(cb));
+        },
+    }),
+}));
+// jsdom marks every script-dispatched event untrusted and can't be told otherwise, so the document's
+// pointerdown listeners are kept here and called with an event that says it was the person's own.
+const presses = new Set<(e: Event) => void>();
+const realAdd = document.addEventListener.bind(document);
+const realRemove = document.removeEventListener.bind(document);
+document.addEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: boolean | AddEventListenerOptions) => {
+    if (type === "pointerdown" && typeof fn === "function") presses.add(fn as (e: Event) => void);
+    realAdd(type, fn, opts);
+}) as typeof document.addEventListener;
+document.removeEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: boolean | EventListenerOptions) => {
+    if (type === "pointerdown" && typeof fn === "function") presses.delete(fn as (e: Event) => void);
+    realRemove(type, fn, opts);
+}) as typeof document.removeEventListener;
+/** A press the person made on `el`. */
+const press = (el: Element) => presses.forEach((h) => h({ isTrusted: true, target: el } as unknown as Event));
 vi.mock("@/app/view/vault/open-vault", () => ({ openVault: (...a: unknown[]) => openVault(...(a as [])) }));
 // The popover is tested on its own; here only what the list hands it.
 vi.mock("@/app/element/anchored-popover", () => ({
@@ -38,6 +66,7 @@ afterEach(() => {
     cleanup();
     fill.mockClear();
     strong.mockClear();
+    close.mockClear();
     openVault.mockClear();
 });
 
@@ -107,6 +136,43 @@ describe("BrowserSigninList", () => {
         await r.findByTestId("browser-signin-list");
         fireEvent.click(r.getByTestId("browser-signin-list-manage"));
         expect(openVault).toHaveBeenCalledWith("logins");
+    });
+
+    it("closes on a press elsewhere in the app's UI, not on a press on the panel", async () => {
+        const [meta, setMeta] = createSignal<Record<string, unknown>>(list());
+        const outside = document.createElement("button");
+        document.body.appendChild(outside);
+        const r = render(() => <BrowserSigninList blockId="b1" meta={meta} />);
+        const panel = await r.findByTestId("browser-signin-list");
+        press(panel);
+        expect(close).not.toHaveBeenCalled();
+        press(outside);
+        expect(close).toHaveBeenCalledWith({}, { block_id: "b1" });
+        // srv closed it: nothing listens any more.
+        setMeta({});
+        await Promise.resolve();
+        await Promise.resolve();
+        close.mockClear();
+        press(outside);
+        paneClicks.forEach((cb) => cb({ block_id: "b2" }));
+        expect(close).not.toHaveBeenCalled();
+        outside.remove();
+    });
+
+    it("takes a click in the page of this same pane, which the DOM sees as a synthetic press, for the page's own", async () => {
+        const r = render(() => <BrowserSigninList blockId="b1" meta={() => list()} />);
+        await r.findByTestId("browser-signin-list");
+        // BrowserPaneOutsideClickBridge: an untrusted press on the body, and the host's event naming the pane.
+        document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+        paneClicks.forEach((cb) => cb({ block_id: "b1" }));
+        expect(close).not.toHaveBeenCalled();
+    });
+
+    it("closes on a click in the page of another browser pane", async () => {
+        const r = render(() => <BrowserSigninList blockId="b1" meta={() => list()} />);
+        await r.findByTestId("browser-signin-list");
+        paneClicks.forEach((cb) => cb({ block_id: "b2" }));
+        expect(close).toHaveBeenCalledWith({}, { block_id: "b1" });
     });
 
     it("says why when a fill fails", async () => {

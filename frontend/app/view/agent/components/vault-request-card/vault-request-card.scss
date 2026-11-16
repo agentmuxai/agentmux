@@ -49,6 +49,20 @@
         max-height: 120px;
         overflow: auto;
     }
+
+    // A batch's rows at their full height: the body is the one scroll box, so the list never shrinks to a row
+    // and a row is never behind a second scroll bar.
+    .vault-batch-rows {
+        flex-shrink: 0;
+        max-height: none;
+        overflow-y: visible;
+    }
+}
+
+// A list the person reads row by row gets more of the pane than the other requests, which share 40% of it
+// (pane-requests.scss): at 40% a batch showed two or three rows at a time, however large the pane (both look checks).
+.agent-request-stack:has(.vault-batch-rows) {
+    max-height: 70%;
 }
 
 .vault-request-card-why {

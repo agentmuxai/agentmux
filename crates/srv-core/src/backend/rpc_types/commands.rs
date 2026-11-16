@@ -771,6 +771,8 @@ pub const COMMAND_BROWSER_SIGNIN_FILL: &str = "browser.signin_fill";
 pub const COMMAND_BROWSER_SIGNUP_PASSWORD: &str = "browser.signup_password";
 // The person's [Stop] on "<agent> is signing in" (same spec, §5.3).
 pub const COMMAND_BROWSER_SIGNIN_STOP: &str = "browser.signin_stop";
+// The person pressed in the app's own UI while a pane's sign-in list showed.
+pub const COMMAND_BROWSER_SIGNIN_LIST_CLOSE: &str = "browser.signin_list_close";
 
 // Layout files — save a window as `*.agentmux-layout.json`.
 // See docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md.

@@ -468,6 +468,14 @@ pub struct CommandBrowserSignupPasswordData {
     pub block_id: String,
 }
 
+/// `browser.signin_list_close`: the person pressed in the app's own UI (outside the page) while pane
+/// `block_id`'s list of saved sign-ins showed: close it, in srv and in the page's listener.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandBrowserSigninListCloseData {
+    pub block_id: String,
+}
+
 /// `browser.signin_stop`: the person stops agent sign-in notice `id` in pane `block_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

@@ -191,6 +191,30 @@ async fn enter_with_a_row_selected_types_that_sign_in_and_closes_the_list() {
     assert_eq!((typed["origin"].as_str(), typed["username"].as_str(), typed["password"].as_str()), (Some(s.site.as_str()), Some("alice@example.com"), Some("correct horse")));
 }
 
+/// What the host was asked to type once a pick was made.
+async fn typed_after_pick(s: &Setup) -> Value {
+    for _ in 0..80 {
+        if let Some((_, b)) = s.host.seen.lock().unwrap().iter().find(|(r, _)| r == "signin_fill") {
+            return b.clone();
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the host was asked to type the picked sign-in");
+}
+
+#[tokio::test]
+async fn a_tab_pick_asks_the_host_to_keep_the_focus_tab_moved_and_enter_does_not() {
+    let (tab, enter) = (setup(None).await, setup(None).await);
+    for (s, k) in [(&tab, "Tab"), (&enter, "Enter")] {
+        save(s, "alice@example.com");
+        open(&s.state, &s.block, &s.site, "password", "");
+        key(&s.state, &s.block, "ArrowDown");
+        key(&s.state, &s.block, k);
+    }
+    assert_eq!(typed_after_pick(&tab).await["keep_focus"], json!(true));
+    assert_eq!(typed_after_pick(&enter).await["keep_focus"], json!(false));
+}
+
 #[tokio::test]
 async fn tab_picks_the_selected_row_too_and_a_mouse_pick_closes_the_list() {
     let s = setup(None).await;
@@ -230,4 +254,19 @@ async fn a_new_page_closes_the_list() {
 #[test]
 fn only_booleans_go_back_to_the_host() {
     assert_eq!(Answer { shown: true, cursor: false }.to_json(), json!({ "shown": true, "cursor": false }));
+}
+
+#[tokio::test]
+async fn a_press_in_the_apps_own_ui_closes_the_list_and_tells_the_host_to_clear_the_listener() {
+    let s = setup(None).await;
+    save(&s, "alice@example.com");
+    open(&s.state, &s.block, &s.site, "password", "");
+    key(&s.state, &s.block, "ArrowDown");
+    assert!(meta(&s) != Value::Null);
+    close_from_ui(&s.state, &s.block).await;
+    assert_eq!(meta(&s), Value::Null);
+    let told = s.host.seen.lock().unwrap().iter().find(|(r, _)| r == "signin_list_clear").map(|(_, b)| b.clone());
+    assert_eq!(told, Some(json!({ "block_id": s.block })));
+    // The list is gone in srv too: a key now is nothing's.
+    assert_eq!(key(&s.state, &s.block, "ArrowDown"), Answer::default());
 }

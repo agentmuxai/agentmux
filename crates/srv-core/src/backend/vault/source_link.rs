@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use super::aws_import::{self, Source, Via};
-use super::{history, kinds, record_line, seal, vaults, Line, PERSON};
+use super::{history, kinds, linked, record_line, seal, vaults, Line, PERSON};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
 use crate::identity::aws_broker::mint::Runner;
@@ -56,6 +56,10 @@ pub const CHECKED: &str = "checked";
 pub const SAME: &str = "same";
 pub const DIFFERENT: &str = "different";
 pub const COULD_NOT_READ: &str = "could not read";
+/// What a check of a linked entry's place finds, from the place's description alone (`linked`).
+pub const PRESENT: &str = "present";
+pub const CHANGED: &str = "changed since recorded";
+pub const MISSING: &str = "missing";
 
 /// How many checks agents get of one entry in an hour, all agents together: a check answers one bit about the sealed
 /// value, so it is not something to ask in a loop.
@@ -121,7 +125,7 @@ impl Link {
     }
 
     /// What an import-style read of it takes, for an AWS secret.
-    fn aws(&self) -> Option<Source> {
+    pub(super) fn aws(&self) -> Option<Source> {
         let some = |s: &String| (!s.is_empty()).then(|| s.clone());
         (self.kind == AWS_SECRET).then(|| Source { aws_secret_id: self.location.clone(), key: some(&self.key), region: some(&self.region), profile: some(&self.profile) })
     }
@@ -235,7 +239,7 @@ pub fn last_check(store: &Store, row: &VaultRow, link: &Link) -> Option<VaultSou
 }
 
 /// The link as `list` gives it to an agent: the place, and the newest check. Which login reads it is left out.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct AgentLink {
     pub kind: String,
     pub location: String,
@@ -243,12 +247,41 @@ pub struct AgentLink {
     pub key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<VaultSourceCheck>,
+    /// The entry is a link (`linked`): it holds no value, and the key is only at the place.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub link_only: bool,
+    /// Who or what reads the key, as recorded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub readers: Vec<String>,
+    /// When the key was last changed, as recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotated: Option<String>,
+    /// Other places the same key is kept.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copies: Vec<String>,
+}
+
+/// An entry's plain fields as an agent is given them: all of them but the login its machine copy is read under.
+pub fn fields_for_agent(mut fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    fields.remove(PROFILE);
+    fields
 }
 
 pub fn for_agent(store: &Store, row: &VaultRow) -> Option<AgentLink> {
     let link = Link::of_row(row)?;
     let checked = last_check(store, row, &link);
-    Some(AgentLink { kind: link.kind, location: link.location, key: link.key, checked })
+    let fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let lines = |name: &str| linked::lines(fields.get(name).map_or("", String::as_str)).into_iter().map(str::to_string).collect();
+    Some(AgentLink {
+        kind: link.kind,
+        location: link.location,
+        key: link.key,
+        checked,
+        link_only: linked::is_linked(&fields),
+        readers: lines(linked::READERS),
+        rotated: fields.get(linked::ROTATED).cloned(),
+        copies: lines(linked::COPIES),
+    })
 }
 
 /// Agents' checks that are planned and have not written their history line yet, by store and entry. They count
@@ -286,6 +319,10 @@ pub struct CheckPlan {
     /// The entry's main part, which the copy is compared with.
     pub part: &'static str,
     pub link: Link,
+    /// The entry is a link: it holds no value, so the check reads the place's description and compares nothing.
+    pub only: bool,
+    /// The other places the key is kept, which a linked entry's check describes too.
+    pub copies: Vec<Link>,
     /// The agent's id, or the person.
     pub actor: String,
     pub reason: String,
@@ -298,7 +335,9 @@ fn plan_of(row: VaultRow, actor: &str, reason: String) -> Result<CheckPlan, Stri
     let Some(link) = Link::of_row(&row) else {
         return Err(format!("{} has no machine copy recorded: set {KIND}, {LOCATION} and {KEY} on it first", row.label));
     };
-    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, actor: actor.to_string(), reason, slot: None })
+    let fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let (only, copies) = (linked::is_linked(&fields), linked::copies(&fields));
+    Ok(CheckPlan { entry_id: row.id, created_at: row.created_at, label: row.label, part: kind.parts[0], link, only, copies, actor: actor.to_string(), reason, slot: None })
 }
 
 /// The person's check, from the Vault pane.
@@ -345,6 +384,12 @@ pub enum Outcome {
     Different,
     /// Why neither could be said: the other place refused, has no such key, or is a kind nothing reads back.
     CouldNotRead(String),
+    /// A linked entry's place is there, and did not change after the date the entry records.
+    Present,
+    /// The place changed after the date the entry records: what it says about that.
+    Changed(String),
+    /// The place is not there, or is being deleted: which.
+    Missing(String),
 }
 
 impl Outcome {
@@ -353,21 +398,24 @@ impl Outcome {
             Outcome::Same => SAME,
             Outcome::Different => DIFFERENT,
             Outcome::CouldNotRead(_) => COULD_NOT_READ,
+            Outcome::Present => PRESENT,
+            Outcome::Changed(_) => CHANGED,
+            Outcome::Missing(_) => MISSING,
         }
     }
 
     pub fn why(&self) -> &str {
         match self {
-            Outcome::CouldNotRead(why) => why,
+            Outcome::CouldNotRead(why) | Outcome::Changed(why) | Outcome::Missing(why) => why,
             _ => "",
         }
     }
 
-    /// The history line's outcome: the word, and why when it could not be read.
+    /// The history line's outcome: the word, and why when there is one to give.
     pub fn line(&self) -> String {
-        match self {
-            Outcome::CouldNotRead(why) => format!("{COULD_NOT_READ}: {why}"),
-            other => other.word().to_string(),
+        match self.why() {
+            "" => self.word().to_string(),
+            why => format!("{}: {why}", self.word()),
         }
     }
 }
@@ -377,13 +425,40 @@ impl Outcome {
 pub struct Checked {
     pub id: String,
     pub label: String,
-    /// `same`, `different` or `could not read`.
+    /// `same`, `different` or `could not read`; for a linked entry `present`, `changed since recorded`, `missing`
+    /// or `could not read`.
     pub outcome: &'static str,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub why: String,
     /// The place that was read, as the history names it.
     pub source: String,
     pub checked_at: i64,
+    /// A linked entry: the day the place last changed, as the place says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_changed: Option<String>,
+    /// A linked entry: whether the place rotates the key itself, when the place says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<bool>,
+    /// A linked entry: what was found at each other place the key is kept.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copies: Vec<linked::CopyChecked>,
+}
+
+impl Checked {
+    /// The answer for `plan`'s entry and place, as of now.
+    pub fn of(plan: &CheckPlan, outcome: &Outcome) -> Checked {
+        Checked {
+            id: plan.entry_id.clone(),
+            label: plan.label.clone(),
+            outcome: outcome.word(),
+            why: outcome.why().to_string(),
+            source: plan.link.text(),
+            checked_at: now_ms(),
+            last_changed: None,
+            rotation: None,
+            copies: Vec::new(),
+        }
+    }
 }
 
 /// Whether two values are equal, in time that does not depend on where they differ: their digests are compared, whole.
@@ -401,12 +476,22 @@ async fn read<R: Runner>(runner: &R, link: &Link, via: Via<'_>) -> Result<Zeroiz
     aws_import::pick(secret, source.key.as_deref())
 }
 
-/// The entry's own value against `other`. The entry is opened here and wiped when this returns.
-fn compare(store: &Store, plan: &CheckPlan, other: &Zeroizing<String>) -> Outcome {
-    let cant = |why: &str| Outcome::CouldNotRead(why.to_string());
+/// The entry as it is once the read has come back, when it is still the entry the check was planned for and its
+/// link is still the one that was read. A read takes seconds, and the link may change under it: a line written for
+/// the old region or profile would count as the newest check of the new one, which the history names the same way.
+pub(super) fn as_planned(store: &Store, plan: &CheckPlan) -> Result<VaultRow, String> {
     let Some(row) = store.vault_get(&plan.entry_id).ok().flatten().filter(|r| r.created_at == plan.created_at) else {
-        return cant("the entry was deleted while its machine copy was read");
+        return Err("the entry was deleted while its machine copy was read".into());
     };
+    if Link::of_row(&row).as_ref() != Some(&plan.link) {
+        return Err("where the entry's machine copy is was changed while it was read, so what was read says nothing about it: check again".into());
+    }
+    Ok(row)
+}
+
+/// The entry's own value against `other`. The entry is opened here and wiped when this returns.
+fn compare(row: &VaultRow, plan: &CheckPlan, other: &Zeroizing<String>) -> Outcome {
+    let cant = |why: &str| Outcome::CouldNotRead(why.to_string());
     let Ok(key) = seal::key(false) else { return cant("this computer's Vault key can't be read, so the entry's own value can't be opened") };
     let Ok(parts) = seal::open(&key, &row.id, &row.sealed) else { return cant("the entry's own value doesn't open with this computer's Vault key") };
     match parts.get(plan.part).filter(|v| !v.is_empty()) {
@@ -420,14 +505,15 @@ fn compare(store: &Store, plan: &CheckPlan, other: &Zeroizing<String>) -> Outcom
 pub fn conclude(store: &Store, plan: &CheckPlan, outcome: &Outcome) -> Checked {
     let source = plan.link.text();
     record_line(store, Line { entry_id: &plan.entry_id, label: &plan.label, actor: &plan.actor, action: CHECKED, target: &source, outcome: &outcome.line(), reason: &plan.reason });
-    Checked { id: plan.entry_id.clone(), label: plan.label.clone(), outcome: outcome.word(), why: outcome.why().to_string(), source, checked_at: now_ms() }
+    Checked::of(plan, outcome)
 }
 
 /// What a read of the copy came to, compared with the entry's value and recorded.
 fn finish(store: &Store, plan: &CheckPlan, other: Result<Zeroizing<String>, String>) -> Checked {
-    let outcome = match &other {
-        Ok(value) => compare(store, plan, value),
-        Err(why) => Outcome::CouldNotRead(why.clone()),
+    let outcome = match (as_planned(store, plan), &other) {
+        (Err(why), _) => Outcome::CouldNotRead(why),
+        (Ok(row), Ok(value)) => compare(&row, plan, value),
+        (Ok(_), Err(why)) => Outcome::CouldNotRead(why.clone()),
     };
     conclude(store, plan, &outcome)
 }
@@ -435,22 +521,23 @@ fn finish(store: &Store, plan: &CheckPlan, other: Result<Zeroizing<String>, Stri
 /// Reads the machine copy, compares it with the entry's value and records the outcome. Never fails: a place that
 /// can't be read is an outcome. The store is read and written on the blocking pool.
 pub async fn check<R: Runner>(store: &Arc<Store>, runner: &R, plan: &CheckPlan, via: Via<'_>) -> Checked {
-    let other = read(runner, &plan.link, via).await;
-    let stopped = Checked {
-        id: plan.entry_id.clone(),
-        label: plan.label.clone(),
-        outcome: COULD_NOT_READ,
-        why: "the check stopped before it finished".into(),
-        source: plan.link.text(),
-        checked_at: now_ms(),
-    };
+    let stopped = Checked::of(plan, &Outcome::CouldNotRead("the check stopped before it finished".into()));
     let (store, plan) = (Arc::clone(store), plan.clone());
+    // A linked entry holds no value to compare: its place is described, and nothing of the key is read.
+    if plan.only {
+        let found = linked::describe(runner, &plan, via).await;
+        return tokio::task::spawn_blocking(move || linked::finish(&store, &plan, found)).await.unwrap_or(stopped);
+    }
+    let other = read(runner, &plan.link, via).await;
     tokio::task::spawn_blocking(move || finish(&store, &plan, other)).await.unwrap_or(stopped)
 }
 
 /// [`check`] from a thread of the blocking pool, where the pane's operations run: the read is waited for here.
 pub fn check_blocking<R: Runner>(store: &Store, runner: &R, plan: &CheckPlan, via: Via<'_>) -> Result<Checked, String> {
     let runtime = tokio::runtime::Handle::try_current().map_err(|_| "the check can't run here".to_string())?;
+    if plan.only {
+        return Ok(linked::finish(store, plan, runtime.block_on(linked::describe(runner, plan, via))));
+    }
     Ok(finish(store, plan, runtime.block_on(read(runner, &plan.link, via))))
 }
 
