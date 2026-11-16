@@ -103,13 +103,16 @@ pub(crate) struct Track {
     pub last_active: Instant,
     pub last_request: Option<Instant>,
     pub declined_until: Option<Instant>,
+    /// How many requests the page has declined since it last loaded: a window that keeps declining is a window
+    /// something holds back, and the log says so (task #47824: 79 in a row, none ever ran).
+    pub declines: u32,
     /// The last time the window's garbage was collected for being quiet and big.
     pub last_tidy: Option<Instant>,
 }
 
 impl Track {
     fn new(now: Instant) -> Track {
-        Track { loaded_at: now, baseline_mb: None, last_active: now, last_request: None, declined_until: None, last_tidy: None }
+        Track { loaded_at: now, baseline_mb: None, last_active: now, last_request: None, declined_until: None, declines: 0, last_tidy: None }
     }
 }
 
@@ -211,6 +214,7 @@ pub(crate) fn note_window_loaded(label: &str) {
     let t = g.tracks.entry(label.to_string()).or_insert_with(|| Track::new(now));
     t.loaded_at = now;
     t.baseline_mb = None;
+    t.declines = 0;
 }
 
 /// `recycle_declined { label, reason }`: the page wouldn't recycle (input, a
@@ -220,13 +224,16 @@ pub fn recycle_declined(args: &serde_json::Value) -> Result<serde_json::Value, S
     let label = args.get("label").and_then(|v| v.as_str()).ok_or("recycle_declined: label is required")?;
     let reason = args.get("reason").and_then(|v| v.as_str()).unwrap_or("");
     let limits = Limits::from_env();
+    let mut declines = 0;
     if let Some(t) = GOVERNOR.lock().unwrap().tracks.get_mut(label) {
         // Nothing reloaded, so the hour-per-window limit isn't used up: the
         // window is asked again after the idle time.
         t.last_request = None;
         t.declined_until = Some(Instant::now() + idle_time(&limits, crate::memory_pressure::current_level()));
+        t.declines += 1;
+        declines = t.declines;
     }
-    tracing::info!(target: "recycle", label, reason, "[recycle] {label} declined: {reason}");
+    tracing::info!(target: "recycle", label, reason, declines, "[recycle] {label} declined ({declines} since it loaded): {reason}");
     Ok(serde_json::Value::Null)
 }
 
@@ -391,6 +398,7 @@ mod tests {
             last_active: now - idle,
             last_request: None,
             declined_until: None,
+            declines: 0,
             last_tidy: None,
         }
     }
@@ -509,6 +517,20 @@ mod tests {
         assert_eq!(t.last_request, None, "the hour isn't used up");
         let until = t.declined_until.expect("held back");
         assert!(until <= Instant::now() + Limits::SPEC.idle, "for the idle time at most");
+        assert_eq!(t.declines, 1);
+    }
+
+    #[test]
+    fn declines_are_counted_until_the_page_loads_again() {
+        let label = "governor-test-decline-count";
+        GOVERNOR.lock().unwrap().tracks.insert(label.to_string(), track(Instant::now(), 11 * MIN));
+        for _ in 0..3 {
+            recycle_declined(&serde_json::json!({ "label": label, "reason": "a dialog is open" })).unwrap();
+        }
+        assert_eq!(GOVERNOR.lock().unwrap().tracks[label].declines, 3);
+        note_window_loaded(label);
+        let t = GOVERNOR.lock().unwrap().tracks.remove(label).unwrap();
+        assert_eq!(t.declines, 0, "a recycle or reload starts the count again");
     }
 
     #[test]

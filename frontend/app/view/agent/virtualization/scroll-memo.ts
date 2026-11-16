@@ -18,7 +18,7 @@
 
 import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { getBlockMetaKeyAtom } from "@/app/store/block-atom-cache";
-import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
+import { PLACE_IDLE_LIMIT_MS, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { registerReloadSaver } from "@/app/store/recycle-savers";
 import { readSession, writeSession } from "../reload-persistence";
 
@@ -181,8 +181,10 @@ export function useScrollMemo(opts: {
     });
     // A reload reads only the tail, so a pane scrolled up into pages it loaded
     // later would come back at the bottom.
-    const unregister = registerRecycleBlocker(() =>
-        olderLoaded.has(blockId) && !untrack(opts.following) ? "an agent pane is scrolled up into older history" : null
+    // Kept for an hour of the window being used; after that the pane comes back at the bottom, as a reload leaves it.
+    const unregister = registerRecycleBlocker(
+        () => (olderLoaded.has(blockId) && !untrack(opts.following) ? "an agent pane is scrolled up into older history" : null),
+        { idleLimitMs: PLACE_IDLE_LIMIT_MS }
     );
     onCleanup(() => {
         unregister();

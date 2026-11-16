@@ -22,6 +22,8 @@
  *   - highlightId      — derived: matches[currentIndex] or null
  *   - matchSet         — the matches as a Set, for a row to ask "am I one?" (search/search-paint.ts)
  *   - searched         — the query (lower case) whose matches are showing; "" when there is none
+ *   - text             — what is typed in the bar, as typed; undefined until something is typed or the bar is brought
+ *                        back after a recycle (a bar with text keeps the caret where the person had it)
  *   - dim, setDim      — whether non-matching rows are dimmed while a query is showing (on by default)
  *   - searching        — a pass is taking long enough to say so
  *   - performSearch    — run a fresh query (after a short pause in typing)
@@ -33,9 +35,9 @@
  * `jumpTo(nodeId)` callback that gets invoked on every navigation.
  */
 
-import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor, type Setter } from "solid-js";
 import type { DocumentNode } from "../../../agent-model/types";
+import { registerSearchForReload, takeStoredSearch, type StoredSearch } from "../search/search-reload";
 import { createTranscriptIndex, firstMatchFrom, type PassClock } from "../search/transcript-index";
 
 /** Typing pauses this long before a pass runs. */
@@ -46,6 +48,11 @@ export const SEARCH_REFRESH_MS = 200;
 export const SEARCH_SLOW_MS = 150;
 
 export interface UseInSessionSearchOptions {
+    /**
+     * The pane's block. With it, an open bar is written down when the window recycles and put back, with its text and
+     * current match, when the pane loads again (search/search-reload.ts); without it the bar is forgotten.
+     */
+    blockId?: string;
     /**
      * Reactive accessor for the document slice to search over.
      * Pass the document atom's read accessor.
@@ -76,6 +83,8 @@ export interface UseInSessionSearch {
     highlightId: Accessor<string | null>;
     matchSet: Accessor<ReadonlySet<string>>;
     searched: Accessor<string>;
+    /** What is typed in the bar, as typed; undefined for a bar nobody has typed in or brought back (it takes the caret). */
+    text: Accessor<string | undefined>;
     dim: Accessor<boolean>;
     setDim: Setter<boolean>;
     searching: Accessor<boolean>;
@@ -93,6 +102,7 @@ interface SearchView {
     setCurrentIndex: Setter<number>;
     setSearching: Setter<boolean>;
     setSearched: Setter<string>;
+    setText: Setter<string | undefined>;
 }
 
 /** Take a pass's matches in: keep the current one by id while it still matches, else pick a start; move the view only for a typed query. */
@@ -135,18 +145,56 @@ function applyFound(
     opts.jumpTo?.(found[start]);
 }
 
+/** One try at the match a brought-back bar had: it becomes current when this pass has it. Spent either way. */
+function takeSeed(view: SearchView, found: string[], seed: string): null {
+    const at = found.indexOf(seed);
+    if (at >= 0) view.setCurrentIndex(at);
+    return null;
+}
+
+/**
+ * Rows that arrive or grow while the bar is open join the results, at most every SEARCH_REFRESH_MS. Returns what
+ * cancels a refresh that is waiting.
+ */
+function refreshWhileGrowing(
+    opts: UseInSessionSearchOptions,
+    visible: Accessor<boolean>,
+    query: () => string,
+    run: (typed: boolean) => Promise<void>
+): () => void {
+    let refresh: ReturnType<typeof setTimeout> | undefined;
+    createEffect(
+        on(
+            () => opts.document(),
+            () => {
+                if (!visible() || !query() || refresh !== undefined) return;
+                refresh = setTimeout(() => {
+                    refresh = undefined;
+                    if (visible() && query()) void run(false);
+                }, SEARCH_REFRESH_MS);
+            },
+            { defer: true }
+        )
+    );
+    return () => {
+        clearTimeout(refresh);
+        refresh = undefined;
+    };
+}
+
 /** The debounced, sliced, cancellable passes over the transcript, and the refresh while it grows. */
 function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
-    const { visible, highlightId, setMatches, setCurrentIndex, setSearching, setSearched } = view;
+    const { visible, highlightId, setMatches, setCurrentIndex, setSearching, setSearched, setText } = view;
     const index = createTranscriptIndex(opts.clock);
     /** The query as searched (lower case); empty when there is none. */
     let query = "";
+    /** The current match of a bar brought back after a recycle: taken up by the first pass that finds anything. */
+    let seed: string | null = null;
     /** Bumped by every pass and by the search ending: a pass that finds it changed is stale and stops. */
     let pass = 0;
     /** A typed query's pass was cut off by a newer one: whoever finishes is owed its jump. */
     let typedPending = false;
     let debounce: ReturnType<typeof setTimeout> | undefined;
-    let refresh: ReturnType<typeof setTimeout> | undefined;
     let slow: ReturnType<typeof setTimeout> | undefined;
 
     const run = async (typed: boolean): Promise<void> => {
@@ -172,9 +220,13 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         typedPending = false;
         setSearched(query);
         applyFound(opts, view, found, owed, nodes);
+        // Rows that load later do not pull the bar's old current match back.
+        if (seed !== null && found.length > 0) seed = takeSeed(view, found, seed);
     };
 
     const performSearch = (text: string) => {
+        seed = null;
+        setText(text);
         query = text.trim() ? text.toLowerCase() : "";
         clearTimeout(debounce);
         if (!query) {
@@ -187,20 +239,7 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         }, SEARCH_DEBOUNCE_MS);
     };
 
-    // Rows that arrive or grow while the bar is open join the results, at most every SEARCH_REFRESH_MS.
-    createEffect(
-        on(
-            () => opts.document(),
-            () => {
-                if (!visible() || !query || refresh !== undefined) return;
-                refresh = setTimeout(() => {
-                    refresh = undefined;
-                    if (visible() && query) void run(false);
-                }, SEARCH_REFRESH_MS);
-            },
-            { defer: true }
-        )
-    );
+    const cancelRefresh = refreshWhileGrowing(opts, visible, () => query, run);
 
     /** Run a pass that the pause in typing has not yet started: a step asked for now means "now". */
     const flushTyping = (): boolean => {
@@ -211,29 +250,41 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         return true;
     };
 
+    /** Bring a bar back as it was: its text searched again, quietly (no jump), with its current match when found. */
+    const restore = (text: string, matchId: string | null) => {
+        setText(text);
+        query = text.trim() ? text.toLowerCase() : "";
+        seed = matchId;
+        if (query) void run(false);
+    };
+
     const stop = () => {
         pass++;
         typedPending = false;
+        seed = null;
         query = "";
         clearTimeout(debounce);
-        clearTimeout(refresh);
+        cancelRefresh();
         clearTimeout(slow);
-        debounce = refresh = undefined;
+        debounce = undefined;
         setSearching(false);
         setSearched("");
+        setText(undefined);
     };
 
-    return { performSearch, flushTyping, stop, clearIndex: index.clear };
+    return { performSearch, restore, flushTyping, stop, clearIndex: index.clear };
 }
 
 export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessionSearch {
-    const [visible, setVisible] = createSignal(false);
-    onCleanup(registerRecycleBlocker(() => (visible() ? "a transcript search is open" : null)));
+    // A bar that a recycle wrote down comes back open, as it was (search/search-reload.ts).
+    const restored: StoredSearch | undefined = opts.blockId ? takeStoredSearch(opts.blockId) : undefined;
+    const [visible, setVisible] = createSignal(restored !== undefined);
     const [matches, setMatches] = createSignal<string[]>([]);
     const [currentIndex, setCurrentIndex] = createSignal(-1);
     const [searching, setSearching] = createSignal(false);
     const [searched, setSearched] = createSignal("");
-    const [dim, setDim] = createSignal(true);
+    const [text, setText] = createSignal<string | undefined>(restored?.text);
+    const [dim, setDim] = createSignal(restored?.dim ?? true);
 
     const matchCount = createMemo(() => matches().length);
 
@@ -245,15 +296,25 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
 
     const matchSet = createMemo<ReadonlySet<string>>(() => new Set(matches()));
 
-    const { performSearch, flushTyping, stop, clearIndex } = createSearchPasses(opts, {
+    const { performSearch, restore, flushTyping, stop, clearIndex } = createSearchPasses(opts, {
         visible,
         highlightId,
         setMatches,
         setCurrentIndex,
         setSearching,
         setSearched,
+        setText,
     });
     onCleanup(stop);
+    if (restored) restore(restored.text, restored.matchId);
+    // An open bar is no reason to keep a window at its size: a recycle writes it down, and the reloaded pane reads it.
+    if (opts.blockId) {
+        onCleanup(
+            registerSearchForReload(opts.blockId, () =>
+                visible() ? { text: text() ?? "", matchId: highlightId(), dim: dim() } : null
+            )
+        );
+    }
 
     const next = () => {
         if (flushTyping()) return;
@@ -291,6 +352,7 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
         highlightId,
         matchSet,
         searched,
+        text,
         dim,
         setDim,
         searching,
