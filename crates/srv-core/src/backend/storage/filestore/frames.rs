@@ -36,6 +36,11 @@ pub(crate) const CODEC_ZSTD: i64 = 1;
 /// Codec 2: the frame with its streaming deltas stored as uuid and length,
 /// each block's text once (deltas.rs), compressed with zstd.
 pub(crate) const CODEC_DELTAS: i64 = 2;
+/// Codec 3: codec 2 for a frame whose delta lines carry an `api_message_id`
+/// (deltas.rs). A build that reads only codecs 1 and 2 reads such a frame as
+/// damaged, so the store is stamped `GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION`
+/// before the first one.
+pub(crate) const CODEC_DELTA_API: i64 = 3;
 /// The most a codec 2 payload may exceed its frame by (its string and block
 /// tables): a bound on decompression.
 const DELTAS_SLACK: usize = 64 * 1024;
@@ -107,13 +112,24 @@ fn zstd_compress(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
 }
 
 /// Encode a frame's logical bytes with `codec`. Codec 2 falls back to codec
-/// 1 when the frame has no delta line to leave out (deltas.rs). Returns the
-/// codec used and the stored bytes.
+/// 1 when the frame has no delta line to leave out (deltas.rs), and leaves a
+/// line with an `api_message_id` as it was, so what it writes is read by
+/// every build that reads frames. Asking for codec 3 is codec 2 that also
+/// takes those lines, and gives codec 3 when it took one. Returns the codec
+/// used and the stored bytes.
 pub(crate) fn encode(codec: i64, raw: &[u8]) -> Result<(i64, Vec<u8>), StoreError> {
+    let deltas = match codec {
+        CODEC_DELTAS => super::deltas::encode_codec2(raw),
+        CODEC_DELTA_API => super::deltas::encode(raw),
+        _ => None,
+    };
     match codec {
         CODEC_ZSTD => Ok((CODEC_ZSTD, zstd_compress(raw)?)),
-        CODEC_DELTAS => match super::deltas::encode(raw) {
-            Some((payload, _)) => Ok((CODEC_DELTAS, zstd_compress(&payload)?)),
+        CODEC_DELTAS | CODEC_DELTA_API => match deltas {
+            Some((payload, stats)) => {
+                let used = if stats.api { CODEC_DELTA_API } else { CODEC_DELTAS };
+                Ok((used, zstd_compress(&payload)?))
+            }
             None => Ok((CODEC_ZSTD, zstd_compress(raw)?)),
         },
         other => Err(StoreError::Other(format!("frame codec {other} can't encode"))),
@@ -129,7 +145,7 @@ pub(crate) fn decode_uncached(frame: &Frame) -> Result<Vec<u8>, StoreError> {
     let raw = match frame.codec {
         CODEC_ZSTD => zstd::bulk::decompress(&frame.data, frame.raw_len as usize)
             .map_err(|e| corrupt(format!("frame at part {}: {e}", frame.first_part)))?,
-        CODEC_DELTAS => {
+        CODEC_DELTAS | CODEC_DELTA_API => {
             let payload = zstd::bulk::decompress(&frame.data, frame.raw_len as usize + DELTAS_SLACK)
                 .map_err(|e| corrupt(format!("frame at part {}: {e}", frame.first_part)))?;
             super::deltas::decode(&payload, frame.raw_len as usize)
@@ -566,13 +582,14 @@ impl FileStore {
         })
     }
 
-    /// Stamp the store `GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION` (never lowering a
-    /// higher one): from here on a build that can't read frames refuses it.
-    /// The framer calls this before its first frame.
-    pub(crate) fn stamp_frames_version(&self) -> Result<(), StoreError> {
+    /// Stamp the store `want` (`GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION`, or
+    /// `GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION` when codec 3 may be written;
+    /// never lowering a higher one): from here on a build that can't read the
+    /// frames it may hold refuses the store. The framer calls this before its
+    /// first frame.
+    pub(crate) fn stamp_frames_version(&self, want: i64) -> Result<(), StoreError> {
         self.write_txn(|tx| {
             let found: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-            let want = super::core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION;
             if found < want {
                 tx.execute_batch(&format!("PRAGMA user_version = {want};"))?;
             }

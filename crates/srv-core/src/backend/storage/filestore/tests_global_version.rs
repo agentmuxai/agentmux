@@ -81,8 +81,8 @@ fn a_store_from_a_later_build_is_refused_too() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("filestore.db");
     drop(FileStore::open_global_transcripts(&path).unwrap());
-    // Past the newest format this build reads (frames, 3).
-    set_user_version(&path, super::core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION + 1);
+    // Past the newest format this build reads (frames with message-id deltas, 4).
+    set_user_version(&path, super::core::GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION + 1);
     assert!(matches!(FileStore::open_global_transcripts(&path), Err(StoreError::SchemaTooNew { .. })));
 }
 
@@ -105,6 +105,12 @@ fn the_frames_version_is_accepted_but_only_the_framer_writes_it() {
     drop(fs);
     assert_eq!(user_version(&path), GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION, "and keeps its 3");
 
-    set_user_version(&path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION + 1);
+    // Frames with message-id deltas (codec 3): this build reads them, so it accepts and keeps the 4; a build
+    // that reads only codecs 1 and 2 (accepting up to 3) refuses it, as it must.
+    set_user_version(&path, super::core::GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION);
+    drop(FileStore::open_global_transcripts(&path).expect("a store with codec 3 frames opens"));
+    assert_eq!(user_version(&path), super::core::GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION, "and keeps its 4");
+
+    set_user_version(&path, super::core::GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION + 1);
     assert!(matches!(FileStore::open_global_transcripts(&path), Err(StoreError::SchemaTooNew { .. })), "a newer format is refused");
 }

@@ -73,7 +73,8 @@ pub use lines::is_blank_line;
 pub use parts::strip_slack as strip_slack_for_test;
 pub(crate) use trim::{append_log_cost, first_live_part};
 pub(crate) use types::RETAINED_FROM_KEY;
-pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
+pub(crate) use core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION;
+pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_DELTA_API, CODEC_ZSTD, FRAME_PARTS};
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
 pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState, TailState};
 #[allow(unused_imports)]
