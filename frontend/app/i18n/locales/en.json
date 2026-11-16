@@ -683,5 +683,6 @@
     "vault.batchCard.allow.one": "Allow this one",
     "vault.batchCard.allow.other": "Allow these {{count}}",
     "vault.activity.batchSecrets.one": "{{count}} secret",
-    "vault.activity.batchSecrets.other": "{{count}} secrets"
+    "vault.activity.batchSecrets.other": "{{count}} secrets",
+    "attachments.strip.fewer": "Show fewer"
 }
