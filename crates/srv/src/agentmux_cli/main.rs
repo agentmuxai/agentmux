@@ -467,6 +467,10 @@ fn become_server(mut cmd: Command, _paths: &DataPaths, _record: ServerState) -> 
 #[cfg(not(unix))]
 fn become_server(mut cmd: Command, paths: &DataPaths, mut record: ServerState) -> i32 {
     cmd.no_window();
+    // The server's output goes to the channel's log, whoever started this (a logon task has no console and no log of its own).
+    if let Some((out, err)) = state::open_log(&paths.instance_dir).ok().and_then(|out| out.try_clone().ok().map(|err| (out, err))) {
+        cmd.stdout(out).stderr(err);
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(&format!("cannot start the server: {e}")),
@@ -611,7 +615,7 @@ fn cmd_stop(paths: &DataPaths, force: bool) -> i32 {
         return 0;
     }
     // A service restarts a server that exits non-zero, so a service's server is stopped through the service.
-    let stopped = match user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
+    let stopped = match user_home().ok().filter(|h| !cfg!(windows) && service::installed(h, &paths.channel)) {
         Some(home) => service::control(&home, &paths.channel, "stop"),
         None if process::terminate(record.pid) => Ok(()),
         // Windows has no signal to send: the server is asked over its signed channel.
@@ -760,7 +764,7 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
     let key_file = record.as_ref().map(|s| s.key_file.clone()).unwrap_or_else(|| paths.data_dir.join(KEY_FILE_NAME));
     let exe = stable_exe().ok();
     let service_file = user_home().ok().and_then(|h| service::manager().map(|m| service::file_path(m, &h, &paths.channel)));
-    let service_text = service_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok());
+    let service_text = service_file.as_ref().and_then(|f| service::read_text(f));
     doctor::Facts {
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,

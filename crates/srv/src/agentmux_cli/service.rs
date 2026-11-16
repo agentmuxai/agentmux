@@ -17,6 +17,8 @@ use crate::DEFAULT_CHANNEL;
 pub enum Manager {
     Systemd,
     Launchd,
+    /// Windows: a per-user Scheduled Task that runs at the person's logon, as the person, with no administrator rights.
+    Task,
 }
 
 /// The service manager of this machine, when the first package supports it.
@@ -25,6 +27,8 @@ pub fn manager() -> Option<Manager> {
         Some(Manager::Systemd)
     } else if cfg!(target_os = "macos") {
         Some(Manager::Launchd)
+    } else if cfg!(windows) {
+        Some(Manager::Task)
     } else {
         None
     }
@@ -45,7 +49,137 @@ pub fn file_path(manager: Manager, user_home: &Path, channel: &str) -> PathBuf {
     match manager {
         Manager::Systemd => user_home.join(".config").join("systemd").join("user").join(unit_name(channel)),
         Manager::Launchd => user_home.join("Library").join("LaunchAgents").join(format!("{}.plist", label(channel))),
+        // The registration as it was made, kept so `doctor` can read what the task runs.
+        Manager::Task => user_home.join(".agentmux").join("headless-tasks").join(format!("{}.xml", task_name(channel))),
     }
+}
+
+/// The Scheduled Task's name: the product's, with the channel in it for any channel but the default. The desktop's own
+/// task is named `AgentMux`: this one never has that name, so neither can replace or remove the other.
+pub fn task_name(channel: &str) -> String {
+    if channel == DEFAULT_CHANNEL { "AgentMux Headless".to_string() } else { format!("AgentMux Headless ({channel})") }
+}
+
+/// The program the logon task runs: the one that starts the server with no console window, beside `agentmux`.
+pub fn task_program(exe: &Path) -> PathBuf {
+    exe.with_file_name("agentmuxw.exe")
+}
+
+/// `path` without Windows' `\\?\` prefix, which a Scheduled Task's action does not take and which hides that two paths
+/// are the same.
+pub fn plain_path(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Is `program` inside the person's own profile folder? The task is only ever written for a program there: one the
+/// person's account can write is theirs to run, and nothing under a shared folder is.
+pub fn inside_profile(program: &Path, home: &Path) -> bool {
+    let (program, home) = (plain_path(program).to_string_lossy().to_lowercase().replace('/', "\\"), plain_path(home).to_string_lossy().to_lowercase().replace('/', "\\"));
+    let home = home.trim_end_matches('\\');
+    // A path that climbs out of the folder it starts in is not inside it.
+    !home.is_empty() && !program.split('\\').any(|part| part == "..") && program.strip_prefix(home).is_some_and(|rest| rest.starts_with('\\'))
+}
+
+/// The task's registration. It runs as the person who made it, only while they are signed in (`InteractiveToken`), with
+/// the least privilege and no stored password, starts `program --channel <channel>` once at their logon, and is not
+/// ended by the scheduler's own time limit; a failed server is started again.
+pub fn render_task_xml(program: &Path, channel: &str, user: Option<&str>) -> String {
+    let user_id = user.map(|u| format!("      <UserId>{}</UserId>\n", xml_escape(u))).unwrap_or_default();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Starts AgentMux Headless (channel {channel}) when you sign in. Created by `agentmux setup`; remove it with `agentmux setup --no-service`, or: schtasks /Delete /TN "{name}" /F</Description>
+    <URI>\{name}</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+{user_id}    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+{user_id}      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"{program}"</Command>
+      <Arguments>--channel {channel}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        name = xml_escape(&task_name(channel)),
+        channel = xml_escape(channel),
+        program = xml_escape(&program.to_string_lossy()),
+    )
+}
+
+/// The text of a task's kept registration (UTF-16, as the scheduler reads it) or of a unit or agent's file (UTF-8).
+pub fn read_text(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    match bytes.strip_prefix(&[0xFF, 0xFE]) {
+        Some(utf16) => Some(String::from_utf16_lossy(&utf16.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>())),
+        None => String::from_utf8(bytes).ok(),
+    }
+}
+
+/// Register the logon task: the program must be in the person's profile and be there; the registration is written
+/// beside the others the product keeps and handed to the scheduler, which replaces a task of the same name.
+fn install_task(user_home: &Path, exe: &Path, channel: &str) -> Result<PathBuf, String> {
+    if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+        return Err(format!("the channel name {channel:?} cannot be part of a task's name: use letters, digits, - _ and ."));
+    }
+    let program = task_program(&plain_path(exe));
+    if !program.is_file() {
+        return Err(format!("{} is not there: it starts the server with no window at sign-in, and comes in the package beside `agentmux` (install the package again)", program.display()));
+    }
+    if !inside_profile(&program, user_home) {
+        return Err(format!("{} is not inside your own profile folder ({}): the logon task only runs a program there. Install AgentMux Headless for your own account, which puts it under %LOCALAPPDATA%", program.display(), user_home.display()));
+    }
+    let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+        (Ok(domain), Ok(name)) if !domain.is_empty() && !name.is_empty() => Some(format!("{domain}\\{name}")),
+        _ => None,
+    };
+    let path = file_path(Manager::Task, user_home, channel);
+    let dir = path.parent().unwrap_or(user_home);
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let mut bytes: Vec<u8> = vec![0xFF, 0xFE];
+    for unit in render_task_xml(&program, channel, user.as_deref()).encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    run_quiet("schtasks", &["/Create", "/TN", &task_name(channel), "/XML", &path.to_string_lossy(), "/F"])?;
+    Ok(path)
 }
 
 /// A value inside a systemd double-quoted word: backslash, quote and the specifier mark are escaped.
@@ -69,6 +203,7 @@ fn system_dirs(manager: Manager) -> &'static [&'static str] {
     match manager {
         Manager::Launchd => &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"],
         Manager::Systemd => &["/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin"],
+        Manager::Task => &[],
     }
 }
 
@@ -172,13 +307,22 @@ pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home:
 
 /// Does the unit or agent's file name this command's own program? (The install may have moved.)
 pub fn file_names_exe(text: &str, exe: &Path) -> bool {
-    let exe = exe.to_string_lossy();
-    text.contains(exe.as_ref()) || text.contains(&xml_escape(&exe)) || text.contains(&systemd_quote(&exe))
+    let named = |exe: &Path| {
+        let exe = exe.to_string_lossy();
+        text.contains(exe.as_ref()) || text.contains(&xml_escape(&exe)) || text.contains(&systemd_quote(&exe))
+    };
+    // A Windows task runs the program that starts the server with no window, which is beside `agentmux`.
+    named(exe) || (cfg!(windows) && named(&task_program(&plain_path(exe))))
 }
 
 /// Is a service of this channel installed for this person?
 pub fn installed(user_home: &Path, channel: &str) -> bool {
-    manager().is_some_and(|m| file_path(m, user_home, channel).is_file())
+    match manager() {
+        // The scheduler is asked, not the kept file: a task someone deleted is not installed.
+        Some(Manager::Task) => run_quiet("schtasks", &["/Query", "/TN", &task_name(channel)]).is_ok(),
+        Some(m) => file_path(m, user_home, channel).is_file(),
+        None => false,
+    }
 }
 
 fn run_quiet(program: &str, args: &[&str]) -> Result<(), String> {
@@ -203,12 +347,16 @@ fn uid() -> u32 {
 
 /// Write the service's file and have the manager run it from now on and at every login.
 pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path) -> Result<PathBuf, String> {
-    let manager = manager().ok_or_else(|| "a service is for Linux and macOS in this release".to_string())?;
+    let manager = manager().ok_or_else(|| "a service is for Linux, macOS and Windows".to_string())?;
+    if manager == Manager::Task {
+        return install_task(user_home, exe, channel);
+    }
     let path = file_path(manager, user_home, channel);
     let path_env = service_path(manager, exe, &agentmux_common::toolchain_path::well_known_tool_dirs());
     let text = match manager {
         Manager::Systemd => render_unit(exe, channel, log, &path_env, user_home),
         Manager::Launchd => render_plist(exe, channel, log, &path_env, user_home),
+        Manager::Task => unreachable!("a task is installed above"),
     };
     std::fs::create_dir_all(path.parent().unwrap_or(user_home)).map_err(|e| format!("cannot create {}: {e}", path.parent().unwrap_or(user_home).display()))?;
     std::fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -223,6 +371,7 @@ pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path) -> Resul
             let _ = run_quiet("launchctl", &["bootout", &format!("{domain}/{}", label(channel))]);
             run_quiet("launchctl", &["bootstrap", &domain, &path.to_string_lossy()])?;
         }
+        Manager::Task => unreachable!("a task is installed above"),
     }
     Ok(path)
 }
@@ -232,6 +381,17 @@ pub fn install(user_home: &Path, exe: &Path, channel: &str, log: &Path) -> Resul
 pub fn remove(user_home: &Path, channel: &str) -> Result<Option<PathBuf>, String> {
     let Some(manager) = manager() else { return Ok(None) };
     let path = file_path(manager, user_home, channel);
+    if manager == Manager::Task {
+        let registered = installed(user_home, channel);
+        if !registered && !path.is_file() {
+            return Ok(None);
+        }
+        if registered {
+            run_quiet("schtasks", &["/Delete", "/TN", &task_name(channel), "/F"])?;
+        }
+        let _ = std::fs::remove_file(&path);
+        return Ok(Some(path));
+    }
     if !path.is_file() {
         return Ok(None);
     }
@@ -242,6 +402,7 @@ pub fn remove(user_home: &Path, channel: &str) -> Result<Option<PathBuf>, String
         Manager::Launchd => {
             let _ = run_quiet("launchctl", &["bootout", &format!("gui/{}/{}", uid(), label(channel))]);
         }
+        Manager::Task => {}
     }
     std::fs::remove_file(&path).map_err(|e| format!("cannot remove {}: {e}", path.display()))?;
     if manager == Manager::Systemd {
@@ -281,13 +442,78 @@ pub fn control(user_home: &Path, channel: &str, action: &str) -> Result<(), Stri
                 _ => start(),
             }
         }
-        None => Err("a service is for Linux and macOS in this release".to_string()),
+        // `stop` is the server's own shutdown (`agentmux stop` asks for it); a start runs the task now.
+        Some(Manager::Task) if action == "stop" => Ok(()),
+        Some(Manager::Task) => run_quiet("schtasks", &["/Run", "/TN", &task_name(channel)]),
+        None => Err("a service is for Linux, macOS and Windows".to_string()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_task_runs_as_the_person_with_least_privilege_and_no_password() {
+        let xml = render_task_xml(Path::new(r"C:\Users\sam\AppData\Local\AgentMux\Headless\current\bin\agentmuxw.exe"), "headless", Some(r"HOME\sam"));
+        for needed in [
+            "<LogonTrigger>",
+            "<LogonType>InteractiveToken</LogonType>",
+            "<RunLevel>LeastPrivilege</RunLevel>",
+            "<UserId>HOME\\sam</UserId>",
+            "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+            r#"<Command>"C:\Users\sam\AppData\Local\AgentMux\Headless\current\bin\agentmuxw.exe"</Command>"#,
+            "<Arguments>--channel headless</Arguments>",
+            r"<URI>\AgentMux Headless</URI>",
+        ] {
+            assert!(xml.contains(needed), "{needed}\n{xml}");
+        }
+        for never in ["<Password>", "HighestAvailable", "S-1-5-18", "SYSTEM", "<LogonType>Password</LogonType>", "ServiceAccount"] {
+            assert!(!xml.contains(never), "{never}");
+        }
+    }
+
+    #[test]
+    fn a_channels_task_has_its_own_name_and_never_the_desktops() {
+        assert_eq!(task_name("headless"), "AgentMux Headless");
+        assert_eq!(task_name("work"), "AgentMux Headless (work)");
+        assert!(render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None).contains(r"<URI>\AgentMux Headless (work)</URI>"));
+        // The desktop's own task is called `AgentMux`.
+        assert_ne!(task_name(DEFAULT_CHANNEL), "AgentMux");
+        assert_eq!(file_path(Manager::Task, Path::new(r"C:\Users\sam"), "work"), Path::new(r"C:\Users\sam").join(".agentmux").join("headless-tasks").join("AgentMux Headless (work).xml"));
+    }
+
+    #[test]
+    fn a_name_that_could_break_the_registration_is_escaped() {
+        let xml = render_task_xml(Path::new(r"C:\Users\a&b\agentmuxw.exe"), "x<y", Some("D\\u\"er"));
+        assert!(xml.contains("a&amp;b") && xml.contains("x&lt;y") && xml.contains("D\\u&quot;er"), "{xml}");
+    }
+
+    #[test]
+    fn only_a_program_inside_the_persons_own_profile_is_ever_run() {
+        let home = Path::new(r"C:\Users\sam");
+        assert!(inside_profile(Path::new(r"C:\Users\sam\AppData\Local\AgentMux\Headless\current\bin\agentmuxw.exe"), home));
+        assert!(inside_profile(Path::new(r"\\?\c:\users\SAM\x\agentmuxw.exe"), home), "the verbatim prefix and the case do not matter");
+        for outside in [r"C:\Program Files\AgentMux\agentmuxw.exe", r"C:\Users\samantha\agentmuxw.exe", r"C:\Users\sam", r"D:\Users\sam\agentmuxw.exe", r"C:\Users\sam\..\bob\agentmuxw.exe", r"\\server\share\agentmuxw.exe", ""] {
+            assert!(!inside_profile(Path::new(outside), home), "{outside}");
+        }
+        assert!(!inside_profile(Path::new(r"C:\Users\sam\x.exe"), Path::new("")));
+    }
+
+    #[test]
+    fn the_stub_is_found_beside_the_command_and_a_kept_registration_reads_back() {
+        assert_eq!(task_program(Path::new(r"C:\i\bin\agentmux.exe")), Path::new(r"C:\i\bin\agentmuxw.exe"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.xml");
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in "héllo <Task/>".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(read_text(&path).as_deref(), Some("héllo <Task/>"));
+        std::fs::write(&path, "plain utf-8").unwrap();
+        assert_eq!(read_text(&path).as_deref(), Some("plain utf-8"));
+    }
 
     #[test]
     fn the_default_channel_has_the_plain_names_and_another_has_its_own() {
@@ -407,7 +633,29 @@ mod tests {
         assert!(!file_names_exe(&render_unit(Path::new("/old/agentmux"), "headless", Path::new("/l"), "/p", Path::new("/h")), exe));
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    /// The task is refused, before the scheduler is asked, for a program that is not there, one outside the person's
+    /// profile, and a channel name that cannot be part of a task's name.
+    #[cfg(windows)]
+    #[test]
+    fn the_logon_task_is_refused_for_a_program_that_is_not_the_persons_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (home, elsewhere) = (dir.path().join("home"), dir.path().join("elsewhere"));
+        std::fs::create_dir_all(home.join("bin")).unwrap();
+        std::fs::create_dir_all(elsewhere.join("bin")).unwrap();
+        let (inside, outside) = (home.join("bin").join("agentmux.exe"), elsewhere.join("bin").join("agentmux.exe"));
+        let missing = install_task(&home, &inside, "headless").unwrap_err();
+        assert!(missing.contains("agentmuxw.exe") && missing.contains("install the package again"), "{missing}");
+        std::fs::write(elsewhere.join("bin").join("agentmuxw.exe"), b"x").unwrap();
+        let away = install_task(&home, &outside, "headless").unwrap_err();
+        assert!(away.contains("not inside your own profile folder"), "{away}");
+        std::fs::write(home.join("bin").join("agentmuxw.exe"), b"x").unwrap();
+        for channel in ["", "a b", r"x\y", "a\"b", "../c"] {
+            assert!(install_task(&home, &inside, channel).unwrap_err().contains("cannot be part of a task's name"), "{channel:?}");
+        }
+        assert!(!file_path(Manager::Task, &home, "headless").exists(), "nothing was registered or kept");
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     #[test]
     fn where_there_is_no_service_there_is_no_install() {
         assert!(manager().is_none());
