@@ -61,6 +61,10 @@ pub(super) async fn handle_voice_transcribe(
     let mime = q.mime.unwrap_or_else(|| "audio/webm".to_string());
     let lang = q.lang.filter(|l| !l.trim().is_empty());
     let settings = read_settings_json();
+    // Switched off, nothing is transcribed, whoever posts the audio: it goes to no engine and is dropped here.
+    if voice_off(&settings) {
+        return (StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": VOICE_OFF }))).into_response();
+    }
     let engine = resolve_engine(&settings);
 
     let result = if engine == "whisper-local" {
@@ -91,6 +95,13 @@ pub(super) async fn handle_voice_transcribe(
     }
 }
 
+const VOICE_OFF: &str = "Voice input is turned off: turn it on in Settings > Recording";
+
+/// Voice input is switched off: `voice:enabled` is `false` in settings.json (Settings > Recording). Absent, it is on.
+fn voice_off(settings: &Option<serde_json::Value>) -> bool {
+    settings.as_ref().and_then(|s| s.get("voice:enabled")).and_then(serde_json::Value::as_bool) == Some(false)
+}
+
 const GROQ_NOT_CONFIGURED: &str = "Groq backend not configured — choose a Vault key for it in Settings > Recording \
      (add one to the Vault there), or set the AGENTMUX_GROQ_API_KEY environment variable";
 const GROQ_GONE: &str = "The Vault key chosen for voice input is not there, is not an API key, or was not allowed for voice input — choose it again in \
@@ -118,7 +129,7 @@ pub(super) async fn handle_voice_status(State(state): State<AppState>) -> impl I
 /// What an engine still needs before it can transcribe.
 #[derive(Debug, PartialEq)]
 struct SetupGap {
-    /// `groq-key`, `whisper-cli` or `whisper-model`: what the pane's own wording is chosen by.
+    /// `off`, `groq-key`, `whisper-cli` or `whisper-model`: what the pane's own wording is chosen by.
     missing: &'static str,
     /// The same sentence a transcription refused for it answers with.
     error: String,
@@ -135,6 +146,9 @@ fn setup_gap_with(groq_env: Option<String>, settings: &Option<serde_json::Value>
         let (NotConfigured(error) | Upstream(error)) = error;
         Some(SetupGap { missing, error })
     };
+    if voice_off(settings) {
+        return gap("off", NotConfigured(VOICE_OFF.to_string()));
+    }
     if engine != "whisper-local" {
         // The Vault entry is looked for, never opened: the status runs whenever the mic is clicked.
         return match groq_key_state_with(groq_env, settings, store) {
@@ -610,6 +624,22 @@ mod tests {
     fn a_plain_key_left_in_the_settings_still_works_until_it_is_moved() {
         let GroqKey::Found(k) = groq_key_with(None, &setting("gsk_plain"), None) else { panic!("not found") };
         assert_eq!(k.as_str(), "gsk_plain");
+    }
+
+    #[test]
+    fn voice_switched_off_is_a_gap_whatever_else_is_set_up() {
+        let key = || Some("gsk_from_the_environment".to_string());
+        let off = Some(serde_json::json!({ "voice:enabled": false }));
+        assert!(voice_off(&off));
+        for engine in ["groq", "whisper-local"] {
+            let gap = setup_gap_with(key(), &off, engine, None).expect("off is a gap");
+            assert_eq!((gap.missing, gap.error.as_str()), ("off", VOICE_OFF));
+        }
+        // On, or never set, it is not: only an explicit false switches it off.
+        for on in [Some(serde_json::json!({ "voice:enabled": true })), Some(serde_json::json!({})), Some(serde_json::json!({ "voice:enabled": "false" })), None] {
+            assert!(!voice_off(&on), "{on:?}");
+            assert_eq!(setup_gap_with(key(), &on, "groq", None), None, "{on:?}");
+        }
     }
 
     #[test]
