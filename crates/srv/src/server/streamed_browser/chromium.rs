@@ -119,6 +119,8 @@ impl Drop for Lease {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
         runtime.spawn(async move {
             tokio::time::sleep(IDLE_STOP).await;
+            // Holding the start lock, so a pane opened now waits until the old browser is gone before it starts one.
+            let _starting = starting().lock().await;
             let idle = {
                 let mut p = pool().lock().unwrap();
                 if p.epoch == epoch && p.slots.is_empty() { p.browser.take() } else { None }
@@ -126,6 +128,12 @@ impl Drop for Lease {
             // Ask it to close; its pipe then ends and the client and the process are let go.
             if let Some(browser) = idle {
                 let _ = browser.call("Browser.close", serde_json::json!({}), None).await;
+                for _ in 0..50 {
+                    if browser.is_dead() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
             }
         });
     }
@@ -180,6 +188,9 @@ async fn start() -> Result<Arc<Cdp>, String> {
     let (cmd_read_fd, resp_write_fd) = (cmd_read.as_raw_fd(), resp_write.as_raw_fd());
     let mut command = tokio::process::Command::new(&binary);
     command.args(args(&profile, no_sandbox)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+    // The browser opens pages from the web: it gets none of srv's own environment (the key, the local address), as a
+    // provider CLI started for a login gets none.
+    crate::backend::pane_env::sanitize_external_command(&mut command);
     // SAFETY: only dup2 and close run between fork and exec, both async-signal-safe.
     unsafe {
         command.pre_exec(move || {
