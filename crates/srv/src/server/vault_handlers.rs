@@ -153,7 +153,8 @@ fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) ->
 }
 
 /// The host ops on Vaults and on an entry's earlier values.
-fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Value) -> Result<(Value, bool), String> {
+fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), String> {
+    let store: &crate::backend::storage::store::Store = &state.identity_store;
     let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     match op {
         // The person's Vaults: made, renamed or given other agents, deleted when empty, and
@@ -182,12 +183,8 @@ fn entry_ops(store: &crate::backend::storage::store::Store, op: &str, body: &Val
             vault::setting_key::allow(store, &s("entry_id"), &s("setting"), vault::PERSON)?;
             Ok((json!({}), true))
         }
-        // The person's check of an entry's machine copy against its value, read with this computer's own AWS login.
-        "check_source" => {
-            let plan = vault::source_link::plan_for_person(store, &s("id"))?;
-            let checked = vault::source_link::check_blocking(store, &crate::identity::aws_broker::mint::HostRunner, &plan, vault::aws_import::Via::Host)?;
-            Ok((json!({ "checked": checked }), true))
-        }
+        // The person's check of an entry's machine copy, read with this computer's own AWS and GitHub logins.
+        "check_source" => Ok((json!({ "checked": super::vault_source::person_check(state, &s("id"))? }), true)),
         // An entry's earlier values, and putting one back (spec §4.4 of the generate spec).
         "versions" => Ok((json!({ "versions": vault::versions::list(store, &s("id"))? }), false)),
         // An entry's history, and whether the record of it still holds together (the History dialog).
@@ -265,7 +262,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&store, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {

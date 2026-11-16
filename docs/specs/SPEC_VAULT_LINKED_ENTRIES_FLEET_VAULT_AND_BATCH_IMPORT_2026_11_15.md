@@ -63,6 +63,88 @@ A linked entry cannot tell whether two copies hold the same value (that needs a 
 
 It does not rotate, set or push anything. Writing a value to a place is "Mirrored to" (the shared-Vault spec's VS4) and costs money in a cloud account; it stays a separate, later step.
 
+### 2.6 The check of a CI secret
+
+Until this step a place of the kind `github-secret` answers `could not read`. This section says what its check
+reads, with which login, and who may start it.
+
+**What is read.** GitHub never gives a secret's value back. It gives a listing entry: the secret's name, when it
+was made and when it was last updated. The check reads that one entry:
+
+- a repository's secret (`owner/repo`, key `NAME`): the entry of `NAME` among the repository's Actions secrets;
+- an environment's secret (`owner/repo@environment`): the entry of `NAME` among that environment's secrets.
+
+Organisation secrets are not a place an entry can name, and stay out.
+
+**What it answers.**
+
+| GitHub says | The check answers |
+|---|---|
+| the entry, updated on or before the day the Vault entry records (`rotated`), or no day is recorded | `present`, with `last_changed` |
+| the entry, updated after that day | `changed since recorded`, with both days |
+| no such secret, and this login can read the secrets there | `missing` |
+| no such secret, and this login can't read the secrets there | `could not read`, saying the secrets there can't be read |
+| no GitHub CLI, not signed in, not allowed, too slow, no network | `could not read`, with why |
+
+The two "no such secret" rows are told apart by asking, after a "not found", for the collection the secret is in
+(the repository's secrets, or the environment's) with at most one entry, and by the status code of each answer,
+never by its text. A repository this login can see is not enough to say a secret is missing: it must be able to
+read the secrets there. Of the collection's answer only the status code is read: its body is dropped unread, and
+nothing of it is in a result, the history, a log line or Audit. `rotation` is never in the answer: a CI secret has no rotation setting. A
+day is compared in UTC, as for AWS. Of GitHub's answer only this is kept or returned: found or not, the secret's
+name, and the day it was last updated.
+
+**Which login.** The GitHub CLI (`gh`) signed in on this computer, as the AWS check runs the AWS CLI under the
+host's own setup. AgentMux installs nothing and signs nothing in. With no `gh`, with `gh` signed out, or with a
+login that has no access, the result says so. No other credential is ever tried in its place.
+
+**How the read is built.** srv builds it from the entry's own link and nothing else: one secret, a GET, and one
+of the two fixed endpoints above (and the collection the secret is in, after a "not found"). The owner, repository,
+environment and secret name each match a strict name pattern and none starts with a dash; a link that doesn't
+match is not read. The child process gets the allowlisted environment the AWS run has, and a time limit.
+
+**Who may start a read.**
+
+- **The person**, with the entry's Check button.
+- **A native agent**, with `check`: inside the six checks an hour agents get of one entry.
+- **A container agent**, with `check`, only for an entry it already holds the person's standing approval to use
+  (the person answered Always to that agent's use of the entry's main value in a command) and whose Vault it may use. Without it the
+  agent's `check` starts no read: it answers with the newest stored result and when it was made (or `not checked
+  yet`), the reason, and what to do: ask for the entry through the Vault, or for an entry that holds no value, ask
+  the person to check it.
+
+**An entry that holds a value.** An entry with a value whose machine copy is a CI secret is checked the same way:
+GitHub gives no value to compare, so its check says whether the secret is there and when it last changed, and
+describes its other places as a linked entry's check does.
+
+**The record.** Every read that is started, by the person or an agent, is one line in Audit: who, which entry,
+which repository, and the outcome. It is also the entry's `checked` line in its history, as for AWS.
+
+**Copies.** A copy of the kind `github-secret` is read the same way, whatever the entry's own place is, under
+the same rule of who may start it, and gets its `checked a copy` line. A copy in AWS under an entry whose own
+place is a CI secret still answers that it is described under an AWS place only.
+
+**What the pane says.** As for an AWS place: "Kept at:" with the newest check, and each "Also kept at" place says
+what its newest check found.
+
+**Not in this step.** No write, no rotation, no list of a repository's secrets read, kept or shown, no
+organisation secrets, no schedule (§9), and no read with the account of Connect with GitHub.
+
+**Tests.**
+
+- Each row of the table above, with a stand-in `gh`: the outcome, `last_changed`, and that nothing else of the
+  answer is stored or returned.
+- A collection's answer that names another secret: that name is in no result, history line or Audit line. A
+  repository that answers and a collection that does not: `could not read`. A check that asks twice is one line
+  toward the agents' hour.
+- A link whose owner, repository, environment or name fails the pattern, or starts with a dash: no process is run.
+- The arguments of each run are exactly the fixed ones for that link.
+- A container agent without the standing approval: no process is run, and the answer carries the stored result,
+  the reason and what to do. With the approval and a usable Vault: the read runs.
+- A native agent's seventh check in an hour is refused as today.
+- One Audit line a read, for the person, a native agent and a container agent, and none when no read ran.
+- No `gh`, and `gh` signed out: `could not read` with why, and no other program is run.
+
 ## 3. The Fleet Vault
 
 ### 3.1 What it is
@@ -208,7 +290,7 @@ Agent2, 2026-11-15, task #47648. Linked entries, as §2 says, with these choices
 - **A link item of a batch** is an API key when it names no kind, takes its place from the item's secret and key and the batch's region and profile, and reads nothing: a batch of links only asks the broker for no session. Its line in the history has the action `linked` and the place as its target, with the batch's reference. The card's row says "link only (no value read)", and a batch of links only is titled "wants to record where N keys live".
 - **The use of a link** (a fill, a command's `secrets`, a version of it) is refused before anyone is asked, with §2.3's sentence naming the place as `kind: location#key`.
 - **An agent's change** to `readers`, `copies` or `rotated` is a card for the person, like a change of place, on any entry. The card shows what is recorded now and what is asked for. A change to other fields (notes, a label) asks nobody. The Vault tool waits for the person's answer on such an update, as on a change of place (the live run found it giving up after ten seconds with the card still open).
-- **The check describes an AWS secret only.** For a place in AWS it reads the secret's description (when it last changed, whether it rotates, whether it is being deleted) and never the value. It answers `present`; `changed since recorded` when the place's day of last change (UTC) is after the entry's `rotated`; `missing` when there is no such secret or it is scheduled for deletion; `could not read` with why. A link with no `rotated` is `present`, and the answer carries `last_changed` and `rotation` as the place gives them. A CI secret or any other place answers `could not read`: describing a CI secret needs a GitHub login chosen for it, which is not built.
+- **The check describes an AWS secret only.** For a place in AWS it reads the secret's description (when it last changed, whether it rotates, whether it is being deleted) and never the value. It answers `present`; `changed since recorded` when the place's day of last change (UTC) is after the entry's `rotated`; `missing` when there is no such secret or it is scheduled for deletion; `could not read` with why. A link with no `rotated` is `present`, and the answer carries `last_changed` and `rotation` as the place gives them. A CI secret or any other place answers `could not read`: describing a CI secret needs a GitHub login chosen for it, which is not built. (It is since §2.6: the GitHub CLI's login on the computer.)
 - **Copies.** A copy in AWS is described under the entry's own region and login, and only when the entry's own place is in AWS (there is no other login to describe it under). Each one asked has its own history line, `checked a copy`, so the newest `checked` line is always the entry's own place and a check counts once toward the agents' six an hour. Every copy is in the answer.
 - **Unchecked.** A link whose newest check is more than 30 days old says "unchecked for N days" on its line; one never checked says "not checked yet", as a machine copy does. The check runs when asked, by the person's button or an agent's `check`; nothing runs it on a schedule (§9 leaves that open).
 - **Health** counts `linked`, `linked_changed_or_missing` and `linked_unchecked_for_30_days`, and no longer counts a link as unused. `verify` finds a link with a value wrong, and not one without. An expiry reminder follows a link's `expires` as any entry's. A check that says changed or missing has no reminder of its own yet.
@@ -258,3 +340,15 @@ Agent2, 2026-11-16, task #47765. From the review and look checks of B2 and B3:
 - **Each other place says what its newest check found.** On the entry's "Also kept at" line every place is followed by its newest check as the entry is now, "not checked yet", or "can't be checked from here" for a place no check can describe (until now that was only in the answer the asking agent got). A place found changed or missing, or one that could not be read, is marked.
 - **A batch of both kinds says how many of each.** When a batch has rows that are read and rows that are links, the card says above the rows how many of the ticked ones are read and copied and how many are only recorded, and the line follows the ticks.
 - **The card for a change to what a link says shows one thing a line.** Who reads the key, when it last changed and where else it is kept each have a line, in what is recorded now and in what is asked for, so the date is not at the end of a long list of readers. In what is asked for, a line that differs is marked "changed", one that was not there "new", and a thing the change takes away is a line marked "removed".
+
+## As built (the check of a CI secret)
+
+Agent2, 2026-11-16, task #47765, §2.6:
+
+- **The read.** `gh api` with the host fixed to github.com, a GET, and the answer printed with its status line. The status code decides the outcome. Of the secret's own entry only its name (it must be the one asked for) and the day of `updated_at` are read; nothing else is kept, returned or written to the history. After a "not found" the collection is asked with `per_page=1`, and of that answer the first line alone is read.
+- **A check that starts no read** answers `not started`, with the reason and what to do in `why`, and the newest check of the place as the entry is now in `stored` (absent when it was never checked). It writes no history line and no Audit line, and does not count toward the agents' six an hour. The same holds for one of an entry's other places that is a CI secret.
+- **The standing approval** a container agent's read needs is the Always the person gave to that agent's use of the entry's main value in a command, in a Vault the agent may use. A linked entry holds no value and so never has one: for a link a container agent is told to ask the person to check it.
+- **Audit.** One line for each CI secret a check was allowed to read, whatever came of it: who, the secret and its repository, the entry, and the outcome. A read that found no GitHub CLI or a signed-out one is a line too, with `could not read`.
+- **The child process** gets the allowlisted environment the AWS run has, in which no GitHub token variable passes, and on Linux the two variables the desktop's keyring is reached through.
+- **An entry that holds a value** and names a CI secret is described, not compared. An entry whose place is in AWS is still compared with its value, and its other places are not read by that check.
+- The tests and the look checks use a stand-in for the GitHub CLI.
