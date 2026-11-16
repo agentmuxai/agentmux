@@ -8,6 +8,8 @@
 // global.ts), the shared base module both files import, so this module stays
 // out of global.ts's import cycle.
 
+import { paneTotals } from "@/app/diag/pane-stats";
+import { heapMb, windowLabel } from "@/app/diag/renderer-sample";
 import { paneCount } from "@/app/platform/pane-rect-registry";
 import { keepInactiveTabsLaidOut } from "@/app/workspace/window-tab-visibility";
 import { markEnd, markStart } from "@/perf";
@@ -324,8 +326,11 @@ function guardStep(name: string, counter: { threw: number }, step: () => void): 
  *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
 function logSwitch(tabId: string, current: boolean, gated: boolean, rpcMs: number, frameMs: number, threw: number): void {
     const rpc = rpcMs < 0 ? "failed" : `${Math.round(rpcMs)}ms`;
+    // What the window holds as it switches (#47823): agent panes and their rows, the JS heap, which window.
+    const totals = paneTotals();
+    const heap = heapMb();
     console.info(
-        `[tab-switch] to=${tabId} rpc=${rpc} frames=${Math.round(frameMs)}ms gated=${gated} browser-panes=${paneCount()} threw=${threw}${current ? "" : " superseded=true"}`
+        `[tab-switch] to=${tabId} rpc=${rpc} frames=${Math.round(frameMs)}ms gated=${gated} browser-panes=${paneCount()} agent-panes=${totals.panes} rows=${totals.rows} heap=${heap ? `${heap.used}MB` : "n/a"} window=${windowLabel()} threw=${threw}${current ? "" : " superseded=true"}`
     );
 }
 

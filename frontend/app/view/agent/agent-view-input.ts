@@ -8,6 +8,7 @@
  * order they were there.
  */
 
+import { registerPaneStats, searchState } from "@/app/diag/pane-stats";
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { createMemo, onCleanup } from "solid-js";
@@ -69,6 +70,14 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
             return rawIdAtOrAfter(p.shown.shownDocument(), top, new Set(paneModel.document().map((n) => n.id)));
         },
     });
+
+    // What this pane holds, for the renderer's five-minute state line (diag/renderer-state-diagnostic.ts).
+    onCleanup(
+        registerPaneStats(model.blockId, () => ({
+            rows: paneModel.document().length,
+            search: searchState(search.visible(), search.text()),
+        }))
+    );
 
     // One way in: Ctrl+F, the header magnifier and the palette open the bar; with it open, they put the caret in its
     // field with the text selected. Esc, the close button and the magnifier close it (search/search-bridge.ts).

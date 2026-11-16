@@ -28,6 +28,7 @@
 //! is live rather than theoretical.
 
 import { getMuxObjectCacheStats } from "@/app/store/mos";
+import { windowLabel } from "./renderer-sample";
 import { getBlockAtomCacheStats } from "@/app/store/block-atom-cache";
 import { getBlockComponentRegistryStats } from "@/app/store/block-component-registry";
 
@@ -36,6 +37,8 @@ const REPORT_INTERVAL_MS = 30000;
 /** Exported for tests — gathers the snapshot without logging it. */
 export function collectAtomCacheDiagnostics() {
     return {
+        // Which window these caches are in: every window logs this line, and without it they read as one.
+        window: windowLabel(),
         muxObjectCache: getMuxObjectCacheStats(),
         blockAtomCache: getBlockAtomCacheStats(),
         registry: getBlockComponentRegistryStats(),

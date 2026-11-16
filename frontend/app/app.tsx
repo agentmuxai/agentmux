@@ -10,6 +10,9 @@ import "./diag/replace-child-diagnostic";
 // Periodic, read-only atom-cache/registry diagnostics — see the module
 // header for context (a 2026-09-20 latency/memory report).
 import "./diag/atom-cache-diagnostic";
+// The five-minute state of this window: heap, panes, rows, what holds a recycle back.
+import { startRendererStateReports } from "./diag/renderer-state-diagnostic";
+startRendererStateReports();
 
 import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
