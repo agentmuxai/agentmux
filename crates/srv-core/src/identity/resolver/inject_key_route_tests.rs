@@ -7,6 +7,12 @@
 use super::*;
 use crate::backend::model_gateway::{catalog, token};
 
+/// The token registry is process-wide and keyed by agent definition and route, and these tests all use one definition: run them one at a time.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A made-up key of the shape the redaction code knows, built from pieces so no key-shaped literal sits in the file.
 fn made_up_key() -> String {
     ["sk-ant", "-api03-", "MADEUPMADEUPMADEUPMADEUPMADEUP0123456789"].concat()
@@ -39,6 +45,7 @@ fn agent_on(store: &Arc<Store>, account: &IdentityAccount, block: &str) {
 fn a_claude_agent_on_an_api_key_is_given_the_gateway_and_a_token_and_never_the_key() {
     let key = made_up_key();
     std::env::set_var("AMX_TEST_KEY_ROUTE_acct-key-1", &key);
+    let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-1", "api_key"), "block-key-1");
 
@@ -55,6 +62,7 @@ fn a_claude_agent_on_an_api_key_is_given_the_gateway_and_a_token_and_never_the_k
 
 #[test]
 fn the_token_is_for_the_key_route_only_and_follows_the_account_the_agent_is_on() {
+    let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-2", "api_key"), "block-key-2");
     let (_, env) = spawn(&store, "block-key-2", false);
@@ -72,6 +80,7 @@ fn the_token_is_for_the_key_route_only_and_follows_the_account_the_agent_is_on()
 
 #[test]
 fn an_account_that_is_not_an_api_key_is_not_carried_by_the_gateway() {
+    let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-4", "pat"), "block-key-4");
     let (res, env) = spawn(&store, "block-key-4", false);
@@ -81,6 +90,7 @@ fn an_account_that_is_not_an_api_key_is_not_carried_by_the_gateway() {
 
 #[test]
 fn an_agent_with_a_key_link_whose_account_is_gone_is_refused_not_left_on_a_login() {
+    let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-5", "api_key"), "block-key-5");
     delete_account_row_keep_link(&store, "acct-key-5");
@@ -91,9 +101,25 @@ fn an_agent_with_a_key_link_whose_account_is_gone_is_refused_not_left_on_a_login
 
 #[test]
 fn an_agent_on_its_own_endpoint_does_not_use_the_key_route() {
+    let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-6", "api_key"), "block-key-6");
     let (res, env) = spawn(&store, "block-key-6", true);
     assert_eq!(res, Ok(()));
     assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"), "its own endpoint's authentication is put in after this step");
+}
+
+#[test]
+fn a_container_agent_with_a_key_link_is_refused_and_given_neither_the_key_nor_the_gateway() {
+    let _serial = serial();
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-7", "api_key"), "block-key-7");
+    let mut block = store.get::<crate::backend::obj::Block>("block-key-7").unwrap().unwrap();
+    block.meta.insert("agentMode".to_string(), serde_json::json!("container"));
+    store.update(&mut block).unwrap();
+
+    let (res, env) = spawn(&store, "block-key-7", false);
+
+    assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }));
+    assert!(env.is_empty(), "nothing of the key or the gateway reaches a container: {env:?}");
 }

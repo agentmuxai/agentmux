@@ -1,8 +1,6 @@
 # Spec: an Anthropic API key as an account in the agent pane's menu (first slice)
 
-**Status:** active. First slice (parts B.1 to B.3, Anthropic only) of task #47858, built in #47859 on the operator's go. Author: Agent5@narko, 2026-11-16.
-
-The operator's words, relayed by AgentY: "lets also move the claude api, setting it in agent pane. we want that in the next release. in that case you'd add you api to connectors, and selectable in with the set display name".
+**Status:** active. First slice (parts B.1 to B.3, Anthropic only) of task #47858, built in #47859. Author: Agent5@narko, 2026-11-16.
 
 ## Requirement
 
@@ -36,4 +34,4 @@ macOS (Clare, Masty, Maop) and Linux (Maricon, Opaz, Parlo): the menu with a pla
 
 ## Proof
 
-I use no key. The debug `task dev` build is started on narko; the operator adds their own key in that build's Connectors and switches an agent themselves.
+A debug `task dev` build is started; a person adds their own key in that build's Connectors and switches an agent themselves. No agent types or handles the key.

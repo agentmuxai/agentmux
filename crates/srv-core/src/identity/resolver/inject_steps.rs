@@ -552,6 +552,11 @@ pub(super) fn inject_key_route(
             return false;
         }
     };
+    // A container agent is never given a key account, nor the gateway in its place (it can't reach srv's loopback address).
+    if mstore.get::<crate::backend::obj::Block>(&instance.block_id).ok().flatten().is_some_and(|b| crate::backend::obj::meta_get_string(&b.meta, "agentMode", "host") == "container") {
+        tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is not given to a container agent");
+        return false;
+    }
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return false };
     let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") else {
         tracing::warn!(target: "identity", "srv's own address is not known; the API-key account can't be used for this spawn");
