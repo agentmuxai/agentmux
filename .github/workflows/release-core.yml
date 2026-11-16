@@ -111,6 +111,8 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - name: Use the mold linker (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: rui314/setup-mold@v1

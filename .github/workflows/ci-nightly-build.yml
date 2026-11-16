@@ -113,6 +113,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
 
       # The ubuntu test leg was killed every night from 2026-10-27 on, 7-26 min into
       # `cargo test --workspace`, with "The runner has received a shutdown signal" and exit 143

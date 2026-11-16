@@ -131,6 +131,8 @@ jobs:
           exit 0
 
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

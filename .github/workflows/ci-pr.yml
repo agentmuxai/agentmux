@@ -297,6 +297,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       # The mold linker: linking the large srv test binaries is a sizeable
       # share of the nextest step (same spec, Phase 4).
       - name: Use the mold linker (Linux)
@@ -574,6 +576,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       # Keep this crate list identical to the `rust` job's.
       - name: cargo check --tests (CEF-free crates)
@@ -611,6 +615,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -663,6 +669,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell
@@ -711,6 +719,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       # The same exclusions as the `rust` job's step of this name.
       - name: Exclude build paths + toolchain processes from Windows Defender
         shell: powershell

@@ -185,6 +185,8 @@ jobs:
           fi
 
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
 
       # agentmux-mcp links libdbus and libxcb (its screen capture); the Linux package needs them at run time too.
       - name: System libraries (Linux)
