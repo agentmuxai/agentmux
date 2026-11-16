@@ -34,6 +34,7 @@ use super::AppState;
 
 /// The block meta key the pane reads the open list from.
 pub(crate) const LIST_META_KEY: &str = "browser:signin-list";
+const HOST_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The kind of login field the person is in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -184,6 +185,35 @@ pub(crate) fn close(state: &AppState, block_id: &str) -> Answer {
         return show(state, block_id, None);
     }
     Answer::default()
+}
+
+/// The person pressed in the app's own UI (another pane, the address bar, the tab strip) while the list
+/// showed: the page saw no press, so nothing told the listener. Close the list here and tell the host to
+/// clear the listener's state, so the next Up, Down, Escape or Enter in the page's field is the page's.
+pub(crate) async fn close_from_ui(state: &AppState, block_id: &str) {
+    close(state, block_id);
+    // Not `proxy_value`: that notes the call as an agent's input to the pane, and this is housekeeping for the
+    // person's own press, which must not be taken for the agent's (a popup the person opens next).
+    let told = match super::ui_handlers::get_host_ipc(state).await {
+        Ok(host) => super::ui_handlers::proxy_to_host_timeout(state, &host, "signin_list_clear", json!({ "block_id": block_id }), Some(HOST_WAIT)).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = told {
+        tracing::info!(error = %e, "[signin-list] the page's listener wasn't told the list closed");
+    }
+}
+
+/// `browser.signin_list_close`, from the window.
+pub(crate) fn register(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
+    use crate::backend::rpc_types::{CommandBrowserSigninListCloseData, COMMAND_BROWSER_SIGNIN_LIST_CLOSE};
+    let st = state.clone();
+    engine.register_typed(COMMAND_BROWSER_SIGNIN_LIST_CLOSE, move |req: CommandBrowserSigninListCloseData, _ctx| {
+        let state = st.clone();
+        async move {
+            close_from_ui(&state, &req.block_id).await;
+            Ok(())
+        }
+    });
 }
 
 /// Pane `block_id`'s main frame loaded a new page.

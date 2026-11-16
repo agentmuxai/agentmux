@@ -255,3 +255,18 @@ async fn a_new_page_closes_the_list() {
 fn only_booleans_go_back_to_the_host() {
     assert_eq!(Answer { shown: true, cursor: false }.to_json(), json!({ "shown": true, "cursor": false }));
 }
+
+#[tokio::test]
+async fn a_press_in_the_apps_own_ui_closes_the_list_and_tells_the_host_to_clear_the_listener() {
+    let s = setup(None).await;
+    save(&s, "alice@example.com");
+    open(&s.state, &s.block, &s.site, "password", "");
+    key(&s.state, &s.block, "ArrowDown");
+    assert!(meta(&s) != Value::Null);
+    close_from_ui(&s.state, &s.block).await;
+    assert_eq!(meta(&s), Value::Null);
+    let told = s.host.seen.lock().unwrap().iter().find(|(r, _)| r == "signin_list_clear").map(|(_, b)| b.clone());
+    assert_eq!(told, Some(json!({ "block_id": s.block })));
+    // The list is gone in srv too: a key now is nothing's.
+    assert_eq!(key(&s.state, &s.block, "ArrowDown"), Answer::default());
+}
