@@ -68,10 +68,10 @@ export function litRowId(entries: readonly AuditEntry[], sounds: readonly Played
     return undefined;
 }
 
-/** The line "♪ agent · Bash · 4s ago": who is left out when unknown. */
+/** The line "agent · Bash · 4s ago": who is left out when unknown. */
 export function soundText(sound: PlayedSound, who: string | undefined, now: number): string {
     const what = sound.tool ?? SOUNDS[sound.event as keyof typeof SOUNDS]?.label ?? sound.event;
-    return `♪ ${[who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ")}`;
+    return [who, what, `${formatAge(ageMs(sound.at, now))} ago`].filter(Boolean).join(" · ");
 }
 
 /** The newest sound, if it played in the last minute: what the Audit's bar and the status bar's item show. */
@@ -80,7 +80,7 @@ export function lastSound(sounds: readonly PlayedSound[], now: number): PlayedSo
     return sound && now - sound.at <= LAST_SOUND_MS ? sound : undefined;
 }
 
-/** What the last sound was, for the line "♪ agent · Bash · 4s ago", and the pane to reveal; none after a minute. */
+/** What the last sound was, for the line "agent · Bash · 4s ago", and the pane to reveal; none after a minute. */
 export function lastSoundLine(entries: readonly AuditEntry[], sounds: readonly PlayedSound[], now: number): { text: string; blockId: string } | null {
     const sound = lastSound(sounds, now);
     if (!sound) return null;

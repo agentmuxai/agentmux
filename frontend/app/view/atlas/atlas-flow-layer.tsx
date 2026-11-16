@@ -30,11 +30,12 @@ function flowMarks(
     resolve: (end: FlowEnd) => string | null,
     nodes: ReadonlyMap<string, Placed>,
     framed: ReadonlySet<string>,
-    avoid: readonly FlowNode[]
+    avoid: readonly FlowNode[],
+    frameOut: number
 ): Map<string, Mark> {
     const node = (key: string): FlowNode | undefined => {
         const p = nodes.get(key);
-        return p && framed.has(key) ? { ...p, pad: CONTAINER_FRAME_OUT } : p;
+        return p && framed.has(key) ? { ...p, pad: frameOut } : p;
     };
     const at = (end: FlowEnd) => {
         const key = resolve(end);
@@ -104,13 +105,17 @@ export function AtlasFlowLayer(props: {
     framed?: ReadonlySet<string>;
     /** What else a label keeps clear of (atlas-flow.ts `labelKeepOut`). */
     avoid?: readonly FlowNode[];
+    /** How far a frame reaches past its node: the layout's (`AtlasLayout.gaps.frame`), which closes in with its gaps. */
+    frameOut?: number;
     width: number;
     height: number;
 }): JSX.Element {
     // By id, so a line keeps its element (and is not drawn again) when only its state changes.
     const ids = createMemo(() => props.flows.map((f) => f.id));
     const byId = createMemo(() => new Map(props.flows.map((f) => [f.id, f] as const)));
-    const marks = createMemo(() => flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? []));
+    const marks = createMemo(() =>
+        flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT)
+    );
     return (
         <svg class="atlas-flows" width={props.width} height={props.height} aria-hidden="true">
             <For each={ids()}>

@@ -775,5 +775,8 @@
     "vault.batchCard.allow.other": "Allow these {{count}}",
     "vault.activity.batchSecrets.one": "{{count}} secret",
     "vault.activity.batchSecrets.other": "{{count}} secrets",
-    "attachments.strip.fewer": "Show fewer"
+    "attachments.strip.fewer": "Show fewer",
+    "swarm.broadcast.hint": "Enter sends · {{newlineKey}} adds a line",
+    "swarm.select.host": "Select all on host",
+    "swarm.select.hostTitle": "Select only the agents of this computer, not those on LAN or cloud machines"
 }

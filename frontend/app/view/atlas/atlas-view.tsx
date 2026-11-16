@@ -264,6 +264,8 @@ function AtlasMap(props: {
                 width: `${props.layout.width}px`,
                 height: `${props.layout.height}px`,
                 transform: `translate(${props.view.x}px, ${props.view.y}px) scale(${clampZoom(props.view.k)})`,
+                // A container's frame closes in with the gaps it stands in (atlas.scss `.atlas-node--container`).
+                "--atlas-frame-out": `${props.layout.gaps.frame}px`,
             }}
         >
             <For each={props.layout.regions}>
@@ -288,7 +290,7 @@ function AtlasMap(props: {
                                 <path
                                     class="atlas-edge"
                                     classList={{ "atlas-edge--spawned": edge.kind === "spawned" }}
-                                    d={edgePath(from()!, to()!, props.layout.wrapped.get(edge.to) === edge.from)}
+                                    d={edgePath(from()!, to()!, props.layout.wrapped.get(edge.to) === edge.from, props.layout.gaps)}
                                 />
                             </Show>
                         );
@@ -301,6 +303,7 @@ function AtlasMap(props: {
                 nodes={props.layout.nodes}
                 framed={framed()}
                 avoid={keepOut()}
+                frameOut={props.layout.gaps.frame}
                 width={props.layout.width}
                 height={props.layout.height}
             />
@@ -352,7 +355,7 @@ function RegionBox(props: { box: RegionBoxLayout; region: AtlasRegion; open: boo
                 </header>
             </section>
             <Show when={r().folded.length > 0}>
-                <FoldedChip region={r()} x={box().x + FOLD_CHIP.x} y={box().foldY} open={props.open} onToggle={props.onToggle} />
+                <FoldedChip region={r()} x={box().foldX} y={box().foldY} open={props.open} onToggle={props.onToggle} />
             </Show>
         </>
     );
@@ -434,8 +437,11 @@ export function AtlasView(props: { data: AtlasData; ctx: PaneTabHostContext }): 
     // The pane is measured before the first draw and the layout is formed for its shape, so the first paint is
     // already fitted (the view reads the layout lazily: it is made right below).
     const zoom = useAtlasPanZoom(() => layout(), mode, () => setSelected(null));
+    // Zoomed in past the fitted view, the gaps close up (`zoom.spread`), so more of the cards are in the pane.
     const layout = createMemo<AtlasLayout>(() =>
-        mode() === "seat" ? layoutBySeat(data.graph(), zoom.shape()) : layoutAtlas(data.graph(), zoom.shape())
+        mode() === "seat"
+            ? layoutBySeat(data.graph(), zoom.shape(), zoom.spread())
+            : layoutAtlas(data.graph(), zoom.shape(), zoom.spread())
     );
     const sel = useAtlasSelection(data, zoom, layout);
     const shownCount = createMemo(() => data.graph().regions.reduce((n, r) => n + r.shown.length + r.orphans.length, 0));

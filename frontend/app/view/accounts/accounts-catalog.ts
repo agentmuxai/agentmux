@@ -14,6 +14,7 @@
 
 import type { AccountKind, AccountProvider } from "@/app/view/identity/identity-model";
 
+import { CLI_SIGN_INS } from "./cli-sign-ins";
 import { GITHUB_APP_CHOICE, GITHUB_TOKEN_CHOICE } from "./github-account-copy";
 
 export type AuthMode = "oauth" | "key";
@@ -50,7 +51,7 @@ export const SERVICE_CATALOG: ServiceTile[] = [
         authModes: ["oauth", "key"],
         keyKind: "api_key",
         blurb: "ChatGPT sign-in, or API key",
-        signIn: { provider: "codex", brand: "ChatGPT" },
+        signIn: { provider: "codex", brand: CLI_SIGN_INS.codex },
     },
     // "oauth" here is Claude's own in-app CLI login (spec
     // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3), NOT the
@@ -66,8 +67,13 @@ export const SERVICE_CATALOG: ServiceTile[] = [
         authModes: ["oauth", "key"],
         keyKind: "api_key",
         blurb: "Browser sign-in, or API key",
-        signIn: { provider: "claude", brand: "Anthropic" },
+        signIn: { provider: "claude", brand: CLI_SIGN_INS.claude },
     },
+    // xAI: Grok Build signs in inside the agent, so the tile is text only (no way to connect from here).
+    { id: "xai", displayName: "xAI", authModes: [], keyKind: "api_key", blurb: "Grok Build" },
+    // Moonshot: text only. Kimi Code signs in inside the agent; a key form waits until a Kimi key is seen
+    // reaching the CLI (spec §9, decision 2). Its id is `kimi`, the id srv's key class and the Kimi agent use.
+    { id: "kimi", displayName: "Moonshot", authModes: [], keyKind: "api_key", blurb: "Kimi Code" },
     { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
     { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
 ];

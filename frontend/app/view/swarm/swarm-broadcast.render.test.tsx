@@ -56,19 +56,47 @@ describe("BroadcastDock", () => {
         expect(row.textContent).toContain("2 sent · 1 delivered · 1 failed");
     });
 
-    it("names the key as Enter, capitalised", () => {
+    it("says Enter sends and Shift+Enter adds a line", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a"])} agents={agents} />);
-        expect(container.querySelector(".swarm-broadcast-hint")!.textContent).toMatch(/^(Ctrl\+Enter|⌘Enter) sends$/);
+        expect(container.querySelector(".swarm-broadcast-hint")!.textContent).toMatch(/^Enter sends · (Shift\+Enter|⇧Enter) adds a line$/);
     });
 
-    it("sends on Ctrl+Enter and not on a plain Enter", () => {
+    it("sends on Enter, and on Ctrl+Enter too", () => {
         const model = modelStub(["a"]);
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "hi" } });
         fireEvent.keyDown(box(container), { key: "Enter" });
-        expect(model.broadcastToSelection).not.toHaveBeenCalled();
-        fireEvent.keyDown(box(container), { key: "Enter", ctrlKey: true });
         expect(model.broadcastToSelection).toHaveBeenCalledWith("hi");
+        fireEvent.input(box(container), { target: { value: "again" } });
+        fireEvent.keyDown(box(container), { key: "Enter", ctrlKey: true });
+        expect(model.broadcastToSelection).toHaveBeenLastCalledWith("again");
+    });
+
+    it("adds a line on Shift+Enter and sends nothing", () => {
+        const model = modelStub(["a"]);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        fireEvent.input(box(container), { target: { value: "hi" } });
+        const notCancelled = fireEvent.keyDown(box(container), { key: "Enter", shiftKey: true });
+        expect(model.broadcastToSelection).not.toHaveBeenCalled();
+        // Not cancelled: the browser still inserts the newline.
+        expect(notCancelled).toBe(true);
+    });
+
+    it("leaves Enter to an IME that is converting", () => {
+        const model = modelStub(["a"]);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        fireEvent.input(box(container), { target: { value: "かな" } });
+        fireEvent.keyDown(box(container), { key: "Enter", isComposing: true });
+        fireEvent.keyDown(box(container), { key: "Enter", keyCode: 229 });
+        expect(model.broadcastToSelection).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing on Enter with an empty box, and does not insert a line break", () => {
+        const model = modelStub(["a"]);
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        const notCancelled = fireEvent.keyDown(box(container), { key: "Enter" });
+        expect(model.broadcastToSelection).not.toHaveBeenCalled();
+        expect(notCancelled).toBe(false);
     });
 
     it("keeps a half-typed message and the recent list across a section switch", async () => {

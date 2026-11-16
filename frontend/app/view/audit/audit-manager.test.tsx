@@ -316,7 +316,7 @@ describe("AuditManager", () => {
 
         noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
         await waitFor(() => expect(document.querySelector('[data-lit="true"]')?.textContent).toContain("Bash ls"));
-        const last = screen.getByRole("button", { name: /^♪ korp · Bash · / });
+        const last = screen.getByRole("button", { name: /^korp · Bash · / });
         fireEvent.click(last);
         expect(revealBlock).toHaveBeenCalledWith("blk-korp", { source: "audit" });
     });
