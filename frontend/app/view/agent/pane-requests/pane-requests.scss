@@ -23,6 +23,12 @@
 // at 40% a narrow, zoomed pane left the options no height under the header and the answers (#47821).
 .agent-request-stack:has(.agent-question-panel) {
     max-height: 70%;
+
+    // In a pane under 280 px wide (a 372 px pane at 200% zoom is 186 px) the header wraps to several lines and the
+    // answers stack one per line, which alone fill 70% of it: the question is what the agent waits on, so it takes more.
+    @container agent-pane (max-width: 280px) {
+        max-height: 85%;
+    }
 }
 
 .pane-request-dock {

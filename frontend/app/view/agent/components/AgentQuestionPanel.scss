@@ -42,6 +42,11 @@
     // scrolled on its own then had no height at all. The header and the answers
     // stay in view (sticky, below); the options scroll between them.
     overflow-y: auto;
+    // Nothing scrolls sideways: text that cannot wrap would show beside the
+    // pinned answers, in the panel's padding, which they do not cover.
+    overflow-x: hidden;
+    // The container the narrow-pane rules below ask about.
+    container-type: inline-size;
 }
 
 .agent-question-panel-header {
@@ -54,8 +59,11 @@
     flex-shrink: 0;
     position: sticky;
     top: 0;
-    z-index: 1;
-    padding: var(--space-3) 0 var(--space-1);
+    z-index: var(--z-over-content);
+    // Edge to edge: the panel's side padding is under the bar's background too, so
+    // nothing scrolls into view beside it.
+    margin-inline: calc(-1 * var(--space-3));
+    padding: var(--space-3) var(--space-3) var(--space-1);
     background: var(--modal-bg-color);
 }
 
@@ -125,6 +133,8 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+    // A fieldset is never narrower than its content by default.
+    min-width: 0;
     margin: 0;
     padding: 0;
     border: none;
@@ -132,6 +142,9 @@
 
 .agent-question-panel-q-prompt {
     display: flex;
+    // A legend does not shrink or wrap by default; an agent's question is long.
+    min-width: 0;
+    overflow-wrap: anywhere;
     align-items: baseline;
     gap: var(--space-2);
     padding: 0;
@@ -242,8 +255,9 @@
     // the bar sticks to its bottom edge, on the panel's own background.
     position: sticky;
     bottom: 0;
-    z-index: 1;
-    padding: var(--space-2) 0 var(--space-3);
+    z-index: var(--z-over-content);
+    margin-inline: calc(-1 * var(--space-3));
+    padding: var(--space-2) var(--space-3) var(--space-3);
     background: var(--modal-bg-color);
     flex-shrink: 0;
 }
@@ -252,3 +266,14 @@
 // are neutral, Submit is accent: the recommended-answer shortcut must not
 // compete with Submit, so a user still reads the options
 // (docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md §3).
+
+// A narrow, zoomed pane (a 372 px pane at 200% zoom is 186 px wide): the header
+// wrapped to three lines and the answers stacked one per line, and pinned
+// together they left the options no room (#47821, Linux look check). Here the
+// header scrolls away with the options, as the Vault card's title does
+// (vault-request-card.scss), and the answers stay in view.
+@container (max-width: 280px) {
+    .agent-question-panel-header {
+        position: static;
+    }
+}
