@@ -20,6 +20,8 @@ pub enum Kind {
     Oom,
     RemovePrompt,
     Interrupt,
+    /// The check that the image has the AgentMux tools (`ContainerManager::check_image_tools`).
+    ImageCheck,
     Turn,
     Other,
 }
@@ -71,6 +73,8 @@ pub struct State {
     pub upload_fails: bool,
     /// What the memory counter reads at each probe, in order; none left reads nothing.
     pub oom_counts: VecDeque<u64>,
+    /// The tools the image check finds absent: an image that lacks them.
+    pub missing_tools: Vec<String>,
     execs: Vec<ExecRec>,
 }
 
@@ -171,6 +175,8 @@ fn kind_of(cmd: &[String]) -> Kind {
         Kind::Oom
     } else if at(0) == "sh" && at(3) == "agentmux-cleanup" {
         Kind::RemovePrompt
+    } else if at(0) == "sh" && at(3) == "agentmux-image-check" {
+        Kind::ImageCheck
     } else {
         Kind::Other
     }
@@ -284,15 +290,21 @@ fn create_exec(state: &Mutex<State>, body: &[u8]) -> Vec<u8> {
 /// `POST /exec/{id}/start`: switch the connection to the exec's output stream and write what the
 /// script says, then close it (or hold it open, or cut it mid-frame).
 async fn start_exec(sock: &mut TcpStream, state: &Mutex<State>, id: &str) {
-    let (kind, turn, oom) = {
+    let (kind, turn, oom, missing) = {
         let st = state.lock().unwrap();
         let Some(rec) = st.execs.get(exec_index(id)) else { return };
-        (rec.kind, rec.turn.clone(), rec.oom)
+        (rec.kind, rec.turn.clone(), rec.oom, st.missing_tools.clone())
     };
     let mut out = b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n".to_vec();
     let mut hold = false;
     match kind {
         Kind::IdProbe => out.extend(frame(1, b"1000\n1000\n")),
+        Kind::ImageCheck => {
+            for tool in &missing {
+                out.extend(frame(1, format!("missing:{tool}\n").as_bytes()));
+            }
+            out.extend(frame(1, b"checked\n"));
+        }
         Kind::Oom => {
             if let Some(n) = oom {
                 out.extend(frame(1, format!("low 0\nhigh 0\nmax 0\noom 0\noom_kill {n}\n").as_bytes()));

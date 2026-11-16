@@ -48,6 +48,17 @@ pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<Agent
     route_agent_message_from(block_id, message, None, backend::message_origin::MessageOrigin::system(), &[], None)
 }
 
+/// Whether `block_id` is a subprocess agent in the middle of a turn: a message for it queues.
+fn turn_in_flight(block_id: &str) -> bool {
+    backend::blockcontroller::get_controller(block_id)
+        .and_then(|ctrl| {
+            ctrl.as_any()
+                .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
+                .map(|s| s.turn_in_flight())
+        })
+        .unwrap_or(false)
+}
+
 /// Give the reactive handler a delivery route to `SubprocessController` agents.
 ///
 /// `spawn_background_subsystems` installs a message sender that can only reach
@@ -133,6 +144,8 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                         .to_string(),
                 );
             }
+            // One turn at a time: a message sent mid-turn queues, and the answer says so.
+            let queued_behind_turn = turn_in_flight(block_id);
             let deps = deps.clone();
             let block_id_owned = block_id.to_string();
             let message = message.to_string();
@@ -155,6 +168,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 ))
             });
             match started {
+                Ok(()) if queued_behind_turn => Ok(reactive::SenderDelivery::Deferred),
                 Ok(()) => Ok(reactive::SenderDelivery::Delivered),
                 Err(e) => {
                     tracing::error!(
