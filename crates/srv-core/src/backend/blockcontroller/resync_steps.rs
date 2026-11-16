@@ -109,6 +109,9 @@ impl ResyncCtx<'_> {
             // controller's own CLI process should die. See
             // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
             let _ = crate::backend::teardown_hooks::hooks().replace_now(ctrl.as_ref());
+            if let Some(old) = ctrl.as_any().downcast_ref::<super::subprocess::SubprocessController>() {
+                old.hand_over_held_to_replacement();
+            }
             remove_controller_entry_only(block_id);
             return None;
         }
