@@ -57,7 +57,7 @@ export function VaultUseCard(props: { use: UseRequest } & PaneRequestProps): JSX
             <h3 class="vault-request-card-title" {...tip(shown === title ? undefined : title)}>
                 {shown}
             </h3>
-            <UseQuestion use={props.use} answer={answer} Body={CardBody} Actions={CardActions} focus={false} />
+            <UseQuestion use={props.use} answer={answer} Body={CardBody} Actions={CardActions} focus={false} rowsFirst />
             <DenyAll agent={props.use.agent} />
         </section>
     );
