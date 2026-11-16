@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Account } from "@/app/view/identity/identity-model";
 import {
     canReconnect,
+    cliSignInOf,
     clientModeTag,
     githubConnectedAs,
     githubGrantIsGone,
@@ -137,5 +138,40 @@ describe("a GitHub account made through the broker", () => {
         // A failure to ask says nothing, and nothing was asked when signed out.
         expect(githubGrantIsGone({ signedIn: true, error: "unavailable" })).toBe(false);
         expect(githubGrantIsGone({ signedIn: false, status: "revoked" })).toBe(false);
+    });
+});
+
+function cli(provider: string, over: Partial<Account> = {}): Account {
+    return google({
+        id: "c1",
+        name: `${provider}-oauth`,
+        provider: provider as Account["provider"],
+        secret_ref: { backend: "oauth_config_dir", dir: "/tmp/acct-1" },
+        context: {},
+        ...over,
+    });
+}
+
+describe("a CLI sign-in's account", () => {
+    it("is one whose login Connectors runs: Claude Code's and Codex's, kept in a directory of its own", () => {
+        expect(cliSignInOf(cli("claude"))).toEqual({ provider: "claude", brand: "Anthropic" });
+        expect(cliSignInOf(cli("codex"))).toEqual({ provider: "codex", brand: "ChatGPT" });
+        // A login Connectors doesn't run, a service sign-in and a key are none.
+        expect(cliSignInOf(cli("grok"))).toBeUndefined();
+        expect(cliSignInOf(cli("copilot"))).toBeUndefined();
+        expect(cliSignInOf(google())).toBeUndefined();
+        expect(cliSignInOf(cli("claude", { kind: "api_key" }))).toBeUndefined();
+        expect(cliSignInOf(cli("claude", { secret_ref: { backend: "keychain", service: "s", account: "a" } }))).toBeUndefined();
+    });
+
+    it("offers Reconnect once the provider no longer accepts the login", () => {
+        expect(canReconnect(cli("claude"))).toBe(false);
+        expect(canReconnect(cli("claude", { status: "unknown" }))).toBe(false);
+        for (const status of ["expired", "needs_reauth", "invalid"] as const) {
+            expect(canReconnect(cli("claude", { status })), status).toBe(true);
+            expect(canReconnect(cli("codex", { status })), status).toBe(true);
+        }
+        // Not for a login Connectors doesn't run.
+        expect(canReconnect(cli("grok", { status: "needs_reauth" }))).toBe(false);
     });
 });

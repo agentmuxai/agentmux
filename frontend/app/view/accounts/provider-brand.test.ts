@@ -10,6 +10,7 @@ describe("brandForProvider", () => {
         expect(brandForProvider("codex")).toBe("openai");
         expect(brandForProvider("gemini")).toBe("google");
         expect(brandForProvider("copilot")).toBe("github");
+        expect(brandForProvider("grok")).toBe("xai");
     });
 
     it("passes brand ids through unchanged", () => {

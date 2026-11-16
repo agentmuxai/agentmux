@@ -84,7 +84,7 @@ export function AddAccountSection(props: {
                 </div>
             </Show>
             <Show when={guide}>{(g) => <ProviderGuideInside guide={g()} />}</Show>
-            <Show when={tile.id !== "agentmux" && mode() === null}>
+            <Show when={tile.id !== "agentmux" && tile.authModes.length > 0 && mode() === null}>
                 <div class="accounts-chooser accounts-chooser--inline">
                     <div class="accounts-chooser-modes">
                         <For each={tile.authModes}>

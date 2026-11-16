@@ -1,6 +1,6 @@
 # Spec: Connectors show every way to connect each provider, with plain explanations
 
-**Status:** active — PR 1 (the guide data, the explanations on the Anthropic, OpenAI and Google tiles, the ChatGPT sign-in, the panel rename) in #7409, merging when the operator approves this spec (task #27097; the build is #27098). PR 2 (§8: device code, Reconnect for a CLI sign-in, the xAI, Moonshot and Copilot entries, the other agents) is not started.
+**Status:** active — PR 1 (the guide data, the explanations on the Anthropic, OpenAI and Google tiles, the ChatGPT sign-in, the panel rename) in #7409, merging when the operator approves this spec (task #27097; the build is #27098). PR 2 (§8) adds Reconnect for a CLI sign-in, the xAI and Moonshot tiles (text only), Copilot under GitHub (text) and the other agents (task #47787, vendor pages re-read 2026-11-16). The device-code fallback and the sign-ins for Grok Build and Copilot are not built: each waits for a real sign-in seen working, which needs the operator's OK for a lab.
 **Date:** 2026-11-14
 **Author:** Naki-2@narko
 **Verified against:** `agentmux` `main` @ `086e28e98` (code read) and the vendor pages named in §6, fetched 2026-11-14.
@@ -54,7 +54,7 @@ Per provider, after this build:
 | Google | Gmail, Calendar, Drive (exists) | | Antigravity (Google plan), Gemini CLI |
 | GitHub | GitHub App (exists), Copilot (PR 2) | personal access token (exists) | |
 | xAI (new tile, PR 2) | Grok Build sign-in | | |
-| Moonshot (new tile, PR 2) | | Moonshot Platform key | Kimi Code sign-in |
+| Moonshot (new tile, PR 2) | | Moonshot Platform key (the form waits until a key is seen reaching the Kimi CLI, §9) | Kimi Code sign-in |
 | Other agents (a list under the tiles) | | | Muse Code, Qwen Code, DeepSeek Harness, OpenRouter-routed agents, Pi, Kilo, Cline, OpenCode, goose, Aider, Crush |
 
 AWS, Slack, Custom and AgentMux keep their tiles and get one short explanation each (§4.4).
@@ -150,10 +150,10 @@ Connect OpenAI
 - *Key:* console.x.ai, billed from prepaid credits. This is not an AgentMux option today (§3), so it is not offered.
 
 **Moonshot** (new tile, PR 2)
-- *API key.* "A key from the Kimi API Platform (platform.kimi.ai/console/api-keys), billed separately from a Kimi membership."
+- *API key (not built yet, §9 decision 2):* "A key from the Kimi API Platform (platform.kimi.ai/console/api-keys), billed separately from a Kimi membership."
 - Inside the agent: "Kimi Code has its own sign-in; open a Kimi agent and run /login."
 
-**Other agents:** one line each: "Asks you to sign in or paste a key the first time it runs", with its docs link (from `catalog.ts`), and for OpenRouter-routed agents a key from openrouter.ai/keys (starts `sk-or-v1-`, paid from credits, each key can have a credit limit); for DeepSeek a key from platform.deepseek.com/api_keys, billed per token from a topped-up or granted balance.
+**Other agents (as built in PR 2):** each agent's line says only what its own page says (§6.1), because the pages disagree: Muse Code and goose prompt on first use, Qwen Code opens its /auth menu, Pi, Kilo, OpenCode and Cline have a command (/login, /connect, cline auth), Crush has a model picker (ctrl+l) where you paste a key, Aider reads keys from flags, environment variables, .env or YAML, and DeepSeek Harness starts a web page (dsh web). The blanket sentence below is therefore not shown; Qwen Code gets an OpenRouter key pointer and DeepSeek Harness a DeepSeek one. Planned wording was: one line each: "Asks you to sign in or paste a key the first time it runs", with its docs link (from `catalog.ts`), and for OpenRouter-routed agents a key from openrouter.ai/keys (starts `sk-or-v1-`, paid from credits, each key can have a credit limit); for DeepSeek a key from platform.deepseek.com/api_keys, billed per token from a topped-up or granted balance.
 
 ## 6. Sources, and what was left out
 
@@ -178,6 +178,14 @@ Connect OpenAI
 | OpenRouter key page, `sk-or-v1-`, credits and limits | openrouter.ai/docs/api-reference/authentication |
 | DeepSeek key page, per-token billing from balance | api-docs.deepseek.com; api-docs.deepseek.com/quick_start/pricing |
 | Muse Code: browser sign-in or API key, `/login`, `META_API_KEY` | dev.meta.ai/docs/muse-code |
+| Copilot plan names, every plan includes Copilot CLI, GitHub AI Credits (read 2026-11-16) | docs.github.com/en/copilot/get-started/plans |
+| Copilot CLI opens a browser; the device-code flow is the default on remote or headless machines; `/login` picks a method (read 2026-11-16) | docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli |
+| Grok Build opens the browser on first launch; device code for headless or remote machines (read 2026-11-16) | github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md; docs.x.ai/build/overview |
+| Kimi API Platform keys page; `MOONSHOT_API_KEY` in its examples (read 2026-11-16) | platform.kimi.ai/docs/overview |
+| Kimi API Platform is pay as you go, separate from Kimi Membership and Kimi Code (read 2026-11-16) | platform.kimi.ai/docs/guide/product-plans |
+| Kimi Code `/login`; the `kimi` provider type's variables are `KIMI_API_KEY` and `KIMI_BASE_URL`; no `MOONSHOT_API_KEY` (read 2026-11-16) | moonshotai.github.io/kimi-code/en/configuration/providers; moonshotai.github.io/kimi-cli/en/configuration/env-vars.html |
+| OpenRouter keys page, `sk-or-v1-` prefix, credit limit; usage deducted from credits (read 2026-11-16) | openrouter.ai/docs/api-reference/authentication; openrouter.ai/docs/faq |
+| First-run lines of the other agents (read 2026-11-16) | dev.meta.ai/docs/muse-code; qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/; github.com/deepseek-ai/deepseek-harness; github.com/badlogic/pi-mono; kilo.ai/docs/code-with-ai/platforms/cli; docs.cline.bot/cli/cli-reference; opencode.ai/docs/; goose-docs.ai/docs/getting-started/installation; aider.chat/docs/config/api-keys.html; github.com/charmbracelet/crush |
 
 ### 6.2 Left out because no vendor page of its own says it
 
@@ -219,4 +227,7 @@ The operator has not answered these four. AgentY decided them on 2026-11-16 unde
 1. **"Where AgentMux keeps it (the Vault)":** keep the wording as it is. An account's API key is in the OS keychain (a file store on a machine with no keychain), and the copy says "stored in your computer's keychain". Moving Connectors keys into the Vault is a separate piece of work in Agent2-6's lane.
 2. **Kimi's key variable:** the build checks it. srv injects a Kimi key as `MOONSHOT_API_KEY` (`provider_class("kimi")`), while the Kimi Code docs list `KIMI_API_KEY` for the CLI and say it doesn't read shell variables unless `api_key_env` is declared. A bound Kimi account must be seen reaching the CLI before the Moonshot tile ships (PR 2). If it doesn't, that is its own bug.
 3. **Google individuals:** text only. Connectors offers no Gemini CLI sign-in, because Google's README sends individuals to Antigravity (which AgentMux treats as signing in inside the agent).
+
+**Result of decision 2 (PR 2, 2026-11-16).** The vendor pages disagree on the name: Moonshot's platform page uses `MOONSHOT_API_KEY`, while the Kimi CLI's configuration page names `KIMI_API_KEY` for its `kimi` provider and never mentions `MOONSHOT_API_KEY`. narko holds no Moonshot key, so no key has been seen reaching a running Kimi CLI, and AgentX decided (2026-11-16) that the rule holds: the Moonshot tile is text only (Kimi Code's `/login`), there is no key form, and srv's injection (`MOONSHOT_API_KEY` only) is unchanged. The key form, and whatever the injection needs to be, ship together once a key is seen working.
+
 4. **Staying current:** a weekly Schedule job that re-reads the §6.1 pages and opens a task when one differs: yes, later, as its own task. Until then the dated source line on each fact is the check.
