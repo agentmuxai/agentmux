@@ -21,6 +21,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
+use super::vaults::VaultAgents;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct UseRequest {
@@ -150,7 +152,20 @@ pub struct UseBatch {
     pub grant: bool,
     /// The Vault every row goes into.
     pub vault: String,
+    /// Which agents may use what is in that Vault.
+    pub agents: VaultAgents,
+    /// The Vaults the person may send the rows to instead, `vault` among them: the ones the asking agent may use.
+    /// Empty when there is no other, or when a row replaces an entry's value (that entry stays in its Vault).
+    pub vaults: Vec<UseBatchVault>,
     pub items: Vec<UseBatchItem>,
+}
+
+/// A Vault a batch's rows may go into, as the card offers it: its name and who may use what is in it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseBatchVault {
+    pub name: String,
+    pub agents: VaultAgents,
 }
 
 /// One row of a batch: the entry it becomes and the secret it is read from.
@@ -258,11 +273,13 @@ pub struct UseAnswer {
     pub choice: Option<String>,
     /// The rows of a batch the person left ticked, by their place in the request's list; none for any other use.
     pub rows: Option<Vec<usize>>,
+    /// The Vault the person chose for a batch's rows, one of the request's `vaults`; none when they left it as asked.
+    pub vault: Option<String>,
 }
 
 impl UseAnswer {
     pub fn of(decision: Decision) -> Self {
-        Self { decision, value: None, save: false, by: By::Person, choice: None, rows: None }
+        Self { decision, value: None, save: false, by: By::Person, choice: None, rows: None, vault: None }
     }
 
     fn by(decision: Decision, by: By) -> Self {

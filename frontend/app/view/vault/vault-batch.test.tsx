@@ -21,6 +21,8 @@ const batch = (over: Partial<UseBatch> = {}): UseBatch => ({
     profile: "work-read",
     grant: false,
     vault: "Fleet",
+    agents: { mode: "named", agents: ["agent1", "loap"] },
+    vaults: [],
     items: [
         { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false, link: false },
         { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false, link: false },
@@ -99,6 +101,50 @@ describe("the approval of a batch import", () => {
         expect(within(dialog).getByRole("button", { name: "Allow these 3" })).toBeTruthy();
         expect(within(dialog).queryByRole("button", { name: /Always|Allow once/ })).toBeNull();
         expect(within(dialog).queryByRole("timer")).toBeNull();
+    });
+
+    it("says who may use the Vault the rows go into", async () => {
+        const first = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const said = () => screen.getByRole("group").querySelector('[data-batch="agents"]')?.textContent;
+        await screen.findByRole("group");
+        expect(said()).toBe("Only these agents can use what is in that Vault: agent1, loap.");
+        // With one Vault to save to there is nothing to choose.
+        expect(screen.queryByRole("combobox", { name: "Vault to save to" })).toBeNull();
+        first.unmount();
+
+        for (const [agents, line] of [
+            [{ mode: "all" }, "Every agent can use what is in that Vault."],
+            [{ mode: "none" }, "No agent can use what is in that Vault: only you."],
+            [{ mode: "named", agents: [] }, "No agent can use what is in that Vault: only you."],
+        ] as const) {
+            uses = [use({ batch: batch({ agents: agents as UseBatch["agents"] }) })];
+            await refreshVault();
+            const shown = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+            await screen.findByRole("group");
+            expect(said()).toBe(line);
+            shown.unmount();
+        }
+    });
+
+    it("lets the person send the rows to another Vault the card offers, and says who may use that one", async () => {
+        const vaults = [
+            { name: "Personal", agents: { mode: "all" as const } },
+            { name: "Fleet", agents: { mode: "named" as const, agents: ["agent1"] } },
+        ];
+        uses = [use({ batch: batch({ vault: "Personal", agents: { mode: "all" }, vaults }) })];
+        await refreshVault();
+        const close = vi.fn();
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const dialog = await screen.findByRole("group");
+        expect(dialog.textContent).toContain("saved to the Vault Personal");
+        const choose = within(dialog).getByRole("combobox", { name: "Vault to save to" }) as HTMLSelectElement;
+        expect([...choose.options].map((o) => o.textContent)).toEqual(["Personal", "Fleet"]);
+        fireEvent.change(choose, { target: { value: "Fleet" } });
+        await waitFor(() => expect(dialog.textContent).toContain("saved to the Vault Fleet"));
+        expect(dialog.querySelector('[data-batch="agents"]')?.textContent).toBe("Only these agents can use what is in that Vault: agent1.");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow these 3" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", rows: [0, 1, 2], vault: "Fleet" }]));
+        await waitFor(() => expect(close).toHaveBeenCalled());
     });
 
     it("answers with the rows left ticked, and can't allow none", async () => {
