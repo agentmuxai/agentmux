@@ -65,6 +65,40 @@
     max-height: 70%;
 }
 
+// A batch's card is one scroll box above its answers. In a narrow, zoomed pane the title and the answers can fill
+// the card's share of the pane, and a body that scrolls on its own then has no room for a row: the person could
+// answer and not see what the answer allows. Here the title scrolls away with the rows, and the answers stay in view.
+.vault-request-card:has(.vault-batch-rows) {
+    overflow-y: auto;
+    padding-bottom: 0;
+
+    .vault-request-card-title,
+    .vault-request-card-body {
+        flex-shrink: 0;
+    }
+
+    .vault-request-card-body {
+        overflow-y: visible;
+    }
+
+    // The card's own bottom padding is the answers', so nothing scrolls into view under them.
+    .vault-request-card-actions {
+        position: sticky;
+        bottom: 0;
+        margin-top: calc(-1 * var(--space-2));
+        padding-block: var(--space-2) var(--space-3);
+        background: var(--modal-bg-color);
+
+        &:not(:last-child) {
+            padding-bottom: var(--space-1);
+        }
+    }
+
+    .vault-request-card-deny-all {
+        margin-bottom: var(--space-3);
+    }
+}
+
 .vault-request-card-why {
     font-style: italic;
 }

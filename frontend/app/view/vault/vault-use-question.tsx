@@ -287,8 +287,10 @@ function vaultOpenTo(agents: VaultAgents): { text: string; whole?: string } {
 }
 
 /** A batch of imports: the one account, region and Vault, and a row for every secret with its tick. A row left
- *  unticked is not read. Every row is shown; a long list scrolls. */
-function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState }): JSX.Element {
+ *  unticked is not read. Every row is shown; a long list scrolls. With `rowsFirst` the rows come before the count of
+ *  what is ticked, the account and the Vault: a card in an agent's pane has a share of the pane's height, and in a
+ *  narrow, zoomed pane the text above the rows filled it, so the answers were in view and what they allow was not. */
+function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answer: UseAnswerState; rowsFirst: boolean }): JSX.Element {
     const b = props.batch;
     const a = props.answer;
     const links = () => linksOnly(b);
@@ -309,7 +311,7 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
         return { read: a.rows().length - recorded, links: recorded };
     };
     const offered = (): SelectOption[] => b.vaults.map((v) => ({ value: v.name, label: clip(v.name, CLIP.label) }));
-    return (
+    const About = (): JSX.Element => (
         <>
             <p data-batch="source">
                 <Show when={b.region} fallback={t(links() ? "vault.batchCard.linksAtDefaultRegion" : "vault.batchCard.fromDefaultRegion", { service: b.service, count })}>
@@ -336,9 +338,15 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                     <Select value={a.vault()} onChange={a.setVault} options={offered()} ariaLabel={t("vault.batchCard.chooseVault")} disabled={a.busy()} />
                 </Field>
             </Show>
-            <Show when={mixed()}>
-                <p data-batch="mixed">{t("vault.batchCard.mixed", ticked())}</p>
-            </Show>
+        </>
+    );
+    const Tally = (): JSX.Element => (
+        <Show when={mixed()}>
+            <p data-batch="mixed">{t("vault.batchCard.mixed", ticked())}</p>
+        </Show>
+    );
+    const Rows = (): JSX.Element => (
+        <>
             <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
                 <For each={b.items}>
                     {(item, i) => (
@@ -366,6 +374,13 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                 </For>
             </ul>
         </>
+    );
+    return (
+        <Show when={props.rowsFirst} fallback={[<About />, <Tally />, <Rows />]}>
+            <Rows />
+            <Tally />
+            <About />
+        </Show>
     );
 }
 
@@ -659,8 +674,9 @@ function UseSubject(props: { use: UseRequest; answer: UseAnswerState; focus: boo
 
 /** The question and its answers, laid out by `Body` and `Actions` (the modal's
  *  parts, or the card's). `focus` lets a typed value's field take the focus: the
- *  window's prompt may, a card in the agent's pane never does (spec §4.4). */
-export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Body: Component<{ children: JSX.Element }>; Actions: Component<{ children: JSX.Element }>; focus: boolean }): JSX.Element {
+ *  window's prompt may, a card in the agent's pane never does (spec §4.4). `rowsFirst`
+ *  puts a batch's rows at the top of the body (`UseBatchSubject`). */
+export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Body: Component<{ children: JSX.Element }>; Actions: Component<{ children: JSX.Element }>; focus: boolean; rowsFirst?: boolean }): JSX.Element {
     const u = props.use;
     const a = props.answer;
     const held = holdOnActivity(u);
@@ -670,7 +686,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 <Show when={u.batch}>
                     {(b) => (
                         <>
-                            <UseBatchSubject batch={b()} answer={a} />
+                            <UseBatchSubject batch={b()} answer={a} rowsFirst={!!props.rowsFirst} />
                             <UseSays use={u} />
                             <UseDeadline use={u} />
                         </>

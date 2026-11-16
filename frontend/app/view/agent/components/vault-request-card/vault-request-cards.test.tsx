@@ -6,6 +6,9 @@
  *  drawn from srv's record in the pane that asked, answered through the host,
  *  gone when srv's list drops them, never taking the composer's focus. */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -186,6 +189,43 @@ describe("an agent's Vault requests as cards in its pane", () => {
         const yeses = actions.querySelector(".vault-use-allow")!;
         expect([...yeses.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Allow once", "Always for Builder"]);
         expect(deny.nextElementSibling).toBe(yeses);
+    });
+
+    it("lists a batch's rows before its account and Vault in the pane, and after them in the Vault pane's list", async () => {
+        const items = ["Alpha", "Beta"].map((label, i) => ({ label, kind: "login", secret: `hosts/${label.toLowerCase()}`, key: "", replaces: false, link: i === 1 }));
+        const batch = { name: "host passwords", service: "AWS Secrets Manager", region: "eu-west-1", profile: "work-read", grant: false, vault: "Fleet", agents: { mode: "all" as const }, vaults: [], items };
+        const asked = (block_id: string) => use({ block_id, entry_id: "", entry_label: "host passwords", what: "secrets", command: "", offer_always: false, goes_ahead: false, batch });
+        // The rows, the count of what is ticked and the paragraph that names the account, in the order the page reads them.
+        const order = (card: HTMLElement) => [...card.querySelectorAll<HTMLElement>('.vault-batch-rows, [data-batch="mixed"], [data-batch="source"]')].map((e) => e.dataset.batch ?? "rows");
+
+        // A card has a share of the pane's height: in a narrow, zoomed pane only its first lines are in view.
+        uses = [asked(PANE)];
+        await refreshVault();
+        render(() => <PaneRequestDock blockId={PANE} />);
+        const dock = await screen.findByTestId("pane-request-dock");
+        expect(order(dock)).toEqual(["rows", "mixed", "source"]);
+        expect(dock.querySelector('[data-batch="source"]')?.textContent).toContain("Read from AWS Secrets Manager in eu-west-1.");
+        expect(within(dock).getAllByRole("checkbox")).toHaveLength(2);
+        cleanup();
+
+        // The Vault pane's list has the pane to itself: the account and the Vault come first, as they did.
+        uses = [asked("")];
+        await refreshVault();
+        render(() => <VaultRequestsList onFill={vi.fn()} />);
+        expect(order(await screen.findByRole("group"))).toEqual(["source", "mixed", "rows"]);
+    });
+
+    it("scrolls a batch's card as a whole and keeps its answers in view", () => {
+        // What a narrow, zoomed pane needs is in the stylesheet: with the body as the scroll box, the title and
+        // the answers could fill the card and leave the rows no room at all.
+        const scss = readFileSync(join(__dirname, "vault-request-card.scss"), "utf8");
+        const start = scss.indexOf(".vault-request-card:has(.vault-batch-rows) {");
+        const rule = scss.slice(start, scss.indexOf("\n}", start)).replace(/\s+/g, " ");
+        expect(start).toBeGreaterThanOrEqual(0);
+        expect(rule).toMatch(/^\S+ \{ overflow-y: auto;/);
+        expect(rule).toMatch(/\.vault-request-card-title, \.vault-request-card-body \{ flex-shrink: 0; \}/);
+        expect(rule).toMatch(/\.vault-request-card-body \{ overflow-y: visible; \}/);
+        expect(rule).toMatch(/\.vault-request-card-actions \{ position: sticky; bottom: 0;/);
     });
 
     it("denies all from an agent waiting on more than one, uses and asks for entries alike, whatever the agent's case", async () => {
