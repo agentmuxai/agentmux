@@ -15,8 +15,7 @@ import { paneTearOffOf } from "@/app/drag/pane-tearoff";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { layoutDragEnded } from "./layoutIntents";
 import type { LayoutModel } from "./layoutModel";
-import { landingSiteOf } from "./landingSite";
-import { landingRectOf } from "./liveReflow";
+import { homeLayoutOf } from "./homeLayout";
 import { resetAllDropIntent } from "./placementPreview";
 import { leaveWindow, returnToWindow } from "./tearOffPreview";
 import { dragState } from "./tilelayout-drag-state";
@@ -67,15 +66,8 @@ export function startTileDrag(node: LayoutNode, model: LayoutModel): void {
     dragState.node = node;
     beginDrag("tile", { nodeId: node.id, tabId });
     const blockId = paneTearOffOf(node)?.blockId;
-    // The pane's picture in hand takes the shape of its landing rect while the live reflow shows a drop, and
-    // is taken again of the pane standing in that rect once the panes have come to rest there.
-    const landing = blockId && {
-        rect: () => (model.liveReflowActive() ? landingRectOf(model) : undefined),
-        active: () => model.activeDrag(),
-        settled: () => model.landingSettled(),
-        site: () => landingSiteOf(model, blockId),
-    };
-    watchEscapeDuringDrag(blockId && landing ? { blockId, landing } : undefined);
+    // The pane's picture is carried outside this layout's body only: over it, the layout shows the pane.
+    watchEscapeDuringDrag(blockId ? { blockId, home: homeLayoutOf(model, () => model.activeDrag()) } : undefined);
     clearCrossTabDrop();
     model.activeDrag._set(true);
     setCurrentDragPayload({ kind: "tile", node, sourceTabId: tabId });

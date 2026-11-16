@@ -22,6 +22,7 @@
 
 import { hostHas } from "@/util/host-caps";
 import { getApi } from "@/util/app-api";
+import { pressOnControl } from "@/app/util/press-on-control";
 
 let cefDragListenerInstalled = false;
 
@@ -68,6 +69,8 @@ function installCefDragListener() {
             // renderer's normal handling (contextmenu etc.).
             if (e.button !== 0) return;
             if (!isInDragRegion(e.target as HTMLElement)) return;
+            // A press on a button never starts a window drag, however far the pointer then moves.
+            if (pressOnControl(e.target)) return;
             pressX = e.clientX;
             pressY = e.clientY;
             pressArmed = true;

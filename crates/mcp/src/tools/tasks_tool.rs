@@ -16,6 +16,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "complete", tool: "WorkComplete", rename: &[] },
     Act { action: "release", tool: "WorkRelease", rename: &[] },
     Act { action: "list", tool: "WorkList", rename: &[] },
+    Act { action: "get", tool: "WorkGet", rename: &[] },
     // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md §6.11).
     Act { action: "update", tool: "WorkUpdate", rename: &[] },
     Act { action: "ask", tool: "WorkAsk", rename: &[] },

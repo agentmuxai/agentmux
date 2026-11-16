@@ -13,6 +13,10 @@ use std::path::Path;
 
 /// True when the splash should be suppressed entirely (no window created).
 pub fn splash_disabled() -> bool {
+    // A test build (AGENTMUX_TEST_OFFSCREEN) shows nothing on a real display, the splash included.
+    if agentmux_common::test_offscreen::active() {
+        return true;
+    }
     if let Some(forced) = env_override() {
         return forced; // env is authoritative (Some(true)=disable, Some(false)=force-on)
     }

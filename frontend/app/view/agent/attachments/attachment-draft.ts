@@ -370,6 +370,21 @@ export class AttachmentDraft {
         });
     }
 
+    /**
+     * Drag reorder: put `key` just before `targetKey`, or just after it with `after`. The numbers on the
+     * tiles and the numbered list the agent receives both follow this order.
+     */
+    moveNear(key: string, targetKey: string, after: boolean): void {
+        if (key === targetKey) return;
+        this.setItems((prev) => {
+            if (!prev.some((i) => i.key === key) || !prev.some((i) => i.key === targetKey)) return prev;
+            const next = prev.filter((i) => i.key !== key);
+            const moved = prev.find((i) => i.key === key)!;
+            next.splice(next.findIndex((i) => i.key === targetKey) + (after ? 1 : 0), 0, moved);
+            return next.every((it, n) => it === prev[n]) ? prev : next;
+        });
+    }
+
     /** Stop everything still copying, uploading or processing. */
     cancel(): void {
         for (const batchId of this.openBatches) {

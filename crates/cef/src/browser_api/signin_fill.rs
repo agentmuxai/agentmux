@@ -20,6 +20,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use cef::ImplBrowser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -37,6 +38,10 @@ pub struct SigninFillReq {
     pub username: String,
     /// Held only for the length of this request.
     pub password: String,
+    /// The pick was made with Tab (or Shift+Tab), which moved focus on before this ran: give focus back to where
+    /// it went once the fields are typed, since typing focuses each one.
+    #[serde(default)]
+    pub keep_focus: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,12 +155,38 @@ pub async fn signin_fill_route(State(state): State<Arc<AppState>>, headers: Head
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    // srv closed the list as it started this: the page's listener is told, so its keys are the page's again.
+    if let Some(id) = cdp.browser_id() {
+        crate::browser_pane::signin_list::clear(id).await;
+    }
     let result = fill(&mut cdp, &req).await;
     let _ = cdp.close().await;
     match result {
         Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
         Err(e) => fail(e),
     }
+}
+
+#[derive(Deserialize)]
+pub struct SigninListClearReq {
+    pub block_id: String,
+}
+
+/// `POST /agentmux/browser/signin_list_clear`, for srv only: the person pressed in the app's own UI while
+/// the pane's list of saved sign-ins showed, and srv closed it. The page saw no press, so the listener is
+/// told here that no list shows, and its keys are the page's again.
+pub async fn signin_list_clear_route(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(req): Json<SigninListClearReq>) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let resolved = match state.browser_api.target_cache.resolve(&state, &req.block_id).await {
+        Ok(r) => r,
+        Err(e) => return fail(e),
+    };
+    if let Some(browser) = state.get_browser(&resolved.label) {
+        crate::browser_pane::signin_list::clear(browser.identifier()).await;
+    }
+    (StatusCode::OK, Json(ApiResponse::ok(json!({}))))
 }
 
 /// The frames of `tree` whose origin is exactly `origin`.
@@ -218,6 +249,7 @@ async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillDa
 async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> Result<Option<SigninFillData>, String> {
     let ctx = super::act::isolated_context(cdp, Some(frame)).await?;
     let Some(password) = object(cdp, ctx, &find_password()).await? else { return Ok(None) };
+    let focused = if req.keep_focus { focused_element(cdp, ctx).await } else { None };
     let user = call_on_object(cdp, &password, &user_for()).await?;
     let username_filled = match &user {
         Some(user) if !req.username.is_empty() => {
@@ -234,7 +266,27 @@ async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> R
         object(cdp, ctx, &find_password()).await?.ok_or("the password field left the page after the user name was typed, so the password wasn't")?
     };
     type_into(cdp, &password, &req.password, &req.origin, "password").await?;
+    if let Some(focused) = focused {
+        give_back_focus(cdp, &focused).await;
+    }
     Ok(Some(SigninFillData { filled: true, username_filled }))
+}
+
+/// Gives focus back to the element that had it when a fill started, if it is still in the page and is a
+/// real element (not the page itself).
+const RESTORE_FOCUS: &str = r#"function () {
+  const d = this.ownerDocument;
+  if (this.isConnected && this !== d.body && this !== d.documentElement && typeof this.focus === "function") this.focus({ preventScroll: true });
+}"#;
+
+/// The element `ctx`'s document has focused now: where a Tab pick's Tab sent focus, before typing moves it.
+pub(super) async fn focused_element(cdp: &mut CdpSession, ctx: i64) -> Option<String> {
+    object(cdp, ctx, "document.activeElement").await.ok().flatten()
+}
+
+/// Put focus back on `element` ([`focused_element`]) once the fields are typed.
+pub(super) async fn give_back_focus(cdp: &mut CdpSession, element: &str) {
+    let _ = call_on(cdp, element, RESTORE_FOCUS, vec![]).await;
 }
 
 /// Evaluate `expression` in context `ctx` and return the element it gives, if any.
@@ -287,6 +339,16 @@ mod tests {
         }});
         assert_eq!(frames_of_origin(&tree, "https://accounts.example.com"), ["main", "again"]);
         assert!(frames_of_origin(&tree, "https://other.example.com").is_empty());
+    }
+
+    #[test]
+    fn a_tab_pick_gives_focus_back_only_to_a_real_element_still_in_the_page() {
+        for needle in ["this.isConnected", "this !== d.body", "this !== d.documentElement", "this.focus({ preventScroll: true })"] {
+            assert!(RESTORE_FOCUS.contains(needle), "{needle}");
+        }
+        // Absent from the request, no focus is kept: a click, Enter and an agent's sign-in behave as before.
+        let req: SigninFillReq = serde_json::from_value(json!({ "block_id": "b", "origin": "https://a.example.com", "username": "u", "password": "p" })).unwrap();
+        assert!(!req.keep_focus);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 /**
  * Where an agent runs: the one place the frontend reads `agentMode` (a pane), `agent_type` (a
  * definition) or a wire `kind` as "host or container". Mirrors srv's `RuntimeKind`
- * (crates/srv/src/backend/runtime_adapter.rs): the same two kinds, the same wire strings and the
+ * (crates/srv-core/src/backend/runtime_adapter.rs): the same two kinds, the same wire strings and the
  * same reading rules, under the names `of_agent_mode`, `of_agent_type`, `of_block_meta`, `parse`
  * and `is_container` there.
  *

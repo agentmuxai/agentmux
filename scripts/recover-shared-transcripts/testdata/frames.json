@@ -1,5 +1,5 @@
 {
-  "about": "Frames written by crates/srv/src/backend/storage/filestore/frames.rs (tests_frame_vector.rs); decoded by lib/frames.mjs in frames.test.mjs.",
+  "about": "Frames written by crates/srv-core/src/backend/storage/filestore/frames.rs (tests_frame_vector.rs); decoded by lib/frames.mjs in frames.test.mjs.",
   "frames": [
     {
       "check_hash": "a8ce6b201ec30727c8a6dfc76f0d7b2df2e4ad510b4ffe8385997f05c6d1082b",

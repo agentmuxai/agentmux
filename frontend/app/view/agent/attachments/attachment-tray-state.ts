@@ -13,6 +13,7 @@ import type { AttachmentDraft, DraftAttachment, RemovedAttachment } from "./atta
 import type { LightboxItem } from "./AttachmentLightbox";
 import type { TileModel } from "./AttachmentTile";
 import { attachmentNoun, fileKind, type FileKind } from "./file-kind";
+import { createTileReorder, movedAnnouncement, positionOf } from "./attachment-tile-reorder";
 import { limitLevel, trayLayout } from "./tray-layout";
 
 const UNDO_MS = 6000;
@@ -160,6 +161,7 @@ export function createAttachmentTray(props: AttachmentTrayProps) {
 
     const [announcement, setAnnouncement] = useBatchAnnouncement(d, noun);
     const { level, summary } = createTraySummary(d, noun);
+    const reorderFor = createTileReorder(d, setAnnouncement);
 
     const focusTile = (key: string | undefined) => {
         if (!key) {
@@ -199,7 +201,10 @@ export function createAttachmentTray(props: AttachmentTrayProps) {
             e.preventDefault();
             const delta = e.key === "ArrowLeft" ? -1 : 1;
             if (e.altKey) {
+                const was = positionOf(d, key);
                 d.move(key, delta);
+                const said = movedAnnouncement(d, key, was);
+                if (said) setAnnouncement(said);
                 queueMicrotask(() => focusTile(key));
             } else {
                 focusTile(list[idx + delta]?.key ?? (delta > 0 ? undefined : list[0]?.key));
@@ -237,7 +242,7 @@ export function createAttachmentTray(props: AttachmentTrayProps) {
     return {
         d, ...row, undo, undoState, tileEls,
         lightboxIndex, setLightboxIndex, announcement,
-        level, summary, removeTile, clearAll, onTileKeyDown, lightboxItems, removeFromLightbox,
+        level, summary, reorderFor, removeTile, clearAll, onTileKeyDown, lightboxItems, removeFromLightbox,
     };
 }
 

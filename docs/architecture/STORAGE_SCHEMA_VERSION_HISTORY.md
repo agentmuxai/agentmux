@@ -2,7 +2,7 @@
 
 **Status:** living: one entry per schema version, added in the change that bumps the constant.
 
-What each `user_version` of the three SQLite stores added, moved here from the doc comments on the version constants in [`crates/srv/src/backend/storage/migrations.rs`](../../crates/srv/src/backend/storage/migrations.rs). The constants (`SHARED_STORE_SCHEMA_VERSION`, `OBJECT_SCHEMA_VERSION`, `IDENTITY_STORE_SCHEMA_VERSION`) stay in the code, with what a reader needs to change them safely; this file is the log of why each number exists. Add the entry for a new version here, in the same change that bumps the constant.
+What each `user_version` of the three SQLite stores added, moved here from the doc comments on the version constants in [`crates/srv-core/src/backend/storage/migrations.rs`](../../crates/srv-core/src/backend/storage/migrations.rs). The constants (`SHARED_STORE_SCHEMA_VERSION`, `OBJECT_SCHEMA_VERSION`, `IDENTITY_STORE_SCHEMA_VERSION`) stay in the code, with what a reader needs to change them safely; this file is the log of why each number exists. Add the entry for a new version here, in the same change that bumps the constant.
 
 ## Shared store (`~/.agentmux/shared/store.db`)
 

@@ -4,7 +4,7 @@
 // Cloud presence: whether this computer's presence record reaches the cloud,
 // which is how your signed-in devices list it when they aren't on this
 // network, in one line, and "Publish now". The publisher and its states are
-// crates/srv/src/muxbus/wan_presence.rs. The "Publish this computer to my
+// crates/srv-core/src/muxbus/wan_presence.rs. The "Publish this computer to my
 // devices" switch below it is devices-section.tsx's.
 
 import { Button } from "@/app/element/ui";

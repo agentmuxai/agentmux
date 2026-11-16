@@ -55,7 +55,7 @@ export const META_RESTORED = "term:restored_summary";
 export const META_LAST_PROMPT = "term:last_prompt";
 export const META_AWAITING_USER = "term:awaiting_user";
 /** The line the agent set (or the task title srv wrote on a claim), when it was set, and by whom
- *  (`agent` or `task`). Written by srv (crates/srv/src/backend/work_facts/live_phrase.rs). */
+ *  (`agent` or `task`). Written by srv (crates/srv-core/src/backend/work_facts/live_phrase.rs). */
 export const META_LIVE_PHRASE = "term:live_phrase";
 export const META_LIVE_PHRASE_AT = "term:live_phrase_at";
 export const META_LIVE_PHRASE_SRC = "term:live_phrase_src";

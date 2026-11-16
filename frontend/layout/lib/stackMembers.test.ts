@@ -4,7 +4,7 @@
 /**
  * Tests for stackMembers.ts's pure leaf-stack helpers.
  * `moveMemberInStack` mirrors the backend's `reorder_within_leaf`
- * (crates/srv/src/backend/layout/mod.rs) — see that function's own doc
+ * (crates/srv-core/src/backend/layout/mod.rs) — see that function's own doc
  * comment for why a reorder must never change which member is visible
  * unless `activate` is explicitly requested.
  * Spec: docs/specs/SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §4.1, Phase 3.
@@ -16,6 +16,7 @@ import {
     effectiveStack,
     moveMemberAcrossStacks,
     moveMemberInStack,
+    memberAfter,
     removeMemberFromStack,
 } from "./stackMembers";
 
@@ -77,7 +78,7 @@ describe("moveMemberInStack", () => {
     // `next.indexOf(targetBlockId)` returns -1 and every position variant
     // below silently reorders the stack instead of leaving it unchanged.
     // Mirrors the backend's identical guard in move_stack_member
-    // (crates/srv/src/backend/layout/mod.rs), added after the same
+    // (crates/srv-core/src/backend/layout/mod.rs), added after the same
     // mistake there (ReAgent P1 on PR #3441) — never mirrored here until now.
     it("is a no-op — stack order unchanged — when blockId and targetBlockId are the same, for every position", () => {
         for (const position of ["before", "after", "end"] as const) {
@@ -173,5 +174,17 @@ describe("existing stack helpers still work", () => {
         expect(data.blockStack).toEqual(["a", "b"]);
         expect(removeMemberFromStack(data, "a")).toBe(true);
         expect(data.blockStack).toEqual(["b"]);
+    });
+
+    it("memberAfter names the tab a removal brings to the front: the right-hand neighbour, the last when it was rightmost", () => {
+        expect(memberAfter(["a", "b", "c"], "a")).toBe("b");
+        expect(memberAfter(["a", "b", "c"], "b")).toBe("c");
+        expect(memberAfter(["a", "b", "c"], "c")).toBe("b");
+        expect(memberAfter(["a"], "a")).toBeUndefined();
+        expect(memberAfter(["a", "b"], "z")).toBeUndefined();
+        // The same tab the removal itself puts in front.
+        const data = stacked("b", ["a", "b", "c"], "b");
+        removeMemberFromStack(data, "b");
+        expect(data.activeBlockId).toBe("c");
     });
 });

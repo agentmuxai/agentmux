@@ -1,0 +1,831 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! The Vault: the person's secrets, which agents use by name without seeing
+//! them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md).
+//!
+//! The person writes the Vault through the host (`server::vault_handlers`).
+//! Agents list entries' names, ask for new ones, and create entries whose value
+//! the Vault makes itself (`generate`), which no one has seen. Everything here
+//! is blocking (the store, the keychain): call it off the async runtime.
+
+pub mod aws_import;
+pub mod aws_import_batch;
+pub mod capture;
+pub mod changes;
+pub mod card;
+pub mod card_fill;
+pub mod card_target;
+pub mod expiry;
+pub mod files;
+pub mod generate;
+pub mod history;
+pub mod import;
+pub mod inspect;
+pub mod kdbx_export;
+pub mod kdbx_names;
+pub mod kinds;
+pub mod linked;
+pub mod plain_export;
+pub mod requests;
+pub mod endpoint_key;
+pub mod route_key;
+pub mod scrub;
+pub mod seal;
+pub mod setting_key;
+pub mod signins;
+pub mod signups;
+pub mod slots;
+pub mod source_link;
+pub mod transfer;
+pub mod uses;
+pub mod vaults;
+pub mod versions;
+pub mod wordlist;
+
+use std::collections::BTreeMap;
+
+use agentmux_common::time::now_ms;
+use serde::{Deserialize, Serialize};
+
+use crate::backend::storage::store::Store;
+use crate::backend::storage::vault::{VaultActivityRow, VaultRow, PERSONAL_VAULT};
+use kinds::VaultSection;
+use seal::Parts;
+
+/// The actor the activity log names for the person.
+pub const PERSON: &str = "you";
+
+const MAX_LABEL: usize = 200;
+const MAX_FIELD: usize = 4096;
+/// §8.7's cap on one value.
+const MAX_PART: usize = 1024 * 1024;
+const MAX_TAGS: usize = 50;
+const MAX_ID: usize = 48;
+
+/// An entry as the pane shows it: no value, only which parts are set and
+/// the main value's last characters.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct VaultEntryInfo {
+    pub id: String,
+    pub kind: String,
+    pub section: VaultSection,
+    pub label: String,
+    /// The Vault it belongs to (`vaults::VaultInfo::id`).
+    pub vault_id: String,
+    pub fields: BTreeMap<String, String>,
+    pub tags: Vec<String>,
+    /// The parts that hold a value.
+    pub parts_set: Vec<String>,
+    /// The sites an agent may fill this entry into without asking again.
+    pub grants: Vec<String>,
+    pub tail: String,
+    /// Earlier values kept for 7 days, which the person can put back.
+    pub versions: u32,
+    /// The newest check of the entry's machine copy (`source_link`) against its value; absent when the entry has no
+    /// link, or the place it names now was never checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_checked: Option<source_link::VaultSourceCheck>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    #[ts(type = "number")]
+    pub last_used_at: i64,
+}
+
+/// An entry as an agent sees it (`Vault` `list`): what it is called, what
+/// kind it is, when it expires (a date being no secret) and where its machine
+/// copy is, if it has one. No value, tail, other field or grant.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct VaultAgentEntry {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub section: VaultSection,
+    /// The Vault's name, so an agent can say where an entry is kept and name it in `request`.
+    pub vault: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
+    /// Where a copy of its value lives outside the Vault, and what the newest check of it found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<source_link::AgentLink>,
+}
+
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct VaultActivity {
+    #[ts(type = "number")]
+    pub at: i64,
+    pub entry_id: String,
+    pub entry_label: String,
+    pub actor: String,
+    pub action: String,
+    pub target: String,
+    pub outcome: String,
+    /// Order on this machine.
+    #[ts(type = "number")]
+    pub seq: i64,
+    /// The value version this event made or used; 0 for one that touches no value.
+    #[ts(type = "number")]
+    pub version: i64,
+    /// `agent`, `person` or `srv`; empty for a line made before this was kept.
+    pub actor_kind: String,
+    /// The machine it happened on; empty for a line made before this was kept.
+    pub host: String,
+    /// The agent's own reason; empty for the person's actions and for lines made before reasons were kept.
+    pub reason: String,
+    /// Short references the event relates to (a task, a PR).
+    pub refs: Vec<String>,
+    /// Whether it handed the entry's value to a process, a form or a sign-in (the history's "Uses").
+    pub is_use: bool,
+}
+
+impl From<VaultActivityRow> for VaultActivity {
+    fn from(r: VaultActivityRow) -> Self {
+        VaultActivity {
+            is_use: crate::backend::storage::vault::VALUE_USES.contains(&r.action.as_str()),
+            refs: history::refs_of(&r.refs),
+            at: r.at,
+            entry_id: r.entry_id,
+            entry_label: r.entry_label,
+            actor: r.actor,
+            action: r.action,
+            target: r.target,
+            outcome: r.outcome,
+            seq: r.seq,
+            version: r.version,
+            actor_kind: r.actor_kind,
+            host: r.host,
+            reason: r.reason,
+        }
+    }
+}
+
+/// A new entry from the pane.
+#[derive(Deserialize)]
+pub struct NewEntry {
+    pub kind: String,
+    pub label: String,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub parts: Parts,
+}
+
+/// A change to an entry from the pane. A part left out keeps its value;
+/// `clear` empties the parts it names.
+#[derive(Deserialize)]
+pub struct EntryChange {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub parts: Parts,
+    #[serde(default)]
+    pub clear: Vec<String>,
+}
+
+fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, tags: &[String], parts: &Parts) -> Result<(), String> {
+    if label.trim().is_empty() {
+        return Err("an entry needs a label".into());
+    }
+    if label.chars().count() > MAX_LABEL {
+        return Err(format!("a label is at most {MAX_LABEL} characters"));
+    }
+    for (k, v) in fields {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) {
+            return Err(format!("a {} entry has no field {k:?}", kind.name));
+        }
+        if v.len() > MAX_FIELD {
+            return Err(format!("{k} is longer than {MAX_FIELD} bytes"));
+        }
+        if k == expiry::FIELD {
+            expiry::parse(v)?;
+        }
+        if k == signins::PROFILE && !signins::is_profile(v) {
+            return Err(format!("{v:?} isn't a browser profile: personal or profile:<id>"));
+        }
+        if k == signins::PROXY && v != "yes" {
+            return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
+        }
+    }
+    source_link::validate(fields)?;
+    linked::validate(fields, !parts.0.is_empty())?;
+    if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
+        return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
+    }
+    for (k, v) in &parts.0 {
+        if !kind.parts.contains(&k.as_str()) {
+            return Err(format!("a {} entry has no part {k:?}", kind.name));
+        }
+        if v.len() > MAX_PART {
+            return Err(format!("{k} is longer than 1 MiB"));
+        }
+    }
+    Ok(())
+}
+
+/// Fields and parts with nothing in them aren't kept.
+fn trimmed(fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    fields.into_iter().map(|(k, v)| (k, v.trim().to_string())).filter(|(_, v)| !v.is_empty()).collect()
+}
+
+fn drop_empty(parts: &mut Parts) {
+    parts.0.retain(|_, v| !v.is_empty());
+}
+
+/// A card saved as the default takes the flag from the Vault's other cards: at most one has it.
+/// Runs after the save has committed, so a failure here is the caller's to log, not to fail the save
+/// with: the card is saved, and a card picker that finds two defaults takes the one saved last.
+fn keep_one_default(store: &Store, kind: &str, vault_id: &str, id: &str, fields: &BTreeMap<String, String>) -> Result<(), String> {
+    if kind != card::KIND || fields.get(card::DEFAULT).map(String::as_str) != Some("yes") {
+        return Ok(());
+    }
+    let rows = store.vault_list().map_err(|e| format!("couldn't list the cards: {e}"))?;
+    let mut failed = Vec::new();
+    for row in rows.into_iter().filter(|r| r.id != id && r.kind == card::KIND && r.vault_id == vault_id) {
+        let mut other: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+        if other.remove(card::DEFAULT).is_none() {
+            continue;
+        }
+        let cleared = serde_json::to_string(&other).map_err(|e| e.to_string()).and_then(|json| store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string()));
+        if let Err(e) = cleared {
+            failed.push(format!("{}: {e}", row.id));
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("couldn't clear the default flag of {}", failed.join("; ")))
+    }
+}
+
+/// A card whose sealed value was swapped for another (a restored version, a rotated number) gets its
+/// brand and expiry date worked out again from the parts it holds now. The parts themselves are not rewritten.
+pub(crate) fn resettle_card(store: &Store, id: &str) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.kind != card::KIND {
+        return Ok(());
+    }
+    let key = seal::key(false)?;
+    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+    let before: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    let mut fields = before.clone();
+    card::settle(card::KIND, &mut fields, &mut parts)?;
+    if fields != before {
+        let json = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+        store.vault_set_fields(&row.id, &json).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// A part as a fill or a command asks for it: a card's older `expiry` is read from its month and year when it has no such part.
+fn part_of(kind: &str, parts: &Parts, part: &str) -> Option<String> {
+    if kind == card::KIND {
+        card::part_value(parts, part)
+    } else {
+        parts.get(part).map(str::to_string)
+    }
+}
+
+/// A readable id that never changes: the kind and the label, e.g.
+/// `ssn-alex`, unique with a number when taken. No `.`: P3 names a part as
+/// `<id>.<part>`.
+fn new_id(store: &Store, kind: &str, label: &str) -> Result<String, String> {
+    new_id_besides(store, kind, label, &[])
+}
+
+/// [`new_id`], also skipping the ids in `taken`: ones chosen for entries not
+/// written yet (a capture's rules, written together).
+fn new_id_besides(store: &Store, kind: &str, label: &str, taken: &[String]) -> Result<String, String> {
+    let mut slug = String::new();
+    for c in format!("{kind}-{label}").chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let mut base: String = slug.trim_matches('-').chars().take(MAX_ID).collect();
+    base = base.trim_end_matches('-').to_string();
+    for n in 1..1000 {
+        let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
+        if !taken.contains(&id) && store.vault_get(&id).map_err(|e| e.to_string())?.is_none() {
+            return Ok(id);
+        }
+    }
+    Err("too many entries with that label".into())
+}
+
+/// The actions that use an entry's value: one of an expired entry says so.
+const USES: &[&str] = &["filled a web form", signins::SIGNED_IN, "ran a command", "revealed", "copied", route_key::USED];
+
+/// Adds a line to the activity log; a failure to is logged, not raised.
+pub fn record(store: &Store, entry_id: &str, entry_label: &str, actor: &str, action: &str, target: &str, outcome: &str) {
+    let row = VaultActivityRow {
+        entry_id: entry_id.into(),
+        entry_label: entry_label.into(),
+        actor: actor.into(),
+        action: action.into(),
+        target: target.into(),
+        outcome: outcome.into(),
+        ..Default::default()
+    };
+    record_row(store, row);
+}
+
+/// A line of the record for something an agent did with an entry, with the reason it gave.
+pub struct Line<'a> {
+    pub entry_id: &'a str,
+    pub label: &'a str,
+    pub actor: &'a str,
+    pub action: &'a str,
+    pub target: &'a str,
+    pub outcome: &'a str,
+    pub reason: &'a str,
+}
+
+/// [`record`] for an agent's use or change, with its reason.
+pub fn record_line(store: &Store, l: Line<'_>) {
+    record_row(
+        store,
+        VaultActivityRow {
+            entry_id: l.entry_id.into(),
+            entry_label: l.label.into(),
+            actor: l.actor.into(),
+            action: l.action.into(),
+            target: l.target.into(),
+            outcome: l.outcome.into(),
+            reason: l.reason.into(),
+            ..Default::default()
+        },
+    );
+}
+
+/// [`record`] with the line's other parts given too: the agent's reason and references.
+pub fn record_row(store: &Store, mut row: VaultActivityRow) {
+    if USES.contains(&row.action.as_str()) && !row.entry_id.is_empty() {
+        if let Ok(Some(entry)) = store.vault_get(&row.entry_id) {
+            if expiry::expired(&entry, expiry::today()) {
+                row.target = if row.target.is_empty() { "(expired)".into() } else { format!("{} (expired)", row.target) };
+            }
+        }
+    }
+    row.at = now_ms();
+    history::append(store, row);
+}
+
+/// Saves a new entry from the person; returns its id.
+pub fn create(store: &Store, entry: NewEntry) -> Result<String, String> {
+    insert(store, entry, PERSON, "created", "")
+}
+
+/// [`create`] in the Vault `vault_id`, which must exist.
+pub fn create_in(store: &Store, entry: NewEntry, vault_id: &str) -> Result<String, String> {
+    insert_in(store, entry, PERSON, "created", "", vault_id)
+}
+
+/// Saves a new entry and records who made it and how.
+fn insert(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str) -> Result<String, String> {
+    insert_in(store, entry, actor, action, target, PERSONAL_VAULT)
+}
+
+/// [`insert`] in the Vault `vault_id`.
+fn insert_in(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str) -> Result<String, String> {
+    insert_in_why(store, entry, actor, action, target, vault_id, "")
+}
+
+/// [`insert_in`], recording the agent's `reason` for making the entry.
+fn insert_in_why(store: &Store, entry: NewEntry, actor: &str, action: &str, target: &str, vault_id: &str, reason: &str) -> Result<String, String> {
+    let (id, label) = insert_unrecorded(store, entry, vault_id)?;
+    record_line(store, Line { entry_id: &id, label: &label, actor, action, target, outcome: "done", reason });
+    Ok(id)
+}
+
+/// Saves a new entry in the Vault `vault_id` and leaves the record of it to the caller: its id and label.
+fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Result<(String, String), String> {
+    store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
+    let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
+    drop_empty(&mut entry.parts);
+    let mut fields = trimmed(std::mem::take(&mut entry.fields));
+    signins::settle_profile(kind.name, &mut fields);
+    card::settle(kind.name, &mut fields, &mut entry.parts)?;
+    validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
+    // A linked entry is the one kind of entry with no value: it says where the key lives.
+    if !linked::is_linked(&fields) && entry.parts.get(kind.parts[0]).is_none() {
+        return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
+    }
+    let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
+    let label = entry.label.trim().to_string();
+    let id = new_id(store, kind.name, &label)?;
+    let now = now_ms();
+    let row = VaultRow {
+        id: id.clone(),
+        kind: kind.name.into(),
+        label: label.clone(),
+        fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
+        tags: serde_json::to_string(&entry.tags).map_err(|e| e.to_string())?,
+        sealed: seal::seal(&key, &id, &entry.parts)?,
+        created_at: now,
+        updated_at: now,
+        last_used_at: 0,
+        vault_id: vault_id.to_string(),
+    };
+    store.vault_insert(&row).map_err(|e| e.to_string())?;
+    if let Err(e) = keep_one_default(store, kind.name, vault_id, &id, &fields) {
+        tracing::warn!(entry = %id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
+    }
+    Ok((id, label))
+}
+
+/// The kinds `generate` makes, and the part it fills: a value no person needs to
+/// choose. An ID number or a card is the person's, never made up.
+pub const GENERATED_KINDS: &[(&str, &str)] = &[("api-key", "value"), ("login", "password"), ("note", "text")];
+
+/// What an agent asks `generate` for.
+#[derive(Debug, Deserialize)]
+pub struct GenerateRequest {
+    pub kind: String,
+    pub label: String,
+    #[serde(default)]
+    pub why: String,
+    /// Why the agent needs it: one line of 8 to 300 characters, required (`why` is the same thing, as it was called).
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Plain fields of the kind (a login's site and username, an API key's service).
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    #[serde(default)]
+    pub rules: generate::RulesRequest,
+    /// When the value stops working (`YYYY-MM-DD`), if the agent knows: the person
+    /// is reminded before then (spec §15.2).
+    #[serde(default)]
+    pub expires: Option<String>,
+    /// The Vault to make it in, by name or id; the agent's first Vault when left out.
+    #[serde(default)]
+    pub vault: Option<String>,
+}
+
+/// What `generate` made: the entry, never its value.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Generated {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    /// The rules it was made under, e.g. "20 characters from 66 choices, 123 bits".
+    pub made: String,
+}
+
+/// Creates an entry whose main value the Vault makes, for `actor` (the agent that
+/// asked). The value goes from the generator into the sealed row and nowhere else.
+pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Result<Generated, String> {
+    let reason = history::require_reason(req.reason.as_deref().filter(|r| !r.trim().is_empty()).or(Some(req.why.as_str())))?;
+    let Some((kind, part)) = GENERATED_KINDS.iter().find(|(k, _)| *k == req.kind) else {
+        let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
+        return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
+    };
+    let rules = generate::rules(&req.rules)?;
+    let value = generate::generate(&rules)?;
+    let mut parts = Parts::default();
+    parts.0.insert(part.to_string(), value.to_string());
+    let target = generate::describe(&rules);
+    let mut fields = req.fields;
+    if let Some(date) = req.expires.filter(|d| !d.trim().is_empty()) {
+        fields.insert(expiry::FIELD.to_string(), date);
+    }
+    let entry = NewEntry { kind: kind.to_string(), label: req.label, fields, tags: Vec::new(), parts };
+    let label = entry.label.trim().to_string();
+    let vault_id = match req.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        Some(which) => vaults::resolve(store, which, Some(Some(actor)))?.id,
+        None => vaults::default_for(store, Some(actor))?,
+    };
+    let id = insert_in_why(store, entry, actor, "generated", &target, &vault_id, &reason)?;
+    Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
+}
+
+/// Changes an entry's label, fields, tags and the parts given.
+pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
+    let row = store.vault_get(&change.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", change.id))?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
+    drop_empty(&mut change.parts);
+    let mut fields = trimmed(std::mem::take(&mut change.fields));
+    signins::settle_profile(kind.name, &mut fields);
+    validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
+    let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
+        return Err(linked::SET_WHEN_MADE.into());
+    }
+    if change.clear.iter().any(|p| p == kind.parts[0]) {
+        return Err(format!("a {} entry needs its {}", kind.name, kind.parts[0]));
+    }
+    let key = seal::key(false)?;
+    let mut parts = seal::open(&key, &row.id, &row.sealed)?;
+    for p in &change.clear {
+        if let Some(mut v) = parts.0.remove(p) {
+            zeroize::Zeroize::zeroize(&mut v);
+        }
+    }
+    // A new main value is the person's: the next rotation is theirs, not the agent's that made the old one.
+    let replaced = change.parts.0.contains_key(kind.parts[0]);
+    let kept = replaced.then(|| versions::of(&row, PERSON, "replaced"));
+    if replaced {
+        versions::prune(store);
+    }
+    let was = row.sealed.clone();
+    for (k, v) in std::mem::take(&mut change.parts.0) {
+        if let Some(mut old) = parts.0.insert(k, v) {
+            zeroize::Zeroize::zeroize(&mut old);
+        }
+    }
+    card::settle(kind.name, &mut fields, &mut parts)?;
+    let label = change.label.trim().to_string();
+    let target = match (old_fields.get(expiry::FIELD), fields.get(expiry::FIELD)) {
+        (old, Some(new)) if old != Some(new) => format!("expires {new}"),
+        (Some(_), None) => "no expiry date".to_string(),
+        _ => String::new(),
+    };
+    let changed = VaultRow {
+        label: label.clone(),
+        fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
+        tags: serde_json::to_string(&change.tags).map_err(|e| e.to_string())?,
+        sealed: seal::seal(&key, &row.id, &parts)?,
+        updated_at: now_ms(),
+        ..row
+    };
+    // Only over the value read above, and keeping the one it replaces in the same
+    // transaction: a capture or restore that landed meanwhile is never lost.
+    if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
+        return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
+    }
+    if let Err(e) = keep_one_default(store, kind.name, &changed.vault_id, &changed.id, &fields) {
+        tracing::warn!(entry = %changed.id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
+    }
+    record(store, &changed.id, &label, PERSON, if replaced { "replaced" } else { "changed" }, &target, "done");
+    Ok(())
+}
+
+/// One part's value, for the person: shown in the pane (`revealed`) or put on
+/// the clipboard by the host (`copied`). Only the host reaches this, after the
+/// OS has confirmed the person. A reveal is logged here, the value never is; a
+/// copy is logged by `record_copy` once the host has put it on the clipboard, so
+/// the trail never says copied when nothing was.
+pub fn reveal(store: &Store, id: &str, part: &str, action: &str) -> Result<zeroize::Zeroizing<String>, String> {
+    if action != "revealed" && action != "copied" {
+        return Err(format!("unknown use {action:?}"));
+    }
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    if !kind.parts.contains(&part) {
+        return Err(format!("a {} entry has no part {part:?}", kind.name));
+    }
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &row.sealed)?;
+    let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    let value = zeroize::Zeroizing::new(value.to_string());
+    if action == "revealed" {
+        store.vault_touch(&row.id, now_ms()).map_err(|e| e.to_string())?;
+        record(store, &row.id, &row.label, PERSON, action, part, "done");
+    }
+    Ok(value)
+}
+
+/// The host's report of what became of a copy: `done` notes the use, `failed`
+/// only says it didn't happen.
+pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if !kinds::kind(&row.kind).is_some_and(|k| k.parts.contains(&part)) {
+        return Err(format!("{} has no part {part:?}", row.label));
+    }
+    if done {
+        store.vault_touch(&row.id, now_ms()).map_err(|e| e.to_string())?;
+    }
+    record(store, &row.id, &row.label, PERSON, "copied", part, if done { "done" } else { "failed" });
+    Ok(())
+}
+
+/// What a web form fill needs to know about an entry, before anything is asked:
+/// the entry, the part, and the kind of field that part belongs in.
+#[derive(Clone)]
+pub struct FillTarget {
+    /// Empty for a value the person will type, with no entry yet.
+    pub id: String,
+    /// The kind's name.
+    pub kind: &'static str,
+    /// There is no entry: the person types the value (spec section 6.5).
+    pub typed: bool,
+    /// The kind, for keeping what they typed.
+    pub kind_info: &'static kinds::Kind,
+    pub label: String,
+    pub part: &'static str,
+    pub slot: Option<&'static str>,
+    pub what: String,
+    /// Which incarnation of the id this is: a deleted entry's id is reused by a
+    /// new one of the same kind and label, and neither a grant nor a value may
+    /// cross from one to the other while the person decides.
+    pub created_at: i64,
+    /// A version a command names instead of the current value: `previous` (the
+    /// value the last change replaced) or `pending` (a rotation's new value).
+    pub version: Option<&'static str>,
+}
+
+/// The entry `id` for an agent's use. One in a Vault the agent may not use is refused as an
+/// entry that isn't there, so an agent learns nothing about Vaults it can't use.
+fn usable_entry(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow, String> {
+    let none = || format!("no Vault entry {id:?}: Vault's list action shows the entries");
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(none)?;
+    if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
+        return Err(none());
+    }
+    if let Some(no_value) = linked::no_value(&row) {
+        return Err(no_value);
+    }
+    Ok(row)
+}
+
+/// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
+pub fn fill_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
+    let (id, part) = slots::split(vault);
+    let row = usable_entry(store, id, agent)?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    let part = slots::fillable_part(kind, part)?;
+    let slot = slots::slot(kind, part);
+    let what = slots::what(kind, part);
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at, version: None })
+}
+
+/// For a value no entry holds yet: the kind's main part, to be typed by the person.
+pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
+    let kind = kinds::kind(kind).ok_or_else(|| format!("unknown kind {kind:?}"))?;
+    let label = label.trim();
+    if label.is_empty() || label.chars().count() > MAX_LABEL {
+        return Err("request_value needs a label saying what the value is, e.g. \"Alex's SSN\"".into());
+    }
+    let part = slots::fillable_part(kind, None)?;
+    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0, version: None })
+}
+
+/// What a command's `secrets` entry names (`"id"` or `"id.part"`): the entry and
+/// the part handed to the process, the kind's main part unless another is named.
+/// Unlike a web form, a command may be given any kind of entry; the person is
+/// asked first (spec section 7.3).
+pub fn command_target(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
+    // `id@previous` or `id@pending`, then `.part` as usual.
+    let (vault, version) = match vault.trim().split_once('@') {
+        Some((id, rest)) => {
+            let (which, part) = rest.split_once('.').map(|(w, p)| (w, Some(p))).unwrap_or((rest, None));
+            let which = match which {
+                "previous" => "previous",
+                "pending" => "pending",
+                other => return Err(format!("{id}@{other}: a command can name {id}@previous (the value the last change replaced), not @{other}")),
+            };
+            (part.map(|p| format!("{id}.{p}")).unwrap_or_else(|| id.to_string()), Some(which))
+        }
+        None => (vault.to_string(), None),
+    };
+    let mut target = command_target_now(store, &vault, agent)?;
+    target.version = version;
+    if let Some(v) = version {
+        target.what = format!("{} ({v} value)", target.what);
+    }
+    Ok(target)
+}
+
+fn command_target_now(store: &Store, vault: &str, agent: Option<&str>) -> Result<FillTarget, String> {
+    let (id, part) = slots::split(vault);
+    let row = usable_entry(store, id, agent)?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    let part = match part {
+        None => kind.parts[0],
+        Some(p) => *kind.parts.iter().find(|x| **x == p).ok_or_else(|| format!("{} has no part {p:?}; its parts are {}", row.label, kind.parts.join(", ")))?,
+    };
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at, version: None })
+}
+
+/// A part's value for the host to type; never returned to an agent. The use is
+/// logged by the caller, with the site and the outcome.
+pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> Result<zeroize::Zeroizing<String>, String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.created_at != created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was typed", row.label));
+    }
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &row.sealed)?;
+    let value = part_of(&row.kind, &parts, part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    Ok(zeroize::Zeroizing::new(value))
+}
+
+/// A part's value for a command: the current value, or the version `t` names
+/// (`id@previous`, a rotation's `id@pending`). Never returned to an agent.
+pub fn value_for_command(store: &Store, t: &FillTarget) -> Result<zeroize::Zeroizing<String>, String> {
+    let Some(which) = t.version else { return value_for_fill(store, &t.id, t.created_at, t.part) };
+    let row = store.vault_get(&t.id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {}", t.id))?;
+    if row.created_at != t.created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was run", row.label));
+    }
+    let (_, sealed) = versions::sealed_version(store, &row, which)?;
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &sealed)?;
+    let value = part_of(&row.kind, &parts, t.part).ok_or_else(|| format!("{}'s {which} value has no {}", row.label, t.part))?;
+    Ok(zeroize::Zeroizing::new(value))
+}
+
+pub fn delete(store: &Store, id: &str) -> Result<(), String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    store.vault_delete(id).map_err(|e| e.to_string())?;
+    // An agent asking again for the entry it was given must not get this id.
+    requests::requests().forget_entry(id);
+    record(store, id, &row.label, PERSON, "deleted", "", "done");
+    Ok(())
+}
+
+/// Every entry for the pane, and why the values couldn't be opened if they
+/// couldn't (the tails are then empty).
+pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<String>), String> {
+    let rows = store.vault_list().map_err(|e| e.to_string())?;
+    let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
+    versions::prune(store);
+    let counts = store.vault_version_counts().map_err(|e| e.to_string())?;
+    let key = if rows.is_empty() { Ok(None) } else { seal::key(false).map(Some) };
+    let mut problem = key.as_ref().err().cloned();
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(kind) = kinds::kind(&row.kind) else { continue };
+        let (parts_set, tail) = match &key {
+            Ok(Some(key)) => match seal::open(key, &row.id, &row.sealed) {
+                Ok(parts) => (parts.0.keys().cloned().collect(), parts.get(kind.parts[0]).map(|v| kinds::tail(kind, v)).unwrap_or_default()),
+                Err(e) => {
+                    problem.get_or_insert(e);
+                    (Vec::new(), String::new())
+                }
+            },
+            _ => (Vec::new(), String::new()),
+        };
+        let source_checked = source_link::Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link));
+        out.push(VaultEntryInfo {
+            source_checked,
+            fields: serde_json::from_str(&row.fields).unwrap_or_default(),
+            tags: serde_json::from_str(&row.tags).unwrap_or_default(),
+            section: kind.section,
+            grants: grants.remove(&row.id).unwrap_or_default(),
+            versions: counts.get(&row.id).filter(|(created, _)| *created == row.created_at).map(|(_, n)| *n).unwrap_or(0),
+            id: row.id,
+            kind: row.kind,
+            label: row.label,
+            vault_id: row.vault_id,
+            parts_set,
+            tail,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            last_used_at: row.last_used_at,
+        });
+    }
+    Ok((out, problem))
+}
+
+/// Every entry `agent` may use, as it may see it. Reads no value, so it never needs the
+/// keychain. An agent that isn't proven (`None`) sees the Vaults open to every agent.
+pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
+    let vaults = store.vaults().map_err(|e| e.to_string())?;
+    Ok(store
+        .vault_list()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|r| {
+            let vault = vaults.iter().find(|v| v.id == r.vault_id);
+            if !vault.is_none_or(|v| vaults::may_use(v, agent)) {
+                return None;
+            }
+            let section = kinds::kind(&r.kind)?.section;
+            let expires = expiry::of(&r).map(|d| d.to_string());
+            let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
+            let source = source_link::for_agent(store, &r);
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source })
+        })
+        .collect())
+}
+
+pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String> {
+    Ok(store
+        .vault_activity_list(limit.clamp(1, 1000))
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(VaultActivity::from)
+        .collect())
+}
+
+#[cfg(test)]
+mod card_scan_tests;
+#[cfg(test)]
+mod history_tests;
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod transfer_tests;

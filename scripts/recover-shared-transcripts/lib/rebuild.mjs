@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Writing a zone back into the recovered database, the way `replace_file` and
-// `seed_global_zone` do (crates/srv/src/backend/storage/filestore/replace.rs,
-// crates/srv/src/backend/transcript_backfill.rs): the new `output` replaces the
+// `seed_global_zone` do (crates/srv-core/src/backend/storage/filestore/replace.rs,
+// crates/srv-core/src/backend/transcript_backfill.rs): the new `output` replaces the
 // old one and the files derived from it are dropped, in one transaction. The
 // line counters (`gen`, `lines`, ...) are left NULL, which the app reads as "not
 // counted yet" and recounts on first use.

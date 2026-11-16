@@ -32,7 +32,7 @@ const WIDGETS_JSON = join(
     "..",
     "..",
     "crates",
-    "srv",
+    "srv-core",
     "src",
     "config",
     "widgets.json"

@@ -1,0 +1,189 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Reviews pane (reviews-view.tsx). Theme tokens only: no colour is written here, so a theme change reaches it.
+// A row never scrolls sideways: its text wraps or is cut with an ellipsis, and below the narrow width the detail
+// takes the list's place.
+
+.reviews-root {
+    // The pane's zoom (the shared pane zoom's --pane-zoom, block.tsx): text and the room it needs scale with it.
+    zoom: var(--pane-zoom, 1);
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    color: var(--main-text-color);
+}
+
+.reviews-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+
+    .ui-filter-input {
+        flex: 1 1 160px;
+        min-width: 0;
+    }
+}
+
+.reviews-asof,
+.reviews-muted,
+.reviews-hint,
+.reviews-row-age,
+.reviews-row-agent {
+    color: var(--secondary-text-color);
+}
+
+.reviews-asof {
+    margin-left: auto;
+    font-size: 0.85em;
+}
+
+.reviews-scope,
+.reviews-hint {
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    font-size: 0.9em;
+}
+
+.reviews-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.reviews-list {
+    flex: 1 1 55%;
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border-color);
+}
+
+.reviews-root[data-narrow="true"] .reviews-list {
+    border-right: 0;
+}
+
+.reviews-group {
+    padding-bottom: var(--space-2);
+}
+
+// A group's heading is one line, cut with an ellipsis, and starts where the rows' text does.
+.reviews-group .reviews-group-heading {
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reviews-empty {
+    padding: var(--space-3) var(--space-2);
+}
+
+.reviews-row {
+    // The kit's row button is 10px and bold; a list of titles reads like the Swarm's rows instead.
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+}
+
+.reviews-row-line {
+    display: flex;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.reviews-row-number {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+}
+
+.reviews-row-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reviews-row-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    min-width: 0;
+}
+
+.reviews-row-age {
+    margin-left: auto;
+    font-size: var(--text-xs);
+}
+
+.reviews-row-agent {
+    font-size: var(--text-xs);
+}
+
+.reviews-detail {
+    display: flex;
+    flex: 1 1 45%;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+    min-height: 0;
+    padding: var(--space-3);
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+.reviews-back {
+    align-self: flex-start;
+}
+
+.reviews-detail--empty {
+    justify-content: center;
+}
+
+.reviews-detail-title {
+    margin: 0;
+    font-size: 1.05em;
+}
+
+.reviews-why {
+    margin: 0;
+}
+
+.reviews-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+
+    dt {
+        color: var(--secondary-text-color);
+    }
+
+    dd {
+        margin: 0;
+        min-width: 0;
+    }
+}
+
+.reviews-verdict {
+    display: block;
+}
+
+.reviews-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}

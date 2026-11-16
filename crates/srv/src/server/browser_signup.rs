@@ -129,9 +129,15 @@ pub(crate) fn new_password(field: &Field) -> Result<Zeroizing<String>, String> {
 /// The person chose "Use a strong password" in pane `block_id`: make one, keep
 /// it in the Vault, then set it into the page. Gives the site.
 pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, String> {
+    make_picked(state, block_id, false).await
+}
+
+/// [`make`], for a pick made with the keyboard: `keep_focus` when it was Tab, which moved focus on before the
+/// fill ran, so the host gives focus back to where it went once the fields are filled.
+pub(crate) async fn make_picked(state: &AppState, block_id: &str, keep_focus: bool) -> Result<String, String> {
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
     let field = OFFERED.lock().get(block_id).cloned().ok_or("the page has no field for a new password now")?;
-    make_for(state, block_id, field, profile, PERSON, "", None).await.map(|(origin, _)| origin)
+    make_for(state, block_id, field, profile, PERSON, "", None, keep_focus).await.map(|(origin, _)| origin)
 }
 
 /// Make a password for `field` of pane `block_id`, keep it in the Vault under
@@ -139,7 +145,8 @@ pub(crate) async fn make(state: &AppState, block_id: &str) -> Result<String, Str
 /// it into the page, as `actor`'s doing. Gives the site and the entry; never
 /// the value. A password made earlier for this pane and site, still unconfirmed,
 /// is replaced (the site refused it), the refused one kept as a version.
-pub(crate) async fn make_for(state: &AppState, block_id: &str, field: Field, profile: String, actor: &str, reason: &str, extra: Option<&'static str>) -> Result<(String, String), String> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn make_for(state: &AppState, block_id: &str, field: Field, profile: String, actor: &str, reason: &str, extra: Option<&'static str>, keep_focus: bool) -> Result<(String, String), String> {
     let earlier = MADE.lock().get(block_id).filter(|m| m.origin == field.origin && m.at.elapsed() < CONFIRM_WITHIN).map(|m| m.entry.clone());
     let password = new_password(&field)?;
     let (origin, field_token) = (field.origin.clone(), field.field.clone());
@@ -157,7 +164,7 @@ pub(crate) async fn make_for(state: &AppState, block_id: &str, field: Field, pro
     .map_err(|e| e.to_string())??;
     MADE.lock().insert(block_id.to_string(), Made { origin: origin.clone(), entry: entry.clone(), at: Instant::now() });
     super::vault_handlers::publish(state);
-    let body = json!({ "block_id": block_id, "origin": origin, "field": field_token, "password": password.as_str() });
+    let body = json!({ "block_id": block_id, "origin": origin, "field": field_token, "password": password.as_str(), "keep_focus": keep_focus });
     let filled = super::ui_handlers::proxy_value(state, "signup_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if filled.is_ok() { "done" } else { "failed" };
@@ -201,6 +208,7 @@ pub(crate) fn register(engine: &std::sync::Arc<crate::backend::rpc::engine::WshR
         let state = st.clone();
         async move {
             ctx.operator_only("only the person chooses to make a password for a sign-up")?;
+            super::browser_signin_list::close(&state, &req.block_id);
             make(&state, &req.block_id).await.map(|_| ())
         }
     });

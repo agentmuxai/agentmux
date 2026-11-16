@@ -196,7 +196,7 @@ describe("a store holding frames", () => {
     });
 
     it("the fixture's frame table is the one srv creates", () => {
-        const rust = readFileSync(new URL("../../crates/srv/src/backend/storage/filestore/frames.rs", import.meta.url), "utf8").replace(/\s+/g, " ");
+        const rust = readFileSync(new URL("../../crates/srv-core/src/backend/storage/filestore/frames.rs", import.meta.url), "utf8").replace(/\s+/g, " ");
         expect(rust).toContain(FRAME_TABLE.replace(/\s+/g, " "));
     });
 });

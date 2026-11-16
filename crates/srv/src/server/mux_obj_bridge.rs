@@ -41,7 +41,7 @@ use crate::backend::storage::store::Store;
 
 /// JSON shape that gets broadcast as the `data` payload of a
 /// `waveobj:update` WS event. Matches the shape of the `MuxObjUpdate` struct
-/// in `crates/srv/src/backend/obj.rs` so the frontend's existing
+/// in `crates/srv-core/src/backend/obj.rs` so the frontend's existing
 /// `updateMuxObject` handler accepts it without changes.
 fn build_update_payload(
     updatetype: &str,

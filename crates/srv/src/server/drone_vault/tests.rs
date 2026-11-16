@@ -277,3 +277,69 @@ async fn an_earlier_always_does_not_cover_a_key_that_is_now_for_another_site() {
     assert!(!shown.offer_always && shown.reason.contains("saved for api.github.com"), "{}", shown.reason);
     assert!(err.contains("said no"), "{err}");
 }
+
+/// What a drone's lines in the Activity are, newest first.
+fn lines_of(state: &AppState, drone: &str) -> Vec<String> {
+    let who = actor(drone);
+    state.identity_store.vault_activity_list(200).unwrap().iter().filter(|a| a.actor == who).map(|a| format!("{} {} {}", a.action, a.outcome, a.reason)).collect()
+}
+
+#[tokio::test]
+async fn a_poll_with_no_grant_fails_at_once_raising_no_card_and_writing_no_line() {
+    let s = setup().await;
+    let err = tokio::time::timeout(Duration::from_secs(2), resolve_with(&s.state, &s.drone, &s.entry, SITE, Asking::Never))
+        .await
+        .expect("a poll never waits for an answer")
+        .err()
+        .expect("not sent");
+    assert!(err.contains("can't ask") && err.contains("Always") && err.contains(&s.drone), "{err}");
+    assert!(!err.contains(VALUE), "{err}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != actor(&s.drone)), "no card was raised");
+    assert!(lines_of(&s.state, &s.drone).is_empty(), "a poll every minute must not fill the Activity: {:?}", lines_of(&s.state, &s.drone));
+    // And again: still no card piling up behind the first.
+    assert!(resolve_with(&s.state, &s.drone, &s.entry, SITE, Asking::Never).await.is_err());
+    assert!(uses::uses().list().iter().all(|u| u.agent != actor(&s.drone)));
+}
+
+#[tokio::test]
+async fn a_poll_uses_an_always_the_person_gave_and_writes_one_activity_line_an_hour() {
+    let s = setup().await;
+    // The grant is given where a person is: a run by hand, answered Always.
+    let ask = tokio::spawn(answer_when_asked(s.drone.clone(), Decision::Always));
+    assert!(resolve(&s.state, &s.drone, &s.entry, SITE).await.is_ok());
+    ask.await.unwrap();
+    let before = lines_of(&s.state, &s.drone).len();
+    for _ in 0..5 {
+        let got = tokio::time::timeout(Duration::from_secs(2), resolve_with(&s.state, &s.drone, &s.entry, SITE, Asking::Never))
+            .await
+            .expect("granted: nothing is asked")
+            .ok()
+            .expect("sent");
+        assert_eq!(got.value.as_str(), VALUE);
+    }
+    let lines = lines_of(&s.state, &s.drone);
+    assert_eq!(lines.len() - before, 1, "five polls, one line: {lines:?}");
+    assert!(lines[0].contains("done") && lines[0].contains("a poll, 1 time(s)"), "{lines:?}");
+    assert!(lines.iter().all(|l| !l.contains(VALUE)), "never the value: {lines:?}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != actor(&s.drone)));
+    // The line is due again an hour later and says how many polls it stands for.
+    assert_eq!(poll_line_due(&s.drone, &s.entry, i64::MAX / 2), Some(5), "the next line stands for the polls since the last: four above, and this one");
+}
+
+#[tokio::test]
+async fn a_poll_never_sends_a_key_saved_for_another_site_even_with_an_always_for_it() {
+    seal::use_test_key();
+    let state = crate::server::tests::test_state();
+    let entry = create(&state.identity_store, new_entry("api-key", &[("value", VALUE)])).unwrap();
+    let drone = format!("nightly-{}", uuid::Uuid::new_v4().simple());
+    let ask = tokio::spawn(answer_when_asked(drone.clone(), Decision::Always));
+    assert!(resolve(&state, &drone, &entry, "https://example.com").await.is_ok());
+    ask.await.unwrap();
+    // The key is now recorded as for another service: the old grant doesn't stand.
+    let mut change = crate::backend::vault::EntryChange { id: entry.clone(), label: "Acme".into(), fields: [("service".to_string(), "api.github.com".to_string())].into(), tags: vec![], parts: Default::default(), clear: Vec::new() };
+    change.label = state.identity_store.vault_get(&entry).unwrap().unwrap().label;
+    crate::backend::vault::update(&state.identity_store, change).unwrap();
+    let err = resolve_with(&state, &drone, &entry, "https://example.com", Asking::Never).await.err().expect("not sent");
+    assert!(err.contains("saved for api.github.com") && err.contains("can't ask"), "{err}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != actor(&drone)), "no card");
+}

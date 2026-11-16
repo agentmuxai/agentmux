@@ -22,11 +22,11 @@ lan-ports = { max-threads = 1 }
 cgroups = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'package(agentmux-srv) & test(/^backend::lan::ports::/)'
+filter = 'package(agentmux-srv-core) & test(/^backend::lan::ports::/)'
 test-group = 'lan-ports'
 
 [[profile.default.overrides]]
-filter = 'package(agentmux-srv) & test(/^backend::process_tracker::cgroup_linux::/)'
+filter = 'package(agentmux-srv-core) & test(/^backend::process_tracker::cgroup_linux::/)'
 test-group = 'cgroups'
 
 # The PR lane (`cargo nextest run --profile ci`).

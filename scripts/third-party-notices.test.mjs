@@ -21,6 +21,7 @@ import {
   selectLicenceFiles,
   shikiAssetsFromModules,
   shikiNotices,
+  thirdPartyNotices,
 } from "./third-party-notices.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -198,5 +199,40 @@ describe("packages on disk", () => {
   it("reports a package it can't cover", () => {
     const { problem } = packageNoticeText(REPO, { name: "x", license: "SSPL-1.0", authors: [], dir: tmp() });
     expect(problem).toMatch(/SSPL-1.0/);
+  });
+});
+
+describe("the plugin without the Rust crates (the PR check's build)", () => {
+  // A bundle with no modules: the notices of nothing, which still names what it could not list.
+  const run = (strict) => {
+    const said = { warned: [], failed: [], emitted: [] };
+    const ctx = {
+      warn: (msg) => said.warned.push(msg),
+      error: (msg) => {
+        said.failed.push(msg);
+        throw new Error(msg);
+      },
+      emitFile: (file) => said.emitted.push(file.fileName),
+    };
+    const plugin = thirdPartyNotices({ repoRoot: REPO, strict, rust: false });
+    try {
+      plugin.generateBundle.call(ctx, {}, {});
+    } catch {
+      // A strict build stops at `error`.
+    }
+    return said;
+  };
+
+  it("writes the notices with a warning, and never asks cargo", () => {
+    const said = run(false);
+    expect(said.failed).toEqual([]);
+    expect(said.warned.join("\n")).toContain("Rust crates not listed: skipped");
+    expect(said.emitted).toContain("licenses/THIRD_PARTY_NOTICES.txt");
+  });
+
+  it("fails a release build: the crates' notices are not optional there", () => {
+    const said = run(true);
+    expect(said.failed.join("\n")).toContain("Rust crates not listed: skipped");
+    expect(said.emitted).toEqual([]);
   });
 });

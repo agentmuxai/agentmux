@@ -17,6 +17,8 @@ pub(crate) fn chosen_container_image(requested: Option<&str>, agent_type: &str, 
                 Err(format!("container_image must be {DEFAULT_AGENT_IMAGE} or {DEFAULT_DEVELOPER_IMAGE}, not {image:?}"))
             }
         }
+        // The retired image is never carried to a new agent: empty is this version's base image (#47725).
+        _ if crate::backend::container::image::is_legacy_agent_image(template_image) => Ok(String::new()),
         _ => Ok(template_image.to_string()),
     }
 }
@@ -32,6 +34,14 @@ mod tests {
         assert_eq!(chosen_container_image(Some(&format!(" {DEFAULT_AGENT_IMAGE} ")), "container", "x/y:1").unwrap(), DEFAULT_AGENT_IMAGE);
         assert!(chosen_container_image(Some("my/own:1"), "container", "").unwrap_err().contains("container_image must be"));
         assert!(chosen_container_image(Some("ghcr.io/agentmuxai/agent-base:0.59.1"), "container", "").is_err(), "a pinned version is set on the definition, not here");
+    }
+
+    #[test]
+    fn the_retired_image_is_not_carried_from_the_source_to_a_new_agent() {
+        let legacy = "ghcr.io/agentmuxai/agent-claude:latest";
+        assert_eq!(chosen_container_image(None, "container", legacy).unwrap(), "");
+        assert_eq!(chosen_container_image(None, "host", legacy).unwrap(), "");
+        assert_eq!(chosen_container_image(Some(DEFAULT_DEVELOPER_IMAGE), "container", legacy).unwrap(), DEFAULT_DEVELOPER_IMAGE);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Connectors → Remotes' commands (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6).
-// Their types are generated from crates/srv/src/backend/rpc_types/remotes.rs.
+// Their types are generated from crates/srv-core/src/backend/rpc_types/remotes.rs.
 
 export type { RemoteHelper } from "@/types/rpc/RemoteHelper";
 export type { RemotePlatform } from "@/types/rpc/RemotePlatform";

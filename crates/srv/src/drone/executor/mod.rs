@@ -9,4 +9,4 @@ pub mod schedule;
 mod scheduler;
 mod writers;
 
-pub use engine::{cancel_run, resume_drone, run_drone, RunEvent};
+pub use engine::{cancel_run, replay_drone, resume_drone, run_drone, RunEvent};

@@ -5,7 +5,7 @@
  *  action does, and srv's announcements count only in the windows they name
  *  (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2). */
 
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The pane's block object, which the registry watches: present until deleted.
@@ -27,8 +27,10 @@ import {
     endWaitingForYou,
     isAgentWaitingForYou,
     isWaitingForYou,
+    onWaitingEnded,
     startWaitingForYou,
     type UserAttention,
+    waitingApps,
     waitingPanes,
 } from "./waiting-for-you";
 
@@ -122,8 +124,8 @@ describe("waiting for you", () => {
             startWaitingForYou("b2", "permission", "Allow Bash?", { what: "asks to approve a Bash call" });
             startWaitingForYou("b2", "srv:k", "x");
             expect(waitingPanes()).toEqual([
-                { blockId: "b1", what: "asks you a question", since: 1000 },
-                { blockId: "b2", what: "asks to approve a Bash call", since: 2000 },
+                { blockId: "b1", what: "asks you a question", since: 1000, kinds: ["own"] },
+                { blockId: "b2", what: "asks to approve a Bash call", since: 2000, kinds: ["own"] },
             ]);
             endWaitingForYou("b1", "question");
             expect(waitingPanes().map((p) => p.blockId)).toEqual(["b2"]);
@@ -144,5 +146,73 @@ describe("waiting for you", () => {
             ["b3", "asks to install a widget"],
             ["b4", "asks you to confirm"],
         ]);
+    });
+});
+
+describe("what the status bar's summary reads of the registry", () => {
+    it("keeps the kind srv announced a wait as, and lists a request with no pane apart from the panes", () => {
+        __resetWaitingForYou();
+        applyUserAttention({ key: "v1", block_id: "b7", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        applyUserAttention({ key: "c1", block_id: "", kind: "consent", text: "SSH?", window_ids: [], since_ms: 0, active: true }, "w1");
+        expect(waitingPanes().map((p) => [p.blockId, p.kinds])).toEqual([["b7", ["vault"]]]);
+        expect(waitingApps().map((a) => [a.key, a.kind, a.what])).toEqual([["c1", "consent", "asks for your consent"]]);
+        applyUserAttention({ key: "c1", block_id: "", kind: "consent", text: "SSH?", window_ids: [], since_ms: 0, active: false }, "w1");
+        expect(waitingApps()).toEqual([]);
+    });
+
+    it("says what an upgrade ask and a desktop ask want, not just that they need you", () => {
+        __resetWaitingForYou();
+        applyUserAttention({ key: "u1", block_id: "", kind: "upgrade", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        applyUserAttention({ key: "d1", block_id: "", kind: "desktop", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        expect(waitingApps().map((a) => a.what)).toEqual(["asks to upgrade AgentMux", "asks to use your desktop"]);
+    });
+
+    it("lists an agent's own question beside a Vault wait, so the pane is not taken for a Vault-only one", () => {
+        __resetWaitingForYou();
+        startWaitingForYou("b9", "question", "Which branch?");
+        applyUserAttention({ key: "v9", block_id: "b9", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        expect(waitingPanes()[0].kinds?.slice().sort()).toEqual(["own", "vault"]);
+    });
+
+    it("lists the pane again, with its remaining kinds, when one of two waits ends", () => {
+        __resetWaitingForYou();
+        startWaitingForYou("b8", "question", "Which branch?");
+        applyUserAttention({ key: "v8", block_id: "b8", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        const seen: string[][] = [];
+        createRoot((dispose) => {
+            createEffect(() => seen.push(waitingPanes()[0]?.kinds?.slice().sort() ?? []));
+            return dispose;
+        });
+        endWaitingForYou("b8", "question");
+        expect(seen[seen.length - 1]).toEqual(["vault"]);
+    });
+});
+
+describe("the end of a pane's last wait", () => {
+    it("tells its listeners what it was, how long it had waited and how it ended, once, when the last wait ends", () => {
+        const ended: unknown[] = [];
+        const stop = onWaitingEnded((e) => ended.push(e));
+        startWaitingForYou("b1", "permission", "Allow Bash?");
+        startWaitingForYou("b1", "srv:k1", "Allow?", { what: "asks you to confirm", kind: "confirm" });
+        endWaitingForYou("b1", "srv:k1", "submitted");
+        expect(ended, "one wait is left, so the pane still waits").toEqual([]);
+        endWaitingForYou("b1", "permission", "closed");
+        expect(ended).toEqual([
+            { blockId: "b1", what: "asks to approve a Bash call", kind: "own", since: expect.any(Number), reason: "closed" },
+        ]);
+        stop();
+        startWaitingForYou("b2", "question", "Which?");
+        endWaitingForYou("b2", "question");
+        expect(ended, "a listener that stopped hears nothing").toHaveLength(1);
+    });
+
+    it("names a request with no pane by the kind srv announced it as", () => {
+        const ended: { blockId: string; kind: string; reason: string }[] = [];
+        const stop = onWaitingEnded((e) => ended.push(e));
+        applyUserAttention({ key: "k9", kind: "consent", active: true, text: "Agent access", block_id: "", window_ids: [] } as UserAttention, "w1");
+        applyUserAttention({ key: "k9", kind: "consent", active: false, text: "", block_id: "", window_ids: [] } as UserAttention, "w1");
+        expect(ended).toMatchObject([{ kind: "consent", reason: "submitted" }]);
+        expect(ended[0].blockId).toContain("k9");
+        stop();
     });
 });

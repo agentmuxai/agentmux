@@ -259,7 +259,7 @@ function reloadBudgetExhausted(): boolean {
     return getReloadCount() >= MAX_RELOADS;
 }
 
-function mountRoot(): HTMLElement {
+export function mountRoot(): HTMLElement {
     document.body.style.visibility = "visible";
     document.body.style.opacity = "1";
     document.body.classList.remove("is-transparent");
@@ -273,7 +273,7 @@ function mountRoot(): HTMLElement {
     return main;
 }
 
-const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+export const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
 /** Transient state shown while an auto-reload is pending. */
 function showReconnecting(attempt: number, max: number): void {

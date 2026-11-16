@@ -9,8 +9,13 @@
  * names, so a tile's kind is guessed from the extension.
  */
 
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
+import clsx from "clsx";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import { AttachmentLightbox, type LightboxItem } from "./AttachmentLightbox";
 import { AttachmentTile, type TileModel } from "./AttachmentTile";
 import { attachmentNoun, fileKind } from "./file-kind";
@@ -24,6 +29,46 @@ export interface StripAttachment {
     image?: boolean;
 }
 
+/**
+ * The transcript only keeps ids and names; the details (the real kind, a PDF's page count) are fetched once per id,
+ * as the preview does. A signal, not a resource, so a load never suspends the pane's view (#47406).
+ */
+function useAttachmentInfos(attachments: () => StripAttachment[]): () => Record<string, AttachmentInfo> {
+    const [infos, setInfos] = createSignal<Record<string, AttachmentInfo>>({});
+    const asked = new Set<string>();
+    createEffect(() => {
+        const ids = attachments()
+            .map((a) => a.id)
+            .filter((id): id is string => !!id && !untrack(() => asked.has(id)));
+        if (!ids.length) return;
+        for (const id of ids) asked.add(id);
+        // Started from a promise, so a call that throws (no RPC client yet) is a failed fetch, never a broken pane.
+        Promise.resolve()
+            .then(() => RpcApi.AttachmentsInfoCommand(TabRpcClient, { ids }))
+            .then(
+                (r) => setInfos((prev) => ({ ...prev, ...Object.fromEntries(r.items.map((i) => [i.id, i])) })),
+                () => ids.forEach((id) => asked.delete(id))
+            );
+    });
+    return infos;
+}
+
+/** The last tile of the row: "+N" while the strip is folded, a "−" to fold it again once it is open. */
+function MoreTile(props: { expanded: boolean; overflow: number; label: string; onToggle: () => void }) {
+    return (
+        <li class="agent-attachment-tile agent-attachment-tile--more">
+            <Button
+                class="agent-attachment-tile__main"
+                aria-label={props.expanded ? t("attachments.strip.fewer") : props.label}
+                aria-expanded={props.expanded}
+                onClick={props.onToggle}
+            >
+                <span class="more">{props.expanded ? "−" : `+${props.overflow}`}</span>
+            </Button>
+        </li>
+    );
+}
+
 export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
     const [width, setWidth] = createSignal(600);
     const [expanded, setExpanded] = createSignal(false);
@@ -31,32 +76,45 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
     let ro: ResizeObserver | undefined;
     onCleanup(() => ro?.disconnect());
 
+    const infos = useAttachmentInfos(() => props.attachments);
     const tiles = createMemo<TileModel[]>(() =>
-        props.attachments.map((a, i) => ({
-            key: `${i}:${a.id ?? a.name}`,
-            number: i + 1,
-            name: a.name,
-            id: a.id,
-            status: a.id ? "ready" : "error",
-            error: a.id ? undefined : "No longer available",
-            kind: fileKind(undefined, a.name),
-        })),
+        props.attachments.map((a, i) => {
+            const info = a.id ? infos()[a.id] : undefined;
+            return {
+                key: `${i}:${a.id ?? a.name}`,
+                number: i + 1,
+                name: a.name,
+                id: a.id,
+                status: a.id ? "ready" : "error",
+                error: a.id ? undefined : "No longer available",
+                kind: fileKind(info?.kind, a.name),
+                pageCount: info?.page_count,
+            };
+        })
     );
     const noun = (n: number) =>
         attachmentNoun(
             n,
-            tiles().map((t) => t.kind),
+            tiles().map((t) => t.kind)
         );
     // By value: a width change that fits the same number of tiles leaves `shown` and the "+N" tile alone.
     const layout = createMemo(() => trayLayout(tiles().length, width()), undefined, {
         equals: (a, b) => a.visible === b.visible && a.overflow === b.overflow,
     });
+    // The overflow is a property of the width and the count, not of `expanded`: once it is gone the strip folds by itself.
+    createEffect(() => {
+        if (expanded() && layout().overflow === 0) setExpanded(false);
+    });
     const shown = createMemo(() => (expanded() ? tiles() : tiles().slice(0, layout().visible)));
+    // <For> keys on identity and the models are rebuilt when the details arrive, so iterate the keys and look each
+    // model up, or every tile would mount again (the tray does the same).
+    const shownKeys = createMemo(() => shown().map((t) => t.key));
+    const tileByKey = createMemo(() => new Map(tiles().map((t) => [t.key, t])));
     const items = (): LightboxItem[] =>
         tiles().map((t) => ({ key: t.key, number: t.number, name: t.name, id: t.id, error: t.error }));
 
     return (
-        <div class="agent-attachment-strip">
+        <div class={clsx("agent-attachment-strip", { "is-expanded": expanded() })}>
             <ul
                 class="agent-attachment-tray__tiles"
                 aria-label={`${tiles().length} attached ${noun(tiles().length)}`}
@@ -72,19 +130,21 @@ export function AttachmentStrip(props: { attachments: StripAttachment[] }) {
                     ro.observe(el);
                 }}
             >
-                <For each={shown()}>
-                    {(tile) => <AttachmentTile tile={tile} onOpen={() => setOpen(tile.number - 1)} />}
+                <For each={shownKeys()}>
+                    {(key) => (
+                        <AttachmentTile
+                            tile={tileByKey().get(key)!}
+                            onOpen={() => setOpen(tileByKey().get(key)!.number - 1)}
+                        />
+                    )}
                 </For>
-                <Show when={!expanded() && layout().overflow > 0}>
-                    <li class="agent-attachment-tile agent-attachment-tile--more">
-                        <Button
-                            class="agent-attachment-tile__main"
-                            aria-label={`Show all ${tiles().length} ${noun(tiles().length)}`}
-                            onClick={() => setExpanded(true)}
-                        >
-                            <span class="more">+{layout().overflow}</span>
-                        </Button>
-                    </li>
+                <Show when={layout().overflow > 0}>
+                    <MoreTile
+                        expanded={expanded()}
+                        overflow={layout().overflow}
+                        label={`Show all ${tiles().length} ${noun(tiles().length)}`}
+                        onToggle={() => setExpanded(!expanded())}
+                    />
                 </Show>
             </ul>
             <Show when={open() != null}>

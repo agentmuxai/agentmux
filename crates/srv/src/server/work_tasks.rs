@@ -81,6 +81,39 @@ pub(crate) fn clean(text: &str) -> String {
     }
 }
 
+/// The most characters a task's payload (the brief its holder is handed) holds.
+pub(crate) const MAX_PAYLOAD: usize = 100_000;
+
+/// Why a payload is refused when it is longer than [`MAX_PAYLOAD`]: said, never cut, because an agent handed
+/// half a brief works from half.
+pub(crate) fn payload_too_long(text: &str) -> Option<String> {
+    let n = text.trim().chars().count();
+    (n > MAX_PAYLOAD).then(|| format!("the payload is {n} characters and a task holds at most {MAX_PAYLOAD}: put the rest in a file and name its full path in the payload"))
+}
+
+/// Why a payload can't be filed: it is empty, or longer than [`MAX_PAYLOAD`].
+pub(crate) fn payload_problem(text: &str) -> Option<String> {
+    if text.trim().is_empty() {
+        return Some("payload is required".into());
+    }
+    payload_too_long(text)
+}
+
+/// A payload as stored: sanitized and whole, or the reason it is refused.
+pub(crate) fn payload_text(text: &str) -> Result<String, String> {
+    match payload_too_long(text) {
+        Some(why) => Err(why),
+        None => Ok(crate::backend::reactive::sanitize::sanitize_text(text.trim())),
+    }
+}
+
+/// Why agent text is refused when `clean` would cut it: a note, a question or a result longer than [`MAX_TEXT`]
+/// is said so, not kept cut.
+pub(crate) fn text_too_long(what: &str, text: &str) -> Option<String> {
+    let n = crate::backend::reactive::sanitize::sanitize_text(text.trim()).chars().count();
+    (n > MAX_TEXT).then(|| format!("the {what} is {n} characters and a card keeps at most {MAX_TEXT}: shorten it, or put the detail in a file and link it. Nothing was changed."))
+}
+
 /// One line of history; a failure to write it is logged, never the caller's.
 pub(super) fn record(state: &AppState, work_id: &str, actor: &str, actor_kind: &str, kind: &str, from: &str, to: &str, body: &str) {
     let ev = WorkEvent {
@@ -432,6 +465,9 @@ pub(super) async fn handle_work_update(
     Json(req): Json<UpdateRequest>,
 ) -> (StatusCode, Json<Value>) {
     let caller = caller.as_deref();
+    if let Some(why) = req.note.as_deref().and_then(|n| text_too_long("note", n)) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
     let id = resolve_id(&state, &id);
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else { return conflict() };
     if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
@@ -489,6 +525,9 @@ pub(super) async fn handle_work_ask(
     Json(req): Json<UpdateRequest>,
 ) -> (StatusCode, Json<Value>) {
     let caller = caller.as_deref();
+    if let Some(why) = text_too_long("question", &req.text) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
     let question = clean(&req.text);
     if question.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "the question is required" })));
@@ -518,6 +557,9 @@ pub(super) async fn handle_work_submit(
     Json(req): Json<UpdateRequest>,
 ) -> (StatusCode, Json<Value>) {
     let caller = caller.as_deref();
+    if let Some(why) = text_too_long("result", &req.text) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
     let result = clean(&req.text);
     if result.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "result is required: what was done, with links" })));
@@ -575,6 +617,35 @@ pub(super) fn ref_of(state: &AppState, work_id: &str) -> Option<(String, String)
 pub(super) fn viewer(state: &AppState, caller: Option<&Caller>) -> Option<(String, String)> {
     let reg = caller_reg(state, caller)?;
     Some((reg.agent_id.clone(), reg.uid.clone().unwrap_or_default()))
+}
+
+/// The most history lines `GET /agentmux/work/:id` returns.
+const GET_HISTORY: usize = 30;
+
+/// `GET /agentmux/work/:id` (`Tasks` `get`): one task whole, for any agent that sees its board: the instruction
+/// it was filed with, who it is for and who holds it, its card (links, note, question, checklist, what it
+/// starts after) and its last history lines. A task on a board the caller can't see is refused like one that
+/// doesn't exist.
+pub(super) async fn handle_work_get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
+) -> (StatusCode, Json<Value>) {
+    let none = || (StatusCode::NOT_FOUND, Json(json!({ "error": "no such task" })));
+    let id = resolve_id(&state, &id);
+    if !sees_task(&state, caller.as_deref(), &id) {
+        return none();
+    }
+    // A card is made only for a task that exists: `work_card_ensure` takes the next number on the board.
+    if !matches!(state.work_store.work_queue_get(&id), Ok(Some(_))) {
+        return none();
+    }
+    let _ = state.work_store.work_card_ensure(&id, now_ms());
+    let Ok(Some(task)) = state.work_store.work_board_get(&id) else { return none() };
+    let mut v = serde_json::to_value(&task).unwrap_or_default();
+    let history = state.work_store.work_events(&task.item.id, GET_HISTORY).unwrap_or_default();
+    v["history"] = serde_json::to_value(history).unwrap_or_default();
+    (StatusCode::OK, Json(v))
 }
 
 /// Whether the caller may see the board a task is on (a call with no token sees every board). A task

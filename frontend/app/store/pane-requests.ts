@@ -53,6 +53,8 @@ export interface PaneRequestOptions<P extends object> {
     text?: string;
     /** What it wants in a few words, led by a verb ("asks to use a secret"), for the toast and the list. */
     what?: string;
+    /** The kind srv would announce it as (`browser`, `consent`…), for the status bar's summary to sort it into a part. */
+    kind?: string;
     /** Its line in the dock's "N more" list while another is shown. */
     summary?: string;
     /** Whether something waits on the person for it (default true). */
@@ -128,7 +130,7 @@ export const paneRequests = {
         };
         setAll((prev) => [...prev, r]);
         untrack(() => {
-            if (r.waits) startWaitingForYou(blockId, waitKey(r), opts.text, { what: opts.what });
+            if (r.waits) startWaitingForYou(blockId, waitKey(r), opts.text, { what: opts.what, kind: opts.kind });
             watchPane(r, opts.onGone);
         });
         return { close: () => void remove(r.id, "submitted") };

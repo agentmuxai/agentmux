@@ -138,8 +138,16 @@ fn set_meta(state: &AppState, block_id: &str, value: Value) {
 /// The person chose entry `entry` from pane `block_id`'s "Sign in as" menu: type
 /// it into the page, if the page still shows a form for the site it is saved for.
 pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Result<(), String> {
+    fill_picked(state, block_id, entry, false).await
+}
+
+/// [`fill`], for a pick made with the keyboard: `keep_focus` when it was Tab, which moved focus on before the
+/// fill ran, so the host gives focus back to where it went once the fields are typed.
+pub(crate) async fn fill_picked(state: &AppState, block_id: &str, entry: &str, keep_focus: bool) -> Result<(), String> {
+    // A pick closes the pane's list, by click or by key.
+    super::browser_signin_list::close(state, block_id);
     let profile = super::browser_signin_offer::profile_of(state, block_id).ok_or("this tab keeps no sign-ins (Incognito)")?;
-    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None, "").await.map(|_| ())
+    fill_as(state, block_id, entry, &profile, crate::backend::vault::PERSON, None, "", keep_focus).await.map(|_| ())
 }
 
 /// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
@@ -148,7 +156,8 @@ pub(crate) async fn fill(state: &AppState, block_id: &str, entry: &str) -> Resul
 /// `shown`: for an agent's sign-in, the entry's `created_at` and site the person
 /// approved. Nothing is typed if the entry was made again with its id, or its
 /// site was edited, while they were asked.
-pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>, reason: &str) -> Result<(String, bool), String> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>, reason: &str, keep_focus: bool) -> Result<(String, bool), String> {
     let origins = form_origins(block_id);
     let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
     let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
@@ -169,7 +178,7 @@ pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profi
     if !fillable(&origin) {
         return Err(format!("{origin} isn't https, so the sign-in wasn't typed"));
     }
-    let body = json!({ "block_id": block_id, "origin": origin, "username": username, "password": password.as_str() });
+    let body = json!({ "block_id": block_id, "origin": origin, "username": username, "password": password.as_str(), "keep_focus": keep_focus });
     let typed = super::ui_handlers::proxy_value(state, "signin_fill", body, HOST_WAIT).await;
     drop(password);
     let outcome = if typed.is_ok() { "done" } else { "failed" };

@@ -3,7 +3,7 @@
 //
 // What the Vault can hold, for the pane's forms
 // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.2).
-// srv's catalog (crates/srv/src/backend/vault/kinds.rs) is the source: it
+// srv's catalog (crates/srv-core/src/backend/vault/kinds.rs) is the source: it
 // refuses a part or field a kind doesn't have, and vault-kinds.test.ts checks
 // this list names the same kinds, parts and fields.
 

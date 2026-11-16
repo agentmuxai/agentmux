@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use super::act::{fail, unauthorized};
 use super::cdp::CdpSession;
-use super::signin_fill::{call_on_object, frames_for, object, type_into, VISIBLE};
+use super::signin_fill::{call_on_object, focused_element, frames_for, give_back_focus, object, type_into, VISIBLE};
 use super::types::ApiResponse;
 use crate::state::AppState;
 
@@ -37,6 +37,10 @@ pub struct SignupFillReq {
     pub field: String,
     /// Held only for the length of this request.
     pub password: String,
+    /// The pick was made with Tab (or Shift+Tab), which moved focus on before this ran: give focus back to where
+    /// it went once the fields are filled.
+    #[serde(default)]
+    pub keep_focus: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +123,10 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    // srv closed the list as it started this: the page's listener is told, so its keys are the page's again.
+    if let Some(id) = cdp.browser_id() {
+        crate::browser_pane::signin_list::clear(id).await;
+    }
     let result = fill(&mut cdp, &req).await;
     let _ = cdp.close().await;
     match result {
@@ -138,10 +146,17 @@ async fn fill(root: &mut CdpSession, req: &SignupFillReq) -> Result<SignupFillDa
             let Some(field) = object(&mut cdp, ctx, &find_new_password(&req.field)).await? else { continue };
             // Found before the first value goes in: setting it runs the page's handlers.
             let confirm = call_on_object(&mut cdp, &field, &confirm_for()).await?;
+            let focused = if req.keep_focus { focused_element(&mut cdp, ctx).await } else { None };
             type_into(&mut cdp, &field, &req.password, &req.origin, "password").await?;
-            let Some(confirm) = confirm else { return Ok(SignupFillData { fields: 1 }) };
-            type_into(&mut cdp, &confirm, &req.password, &req.origin, "password").await?;
-            return Ok(SignupFillData { fields: 2 });
+            let mut fields = 1;
+            if let Some(confirm) = confirm {
+                type_into(&mut cdp, &confirm, &req.password, &req.origin, "password").await?;
+                fields = 2;
+            }
+            if let Some(focused) = focused {
+                give_back_focus(&mut cdp, &focused).await;
+            }
+            return Ok(SignupFillData { fields });
         }
     }
     Err(format!("the field for a new password the offer was for isn't on {} now, so nothing was filled", req.origin))

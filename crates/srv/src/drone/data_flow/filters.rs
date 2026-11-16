@@ -12,6 +12,8 @@
 //!   `lower`              lowercase text
 //!   `trunc:N`            the first N characters of text
 //!   `default:x`          `x` when the value is missing, null or empty
+//!   `jsonstr`            text made safe to sit inside a JSON string (`"body": "{{a.text | jsonstr}}"`): quotes, backslashes and
+//!                        line breaks escaped, so text from outside cannot close the string and add fields of its own
 //!
 //! A step that is not one of these, or has an argument it cannot read, leaves the whole token unresolved and visible, as
 //! an unknown reference does. Every step is bounded: a count is at most `MAX_COUNT`, parsed text at most `MAX_JSON`
@@ -61,10 +63,17 @@ pub fn apply(value: Option<Value>, steps: &str) -> Option<Value> {
                 value.map(|v| cut(v, n, false))
             }
             ("json", Some(path)) => value.and_then(|v| json_at(v, path)),
+            ("jsonstr", None) => value.map(|v| Value::String(json_escaped(&text_of(&v)))),
             _ => return None,
         };
     }
     value
+}
+
+/// `text` as it is written between the quotes of a JSON string.
+fn json_escaped(text: &str) -> String {
+    let quoted = Value::String(text.to_string()).to_string();
+    quoted[1..quoted.len() - 1].to_string()
 }
 
 fn is_empty(v: &Value) -> bool {
@@ -174,6 +183,21 @@ mod tests {
         assert_eq!(run(json!("ÀBC"), "lower"), Some(json!("àbc")));
         assert_eq!(run(json!("héllo wörld"), "trunc:5"), Some(json!("héllo")));
         assert_eq!(run(json!(1234), "trunc:2"), Some(json!("12")));
+    }
+
+    #[test]
+    fn jsonstr_keeps_text_inside_its_json_string() {
+        assert_eq!(run(json!("a\"b\\c\nd\te"), "jsonstr"), Some(json!(r#"a\"b\\c\nd\te"#)));
+        assert_eq!(run(json!("héllo ✓"), "jsonstr"), Some(json!("héllo ✓")), "other characters are left as they are");
+        assert_eq!(apply(None, "jsonstr"), None);
+        // Text that tries to close the string and add a field stays one string.
+        let hostile = "x\", \"draft\": true, \"y\": \"";
+        let escaped = run(json!(hostile), "jsonstr").unwrap();
+        let body = format!(r#"{{"body": "{}"}}"#, escaped.as_str().unwrap());
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed, json!({ "body": hostile }));
+        assert_eq!(parsed.as_object().unwrap().len(), 1);
+        assert_eq!(run(json!("x"), "jsonstr:1"), None, "it takes no argument");
     }
 
     #[test]

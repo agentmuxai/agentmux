@@ -149,6 +149,7 @@ import type { CommandBrowserProfileDeleteData } from "@/types/rpc/CommandBrowser
 import type { CommandBrowserProfileUpdateData } from "@/types/rpc/CommandBrowserProfileUpdateData";
 import type { CommandBrowserProfilesListData } from "@/types/rpc/CommandBrowserProfilesListData";
 import type { CommandBrowserSigninFillData } from "@/types/rpc/CommandBrowserSigninFillData";
+import type { CommandBrowserSigninListCloseData } from "@/types/rpc/CommandBrowserSigninListCloseData";
 import type { CommandBrowserSigninOfferAnswerData } from "@/types/rpc/CommandBrowserSigninOfferAnswerData";
 import type { CommandBrowserSigninStopData } from "@/types/rpc/CommandBrowserSigninStopData";
 import type { CommandBrowserSignupPasswordData } from "@/types/rpc/CommandBrowserSignupPasswordData";
@@ -499,6 +500,8 @@ import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResul
 import type { PaneConfirmDecideResult } from "@/types/rpc/PaneConfirmDecideResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PayloadSchemaReq } from "@/types/rpc/PayloadSchemaReq";
+import type { PayloadSchemaResp } from "@/types/rpc/PayloadSchemaResp";
 import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
@@ -514,6 +517,8 @@ import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
+import type { ReplayRunReq } from "@/types/rpc/ReplayRunReq";
+import type { ReplayRunResp } from "@/types/rpc/ReplayRunResp";
 import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
 import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
@@ -1292,6 +1297,10 @@ export const GeneratedApi = {
   SigninStopCommand(client: RpcClient, data: CommandBrowserSigninStopData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("browser.signin_stop", data, opts);
   },
+  // command "browser.signin_list_close"
+  SigninListCloseCommand(client: RpcClient, data: CommandBrowserSigninListCloseData, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("browser.signin_list_close", data, opts);
+  },
   // command "browser.signup_password"
   SignupPasswordCommand(client: RpcClient, data: CommandBrowserSignupPasswordData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("browser.signup_password", data, opts);
@@ -1920,6 +1929,10 @@ export const GeneratedApi = {
   ListBundlesCommand(client: RpcClient, data?: CommandListBundlesData, opts?: RpcOpts): Promise<Array<Bundle>> {
     return client.rpcCall("listmemories", data ?? {}, opts);
   },
+  // command "getdronepayloadschema"
+  GetDronePayloadSchemaCommand(client: RpcClient, data: PayloadSchemaReq, opts?: RpcOpts): Promise<PayloadSchemaResp> {
+    return client.rpcCall("getdronepayloadschema", data, opts);
+  },
   // command "listdroneruns"
   ListDroneRunsCommand(client: RpcClient, data: ListRunsReq, opts?: RpcOpts): Promise<Array<DroneRun>> {
     return client.rpcCall("listdroneruns", data, opts);
@@ -2481,6 +2494,10 @@ export const GeneratedApi = {
   // command "resumedronewait"
   ResumeDroneWaitCommand(client: RpcClient, data: ResumeWaitReq, opts?: RpcOpts): Promise<ResumeWaitResp> {
     return client.rpcCall("resumedronewait", data, opts);
+  },
+  // command "replaydronerun"
+  ReplayDroneRunCommand(client: RpcClient, data: ReplayRunReq, opts?: RpcOpts): Promise<ReplayRunResp> {
+    return client.rpcCall("replaydronerun", data, opts);
   },
   // command "layout.save"
   SaveLayoutCommand(client: RpcClient, data: CommandLayoutSaveData, opts?: RpcOpts): Promise<LayoutSaveResult> {

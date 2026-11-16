@@ -15,6 +15,7 @@
 //! Nothing here prints a key, a code or a token.
 
 mod doctor;
+mod logs;
 mod process;
 mod service;
 mod settings;
@@ -138,9 +139,12 @@ enum Cmd {
     Logout,
     /// The server's log.
     Logs {
-        /// How many of the last lines to show.
-        #[arg(long, default_value_t = 50)]
-        lines: usize,
+        /// How many of the last lines to show (50 when `--since` is not given).
+        #[arg(long)]
+        lines: Option<usize>,
+        /// Only the lines written in the last while: a number and s, m, h or d (`30m`, `1h`).
+        #[arg(long, value_name = "AGE")]
+        since: Option<String>,
         /// Keep showing new lines until interrupted.
         #[arg(short, long)]
         follow: bool,
@@ -186,7 +190,13 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
-        Cmd::Logs { lines, follow } => cmd_logs(&paths, lines, follow),
+        Cmd::Logs { lines, since, follow } => match since.as_deref().map(logs::parse_age).transpose() {
+            Ok(age) => cmd_logs(&paths, lines, age, follow),
+            Err(e) => {
+                warn!("logs --since: {e}");
+                2
+            }
+        },
         Cmd::Version { .. } => unreachable!("answered above"),
     }
 }
@@ -337,6 +347,7 @@ fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if let Err(code) = prepare_data(paths, &srv) {
         return code;
     }
+    state::clear_blocked(&paths.instance_dir);
     let record = ServerState {
         pid: std::process::id(),
         version: VERSION.to_string(),
@@ -385,9 +396,27 @@ fn prepare_data(paths: &DataPaths, srv: &Path) -> Result<(), i32> {
         .status();
     match status {
         Ok(s) if s.success() => Ok(()),
+        Ok(s) if s.code() == Some(agentmux_common::srv_stderr::SHARED_FOLDER_HELD_EXIT) => Err(refused_beside_another(paths)),
         Ok(_) => Err(fail("preparing this version's data failed; nothing was started (see `agentmux logs`)")),
         Err(e) => Err(fail(&format!("cannot run {}: {e}", srv.display()))),
     }
+}
+
+/// Another AgentMux of a different version holds the shared folder, so this version's data cannot be prepared and the
+/// server does not start. Say so, and remember it (`blocked.json`) for `start`, `setup`, `status` and `doctor`. The exit
+/// code is 0: a service restarts a server that exits non-zero, and this refusal does not clear until that AgentMux is
+/// closed, so restarting would only fill the log every few seconds. The next `agentmux start`, or the next login, tries again.
+fn refused_beside_another(paths: &DataPaths) -> i32 {
+    let held = std::fs::read_to_string(state::log_path(&paths.instance_dir))
+        .ok()
+        .and_then(|log| state::last_lines(&log, 40).iter().rev().find_map(|l| agentmux_common::srv_stderr::parse_shared_folder_held_line(l)));
+    let (owner, reason) = held.unwrap_or_else(|| ("another AgentMux".to_string(), String::new()));
+    let blocked = state::Blocked { owner, reason, version: VERSION.to_string(), since_unix: agentmux_common::time::now_secs_u64() };
+    if let Err(e) = state::write_blocked(&paths.instance_dir, &blocked) {
+        warn!("cannot write the note about this ({e})");
+    }
+    warn!("{}", blocked.sentence());
+    0
 }
 
 /// Replace this process with the server, so the server keeps this process id and whoever supervises
@@ -418,6 +447,8 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
         println!("AgentMux is already running: {}", s.url());
         return 0;
     }
+    // Any refusal found while waiting below is this start's own.
+    state::clear_blocked(&paths.instance_dir);
     if let Some(home) = user_home().ok().filter(|h| service::installed(h, &paths.channel)) {
         return match service::control(&home, &paths.channel, "start") {
             Ok(()) => wait_for_server(paths, None),
@@ -482,6 +513,10 @@ fn wait_for_server(paths: &DataPaths, mut child: Option<std::process::Child>) ->
                 tell!("Sign in with: `agentmux open`");
                 return 0;
             }
+        }
+        if let Some(blocked) = state::read_blocked(&paths.instance_dir) {
+            warn!("{}", blocked.sentence());
+            return 3;
         }
         if let Some(Ok(Some(status))) = child.as_mut().map(std::process::Child::try_wait) {
             warn!("the server stopped while starting ({status}). The end of its log:");
@@ -561,6 +596,8 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let record = running(paths);
     let healthy = record.as_ref().is_some_and(|s| process::health_ok(s.web_port));
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
+    let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
+    let service = user_home().is_ok_and(|h| service::installed(&h, &paths.channel));
     if json {
         println!(
             "{}",
@@ -574,20 +611,29 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "url": record.as_ref().map(ServerState::url),
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
-                "service": user_home().is_ok_and(|h| service::installed(&h, &paths.channel)),
+                "service": service,
+                "blocked": blocked.as_ref().map(|b| serde_json::json!({ "owner": b.owner, "reason": b.reason, "since_unix": b.since_unix, "what_to_do": b.sentence() })),
             })
         );
     } else if let Some(s) = &record {
         println!("AgentMux {} is {} (pid {}, channel {}, up {})", s.version, if healthy { "running" } else { "running but not answering yet" }, s.pid, s.channel, human_duration(uptime.unwrap_or(0)));
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
+        println!("  service: {}", service_line(service));
         if s.version != VERSION {
             tell!("  installed version is {VERSION}: `agentmux restart` runs it");
         }
+    } else if let Some(b) = &blocked {
+        tell!("AgentMux is not running (channel {}). {}", paths.channel, b.sentence());
     } else {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
+}
+
+/// What `status` says of the service: whether the server starts by itself at every login.
+fn service_line(installed: bool) -> &'static str {
+    if installed { "installed (starts at every login)" } else { "none (runs only when started)" }
 }
 
 fn human_duration(secs: u64) -> String {
@@ -645,6 +691,8 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
         missing_libs: doctor::missing_libs(),
         certs_found: doctor::system_certs_found(),
         installed_version: VERSION,
+        node_version: doctor::node_version(),
+        blocked: state::read_blocked(&paths.instance_dir),
         service_installed: service_text.is_some(),
         service_names_exe: service_text.zip(exe).map(|(text, exe)| service::file_names_exe(&text, &exe)),
     }
@@ -708,7 +756,7 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         Err(e) => return fail(&e),
     };
     if plan.service {
-        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir), &std::env::var("PATH").unwrap_or_default()));
+        let installed = stable_exe().and_then(|exe| service::install(&home, &exe, &paths.channel, &state::log_path(&paths.instance_dir)));
         match installed {
             Ok(file) => {
                 println!("The service is installed ({}): AgentMux starts at every login.", file.display());
@@ -723,8 +771,12 @@ fn cmd_setup(paths: &DataPaths, args: &setup::SetupArgs) -> i32 {
         if !plan.start && cfg!(target_os = "macos") {
             let _ = service::control(&home, &paths.channel, "stop");
         }
-    } else if let Err(e) = service::remove(&home, &paths.channel) {
-        return fail(&e);
+    } else {
+        match service::remove(&home, &paths.channel) {
+            Ok(Some(file)) => println!("The service is removed ({}): AgentMux no longer starts at login.", file.display()),
+            Ok(None) => {}
+            Err(e) => return fail(&e),
+        }
     }
     if plan.start {
         let start = setup_server_args(args);
@@ -767,7 +819,7 @@ fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
     }
 }
 
-fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
+fn cmd_logs(paths: &DataPaths, lines: Option<usize>, since: Option<Duration>, follow: bool) -> i32 {
     use std::io::{Read, Seek, SeekFrom, Write};
     let path = state::log_path(&paths.instance_dir);
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -775,7 +827,15 @@ fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
         return 1;
     };
     let mut out = std::io::stdout();
-    for line in state::last_lines(&text, lines) {
+    // With `--since` the whole window is shown unless `--lines` also caps it; without it, the last 50 lines.
+    let shown: Vec<&str> = match since {
+        Some(age) => {
+            let window = logs::since(&text, logs::cutoff(age));
+            window[window.len().saturating_sub(lines.unwrap_or(usize::MAX))..].to_vec()
+        }
+        None => state::last_lines(&text, lines.unwrap_or(50)),
+    };
+    for line in shown {
         if writeln!(out, "{line}").is_err() {
             return 0;
         }
@@ -857,6 +917,8 @@ mod tests {
             vec!["open", "--origin", "http://127.0.0.1:8080"],
             vec!["logout"],
             vec!["logs", "--lines", "5", "-f"],
+            vec!["logs", "--since", "1h"],
+            vec!["logs", "--since", "30m", "--lines", "20"],
             vec!["version", "--json"],
         ] {
             assert!(parse(&args).is_ok(), "{args:?}");
@@ -1008,6 +1070,29 @@ mod tests {
             state::write(&paths.instance_dir, &record(std::process::id())).unwrap();
             assert_eq!(cmd_status(paths, true), 1, "a record of a process that is not the server is not a running server");
         });
+    }
+
+    #[test]
+    fn a_refusal_beside_another_version_is_recorded_from_the_log_and_ends_a_waiting_start_at_once() {
+        with_channel(|paths| {
+            let line = agentmux_common::srv_stderr::shared_folder_held_line("AgentMux 0.60.27 (stable)", "29 migration(s) pending");
+            std::fs::write(state::log_path(&paths.instance_dir), format!("noise\n{line}\nmore noise\n")).unwrap();
+            assert_eq!(refused_beside_another(paths), 0, "a clean exit: a service must not start it again by itself");
+            let blocked = state::read_blocked(&paths.instance_dir).unwrap();
+            assert_eq!((blocked.owner.as_str(), blocked.reason.as_str()), ("AgentMux 0.60.27 (stable)", "29 migration(s) pending"));
+            let begun = Instant::now();
+            assert_eq!(wait_for_server(paths, None), 3);
+            assert!(begun.elapsed() < Duration::from_secs(5), "a start does not wait out its timeout on a refusal that is already known");
+            assert_eq!(cmd_status(paths, true), 1);
+            state::clear_blocked(&paths.instance_dir);
+            assert!(state::read_blocked(&paths.instance_dir).is_none());
+        });
+    }
+
+    #[test]
+    fn status_says_whether_the_server_starts_at_every_login() {
+        assert!(service_line(true).starts_with("installed") && service_line(true).contains("every login"));
+        assert!(service_line(false).starts_with("none") && service_line(false).contains("only when started"));
     }
 
     #[test]

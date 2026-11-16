@@ -83,6 +83,96 @@
     return user ? user.value : "";
   };
 
+  // The list of saved sign-ins (SPEC_VAULT_AUTOFILL_IN_BROWSER_PANE_2026_11_14.md §P2.3). The person's own
+  // click, or Up or Down, in a login field asks the host to open it; the pane draws it, so the page's field
+  // keeps focus and the page sees nothing. Only what the person did counts (`isTrusted`), and the host
+  // drops every one of these reports while an agent's input is reaching the pane (an agent's click is
+  // just as trusted here). What goes to the host is which kind of field it was and, for a user name
+  // field, the text typed so far (the list is filtered by it); never a password, never any other text.
+  // The host answers each report by setting `window.__agentmuxList` in this world, which the page can't
+  // reach: whether a list is showing, and whether one of its rows is selected, so a key is swallowed
+  // only when it belongs to the list.
+  const loginRole = (el) => {
+    if (!isInput(el)) return null;
+    const group = groupOf(el);
+    const inputs = inputsOf(group);
+    const passwords = inputs.filter((i) => i.type === "password");
+    if (el.type === "password") {
+      if (newPasswordField(el)) return "newpassword";
+      return changeField(group) === el ? null : "password";
+    }
+    if (!typed(el) || passwords.some(newPasswordField)) return null;
+    if (passwords.length) return userIn(inputs, passwords[0]) === el ? "username" : null;
+    return namedLikeUser(el) ? "username" : null;
+  };
+  const listState = () => window.__agentmuxList || {};
+  let askedList = false;
+  // The field the list was asked from: a key in any other field is the page's, and focus leaving it closes the list.
+  let listField = null;
+  const closeList = () => {
+    if (!askedList) return;
+    askedList = false;
+    listField = null;
+    report({ kind: "close" });
+  };
+  const askList = (el) => {
+    const role = loginRole(el);
+    if (!role) return false;
+    askedList = true;
+    listField = el;
+    report({ kind: "open", role, text: role === "username" ? el.value.slice(0, 64) : undefined });
+    return true;
+  };
+  window.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!e.isTrusted) return;
+      if (e.target instanceof Element && askList(e.target)) return;
+      closeList();
+    },
+    { capture: true }
+  );
+  window.addEventListener(
+    "focusin",
+    (e) => {
+      if (e.isTrusted && askedList && e.target !== listField) closeList();
+    },
+    { capture: true }
+  );
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.isTrusted || !isInput(e.target)) return;
+      const shown = !!listState().shown;
+      if (shown && e.target !== listField) {
+        // The list belongs to another field: this key is the page's.
+        closeList();
+        return;
+      }
+      if (!shown) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") askList(e.target);
+        return;
+      }
+      const picked = !!listState().cursor;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Escape" || (e.key === "Enter" && picked)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (!(e.key === "Tab" && picked)) {
+        return;
+      }
+      report({ kind: "key", key: e.key });
+    },
+    { capture: true }
+  );
+  // The list follows what is typed in a user name field.
+  window.addEventListener(
+    "input",
+    (e) => {
+      if (e.isTrusted && askedList && isInput(e.target) && loginRole(e.target) === "username") askList(e.target);
+    },
+    { capture: true }
+  );
+
   const watchLeaving = (password) => {
     const until = performance.now() + WATCH_MS;
     const timer = setInterval(() => {
@@ -203,6 +293,11 @@
     (e) => {
       if (!e.isTrusted || !newPasswordField(e.target)) return;
       const field = e.target;
+      // Moving on to another field for a new password in the same form (its confirm field, by Tab or a click)
+      // keeps the offer on the field it was made for while that field is still shown: the offer's fill is still
+      // on its way and looks for that field. A hidden one (a later step of the form) makes this field's own offer.
+      const held = document.querySelector(`[${SIGNUP_ATTR}]`);
+      if (held && held !== field && held.isConnected && shown(held) && newPasswordField(held) && held.form && held.form === field.form) return;
       const user = userIn(inputsOf(groupOf(field)), field);
       const limit = (n) => (n > 0 ? n : undefined);
       const token = freshToken();

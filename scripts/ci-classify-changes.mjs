@@ -33,6 +33,10 @@
  *       from A to B. Proven from the diff itself, never from a path or a
  *       title, so a "release" PR that also bumps a dependency runs everything.
  *
+ *   R9  The production frontend build (a step of the frontend job) runs unless
+ *       every changed file is documentation or one of BUILD_NEVER_READS: the
+ *       Rust sources and their manifests. A file the list does not name runs it.
+ *
  * Usage:
  *   ci-classify-changes.mjs            # newline-separated paths on stdin
  *   ci-classify-changes.mjs a.md b.rs  # or as arguments (comment-hygiene: allow)
@@ -42,6 +46,7 @@
  * Prints `key=value` lines suitable for $GITHUB_OUTPUT:
  *   rust=true|false          run the Rust compile/test job
  *   frontend=true|false      run vitest / tsc
+ *   frontend_build=true|false  run the production frontend build (R9)
  *   docs_only=true|false     every changed file was documentation
  *   docs_index=true|false    run the specs-index generator on all three OSes
  *   version_only=true|false  the PR only moves the release version (R7)
@@ -101,8 +106,19 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/keybindings\/host-keys\.json$/,
     /^frontend\/app\/store\/rpc-api\//,
     /^frontend\/app\/store\/widget-singleton\.ts$/,
+    /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
 ];
+
+/**
+ * R9. What the production frontend build never bundles: the Rust sources and what configures only their build. A
+ * PR of these and documentation alone does not pay for the build; anything else does, named here or not (the
+ * frontend, the vite and ts configs, the scripts the vite config imports, the npm manifests, schema/, licenses/, a
+ * workflow). The one reader of the Rust manifests in a build is the notices plugin's crate list (`cargo metadata`),
+ * which the PR check's build leaves out (ci-pr.yml). scripts/ci-classify-changes.test.mjs scans what the build
+ * bundles for a path that reaches into crates/.
+ */
+const BUILD_NEVER_READS = [/^crates\//, /^Cargo\.(toml|lock)$/, /^rust-toolchain(\.toml)?$/, /^\.cargo\//, /^\.config\/nextest\.toml$/];
 
 /**
  * R3. Checked BEFORE the docs patterns, so a `.md` file under `.github/` (an
@@ -214,6 +230,12 @@ export function isFrontendOnlyPath(rawPath) {
     return p.startsWith("frontend/") && !RUST_READS_FRONTEND.some((re) => re.test(p));
 }
 
+/** R9: a file the production frontend build never bundles. */
+export function isRustOnlyPath(rawPath) {
+    const p = normalize(rawPath);
+    return BUILD_NEVER_READS.some((re) => re.test(p));
+}
+
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {
     const p = normalize(rawPath);
@@ -239,6 +261,7 @@ export function classifyChanges(files) {
         return {
             rust: true,
             frontend: true,
+            frontend_build: true,
             docs_only: false,
             docs_index: true,
             reason: "no files resolved — running everything (R2)",
@@ -255,6 +278,7 @@ export function classifyChanges(files) {
         return {
             rust: false,
             frontend: false,
+            frontend_build: false,
             docs_only: true,
             docs_index,
             reason: `all ${paths.length} changed file(s) are documentation`,
@@ -266,20 +290,24 @@ export function classifyChanges(files) {
         return {
             rust: false,
             frontend: true,
+            frontend_build: true,
             docs_only: false,
             docs_index,
             reason: `all ${nonDocs.length} non-doc file(s) are frontend files no Rust crate reads, e.g. ${nonDocs[0]} (R8)`,
         };
     }
 
+    // R9: the frontend legs run, and the build with them unless only Rust files (and documentation) changed.
+    const built = nonDocs.find((p) => !isRustOnlyPath(p));
     return {
         rust: true,
         frontend: true,
+        frontend_build: built !== undefined,
         docs_only: false,
         docs_index,
         // Naming a concrete file makes a wrong decision debuggable from the log
         // alone, without re-deriving the whole list.
-        reason: `${nonDocs.length} non-doc file(s), e.g. ${nonDocs[0]}`,
+        reason: `${nonDocs.length} non-doc file(s), e.g. ${nonDocs[0]}; frontend build: ${built !== undefined ? `yes, e.g. ${built}` : "no, only Rust files (R9)"}`,
     };
 }
 
@@ -305,6 +333,7 @@ export function classifyPullFiles(entries) {
         return {
             rust: false,
             frontend: false,
+            frontend_build: false,
             docs_only: false,
             docs_index: false,
             version_only: true,
@@ -343,6 +372,7 @@ if (isMain(import.meta.url)) {
     }
     console.log(`rust=${result.rust}`);
     console.log(`frontend=${result.frontend}`);
+    console.log(`frontend_build=${result.frontend_build}`);
     console.log(`docs_only=${result.docs_only}`);
     console.log(`docs_index=${result.docs_index}`);
     console.log(`version_only=${result.version_only}`);

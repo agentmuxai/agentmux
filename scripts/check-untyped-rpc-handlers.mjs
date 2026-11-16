@@ -37,7 +37,7 @@
 //   node scripts/check-untyped-rpc-handlers.mjs          check
 //   node scripts/check-untyped-rpc-handlers.mjs --list   print each one
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,7 +47,7 @@ const MAX_RELAYS = 2;
 const MAX_TYPED_HELPERS = 6;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SRC = join(ROOT, "crates/srv/src");
+const SRC_DIRS = [join(ROOT, "crates/srv/src"), join(ROOT, "crates/srv-core/src")];
 
 function* rustFiles(dir) {
     for (const name of readdirSync(dir)) {
@@ -149,7 +149,7 @@ const found = [];
 const events = [];
 const relays = [];
 const helpers = [];
-for (const file of rustFiles(SRC)) {
+for (const file of SRC_DIRS.filter((dir) => existsSync(dir)).flatMap((dir) => [...rustFiles(dir)])) {
     const rel = relative(ROOT, file).split(sep).join("/");
     const lines = withoutTestMods(readFileSync(file, "utf8")).split("\n");
     lines.forEach((line, i) => {
@@ -184,7 +184,7 @@ if (process.argv.includes("--list")) {
 
 if (events.length > MAX_EVENTS) {
     console.error(`check-untyped-rpc-handlers: ${events.length} hand-built events, allowed ${MAX_EVENTS}.`);
-    console.error("Declare the event in crates/srv/src/backend/mps_events.rs and publish it with Broker::publish_event (or EventBus::broadcast_typed).");
+    console.error("Declare the event in crates/srv-core/src/backend/mps_events.rs and publish it with Broker::publish_event (or EventBus::broadcast_typed).");
     console.error("Run with --list to see them all.");
     process.exit(1);
 }

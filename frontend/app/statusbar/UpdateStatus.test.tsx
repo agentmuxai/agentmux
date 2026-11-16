@@ -286,24 +286,25 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         expect(screen.getByText("Restarting…")).toBeTruthy();
     });
 
-    it("the chip's tip is not drawn over the open panel, and says what is happening once the restart is under way", async () => {
-        // Closed: the tip says what the chip does, and during the restart what is happening.
+    it("a chip with a panel has no tip, so none can be drawn over the open panel; a screen reader still gets the sentence", async () => {
         updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/x" }));
         render(() => <UpdateStatus />);
         const chip = await screen.findByLabelText("Update: Restart to update");
-        expect(chip.getAttribute("data-tip")).toBe("AgentMux has downloaded an update: restart to install it");
-        // Open: no tip, which would draw over the panel's buttons.
+        // Closed: the label says it, so there is no tip to be showing when the panel opens.
+        expect(chip.getAttribute("data-tip")).toBeNull();
+        expect(chip.getAttribute("aria-description")).toBe("AgentMux has downloaded an update: restart to install it");
+        // Open: still none.
         fireEvent.click(chip);
         await screen.findByText("AgentMux 0.59.27 is ready");
         expect(chip.getAttribute("data-tip")).toBeNull();
-        // Closed again during the restart: the old wording would be out of date.
+        // Once the restart is under way the description says what is happening.
         fireEvent.click(screen.getByRole("button", { name: "Later" }));
         acceptAppUpdate(download("restarting", { folder: "C:/apps/x" }));
         await screen.findByLabelText("Update: Restarting…");
-        expect(screen.getByLabelText("Update: Restarting…").getAttribute("data-tip")).toBe("AgentMux is restarting to install the update");
-    });
-
-    it("the click's own answer, arriving after the event for what came next, does not put the panel back", async () => {
+        const restarting = screen.getByLabelText("Update: Restarting…");
+        expect(restarting.getAttribute("data-tip")).toBeNull();
+        expect(restarting.getAttribute("aria-description")).toBe("AgentMux is restarting to install the update");
+    });    it("the click's own answer, arriving after the event for what came next, does not put the panel back", async () => {
         // Nobody is in a turn: srv answers the click and asks the launcher a moment later. The event for
         // that reaches the window first, then the click's answer, which is the older of the two.
         updateStatus.mockResolvedValue({ ...download("ready", { folder: "C:/apps/x" }), rev: 1_000 });

@@ -221,12 +221,22 @@ async fn set_image(
         .agent_def_update(&mut changed)
         .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: {e}")))?;
 
-    // The open pane keeps its own record of the image, which each turn reads.
+    // The agent's pane keeps its own record of the image, which each turn reads. Every pane of the agent gets
+    // it, found by the agent and not by its live registration: a pane with no registration (stopped, or
+    // registered under another name) kept the old image, and its next start made the container from that (#47725).
     let registration = crate::backend::reactive::handler::get_global_handler().get_agent(&def.slug);
-    if let Some(registration) = &registration {
-        let mut meta = crate::backend::obj::MetaMapType::new();
-        meta.insert("agent:container_image".to_string(), serde_json::json!(&image));
-        crate::server::service::object_helpers::update_object_meta(&state.mstore, &format!("block:{}", registration.block_id), &meta)
+    let mut panes: Vec<String> = crate::server::app_api::agent_block::agent_blocks_by_uid(&state.mstore, uid)
+        .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: {e}")))?
+        .into_iter()
+        .map(|b| b.block.oid)
+        .collect();
+    if let Some(r) = registration.as_ref().filter(|r| !panes.contains(&r.block_id)) {
+        panes.push(r.block_id.clone());
+    }
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("agent:container_image".to_string(), serde_json::json!(&image));
+    for block_id in &panes {
+        crate::server::service::object_helpers::update_object_meta(&state.mstore, &format!("block:{block_id}"), &meta)
             .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, format!("container image: the pane could not be updated: {e}")))?;
     }
 
@@ -416,6 +426,24 @@ mod tests {
 
         set_image(&state, &def.id, &state.mstore.agent_def_get(&def.id).unwrap().unwrap(), &format!(" {DEFAULT_AGENT_IMAGE} "), "tester").await.unwrap();
         assert_eq!(stored_image(&state, &def.id), DEFAULT_AGENT_IMAGE, "and back");
+    }
+
+    /// The pane's own record of the image is what the next start reads, so a changed image must reach it
+    /// even when the agent has no live registration (stopped, or registered under another name), or the next
+    /// container is made from the old image (#47725).
+    #[tokio::test]
+    async fn the_next_start_uses_the_new_image_even_for_a_pane_with_no_live_registration() {
+        use crate::backend::container::image::DEFAULT_DEVELOPER_IMAGE;
+        let state = crate::server::tests::test_state();
+        let def = container_agent_def(&state, "cimg-pane", "container");
+        let block_id = seeded_block(&state);
+        set_meta(&state, &block_id, &[("agentId", &def.id), ("agentMode", "container"), ("agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest")]);
+
+        set_image(&state, &def.id, &def, DEFAULT_DEVELOPER_IMAGE, "tester").await.unwrap();
+
+        let block = state.mstore.get::<crate::backend::obj::Block>(&block_id).unwrap().unwrap();
+        assert_eq!(crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", ""), DEFAULT_DEVELOPER_IMAGE);
+        assert_eq!(stored_image(&state, &def.id), DEFAULT_DEVELOPER_IMAGE);
     }
 
     #[test]

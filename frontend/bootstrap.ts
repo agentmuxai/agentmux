@@ -180,6 +180,8 @@ async function bootstrap() {
         }
 
     } catch (error) {
+        // The host has already told the person what is wrong and what to do (a browser that is not signed in).
+        if (error instanceof StartupFailureHandled) return;
         log("ERROR", "❌ Bootstrap failed:", error);
         log("ERROR", "Stack:", (error as Error).stack);
 

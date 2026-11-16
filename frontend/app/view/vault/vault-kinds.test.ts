@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { VAULT_KINDS } from "./vault-kinds";
 
 // srv's catalog is the source: it refuses a part or field a kind doesn't have.
-const RUST = readFileSync(join(__dirname, "../../../../crates/srv/src/backend/vault/kinds.rs"), "utf8");
+const RUST = readFileSync(join(__dirname, "../../../../crates/srv-core/src/backend/vault/kinds.rs"), "utf8");
 
 function rustKinds(): Map<string, { section: string; parts: string[]; fields: string[] }> {
     const ids = /const ID_FIELDS: &\[&str\] = &\[([^\]]*)\]/.exec(RUST)![1];
