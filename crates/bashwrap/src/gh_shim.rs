@@ -46,13 +46,21 @@ pub(crate) fn real_gh_in(path: &OsStr, me: Option<&Path>) -> Option<PathBuf> {
 /// The command that runs `gh` with `args`: through the function's steps when the agent's GitHub access is
 /// brokered and the function has not run them already, else the real `gh` as it is.
 fn command_for(bash: &Path, real: &Path, args: &[OsString], brokered: bool) -> Command {
-    if !brokered {
+    let mut cmd = if brokered {
+        let mut cmd = Command::new(bash);
+        cmd.arg("-c").arg(script()).arg("gh").args(args).env(REAL_GH_ENV, real);
+        cmd
+    } else {
         let mut cmd = Command::new(real);
         cmd.args(args);
-        return cmd;
+        cmd
+    };
+    // Only a container's image has this program as `gh`; the flag keeps a console from opening if it is ever run on Windows.
+    #[cfg(windows)]
+    {
+        use agentmux_common::win32::NoWindow;
+        cmd.no_window();
     }
-    let mut cmd = Command::new(bash);
-    cmd.arg("-c").arg(script()).arg("gh").args(args).env(REAL_GH_ENV, real);
     cmd
 }
 
@@ -106,9 +114,16 @@ mod tests {
     fn it_answers_to_the_name_gh_and_no_other() {
         assert!(invoked_as_gh(OsStr::new("/usr/local/bin/gh")));
         assert!(invoked_as_gh(OsStr::new("gh")));
-        assert!(invoked_as_gh(OsStr::new("C:\\bin\\GH.exe")));
+        assert!(invoked_as_gh(OsStr::new("/usr/local/bin/GH.exe")));
         assert!(!invoked_as_gh(OsStr::new("/usr/local/bin/agentmux-bashwrap")));
         assert!(!invoked_as_gh(OsStr::new("ghost")));
+    }
+
+    /// Backslashes separate directories on Windows only.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_names_gh_too() {
+        assert!(invoked_as_gh(OsStr::new("C:\\bin\\GH.exe")));
     }
 
     #[test]
