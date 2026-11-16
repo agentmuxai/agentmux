@@ -4,7 +4,7 @@
 // An entry's machine copy: where a copy of its value lives outside the Vault (a
 // secret store a service reads, a CI secret), and what the newest check of it
 // found. The link is plain fields (`source_*`) every kind of entry may have;
-// srv (crates/srv/src/backend/vault/source_link.rs) is the source for what they
+// srv (crates/srv-core/src/backend/vault/source_link.rs) is the source for what they
 // may hold. Nothing here is a value.
 
 import { Show, type JSX } from "solid-js";

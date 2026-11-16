@@ -241,7 +241,7 @@ Users' Vaults use only AgentMux's own tiers (decided by the operator). AgentMux 
 
 ### 11.3 Built first: where an entry's machine copy is, and a check
 
-Before backing or mirroring moves any value, an entry can say where a copy of its value lives outside the Vault, and the Vault can say whether that copy still equals its own. Neither changes which side is authoritative. Code: `crates/srv/src/backend/vault/source_link.rs`.
+Before backing or mirroring moves any value, an entry can say where a copy of its value lives outside the Vault, and the Vault can say whether that copy still equals its own. Neither changes which side is authoritative. Code: `crates/srv-core/src/backend/vault/source_link.rs`.
 
 - **The link** is plain fields on the entry, allowed on every kind, and never a value: `source_kind` (`aws-secret`, `github-secret` or `other`), `source_location` (the secret's name or ARN; `owner/repo` or `owner/repo@environment`; or a line of text), `source_key` (a JSON secret's dotted key, or the CI secret's name), and for an AWS secret optionally `source_region` and `source_profile`. The pane calls it the entry's machine copy. Agents see the kind, the location and the key in `list`, and never the profile.
 - **Who sets it.** The person, in the entry's form. An agent, with `update` and a reason: because the place decides what a check reads, the person is asked first, on a card that shows the place now and the place asked for, and silence is a no.
