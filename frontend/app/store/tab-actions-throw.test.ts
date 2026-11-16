@@ -39,7 +39,8 @@ vi.mock("./tab-reveal", () => ({
     tabWasShown: () => false,
 }));
 
-import { setActiveTab } from "./tab-actions";
+import { createMemo, createRoot } from "solid-js";
+import { setActiveTab, switchIntentTabId } from "./tab-actions";
 
 describe("setActiveTab when a dependent throws during one of its writes", () => {
     beforeEach(() => {
@@ -67,6 +68,20 @@ describe("setActiveTab when a dependent throws during one of its writes", () => 
         vi.advanceTimersByTime(50);
         const line = info.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith("[tab-switch] "));
         expect(line).toMatch(/^\[tab-switch\] to=tab-b rpc=\d+ms frames=\d+ms gated=true browser-panes=\d+ threw=1$/);
+    });
+
+    it("clears the intent when the RPC fails after the intent's own write threw", async () => {
+        let dispose = () => {};
+        createRoot((d) => {
+            dispose = d;
+            createMemo(() => {
+                if (switchIntentTabId() === "tab-c") throw new Error("Stale read from <Show>.");
+            });
+        });
+        setActiveTabRpc.mockRejectedValueOnce(new Error("no"));
+        await expect(setActiveTab("tab-c")).rejects.toThrow("no");
+        expect(switchIntentTabId()).toBeNull();
+        dispose();
     });
 
     it("logs one line for a switch with nothing wrong, and says so when the RPC fails", async () => {
