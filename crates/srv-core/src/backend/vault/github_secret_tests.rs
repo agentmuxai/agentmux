@@ -11,7 +11,9 @@ use super::*;
 use crate::identity::aws_broker::mint::RunOutput;
 
 const SECRET: &str = "repos/example-org/example-app/actions/secrets/EXAMPLE_TOKEN";
-const REPOSITORY: &str = "repos/example-org/example-app";
+const COLLECTION: &str = "repos/example-org/example-app/actions/secrets?per_page=1";
+/// What the collection answers: one entry, of a secret nobody asked about.
+const NEIGHBOUR: &str = r#"{"total_count": 3, "secrets": [{"name": "NEIGHBOUR_SENTINEL_2291", "updated_at": "2026-02-02T00:00:00Z"}]}"#;
 const ENTRY: &str = r#"{"name": "EXAMPLE_TOKEN", "created_at": "2026-01-05T10:00:00Z", "updated_at": "2026-10-01T23:30:00Z"}"#;
 
 /// A stand-in GitHub CLI: each endpoint it knows answers with a status and a body, as `--include` prints them.
@@ -85,8 +87,8 @@ fn the_run_is_one_get_of_the_fixed_endpoint_with_no_login_of_its_own() {
     let args = |i: usize| runs[i].args.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(args(0), ["api", "--hostname", "github.com", "--method", "GET", "--include", SECRET]);
     assert_eq!(args(1), ["api", "--hostname", "github.com", "--method", "GET", "--include", environment]);
-    // After a "not found" the repository is asked for, the same way.
-    assert_eq!(args(2), ["api", "--hostname", "github.com", "--method", "GET", "--include", REPOSITORY]);
+    // After a "not found" the collection the secret is in is asked for one entry, the same way.
+    assert_eq!(args(2), ["api", "--hostname", "github.com", "--method", "GET", "--include", "repos/example-org/example-app/environments/production/secrets?per_page=1"]);
     assert_eq!(runs.len(), 3);
     for run in runs.iter() {
         assert_eq!(run.program, PathBuf::from("/bin/gh"));
@@ -95,15 +97,22 @@ fn the_run_is_one_get_of_the_fixed_endpoint_with_no_login_of_its_own() {
 }
 
 #[test]
-fn a_secret_that_is_not_there_is_told_from_a_repository_that_cant_be_seen_by_status() {
-    // The text of both answers is the same; only the repository's status differs.
-    let gone = Gh::with(&[(REPOSITORY, 200, r#"{"message": "Not Found"}"#)]);
-    assert_eq!(described(&gone, &place()).unwrap_err(), NO_SUCH_SECRET);
-    assert_eq!(gone.asked(), [SECRET, REPOSITORY]);
-    let unseen = Gh::with(&[]);
-    assert_eq!(described(&unseen, &place()).unwrap_err(), CANT_SEE);
-    let refused = Gh::with(&[(REPOSITORY, 403, "{}")]);
-    assert_eq!(described(&refused, &place()).unwrap_err(), CANT_SEE);
+fn a_secret_that_is_not_there_is_told_from_secrets_this_login_cant_read_by_status() {
+    // This login can read the secrets there, and the one asked for is not among them.
+    let gone = Gh::with(&[(COLLECTION, 200, NEIGHBOUR)]);
+    let said = described(&gone, &place()).unwrap_err();
+    assert_eq!(said, NO_SUCH_SECRET);
+    assert_eq!(gone.asked(), [SECRET, COLLECTION]);
+    // The collection's answer is dropped unread: a name in it is in nothing that comes back.
+    assert!(!said.contains("NEIGHBOUR"));
+    // A repository this login can see is not enough: the secrets there must be readable, or nothing is known.
+    for unreadable in [Gh::with(&[]), Gh::with(&[(COLLECTION, 403, NEIGHBOUR)]), Gh::with(&[("repos/example-org/example-app", 200, "{}")])] {
+        assert_eq!(described(&unreadable, &place()).unwrap_err(), CANT_READ);
+        assert_eq!(unreadable.asked(), [SECRET, COLLECTION], "the repository itself is never asked for");
+    }
+    // The status is the first line's, and nothing else of what was printed is looked at for it.
+    assert_eq!(Answer(NEIGHBOUR.as_bytes().to_vec()).status(), None);
+    assert_eq!(Answer(b"HTTP/2.0 200 OK\r\n\r\n{}".to_vec()).status(), Some(200));
 }
 
 #[test]

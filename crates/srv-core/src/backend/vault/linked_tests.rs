@@ -355,7 +355,9 @@ fn a_copy_is_known_by_its_line_as_the_entry_writes_it() {
 }
 
 const CI_SECRET: &str = "repos/example-org/example-app/actions/secrets/EXAMPLE_TOKEN";
-const CI_REPOSITORY: &str = "repos/example-org/example-app";
+const CI_COLLECTION: &str = "repos/example-org/example-app/actions/secrets?per_page=1";
+/// What the collection answers: an entry of a secret nobody asked about. Nothing of it may be kept.
+const CI_NEIGHBOUR: &str = r#"{"total_count": 2, "secrets": [{"name": "NEIGHBOUR_SENTINEL_2291", "updated_at": "2026-02-02T00:00:00Z"}]}"#;
 const CI_ENTRY: &str = r#"{"name": "EXAMPLE_TOKEN", "created_at": "2026-01-05T10:00:00Z", "updated_at": "2026-10-01T09:00:00Z", "made_up_extra": "ci-sentinel-4417"}"#;
 const CI_ENTRY_LATER: &str = r#"{"name": "EXAMPLE_TOKEN", "updated_at": "2026-11-02T08:00:00Z"}"#;
 
@@ -373,8 +375,8 @@ async fn a_ci_secrets_check_says_whether_it_is_there_and_when_it_last_changed() 
     for (github, outcome, why, last_changed, stands) in [
         (vec![(CI_SECRET, 200, CI_ENTRY)], PRESENT, "", Some("2026-10-01"), Standing::Checked),
         (vec![(CI_SECRET, 200, CI_ENTRY_LATER)], CHANGED, "the place last changed on 2026-11-02, after the 2026-10-01 recorded", Some("2026-11-02"), Standing::NeedsALook),
-        (vec![(CI_REPOSITORY, 200, "{}")], MISSING, "GitHub has no secret by that name there", None, Standing::NeedsALook),
-        (vec![], COULD_NOT_READ, "the repository can't be seen with this computer's GitHub login", None, Standing::Checked),
+        (vec![(CI_COLLECTION, 200, CI_NEIGHBOUR)], MISSING, "GitHub has no secret by that name there", None, Standing::NeedsALook),
+        (vec![], COULD_NOT_READ, "the secrets there can't be read with this computer's GitHub login", None, Standing::Checked),
     ] {
         let cli = Cli::with(&[]).github(&github);
         let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
@@ -383,10 +385,16 @@ async fn a_ci_secrets_check_says_whether_it_is_there_and_when_it_last_changed() 
         assert_eq!((checked.rotation, checked.source.as_str(), cli.seen().len()), (None, "github-secret:example-org/example-app#EXAMPLE_TOKEN", 0));
         assert_eq!(standing(&s, &row()), Some((stands, false)), "{outcome}");
     }
-    // Of GitHub's answer only found or not and the day are kept: nothing else of it is in the history or the answer.
-    let lines = rows(&s, CHECKED);
-    assert_eq!(lines.len(), 4);
-    assert!(s.vault_activity_all().unwrap().iter().all(|r| !format!("{r:?}").contains("ci-sentinel") && !format!("{r:?}").contains("2026-01-05")));
+    // Of GitHub's answer only found or not and the day are kept: nothing else of it is in the history or the answer,
+    // and nothing at all of the collection's answer, which names another secret. A check is one line toward the
+    // hour, however many times it asked.
+    let gone = Cli::with(&[]).github(&[(CI_COLLECTION, 200, CI_NEIGHBOUR)]);
+    let answer = serde_json::to_string(&source_link::check(&s, &gone, &plan, Via::Host).await).unwrap();
+    assert!(answer.contains("missing") && !answer.contains("NEIGHBOUR") && !answer.contains("2026-02-02"), "{answer}");
+    assert_eq!(gone.gh.asked(), [CI_SECRET, CI_COLLECTION]);
+    assert_eq!(rows(&s, CHECKED).len(), 5);
+    let kept = format!("{:?}", s.vault_activity_all().unwrap());
+    assert!(!kept.contains("ci-sentinel") && !kept.contains("2026-01-05") && !kept.contains("NEIGHBOUR") && !kept.contains("2026-02-02"), "{kept}");
 
     // An environment's secret is read from the environment's own listing.
     let staged = create(&s, NewEntry { label: "Release key".into(), ..entry(&[(LINK, ONLY), (KIND, source_link::GITHUB_SECRET), (LOCATION, "example-org/example-app@production"), (KEY, "EXAMPLE_TOKEN")], None) }).unwrap();
@@ -404,7 +412,7 @@ async fn an_entry_that_holds_a_value_and_names_a_ci_secret_is_described_not_comp
     let plan = plan_for_agent(&s, &id, "builder", Some(REASON)).unwrap();
     assert!(plan.describes() && !plan.only);
     assert_eq!(plan.github_places().len(), 2);
-    let cli = Cli::with(&[]).github(&[(CI_SECRET, 200, CI_ENTRY), (CI_REPOSITORY, 200, "{}")]);
+    let cli = Cli::with(&[]).github(&[(CI_SECRET, 200, CI_ENTRY), ("repos/example-org/example-app/environments/production/secrets?per_page=1", 200, CI_NEIGHBOUR)]);
     let checked = source_link::check(&s, &cli, &plan, Via::Host).await;
     // GitHub gives no value back, so nothing is compared: the check says the secret is there and when it changed.
     assert_eq!((checked.outcome, checked.last_changed.as_deref()), (PRESENT, Some("2026-10-01")));

@@ -18,21 +18,30 @@ use crate::identity::aws_broker::mint::{RunError, RunOutput, RunSpec};
 const VALUE: &str = "ci-check-sentinel-5531";
 const REASON: &str = "see whether the store key changed before task 31007";
 
-/// A stand-in GitHub CLI that knows one secret, and counts its runs.
+/// A stand-in GitHub CLI that knows one secret, and counts its runs. With `gone` it has no such secret, and its
+/// answer for the collection names another one.
 #[derive(Default)]
 struct Gh {
     runs: AtomicUsize,
+    gone: bool,
 }
+
+const NEIGHBOUR: &str = "{\"total_count\": 2, \"secrets\": [{\"name\": \"NEIGHBOUR_SENTINEL_2291\", \"updated_at\": \"2026-02-02T00:00:00Z\"}]}";
 
 impl Runner for Gh {
     fn which(&self, program: &str) -> Option<PathBuf> {
         (program == "gh").then(|| PathBuf::from("/bin/gh"))
     }
 
-    async fn run(&self, _spec: RunSpec) -> Result<RunOutput, RunError> {
+    async fn run(&self, spec: RunSpec) -> Result<RunOutput, RunError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        let printed = "HTTP/2.0 200 OK\r\n\r\n{\"name\": \"STORE_KEY\", \"updated_at\": \"2026-10-01T09:00:00Z\"}";
-        Ok(RunOutput { success: true, stdout: printed.as_bytes().to_vec(), stderr: String::new() })
+        let collection = spec.args.last().is_some_and(|endpoint| endpoint.ends_with("?per_page=1"));
+        let printed = match (self.gone, collection) {
+            (false, _) => "HTTP/2.0 200 OK\r\n\r\n{\"name\": \"STORE_KEY\", \"updated_at\": \"2026-10-01T09:00:00Z\"}".to_string(),
+            (true, true) => format!("HTTP/2.0 200 OK\r\n\r\n{NEIGHBOUR}"),
+            (true, false) => "HTTP/2.0 404 Not Found\r\n\r\n{\"message\": \"Not Found\"}".to_string(),
+        };
+        Ok(RunOutput { success: true, stdout: printed.into_bytes(), stderr: String::new() })
     }
 }
 
@@ -120,6 +129,16 @@ async fn a_native_agents_and_the_persons_read_are_each_one_audit_line() {
     assert_eq!(run(&s.state, &gh, plan(&s, &s.entry, &native), &native).await.outcome, PRESENT);
     assert_eq!(run(&s.state, &gh, plan(&s, &s.link, &native), &native).await.outcome, PRESENT);
     assert_eq!((gh.runs.load(Ordering::SeqCst), audited(&agent(&native), &s.label).len()), (2, 2));
+
+    // A secret GitHub does not have, where this login can read the secrets: the check asks twice and is one line.
+    // The collection's answer names another secret, and nothing of it is in the answer or the Audit.
+    let gone = Gh { gone: true, ..Gh::default() };
+    let missing = run(&s.state, &gone, plan(&s, &s.entry, &native), &native).await;
+    assert_eq!((missing.outcome, gone.runs.load(Ordering::SeqCst)), (crate::backend::vault::source_link::MISSING, 2));
+    let rows = audited(&agent(&native), &s.label);
+    let said = format!("{rows:?}{}", serde_json::to_string(&missing).unwrap());
+    assert_eq!(rows.len(), 3);
+    assert!(said.contains(": missing") && !said.contains("NEIGHBOUR") && !said.contains("2026-02-02"), "{said}");
 
     let (state, link) = (s.state.clone(), s.link.clone());
     let by_person = tokio::task::spawn_blocking(move || person_check_with(&state, &Gh::default(), &link)).await.unwrap().unwrap();

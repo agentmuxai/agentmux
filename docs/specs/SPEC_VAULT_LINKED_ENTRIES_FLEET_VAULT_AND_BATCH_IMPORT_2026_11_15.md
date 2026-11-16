@@ -82,12 +82,15 @@ Organisation secrets are not a place an entry can name, and stay out.
 |---|---|
 | the entry, updated on or before the day the Vault entry records (`rotated`), or no day is recorded | `present`, with `last_changed` |
 | the entry, updated after that day | `changed since recorded`, with both days |
-| no such secret, and the repository can be seen with this login | `missing` |
-| no such secret, and the repository can't be seen with this login | `could not read`, saying the repository can't be seen |
+| no such secret, and this login can read the secrets there | `missing` |
+| no such secret, and this login can't read the secrets there | `could not read`, saying the secrets there can't be read |
 | no GitHub CLI, not signed in, not allowed, too slow, no network | `could not read`, with why |
 
-The two "no such secret" rows are told apart by asking for the repository after a "not found", and by the status
-code of each answer, never by its text. `rotation` is never in the answer: a CI secret has no rotation setting. A
+The two "no such secret" rows are told apart by asking, after a "not found", for the collection the secret is in
+(the repository's secrets, or the environment's) with at most one entry, and by the status code of each answer,
+never by its text. A repository this login can see is not enough to say a secret is missing: it must be able to
+read the secrets there. Of the collection's answer only the status code is read: its body is dropped unread, and
+nothing of it is in a result, the history, a log line or Audit. `rotation` is never in the answer: a CI secret has no rotation setting. A
 day is compared in UTC, as for AWS. Of GitHub's answer only this is kept or returned: found or not, the secret's
 name, and the day it was last updated.
 
@@ -96,7 +99,7 @@ host's own setup. AgentMux installs nothing and signs nothing in. With no `gh`, 
 login that has no access, the result says so. No other credential is ever tried in its place.
 
 **How the read is built.** srv builds it from the entry's own link and nothing else: one secret, a GET, and one
-of the two fixed endpoints above (and the repository's own, after a "not found"). The owner, repository,
+of the two fixed endpoints above (and the collection the secret is in, after a "not found"). The owner, repository,
 environment and secret name each match a strict name pattern and none starts with a dash; a link that doesn't
 match is not read. The child process gets the allowlisted environment the AWS run has, and a time limit.
 
@@ -124,13 +127,16 @@ place is a CI secret still answers that it is described under an AWS place only.
 **What the pane says.** As for an AWS place: "Kept at:" with the newest check, and each "Also kept at" place says
 what its newest check found.
 
-**Not in this step.** No write, no rotation, no listing of a repository's secrets beyond the one named, no
+**Not in this step.** No write, no rotation, no list of a repository's secrets read, kept or shown, no
 organisation secrets, no schedule (§9), and no read with the account of Connect with GitHub.
 
 **Tests.**
 
 - Each row of the table above, with a stand-in `gh`: the outcome, `last_changed`, and that nothing else of the
   answer is stored or returned.
+- A collection's answer that names another secret: that name is in no result, history line or Audit line. A
+  repository that answers and a collection that does not: `could not read`. A check that asks twice is one line
+  toward the agents' hour.
 - A link whose owner, repository, environment or name fails the pattern, or starts with a dash: no process is run.
 - The arguments of each run are exactly the fixed ones for that link.
 - A container agent without the standing approval: no process is run, and the answer carries the stored result,
@@ -339,7 +345,7 @@ Agent2, 2026-11-16, task #47765. From the review and look checks of B2 and B3:
 
 Agent2, 2026-11-16, task #47765, §2.6:
 
-- **The read.** `gh api` with the host fixed to github.com, a GET, and the answer printed with its status line. The status code decides the outcome. Of the body only the secret's name (it must be the one asked for) and the day of `updated_at` are read; nothing else is kept, returned or written to the history.
+- **The read.** `gh api` with the host fixed to github.com, a GET, and the answer printed with its status line. The status code decides the outcome. Of the secret's own entry only its name (it must be the one asked for) and the day of `updated_at` are read; nothing else is kept, returned or written to the history. After a "not found" the collection is asked with `per_page=1`, and of that answer the first line alone is read.
 - **A check that starts no read** answers `not started`, with the reason and what to do in `why`, and the newest check of the place as the entry is now in `stored` (absent when it was never checked). It writes no history line and no Audit line, and does not count toward the agents' six an hour. The same holds for one of an entry's other places that is a CI secret.
 - **The standing approval** a container agent's read needs is the Always the person gave to that agent's use of the entry's main value in a command, in a Vault the agent may use. A linked entry holds no value and so never has one: for a link a container agent is told to ask the person to check it.
 - **Audit.** One line for each CI secret a check was allowed to read, whatever came of it: who, the secret and its repository, the entry, and the outcome. A read that found no GitHub CLI or a signed-out one is a line too, with `could not read`.
