@@ -781,6 +781,11 @@ export class BrowserViewModel {
         this.navigate(initialUrl);
     }
 
+    /** A streamed pane (no native browser) keeps the address its page is at as the block's `url`, so a reload returns to it. */
+    rememberPageUrl(url: string): void {
+        this.ctx.setMeta({ url, ...titleMetaFor(this.meta(), url) }).catch(() => {});
+    }
+
     navigate(url: string): void {
         this.diag(`navigate(url=${JSON.stringify(url)}) closed=${this.closed}`);
         if (this.closed) return;

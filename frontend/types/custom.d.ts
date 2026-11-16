@@ -110,6 +110,8 @@ declare global {
         tearOff: boolean;
         /** Browser panes (native CEF child browsers). */
         nativeBrowserPane: boolean;
+        /** Browser panes whose page runs in a browser on the server and is streamed (the web UI of a headless server). */
+        streamedBrowserPane: boolean;
         /** Native open/save file dialogs. */
         nativeDialogs: boolean;
         /** In-app update check and install. */

@@ -17,6 +17,7 @@ mod nav;
 mod pane;
 mod protocol;
 
+use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::{Extension, Query, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -63,12 +64,16 @@ fn start_from(p: &Params) -> Result<pane::Start, String> {
 pub(in crate::server) async fn handle(
     session: Option<Extension<SessionId>>,
     Query(params): Query<Params>,
-    ws: WebSocketUpgrade,
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     // The route table is static: the opt-in is answered here, so the route is always registered.
     if !enabled() {
         return (StatusCode::NOT_FOUND, "the streamed browser is not on in this server").into_response();
     }
+    // A plain request (the web UI asking whether the pane exists here) is told to upgrade: 404 is "off", this is "on".
+    let Ok(ws) = ws else {
+        return (StatusCode::UPGRADE_REQUIRED, "this route is a WebSocket").into_response();
+    };
     let start = match start_from(&params) {
         Ok(s) => s,
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),

@@ -54,6 +54,7 @@ function mount(opts: {
         switchAccount,
         quotaNote: (id) => opts.quota?.[id],
         notify,
+        prepNow: async () => ({ ended: true }),
         signInAnother,
     };
     const root = createRoot((dispose) => {

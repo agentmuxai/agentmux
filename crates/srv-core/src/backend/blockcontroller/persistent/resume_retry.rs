@@ -197,6 +197,28 @@ impl PersistentSubprocessController {
         Some(packet)
     }
 
+    /// The handoff the agent left before a user action restarted its session
+    /// (`continuity_handoff.rs`), read once by the spawn that starts the new one: the first section
+    /// of `packet` when AgentMux's record rides on the first message, else a note held for it (the
+    /// session resumed, so the record is already there). `packet` is returned unchanged when none waits.
+    pub(super) fn carry_prep_handoff(&self, packet: Option<String>) -> Option<String> {
+        let def_id = self
+            .mstore
+            .as_deref()
+            .and_then(|m| m.get::<crate::backend::obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentId", ""))
+            .filter(|id| !id.is_empty());
+        let Some(handoff) = def_id.and_then(|id| crate::backend::continuity_handoff::take(&id)) else { return packet };
+        tracing::info!(block_id = %self.block_id, in_packet = packet.is_some(), "continuity: carrying the handoff the agent left before the change");
+        match packet {
+            Some(p) => Some(crate::backend::continuity::with_handoff_first(&p, &handoff.packet_section())),
+            None => {
+                crate::backend::reactive::held_notes::hold(&self.block_id, crate::backend::continuity_handoff::NOTE_KEY, &handoff.note());
+                None
+            }
+        }
+    }
+
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
     /// session instead of giving up and starting blank
     /// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`).

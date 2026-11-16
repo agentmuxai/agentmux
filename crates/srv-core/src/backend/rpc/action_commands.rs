@@ -22,7 +22,7 @@ pub enum Policy {
 /// Changes state, runs or stops a process, writes files, sends to an agent or
 /// changes who may do what. Recorded whoever calls.
 pub const ALWAYS: &[&str] = &[
-    "account.key.verify", "account.oauth.cancel", "app_skills.catalog.install", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch",
+    "account.key.verify", "account.oauth.cancel", "app_skills.catalog.install", "account.oauth.client.clear", "account.oauth.start", "agent.account.switch", "agent.prep.now",
     "agent.define", "agent.kill-process", "agent.kill-tree", "agent.model.switch", "agent.move-here", "agent.notice.decide", "agent.notice.setgrant", "agent.open", "agent.pane.unregister", "agent.send",
     "agent.setSeat", "agent.spend", "agent.start", "agent.stop", "agent.takeover", "agent:memory:adopt", "agent:memory:release", "agent:memory:revert", "agent:memory:write_file",
     "agent:session:append_output", "agent:session:archive", "agent:session:write_state", "agentanswer", "agentcancel",

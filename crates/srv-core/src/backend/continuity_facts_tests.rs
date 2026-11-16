@@ -75,3 +75,24 @@ fn an_agent_with_no_registration_has_no_facts() {
     let facts = collect(&store, None, "no-such-block");
     assert!(facts.tasks.is_empty() && facts.background.is_empty() && facts.line.is_none() && facts.repo.is_none());
 }
+
+#[test]
+fn an_agent_with_nothing_held_has_nothing_to_lose() {
+    assert_eq!(something_lost(&Facts::default()), None);
+    let dead_command = Facts { background: vec![Background { label: "vite".into(), started_at_ms: NOW, alive: Some(false) }], ..Facts::default() };
+    assert_eq!(something_lost(&dead_command), None, "a command found dead is not running");
+    let clean = Facts { repo: Some(WorkingClone { branch: None, dirty_files: 0, checked_ms: None }), ..Facts::default() };
+    assert_eq!(something_lost(&clean), None);
+}
+
+#[test]
+fn each_thing_held_is_enough_to_ask() {
+    let task = Facts { tasks: vec![HeldTask { reference: "#1".into(), title: "t".into() }], ..Facts::default() };
+    assert_eq!(something_lost(&task), Some("holds a claimed task"));
+    for alive in [Some(true), None] {
+        let command = Facts { background: vec![Background { label: "x".into(), started_at_ms: NOW, alive }], ..Facts::default() };
+        assert_eq!(something_lost(&command), Some("a background command is running"), "{alive:?}");
+    }
+    let dirty = Facts { repo: Some(WorkingClone { branch: None, dirty_files: 1, checked_ms: None }), ..Facts::default() };
+    assert_eq!(something_lost(&dirty), Some("uncommitted changes in its working clone"));
+}
