@@ -389,6 +389,8 @@ mod spawn_site_coverage {
          "own-exe: `agentmux start` runs `agentmux run` in the background from its own executable; the shell's AGENTMUX_* variables were dropped first"),
         ("src/agentmux_cli/service.rs", "program", 1,
          "mixed: `agentmux setup` and `start`/`stop` drive the person's own service manager (systemctl --user, launchctl) at their command, to install, start or stop the server's user service; no agent code runs through it, and nothing of the environment is added"),
+        ("src/agentmux_cli/uninstall.rs", "\"cmd.exe\"", 1,
+         "own-exe: `agentmux uninstall` on Windows starts a hidden `cmd` that waits a few seconds and removes the install folder this command ran from, after the command has ended (a running program's own file cannot be deleted); the path was checked to be the install folder and to hold no character `cmd` acts on, and no input or environment is passed on"),
         ("src/agentmux_cli/doctor.rs", "\"node\"", 1,
          "probe: `agentmux doctor` asks the installed Node.js its version (`node --version`) to compare it with the least the new-agent panel needs; no input, output parsed then discarded, no agent code runs through it"),
         ("src/agentmux_cli/process.rs", "\"ps\"", 1,

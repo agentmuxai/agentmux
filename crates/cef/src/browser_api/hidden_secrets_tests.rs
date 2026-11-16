@@ -111,7 +111,7 @@ fn a_hidden_element_with_a_key_in_its_name_stays_listed_without_the_key() {
 
 #[test]
 fn known_key_prefixes_count_even_when_short() {
-    for key in ["sk_live_abcdefgh12", "whsec_abcdefgh12", "ghp_abcdefghij12", "AKIAABCDEFGHIJKLMN12"] {
+    for key in [concat!("sk_live", "_abcdefgh12"), "whsec_abcdefgh12", concat!("ghp", "_abcdefghij12"), concat!("AKI", "AABCDEFGHIJKLMN12")] {
         assert!(has_key_shape(key), "{key}");
     }
     for word in ["Account settings", "skip to content", "keyboard", "2026-11-14"] {
@@ -271,7 +271,7 @@ fn what_a_page_script_read_is_scrubbed_of_secret_shapes() {
 fn a_pem_header_and_an_access_key_id_are_shaped_and_ordinary_words_are_not() {
     // The header is put together here so no file holds a whole one.
     let pem_header = format!("{}BEGIN {} KEY{}", "-".repeat(5), "PRIVATE", "-".repeat(5));
-    for key in [pem_header.as_str(), "AKIAIOSFODNN7EXAMPLE", "ASIAIOSFODNN7EXAMPLE"] {
+    for key in [pem_header.as_str(), concat!("AKI", "AIOSFODNN7EXAMPLE"), concat!("ASI", "AIOSFODNN7EXAMPLE")] {
         assert!(has_key_shape(key), "{key}");
     }
     for word in ["Asia/Kolkata", "Asiatic", "akiakiakiakia", "Australia/Sydney"] {
