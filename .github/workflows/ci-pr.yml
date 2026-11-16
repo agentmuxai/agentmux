@@ -1396,11 +1396,4 @@ jobs:
             for n in $(printf '%s\n' "$all" | tail -n +2); do
               gh issue close "$n" --repo "$REPO" --reason "not planned" --comment "Duplicate of #$keep, opened by a run at the same moment."
             done
-            # Once per break (this branch runs only when no main-red issue was open, and the issue closes on the next
-            # green push): tell the PR this commit came from. An issue opened by CI reaches no agent; a comment on a PR
-            # is the path a review notice takes to the agent that opened it. A PR comment is an issue comment, so
-            # `issues: write` covers it. A failure to comment never fails this job.
-            for pr in $(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[].number' 2>/dev/null || true); do
-              gh issue comment "$pr" --repo "$REPO" --body "main is red at this PR's merge ($at): $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"$'\n\n'"Tracked in #${keep:-$mine}, which stays open until a push to main is green." || true
-            done
           fi
