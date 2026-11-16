@@ -158,6 +158,11 @@
     pointer-events: none;
 }
 
+.menu-item-sublabel--mark {
+    flex-shrink: 0;
+    max-width: none;
+}
+
 // VSCode-style keyboard shortcut hint — right-aligned, muted, mono.
 .menu-item-shortcut {
     flex-shrink: 0;

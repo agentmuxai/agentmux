@@ -103,7 +103,9 @@ async fn a_container_agent_and_an_agent_on_a_model_route_are_not_moved_onto_a_ke
     // …but a plan is still a move.
     assert_eq!(switch::switch(&state, "", &switch_req("box", "plan2", AfterTurn)).unwrap().status, switch::AccountSwitchStatus::Switched);
 
+    assert!(switch::receiving(&state, "ag", "key1").is_some(), "before it is on a route, a key can be received");
     crate::backend::model_gateway::launch::set_choice(&state.mstore, "ag", "claude", "openrouter", "").unwrap();
+    assert!(switch::receiving(&state, "ag", "key1").is_none(), "a switch that waited for a turn is rechecked when it is applied");
     let err = switch::switch(&state, "", &switch_req("ag", "key1", AfterTurn)).unwrap_err();
     assert!(err.contains("model route"), "{err}");
     cleanup(&[&boxed]);

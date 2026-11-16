@@ -558,6 +558,12 @@ pub(super) fn inject_key_route(
         return false;
     }
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return false };
+    // The gateway checks the agent's own link on every request, so a key link inherited from a template is not carried.
+    let own = id_store.agent_identity_list_for_agent(&def.id).unwrap_or_default();
+    if !own.iter().any(|l| l.account_id == binding.account_id && l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)) {
+        tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is carried only for an agent linked to it itself");
+        return false;
+    }
     let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") else {
         tracing::warn!(target: "identity", "srv's own address is not known; the API-key account can't be used for this spawn");
         return false;

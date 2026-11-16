@@ -57,13 +57,13 @@ const items = (m: ReturnType<typeof mount>) => {
 };
 
 describe("an API key account in the chip menu", () => {
-    it("is listed under its display name with the API mark and a key icon, and a plan carries neither", async () => {
+    it("is listed under its display name with the API mark, and a plan carries none", async () => {
         const m = mount({ accounts: [plan("p", "a@x", "2026-09-02"), key("k", "Work key")], links: [{ provider: "claude", account_id: "p" }] });
         await flush();
         const rows = items(m).filter((i) => i.type === "checkbox");
-        expect(rows.map((i) => [i.label, i.sublabel, i.icon, i.checked])).toEqual([
-            ["a@x", undefined, undefined, true],
-            ["Work key", "API", "key", false],
+        expect(rows.map((i) => [i.label, i.sublabel, i.checked])).toEqual([
+            ["a@x", undefined, true],
+            ["Work key", "API", false],
         ]);
         m.dispose();
     });

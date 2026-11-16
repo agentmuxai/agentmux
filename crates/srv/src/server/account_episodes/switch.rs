@@ -386,10 +386,14 @@ fn settle(state: &AppState, actor: &str, def_id: &str, account_id: &str, now: bo
 }
 
 /// The account `account_id` as it is now, when it can take an agent: it, its provider and the provider's accounts.
-fn receiving(state: &AppState, def_id: &str, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
+pub(super) fn receiving(state: &AppState, def_id: &str, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
     let provider = agent_provider(state, def_id)?;
     let all: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
     let to = all.iter().find(|a| a.id == account_id && can_receive(&a.status) && serves(&provider, a))?.clone();
+    // A switch that waited for a turn or a window to end meets the rules of a key again: the agent may have moved since.
+    if super::key_account::is_key(&to) && super::key_account::can_take_a_key(state, def_id).is_err() {
+        return None;
+    }
     let same_provider = all.into_iter().filter(|a| serves(&provider, a)).collect();
     Some((to, provider, same_provider))
 }

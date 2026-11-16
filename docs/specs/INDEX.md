@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16`](SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md) | Spec: an Anthropic API key as an account in the agent pane's menu (first slice) | active | 2026-11-16 |  |
 | [`SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16`](SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md) | Spec: AgentMux Headless: one name for the server package, offered next to Standard on Windows, macOS and Linux (task #2598, build #2599) | active | 2026-11-16 |  |
 | [`SPEC_PANE_BACKGROUND_THEMES_2026_11_15`](SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md) | Spec: Pane backdrops: a background that brings its own readable foreground | active | 2026-11-15 |  |
 | [`SPEC_RELEASE_SSHSIG_SECOND_SIGNATURE_2026_11_15`](SPEC_RELEASE_SSHSIG_SECOND_SIGNATURE_2026_11_15.md) | Spec: a second signature of each release's envelope, in SSH signature form, so a stock Mac can check it | active | 2026-11-15 |  |

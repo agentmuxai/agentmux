@@ -123,3 +123,25 @@ fn a_container_agent_with_a_key_link_is_refused_and_given_neither_the_key_nor_th
     assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }));
     assert!(env.is_empty(), "nothing of the key or the gateway reaches a container: {env:?}");
 }
+
+#[test]
+fn a_key_link_inherited_from_a_template_is_not_carried_by_the_gateway() {
+    let _serial = serial();
+    let store = make_store();
+    let mut tpl = gate_def(0);
+    tpl.id = "tpl-1".to_string();
+    tpl.is_seeded = 1;
+    store.agent_def_insert(&mut tpl).unwrap();
+    let mut def = gate_def(0);
+    def.parent_id = "tpl-1".to_string();
+    store.agent_def_insert(&mut def).unwrap();
+    store.identity_upsert(&key_account("acct-key-9", "api_key")).unwrap();
+    store.agent_identity_link("tpl-1", "acct-key-9", "anthropic").unwrap();
+    insert_block_for_agent(&store, "block-key-9", "def-1");
+    store.instance_create(&make_instance("block-key-9", "id-key")).unwrap();
+
+    let (res, env) = spawn(&store, "block-key-9", false);
+
+    assert!(res.is_err(), "the gate is not satisfied by a key the gateway would refuse: {res:?}");
+    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"), "{env:?}");
+}

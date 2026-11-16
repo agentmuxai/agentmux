@@ -16,8 +16,8 @@ export const API_MARK = "API";
 export const KEYS_NOT_FOR_CONTAINERS = "API keys aren't offered to container agents yet";
 
 /** An Anthropic API key: provider `anthropic`, kind `api_key`. */
-export function isKeyAccount(a: Pick<Account, "provider" | "kind">): boolean {
-    return a.kind === "api_key" && a.provider === "anthropic";
+export function isKeyAccount(a: { provider?: string; kind?: string } | null | undefined): boolean {
+    return !!a && a.kind === "api_key" && a.provider === "anthropic";
 }
 
 /** The name the person gave the key: its display name, else its account name. */
@@ -70,13 +70,12 @@ export function keysHeldBack(accounts: readonly Account[], providerId: string, c
     return container && resolveProviderAlias(providerId) === "claude" && accounts.some((a) => isKeyAccount(a) && offered(providerId, a, () => false));
 }
 
-/** One account's row in the chip menu: a plan by its login and quota note, a key by its name, the mark and a key icon. */
+/** One account's row in the chip menu: a plan by its login and quota note, a key by its name and the mark. */
 export function menuRow(a: Account, all: readonly Account[], current: string | undefined, quotaNote: string | undefined, click: () => void): ContextMenuItem {
     const key = isKeyAccount(a);
     return {
         label: key ? keyName(a) : accountLabel(a, all),
         sublabel: key ? API_MARK : quotaNote,
-        ...(key ? { icon: "key" } : {}),
         type: "checkbox",
         checked: a.id === current,
         click,
