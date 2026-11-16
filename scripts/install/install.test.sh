@@ -86,18 +86,19 @@ for SH in sh bash dash; do
     AGENTMUX_INSTALL_ROOT="$W/root-mac" AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=arm64 expect "macos already installed" 0 "/Applications/AgentMux.app" "$SH" "$SCRIPT" --no-launch
 
     # The server package: all four platforms, from the signed release, and what the desktop install does not touch
-    AGENTMUX_INSTALL_PM=apt expect "server dry run, linux x64" 0 "agentmux-server-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_ARCH=aarch64 expect "server dry run, linux arm64" 0 "agentmux-server-0.60.14-linux-arm64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=arm64 expect "server dry run, macos arm64" 0 "agentmux-server-0.60.14-macos-arm64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the server has no Intel Mac package: refused up front" 1 "no Intel Mac server package" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 refuses_to_contain "the Intel Mac refusal comes before any download or plan" "+ " "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the Intel Mac refusal needs no network (no version given)" 1 "no Intel Mac server package" "$SH" "$SCRIPT" --server --dry-run
-    expect "server dry run links the program under both names" 0 "/.local/bin/agentmux-server" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    expect "server dry run with --setup runs setup" 0 "agentmux-server setup --yes --no-open" "$SH" "$SCRIPT" --server --setup --dry-run --version 0.60.14
-    AGENTMUX_INSTALL_ROOT="$W/root-linux" AGENTMUX_INSTALL_PM=apt expect "an installed desktop app does not stop the server install" 0 "agentmux-server-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
-    expect "the server has no package-manager method" 1 "no package-manager method" "$SH" "$SCRIPT" --server --method package-manager --dry-run
-    expect "--setup is for --server" 1 "--setup is for --server" "$SH" "$SCRIPT" --setup --dry-run
-    AGENTMUX_INSTALL_OS=FreeBSD expect "the server has no build for an unknown system" 1 "unsupported system" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_PM=apt expect "server dry run, linux x64" 0 "agentmux-headless-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_ARCH=aarch64 expect "server dry run, linux arm64" 0 "agentmux-headless-0.60.14-linux-arm64.tar.gz" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=arm64 expect "server dry run, macos arm64" 0 "agentmux-headless-0.60.14-macos-arm64.tar.gz" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the server has no Intel Mac package: refused up front" 1 "no Intel Mac Headless package" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 refuses_to_contain "the Intel Mac refusal comes before any download or plan" "+ " "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_OS=Darwin AGENTMUX_INSTALL_ARCH=x86_64 expect "the Intel Mac refusal needs no network (no version given)" 1 "no Intel Mac Headless package" "$SH" "$SCRIPT" --headless --dry-run
+    expect "server dry run links the program under both names" 0 "/.local/bin/agentmux-headless" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    expect "--server still works, under the new package name" 0 "agentmux-headless-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --server --dry-run --version 0.60.14
+    expect "server dry run with --setup runs setup" 0 "agentmux-headless setup --yes --no-open" "$SH" "$SCRIPT" --headless --setup --dry-run --version 0.60.14
+    AGENTMUX_INSTALL_ROOT="$W/root-linux" AGENTMUX_INSTALL_PM=apt expect "an installed desktop app does not stop the server install" 0 "agentmux-headless-0.60.14-linux-x64.tar.gz" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
+    expect "the server has no package-manager method" 1 "no package-manager method" "$SH" "$SCRIPT" --headless --method package-manager --dry-run
+    expect "--setup is for --headless" 1 "--setup is for --headless" "$SH" "$SCRIPT" --setup --dry-run
+    AGENTMUX_INSTALL_OS=FreeBSD expect "the server has no build for an unknown system" 1 "unsupported system" "$SH" "$SCRIPT" --headless --dry-run --version 0.60.14
 
     # ASCII only, no smart quotes
     if LC_ALL=C grep -nP '[^\x00-\x7F]' "$SCRIPT" > /dev/null; then fail "install.sh is ASCII only"; else pass "install.sh is ASCII only"; fi
@@ -179,11 +180,11 @@ else
     expect "a file the signed manifest does not list is refused" 1 "does not list $NAME" run_install "$W/unlisted"
 
     # ---- the server package, from a release made here ----
-    SNAME="agentmux-server-${VER}-linux-x64.tar.gz"
+    SNAME="agentmux-headless-${VER}-linux-x64.tar.gz"
     # make_server_release <dir> <tag> [what to leave out of the package: srv|web]
     make_server_release() {
         d="$1"; tag="$2"; leave="${3:-}"
-        top="agentmux-server-${VER}-linux-x64"
+        top="agentmux-headless-${VER}-linux-x64"
         rm -rf "$W/spkg"; mkdir -p "$d" "$W/spkg/$top/bin" "$W/spkg/$top/web"
         printf '#!/bin/sh\necho "the server program: $0 $*"\n' > "$W/spkg/$top/bin/agentmux"
         cp "$W/spkg/$top/bin/agentmux" "$W/spkg/$top/bin/agentmux-srv"
@@ -199,43 +200,55 @@ else
         if [ -z "${KEEP_HS:-}" ]; then rm -rf "$W/hs"; fi
         mkdir -p "$W/hs"
         HOME="$W/hs" PATH="${SERVER_TEST_PATH:-$PATH}" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 \
-            AGENTMUX_INSTALL_TEST_KEYS="$TESTKEYS" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --server --version "$VER" "$@"
+            AGENTMUX_INSTALL_TEST_KEYS="$TESTKEYS" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --headless --version "$VER" "$@"
     }
 
     make_server_release "$W/sgood" "v$VER"
     expect "a good server release installs" 0 "matches the signed manifest" run_server_install "$W/sgood"
-    if [ -x "$W/hs/.agentmux/server/$VER/bin/agentmux" ] && [ -f "$W/hs/.agentmux/server/$VER/web/index.html" ]; then pass "the server package is unpacked under its version"; else fail "the server package is unpacked under its version"; fi
-    if [ "$(readlink "$W/hs/.agentmux/server/current")" = "$W/hs/.agentmux/server/$VER" ]; then pass "current points at the new version"; else fail "current points at the new version"; fi
-    if [ -L "$W/hs/.local/bin/agentmux-server" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "both names are linked when agentmux is free"; else fail "both names are linked when agentmux is free"; fi
-    expect "the linked program runs from the install" 0 "the server program" "$W/hs/.local/bin/agentmux-server" status
+    if [ -x "$W/hs/.agentmux/headless/$VER/bin/agentmux" ] && [ -f "$W/hs/.agentmux/headless/$VER/web/index.html" ]; then pass "the server package is unpacked under its version"; else fail "the server package is unpacked under its version"; fi
+    if [ "$(readlink "$W/hs/.agentmux/headless/current")" = "$W/hs/.agentmux/headless/$VER" ]; then pass "current points at the new version"; else fail "current points at the new version"; fi
+    if [ -L "$W/hs/.local/bin/agentmux-headless" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "both names are linked when agentmux is free"; else fail "both names are linked when agentmux is free"; fi
+    expect "the linked program runs from the install" 0 "the server program" "$W/hs/.local/bin/agentmux-headless" status
     KEEP_HS=1 expect "a second install over the first works" 0 "matches the signed manifest" run_server_install "$W/sgood"
-    if [ -L "$W/hs/.local/bin/agentmux-server" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "a reinstall keeps both links"; else fail "a reinstall keeps both links"; fi
+    if [ -L "$W/hs/.local/bin/agentmux-headless" ] && [ -L "$W/hs/.local/bin/agentmux" ]; then pass "a reinstall keeps both links"; else fail "a reinstall keeps both links"; fi
     KEEP_HS=1 expect "a reinstall does not call its own agentmux link another program" 0 "next: run  agentmux setup" run_server_install "$W/sgood"
+
+    # An install from before the rename (~/.agentmux/server, linked as agentmux-server and agentmux) is taken over:
+    # the links move to the new program, and the old folder is named so it can be removed, not deleted.
+    rm -rf "$W/hs"; mkdir -p "$W/hs/.agentmux/server/0.60.1/bin" "$W/hs/.local/bin"
+    printf '#!/bin/sh\necho old\n' > "$W/hs/.agentmux/server/0.60.1/bin/agentmux"; chmod +x "$W/hs/.agentmux/server/0.60.1/bin/agentmux"
+    ln -s "$W/hs/.agentmux/server/0.60.1" "$W/hs/.agentmux/server/current"
+    ln -s "$W/hs/.agentmux/server/current/bin/agentmux" "$W/hs/.local/bin/agentmux-server"
+    ln -s "$W/hs/.agentmux/server/current/bin/agentmux" "$W/hs/.local/bin/agentmux"
+    KEEP_HS=1 expect "an install from before the rename is named, with how to remove it" 0 "from before the rename" run_server_install "$W/sgood"
+    if [ "$(readlink "$W/hs/.local/bin/agentmux")" = "$W/hs/.agentmux/headless/current/bin/agentmux" ]; then pass "its agentmux link now leads to the new install"; else fail "its agentmux link now leads to the new install"; fi
+    if [ ! -e "$W/hs/.local/bin/agentmux-server" ] && [ ! -L "$W/hs/.local/bin/agentmux-server" ]; then pass "the old agentmux-server link is gone"; else fail "the old agentmux-server link is gone"; fi
+    if [ -f "$W/hs/.agentmux/server/0.60.1/bin/agentmux" ]; then pass "the old folder is left for the person to remove"; else fail "the old folder is left for the person to remove"; fi
 
     # A launcher already at ~/.local/bin/agentmux (the desktop's) is left alone even when that folder is not on the PATH.
     rm -rf "$W/hs"; mkdir -p "$W/hs/.local/bin"; printf '#!/bin/sh\necho desktop-launcher\n' > "$W/hs/.local/bin/agentmux"; chmod +x "$W/hs/.local/bin/agentmux"
-    KEEP_HS=1 expect "a launcher at the link's path is named in the note" 0 "run this one as  agentmux-server" run_server_install "$W/sgood"
+    KEEP_HS=1 expect "a launcher at the link's path is named in the note" 0 "run this one as  agentmux-headless" run_server_install "$W/sgood"
     expect "the launcher at the link's path is untouched" 0 "desktop-launcher" "$W/hs/.local/bin/agentmux"
-    if [ -L "$W/hs/.local/bin/agentmux-server" ]; then pass "agentmux-server is linked beside it"; else fail "agentmux-server is linked beside it"; fi
+    if [ -L "$W/hs/.local/bin/agentmux-headless" ]; then pass "agentmux-headless is linked beside it"; else fail "agentmux-headless is linked beside it"; fi
     unset KEEP_HS
 
     # Something else named agentmux (the desktop app's launcher) is left alone.
     mkdir -p "$W/fakebin"; printf '#!/bin/sh\necho desktop\n' > "$W/fakebin/agentmux"; chmod +x "$W/fakebin/agentmux"
-    SERVER_TEST_PATH="$W/fakebin:$PATH" expect "another agentmux on the PATH is named in the note" 0 "run this one as  agentmux-server" run_server_install "$W/sgood"
-    if [ -L "$W/hs/.local/bin/agentmux-server" ] && [ ! -e "$W/hs/.local/bin/agentmux" ]; then pass "only agentmux-server is linked then"; else fail "only agentmux-server is linked then"; fi
+    SERVER_TEST_PATH="$W/fakebin:$PATH" expect "another agentmux on the PATH is named in the note" 0 "run this one as  agentmux-headless" run_server_install "$W/sgood"
+    if [ -L "$W/hs/.local/bin/agentmux-headless" ] && [ ! -e "$W/hs/.local/bin/agentmux" ]; then pass "only agentmux-headless is linked then"; else fail "only agentmux-headless is linked then"; fi
     expect "the other agentmux is untouched" 0 "desktop" "$W/fakebin/agentmux"
 
     SERVER_TEST_PATH="$W/fakebin:$PATH" expect "--setup runs setup under the name that is free" 0 "the server program" run_server_install "$W/sgood" --setup
     cp -r "$W/sgood" "$W/sbad2"; printf 'x' >> "$W/sbad2/$SNAME"
     expect "a changed server package is refused" 1 "bytes, the manifest says" run_server_install "$W/sbad2"
-    if [ ! -e "$W/hs/.agentmux/server/$VER" ]; then pass "nothing is installed from a refused package"; else fail "nothing is installed from a refused package"; fi
+    if [ ! -e "$W/hs/.agentmux/headless/$VER" ]; then pass "nothing is installed from a refused package"; else fail "nothing is installed from a refused package"; fi
     make_server_release "$W/snosrv" "v$VER" srv
-    expect "a package with no server program is refused" 1 "is not an AgentMux server package" run_server_install "$W/snosrv"
+    expect "a package with no server program is refused" 1 "is not an AgentMux Headless package" run_server_install "$W/snosrv"
     make_server_release "$W/snoweb" "v$VER" web
-    expect "a package with no web UI is refused" 1 "is not an AgentMux server package" run_server_install "$W/snoweb"
+    expect "a package with no web UI is refused" 1 "is not an AgentMux Headless package" run_server_install "$W/snoweb"
     make_server_release "$W/sunlisted" "v$VER"; sign_release "$W/sunlisted" "v$VER" "Other.tar.gz" "$SNAME"
     expect "a server package the signed manifest does not list is refused" 1 "does not list $SNAME" run_server_install "$W/sunlisted"
-    expect "a release with no package for this system says so" 1 "has no server package for this system" run_server_install "$W/sunlisted"
+    expect "a release with no package for this system says so" 1 "has no AgentMux Headless package for this system" run_server_install "$W/sunlisted"
 
     # ---- a system whose openssl cannot check Ed25519 (a stock Mac's LibreSSL 3.3.6): which check ran, and what --require-signature does ----
     mkdir -p "$W/libre"

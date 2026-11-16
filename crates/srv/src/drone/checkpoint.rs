@@ -64,8 +64,10 @@ pub struct Position {
     pub held: Vec<String>,
     /// Blocks that failed this pass of their loop, and the graph handled it. A block skipped or run
     /// again in a later pass keeps what it said before, so this is what says whether it failed now.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub failed: Vec<String>,
+    /// Absent in a checkpoint written before this was kept (an empty list is a run with no failure
+    /// now), and then a restore works it out from what the blocks said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<Vec<String>>,
     /// What each block has spent, in dollars.
     pub spent_by: BTreeMap<String, f64>,
     /// How long each loop guard's loop has been running, in ms. A restart does

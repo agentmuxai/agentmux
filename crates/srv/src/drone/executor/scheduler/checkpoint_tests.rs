@@ -780,3 +780,56 @@ async fn a_restart_asks_about_each_block_that_was_running_in_turn() {
     let last = load(&p.sink.rows_of(&p.run_id)).unwrap().unwrap();
     assert!(last.frontier.running.is_empty());
 }
+
+/// `start` fans out to a branch that works and one that fails, both into a Join that skips a failed
+/// branch, then a Response says who arrived and who failed.
+fn a_join_after_a_failed_branch() -> DroneGraph {
+    let breaks = node("b2", json!({ "kind": "variables", "entries": [{ "name": "v_b2", "value": "1", "reducer": "bogus" }] }));
+    DroneGraph {
+        nodes: vec![
+            vars("start", "s", "1"),
+            vars("b1", "v_b1", "1"),
+            breaks,
+            node("j", json!({ "kind": "join", "mode": "any", "on_branch_error": "skip" })),
+            response("out", "{{j.arrived}} arrived, {{j.failed}} failed"),
+        ],
+        edges: vec![
+            edge("s-b1", "start", "b1", None),
+            edge("s-b2", "start", "b2", None),
+            edge("b1-j", "b1", "j", None),
+            edge("b2-j", "b2", "j", None),
+            edge("to-out", "j", "out", None),
+        ],
+    }
+}
+
+#[tokio::test]
+async fn a_checkpoint_from_before_the_failed_set_was_kept_still_knows_which_branch_failed() {
+    let graph = a_join_after_a_failed_branch();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let said = kept.result.clone().unwrap();
+    assert!(said.as_str().unwrap().contains("b2"), "the uninterrupted run says b2 failed: {said}");
+
+    // The checkpoint kept after b2 failed and before the join ran, as an older build wrote it:
+    // with no failed set at all.
+    let rows = kept.rows();
+    let n = (1..=rows.len())
+        .find(|n| {
+            let c: Checkpoint = load(&rows[..*n]).unwrap().unwrap();
+            c.position.failed.as_ref().is_some_and(|f| f.iter().any(|id| id == "b2")) && !c.position.finished.iter().any(|id| id == "j")
+        })
+        .expect("a checkpoint after b2 failed and before the join");
+    let mut c: Checkpoint = load(&rows[..n]).unwrap().unwrap();
+    c.position.failed = None;
+
+    let (tx, rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((&graph, &c, Limits::default()), &tx, &states).await;
+    drop(tx);
+    drop(rx);
+    let resumed = match ended {
+        Ok(v) => Ok(v),
+        Err(RunEnd::Failed(e) | RunEnd::Cancelled(e)) => Err(e),
+    };
+    assert_eq!(resumed, kept.result, "a restore from the old checkpoint ends as the uninterrupted run did");
+}
