@@ -379,7 +379,7 @@ async function pollForInAppLoginCompletion(
         initialAuthed = !!result.authenticated;
         // Before the person does the whole flow: a sign-in that could not be kept is not worth starting.
         const why = whyFromStoreProblem(result.store_problem);
-        if (why) return { completed: false, superseded: false, notStored: why };
+        if (why) return await notStoredOutcome(why, myGeneration);
     } catch {
         // Treat as "wasn't authenticated" — the safer default for the OR
         // condition below (fresh mints, the common case, correctly report
@@ -419,7 +419,7 @@ async function pollForInAppLoginCompletion(
             );
             authed = !!result.authenticated;
             const why = whyFromStoreProblem(result.store_problem);
-            if (why) return { completed: false, superseded: false, notStored: why };
+            if (why) return await notStoredOutcome(why, myGeneration);
         } catch {
             // keep polling on transient RPC errors
         }
@@ -434,6 +434,24 @@ async function pollForInAppLoginCompletion(
         }
     }
     return { completed: false, superseded: false };
+}
+
+/**
+ * A login that could not be kept, unless another surface's login took over while the check was away: then it is
+ * not ours to report, and the caller must not reap the newer one.
+ */
+async function notStoredOutcome(
+    why: NotStoredWhy,
+    myGeneration: number | undefined,
+): Promise<{ completed: boolean; superseded: boolean; notStored?: NotStoredWhy }> {
+    const now = await loginBackend()
+        .status()
+        .then((s) => s.generation)
+        .catch(() => undefined);
+    if (myGeneration !== undefined && now !== undefined && now !== myGeneration) {
+        return { completed: false, superseded: true };
+    }
+    return { completed: false, superseded: false, notStored: why };
 }
 
 /** Why an awaited in-app login ended without a credential. */

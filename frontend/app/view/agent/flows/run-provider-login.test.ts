@@ -1054,6 +1054,22 @@ describe("runProviderLogin — a sign-in that cannot be stored", () => {
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
     });
 
+    it("does not report it, or reap anything, when another surface's login took over while the check was away", async () => {
+        vi.useFakeTimers();
+        hub.runCliLogin.mockResolvedValue(URL);
+        hub.getCliLoginStatus
+            .mockResolvedValueOnce({ active: true, credential_changed: false, generation: 5 })
+            .mockResolvedValueOnce({ active: true, credential_changed: false, generation: 6 });
+        hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false, store_problem: "no-default-keychain" });
+
+        const promise = run();
+        await vi.advanceTimersByTimeAsync(0);
+        const outcome = await promise;
+
+        expect(outcome).toBe("inapp-timeout");
+        expect(hub.cancelCliLogin).not.toHaveBeenCalled();
+    });
+
     it("says 'inapp-unfinished' when the code was sent and the login is still alive a minute later, not 'timeout'", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(URL);
