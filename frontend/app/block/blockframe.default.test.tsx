@@ -352,6 +352,15 @@ describe("the backdrop", () => {
         }
     });
 
+    it("a terminal with a backdrop record already in its meta renders exactly as one without", () => {
+        const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+        const bare = setup({ meta: { view: "term" } });
+        const bareMarkup = frame(bare.view.container).outerHTML.replaceAll(bare.blockId, "ID");
+        cleanup();
+        const withRecord = setup({ meta: { view: "term", backdrop: record, bg: "#336699" } });
+        expect(frame(withRecord.view.container).outerHTML.replaceAll(withRecord.blockId, "ID")).toBe(bareMarkup);
+    });
+
     it("a record that can't be read is no backdrop", () => {
         const t = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
         expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
