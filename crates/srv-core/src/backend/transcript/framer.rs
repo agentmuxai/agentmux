@@ -27,7 +27,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::backend::storage::error::StoreError;
 use crate::backend::transcript::damage;
-use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
+use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_DELTA_API, CODEC_ZSTD, FRAME_PARTS};
 
 /// `agent:transcriptframes`: compress the shared transcript store. On unless `false`.
 pub const SETTING_FRAMES: &str = "agent:transcriptframes";
@@ -45,8 +45,11 @@ const MARGIN_MS: i64 = 24 * 60 * 60 * 1000;
 pub const PASS_FRAMES: usize = 64;
 /// The wait after each frame, so another srv's writes get the lock between frames.
 const FRAME_PAUSE: std::time::Duration = std::time::Duration::from_millis(40);
-/// The frame codecs this build reads, written in its readers file.
-const READS_CODECS: [i64; 2] = [CODEC_ZSTD, CODEC_DELTAS];
+/// The frame codecs this build reads, written in its readers file. It reads codec 3 (deltas with an
+/// `api_message_id`) a release before it writes it, so a build rolled back one release still opens the store.
+const READS_CODECS: [i64; 3] = [CODEC_ZSTD, CODEC_DELTAS, CODEC_DELTA_API];
+/// The frame codecs the framer writes: every running srv must read all of them before it frames.
+const WRITES_CODECS: [i64; 2] = [CODEC_ZSTD, CODEC_DELTAS];
 
 static CONFIG: OnceLock<Arc<crate::backend::wconfig::ConfigState>> = OnceLock::new();
 
@@ -184,7 +187,7 @@ fn reads_frames(file: &[u8], started_s: u64) -> bool {
     serde_json::from_slice::<serde_json::Value>(file).ok().is_some_and(|v| {
         let started = v.get("started_s").and_then(|s| s.as_u64()).unwrap_or(0);
         let codecs: Vec<i64> = v.get("codecs").and_then(|c| c.as_array()).map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
-        started.abs_diff(started_s) <= 1 && READS_CODECS.iter().all(|c| codecs.contains(c))
+        started.abs_diff(started_s) <= 1 && WRITES_CODECS.iter().all(|c| codecs.contains(c))
     })
 }
 
@@ -284,8 +287,10 @@ fn pass_into(
     }
     // Stamp first, then look again: a build that opened the store before the
     // stamp is a running process now, and one that starts after it refuses
-    // the store.
-    store.stamp_frames_version()?;
+    // the store. This build reads codec 3 but does not write it yet (a release
+    // later it will, and stamp `GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION`
+    // first), so 3 is still all it stamps.
+    store.stamp_frames_version(crate::backend::storage::filestore::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION)?;
     if let Some(who) = blocks() {
         report.waiting = Some(who);
         return Ok(());
@@ -317,7 +322,7 @@ fn pass_into(
                     report.frames += 1;
                     report.raw_bytes += raw as u64;
                     report.stored_bytes += stored as u64;
-                    report.codec2 += usize::from(codec == CODEC_DELTAS);
+                    report.codec2 += usize::from(codec == CODEC_DELTAS || codec == CODEC_DELTA_API);
                 }
                 FrameOutcome::Skipped(why) => {
                     tracing::debug!(zone = %zone, first, why, "framer: skipped");

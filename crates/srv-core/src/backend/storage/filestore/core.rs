@@ -108,6 +108,14 @@ pub const GLOBAL_TRANSCRIPT_STORE_VERSION: i64 = 2;
 /// older builds out. The framer stamps this when it writes the first frame.
 pub const GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION: i64 = 3;
 
+/// `user_version` of a GLOBAL transcript store that may hold codec 3 frames (the
+/// delta lines that carry an `api_message_id`, deltas.rs). A build that reads
+/// only codecs 1 and 2 accepts up to [`GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION`]
+/// and would read such a frame as damaged, so it must refuse this one. This
+/// build accepts it; the framer stamps it before its first frame, never an
+/// ordinary open.
+pub const GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION: i64 = 4;
+
 /// Connections that only read, for a file-backed store. In WAL mode a reader
 /// sees every committed write and never waits for a writer, so reads taken
 /// through these don't queue behind the writer's mutex — which, on the global
@@ -179,7 +187,7 @@ impl FileStore {
     /// which every srv shares. It is stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`], so
     /// builds that predate it (and bundle the SQLite with the WAL-reset bug) refuse it.
     pub fn open_global_transcripts(path: &Path) -> Result<Self, StoreError> {
-        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION, true)
+        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION, true)
     }
 
     /// Accept a `user_version` up to `accept`; stamp at least `stamp`, never
