@@ -56,7 +56,7 @@ function pane(id: string, width: number, height: number, zoom: number): string {
 <div class="agent-question-panel-scroll"><fieldset class="agent-question-panel-q"><legend class="agent-question-panel-q-prompt"><span style="border:1px solid #58c142;border-radius:9px;padding:0 6px">Channel</span>Which release channel should the made-up docs preview be published to?</legend>
 <div class="agent-question-panel-options">${option("Stacked (Recommended)", "One column, answers under the options", true)}${option("Side by side", "Options left, preview right")}${option("Tabs", "One question per tab")}
 <label class="agent-question-panel-other"><span class="agent-question-panel-other-label">Other</span><input class="agent-question-panel-other-input ui-input" placeholder="Type a custom answer…"></label></div></fieldset></div>
-<div class="agent-question-panel-actions"><button class="ui-button agent-question-panel-btn">Cancel</button><button class="ui-button agent-question-panel-btn">Accept Recommended</button><button class="ui-button ui-tone-attention agent-question-panel-btn" disabled>Submit answer</button></div>
+<div class="agent-question-panel-actions"><button class="ui-button agent-question-panel-btn agent-question-panel-btn--cancel">Cancel</button><button class="ui-button agent-question-panel-btn agent-question-panel-btn--recommended">Accept Recommended</button><button class="ui-button ui-tone-attention agent-question-panel-btn agent-question-panel-btn--submit" disabled>Submit answer</button></div>
 </div></div>
 <div class="status" style="flex:none;height:60px;background:#262626"></div>
 <div class="composer" style="flex:none;height:90px;background:#222"></div>
@@ -67,8 +67,9 @@ function pane(id: string, width: number, height: number, zoom: number): string {
 const CASES: Array<{ id: string; width: number; height: number; zoom: number; startsWithOptions: boolean }> = [
     { id: "narrow-100", width: 372, height: 744, zoom: 1, startsWithOptions: true },
     { id: "narrow-150", width: 372, height: 744, zoom: 1.5, startsWithOptions: true },
-    // At 200% the pane is 186 px wide: the header and the question fill the start of the scroll, the options follow.
-    { id: "narrow-200", width: 372, height: 744, zoom: 2, startsWithOptions: false },
+    // At 200% the pane is 186 px wide: the compact header and answers leave the question and the first option in the
+    // first view (#47842).
+    { id: "narrow-200", width: 372, height: 744, zoom: 2, startsWithOptions: true },
     { id: "wide-100", width: 700, height: 744, zoom: 1, startsWithOptions: true },
 ];
 
@@ -84,6 +85,13 @@ const visible = (el) => {
     box = { left: Math.max(box.left, b.left), right: Math.min(box.right, b.right), top: Math.max(box.top, b.top), bottom: Math.min(box.bottom, b.bottom) };
   }
   return { width: Math.max(0, box.right - box.left), height: Math.max(0, box.bottom - box.top), full: { width: r.width, height: r.height } };
+};
+// What the person sees before scrolling: an element's height between the panel's top and the pinned answers' top.
+const shownAtStart = (view, el) => {
+  const pr = view.querySelector('.agent-question-panel').getBoundingClientRect();
+  const floor = view.querySelector('.agent-question-panel-actions').getBoundingClientRect().top;
+  const r = el.getBoundingClientRect();
+  return { visible: Math.max(0, Math.min(r.bottom, floor) - Math.max(r.top, pr.top)), full: r.height };
 };
 const result = {};
 for (const view of document.querySelectorAll('.view')) {
@@ -106,6 +114,12 @@ for (const view of document.querySelectorAll('.view')) {
     headerVisible: visible(header),
     options: visible(q('.agent-question-panel-options')),
     buttons,
+    atStart: {
+      header: shownAtStart(view, header),
+      prompt: shownAtStart(view, q('.agent-question-panel-q-prompt')),
+      option: shownAtStart(view, q('.agent-question-panel-option')),
+      actions: actions.getBoundingClientRect().height,
+    },
   };
 }
 const out = document.createElement('pre'); out.id = 'result'; out.textContent = JSON.stringify(result); document.body.appendChild(out);`;
@@ -126,6 +140,11 @@ interface Measured {
     headerVisible: Seen;
     options: Seen;
     buttons: Seen[];
+    atStart: { header: AtStart; prompt: AtStart; option: AtStart; actions: number };
+}
+interface AtStart {
+    visible: number;
+    full: number;
 }
 
 let measured: Record<string, Measured> = {};
@@ -162,6 +181,13 @@ describe.skipIf(!BROWSER)("Question panel in a narrow, zoomed pane", () => {
                 if (c.startsWithOptions) expect(m.options.height, JSON.stringify(m)).toBeGreaterThanOrEqual(80);
                 // Where they start below the header, the scroll box is still tall enough to read a few lines in.
                 expect(m.room, JSON.stringify(m)).toBeGreaterThanOrEqual(150);
+            });
+
+            it("shows the question and the first answer before any scrolling", () => {
+                const m = measured[c.id];
+                // Two lines of the question at least, and the first option's label: not only a header and buttons.
+                expect(m.atStart.prompt.visible, JSON.stringify(m.atStart)).toBeGreaterThanOrEqual(Math.min(m.atStart.prompt.full, 48));
+                expect(m.atStart.option.visible, JSON.stringify(m.atStart)).toBeGreaterThanOrEqual(24);
             });
 
             it("keeps the composer inside the pane", () => {
