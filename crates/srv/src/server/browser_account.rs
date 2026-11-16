@@ -253,7 +253,7 @@ pub(crate) async fn handle_generate_password(
         return err_response(code, e);
     }
     let (kept_in, extra) = if incognito { (PERSONAL.to_string(), Some(signups::FROM_INCOGNITO)) } else { (profile, None) };
-    match super::browser_signup::make_for(&state, &block_id, found.field, kept_in.clone(), &agent, &reason, extra).await {
+    match super::browser_signup::make_for(&state, &block_id, found.field, kept_in.clone(), &agent, &reason, extra, false).await {
         Ok((site, entry)) => {
             note(&block_id, &agent, Kind::Fill).detail("a new account's password").how(How::Allowed).record(&state);
             let mut out = json!({
