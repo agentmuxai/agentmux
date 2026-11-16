@@ -35,6 +35,9 @@ pub(super) enum Event {
     Stalled { waited: Duration, repeat: bool },
     /// It answered; the last ping took `latency`.
     Recovered { latency: Duration },
+    /// A ping took `latency` to run and was answered between two looks, so no stall was seen while it lasted
+    /// (the probe thread was held up with the UI thread).
+    Late { latency: Duration },
 }
 
 /// Turns the probe's readings into lines: one when a stall starts, one every `REPEAT_EVERY`, one at its end.
@@ -42,12 +45,14 @@ pub(super) enum Event {
 pub(super) struct StallTracker {
     /// When the stall was first written, and when it was last written.
     stalled: Option<(Instant, Instant)>,
+    /// The latest answered ping already looked at.
+    seen_ack: u64,
 }
 
 impl StallTracker {
-    /// `outstanding` is when the oldest unanswered ping was posted; `latency` is how long the last answered
-    /// ping took (only read when the stall just ended).
-    pub(super) fn observe(&mut self, now: Instant, outstanding: Option<Instant>, latency: Duration) -> Option<Event> {
+    /// `outstanding` is when the oldest unanswered ping was posted; `acked` counts the pings the UI thread has run
+    /// and `latency` is how long the last of them took.
+    pub(super) fn observe(&mut self, now: Instant, outstanding: Option<Instant>, acked: u64, latency: Duration) -> Option<Event> {
         match (outstanding, self.stalled) {
             (Some(sent), None) => {
                 let waited = now.saturating_duration_since(sent);
@@ -66,9 +71,14 @@ impl StallTracker {
             }
             (None, Some(_)) => {
                 self.stalled = None;
+                self.seen_ack = acked;
                 Some(Event::Recovered { latency })
             }
-            (None, None) => None,
+            (None, None) => {
+                let fresh = acked != self.seen_ack;
+                self.seen_ack = acked;
+                (fresh && latency >= STALL_AFTER).then_some(Event::Late { latency })
+            }
         }
     }
 }
@@ -88,7 +98,7 @@ struct Beat {
 }
 
 impl Beat {
-    fn now_ms(&self) -> u64 {
+    fn elapsed_ms(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
     }
 }
@@ -101,7 +111,7 @@ cef::wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let latency = self.beat.now_ms().saturating_sub(self.beat.sent_at_ms.load(Ordering::Relaxed));
+            let latency = self.beat.elapsed_ms().saturating_sub(self.beat.sent_at_ms.load(Ordering::Relaxed));
             self.beat.latency_ms.store(latency, Ordering::Relaxed);
             if let Some(tid) = current_tid() {
                 self.beat.ui_tid.store(tid, Ordering::Relaxed);
@@ -140,11 +150,12 @@ fn run(beat: Arc<Beat>, data_root: Option<std::path::PathBuf>) {
         std::thread::sleep(PING_EVERY);
         let sent = beat.sent.load(Ordering::Relaxed);
         let outstanding = (beat.acked.load(Ordering::Acquire) < sent).then(|| {
-            let ago = Duration::from_millis(beat.now_ms().saturating_sub(beat.sent_at_ms.load(Ordering::Relaxed)));
+            let ago = Duration::from_millis(beat.elapsed_ms().saturating_sub(beat.sent_at_ms.load(Ordering::Relaxed)));
             Instant::now().checked_sub(ago).unwrap_or_else(Instant::now)
         });
+        let acked = beat.acked.load(Ordering::Acquire);
         let latency = Duration::from_millis(beat.latency_ms.load(Ordering::Relaxed));
-        match tracker.observe(Instant::now(), outstanding, latency) {
+        match tracker.observe(Instant::now(), outstanding, acked, latency) {
             Some(Event::Stalled { waited, repeat }) => {
                 let tid = beat.ui_tid.load(Ordering::Relaxed);
                 let context = context(if tid == 0 { None } else { Some(tid) }, data_root.as_deref());
@@ -164,11 +175,19 @@ fn run(beat: Arc<Beat>, data_root: Option<std::path::PathBuf>) {
                     latency.as_secs()
                 );
             }
+            Some(Event::Late { latency }) => {
+                tracing::warn!(
+                    target: "ui_stall",
+                    latency_ms = latency.as_millis() as u64,
+                    "[ui-stall] a ping took {} s to run; it was over before the probe looked, so there is no machine context",
+                    latency.as_secs()
+                );
+            }
             None => {}
         }
         if outstanding.is_none() {
             let seq = sent + 1;
-            beat.sent_at_ms.store(beat.now_ms(), Ordering::Relaxed);
+            beat.sent_at_ms.store(beat.elapsed_ms(), Ordering::Relaxed);
             beat.sent.store(seq, Ordering::Relaxed);
             let mut task = PingTask::new(Arc::clone(&beat), seq);
             if cef::post_task(cef::ThreadId::UI, Some(&mut task)) == 0 {
@@ -185,9 +204,15 @@ fn context(ui_tid: Option<u64>, data_root: Option<&std::path::Path>) -> String {
     if let Some(mb) = own_private_mb() {
         parts.push(format!("host {mb} MB private"));
     }
-    parts.push(format!("free RAM {} MB", mb_or_unknown(super::phys_free_mb())));
+    // Read now where the system can be asked now; the heartbeat's figure is up to 20 s old. Linux's `MemAvailable`
+    // (below) is read now too.
     #[cfg(target_os = "windows")]
-    parts.push(format!("free commit {} MB", mb_or_unknown(super::commit_free_mb())));
+    {
+        parts.push(format!("free RAM {} MB", fresh_phys_free_mb().map_or("unknown".to_string(), |mb| mb.to_string())));
+        parts.push(format!("free commit {} MB", mb_or_unknown(super::commit_free_mb())));
+    }
+    #[cfg(target_os = "macos")]
+    parts.push(format!("free RAM {} MB (as of the last heartbeat)", mb_or_unknown(super::phys_free_mb())));
     if let Some(root) = data_root {
         if let Some((free, total)) = agentmux_common::disk_space::volume_free_total_bytes(root) {
             parts.push(format!("free disk {} GB of {} GB", free / (1 << 30), total / (1 << 30)));
@@ -200,7 +225,17 @@ fn context(ui_tid: Option<u64>, data_root: Option<&std::path::Path>) -> String {
     parts.join(", ")
 }
 
+/// Physical RAM free now, in MB.
+#[cfg(target_os = "windows")]
+fn fresh_phys_free_mb() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    (unsafe { GlobalMemoryStatusEx(&mut mem) } != 0).then(|| mem.ullAvailPhys / (1024 * 1024))
+}
+
 /// `u64::MAX` is the heartbeat's "not sampled yet".
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn mb_or_unknown(mb: u64) -> String {
     if mb == u64::MAX {
         "unknown".to_string()
@@ -298,10 +333,10 @@ mod tests {
     fn a_ping_that_runs_in_time_says_nothing() {
         let t0 = Instant::now();
         let mut t = StallTracker::default();
-        assert_eq!(t.observe(at(t0, 1), Some(at(t0, 0)), Duration::ZERO), None);
-        assert_eq!(t.observe(at(t0, 2), None, Duration::from_millis(5)), None);
+        assert_eq!(t.observe(at(t0, 1), Some(at(t0, 0)), 0, Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 2), None, 0, Duration::from_millis(5)), None);
         // Late, but not by enough to be a stall.
-        assert_eq!(t.observe(at(t0, 5), Some(at(t0, 3)), Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 5), Some(at(t0, 3)), 0, Duration::ZERO), None);
     }
 
     #[test]
@@ -309,27 +344,27 @@ mod tests {
         let t0 = Instant::now();
         let mut t = StallTracker::default();
         let sent = at(t0, 0);
-        assert_eq!(t.observe(at(t0, 2), Some(sent), Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 2), Some(sent), 0, Duration::ZERO), None);
         assert_eq!(
-            t.observe(at(t0, 3), Some(sent), Duration::ZERO),
+            t.observe(at(t0, 3), Some(sent), 0, Duration::ZERO),
             Some(Event::Stalled { waited: Duration::from_secs(3), repeat: false })
         );
         // The next seconds of the same stall say nothing.
-        assert_eq!(t.observe(at(t0, 4), Some(sent), Duration::ZERO), None);
-        assert_eq!(t.observe(at(t0, 17), Some(sent), Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 4), Some(sent), 0, Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 17), Some(sent), 0, Duration::ZERO), None);
         assert_eq!(
-            t.observe(at(t0, 18), Some(sent), Duration::ZERO),
+            t.observe(at(t0, 18), Some(sent), 0, Duration::ZERO),
             Some(Event::Stalled { waited: Duration::from_secs(18), repeat: true })
         );
-        assert_eq!(t.observe(at(t0, 40), Some(sent), Duration::ZERO), Some(Event::Stalled { waited: Duration::from_secs(40), repeat: true }));
+        assert_eq!(t.observe(at(t0, 40), Some(sent), 0, Duration::ZERO), Some(Event::Stalled { waited: Duration::from_secs(40), repeat: true }));
         assert_eq!(
-            t.observe(at(t0, 56), None, Duration::from_secs(55)),
+            t.observe(at(t0, 56), None, 0, Duration::from_secs(55)),
             Some(Event::Recovered { latency: Duration::from_secs(55) })
         );
         // And it is over: nothing more, and a later stall starts a new run of lines.
-        assert_eq!(t.observe(at(t0, 57), None, Duration::from_secs(55)), None);
+        assert_eq!(t.observe(at(t0, 57), None, 0, Duration::from_secs(55)), None);
         assert_eq!(
-            t.observe(at(t0, 70), Some(at(t0, 66)), Duration::ZERO),
+            t.observe(at(t0, 70), Some(at(t0, 66)), 0, Duration::ZERO),
             Some(Event::Stalled { waited: Duration::from_secs(4), repeat: false })
         );
     }
@@ -338,8 +373,24 @@ mod tests {
     fn a_recovery_is_only_reported_for_a_stall_that_was() {
         let t0 = Instant::now();
         let mut t = StallTracker::default();
-        assert_eq!(t.observe(at(t0, 2), Some(at(t0, 0)), Duration::ZERO), None);
-        assert_eq!(t.observe(at(t0, 3), None, Duration::from_secs(2)), None);
+        assert_eq!(t.observe(at(t0, 2), Some(at(t0, 0)), 0, Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 3), None, 0, Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn a_long_ping_answered_between_two_looks_is_still_reported_once() {
+        let t0 = Instant::now();
+        let mut t = StallTracker::default();
+        // The probe was held up with the UI thread: the 9 s ping was answered before it looked again.
+        assert_eq!(
+            t.observe(at(t0, 12), None, 1, Duration::from_secs(9)),
+            Some(Event::Late { latency: Duration::from_secs(9) })
+        );
+        // The same answer is not reported again, and a quick ping after it is not a stall.
+        assert_eq!(t.observe(at(t0, 13), None, 1, Duration::from_secs(9)), None);
+        assert_eq!(t.observe(at(t0, 14), None, 2, Duration::from_millis(40)), None);
+        // Just under the line is not one either.
+        assert_eq!(t.observe(at(t0, 15), None, 3, Duration::from_millis(2_900)), None);
     }
 
     #[test]
