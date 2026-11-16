@@ -67,7 +67,7 @@ describe("setActiveTab when a dependent throws during one of its writes", () => 
         expect(scheduleRevealLift).toHaveBeenCalledTimes(1);
         vi.advanceTimersByTime(50);
         const line = info.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith("[tab-switch] "));
-        expect(line).toMatch(/^\[tab-switch\] to=tab-b rpc=\d+ms frames=\d+ms gated=true browser-panes=\d+ threw=1$/);
+        expect(line).toMatch(/^\[tab-switch\] to=tab-b rpc=\d+ms frames=\d+ms gated=true browser-panes=\d+ agent-panes=\d+ rows=\d+ heap=\S+ window=\S+ threw=1$/);
     });
 
     it("clears the intent when the RPC fails after the intent's own write threw", async () => {
