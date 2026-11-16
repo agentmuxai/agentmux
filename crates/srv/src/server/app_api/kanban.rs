@@ -65,14 +65,32 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 /// An agent of this instance as the board shows it, with its colour
 /// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7.2).
-fn agent_json(reg: &AgentRegistration, state: Option<AgentState>, color: Option<String>) -> Value {
+fn agent_json(reg: &AgentRegistration, state: Option<AgentState>, color: Option<String>, names: &Names) -> Value {
     json!({
         "name": reg.agent_id,
+        "display": reg.uid.as_deref().and_then(|u| names.get(u)),
         "uid": reg.uid,
         "block_id": reg.block_id,
         "state": state.map(AgentState::as_str).unwrap_or("gone"),
         "color": color,
     })
+}
+
+/// Agents' display names by uid ("Tess"), where a card or an agent names one by its id ("tess-2").
+type Names = std::collections::HashMap<String, String>;
+
+/// The display names of the agents these uids name, those whose definition is known.
+fn names_of<'a>(mstore: &crate::backend::storage::store::Store, uids: impl Iterator<Item = &'a str>) -> Names {
+    let mut out = Names::new();
+    for uid in uids.filter(|u| !u.is_empty()) {
+        if out.contains_key(uid) {
+            continue;
+        }
+        if let Some(def) = mstore.agent_def_get(uid).ok().flatten().filter(|d| !d.name.trim().is_empty()) {
+            out.insert(uid.to_string(), def.name);
+        }
+    }
+    out
 }
 
 /// The colour an agent definition keeps (`ui:color`, `#rrggbb`), the one its
@@ -241,7 +259,7 @@ fn holder_of<'a>(regs: &'a [AgentRegistration], item: &WorkItem) -> Option<&'a A
 /// A Done task an agent accepted, for its card and Reopen.
 type DelegateAccepts = std::collections::HashMap<String, (String, String, i64)>;
 
-fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, accepts: &DelegateAccepts) -> Value {
+fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, accepts: &DelegateAccepts, names: &Names) -> Value {
     let mut v = serde_json::to_value(&t.item).unwrap_or_else(|_| json!({}));
     if let Some(o) = v.as_object_mut() {
         if let Some((name, said, at)) = accepts.get(&t.item.id).filter(|_| t.item.state == work_state::DONE) {
@@ -249,6 +267,9 @@ fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>, a
         }
         o.insert("card".into(), serde_json::to_value(&t.card).unwrap_or_default());
         o.insert("holder".into(), holder.unwrap_or(Value::Null));
+        // The owner's display name, for a card that holds or waits on an agent by its id.
+        o.insert("claimed_by_name".into(), json!(names.get(&t.item.claimed_by_uid)));
+        o.insert("target_agent_name".into(), json!(names.get(&t.item.target_agent_uid)));
         // Why its holder can't work (out of quota, signed out), when it can't.
         o.insert("holder_unavailable".into(), unavailable.unwrap_or(Value::Null));
     }
@@ -293,17 +314,23 @@ async fn list(state: &AppState, data: &Value) -> Result<Value, String> {
                 _ => None,
             })
             .collect();
+        let names = names_of(
+            &mstore,
+            regs.iter()
+                .filter_map(|r| r.uid.as_deref())
+                .chain(tasks.iter().flat_map(|t| [t.item.target_agent_uid.as_str(), t.item.claimed_by_uid.as_str()])),
+        );
         let colors: Vec<Option<String>> = regs.iter().map(|r| r.uid.as_deref().and_then(|u| color_of(&mstore, u))).collect();
         let tasks_json: Vec<Value> = tasks
             .iter()
             .map(|t| {
                 let held = holder_of(&regs, &t.item).and_then(|r| regs.iter().position(|x| x.block_id == r.block_id));
-                let holder = held.map(|i| agent_json(&regs[i], states[i], colors[i].clone()));
-                task_json(t, holder, held.and_then(|i| unavailable[i].clone()), &accepts)
+                let holder = held.map(|i| agent_json(&regs[i], states[i], colors[i].clone(), &names));
+                task_json(t, holder, held.and_then(|i| unavailable[i].clone()), &accepts, &names)
             })
             .collect();
         let agents: Vec<Value> =
-            regs.iter().zip(states.iter()).zip(colors.iter()).map(|((r, s), c)| agent_json(r, *s, c.clone())).collect();
+            regs.iter().zip(states.iter()).zip(colors.iter()).map(|((r, s), c)| agent_json(r, *s, c.clone(), &names)).collect();
         // The colours of agents tasks name that aren't running here (closed,
         // or in another channel), by uid.
         let live: std::collections::HashSet<&str> = regs.iter().filter_map(|r| r.uid.as_deref()).collect();
@@ -369,7 +396,8 @@ async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     fill_media_paths(&mut t);
     let events = state.work_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
     let accepts = state.work_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
-    Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events, "media": media_json(&t.item.id, &state.work_store) }))
+    let names = names_of(&state.mstore, [t.item.target_agent_uid.as_str(), t.item.claimed_by_uid.as_str()].into_iter());
+    Ok(json!({ "task": task_json(&t, None, None, &accepts, &names), "events": events, "media": media_json(&t.item.id, &state.work_store) }))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -787,6 +815,27 @@ mod tests {
     async fn task_of(state: &AppState, id: &str) -> Value {
         let board = list(state, &Value::Null).await.unwrap();
         board["tasks"].as_array().unwrap().iter().find(|t| t["id"] == id).cloned().expect("on the board")
+    }
+
+    #[tokio::test]
+    async fn a_card_carries_its_agents_display_name_beside_its_id() {
+        let state = test_state();
+        let uid = format!("ag-{}", Uuid::new_v4());
+        let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(json!({
+            "id": uid, "slug": "tess-2", "name": "Tess", "icon": "robot", "provider": "claude", "description": "", "created_at": 1,
+        }))
+        .unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let made = act(&state, json!({"action": "create", "title": "Test the page", "payload": "do it"})).await.unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        state.identity_store.work_start_for(&id, "tess-2", &uid, now_ms(), LEASE_MS).unwrap().expect("claimed");
+        let t = task_of(&state, &id).await;
+        assert_eq!((t["claimed_by"].as_str(), t["claimed_by_name"].as_str()), (Some("tess-2"), Some("Tess")), "{t}");
+        // The one-task answer says it too, and a holder with no definition has no name to show.
+        let one = task(&state, &json!({ "id": id })).await.unwrap();
+        assert_eq!(one["task"]["claimed_by_name"], "Tess", "{one}");
+        let unknown = held_task(&state, "ghost").await;
+        assert!(task_of(&state, &unknown).await["claimed_by_name"].is_null());
     }
 
     #[tokio::test]

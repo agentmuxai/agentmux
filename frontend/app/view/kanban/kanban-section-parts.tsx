@@ -12,7 +12,7 @@ import { tip } from "@/app/element/tip";
 import { KanbanBoard, useCardDrop } from "./kanban-board";
 import { KanbanBoardPicker } from "./kanban-board-picker";
 import { AgentChip, agentStateWords } from "./kanban-card";
-import { columnOf, isFinishedColumn, repoLabel } from "./kanban-columns";
+import { agentLabel, columnOf, isFinishedColumn, repoLabel } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
 import type { KanbanModel } from "./kanban-model";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
@@ -102,7 +102,7 @@ function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel; onOpenA
             density="compact"
             tone="quiet"
             class={hover() ? "kanban-strip__agent kanban-drop--hover" : "kanban-strip__agent"}
-            title={`${props.agent.name}: ${agentStateWords(props.agent.state)}. Drop a waiting task here to start it on ${props.agent.name}; click to open it.`}
+            title={`${agentLabel(props.agent)}: ${agentStateWords(props.agent.state)}. Drop a waiting task here to start it on ${agentLabel(props.agent)}; click to open it.`}
             onClick={() => props.onOpenAgent(props.agent.block_id)}
         >
             <AgentChip name={props.agent.name} agent={props.agent} />

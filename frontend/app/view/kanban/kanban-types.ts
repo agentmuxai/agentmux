@@ -126,7 +126,10 @@ export interface KanbanMediaItem {
 }
 
 export interface KanbanAgent {
+    /** Its id (the slug), which a task names it by; `display` is the name to show. */
     name: string;
+    /** Its display name ("Tess" for "tess-2"), absent from an older srv or with no definition. */
+    display?: string | null;
     uid?: string | null;
     block_id: string;
     state: KanbanAgentState;
@@ -145,6 +148,9 @@ export interface KanbanTask {
     state: TaskState;
     claimed_by: string;
     claimed_by_uid: string;
+    /** The display names of the holder and of the agent it is for, absent from an older srv. */
+    claimed_by_name?: string | null;
+    target_agent_name?: string | null;
     claim_expires?: number | null;
     attempts: number;
     max_attempts: number;
