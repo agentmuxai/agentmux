@@ -53,6 +53,7 @@ mod streamed_browser;
 pub(crate) mod files_root;
 mod container_workspace;
 mod model_gateway_handlers;
+mod model_gateway_key;
 pub(crate) mod compact_backstop;
 pub(crate) mod spend_watch;
 mod container_tool_chunk;
@@ -217,6 +218,9 @@ mod agent_status_tests;
 #[cfg(test)]
 #[path = "tests/model_gateway_tests.rs"]
 mod model_gateway_tests;
+#[cfg(test)]
+#[path = "tests/key_route_gateway_tests.rs"]
+mod key_route_gateway_tests;
 #[cfg(test)]
 #[path = "tests/http_skill_tests.rs"]
 mod http_skill_tests;

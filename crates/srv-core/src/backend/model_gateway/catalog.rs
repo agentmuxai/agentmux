@@ -134,6 +134,42 @@ pub fn route(id: &str) -> Option<&'static Route> {
     ROUTES.iter().find(|r| r.id == id)
 }
 
+/// The id of the gateway route that carries an agent's own Anthropic API key (an account of Connectors > Accounts).
+/// It is not in [`ROUTES`]: an agent is never *set* to it as a model route, it is bound to a key account, and the key
+/// is read from that account at each request.
+pub const KEY_ROUTE_ID: &str = "anthropic";
+
+/// What a model of each family costs, per million tokens, for counting a key account's use against the caps. Each is
+/// the highest price the family has charged (a long prompt's rate, an older model's), so the count errs early, never late.
+const KEY_ROUTE_PRICES: &[Model] = &[
+    Model { id: "fable", label: "Fable", context: 1_000_000, tools: true, thinking: true, images: true, price_in: 10.0, price_out: 50.0, price_cache_read: 0.25 },
+    Model { id: "opus", label: "Opus", context: 1_000_000, tools: true, thinking: true, images: true, price_in: 5.0, price_out: 25.0, price_cache_read: 0.5 },
+    Model { id: "sonnet", label: "Sonnet", context: 1_000_000, tools: true, thinking: true, images: true, price_in: 3.0, price_out: 15.0, price_cache_read: 0.3 },
+    Model { id: "haiku", label: "Haiku", context: 1_000_000, tools: true, thinking: true, images: true, price_in: 1.0, price_out: 5.0, price_cache_read: 0.1 },
+];
+
+const KEY_ROUTE: Route = Route {
+    id: KEY_ROUTE_ID,
+    label: "Anthropic API key",
+    harness: "claude",
+    base_url: "https://api.anthropic.com",
+    key_label: "",
+    models: KEY_ROUTE_PRICES,
+    default_model: "opus",
+};
+
+/// The route a request may name at the gateway: a model route, or the key route.
+pub fn gateway_route(id: &str) -> Option<&'static Route> {
+    route(id).or((id == KEY_ROUTE_ID).then_some(&KEY_ROUTE))
+}
+
+/// The price tier a model name counts at on the key route: its family's, and the dearest (`fable`) for a name that
+/// names none, so a model that is unknown counts more, not less.
+pub fn key_route_price(model: &str) -> &'static Model {
+    let name = model.to_ascii_lowercase();
+    KEY_ROUTE_PRICES.iter().find(|m| name.contains(m.id)).unwrap_or(&KEY_ROUTE_PRICES[0])
+}
+
 /// A test's stand-in upstream, in place of the route's own address.
 #[cfg(any(test, feature = "test-support"))]
 pub static TEST_BASE_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);

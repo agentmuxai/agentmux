@@ -204,7 +204,7 @@ fn on_settled(state: &AppState, grant: &Grant, now: i64) {
 
 /// "OpenRouter (DeepSeek V4.1 Flash)": where the agent's spend goes.
 fn place_of(state: &AppState, grant: &Grant) -> String {
-    let Some(route) = catalog::route(&grant.route) else { return grant.route.clone() };
+    let Some(route) = catalog::gateway_route(&grant.route) else { return grant.route.clone() };
     match launch::model_on_route(&state.mstore, &grant.def_id, route) {
         Some(model) => format!("{} ({})", route.label, model.label),
         None => route.label.to_string(),

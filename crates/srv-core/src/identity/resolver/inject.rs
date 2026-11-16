@@ -552,20 +552,15 @@ pub fn inject_identity_env_for_spawn(
         id_store: &id_store,
         identity_store: &identity_store,
         broker: broker.as_ref(),
-        instance: &instance,
-        injected_oauth: std::collections::HashSet::new(),
+        instance: &instance, injected_oauth: std::collections::HashSet::new(), mstore: &mstore, def_provider: def_provider.as_deref(), own_endpoint: own_claude_endpoint,
     };
     for binding in &bindings {
-        // The Claude account is discarded for an agent on its own endpoint: not injected, not required.
-        if own_claude_endpoint && resolve_provider_alias(&binding.provider) == "claude" {
-            continue;
-        }
         injector.inject(binding, env_vars)?;
     }
 
     // Step 5: the definition-provider gate (spec §2.2 edge case).
     let brings_own_login = on_route || (own_claude_endpoint && def_provider.as_deref() == Some("claude"));
-     if !brings_own_login { steps::gate_unbound_provider(def_provider, &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
+     if !brings_own_login { steps::gate_unbound_provider(def_provider.clone(), &injector.injected_oauth, &bindings, &identity_store, &instance, &parent_template_id)?; }
 
     // #3577, re-checked at the gate's own exit.
     steps::recheck_agent_not_deleted(&mstore, &instance)
@@ -578,6 +573,8 @@ pub mod steps;
 mod tests {
     #[path = "../../inject_own_endpoint_tests.rs"]
     pub mod own_endpoint;
+    #[path = "../../inject_key_route_tests.rs"]
+    pub mod key_route;
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{

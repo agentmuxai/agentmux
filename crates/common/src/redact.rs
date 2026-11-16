@@ -366,6 +366,17 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// An Anthropic API key (the shape of the one a person adds in Connectors > Accounts), made up and built from pieces.
+    #[test]
+    fn an_anthropic_api_key_is_redacted_wherever_it_appears() {
+        let key = ["sk-ant", "-api03-", "MADEUPMADEUPMADEUPMADEUPMADEUP0123456789"].concat();
+        for text in [format!("key {key} used"), format!("x-api-key: {key}"), format!("ANTHROPIC_API_KEY={key}"), format!("{{\"error\":\"bad {key}\"}}")] {
+            let out = redact_secrets(&text);
+            assert!(!out.contains("MADEUP") && !out.contains(&key), "{text} -> {out}");
+        }
+        assert!(!redact_token_shapes(&format!("pasted {key}")).contains("MADEUP"), "the shape pass alone catches it too");
+    }
+
     #[test]
     fn a_private_key_after_a_certificate_is_still_redacted() {
         let text = "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n\

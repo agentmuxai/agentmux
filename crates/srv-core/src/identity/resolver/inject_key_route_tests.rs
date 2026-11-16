@@ -1,0 +1,99 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! The spawn gate for a Claude agent on an Anthropic API key account: it is pointed at the gateway's key route and
+//! never holds the key (docs/specs/SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md).
+
+use super::*;
+use crate::backend::model_gateway::{catalog, token};
+
+/// A made-up key of the shape the redaction code knows, built from pieces so no key-shaped literal sits in the file.
+fn made_up_key() -> String {
+    ["sk-ant", "-api03-", "MADEUPMADEUPMADEUPMADEUPMADEUP0123456789"].concat()
+}
+
+fn key_account(id: &str, kind: &str) -> IdentityAccount {
+    let mut account = make_account(id, "anthropic", SecretRef::Env { env_var: format!("AMX_TEST_KEY_ROUTE_{id}") });
+    account.kind = kind.to_string();
+    account.display_name = "Work key".to_string();
+    account
+}
+
+fn spawn(store: &Arc<Store>, block: &str, own_endpoint: bool) -> (Result<(), SpawnGateError>, HashMap<String, String>) {
+    std::env::set_var("AGENTMUX_LOCAL_URL", "http://127.0.0.1:4000");
+    let mut env = HashMap::new();
+    let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store.clone(), None, block, &mut env, own_endpoint);
+    (res, env)
+}
+
+fn agent_on(store: &Arc<Store>, account: &IdentityAccount, block: &str) {
+    let mut def = gate_def(0);
+    store.agent_def_insert(&mut def).unwrap();
+    store.identity_upsert(account).unwrap();
+    store.agent_identity_link("def-1", &account.id, "anthropic").unwrap();
+    insert_block_for_agent(store, block, "def-1");
+    store.instance_create(&make_instance(block, "id-key")).unwrap();
+}
+
+#[test]
+fn a_claude_agent_on_an_api_key_is_given_the_gateway_and_a_token_and_never_the_key() {
+    let key = made_up_key();
+    std::env::set_var("AMX_TEST_KEY_ROUTE_acct-key-1", &key);
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-1", "api_key"), "block-key-1");
+
+    let (res, env) = spawn(&store, "block-key-1", false);
+
+    assert_eq!(res, Ok(()), "the key link satisfies the Claude agent's account gate");
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4000/api/v1/model/anthropic");
+    assert!(env["ANTHROPIC_AUTH_TOKEN"].starts_with(token::TOKEN_PREFIX));
+    assert_eq!(env["ANTHROPIC_API_KEY"], "", "no key of any kind in its place");
+    assert!(!env.values().any(|v| v.contains(&key) || v.contains("MADEUPMADEUP")), "the key is nowhere in the agent's environment: {env:?}");
+    let grant = token::grant_for(&env["ANTHROPIC_AUTH_TOKEN"]).unwrap();
+    assert_eq!((grant.route.as_str(), grant.account.as_str(), grant.def_id.as_str()), (catalog::KEY_ROUTE_ID, "acct-key-1", "def-1"));
+}
+
+#[test]
+fn the_token_is_for_the_key_route_only_and_follows_the_account_the_agent_is_on() {
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-2", "api_key"), "block-key-2");
+    let (_, env) = spawn(&store, "block-key-2", false);
+    let first = env["ANTHROPIC_AUTH_TOKEN"].clone();
+
+    store.identity_upsert(&key_account("acct-key-3", "api_key")).unwrap();
+    store.agent_identity_unlink("def-1", "anthropic").unwrap();
+    store.agent_identity_link("def-1", "acct-key-3", "anthropic").unwrap();
+    let (_, env) = spawn(&store, "block-key-2", false);
+
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], first, "the same token, now spending the other account");
+    assert_eq!(token::grant_for(&first).unwrap().account, "acct-key-3");
+    assert_ne!(token::grant_for(&first).unwrap().route, "openrouter", "never a model route's token");
+}
+
+#[test]
+fn an_account_that_is_not_an_api_key_is_not_carried_by_the_gateway() {
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-4", "pat"), "block-key-4");
+    let (res, env) = spawn(&store, "block-key-4", false);
+    assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }));
+    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+}
+
+#[test]
+fn an_agent_with_a_key_link_whose_account_is_gone_is_refused_not_left_on_a_login() {
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-5", "api_key"), "block-key-5");
+    delete_account_row_keep_link(&store, "acct-key-5");
+    let (res, env) = spawn(&store, "block-key-5", false);
+    assert!(matches!(res, Err(SpawnGateError::MissingCredentials { .. })), "{res:?}");
+    assert!(env.is_empty());
+}
+
+#[test]
+fn an_agent_on_its_own_endpoint_does_not_use_the_key_route() {
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-6", "api_key"), "block-key-6");
+    let (res, env) = spawn(&store, "block-key-6", true);
+    assert_eq!(res, Ok(()));
+    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"), "its own endpoint's authentication is put in after this step");
+}
