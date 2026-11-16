@@ -1004,7 +1004,7 @@ mod tests {
     fn credential_text_is_never_what_the_log_keeps_whatever_refused_the_call() {
         let key = format!(
             "export K={}{}",
-            concat!("ghp", "_"), "abcdefghijklmnopqrstuvwxyz0123456789ab"
+            "ghp_", "abcdefghijklmnopqrstuvwxyz0123456789ab"
         );
         assert!(credential_line(&key));
         assert_eq!(detail_for_log(&key, ""), "");

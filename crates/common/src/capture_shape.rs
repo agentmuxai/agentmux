@@ -44,13 +44,13 @@ fn is_uuid(text: &str) -> bool {
 fn is_named(name: &str, value: &str) -> Option<bool> {
     let rest_alnum = |rest: Option<&str>, min: usize| rest.is_some_and(|r| r.len() >= min && all(r, alnum));
     Some(match name {
-        "stripe-secret" => rest_alnum(after(value, &[concat!("sk_live", "_"), "sk_test_", "rk_live_", "rk_test_"]), 16),
+        "stripe-secret" => rest_alnum(after(value, &["sk_live_", "sk_test_", "rk_live_", "rk_test_"]), 16),
         "stripe-publishable" => rest_alnum(after(value, &["pk_live_", "pk_test_"]), 16),
         "stripe-webhook" => rest_alnum(after(value, &["whsec_"]), 16),
         "aws-access-key" => value.len() == 20 && after(value, &["AKIA", "ASIA"]).is_some_and(|r| all(r, |c| c.is_ascii_uppercase() || c.is_ascii_digit())),
         "aws-secret-key" => value.len() == 40 && all(value, |c| alnum(c) || c == '/' || c == '+'),
         "github-token" => {
-            rest_alnum(after(value, &[concat!("ghp", "_"), "gho_", "ghu_", "ghs_", "ghr_"]), 36)
+            rest_alnum(after(value, &["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]), 36)
                 || after(value, &["github_pat_"]).is_some_and(|r| r.len() >= 22 && all(r, |c| alnum(c) || c == '_'))
         }
         "slack-token" => after(value, &["xoxb-", "xoxp-", "xoxa-", "xoxr-", "xoxs-"]).is_some_and(|r| r.len() >= 10 && all(r, |c| alnum(c) || c == '-')),
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn each_named_shape_takes_its_kind_of_value_and_refuses_the_others() {
         let cases: [(&str, &str, &str); 11] = [
-            ("stripe-secret", &key(concat!("sk_live", "_"), "abcdefghij123456"), &key("pk_live_", "abcdefghij123456")),
+            ("stripe-secret", &key("sk_live_", "abcdefghij123456"), &key("pk_live_", "abcdefghij123456")),
             ("stripe-publishable", &key("pk_test_", "abcdefghij123456"), &key("sk_test_", "abcdefghij123456")),
             ("stripe-webhook", &key("whsec_", "abcdefghij123456"), &key("whsec_", "short")),
             ("aws-access-key", concat!("AKI", "AIOSFODNN7EXAMPLE"), concat!("AKI", "AIOSFODNN7EXAMPLE1")),
@@ -160,10 +160,10 @@ mod tests {
 
     #[test]
     fn a_prefix_and_a_length_range_narrow_it_further() {
-        let s = shape(Some(concat!("sk_live", "_")), Some("stripe-secret"), Some(20), Some(40));
-        assert!(s.matches(concat!("  sk_live", "_abcdefghij123456\n")), "trimmed");
+        let s = shape(Some("sk_live_"), Some("stripe-secret"), Some(20), Some(40));
+        assert!(s.matches("  sk_live_abcdefghij123456\n"), "trimmed");
         assert!(!s.matches(&key("sk_test_", "abcdefghij123456")), "the prefix");
-        assert!(!s.matches(&key(concat!("sk_live", "_"), "abcdefghij1234567890abcdefghij1234567890")), "the range");
+        assert!(!s.matches(&key("sk_live_", "abcdefghij1234567890abcdefghij1234567890")), "the range");
         assert!(shape(Some("ab"), None, None, None).matches("abc") && !shape(Some("ab"), None, None, None).matches("ba"));
     }
 

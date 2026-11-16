@@ -500,7 +500,7 @@ async fn a_key_is_written_only_with_the_address_of_a_server_of_its_own() {
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "API_TIMEOUT_MS": "5" }, "unset": unset })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // A key the person wrote in the clear is theirs, and stays.
-    write_env(&state, &lolly, concat!("ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_API_KEY=sk-ant", "-person-owned-key\n"));
+    write_env(&state, &lolly, "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_API_KEY=sk-ant-person-owned-key\n");
     let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_BASE_URL"] })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_API_KEY"));

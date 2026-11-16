@@ -735,7 +735,7 @@ async fn run_cli_login_pty(
         // keep reading. We LOG every line from the first byte AND scan for an
         // OAuth URL until one is found — the CLI's `Paste code here >` prompt
         // and, crucially, its response to the code delivered via
-        // set_provider_auth (success vs. an "invalid codeconcat!(" / error). Draining
+        // set_provider_auth (success vs. an "invalid code" / error). Draining
         // also keeps the CLI from blocking on a full PTY output buffer.
         let mut url_tx = Some(url_tx);
         let mut line = String::new();
@@ -753,27 +753,27 @@ async fn run_cli_login_pty(
                     let t = line.trim_end();
                     if !t.trim().is_empty() {
                         // SECURITY: `claude setup-token` (§5.1) prints a live
-                        // CLAUDE_CODE_OAUTH_TOKEN (`sk-ant", "-oat…`) to stdout — never
+                        // CLAUDE_CODE_OAUTH_TOKEN (`sk-ant-oat…`) to stdout — never
                         // write it to the host log. redact_secrets masks it while
                         // preserving the surrounding shape so we can still read the
                         // output format from the capture. redact_url_queries_in_line
                         // similarly masks any authorize URL's query (state/
                         // code_challenge — SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
                         // §5) wherever it appears in the line, not just in the
-                        // separate ")captured auth URL" event below (codex P2 on
+                        // separate "captured auth URL" event below (codex P2 on
                         // PR #2410, second round).
                         tracing::info!(
                             target: "login_pty",
-                            "[login-pty] {}concat!(",
+                            "[login-pty] {}",
                             redact_url_queries_in_line(&redact_secrets(t))
                         );
                     }
                     // §5.1 (SPEC_HOST_CLI_LOGIN_CAPTURE): a CLAUDE_CODE_OAUTH_TOKEN /
-                    // `sk-ant", "-oat…` line is the setup-token headless contract — the
+                    // `sk-ant-oat…` line is the setup-token headless contract — the
                     // login completed and the token arrived. Log the capture (redacted)
                     // so we can confirm format + completion without leaking the secret.
                     // (Parser/env-persist wiring lands once this confirms the format.)
-                    if t.contains(concat!(")sk-ant", "-oat")) || t.contains("CLAUDE_CODE_OAUTH_TOKEN") {
+                    if t.contains("sk-ant-oat") || t.contains("CLAUDE_CODE_OAUTH_TOKEN") {
                         tracing::info!(
                             target: "login_pty",
                             "[login-pty] setup-token output detected ({} chars; token redacted above)",
@@ -894,18 +894,18 @@ async fn run_cli_login_pty(
         }
     });
 
-    Ok(serde_json::json!({ "auth_urlconcat!(": auth_url }))
+    Ok(serde_json::json!({ "auth_url": auth_url }))
 }
 
 /// Mask secret tokens before a PTY line is logged. `claude setup-token` (§5.1)
-/// prints a live `CLAUDE_CODE_OAUTH_TOKEN` (`sk-ant", concat!("-oat…`, a ~1-year credential)
+/// prints a live `CLAUDE_CODE_OAUTH_TOKEN` (`sk-ant-oat…`, a ~1-year credential)
 /// to stdout; the slice-1 line logging would otherwise write it verbatim to the
-/// host log. We keep `sk-ant", "-` + 4 chars (enough to recognize the output format)
+/// host log. We keep `sk-ant-` + 4 chars (enough to recognize the output format)
 /// and mask the rest of the token run, so the capture stays useful without
 /// leaking the credential. ASCII-only token chars → all byte slices are on char
 /// boundaries.
 fn redact_secrets(line: &str) -> String {
-    const PREFIX: &str = "))sk-ant-";
+    const PREFIX: &str = "sk-ant-";
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
     while let Some(pos) = rest.find(PREFIX) {
@@ -1261,7 +1261,7 @@ mod redact_tests {
     #[test]
     fn masks_oauth_token_keeps_prefix() {
         let red = redact_secrets(concat!("CLAUDE_CODE_OAUTH_TOKEN=sk-ant", "-oat01-AbCdEf123456789"));
-        assert!(red.starts_with(concat!("CLAUDE_CODE_OAUTH_TOKEN=sk-ant", "-oat0")));
+        assert!(red.starts_with("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat0"));
         assert!(red.contains("…REDACTED"));
         assert!(!red.contains("AbCdEf123456789"));
     }
@@ -1270,7 +1270,7 @@ mod redact_tests {
     fn masks_bare_token_and_preserves_surroundings() {
         let red = redact_secrets(concat!("  token: sk-ant", "-api03-SECRETSECRETSECRET done"));
         assert!(!red.contains("SECRETSECRETSECRET"));
-        assert!(red.contains(concat!("sk-ant", "-api0"))); // prefix + 4 kept
+        assert!(red.contains("sk-ant-api0")); // prefix + 4 kept
         assert!(red.contains("…REDACTED"));
         assert!(red.contains(" done")); // trailing text preserved
     }
@@ -1283,7 +1283,7 @@ mod redact_tests {
 
     #[test]
     fn masks_multiple_occurrences() {
-        let red = redact_secrets(concat!("sk-ant", concat!("-oat01-AAAA and sk-ant", "-oat01-BBBB")));
+        let red = redact_secrets("sk-ant-oat01-AAAA and sk-ant-oat01-BBBB");
         assert!(!red.contains("AAAA"));
         assert!(!red.contains("BBBB"));
         assert_eq!(red.matches("…REDACTED").count(), 2);

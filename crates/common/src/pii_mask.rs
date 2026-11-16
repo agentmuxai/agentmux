@@ -433,13 +433,13 @@ mod tests {
     #[test]
     fn short_text_also_loses_tokens_and_private_keys() {
         let masked = mask_short_text(concat!("token ghp", "_abcdefghijklmnopqrstuvwxyz0123456789 end"));
-        assert!(!masked.contains(concat!("ghp", "_abcdef")), "{masked}");
+        assert!(!masked.contains("ghp_abcdef"), "{masked}");
         // Built in pieces, so the file doesn't hold a key block that a secret scanner would flag.
         let dashes = "-----";
         let key = format!("{dashes}BEGIN RSA PRIVATE KEY{dashes}\nMIIEow\n{dashes}END RSA PRIVATE KEY{dashes}");
         assert!(!mask_short_text(&key).contains("MIIEow"));
         // mask_text alone leaves them: it is for whole pages.
-        assert_eq!(mask_text(concat!("ghp", "_abcdefghijklmnopqrstuvwxyz")), concat!("ghp", "_abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(mask_text("ghp_abcdefghijklmnopqrstuvwxyz"), "ghp_abcdefghijklmnopqrstuvwxyz");
         // A prefix in the middle of a word is not a token: ordinary page text comes back whole.
         for text in ["disk-usage-report-weekly", "https://example.test/risk-assessment-for-the-quarter", "tasks-and-asks-for-next-year-planning", concat!("AKI", "AIOSFODNN7EXAMPLE is shown")] {
             if text.starts_with("AKIA") {
@@ -448,13 +448,13 @@ mod tests {
             assert_eq!(mask_short_text(text), text);
         }
         assert!(!mask_short_text(concat!("key=AKI", "AIOSFODNN7EXAMPLE")).contains("AKIAIOSFODNN7"));
-        assert!(!mask_short_text(concat!("see https://x.test/ghp", "_abcdefghijklmnopqrstuvwxyz0123")).contains(concat!("ghp", "_abcdef")));
+        assert!(!mask_short_text("see https://x.test/ghp_abcdefghijklmnopqrstuvwxyz0123").contains("ghp_abcdef"));
     }
 
     #[test]
     fn a_number_across_the_cut_is_hidden_even_after_a_token_shrinks_the_text() {
         // A token before the cut shrinks when redacted, which moves a later number across the cut.
-        let text = format!(concat!("ghp", "_{} {} 4111111111111111"), "a".repeat(300), "x".repeat(90));
+        let text = format!("ghp_{} {} 4111111111111111", "a".repeat(300), "x".repeat(90));
         let shown = mask_bounded(&text, 400);
         assert!(!shown.contains("4111"), "{shown}");
         assert!(shown.contains(CARD) || shown.chars().count() <= 400, "{shown}");
@@ -479,9 +479,9 @@ mod tests {
 
     #[test]
     fn a_token_that_crosses_the_cut_never_shows_its_prefix() {
-        let text = format!(concat!("ghp", concat!("_{} ghp", "_abcdefghijklmnopqrstuv")), "a".repeat(1980));
+        let text = format!("ghp_{} ghp_abcdefghijklmnopqrstuv", "a".repeat(1980));
         let shown = mask_bounded(&text, 2000);
-        assert!(!shown.contains(concat!("ghp", "_")), "{shown}");
+        assert!(!shown.contains("ghp_"), "{shown}");
         assert_eq!(mask_bounded(&format!("{} sk-abcdefghijklmnopqrstuvwxyz", "word ".repeat(10)), 60).contains("sk-"), false);
     }
 

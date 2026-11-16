@@ -160,13 +160,13 @@ fn text_that_comes_apart_in_an_ancestors_name_is_still_withheld() {
     // The ancestor's name has the pieces joined by a space the text itself does not have.
     let mut nodes = vec![
         n("1", None, "RootWebArea", "Settings", 1, &["2"]),
-        n("2", Some("1"), "cell", concat!("Key sk_live", "_ abcdefgh12"), 2, &["3", "4"]),
-        n("3", Some("2"), "StaticText", concat!("sk_live", "_"), 9, &[]),
+        n("2", Some("1"), "cell", "Key sk_live_ abcdefgh12", 2, &["3", "4"]),
+        n("3", Some("2"), "StaticText", "sk_live_", 9, &[]),
         n("4", Some("2"), "StaticText", "abcdefgh12", 10, &[]),
     ];
     visibility::apply(&mut nodes, &layout(&[9, 10]), true);
     let out = shown(&nodes, None);
-    assert!(!out.text.contains("abcdefgh12") && !out.text.contains(concat!("sk_live", "_")), "{}", out.text);
+    assert!(!out.text.contains("abcdefgh12") && !out.text.contains("sk_live_"), "{}", out.text);
 }
 
 #[test]
@@ -257,9 +257,9 @@ fn hidden_text_in_a_frame_of_the_page_is_read_from_every_document() {
 
 #[test]
 fn what_a_page_script_read_is_scrubbed_of_secret_shapes() {
-    assert_eq!(scrub(concat!("Copy sk_live", "_abcdefgh12 now")), format!("Copy {WITHHELD} now"));
+    assert_eq!(scrub("Copy sk_live_abcdefgh12 now"), format!("Copy {WITHHELD} now"));
     assert_eq!(scrub("Account settings"), "Account settings");
-    let mut state = json!({ "tag": "div", "value": concat!("token ghp", "_abcdefghij12"), "checked": true, "options": ["a", "xK9fQ2mLp7ZaB3cD4eF5gH6"] });
+    let mut state = json!({ "tag": "div", "value": "token ghp_abcdefghij12", "checked": true, "options": ["a", "xK9fQ2mLp7ZaB3cD4eF5gH6"] });
     scrub_value(&mut state);
     assert_eq!(state["value"], json!(format!("token {WITHHELD}")));
     assert_eq!(state["checked"], json!(true));
@@ -341,9 +341,9 @@ fn an_unreadable_layout_withholds_an_odd_token_in_a_secret_row_and_keeps_a_phras
 
 #[test]
 fn an_answer_with_an_approval_request_in_it_is_left_as_the_person_is_shown_it() {
-    let ask = json!({ "needs_approval": { "what": "Click \"Save\"", "fields": [["Key", concat!("ghp", "_abcdefghij12"), true]] } });
+    let ask = json!({ "needs_approval": { "what": "Click \"Save\"", "fields": [["Key", "ghp_abcdefghij12", true]] } });
     assert_eq!(scrub_answer(ask.clone()), ask);
-    let answered = scrub_answer(json!({ "value": concat!("ghp", "_abcdefghij12"), "checked": true }));
+    let answered = scrub_answer(json!({ "value": "ghp_abcdefghij12", "checked": true }));
     assert_eq!(answered["value"], json!(WITHHELD));
     assert_eq!(answered["checked"], json!(true));
 }

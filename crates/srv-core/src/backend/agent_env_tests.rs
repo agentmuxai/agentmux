@@ -155,7 +155,7 @@ fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
     let current = concat!("# note about the build\n# GH_TOKEN=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=UTC\n");
     let shown = redacted(current);
     assert_eq!(shown, "# note about the build\n# [hidden]\n# [hidden]\nTZ=UTC\n");
-    assert!(!shown.contains(concat!("ghp", "_")) && !shown.contains("hunter2"));
+    assert!(!shown.contains("ghp_") && !shown.contains("hunter2"));
     // Written back as shown, the operator's lines return; the edit around them stands.
     let edited = shown.replace("TZ=UTC", "TZ=Europe/Berlin");
     assert_eq!(
@@ -164,7 +164,7 @@ fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
     );
     // Dropped: kept at the end.
     let dropped = resolve_lines(current, "TZ=UTC\n").unwrap();
-    assert!(dropped.contains(concat!("GH_TOKEN=ghp", "_")) && dropped.contains("PGPASSWORD = hunter2"));
+    assert!(dropped.contains("GH_TOKEN=ghp_") && dropped.contains("PGPASSWORD = hunter2"));
 }
 
 #[test]

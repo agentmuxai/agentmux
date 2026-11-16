@@ -482,7 +482,7 @@ mod tests {
         let question = format!("Click \"Pay {card}\" on https://a.test/?k={token}");
         for state in [State::Done(format!("The page is now https://a.test/{token}.")), State::Failed(format!("{card} changed")), State::Void(token.to_string())] {
             let t = outcome_text("r-4", "approval", &question, &state);
-            assert!(!t.contains(card) && !t.contains(concat!("ghp", "_abcdef")), "{t}");
+            assert!(!t.contains(card) && !t.contains("ghp_abcdef"), "{t}");
         }
         assert!(outcome_text("r-4", "approval", &question, &State::Declined).contains("[card number hidden]"));
     }

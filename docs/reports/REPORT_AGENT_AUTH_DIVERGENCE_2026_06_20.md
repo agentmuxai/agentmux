@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-20
 **Author:** AgentA
-**Status:** Diagnosis complete; fix proposed (not yet implemented)
+**Status:** analysis. Diagnosis complete; fix proposed (not yet implemented)
 **Related:** `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (failure-mode A), `SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20` (#1604), cross-channel persistence work (#1383–#1393)
 
 ---
