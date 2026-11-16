@@ -30,6 +30,8 @@ pub(super) struct Entry {
     pub ready: bool,
     /// The person pressed "Switch now".
     pub now: bool,
+    /// Who pressed it: the agent's slug when an agent did, empty for the window (the person).
+    pub now_by: String,
     /// How long the handoff the agent left is, for the audit row.
     pub handoff_chars: Option<usize>,
     pub proceed: Option<Proceed>,
@@ -135,6 +137,7 @@ pub fn open(state: &AppState, prep: Prep, proceed: Proceed) -> Opened {
         why: None,
         ready: false,
         now: false,
+        now_by: String::new(),
         handoff_chars: None,
         proceed: Some(proceed),
         wake: Arc::new(Notify::new()),
@@ -207,21 +210,24 @@ pub(crate) fn answer(state: &AppState, def_id: &str, slug: &str, a: Answer) -> R
     Ok(serde_json::json!({ "status": if a.more_time { "more_time" } else { "ready" }, "note": said.join("; "), "prep": id }))
 }
 
-/// The person pressed "Switch now" for the agent `def_id`: the window ends and the closure runs. BLOCKING.
-pub fn person_says_now(def_id: &str) -> Result<(), String> {
+/// "Switch now" for the agent `def_id`, pressed by the window (`caller` empty: the person) or by the agent
+/// `caller`: the window ends and the closure runs. BLOCKING.
+pub fn person_says_now(def_id: &str, caller: &str) -> Result<(), String> {
     let mut guard = ledger();
     let e = guard.get_mut(def_id).ok_or("nothing is waiting for that agent")?;
     e.now = true;
+    e.now_by = caller.to_string();
     e.wake.notify_one();
     Ok(())
 }
 
 /// The `prep.answered` row of a window that ended as `how`: who it is recorded as (the agent when it
-/// answered, the person when they pressed "Switch now", AgentMux otherwise) and why.
+/// answered, whoever pressed "Switch now" (the person, or the agent that did), AgentMux otherwise) and why.
 pub(super) fn finish_row(e: &Entry, how: How) -> (String, String) {
     let who = match how {
         How::Ready => agentmux_common::slug::agent_route_name(&e.prep.agent_name),
-        How::PersonSaidNow => "operator".to_string(),
+        How::PersonSaidNow if e.now_by.is_empty() => "operator".to_string(),
+        How::PersonSaidNow => e.now_by.clone(),
         How::TimedOut | How::NotAsked => "agentmux".to_string(),
     };
     let handoff = e.handoff_chars.map_or_else(String::new, |n| format!(", handoff {n} characters"));

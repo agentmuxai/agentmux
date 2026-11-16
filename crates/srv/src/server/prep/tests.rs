@@ -120,12 +120,12 @@ async fn the_person_ends_the_window_at_once_and_a_late_answer_changes_nothing() 
     let (ran, proceed) = recorder();
     open(&state, prep("prep-def-c", "Prep-C", "acct-2"), proceed);
     until("the note", || !sink::notes("prep-c").is_empty()).await;
-    ledger::person_says_now("prep-def-c").unwrap();
+    ledger::person_says_now("prep-def-c", "").unwrap();
     until("the change", || !ran.lock().unwrap().is_empty()).await;
     assert_eq!(*ran.lock().unwrap(), vec![How::PersonSaidNow]);
     let late = ledger::answer(&state, "prep-def-c", "prep-c", Answer { handoff: Some("late".into()), ..Answer::default() });
     assert!(late.unwrap_err().contains("no change is waiting on you"), "an answer after the change ran is refused");
-    assert!(ledger::person_says_now("prep-def-c").is_err());
+    assert!(ledger::person_says_now("prep-def-c", "").is_err());
     assert_eq!(ran.lock().unwrap().len(), 1);
 }
 

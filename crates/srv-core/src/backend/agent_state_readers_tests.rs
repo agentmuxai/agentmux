@@ -15,14 +15,13 @@ const READERS: [&str; 3] = ["current_state", "current_state_at", "unavailable_of
 /// The files that call a reader, and why each may. A reason that says "feeds" is the reader the
 /// module is built on; "display" shows a state and decides nothing; "busy" asks whether a turn is in
 /// flight, which is not an availability.
-const ALLOWED: [(&str, &str); 12] = [
+const ALLOWED: [(&str, &str); 11] = [
     ("backend/fleet_source.rs", "display: the fleet feed's state for the Swarm, LAN and mobile"),
     ("backend/kanban.rs", "busy: the reminder loop reminds an idle agent; a limited or signed-out one reads as not idle"),
     ("backend/lan/discovery/agent_names.rs", "display: a limited agent's reset time on the LAN beacon (spec D5)"),
-    ("backend/model_gateway/switch.rs", "busy: the old route's token is kept until no pane of the agent is in a turn"),
     ("backend/supervisor/watcher.rs", "feeds: the Supervisor pauses on an agent that is out of quota or signed out"),
     ("backend/worker_notes.rs", "busy: a note is not sent to a worker waiting on its user"),
-    ("server/account_episodes/moves.rs", "busy: an account move waits for the turn in flight to end"),
+    ("server/prep/decide.rs", "busy: whether an agent is in a turn or can take one, to decide whether to ask it to prepare; the note itself goes through the hold, and offline APIs are read through `jekt_hold`"),
     ("server/app_api/agent_spawn.rs", "display: the unavailable detail beside an agent in `Agents list`"),
     ("server/app_api/kanban.rs", "display: the Kanban card's holder and its unavailable detail"),
     ("server/availability_view.rs", "feeds: `availability_of_block`, the one reader of the fact"),

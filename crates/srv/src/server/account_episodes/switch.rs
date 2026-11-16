@@ -328,10 +328,12 @@ pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &Identi
     }
     if is_asked(state, actor, def_id, &blocks, to, &label, when) {
         let prep = prep_of(state, actor, def_id, &blocks, to, &label, when);
-        set_pending(state, &blocks, Some((&to.id, actor)));
-        let (s, actor, def, to_c, provider_c, accounts_c) = (state.clone(), actor.to_string(), def_id.to_string(), to.clone(), provider.to_string(), accounts.to_vec());
+        let (s, actor_c, def, to_id) = (state.clone(), actor.to_string(), def_id.to_string(), to.id.clone());
         let now = when == AccountSwitchWhen::Now;
-        crate::server::prep::open(state, prep, Box::new(move |how| settle(&s, &actor, &def, &to_c, &provider_c, &accounts_c, now || how == crate::server::prep::How::PersonSaidNow)));
+        // The window first, then the choice it waits on: `apply_pending` skips an agent in a window, so
+        // a refresh between the two can't apply the choice before the agent was asked.
+        crate::server::prep::open(state, prep, Box::new(move |how| settle(&s, &actor_c, &def, &to_id, now || how == crate::server::prep::How::PersonSaidNow)));
+        set_pending(state, &blocks, Some((&to.id, actor)));
         return Ok(result(AccountSwitchStatus::Preparing));
     }
     if when == AccountSwitchWhen::AfterTurn && blocks.iter().any(|b| busy(state, &b.oid)) {
@@ -367,14 +369,29 @@ fn prep_of(state: &AppState, actor: &str, def_id: &str, blocks: &[Block], to: &I
 /// What a switch does when its window ends: as it would have without one. A turn still running waits for
 /// its end, unless the switch ends turns (`now`: the caller said `when: now`, or the person pressed
 /// "Switch now"). BLOCKING.
-fn settle(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, accounts: &[IdentityAccount], now: bool) {
+fn settle(state: &AppState, actor: &str, def_id: &str, account_id: &str, now: bool) {
     let blocks = open_panes(state, def_id);
+    // The account is read again: it may have signed out or gone in the window.
+    let Some((to, provider, accounts)) = receiving(state, account_id) else {
+        tracing::info!(def_id = %def_id, "agent.account.switch: a prepared switch was dropped, its account is gone or signed out");
+        set_pending(state, &blocks, None);
+        return;
+    };
     if !now && blocks.iter().any(|b| busy(state, &b.oid)) {
         // Still queued in the panes' meta: `apply_pending` runs it when the turn ends.
         set_pending(state, &blocks, Some((&to.id, actor)));
         return;
     }
-    apply(state, actor, def_id, to, provider, &blocks, accounts, now);
+    apply(state, actor, def_id, &to, &provider, &blocks, &accounts, now);
+}
+
+/// The account `account_id` as it is now, when it can take an agent: it, its provider and the provider's accounts.
+fn receiving(state: &AppState, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
+    let all: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
+    let to = all.iter().find(|a| a.id == account_id && can_receive(&a.status))?.clone();
+    let provider = canonical(&to.provider);
+    let same_provider = all.into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    Some((to, provider, same_provider))
 }
 
 /// Clear the chip's countdown from panes whose window is gone: srv restarted in it, so the choice it
@@ -405,14 +422,11 @@ pub(super) fn apply_pending(state: &AppState) {
         if blocks.iter().any(|b| busy(state, &b.oid)) {
             continue;
         }
-        let accounts: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
-        let Some(to) = accounts.iter().find(|a| a.id == account_id && can_receive(&a.status)) else {
+        let Some((to, provider, accounts)) = receiving(state, &account_id) else {
             tracing::info!(def_id = %def_id, "agent.account.switch: a queued switch was dropped, its account is gone or signed out");
             set_pending(state, &blocks, None);
             continue;
         };
-        let provider = canonical(&to.provider);
-        let same_provider: Vec<IdentityAccount> = accounts.iter().filter(|a| canonical(&a.provider) == provider).cloned().collect();
-        apply(state, &by, &def_id, to, &provider, &blocks, &same_provider, false);
+        apply(state, &by, &def_id, &to, &provider, &blocks, &accounts, false);
     }
 }

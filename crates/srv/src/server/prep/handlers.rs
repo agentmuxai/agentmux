@@ -80,6 +80,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
         if ctx.agent_id.is_empty() {
             ctx.operator_only("only the AgentMux window or an agent ends a change's window")?;
         }
-        Ok(AgentPrepNowResult { ended: ledger::person_says_now(req.agent_id.trim()).is_ok() })
+        Ok(AgentPrepNowResult { ended: ledger::person_says_now(req.agent_id.trim(), &ctx.agent_id).is_ok() })
     });
 }
