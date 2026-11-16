@@ -1,10 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createRoot } from "solid-js";
+import { createMemo, createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { useAtlasLasso } from "./atlas-lasso";
-import { useAtlasPanZoom } from "./atlas-pan-zoom";
+import { gapsAt } from "./atlas-layout";
+import { useAtlasPanZoom, type AtlasPanZoom } from "./atlas-pan-zoom";
 import { pointerScale } from "./atlas-viewport";
 
 /** A pane the person zoomed to 125%: it is 800 px of its own and is drawn 1000 px wide. */
@@ -93,6 +94,74 @@ describe("the wheel over the map", () => {
             expect(plain.prevented()).toBe(true);
             expect(zoom.view().k).toBeGreaterThan(before.k);
             dispose();
+        });
+    });
+});
+
+describe("a zoom past the fitted view closes the rows and keeps its place", () => {
+    const PLAIN = { left: 0, top: 0, width: 800, height: 600 };
+    /** Three rows of one node each, as far apart as the layout's gap between a lead and its reports at `spread`. */
+    const mapAt = (spread: number) => {
+        const gap = gapsAt(spread).level;
+        const nodes = new Map([0, 1, 2].map((row) => [`n${row}`, { x: 100, y: row * (36 + gap) }] as const));
+        return { width: 400, height: 3 * 36 + 2 * gap, nodes };
+    };
+    function zoomed(run: (zoom: AtlasPanZoom, map: () => ReturnType<typeof mapAt>) => void) {
+        let map!: () => ReturnType<typeof mapAt>;
+        let zoom!: AtlasPanZoom;
+        const dispose = createRoot((done) => {
+            // As the view makes it: the map is laid out for the spread the zoom gives.
+            zoom = useAtlasPanZoom(() => map(), () => "machine", () => {});
+            map = createMemo(() => mapAt(zoom.spread()));
+            zoom.setViewport({ ...viewportAt(PLAIN), clientWidth: 800, clientHeight: 600 } as unknown as HTMLDivElement);
+            return done;
+        });
+        // The pane is measured and the map fitted once the root is made.
+        run(zoom, map);
+        dispose();
+    }
+    const wheelAt = (clientX: number, clientY: number, deltaY: number) =>
+        ({ deltaY, deltaMode: 0, clientX, clientY, ctrlKey: false, metaKey: false, preventDefault: () => {} }) as unknown as WheelEvent;
+
+    it("has the full gaps until the person zooms in, and closes them as they do", () => {
+        zoomed((zoom, map) => {
+            expect(zoom.spread()).toBe(1);
+            const full = map().height;
+            zoom.onWheel(wheelAt(300, 200, -400));
+            expect(zoom.view().k).toBeGreaterThan(1);
+            expect(zoom.spread()).toBeLessThan(1);
+            expect(map().height).toBeLessThan(full);
+            // Zoomed back out past where it started, the gaps are whole again.
+            zoom.onWheel(wheelAt(300, 200, 2000));
+            expect(zoom.spread()).toBe(1);
+            expect(map().height).toBe(full);
+        });
+    });
+
+    it("keeps the node under the pointer where it was, though the rows above it closed", () => {
+        zoomed((zoom, map) => {
+            const before = zoom.view();
+            const node = map().nodes.get("n2")!;
+            // The pointer is on the third row's node.
+            const px = before.x + (node.x + 70) * before.k;
+            const py = before.y + (node.y + 18) * before.k;
+            zoom.onWheel(wheelAt(px, py, -400));
+            const after = zoom.view();
+            const moved = map().nodes.get("n2")!;
+            expect(moved.y).toBeLessThan(node.y);
+            expect(after.x + (moved.x + 70) * after.k).toBeCloseTo(px);
+            expect(after.y + (moved.y + 18) * after.k).toBeCloseTo(py);
+        });
+    });
+
+    it("centres the map at the size it has after a zoom button's step", () => {
+        zoomed((zoom, map) => {
+            zoom.zoomBy(1.25);
+            zoom.zoomBy(1.25);
+            const v = zoom.view();
+            expect(zoom.spread()).toBeLessThan(1);
+            expect(v.x + (map().width * v.k) / 2).toBeCloseTo(400);
+            expect(v.y + (map().height * v.k) / 2).toBeCloseTo(300);
         });
     });
 });

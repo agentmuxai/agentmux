@@ -301,7 +301,8 @@
     flex-direction: column;
     justify-content: center;
     gap: 2px;
-    padding: 0 var(--space-2);
+    // Tight: the box is the size of its two lines (atlas-layout.ts NODE_H), with a little room at each side.
+    padding: 0 var(--space-1);
     border: 1px solid var(--border-color);
     border-left-width: 3px;
     border-radius: var(--radius-sm);
@@ -366,8 +367,10 @@
     &--container::after {
         content: "";
         position: absolute;
-        // The same distance from each edge: the left border is 2 px wider than the others.
-        inset: -5px -5px -5px -7px;
+        // The same distance from each edge: the left border is 2 px wider than the others. The distance is the
+        // layout's (atlas-layout.ts CONTAINER_FRAME_OUT), which closes in with the gaps as the map is zoomed in.
+        --out: var(--atlas-frame-out, 7px);
+        inset: calc(2px - var(--out)) calc(2px - var(--out)) calc(2px - var(--out)) calc(-1 * var(--out));
         border: 1px dashed var(--secondary-text-color);
         pointer-events: none;
     }
@@ -389,7 +392,7 @@
 
     // The review bot and CI: a pill, so they read apart from the agents.
     &--service {
-        padding: 0 calc(var(--space-2) * 2);
+        padding: 0 calc(var(--space-1) * 3);
         border-left-width: 1px;
         border-radius: var(--radius-full);
     }
