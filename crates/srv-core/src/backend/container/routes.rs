@@ -55,6 +55,7 @@ mod tests {
             "/api/v1/work-facts/who",
             "/api/v1/coord/posts",
             "/api/v1/vault",
+            "/api/v1/vault/check",
             "/api/v1/vault/generate",
             "/api/v1/vault/history",
             "/api/v1/vault/import",

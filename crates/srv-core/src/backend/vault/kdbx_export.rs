@@ -140,6 +140,12 @@ fn fill(entry: &mut keepass::db::Entry, e: &Incoming) {
             }
         }
     }
+    // Where the entry's machine copy is: no secret, and the same for every kind.
+    for (name, title) in super::source_link::TITLES {
+        if let Some(v) = field(name) {
+            entry.set_unprotected(title, v);
+        }
+    }
 }
 
 /// A one-time-code seed as the `otpauth://` address KeePassXC reads; an address stays as it is.

@@ -34,6 +34,7 @@ pub mod setting_key;
 pub mod signins;
 pub mod signups;
 pub mod slots;
+pub mod source_link;
 pub mod transfer;
 pub mod uses;
 pub mod vaults;
@@ -80,6 +81,11 @@ pub struct VaultEntryInfo {
     pub tail: String,
     /// Earlier values kept for 7 days, which the person can put back.
     pub versions: u32,
+    /// The newest check of the entry's machine copy (`source_link`) against its value; absent when the entry has no
+    /// link, or the place it names now was never checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_checked: Option<source_link::VaultSourceCheck>,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]
@@ -89,8 +95,8 @@ pub struct VaultEntryInfo {
 }
 
 /// An entry as an agent sees it (`Vault` `list`): what it is called, what
-/// kind it is, and when it expires, a date being no secret. No value, tail,
-/// other field or grant.
+/// kind it is, when it expires (a date being no secret) and where its machine
+/// copy is, if it has one. No value, tail, other field or grant.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VaultAgentEntry {
     pub id: String,
@@ -101,6 +107,9 @@ pub struct VaultAgentEntry {
     pub vault: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>,
+    /// Where a copy of its value lives outside the Vault, and what the newest check of it found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<source_link::AgentLink>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -190,7 +199,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         return Err(format!("a label is at most {MAX_LABEL} characters"));
     }
     for (k, v) in fields {
-        if !kind.fields.contains(&k.as_str()) {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) {
             return Err(format!("a {} entry has no field {k:?}", kind.name));
         }
         if v.len() > MAX_FIELD {
@@ -206,6 +215,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
             return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
         }
     }
+    source_link::validate(fields)?;
     if tags.len() > MAX_TAGS || tags.iter().any(|t| t.chars().count() > MAX_LABEL) {
         return Err(format!("at most {MAX_TAGS} tags, each at most {MAX_LABEL} characters"));
     }
@@ -748,7 +758,9 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             },
             _ => (Vec::new(), String::new()),
         };
+        let source_checked = source_link::Link::of_row(&row).and_then(|link| source_link::last_check(store, &row, &link));
         out.push(VaultEntryInfo {
+            source_checked,
             fields: serde_json::from_str(&row.fields).unwrap_or_default(),
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,
@@ -784,7 +796,8 @@ pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAge
             let section = kinds::kind(&r.kind)?.section;
             let expires = expiry::of(&r).map(|d| d.to_string());
             let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires })
+            let source = source_link::for_agent(store, &r);
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source })
         })
         .collect())
 }

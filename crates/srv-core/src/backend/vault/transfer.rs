@@ -527,6 +527,9 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_
                 let kept = current.as_ref().and_then(|row| signins::fields_of(row).get(signins::PROFILE).cloned());
                 fields.insert(signins::PROFILE.to_string(), kept.unwrap_or_else(|| profile.to_string()));
             }
+            if let Some(row) = &current {
+                super::source_link::carry_over(&mut fields, row);
+            }
             updates.push(VaultRow {
                 id: existing.clone(),
                 kind: e.kind.name.into(),

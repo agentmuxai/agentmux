@@ -153,6 +153,14 @@
     overflow-wrap: anywhere;
 }
 
+// A column's name and the time an entry changed are short and stay whole: with a long line of details beside
+// them the table squeezed them to a letter's width, and "Changed" broke into "Chang / ed" (both look checks).
+.vault-table th,
+.vault-table td.vault-when {
+    overflow-wrap: normal;
+    white-space: nowrap;
+}
+
 .vault-actions {
     white-space: nowrap;
     text-align: right;
@@ -386,6 +394,22 @@
 
 .vault-expiry-warn {
     color: var(--warning-text-color);
+}
+
+// Where a copy of the entry's value lives outside the Vault, and what the newest check of it found.
+// The text wraps inside its own box and the check button stays beside it: as one run of inline content the button
+// dropped to a line of its own under a line that just fitted (the macOS look check, 2026-11-14).
+.vault-machine-copy {
+    margin-top: var(--space-1);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+}
+
+.vault-machine-copy-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 // An entry's earlier values: last characters, when and by whom replaced, Restore.

@@ -87,6 +87,11 @@ pub struct UseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub import: Option<UseImport>,
+    /// An agent wants to change where the entry's machine copy is (`Vault` `update` of its `source_*` fields); never
+    /// goes ahead on silence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub link: Option<UseLink>,
     /// The cards the person may pick from, when the agent named none or named one the person may swap
     /// (`Browser` `fill` of a whole card): none for any other use. `entry_id` is the one preselected, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +112,15 @@ pub struct UseChoice {
     pub expired: bool,
     /// The person's default card.
     pub default: bool,
+}
+
+/// A change to where an entry's machine copy is, as the person reads it: the place now and the place asked for.
+/// Either is empty when there is none. No value: a place is a name.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseLink {
+    pub from: String,
+    pub to: String,
 }
 
 /// What an import copies, as the person reads it: where from, and where to. Nothing of the value.
@@ -146,11 +160,15 @@ pub fn goes_ahead_on_silence(kind: &str, needs_value: bool) -> bool {
 pub const DRONE_ACTOR: &str = "drone:";
 
 /// Whether `req` goes ahead when nobody answers: [`goes_ahead_on_silence`], and never a copy of a secret from elsewhere,
-/// nor a new account (an agent makes one only on the person's yes), nor a drone's use: the 30 s rule assumes the person
-/// is at the desk while an agent works, and a drone often runs unattended (at night, on a webhook), so for it
-/// silence is a no.
+/// a new place for an entry's machine copy, nor a new account (an agent makes one only on the person's yes), nor a
+/// drone's use: the 30 s rule assumes the person is at the desk while an agent works, and a drone often runs
+/// unattended (at night, on a webhook), so for it silence is a no.
 pub fn goes_ahead(req: &UseRequest) -> bool {
-    req.import.is_none() && !req.account && !req.agent.starts_with(DRONE_ACTOR) && goes_ahead_on_silence(&req.kind, req.needs_value)
+    req.import.is_none()
+        && req.link.is_none()
+        && !req.account
+        && !req.agent.starts_with(DRONE_ACTOR)
+        && goes_ahead_on_silence(&req.kind, req.needs_value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
