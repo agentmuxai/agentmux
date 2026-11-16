@@ -417,6 +417,9 @@ jobs:
             if (Test-Path $agentmux) { & $agentmux stop *> $null }
             if (Test-Task) { schtasks /Delete /TN $task /F *> $null }
           }
+          # Reached only when every check above passed. PowerShell ends the step with the exit code of the last native
+          # command, and the clean-up's `stop` of a server that is already stopped exits 1.
+          exit 0
 
       # The server's https trusts the system's certificates, and a minimal Linux image has none. The packaged command must
       # say so plainly there (and not once the package that holds them is installed).
