@@ -3,6 +3,7 @@
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { t } from "@/app/i18n/i18n";
+import { Button, IconButton, Notice, TextInput } from "@/app/element/ui";
 import type { BrowserViewModel } from "../browser-model";
 import { createFramePainter } from "./frame-painter";
 import { attachStageInput } from "./stage-input";
@@ -26,14 +27,6 @@ function statusText(status: PaneStatus): string {
     }
 }
 
-function BarButton(props: { icon: string; label: string; disabled?: boolean; onClick: () => void }): JSX.Element {
-    return (
-        <button class="streamed-bar-btn" aria-label={props.label} title={props.label} disabled={props.disabled} onClick={props.onClick}>
-            <i class={`fa-solid ${props.icon}`} aria-hidden="true" />
-        </button>
-    );
-}
-
 /** The bar over the page: back, forward, reload or stop, and the address. */
 function StreamedBar(props: { pane: StreamedPane }): JSX.Element {
     const [typed, setTyped] = createSignal<string | null>(null);
@@ -46,17 +39,16 @@ function StreamedBar(props: { pane: StreamedPane }): JSX.Element {
     };
     return (
         <div class="streamed-bar">
-            <BarButton icon="fa-arrow-left" label={t("browser.streamed.back")} disabled={!nav()?.canGoBack} onClick={() => props.pane.send({ t: "nav", go: "back" })} />
-            <BarButton icon="fa-arrow-right" label={t("browser.streamed.forward")} disabled={!nav()?.canGoForward} onClick={() => props.pane.send({ t: "nav", go: "forward" })} />
+            <IconButton icon="arrow-left" label={t("browser.streamed.back")} disabled={!nav()?.canGoBack} onClick={() => props.pane.send({ t: "nav", go: "back" })} />
+            <IconButton icon="arrow-right" label={t("browser.streamed.forward")} disabled={!nav()?.canGoForward} onClick={() => props.pane.send({ t: "nav", go: "forward" })} />
             <Show
                 when={nav()?.loading}
-                fallback={<BarButton icon="fa-rotate-right" label={t("browser.streamed.reload")} onClick={() => props.pane.send({ t: "nav", go: "reload" })} />}
+                fallback={<IconButton icon="rotate-right" label={t("browser.streamed.reload")} onClick={() => props.pane.send({ t: "nav", go: "reload" })} />}
             >
-                <BarButton icon="fa-xmark" label={t("browser.streamed.stop")} onClick={() => props.pane.send({ t: "nav", go: "stop" })} />
+                <IconButton icon="stop" label={t("browser.streamed.stop")} onClick={() => props.pane.send({ t: "nav", go: "stop" })} />
             </Show>
-            <input
+            <TextInput
                 class="streamed-bar-address"
-                type="text"
                 spellcheck={false}
                 aria-label={t("browser.streamed.address")}
                 value={shown()}
@@ -107,17 +99,18 @@ export function StreamedBrowserPane(props: { model: BrowserViewModel }): JSX.Ele
     return (
         <div class="browser-view streamed-browser">
             <StreamedBar pane={pane} />
+            <Show when={pane.error()}>
+                <Notice tone="warning" icon="triangle-exclamation" onDismiss={pane.dismissError}>
+                    {pane.error()}
+                </Notice>
+            </Show>
             <div class="streamed-stage" ref={stage} tabindex={0}>
                 <canvas class="streamed-canvas" ref={canvas} />
-                <Show when={message() || pane.error()}>
+                <Show when={message()}>
                     <div class="streamed-status" role="status">
-                        <Show when={pane.error()} fallback={<span>{message()}</span>}>
-                            <span>{pane.error()}</span>
-                        </Show>
+                        <span>{message()}</span>
                         <Show when={pane.status() === "failed" || pane.status() === "ended"}>
-                            <button class="streamed-status-btn" onClick={pane.reconnect}>
-                                {t("browser.streamed.reconnect")}
-                            </button>
+                            <Button onClick={pane.reconnect}>{t("browser.streamed.reconnect")}</Button>
                         </Show>
                     </div>
                 </Show>

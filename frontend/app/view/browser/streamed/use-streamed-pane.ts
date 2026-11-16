@@ -38,6 +38,8 @@ export interface StreamedPane {
     /** The stage is on screen or not. */
     shown: (visible: boolean) => void;
     reconnect: () => void;
+    /** The person closed the server's last complaint (a refused address). */
+    dismissError: () => void;
 }
 
 /** `draw` paints a frame; `startUrl` is where a new socket starts; `remember` keeps the page's address. */
@@ -67,6 +69,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                 onMessage: (m) => {
                     if (m.t === "nav") {
                         setNav(m);
+                        setError("");
                         if (!m.loading && /^https?:/i.test(m.url)) remember(m.url);
                     } else if (m.t === "error") setError(m.message);
                     else if (m.t === "closed") setStatus("ended");
@@ -109,5 +112,6 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
             close();
             open();
         },
+        dismissError: () => setError(""),
     };
 }
