@@ -43,14 +43,14 @@ describe("LastSoundStatus", () => {
     it("says who made the last sound and how long ago, as it plays", async () => {
         render(() => <LastSoundStatus rows={() => [agent("korp", "blk-korp")]} />);
         noteSound({ blockId: "blk-korp", event: "tool", tool: "Bash", at: Date.now() });
-        await waitFor(() => expect(screen.getByRole("button", { name: /^♪ korp · Bash · \d+s ago\./ })).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("button", { name: /^korp · Bash · \d+s ago\./ })).toBeInTheDocument());
         expect(screen.getByRole("button").getAttribute("data-tip")).toBe(LAST_SOUND_TIP);
     });
 
     it("leaves the agent out when no running agent has the pane", async () => {
         render(() => <LastSoundStatus rows={() => []} />);
         noteSound({ blockId: "blk-gone", event: "agent.turn.complete", at: Date.now() });
-        await waitFor(() => expect(screen.getByRole("button").textContent).toMatch(/^♪ Agent turn completed · \d+s ago$/));
+        await waitFor(() => expect(screen.getByRole("button").textContent).toMatch(/^Agent turn completed · \d+s ago$/));
     });
 
     it("has the bar fit again as it comes, since a hidden slot changes no size the bar watches", async () => {

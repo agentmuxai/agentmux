@@ -6,13 +6,16 @@ import { buildAtlasGraph, type AtlasAgent, type AtlasExtras, type AtlasMachine }
 import {
     FIT_MAX_K,
     fitScale,
+    gapsAt,
     layoutAtlas,
     layoutBySeat,
     MIN_READABLE_K,
+    MIN_SPREAD,
     NODE_H,
     NODE_W,
     ROW_MAX_W,
     SERVICES_REGION,
+    type AtlasLayout,
     type PaneShape,
 } from "./atlas-layout";
 
@@ -420,5 +423,98 @@ describe("layoutAtlas wraps a lead's reports for a pane", () => {
         const g = wideLeaderFleet();
         const l = layoutBySeat(g, panes.tall);
         expect(fitScale(l, panes.tall)).toBeGreaterThanOrEqual(MIN_READABLE_K);
+    });
+});
+
+describe("the gaps close as the map is zoomed in", () => {
+    const panes: PaneShape[] = [
+        { w: 640, h: 1700 },
+        { w: 1000, h: 1000 },
+        { w: 1600, h: 700 },
+    ];
+    /**
+     * The keys of the nodes of each row, top to bottom, each row left to right. With `perMachine`, the rows of each
+     * machine's box on their own: two boxes side by side close their rows each at its own pace.
+     */
+    const rows = (l: AtlasLayout, perMachine: boolean): string[][] => {
+        const byRow = new Map<string, { y: number; keys: string[] }>();
+        for (const [key, p] of [...l.nodes].sort((a, b) => a[1].x - b[1].x)) {
+            const box = perMachine ? key.split("/")[0].split(":")[0] : "";
+            const row = byRow.get(`${box}@${p.y}`) ?? { y: p.y, keys: [] };
+            row.keys.push(key);
+            byRow.set(`${box}@${p.y}`, row);
+        }
+        return [...byRow]
+            .sort((a, b) => a[0].split("@")[0].localeCompare(b[0].split("@")[0]) || a[1].y - b[1].y)
+            .map(([, row]) => row.keys);
+    };
+    /** The machine boxes of each row of boxes, top to bottom, each row left to right. */
+    const boxRows = (l: AtlasLayout): string[][] => {
+        const byY = new Map<number, string[]>();
+        for (const box of [...l.regions].sort((a, b) => a.x - b.x)) byY.set(box.y, [...(byY.get(box.y) ?? []), box.key]);
+        return [...byY].sort((a, b) => a[0] - b[0]).map(([, keys]) => keys);
+    };
+
+    it("keeps the full gaps in the fitted view, and closes every gap by the same share, no further than the least", () => {
+        const full = gapsAt(1);
+        expect(gapsAt()).toBe(full);
+        expect(gapsAt(1.6)).toBe(full);
+        const half = gapsAt(0.5);
+        for (const gap of ["x", "level", "reportRow", "pad", "region", "services", "frame"] as const) {
+            expect(half[gap]).toBeCloseTo(full[gap] / 2);
+        }
+        const least = gapsAt(0.01);
+        expect(least).toEqual(gapsAt(MIN_SPREAD));
+        // A container's frame on each side still fits between two nodes of a row, as it does at the full gaps.
+        for (const g of [full, half, least]) expect(g.x).toBeGreaterThanOrEqual(g.frame * 2);
+    });
+
+    it("moves no card to another row or place in its row, and no machine to another row: the map is only smaller", () => {
+        for (const graph of [fleet(), wideLeaderFleet(), wideLeaderFleet(true)]) {
+            for (const pane of panes) {
+                for (const layout of [layoutAtlas, layoutBySeat]) {
+                    const full = layout(graph, pane);
+                    const closed = layout(graph, pane, 0.5);
+                    expect(rows(closed, layout === layoutAtlas)).toEqual(rows(full, layout === layoutAtlas));
+                    expect(boxRows(closed)).toEqual(boxRows(full));
+                    expect([...closed.wrapped]).toEqual([...full.wrapped]);
+                    expect(closed.width).toBeLessThanOrEqual(full.width);
+                    expect(closed.height).toBeLessThan(full.height);
+                    expect(closed.gaps.spread).toBe(0.5);
+                    expect(full.gaps.spread).toBe(1);
+                }
+            }
+        }
+    });
+
+    it("stands no node on another and none outside its machine's box, at any spread", () => {
+        for (const spread of [0.8, 0.5, 0.1]) {
+            for (const pane of panes) {
+                const graph = wideLeaderFleet(true);
+                const l = layoutAtlas(graph, pane, spread);
+                const placed = [...l.nodes.values()];
+                for (let i = 0; i < placed.length; i++) {
+                    for (let j = i + 1; j < placed.length; j++) expect(overlap(placed[i], placed[j])).toBe(false);
+                }
+                for (const region of graph.regions) {
+                    const box = l.regions.find((r) => r.key === region.key)!;
+                    for (const a of region.shown) {
+                        const p = l.nodes.get(a.key)!;
+                        expect(p.x).toBeGreaterThanOrEqual(box.x);
+                        expect(p.x + NODE_W).toBeLessThanOrEqual(box.x + box.w);
+                        expect(p.y).toBeGreaterThanOrEqual(box.y);
+                        expect(p.y + NODE_H).toBeLessThanOrEqual(box.y + box.h);
+                    }
+                }
+            }
+        }
+    });
+
+    it("is the fitted layout itself at a spread of 1 or more, and with no pane closes the fixed layout", () => {
+        const graph = fleet();
+        expect(layoutAtlas(graph, panes[0], 1)).toEqual(layoutAtlas(graph, panes[0]));
+        expect(layoutBySeat(graph, panes[0], 2)).toEqual(layoutBySeat(graph, panes[0]));
+        expect(layoutAtlas(graph, undefined, 0.5).height).toBeLessThan(layoutAtlas(graph).height);
+        expect(boxRows(layoutAtlas(graph, undefined, 0.5))).toEqual(boxRows(layoutAtlas(graph)));
     });
 });
