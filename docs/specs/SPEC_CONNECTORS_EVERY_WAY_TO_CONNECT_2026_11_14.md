@@ -212,9 +212,11 @@ Two vendor pages disagree today: Gemini CLI's README says Google AI Pro and Ultr
 2. **PR 2:** the device-code fallback and Reconnect for a CLI sign-in (§4.3), the xAI and Moonshot tiles, Copilot under GitHub, and the "Other agents" list, each sign-in enabled only after a real sign-in is seen working in a build (needs the operator's or a tester's account).
 3. **Visual checks:** both PRs change how Connectors looks, so macOS (Clare, Masty, Maop) and Linux (Maricon, Opaz, Parlo) look checks run before each merge.
 
-## 9. Open questions
+## 9. Decisions on the open questions
 
-1. **"Where AgentMux keeps it (the Vault)":** an account's API key is in the OS keychain (a file store on a machine with no keychain), not the Vault. The copy says "stored in your computer's keychain". Should Connectors keys move into the Vault (Agent2-6's lane), or is the keychain wording right for now?
-2. **Kimi's key variable.** srv injects a Kimi key as `MOONSHOT_API_KEY` (`provider_class("kimi")`), while the Kimi Code docs list `KIMI_API_KEY` for the CLI and say it doesn't read shell variables unless `api_key_env` is declared. The build checks a bound Kimi account actually reaches the CLI before the Moonshot tile ships. If it doesn't, that is its own bug.
-3. **Google individuals.** Should Connectors offer a Gemini CLI sign-in at all, now that Google's README sends individuals to Antigravity (which AgentMux treats as signing in inside the agent)? This spec says no, and shows text only.
-4. **Staying current.** A plan list goes stale. Should a weekly Schedule job re-read the §6.1 pages and open a task when one differs, or is the dated source line enough for now?
+The operator has not answered these four. AgentY decided them on 2026-11-16 under the operator's standing instruction to use the best recommendation. It is not the operator's approval of this spec, and any answer can be changed.
+
+1. **"Where AgentMux keeps it (the Vault)":** keep the wording as it is. An account's API key is in the OS keychain (a file store on a machine with no keychain), and the copy says "stored in your computer's keychain". Moving Connectors keys into the Vault is a separate piece of work in Agent2-6's lane.
+2. **Kimi's key variable:** the build checks it. srv injects a Kimi key as `MOONSHOT_API_KEY` (`provider_class("kimi")`), while the Kimi Code docs list `KIMI_API_KEY` for the CLI and say it doesn't read shell variables unless `api_key_env` is declared. A bound Kimi account must be seen reaching the CLI before the Moonshot tile ships (PR 2). If it doesn't, that is its own bug.
+3. **Google individuals:** text only. Connectors offers no Gemini CLI sign-in, because Google's README sends individuals to Antigravity (which AgentMux treats as signing in inside the agent).
+4. **Staying current:** a weekly Schedule job that re-reads the §6.1 pages and opens a task when one differs: yes, later, as its own task. Until then the dated source line on each fact is the check.
