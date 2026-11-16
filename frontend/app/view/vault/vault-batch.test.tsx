@@ -66,6 +66,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { batchOf, groupBatches } from "./vault-activity-batches";
+import { outcomeOf } from "./vault-format";
 import { VaultUseItem as UsePrompt } from "./vault-requests-list";
 import { refreshVault } from "./vault-store";
 
@@ -174,11 +175,21 @@ describe("a batch's lines in the Activity tab", () => {
         const groups = groupBatches(rows);
         expect(groups.map((g) => [g.row.entry_label, g.batch, g.items.map((i) => i.entry_label)])).toEqual([
             ["Passport", "", []],
-            ["host passwords", "aaa", ["Beta", "Alpha"]],
+            // Under the batch's own line its secrets read in the approval's order, oldest first.
+            ["host passwords", "aaa", ["Alpha", "Beta"]],
             ["Stripe", "", []],
             // Its batch's own line is older than the list goes back: the line stays a line.
             ["Orphan", "", []],
             ["Single", "", []],
         ]);
+    });
+
+    it("says what became of a line whose action alone does not, so a failed import is not read as one that worked", () => {
+        expect(outcomeOf("done")).toBeNull();
+        expect(outcomeOf("")).toBeNull();
+        expect(outcomeOf("failed")).toEqual({ text: "failed", warn: true });
+        expect(outcomeOf("denied")?.warn).toBe(true);
+        expect(outcomeOf("partly done")?.warn).toBe(true);
+        expect(outcomeOf("same")).toEqual({ text: "same", warn: false });
     });
 });

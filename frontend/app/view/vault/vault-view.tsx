@@ -24,7 +24,7 @@ import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
-import { formatWhen } from "./vault-format";
+import { formatWhen, outcomeOf } from "./vault-format";
 import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -141,8 +141,18 @@ function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) 
     return (
         <tr data-outcome={a().outcome} classList={{ "vault-activity-nested": !!props.nested }}>
             <td class="warden-manager-dim">{formatWhen(a().at)}</td>
-            <td>{whoOf(a())}</td>
-            <td>{a().action}</td>
+            <td class="vault-activity-word">{whoOf(a())}</td>
+            <td class="vault-activity-word">
+                {a().action}
+                <Show when={outcomeOf(a().outcome)}>
+                    {(o) => (
+                        <span class={o().warn ? "vault-activity-outcome vault-expiry-warn" : "vault-activity-outcome"}>
+                            {" · "}
+                            {o().text}
+                        </span>
+                    )}
+                </Show>
+            </td>
             <td>
                 <Show when={exists()} fallback={a().entry_label}>
                     <Button density="compact" onClick={() => props.onHistory(a())}>

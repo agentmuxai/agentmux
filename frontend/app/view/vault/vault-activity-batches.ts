@@ -25,8 +25,9 @@ export function batchOf(a: VaultActivity): string {
     return a.refs.find((r) => r.startsWith(BATCH_REF))?.slice(BATCH_REF.length) ?? "";
 }
 
-/** `rows`, in their order, with the lines of each batch's secrets folded under the batch's own line. A batch whose
- *  own line is not among `rows` (it is older than the list goes back) keeps its lines where they are. */
+/** `rows`, in their order (newest first), with the lines of each batch's secrets folded under the batch's own line,
+ *  oldest first: the order the person read them in on the approval. A batch whose own line is not among `rows` (it
+ *  is older than the list goes back) keeps its lines where they are. */
 export function groupBatches(rows: VaultActivity[]): ActivityGroup[] {
     const heads = new Map<string, ActivityGroup>();
     for (const row of rows) {
@@ -38,7 +39,7 @@ export function groupBatches(rows: VaultActivity[]): ActivityGroup[] {
         const head = heads.get(batchOf(row));
         if (!head) out.push({ row, batch: "", items: [] });
         else if (head.row === row) out.push(head);
-        else head.items.push(row);
+        else head.items.unshift(row);
     }
     return out;
 }
