@@ -40,6 +40,31 @@ pub fn active() -> bool {
     *ACTIVE.get_or_init(|| requested_by(build_kind(), std::env::var(ENV).ok().as_deref()))
 }
 
+/// The Chromium switches that keep a test build silent. A test run is driven on a machine a person
+/// works at, and an agent sound (turn done, waiting) through that person's speakers is as much an
+/// intrusion as a window on their screen. `mute-audio` zeroes every sample and `disable-audio-output`
+/// swaps the audio service's output for a fake one, so no device is opened; Chromium forwards both
+/// to the audio service process. Neither depends on the app's sound setting, so a build that has
+/// sounds on (the default) is silent anyway, in the app's own sounds and in any page a pane loads.
+pub const SILENT_SWITCHES: [&str; 2] = ["mute-audio", "disable-audio-output"];
+
+/// The phrase [`start_line`] carries when audio is off, which `scripts/offscreen-check.sh` looks for
+/// in a binary: a build from before this one honours the off-screen flag but plays sound.
+pub const AUDIO_OFF_MARK: &str = "audio stays off";
+
+fn silent_switches_for(off_screen: bool) -> &'static [&'static str] {
+    if off_screen {
+        &SILENT_SWITCHES
+    } else {
+        &[]
+    }
+}
+
+/// The switches the host adds to its command line: [`SILENT_SWITCHES`] in test window mode, none otherwise.
+pub fn silent_switches() -> &'static [&'static str] {
+    silent_switches_for(active())
+}
+
 /// A spare pool window waits parked with its left edge under this (the host's
 /// `OFFSCREEN_POOL_THRESHOLD_X`): it is already off-screen and stays there until it is promoted.
 pub const PARKED_BELOW_X: i32 = -20000;
@@ -125,13 +150,18 @@ pub fn begin(process: &str) {
 /// tell a build that ignored it from one that honoured it. `None` when it was not set.
 pub fn start_line(process: &str) -> Option<String> {
     let value = std::env::var(ENV).ok().filter(|v| !v.trim().is_empty())?;
-    Some(if active() && cfg!(target_os = "macos") {
-        format!("{process}: test window mode: no window is ever shown (every way to order one in is blocked, a watchdog stops the process if one is on the screen) and its place is not saved")
-    } else if active() {
-        format!("{process}: test window mode: every window is created off-screen at ({}, {}) and its place is not saved", ORIGIN.0, ORIGIN.1)
+    Some(describe(process, &value, active(), cfg!(target_os = "macos")))
+}
+
+/// [`start_line`]'s text for a process that `active`ly runs in test window mode or ignored `value`.
+fn describe(process: &str, value: &str, active: bool, macos: bool) -> String {
+    if active && macos {
+        format!("{process}: test window mode: no window is ever shown (every way to order one in is blocked, a watchdog stops the process if one is on the screen) and its place is not saved; {AUDIO_OFF_MARK}: no sound is played and no audio output is opened")
+    } else if active {
+        format!("{process}: test window mode: every window is created off-screen at ({}, {}) and its place is not saved; {AUDIO_OFF_MARK}: no sound is played and no audio output is opened", ORIGIN.0, ORIGIN.1)
     } else {
         format!("{process}: {ENV}={value} ignored: only a dev or local build runs off-screen")
-    })
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +205,26 @@ mod tests {
         assert_eq!(activation_policy(false), 0);
         // The tests run without the variable set.
         assert_eq!(macos_activation_policy(), 0);
+    }
+
+    #[test]
+    fn a_test_build_is_silent_and_a_normal_one_is_not_touched() {
+        assert_eq!(silent_switches_for(true), ["mute-audio", "disable-audio-output"]);
+        assert!(silent_switches_for(false).is_empty());
+        // The tests run without the variable set.
+        assert!(silent_switches().is_empty());
+    }
+
+    #[test]
+    fn the_start_line_says_audio_stays_off_only_when_the_build_runs_in_test_mode() {
+        for macos in [true, false] {
+            let on = describe("host", "1", true, macos);
+            assert!(on.contains(AUDIO_OFF_MARK), "{on}");
+            assert!(on.contains("test window mode"), "{on}");
+            let ignored = describe("host", "1", false, macos);
+            assert!(!ignored.contains(AUDIO_OFF_MARK), "{ignored}");
+            assert!(ignored.contains("ignored"), "{ignored}");
+        }
     }
 
     #[test]
