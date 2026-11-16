@@ -74,7 +74,7 @@ impl SubprocessController {
     ///
     /// If a session_id exists from a previous turn, `--resume <sid>` is appended to args.
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
-        if !self.try_lock_run() {
+        if !self.take_run_lock_for_turn() {
             // Turn in progress — queue the message for after it exits.
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(
