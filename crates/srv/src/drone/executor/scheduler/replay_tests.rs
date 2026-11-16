@@ -85,13 +85,13 @@ async fn first_run(graph: &DroneGraph) -> Ran {
 }
 
 /// Replay `graph` from checkpoint `step` of `first`, in a run of its own, with `original` as what its stubs say.
-async fn replayed_with(graph: &DroneGraph, first: &Ran, (step, real): (usize, bool), original: BTreeMap<String, Value>) -> Ran {
+async fn replayed_with(graph: &DroneGraph, first: &Ran, (step, real): (usize, bool), (original, bits): (BTreeMap<String, Value>, BTreeMap<String, (bool, bool)>)) -> Ran {
     let rows = first.sink.rows_of("run-1");
     let at: Checkpoint = load(&rows[..=step]).unwrap().unwrap();
     let fork = Fork { run_id: "run-1".to_string(), step: step as u32, real };
     let c = fork_checkpoint(&at, "run-2", fork.clone());
     let sink = Arc::new(MemorySink::default());
-    let limits = Limits { persist: Some(Persist { sink: sink.clone(), graph: graph_ref() }), lookup: saved(), replay: Some(Arc::new(Replay { fork, original })), ..Limits::default() };
+    let limits = Limits { persist: Some(Persist { sink: sink.clone(), graph: graph_ref() }), lookup: saved(), replay: Some(Arc::new(Replay { fork, original, bits })), ..Limits::default() };
     let (tx, rx) = mpsc::unbounded_channel();
     let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let ended = replay((graph, &c, limits), &tx, &states).await;
@@ -102,7 +102,7 @@ async fn replayed_with(graph: &DroneGraph, first: &Ran, (step, real): (usize, bo
 /// Replay from `step` of `first`, with what its newest checkpoint says.
 async fn replayed(graph: &DroneGraph, first: &Ran, step: usize, real: bool) -> Ran {
     let newest: Checkpoint = load(&first.sink.rows_of("run-1")).unwrap().unwrap();
-    replayed_with(graph, first, (step, real), newest.outputs).await
+    replayed_with(graph, first, (step, real), (newest.outputs, newest.bits)).await
 }
 
 fn calls_a_drone() -> DroneGraph {
@@ -171,8 +171,86 @@ async fn blocks_that_start_together_are_stubbed_too_and_a_block_that_only_reads_
     let first = first_run(&g).await;
     assert!(first.result.is_err(), "run for real, a message has nowhere to go here");
     let original = BTreeMap::from([("m1".to_string(), json!({ "delivered": true })), ("m2".to_string(), json!({ "delivered": true }))]);
-    let again = replayed_with(&g, &first, (1, false), original).await;
+    let again = replayed_with(&g, &first, (1, false), (original, BTreeMap::new())).await;
     assert_eq!(again.result, Ok(json!("true")), "{:?}", again.result);
     assert_eq!(again.said("m2").unwrap()["stubbed"], json!(true));
     assert!(again.said("c").is_some_and(|o| o.get("stubbed").is_none()), "a condition ran as it always does");
+}
+
+fn error_edge(id: &str, source: &str, target: &str) -> FlowEdge {
+    FlowEdge { source_handle: Some("error".to_string()), ..edge(id, source, target) }
+}
+
+/// A message that fails here (it has nowhere to go) and a graph that handles it: `ok` if it worked, `handled` if not.
+fn a_message_the_graph_handles() -> DroneGraph {
+    DroneGraph {
+        nodes: vec![start(), node("m", json!({ "kind": "message", "to": "agenty", "body": "a" })), response("ok", "fine"), response("handled", "caught {{m.failed}}")],
+        edges: vec![edge("e1", "start", "m"), edge("e2", "m", "ok"), error_edge("e3", "m", "handled")],
+    }
+}
+
+#[tokio::test]
+async fn a_block_that_failed_and_was_handled_fails_again_in_the_replay_and_takes_the_error_edge() {
+    let g = a_message_the_graph_handles();
+    let first = first_run(&g).await;
+    assert!(first.said("handled").is_some() && first.said("ok").is_none(), "run for real, the message failed and its error edge took it");
+    let again = replayed(&g, &first, 1, false).await;
+    assert!(again.said("handled").is_some(), "the replay follows the failure the run had");
+    assert!(again.said("ok").is_none(), "and does not take the road of a block that worked");
+}
+
+#[tokio::test]
+async fn blocks_that_start_together_follow_the_failure_they_had_too() {
+    let g = DroneGraph {
+        nodes: vec![
+            start(),
+            node("m1", json!({ "kind": "message", "to": "agenty", "body": "a" })),
+            node("m2", json!({ "kind": "message", "to": "loap", "body": "b" })),
+            response("ok1", "fine"),
+            response("caught1", "caught"),
+            response("ok2", "fine"),
+            response("caught2", "caught"),
+        ],
+        edges: vec![
+            edge("e1", "start", "m1"),
+            edge("e2", "start", "m2"),
+            edge("e3", "m1", "ok1"),
+            error_edge("e4", "m1", "caught1"),
+            edge("e5", "m2", "ok2"),
+            error_edge("e6", "m2", "caught2"),
+        ],
+    };
+    let first = first_run(&g).await;
+    assert!(first.said("caught1").is_some() && first.said("caught2").is_some());
+    let again = replayed(&g, &first, 1, false).await;
+    assert!(again.said("caught1").is_some() && again.said("caught2").is_some());
+    assert!(again.said("ok1").is_none() && again.said("ok2").is_none());
+}
+
+#[tokio::test]
+async fn a_for_each_that_is_stubbed_is_as_tainted_as_it_was() {
+    let g = DroneGraph {
+        nodes: vec![
+            start(),
+            node("each", json!({ "kind": "foreach", "items": "{{trigger.list}}", "body": "tell", "on_item_error": "continue" })),
+            node("tell", json!({ "kind": "message", "to": "agenty", "body": "{{item.name}}" })),
+            response("out", "{{each.count}}"),
+        ],
+        edges: vec![edge("e1", "start", "each"), edge("e2", "each", "out")],
+    };
+    let (tx, rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let sink = Arc::new(MemorySink::default());
+    let limits = Limits { persist: Some(Persist { sink: sink.clone(), graph: graph_ref() }), lookup: saved(), ..Limits::default() };
+    let trigger = json!({ "list": [{ "name": "a" }, { "name": "b" }] });
+    let ended = execute("run-1", (&g, trigger, limits, "d"), &tx, &states).await;
+    drop(tx);
+    let first = drain(ended, rx, sink).await;
+    let before: Checkpoint = load(&first.sink.rows_of("run-1")).unwrap().unwrap();
+    assert!(before.bits["each"].0, "a list that came with the trigger is outside text, and so is the for-each over it");
+    let again = replayed(&g, &first, 1, false).await;
+    assert_eq!(children(&again), 0);
+    let after: Checkpoint = load(&again.sink.rows_of("run-2")).unwrap().unwrap();
+    assert_eq!(after.bits["each"], before.bits["each"], "the stub keeps what the for-each was");
+    assert_eq!(after.bits["each"].0, true);
 }
