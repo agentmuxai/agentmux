@@ -14,6 +14,7 @@ import { Card, CardGrid } from "@/app/element/ui";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, type ServiceTile } from "./accounts-catalog";
+import { OtherAgentsSection } from "./OtherAgentsSection";
 import "./accounts-gallery.scss";
 import { tip } from "@/app/element/tip";
 
@@ -71,6 +72,7 @@ export function AccountsGallery(props: {
                     );
                 }}
             />
+            <OtherAgentsSection />
         </div>
     );
 }

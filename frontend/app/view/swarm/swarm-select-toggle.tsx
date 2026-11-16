@@ -3,6 +3,7 @@
 
 import { createMemo, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { SwarmViewModel } from "./swarm-model";
 import { actionableKeys, filterActive } from "./swarm-filter-state";
 import { remoteFleetTargets } from "./swarm-fleet-targets";
@@ -29,6 +30,11 @@ export function SwarmSelectToggle(props: { model: SwarmViewModel; ids: () => str
     };
     // What the selection is, in a line beside the button: how many, and which of them an action won't reach.
     const remote = createMemo(() => remoteFleetTargets(remoteSections(model.otherInstancesAtom())));
+    // The listed agents of this computer: this AgentMux's own and any other channel's on it, not a LAN or cloud
+    // machine's. A button for them shows only while some listed agent is on another machine, since it would
+    // otherwise do what Select all does.
+    const hostIds = () => props.ids().filter((id) => !remote().get(id)?.otherMachine);
+    const hasOtherMachines = () => hostIds().length < props.ids().length;
     const hidden = () => count() - actionableKeys(model, model.selectedBlockIdsAtom()).length;
     const otherMachines = () => {
         let n = 0;
@@ -42,6 +48,16 @@ export function SwarmSelectToggle(props: { model: SwarmViewModel; ids: () => str
                     <Button density="compact" class="swarm-select-toggle__btn" onClick={toggle}>
                         {allSelected() ? "Select none" : "Select all"}
                         <Show when={filtering()}> {props.ids().length} shown</Show>
+                    </Button>
+                </Show>
+                <Show when={hasOtherMachines() && hostIds().length > 0}>
+                    <Button
+                        density="compact"
+                        class="swarm-select-toggle__btn"
+                        title={t("swarm.select.hostTitle")}
+                        onClick={() => model.selectAll(hostIds())}
+                    >
+                        {t("swarm.select.host")}
                     </Button>
                 </Show>
                 <Show when={count() > 0}>

@@ -27,6 +27,7 @@ const CLI_PROVIDER_TO_BRAND: Record<string, AccountProvider> = {
     codex: "openai",
     gemini: "google",
     copilot: "github",
+    grok: "xai",
 };
 
 /**

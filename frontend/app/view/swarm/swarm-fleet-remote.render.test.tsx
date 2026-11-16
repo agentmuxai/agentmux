@@ -93,6 +93,27 @@ describe("Select all and the Supervise actions with agents of other instances se
         expect(statsText()).toBe("1 selected");
     });
 
+    // "Select all on host": this computer's agents only, for a broadcast that stays on this machine.
+    const toggleIds = (model: SwarmViewModel, ids: string[]) => render(() => <SwarmSelectToggle model={model} ids={() => ids} />);
+
+    it("selects only this computer's agents, this machine's other channels included and a LAN peer's left out", () => {
+        const model = modelStub([]);
+        toggleIds(model, ["blk-korp", LOAP, MANOZ]);
+        fireEvent.click(screen.getByText("Select all on host"));
+        expect(model.selectAll).toHaveBeenCalledWith(["blk-korp", LOAP]);
+    });
+
+    it("has no host button when every listed agent is on this computer, since Select all does the same", () => {
+        toggleIds(modelStub([]), ["blk-korp", LOAP]);
+        expect(screen.queryByText("Select all on host")).toBeNull();
+        expect(screen.queryByText("Select all")).not.toBeNull();
+    });
+
+    it("has no host button when no listed agent is on this computer", () => {
+        toggleIds(modelStub([]), [MANOZ]);
+        expect(screen.queryByText("Select all on host")).toBeNull();
+    });
+
     it("counts only the agents a stop can reach", () => {
         toolbar(modelStub(["blk-korp", LOAP, MANOZ]));
         expect(screen.getByText(/Stop 2/)).toBeTruthy();
