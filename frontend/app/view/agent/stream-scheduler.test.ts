@@ -441,6 +441,33 @@ describe("flush rates", () => {
         expect(order).toEqual(["a"]);
     });
 
+    it("drains when the page is hidden after its frame was requested, with no further request", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a")); // a frame is now pending and will never fire
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS - 1);
+        expect(order).toEqual([]);
+        vi.advanceTimersByTime(1);
+        expect(order).toEqual(["a"]);
+        expect(streamSchedulerStats().drained).toBe(1);
+    });
+
+    it("stops draining when the page is shown again, and the next frame flushes", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a"));
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS - 1);
+        Object.defineProperty(document, "hidden", { value: false, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS * 2);
+        expect(order).toEqual([]);
+        expect(streamSchedulerStats().drained).toBe(0);
+        frame();
+        expect(order).toEqual(["a"]);
+    });
+
     it("counts what it did", () => {
         for (const id of ["a", "b", "c", "d"]) requestStreamFlush(id, () => {});
         frame();
