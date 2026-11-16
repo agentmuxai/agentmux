@@ -187,7 +187,7 @@ impl BindingInjector<'_> {
         }
         // An Anthropic API key on a Claude agent goes through the gateway: the agent never holds it.
         if key_route {
-            if inject_key_route(self.mstore, self.id_store, self.instance, binding, env_vars) {
+            if inject_key_route(self.mstore, self.id_store, self.identity_store, self.instance, binding, env_vars) {
                 self.injected_oauth.insert("claude".to_string());
             }
             return Ok(());
@@ -540,6 +540,7 @@ pub(super) fn is_key_route_binding(binding: &IdentityBinding, def_provider: Opti
 pub(super) fn inject_key_route(
     mstore: &Store,
     id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
     instance: &AgentInstance,
     binding: &IdentityBinding,
     env_vars: &mut HashMap<String, String>,
@@ -553,13 +554,13 @@ pub(super) fn inject_key_route(
         }
     };
     // A container agent is never given a key account, nor the gateway in its place (it can't reach srv's loopback address).
-    if mstore.get::<crate::backend::obj::Block>(&instance.block_id).ok().flatten().is_some_and(|b| crate::backend::obj::meta_get_string(&b.meta, "agentMode", "host") == "container") {
+    if mstore.get::<crate::backend::obj::Block>(&instance.block_id).ok().flatten().is_some_and(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container()) {
         tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is not given to a container agent");
         return false;
     }
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return false };
     // The gateway checks the agent's own link on every request, so a key link inherited from a template is not carried.
-    let own = id_store.agent_identity_list_for_agent(&def.id).unwrap_or_default();
+    let own = identity_store.agent_identity_list_for_agent(&def.id).unwrap_or_default();
     if !own.iter().any(|l| l.account_id == binding.account_id && l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)) {
         tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is carried only for an agent linked to it itself");
         return false;

@@ -26,9 +26,14 @@ fn key_account(id: &str, kind: &str) -> IdentityAccount {
 }
 
 fn spawn(store: &Arc<Store>, block: &str, own_endpoint: bool) -> (Result<(), SpawnGateError>, HashMap<String, String>) {
+    spawn_with(store, store, store, block, own_endpoint)
+}
+
+/// The spawn with the model, account and link stores given apart, as srv opens them.
+fn spawn_with(mstore: &Arc<Store>, id_store: &Arc<Store>, identity_store: &Arc<Store>, block: &str, own_endpoint: bool) -> (Result<(), SpawnGateError>, HashMap<String, String>) {
     std::env::set_var("AGENTMUX_LOCAL_URL", "http://127.0.0.1:4000");
     let mut env = HashMap::new();
-    let res = inject_identity_env_for_spawn(store.clone(), store.clone(), store.clone(), None, block, &mut env, own_endpoint);
+    let res = inject_identity_env_for_spawn(mstore.clone(), id_store.clone(), identity_store.clone(), None, block, &mut env, own_endpoint);
     (res, env)
 }
 
@@ -144,4 +149,24 @@ fn a_key_link_inherited_from_a_template_is_not_carried_by_the_gateway() {
 
     assert!(res.is_err(), "the gate is not satisfied by a key the gateway would refuse: {res:?}");
     assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"), "{env:?}");
+}
+
+#[test]
+fn a_key_linked_in_the_link_store_is_carried_when_the_stores_are_apart() {
+    let _serial = serial();
+    let (mstore, id_store, link_store) = (make_store(), make_store(), make_store());
+    let account = key_account("acct-key-10", "api_key");
+    let mut def = gate_def(0);
+    mstore.agent_def_insert(&mut def).unwrap();
+    insert_block_for_agent(&mstore, "block-key-10", "def-1");
+    mstore.instance_create(&make_instance("block-key-10", "id-key")).unwrap();
+    id_store.identity_upsert(&account).unwrap();
+    link_store.identity_upsert(&account).unwrap();
+    link_store.agent_def_insert(&mut gate_def(0)).unwrap();
+    link_store.agent_identity_link("def-1", &account.id, "anthropic").unwrap();
+
+    let (res, env) = spawn_with(&mstore, &id_store, &link_store, "block-key-10", false);
+
+    assert_eq!(res, Ok(()), "the link is read where srv writes it");
+    assert!(env["ANTHROPIC_AUTH_TOKEN"].starts_with(token::TOKEN_PREFIX));
 }

@@ -46,7 +46,7 @@ pub(super) fn link_provider<'a>(to: &IdentityAccount, provider: &'a str) -> &'a 
 /// Why `def_id` cannot be moved onto a key account now, or `Ok`. A container agent is never given a key account yet
 /// (it would need the gateway's address from inside the container); an agent on a model route is billed to the route.
 pub(super) fn can_take_a_key(state: &AppState, def_id: &str) -> Result<(), String> {
-    if open_panes(state, def_id).iter().any(|b| obj::meta_get_string(&b.meta, "agentMode", "host") == "container") {
+    if open_panes(state, def_id).iter().any(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container()) {
         return Err("ACCOUNT_CANT_RUN: API keys aren't offered to container agents yet".to_string());
     }
     if launch::choice_of(&state.mstore, def_id).is_some() {

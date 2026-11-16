@@ -46,6 +46,7 @@ async fn a_claude_agent_moves_onto_a_key_and_back_with_exactly_one_payer_each_ti
     assert_eq!((r.status.clone(), r.restarted), (switch::AccountSwitchStatus::Switched, 1), "an unchecked key is offered and taken");
     assert_eq!(r.account_label, "Work key");
     assert_eq!(links(&state), [("anthropic".to_string(), "key1".to_string())], "the plan link went with the move: one payer");
+    assert!(crate::server::spend_watch::spends_through_gateway(&state, "ag"), "an agent on a key is counted and capped at the gateway, so its spend card is kept");
 
     let again = switch::switch(&state, "", &switch_req("ag", "key1", AfterTurn)).unwrap();
     assert_eq!(again.status, switch::AccountSwitchStatus::Unchanged, "the key it is on changes nothing");
@@ -53,6 +54,7 @@ async fn a_claude_agent_moves_onto_a_key_and_back_with_exactly_one_payer_each_ti
     let r = switch::switch(&state, "", &switch_req("ag", "plan2", AfterTurn)).unwrap();
     assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
     assert_eq!(links(&state), [("claude".to_string(), "plan2".to_string())], "the key link went with the move back");
+    assert!(!crate::server::spend_watch::spends_through_gateway(&state, "ag"));
     cleanup(&[&block]);
 }
 

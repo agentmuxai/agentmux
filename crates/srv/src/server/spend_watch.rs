@@ -97,7 +97,7 @@ fn refresh_chips(state: &AppState) {
     let Ok(defs) = state.mstore.agent_def_list() else { return };
     let spending = spend::agents_today(now);
     for def in &defs {
-        let on_route = launch::choice_of(&state.mstore, &def.id).is_some();
+        let on_route = spends_through_gateway(state, &def.id);
         drop_stale(state, &def.id, on_route, now);
         forget_alert_off_route(&def.slug, on_route, now);
         if on_route && spending.contains(&def.slug) {
@@ -105,6 +105,12 @@ fn refresh_chips(state: &AppState) {
             publish_today(state, &def.id, &def.slug, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
         }
     }
+}
+
+/// Whether the agent's requests go through the gateway and are counted there: it is on a model route, or on an API key.
+pub(super) fn spends_through_gateway(state: &AppState, def_id: &str) -> bool {
+    let on_key = state.identity_store.agent_identity_list_for_agent(def_id).is_ok_and(|links| links.iter().any(|l| l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)));
+    on_key || launch::choice_of(&state.mstore, def_id).is_some()
 }
 
 /// The spend keys on a pane's `meta` that no longer hold. An agent that is not on a model route has no cap and no day of
