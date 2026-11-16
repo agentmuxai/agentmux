@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UseBatch } from "@/types/rpc/UseBatch";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
+import type { VaultInfo } from "@/types/rpc/VaultInfo";
 
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
@@ -61,8 +62,10 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
 });
 
 let uses: UseRequest[] = [];
+// The person's Vaults as the list says them; none unless a test names some.
+let listed: VaultInfo[] = [];
 const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
-    if (op === "list") return { entries: [], problem: null, requests: [], uses, backend: "keychain" };
+    if (op === "list") return { entries: [], vaults: listed, problem: null, requests: [], uses, backend: "keychain" };
     return {};
 });
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
@@ -77,6 +80,10 @@ const calls = (op: string) => vault.mock.calls.filter((c) => c[0] === op).map((c
 describe("the approval of a batch import", () => {
     beforeEach(async () => {
         vault.mockClear();
+        // No use is waiting, so nothing chosen in an earlier test is kept; then this test's own.
+        uses = [];
+        listed = [];
+        await refreshVault();
         uses = [use()];
         await refreshVault();
     });
@@ -176,8 +183,107 @@ describe("the approval of a batch import", () => {
         const dialog = await screen.findByRole("group");
         expect(dialog.textContent).toContain("Agent1 wants to copy 1 secret from AWS Secrets Manager into your Vault: host passwords");
         expect(dialog.textContent).toContain("Read from AWS Secrets Manager, in this computer's default AWS region.");
-        expect(dialog.textContent).toContain("They are read with this computer's default AWS login.");
+        expect(dialog.textContent).toContain("It is read with this computer's default AWS login.");
+        expect(dialog.textContent).toContain("The agent never sees the value: AgentMux reads it.");
         expect(within(dialog).getByRole("button", { name: "Allow this one" })).toBeTruthy();
+    });
+
+    it("says one link as one key, and several as keys", async () => {
+        const links = batch().items.map((item) => ({ ...item, replaces: false, link: true }));
+        uses = [use({ batch: batch({ items: links.slice(0, 1) }) })];
+        await refreshVault();
+        const one = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        expect((await screen.findByRole("group")).textContent).toContain("The key is in AWS Secrets Manager in eu-west-1. Nothing is read.");
+        one.unmount();
+
+        uses = [use({ batch: batch({ region: "", items: links.slice(0, 1) }) })];
+        await refreshVault();
+        const noRegion = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        expect((await screen.findByRole("group")).textContent).toContain("The key is in AWS Secrets Manager, in this computer's default AWS region. Nothing is read.");
+        noRegion.unmount();
+
+        uses = [use({ batch: batch({ items: links }) })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        expect((await screen.findByRole("group")).textContent).toContain("The keys are in AWS Secrets Manager in eu-west-1. Nothing is read.");
+    });
+
+    it("keeps one choice for both copies of a card: a tick or a Vault changed in one shows in the other", async () => {
+        const vaults = [
+            { name: "Personal", agents: { mode: "all" as const } },
+            { name: "Fleet", agents: { mode: "named" as const, agents: ["agent1"] } },
+        ];
+        uses = [use({ batch: batch({ vault: "Fleet", agents: { mode: "named", agents: ["agent1"] }, vaults }) })];
+        await refreshVault();
+        const close = vi.fn();
+        // The card in the agent's pane, and the same use in the Vault pane.
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const [inPane, inVault] = await screen.findAllByRole("group");
+        const ticks = (card: HTMLElement) => within(card).getAllByRole("checkbox").map((c) => (c as HTMLInputElement).checked);
+        const chosen = (card: HTMLElement) => (within(card).getByRole("combobox", { name: "Vault to save to" }) as HTMLSelectElement).value;
+
+        fireEvent.click(within(inPane).getAllByRole("checkbox")[1]);
+        expect(ticks(inVault)).toEqual([true, false, true]);
+        expect(within(inVault).getByRole("button", { name: "Allow these 2" })).toBeTruthy();
+
+        fireEvent.change(within(inVault).getByRole("combobox", { name: "Vault to save to" }), { target: { value: "Personal" } });
+        await waitFor(() => expect(inPane.textContent).toContain("saved to the Vault Personal"));
+        expect(chosen(inPane)).toBe("Personal");
+        expect(inPane.querySelector('[data-batch="agents"]')?.textContent).toBe("Every agent can use what is in that Vault.");
+
+        // Either Allow sends what both show.
+        fireEvent.click(within(inVault).getByRole("button", { name: "Allow these 2" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", rows: [0, 2], vault: "Personal" }]));
+        await waitFor(() => expect(close).toHaveBeenCalled());
+    });
+
+    it("starts a later batch with every row ticked, whatever was chosen on one that is gone", async () => {
+        const first = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        fireEvent.click(within(await screen.findByRole("group")).getAllByRole("checkbox")[0]);
+        expect(within(screen.getByRole("group")).getByRole("button", { name: "Allow these 2" })).toBeTruthy();
+        first.unmount();
+        // The use is answered: the list no longer has it. Then the same id asks again.
+        uses = [];
+        await refreshVault();
+        uses = [use()];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        expect(within(await screen.findByRole("group")).getByRole("button", { name: "Allow these 3" })).toBeTruthy();
+    });
+
+    it("names three agents and counts the rest, with every name in the tooltip", async () => {
+        const agents = ["agent1", "loap", "camper", "korp", "clamk"];
+        uses = [use({ batch: batch({ agents: { mode: "named", agents } }) })];
+        await refreshVault();
+        const many = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const line = () => screen.getByRole("group").querySelector('[data-batch="agents"]') as HTMLElement;
+        await screen.findByRole("group");
+        expect(line().textContent?.trim()).toBe("Only these agents can use what is in that Vault: agent1, loap, camper and 2 more.");
+        expect(line().getAttribute("data-hover-tip")).toBe("agent1, loap, camper, korp, clamk");
+        many.unmount();
+
+        uses = [use({ batch: batch({ agents: { mode: "named", agents: agents.slice(0, 3) } }) })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        await screen.findByRole("group");
+        expect(line().textContent?.trim()).toBe("Only these agents can use what is in that Vault: agent1, loap, camper.");
+        expect(line().getAttribute("data-hover-tip")).toBeNull();
+    });
+
+    it("says who may use the Vault as it is now, when the person changed that while the card was open", async () => {
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const said = () => screen.getByRole("group").querySelector('[data-batch="agents"]')?.textContent?.trim();
+        await screen.findByRole("group");
+        expect(said()).toBe("Only these agents can use what is in that Vault: agent1, loap.");
+        // The Vaults dialog saved a change: the list is read again while the Vault pane shows.
+        listed = [{ id: "v-fleet", name: "Fleet", agents: { mode: "none" }, entries: 0 }];
+        await refreshVault();
+        await waitFor(() => expect(said()).toBe("No agent can use what is in that Vault: only you."));
+        // A Vault the list does not have is said as srv said it.
+        listed = [{ id: "v-other", name: "Other", agents: { mode: "all" }, entries: 0 }];
+        await refreshVault();
+        await waitFor(() => expect(said()).toBe("Only these agents can use what is in that Vault: agent1, loap."));
     });
 
     it("says a container agent's profile is a grant", async () => {

@@ -73,7 +73,9 @@ const store = createRoot(() => {
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [changedMs, setChangedMs] = createSignal(0);
-    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
+    // The `changedMs` the list in `vaults` was read at; -1 until it is read.
+    const [listAsOf, setListAsOf] = createSignal(-1);
+    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs, listAsOf, setListAsOf };
 });
 
 export const vaultEntries = store.entries;
@@ -90,9 +92,14 @@ export const vaultError = store.error;
 export const vaultLoading = store.loading;
 /** When the Vault last changed, for sections that load on their own. */
 export const vaultChangedMs = store.changedMs;
+/** The person's Vaults when the list is current: read since the Vault last changed. `null` when it is not (the list is
+ *  kept current only while a Vault view is on screen), and a caller shows what it was given instead. */
+export const currentVaults = (): VaultInfo[] | null => (store.listAsOf() >= store.changedMs() ? store.vaults() : null);
 
 export async function refreshVault(): Promise<void> {
     store.setLoading(true);
+    // A change that arrives while the list is being read leaves it marked as older than the change.
+    const asOf = store.changedMs();
     try {
         const data = await call<{
             entries: VaultEntryInfo[];
@@ -104,6 +111,7 @@ export async function refreshVault(): Promise<void> {
         }>("list");
         store.setEntries(data.entries);
         store.setVaults(data.vaults ?? []);
+        store.setListAsOf(asOf);
         store.setSigninVaults(data.signin_vaults ?? {});
         store.setProblem(data.problem);
         store.setRequests(data.requests);
