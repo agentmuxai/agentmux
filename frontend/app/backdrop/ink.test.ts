@@ -128,6 +128,10 @@ describe("any colour", () => {
                     for (const layer of layers(d)) {
                         const floor = d.level === "high" ? INK_TARGETS.text.floor : 4.5;
                         if (contrastRatio(d.ink.text, layer) < floor) bad.push(`${hex}: text on ${layer}`);
+                        // The text keeps 4.5:1 over a hovered and a selected row, at every level.
+                        for (const t of [0.08, 0.16]) {
+                            if (contrastRatio(d.ink.text, washed(layer, d.ink.text, t)) < 4.5) bad.push(`${hex}: text on ${layer} washed ${t}`);
+                        }
                     }
                     expect(d.chosen).toBe(hex);
                 }
@@ -154,6 +158,15 @@ describe("any colour", () => {
             expect(contrastRatio(d.ink.text, d.surfaces.raised)).toBeGreaterThanOrEqual(7);
         } else {
             expect(contrastRatio(d.ink.text, d.surfaces.raised)).toBeGreaterThanOrEqual(4.5);
+        }
+    });
+
+    it("keeps primary text at 4.5:1 on a selected row for a mid-tone colour that is only readable", () => {
+        const d = deriveInk("#808080");
+        expect(d.level).toBe("readable");
+        expect(d.unmet).toEqual([]);
+        for (const layer of layers(d)) {
+            expect(contrastRatio(d.ink.text, washed(layer, d.ink.text, 0.16)), `on ${layer}`).toBeGreaterThanOrEqual(4.5);
         }
     });
 
