@@ -17,6 +17,7 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
+use super::gmail_sender::{raw_headers, search_check, sender_check, RAW_THREAD_CHARS};
 use super::{clip, GoogleRequest, SCOPE_PREFIX};
 
 const API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -51,6 +52,9 @@ pub struct GmailArgs {
     /// `get_thread`: a thread id from `search_threads`.
     #[serde(default)]
     pub thread_id: Option<String>,
+    /// `get_thread`: `raw` adds each message's header lines as they came.
+    #[serde(default)]
+    pub headers: Option<String>,
     #[serde(default)]
     pub max_results: Option<u32>,
     #[serde(default)]
@@ -139,17 +143,30 @@ pub fn plan(action: &str, args: &GmailArgs) -> Result<GoogleRequest, String> {
             }
             Ok(get(url_of(&["threads"])?, q))
         }
-        "get_thread" => Ok(get(url_of(&["threads", &id_arg("thread_id", args.thread_id.as_deref())?])?, vec![("format", "full".to_string())])),
+        "get_thread" => {
+            raw_headers_arg(args)?;
+            Ok(get(url_of(&["threads", &id_arg("thread_id", args.thread_id.as_deref())?])?, vec![("format", "full".to_string())]))
+        }
         "list_labels" => Ok(get(url_of(&["labels"])?, Vec::new())),
         other => Err(format!("Gmail has no action \"{other}\"; one of {}", READ_ACTIONS.join(", "))),
     }
 }
 
-/// The request for a found thread's headers, for the line `search_threads` shows.
+/// Whether `get_thread` is asked for the raw header lines (`headers: "raw"`); any other word is refused.
+pub fn raw_headers_arg(args: &GmailArgs) -> Result<bool, String> {
+    match args.headers.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
+        None => Ok(false),
+        Some(h) if h.eq_ignore_ascii_case("raw") => Ok(true),
+        Some(h) => Err(format!("headers can only be \"raw\", not \"{}\"", clip(h, 20))),
+    }
+}
+
+/// The request for a found thread's headers, for the line `search_threads` shows: who wrote it, the
+/// subject and date, and what its sender check reads (Google's verdicts, the Reply-To), in the same call.
 pub fn summary_plan(thread_id: &str) -> Result<GoogleRequest, String> {
     let id = id_arg("thread_id", Some(thread_id))?;
     let mut q = vec![("format", "metadata".to_string())];
-    for h in ["From", "Subject", "Date"] {
+    for h in ["From", "Subject", "Date", "Authentication-Results", "Reply-To"] {
         q.push(("metadataHeaders", h.to_string()));
     }
     Ok(get(url_of(&["threads", &id])?, q))
@@ -198,7 +215,9 @@ pub fn shape_search(list: &Value, summaries: &[Value]) -> Value {
                             m.insert("from".into(), json!(line(header(p, "From"), ADDRESS_CHARS)));
                         }
                         if let Some(last) = msgs.last() {
-                            m.insert("last_date".into(), json!(line(header(last.get("payload").unwrap_or(&Value::Null), "Date"), 60)));
+                            let p = last.get("payload").unwrap_or(&Value::Null);
+                            m.insert("last_date".into(), json!(line(header(p, "Date"), 60)));
+                            m.insert("sender_check".into(), search_check(p, &label_ids(last)));
                         }
                         m.insert("messages".into(), json!(msgs.len()));
                     }
@@ -407,7 +426,13 @@ pub(super) fn attachments(payload: &Value) -> Vec<Value> {
     out
 }
 
-fn shape_message(m: &Value, budget: &mut usize) -> Value {
+/// A message's label ids.
+fn label_ids(m: &Value) -> Vec<&str> {
+    m.get("labelIds").and_then(Value::as_array).map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default()
+}
+
+/// One message of a thread. `raw` is what is left of the raw header budget when the headers were asked for.
+fn shape_message(m: &Value, budget: &mut usize, raw: Option<&mut usize>) -> Value {
     let p = m.get("payload").unwrap_or(&Value::Null);
     let mut out = Map::new();
     out.insert("id".into(), json!(s(m, "/id")));
@@ -419,6 +444,10 @@ fn shape_message(m: &Value, budget: &mut usize) -> Value {
     }
     if let Some(l) = m.get("labelIds").and_then(Value::as_array) {
         out.insert("labels".into(), json!(l.iter().filter_map(Value::as_str).collect::<Vec<_>>()));
+    }
+    out.insert("sender_check".into(), sender_check(p, &label_ids(m)));
+    if let Some(raw_budget) = raw {
+        out.insert("raw_headers".into(), raw_headers(p, raw_budget));
     }
     let text = tidy(&body_text(p));
     let room = BODY_CHARS.min(*budget);
@@ -438,21 +467,27 @@ fn shape_message(m: &Value, budget: &mut usize) -> Value {
     Value::Object(out)
 }
 
+/// A thread's answer: each message with its text and sender check, and with its raw header lines when
+/// `raw` (`headers: "raw"`).
+pub fn shape_thread(body: &Value, raw: bool) -> Value {
+    let mut out = Map::new();
+    let all = body.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+    let (mut budget, mut raw_budget) = (THREAD_CHARS, RAW_THREAD_CHARS);
+    let shown: Vec<Value> = all.iter().take(MESSAGES).map(|m| shape_message(m, &mut budget, raw.then_some(&mut raw_budget))).collect();
+    out.insert("id".into(), json!(s(body, "/id")));
+    out.insert("messages".into(), json!(shown));
+    if all.len() > MESSAGES {
+        out.insert("messages_not_shown".into(), json!(all.len() - MESSAGES));
+    }
+    Value::Object(out)
+}
+
 /// Google's answer to a read action, trimmed for the agent.
 pub fn shape(action: &str, body: &Value) -> Value {
     let mut out = Map::new();
     match action {
         "search_threads" => return shape_search(body, &[]),
-        "get_thread" => {
-            let all = body.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
-            let mut budget = THREAD_CHARS;
-            let shown: Vec<Value> = all.iter().take(MESSAGES).map(|m| shape_message(m, &mut budget)).collect();
-            out.insert("id".into(), json!(s(body, "/id")));
-            out.insert("messages".into(), json!(shown));
-            if all.len() > MESSAGES {
-                out.insert("messages_not_shown".into(), json!(all.len() - MESSAGES));
-            }
-        }
+        "get_thread" => return shape_thread(body, false),
         "list_labels" => {
             let labels: Vec<Value> = body
                 .get("labels")

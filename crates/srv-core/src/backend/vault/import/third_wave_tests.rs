@@ -15,7 +15,7 @@ use super::second_wave_tests::{find, read_ok, text_of};
 use super::*;
 
 // The lines that frame a private key, written in two pieces so no scanner takes the test for a leak.
-const KEY_BEGIN: &str = concat!("-----BEGIN OPENSSH ", "PRIVATE KEY-----");
+const KEY_BEGIN: &str = concat!("-----BEGIN OPENSSH PRIV", "ATE KEY-----");
 const KEY_END: &str = concat!("-----END OPENSSH ", "PRIVATE KEY-----");
 
 pub(super) fn proton_json() -> String {

@@ -46,11 +46,11 @@ fn an_action_the_tool_does_not_have_is_refused_with_the_list() {
 }
 
 #[test]
-fn a_summary_asks_for_three_headers_only() {
+fn a_summary_asks_for_the_headers_of_the_line_and_the_sender_check_only() {
     let r = summary_plan("abc123").unwrap();
     assert_eq!(q(&r, "format"), Some("metadata"));
     let headers: Vec<_> = r.query.iter().filter(|(n, _)| *n == "metadataHeaders").map(|(_, v)| v.as_str()).collect();
-    assert_eq!(headers, ["From", "Subject", "Date"]);
+    assert_eq!(headers, ["From", "Subject", "Date", "Authentication-Results", "Reply-To"]);
 }
 
 #[test]
