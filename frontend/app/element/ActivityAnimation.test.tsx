@@ -57,6 +57,20 @@ describe("ActivityAnimation", () => {
         expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("shows the new bucket's glyph when the bucket changes, with motion on or off", () => {
+        vi.useFakeTimers();
+        setReduced(true);
+        const [bucket, setBucket] = createSignal(BUCKETS.build);
+        const { container } = render(() => <ActivityAnimation bucket={bucket()} />);
+        const glyph = () => container.querySelector(".activity-animation")!.textContent;
+        expect(glyph()).toBe("+x+");
+        setBucket(BUCKETS.test);
+        expect(glyph()).toBe("vvv");
+        setReduced(false);
+        setBucket(BUCKETS.build);
+        expect(["+x+", "x+x"]).toContain(glyph());
+    });
+
     it("shares one timer with the slash and with every other animation, and identical ones move in step", () => {
         vi.useFakeTimers();
         const { container } = render(() => (

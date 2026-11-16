@@ -44,6 +44,16 @@ export function ActivityAnimation(props: { bucket: Bucket; since?: number; class
             { defer: true }
         )
     );
+    // A new bucket shows its own glyph at once: with motion off nothing else would redraw the still one.
+    createEffect(
+        on(
+            () => props.bucket,
+            () => {
+                if (el) el.textContent = glyph(currentTick());
+            },
+            { defer: true }
+        )
+    );
     onCleanup(() => stop?.());
     return (
         <Tooltip
