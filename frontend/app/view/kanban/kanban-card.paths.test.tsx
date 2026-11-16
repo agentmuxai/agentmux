@@ -291,6 +291,26 @@ describe("KanbanCard: whose it is", () => {
         expect(colorOf).toHaveBeenCalledWith(amy, "uid-Amy", { x: "y" }, "identity");
     });
 
+    it("names an agent by its display name, not its id, held, waited for or not running", () => {
+        const tess = { ...agent("tess-2", { state: "working" }), display: "Tess" };
+        const held = mount(
+            task(5, "claimed", { claimed_by: "tess-2", claimed_by_uid: "uid-t", claimed_by_name: "Tess", holder: tess })
+        );
+        expect(held.container.querySelector(".kanban-agent-chip__name")).toHaveTextContent(/^Tess$/);
+        expect(held.container.querySelector(".ui-status-dot")?.getAttribute("aria-label")).toBe("Tess: working");
+        cleanup();
+        // Not running, so no holder: the task's own name for it.
+        const gone = mount(task(6, "claimed", { claimed_by: "tess-2", claimed_by_uid: "uid-t", claimed_by_name: "Tess" }));
+        expect(gone.container.querySelector(".kanban-agent-chip__name")).toHaveTextContent(/^Tess$/);
+        cleanup();
+        const waiting = mount(task(7, "open", { target_agent: "tess-2", target_agent_uid: "uid-t", target_agent_name: "Tess" }));
+        expect(waiting.container.querySelector(".kanban-agent-chip__name")).toHaveTextContent(/^Tess$/);
+        cleanup();
+        // An older srv sends no display name: the id stands.
+        const old = mount(task(8, "claimed", { claimed_by: "tess-2", claimed_by_uid: "uid-t" }));
+        expect(old.container.querySelector(".kanban-agent-chip__name")).toHaveTextContent(/^tess-2$/);
+    });
+
     it("shows the holder rather than the agent it was meant for", () => {
         const holder = agent("Bea", { state: "idle" });
         const { container } = mount(

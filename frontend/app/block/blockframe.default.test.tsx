@@ -63,8 +63,9 @@ import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { resetThemeAnsi } from "@/app/backdrop/ansi";
+import { closeBackdropPicker, openBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
-import { BlockFrame } from "./blockframe";
+import { BlockFrame, buildPaneColorSubmenu } from "./blockframe";
 
 registerPaneTab({
     apiVersion: 1,
@@ -265,7 +266,7 @@ describe("the backdrop", () => {
     });
 
     it("a built-in in the pane's meta puts its surface, ink and the re-pointed tokens on the frame, named by its id", () => {
-        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        const t = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
         const el = frame(t.view.container);
         expect(el.getAttribute("data-backdrop")).toBe("builtin:teal");
         expect(el.style.getPropertyValue("--surface")).toMatch(/^#[0-9a-f]{6}$/);
@@ -274,17 +275,17 @@ describe("the backdrop", () => {
         // The transcript's terminal palette is set again on the pane when the theme gives one.
         resetThemeAnsi();
         document.documentElement.style.setProperty("--term-green", "#4e9a06");
-        const withPalette = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
+        const withPalette = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } } });
         expect(frame(withPalette.view.container).style.getPropertyValue("--term-green")).toMatch(/^#[0-9a-f]{6}$/);
         document.documentElement.style.removeProperty("--term-green");
         resetThemeAnsi();
     });
 
     it("a plain colour in the block's own bg meta is a legacy backdrop; a gradient is left untouched", () => {
-        const plain = setup({ meta: { view: "term", bg: "#336699" } });
+        const plain = setup({ meta: { view: "agent", bg: "#336699" } });
         expect(frame(plain.view.container).getAttribute("data-backdrop")).toBe("legacy");
         cleanup();
-        const gradient = setup({ meta: { view: "term", bg: "linear-gradient(red, blue)" } });
+        const gradient = setup({ meta: { view: "agent", bg: "linear-gradient(red, blue)" } });
         expect(frame(gradient.view.container).hasAttribute("data-backdrop")).toBe(false);
     });
 
@@ -296,7 +297,7 @@ describe("the backdrop", () => {
     });
 
     it("a drag preview of a block reads its live scope, and its unmounting leaves that scope", () => {
-        const meta = { view: "term", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } };
+        const meta = { view: "agent", backdrop: { kind: "builtin", id: "teal", polarity: "follow", version: 1 } };
         const live = setup({ meta });
         const scope = getPaneScope(live.blockId)();
         expect(scope?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
@@ -309,8 +310,75 @@ describe("the backdrop", () => {
         expect(frame(live.view.container).style.getPropertyValue("--surface")).toBe(scope?.["--surface"]);
     });
 
+    it("draws the picker inside the frame while it is open for this pane, and not for another or in a drag preview", () => {
+        const t = setup();
+        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
+        openBackdropPicker(t.blockId);
+        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        closeBackdropPicker(t.blockId);
+        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
+        cleanup();
+        const other = setup();
+        openBackdropPicker("some-other-block");
+        expect(other.view.container.querySelector(".backdrop-picker")).toBeNull();
+        cleanup();
+        const preview = setup({ preview: true });
+        openBackdropPicker(preview.blockId);
+        expect(preview.view.container.querySelector(".backdrop-picker")).toBeNull();
+    });
+
+    it("an agent pane's menu has a Backdrop… entry, after Pane Color, that opens the picker; other panes have none yet", () => {
+        const t = setup({ meta: { view: "agent" } });
+        const items = buildPaneColorSubmenu({ oid: t.blockId, meta: { view: "agent" } } as unknown as Block);
+        const labels = items.map((i) => i.label);
+        expect(labels.indexOf("Backdrop…")).toBe(labels.indexOf("Pane Color") + 1);
+        items.find((i) => i.label === "Backdrop…")!.click!();
+        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        for (const view of ["term", "files", "browser"]) {
+            const other = buildPaneColorSubmenu({ oid: "x", meta: { view } } as unknown as Block);
+            expect(other.map((i) => i.label), view).not.toContain("Backdrop…");
+        }
+    });
+
+    it("a terminal, a files pane and the browser ignore a backdrop record and an old plain bg: no vars, no data-backdrop, nothing registered", () => {
+        const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+        for (const view of ["term", "files", "browser", "sysinfo"]) {
+            const t = setup({ meta: { view, backdrop: record, bg: "#336699" } });
+            expect(frame(t.view.container).hasAttribute("data-backdrop"), view).toBe(false);
+            expect(style(t.view.container).getPropertyValue("--surface"), view).toBe("");
+            expect(style(t.view.container).getPropertyValue("--main-text-color"), view).toBe("");
+            expect(getPaneScope(t.blockId)(), view).toBeUndefined();
+            cleanup();
+        }
+    });
+
+    it("a drag preview of a block that is unmounted leaves the live pane's open picker open, and Backdrop… still reopens it", () => {
+        const meta = { view: "agent" };
+        const live = setup({ meta });
+        openBackdropPicker(live.blockId);
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        const preview = setup({ blockId: live.blockId, preview: true, meta });
+        preview.view.unmount();
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        closeBackdropPicker(live.blockId);
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).toBeNull();
+        buildPaneColorSubmenu({ oid: live.blockId, meta } as unknown as Block)
+            .find((i) => i.label === "Backdrop…")!
+            .click!();
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+    });
+
+    it("a terminal with a backdrop record already in its meta renders exactly as one without", () => {
+        const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
+        const bare = setup({ meta: { view: "term" } });
+        const bareMarkup = frame(bare.view.container).outerHTML.replaceAll(bare.blockId, "ID");
+        cleanup();
+        const withRecord = setup({ meta: { view: "term", backdrop: record, bg: "#336699" } });
+        expect(frame(withRecord.view.container).outerHTML.replaceAll(withRecord.blockId, "ID")).toBe(bareMarkup);
+    });
+
     it("a record that can't be read is no backdrop", () => {
-        const t = setup({ meta: { view: "term", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
+        const t = setup({ meta: { view: "agent", backdrop: { kind: "builtin", id: "not-a-colour", version: 1 } } });
         expect(frame(t.view.container).hasAttribute("data-backdrop")).toBe(false);
     });
 });

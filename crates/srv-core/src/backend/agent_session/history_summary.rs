@@ -278,6 +278,10 @@ fn user_prompt_in_line(line: &[u8]) -> Option<String> {
     if v.get("isSynthetic").and_then(|s| s.as_bool()) == Some(true) {
         return None;
     }
+    // Turns the CLI adds for itself (a skill's expansion, a hook's output) are flagged the same way.
+    if v.get("isMeta").and_then(|s| s.as_bool()) == Some(true) {
+        return None;
+    }
     let content = v.get("message")?.get("content")?;
     let text = match content {
         serde_json::Value::String(s) => s.clone(),
@@ -311,6 +315,12 @@ fn is_scaffolding(text: &str) -> bool {
         "<command-name>",
         "<command-message>",
         "<local-command",
+        // The CLI's own notes in the user turn: a background task's end, a shell command's input and output, a hook.
+        "<task-notification>",
+        "<bash-input>",
+        "<bash-stdout>",
+        "<bash-stderr>",
+        "<user-prompt-submit-hook>",
         "Caveat:",
         "[Request interrupted",
         // Claude Code's compaction summary, when the frame isn't flagged.
@@ -365,6 +375,9 @@ mod tests {
             r#"{"type":"user","tool_use_result":{},"message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}"#.to_string(),
             r#"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":"sub-agent prompt"}}"#.to_string(),
             user("[JEKT:FROM=someone TIER=coord]\nbody"),
+            user("<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"),
+            user("<bash-input>ls</bash-input>"),
+            r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"Base directory for this skill: /x"}}"#.to_string(),
             delta(),
         ]
         .join("\n");

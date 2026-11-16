@@ -29,6 +29,13 @@ name: Release (core)
 # variable once that submission has merged. The Microsoft Store job (`ms-store`) is
 # off until MSSTORE_SUBMIT_ENABLED is 'true'; until then the Store is uploaded by hand.
 #
+# The full test suite is proved on the tagged commit by this run itself (job `suite`), not by main's
+# push run: the merge queue can land a release commit in the same push as another pull request, and
+# then the push run exists only for the push's last commit (0.60.30). Every job that sends anything
+# out of the run needs `suite`, directly or through a job that does: `container-image` (the registry
+# push), `sign-release`, `publish`, and what needs `publish` (the Linux repository, WinGet, the
+# Store, the upgrade check). The builds only make artifacts inside the run and run beside it.
+#
 # See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md and the correction
 # docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md for the full design, and
 # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md §4 for the signing.
@@ -75,18 +82,146 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
-        run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT"
+        # Check 6 (the full test suite on this commit) is the `suite` job's: the jobs that send anything out of the
+        # run need it, so this gate runs beside it and leaves that one check to them.
+        run: node scripts/release-gate.mjs --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --github-output "$GITHUB_OUTPUT" --suite-checked-later
+
+  # ── The full test suite, on exactly the tagged commit ─────────────────────
+  # What the merge queue skips: the whole Rust suite on Linux (the queue runs a named list of tests) and the
+  # Windows compile check. The steps are the ones of ci-pr.yml's `rust` job (scripts/release-gate.test.mjs fails
+  # when a command here differs from its twin there). It checks out github.sha, and a green result of this job
+  # is check 6 of the gate for sign-release and publish (`--suite-proof`, from `needs.suite.result`).
+  # There is no input and no flag that skips it.
+  suite:
+    name: Full test suite on the tagged commit (${{ matrix.os }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 50 || 35 }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - name: Use the mold linker (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: rui314/setup-mold@v1
+      # Twelve more GB of swap for the srv test crate's compile (ci-pr.yml's step of this name says why).
+      - name: Free disk and add swap (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          avail() { df -m --output=avail "$1" | tail -1 | tr -d ' '; }
+          echo "free before: / $(avail /) MB, /mnt $(avail /mnt 2>/dev/null || echo none) MB"
+          if [ "$(avail /)" -lt 40000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+            echo "free after removing dotnet, android, ghc, CodeQL: / $(avail /) MB"
+          fi
+          swapfile=/extra.swap
+          gb=12
+          if mountpoint -q /mnt && [ "$(avail /mnt)" -ge 13000 ]; then
+            swapfile=/mnt/extra.swap
+          else
+            gb=$(( ($(avail /) - 25000) / 1024 ))
+            [ "$gb" -gt 12 ] && gb=12
+          fi
+          if [ "$gb" -ge 2 ]; then
+            sudo fallocate -l "${gb}G" "$swapfile"
+            sudo chmod 600 "$swapfile"
+            sudo mkswap "$swapfile"
+            sudo swapon "$swapfile"
+          else
+            echo "::warning::not enough free disk for extra swap ($gb GB); continuing without it"
+          fi
+          free -m
+          echo "free now: / $(avail /) MB"
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe", "link.exe")) {
+            try { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($exe): $_" }
+          }
+          foreach ($path in @("C:\Program Files\Microsoft Visual Studio", "C:\Program Files (x86)\Microsoft Visual Studio", $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup")) {
+            try { Add-MpPreference -ExclusionPath $path -ErrorAction Stop } catch { Write-Warning "Defender exclusion failed ($path): $_" }
+          }
+      - name: Install build deps (Linux — launcher Wayland toolkit + agentmux-mcp's xcap)
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 20
+        env:
+          CI_APT_BUDGET: 600
+          CI_APT_DNS_WAIT: 180
+          CI_APT_UPDATE_LIMIT: 120
+          CI_APT_INSTALL_LIMIT: 240
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          bash scripts/ci-apt.sh update
+          bash scripts/ci-apt.sh install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
+      # A release run reads the cache main's pushes saved and writes none: its key would be this tag's alone.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+      - name: cargo check --tests (CEF-free crates)
+        if: matrix.os == 'windows-latest'
+        run: cargo check --tests -p agentmux-common -p agentmux-srv-core -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+      - name: A shipped build never has the test-only feature
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-test-support-off.mjs --resolved
+      - name: Install cargo-nextest
+        if: matrix.os == 'ubuntu-latest'
+        uses: taiki-e/install-action@nextest
+      - name: cargo nextest (CEF-free crates)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CI_ATTEMPT1_SECONDS: 1500
+          CI_ATTEMPT2_SECONDS: 900
+        timeout-minutes: 42
+        shell: bash
+        run: bash scripts/ci-nextest-run.sh
+      - name: Keep the resource trace of a failed test step
+        if: ${{ always() && (failure() || cancelled()) && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          { echo "--- kernel log, memory lines"; sudo dmesg -T 2>/dev/null | grep -i -E "out of memory|oom|killed process" | tail -n 30; } >> "$RUNNER_TEMP/resource-trace.log" || true
+      - name: Upload the resource trace
+        if: ${{ always() && (failure() || cancelled()) && matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-resource-trace-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource-trace.log
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: cargo test --doc (CEF-free crates)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --doc -p agentmux-common -p agentmux-remote -p agentmux-procstats
+      - name: RPC bindings are current
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/check-rpc-bindings.sh --check-only
+      - name: ts-rs parses every serde attribute
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-tsrs-serde-warnings.mjs --log "$RUNNER_TEMP/nextest-build.log"
 
   # ── The agent container image ───────────────────────────────────────────
   # Published for each release, after the gate, by main's container-image.yml (which
   # re-runs the gate from this run's own context). Independent of the builds below.
   container-image:
     name: Container agent image
-    needs: gate
+    needs: [gate, suite]
     permissions:
       contents: read
       packages: write
     uses: agentmuxai/agentmux/.github/workflows/container-image.yml@main
+    with:
+      suite-proof: ${{ needs.suite.result }}
 
   # ── Phase 1b: Single source of truth for the three pinned CEF runtime tags ──
   # PR #3086 pinned each build-*.yml call's cef-runtime-tag to a literal
@@ -221,6 +356,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       release-tag: ""
+      suite-proof: later
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.windows-tag }}
     secrets: inherit
 
@@ -241,6 +377,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       release-tag: ""
+      suite-proof: later
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.linux-tag }}
     secrets: inherit
 
@@ -282,6 +419,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       release-tag: ""
+      suite-proof: later
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
@@ -312,6 +450,7 @@ jobs:
     uses: agentmuxai/agentmux/.github/workflows/build-server-package.yml@main
     with:
       ref: ${{ github.sha }}
+      suite-proof: later
       legs: release
       # Developer ID signing and notarization of the macOS programs, in a job of their own. Off until the repository variable
       # says so (the same kind of switch as RELEASE_SIGNING_ENABLED).
@@ -347,9 +486,10 @@ jobs:
     # container-image is needed for its digest, not for the release: a failed image job
     # leaves the manifest without an image (the app then uses its versioned tag, as before),
     # so the other jobs are checked one by one instead of by `!failure()`.
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, container-image]
+    needs: [gate, suite, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, container-image]
     if: >-
       ${{ vars.RELEASE_SIGNING_ENABLED == 'true' && !cancelled()
+      && needs.suite.result == 'success'
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
       && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
@@ -379,11 +519,13 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
+          SUITE_RESULT: ${{ needs.suite.result }}
         run: |
           # main's copy of the gate, kept outside the workspace (which is the commit being signed).
           gate="$RUNNER_TEMP/release-gate.mjs"
           gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
-          node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO"
+          # Check 6 is this run's suite: only the literal result of the job counts.
+          node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$SHA" --repo "$REPO" --suite-result "$SUITE_RESULT"
           # The workspace is the gated commit and nothing else.
           test "$(git rev-parse HEAD)" = "$SHA"
 
@@ -493,9 +635,10 @@ jobs:
   # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
-    needs: [gate, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
+    needs: [gate, suite, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
     if: >-
       ${{ !cancelled()
+      && needs.suite.result == 'success'
       && contains(fromJSON('["success","skipped"]'), needs.gate.result)
       && contains(fromJSON('["success","skipped"]'), needs.check-macos.result)
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
@@ -695,7 +838,7 @@ jobs:
   # from containers. Does nothing until the repository's variables are set (publish-linux-repo.yml has the list).
   publish-linux-repo:
     name: Publish the apt and dnf repository
-    needs: [gate, publish]
+    needs: [gate, suite, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
     permissions:
       contents: read
@@ -703,6 +846,7 @@ jobs:
     uses: agentmuxai/agentmux/.github/workflows/publish-linux-repo.yml@main
     with:
       version: ${{ needs.gate.outputs.version }}
+      suite-proof: ${{ needs.suite.result }}
 
   # ── Phase 4: Distribution channels ────────────────────────────────────────
   # WinGet: opens the version-bump pull request in microsoft/winget-pkgs for the

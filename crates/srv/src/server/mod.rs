@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub(crate) mod cli_handlers;
+mod keychain_probe;
 mod file_icons;
 pub(crate) mod hook_handlers;
 mod files;
 pub(crate) mod app_api;
 pub(crate) mod account_episodes;
+pub(crate) mod prep;
 // `pub` so `bootstrap::install_agent_turn_delivery` can reach `run_agent_turn`
 // to start a turn outside the RPC path.
 pub mod agent_resources;
@@ -47,6 +49,7 @@ mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod container_pane_snapshot;
+mod streamed_browser;
 pub(crate) mod files_root;
 mod container_workspace;
 mod model_gateway_handlers;

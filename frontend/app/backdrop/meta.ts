@@ -11,6 +11,16 @@ import { hexToRgb } from "../theme/oklch";
 import { BUILTINS, deriveBuiltin, type AppScheme } from "./builtins";
 import { deriveInk, type DerivedBackdrop } from "./ink";
 
+/**
+ * The pane views whose own colours follow a backdrop (spec §6, §14). Phase 1 is the agent pane. A terminal keeps its
+ * default text and ANSI colours, so a backdrop on one is unreadable; the other panes come with phase 2. A view is added
+ * here only when its text can be shown to follow the ink.
+ */
+const BACKDROP_VIEWS: ReadonlySet<string> = new Set(["agent"]);
+
+/** Whether a pane of this view takes a backdrop: it is offered in its menu, and a record on any other view is ignored. */
+export const supportsBackdrop = (view: unknown): boolean => typeof view === "string" && BACKDROP_VIEWS.has(view);
+
 /** The shape the record is written in. A reader that finds a newer `version` ignores the record. */
 export const BACKDROP_VERSION = 1;
 
@@ -50,6 +60,20 @@ export function parseBackdrop(raw: unknown): BackdropMeta | undefined {
     if (r.kind === "color" && typeof r.hex === "string" && HEX6.test(r.hex)) return { ...base, kind: "color", hex: r.hex.toLowerCase() };
     if (r.kind === "image" && typeof r.imageId === "string" && r.imageId !== "") return { ...base, kind: "image", imageId: r.imageId };
     return undefined;
+}
+
+/** Whether two records are the same backdrop, field by field: `parseBackdrop` makes a new object each time, so identity says nothing. */
+export function sameBackdrop(a: BackdropMeta | undefined, b: BackdropMeta | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a.kind === b.kind && a.id === b.id && a.hex === b.hex && a.imageId === b.imageId && a.polarity === b.polarity && a.version === b.version;
+}
+
+/** Whether two resolved backdrops are the same one: the same origin and the same colours, not the same object. */
+export function sameResolved(a: ResolvedBackdrop | undefined, b: ResolvedBackdrop | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a.id === b.id && JSON.stringify(a.derived) === JSON.stringify(b.derived);
 }
 
 /** A backdrop ready to apply: where it came from, and the surfaces and ink for the pane. */

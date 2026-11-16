@@ -98,6 +98,8 @@ jobs:
           echo "measuring $dir from run ${{ steps.build.outputs.run-id }}"
 
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

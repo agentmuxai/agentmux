@@ -25,6 +25,10 @@ import {
     versionOfTag,
 } from "./release-manifest.mjs";
 
+// The SSH signature tests live in their own file; the CI step that runs this one runs them through this import, so
+// the second signature's checks (and the guard that fails CI when ssh-keygen is missing) are never skipped.
+import "./release-sshsig.test.mjs";
+
 const TAG = "v0.60.1";
 const privateKey = (seed) =>
     createPrivateKey({

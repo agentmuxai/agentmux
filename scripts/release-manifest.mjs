@@ -13,10 +13,18 @@
 //       AgentMux-<v>-envelope.json (the release's tag and the manifest's
 //       SHA-256: the small document that is signed) into <dir>.
 //   sign-kms --envelope <file> --key-id <alias|arn> --id <k1> --out <file>
+//          [--sshsig-out <file>] [--keys-file <json>]
 //       signs the envelope's exact bytes with an Ed25519 key held by a signing
 //       service (`aws kms sign`, raw message), and writes the signature line
-//       `<id> <base64>` (AgentMux-<v>-envelope.json.sig).
+//       `<id> <base64>` (AgentMux-<v>-envelope.json.sig). It then signs the same
+//       envelope a second time with the same key, in SSH signature form
+//       (SSHSIG), for systems that can check that and not the line above (a
+//       stock Mac), and writes AgentMux-<v>-envelope.json.sshsig next to --out
+//       (or to --sshsig-out). The signature is checked against the pinned key
+//       (--keys-file, default crates/common/update-keys.json) before it is
+//       written. docs/specs/SPEC_RELEASE_SSHSIG_SECOND_SIGNATURE_2026_11_15.md.
 //   sign-key --envelope <file> --private-key <pem> --id <k1> --out <file>
+//          [--sshsig-out <file>]
 //       the same with a local key; for tests, never for a release.
 //   verify --dir <dir> --tag vX.Y.Z --id <k1> [--files <files>]
 //          (--public-key <base64 of the raw 32 bytes> | --keys-file <json>)
@@ -24,7 +32,11 @@
 //       signature of the envelope, its tag, the manifest's hash and format; with
 //       --files, also that every file in <files> is in the manifest with that
 //       size and hash, and that the manifest lists nothing else. --keys-file
-//       is crates/common/update-keys.json, the keys the app pins.
+//       is crates/common/update-keys.json, the keys the app pins. The SSH
+//       signature (.sshsig) is checked when it is there, and must be there for
+//       a release from SSHSIG_FLOOR on: with this script's own parser and with
+//       `ssh-keygen -Y verify` against the pinned key (--no-ssh-keygen skips
+//       the second, for a machine that has none: tests only).
 //
 //   self-check --message <file> --signature <file with base64> --public-key <base64>
 //       checks one plain Ed25519 signature of a file's bytes with one raw public
@@ -35,12 +47,17 @@
 // can't be signed and checked is not published.
 
 import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign, verify as cryptoVerify } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const ENVELOPE_FORMAT = 1;
+/** The namespace every release SSH signature is made and checked under. Fixed: install.sh and install.ps1 use the same. */
+export const SSHSIG_NAMESPACE = "agentmux-release";
+/** The first release that carries a .sshsig. From it on, a release without one is refused, and so is a script that falls back. install.sh has the same value (a test keeps them equal). */
+export const SSHSIG_FLOOR = "0.60.31";
 export const MANIFEST_FORMAT = 1;
 export const MAX_ENVELOPE_BYTES = 4096;
 export const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -72,6 +89,16 @@ export function selfCheck({ message, signatureB64, publicKeyB64 }) {
 export const manifestName = (tag) => `AgentMux-${versionOfTag(tag)}-manifest.json`;
 export const envelopeName = (tag) => `AgentMux-${versionOfTag(tag)}-envelope.json`;
 export const signatureName = (tag) => `${envelopeName(tag)}.sig`;
+export const sshsigName = (tag) => `${envelopeName(tag)}.sshsig`;
+
+/** Whether version `a` is at or above `b`. Both must be exactly `X.Y.Z` (digits): anything else throws, so a suffix can never compare as "below" through NaN. */
+export function versionAtLeast(a, b) {
+    for (const v of [a, b]) if (!/^\d+\.\d+\.\d+$/.test(String(v))) throw new Error(`${JSON.stringify(v)} isn't a version of digits X.Y.Z`);
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
+    return true;
+}
 
 /** Every file in `dir`, with its size and SHA-256, by name. */
 export function listFiles(dir) {
@@ -173,11 +200,156 @@ export function signWithKms(envelopePath, keyId, id) {
     return `${id} ${out}\n`;
 }
 
+// ---- the second signature: SSH signature (SSHSIG) form -------------------------------------------------------------------
+// The same Ed25519 key signs a small structure (the "preimage") that holds the SHA-512 of the envelope, so the system's
+// `ssh-keygen -Y verify` can check it where openssl can't (a stock Mac). The format is OpenSSH's PROTOCOL.sshsig.
+
+const u32 = (n) => {
+    const b = Buffer.alloc(4);
+    b.writeUInt32BE(n);
+    return b;
+};
+const sshString = (bytes) => Buffer.concat([u32(bytes.length), Buffer.from(bytes)]);
+const SSH_ED25519 = Buffer.from("ssh-ed25519");
+const MAX_SSHSIG_BYTES = 2048;
+
+/** The bytes the signer signs for `envelope`: "SSHSIG", the namespace, a reserved empty string, the hash name and the hash. */
+export function sshsigPreimage(envelope, namespace = SSHSIG_NAMESPACE) {
+    return Buffer.concat([
+        Buffer.from("SSHSIG"),
+        sshString(Buffer.from(namespace)),
+        sshString(Buffer.alloc(0)),
+        sshString(Buffer.from("sha512")),
+        sshString(createHash("sha512").update(Buffer.from(envelope)).digest()),
+    ]);
+}
+
+/** The public key as an SSH key blob: string "ssh-ed25519", string(the 32 raw bytes). */
+export const sshPublicKeyBlob = (raw) => Buffer.concat([sshString(SSH_ED25519), sshString(raw)]);
+
+/** The armoured SSH signature file for a 64-byte Ed25519 `signature` of the preimage, made by the key `publicKeyRaw`. */
+export function sshsigArmor(publicKeyRaw, signature, namespace = SSHSIG_NAMESPACE) {
+    if (publicKeyRaw.length !== 32 || signature.length !== 64) throw new Error("an Ed25519 key is 32 bytes and its signature 64");
+    const blob = Buffer.concat([
+        Buffer.from("SSHSIG"),
+        u32(1),
+        sshString(sshPublicKeyBlob(publicKeyRaw)),
+        sshString(Buffer.from(namespace)),
+        sshString(Buffer.alloc(0)),
+        sshString(Buffer.from("sha512")),
+        sshString(Buffer.concat([sshString(SSH_ED25519), sshString(signature)])),
+    ]);
+    const b64 = blob.toString("base64");
+    const lines = b64.match(/.{1,70}/g) ?? [];
+    return `-----BEGIN SSH SIGNATURE-----\n${lines.join("\n")}\n-----END SSH SIGNATURE-----\n`;
+}
+
+/** Take an armoured SSH signature apart, strictly: anything unexpected is an error. */
+export function parseSshsig(text) {
+    if (Buffer.byteLength(text) > MAX_SSHSIG_BYTES) throw new Error("the SSH signature is too large");
+    const m = /^-----BEGIN SSH SIGNATURE-----\n([A-Za-z0-9+/=\n]+)\n-----END SSH SIGNATURE-----\n?$/.exec(String(text).replace(/\r\n/g, "\n"));
+    if (!m) throw new Error("the SSH signature isn't in the armoured form");
+    const buf = Buffer.from(m[1].replace(/\n/g, ""), "base64");
+    let at = 0;
+    const take = (n) => {
+        if (at + n > buf.length) throw new Error("the SSH signature is cut short");
+        const out = buf.subarray(at, at + n);
+        at += n;
+        return out;
+    };
+    const str = () => take(take(4).readUInt32BE());
+    if (take(6).toString() !== "SSHSIG") throw new Error("the SSH signature has no SSHSIG magic");
+    if (take(4).readUInt32BE() !== 1) throw new Error("the SSH signature's version isn't 1");
+    const keyBlob = str();
+    const namespace = str().toString();
+    const reserved = str();
+    const hashAlg = str().toString();
+    const sigBlob = str();
+    if (at !== buf.length) throw new Error("the SSH signature has bytes after its end");
+    if (reserved.length !== 0) throw new Error("the SSH signature's reserved field isn't empty");
+    // The key and the signature, each "ssh-ed25519" and 32 or 64 bytes.
+    let k = 0;
+    const kstr = (b, n) => {
+        const len = b.readUInt32BE(n);
+        return [b.subarray(n + 4, n + 4 + len), n + 4 + len];
+    };
+    const [keyType, k1] = kstr(keyBlob, k);
+    const [publicKey, k2] = kstr(keyBlob, k1);
+    if (keyType.toString() !== "ssh-ed25519" || publicKey.length !== 32 || k2 !== keyBlob.length) throw new Error("the SSH signature's key isn't an Ed25519 key");
+    const [sigType, s1] = kstr(sigBlob, 0);
+    const [signature, s2] = kstr(sigBlob, s1);
+    if (sigType.toString() !== "ssh-ed25519" || signature.length !== 64 || s2 !== sigBlob.length) throw new Error("the SSH signature isn't an Ed25519 signature");
+    return { publicKey, namespace, hashAlg, signature };
+}
+
+/**
+ * Checks `sshsig` (the armoured text) as a signature of `envelope` by the pinned key (`publicKeyB64`, the 32 raw bytes in
+ * base64): the namespace and the hash are the fixed ones, the key INSIDE the signature is the pinned key (it is never
+ * trusted on its own), and the Ed25519 signature of the preimage is good. Throws with the reason.
+ */
+export function verifySshsig({ envelope, sshsig, publicKeyB64 }) {
+    const pinned = Buffer.from(publicKeyB64, "base64");
+    if (pinned.length !== 32) throw new Error("the public key isn't 32 raw bytes in base64");
+    const p = parseSshsig(sshsig);
+    if (p.namespace !== SSHSIG_NAMESPACE) throw new Error(`the SSH signature is for the namespace ${JSON.stringify(p.namespace)}, not ${SSHSIG_NAMESPACE}`);
+    if (p.hashAlg !== "sha512") throw new Error(`the SSH signature hashes with ${p.hashAlg}, not sha512`);
+    if (!p.publicKey.equals(pinned)) throw new Error("the SSH signature was made by a key that isn't the pinned one");
+    if (!cryptoVerify(null, sshsigPreimage(envelope), publicKeyOf(pinned), p.signature)) throw new Error("the SSH signature doesn't match the envelope");
+}
+
+/** The armoured SSH signature of `envelope` made with a local Ed25519 private key (PEM) whose public half is `publicKeyB64`. Tests only. */
+export function signSshsigWithKey(envelope, privateKeyPem, publicKeyB64) {
+    const sig = cryptoSign(null, sshsigPreimage(envelope), createPrivateKey(privateKeyPem));
+    return sshsigArmor(Buffer.from(publicKeyB64, "base64"), sig);
+}
+
+/** The armoured SSH signature of the envelope's file, made by the signing service: the same key, a second message. */
+export function signSshsigWithKms(envelopePath, keyId, publicKeyB64) {
+    const dir = mkdtempSync(join(tmpdir(), "sshsig-"));
+    try {
+        const file = join(dir, "preimage");
+        writeFileSync(file, sshsigPreimage(readFileSync(envelopePath)));
+        const out = execFileSync(
+            "aws",
+            [
+                "kms", "sign",
+                "--key-id", keyId,
+                "--message", `fileb://${file}`,
+                "--message-type", "RAW",
+                "--signing-algorithm", "ED25519_SHA_512",
+                "--query", "Signature",
+                "--output", "text",
+            ],
+            { encoding: "utf8" },
+        ).trim();
+        if (!/^[A-Za-z0-9+/=]{80,100}$/.test(out)) throw new Error("the signing service didn't return a signature");
+        return sshsigArmor(Buffer.from(publicKeyB64, "base64"), Buffer.from(out, "base64"));
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+}
+
+/** `ssh-keygen -Y verify` of the envelope against an allowed-signers file that holds only the pinned key. Throws with its words. */
+export function sshKeygenVerify({ envelope, sshsig, publicKeyB64, keygen = "ssh-keygen" }) {
+    const dir = mkdtempSync(join(tmpdir(), "sshsig-"));
+    try {
+        const signers = join(dir, "allowed_signers");
+        const sigFile = join(dir, "envelope.sshsig");
+        writeFileSync(signers, `${SSHSIG_NAMESPACE} namespaces="${SSHSIG_NAMESPACE}" ssh-ed25519 ${sshPublicKeyBlob(Buffer.from(publicKeyB64, "base64")).toString("base64")}\n`);
+        writeFileSync(sigFile, sshsig);
+        const r = spawnSync(keygen, ["-Y", "verify", "-f", signers, "-I", SSHSIG_NAMESPACE, "-n", SSHSIG_NAMESPACE, "-s", sigFile], { input: Buffer.from(envelope), encoding: "utf8" });
+        if (r.error) throw new Error(`ssh-keygen could not be run (${r.error.code ?? r.error.message}): the release job needs the OpenSSH client`);
+        if (r.status !== 0) throw new Error(`ssh-keygen -Y verify refused the SSH signature: ${`${r.stdout}${r.stderr}`.trim()}`);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+}
+
 /**
  * What the app checks. Throws with the reason; returns the parsed manifest.
  * `files` (optional): the release's real files, `{name, size, sha256}` each.
  */
-export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB64, id, files }) {
+export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB64, id, files, sshsig }) {
     const raw = Buffer.from(publicKeyB64, "base64");
     if (raw.length !== 32) throw new Error("the public key isn't 32 raw bytes in base64");
     if (Buffer.byteLength(envelope) > MAX_ENVELOPE_BYTES) throw new Error("the envelope is too large");
@@ -189,6 +361,12 @@ export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB6
     const sig = Buffer.from(line[1], "base64");
     if (sig.length !== 64 || !cryptoVerify(null, Buffer.from(envelope), publicKeyOf(raw), sig)) {
         throw new Error("the signature doesn't match the envelope");
+    }
+    // The second signature: required from SSHSIG_FLOOR on, checked whenever it is there.
+    if (sshsig === undefined) {
+        if (versionAtLeast(versionOfTag(tag), SSHSIG_FLOOR)) throw new Error(`${tag} must carry ${sshsigName(tag)} (every release from ${SSHSIG_FLOOR} on does)`);
+    } else {
+        verifySshsig({ envelope, sshsig, publicKeyB64 });
     }
     const env = JSON.parse(envelope);
     if (env.format !== ENVELOPE_FORMAT) throw new Error(`envelope format ${env.format} isn't understood`);
@@ -221,11 +399,30 @@ export function verifyRelease({ envelope, signatures, manifest, tag, publicKeyB6
     return m;
 }
 
+const defaultKeysFile = join(dirname(fileURLToPath(import.meta.url)), "..", "crates", "common", "update-keys.json");
+
+/** The base64 raw public key pinned for `id` in the app's keys file. */
+function pinnedKey(keysFile, id) {
+    const key = JSON.parse(readFileSync(keysFile, "utf8")).keys.find((k) => k.id === id)?.public_key;
+    if (!key) throw new Error(`the keys file has no key ${id}`);
+    return key;
+}
+
+/** Where the SSH signature goes for a signature line written to `out`: `...envelope.json.sig` -> `...envelope.json.sshsig`. */
+export function sshsigPathFor(out) {
+    if (!out.endsWith(".sig")) throw new Error("pass --sshsig-out: --out doesn't end in .sig, so the SSH signature's path can't be derived from it");
+    return `${out.slice(0, -".sig".length)}.sshsig`;
+}
+
 function parseArgs(argv) {
     const out = {};
     for (let i = 0; i < argv.length; i++) {
         if (!argv[i].startsWith("--")) throw new Error(`unexpected argument ${argv[i]}`);
         const key = argv[i].slice(2);
+        if (key === "no-ssh-keygen") {
+            out[key] = "1";
+            continue;
+        }
         if (i + 1 >= argv.length) throw new Error(`--${key} needs a value`);
         // --image may be repeated; every other option is given once.
         if (key === "image") (out.images ??= []).push(argv[++i]);
@@ -258,13 +455,27 @@ function main(argv) {
         }
         case "sign-kms": {
             need(args, "envelope", "key-id", "id", "out");
+            const publicKey = pinnedKey(args["keys-file"] ?? defaultKeysFile, args.id);
+            const sshsigOut = args["sshsig-out"] ?? sshsigPathFor(args.out);
+            // A file left by an earlier run is never kept: after this command there is the one it made and checked, or none.
+            rmSync(sshsigOut, { force: true });
             writeFileSync(args.out, signWithKms(args.envelope, args["key-id"], args.id));
-            console.log(`signed ${args.envelope} as ${args.id}`);
+            // The second signature, by the same key (a second message to the same service), checked against the pinned key before it is written (to a temporary name, then renamed: never a partial file).
+            const sshsig = signSshsigWithKms(args.envelope, args["key-id"], publicKey);
+            verifySshsig({ envelope: readFileSync(args.envelope), sshsig, publicKeyB64: publicKey });
+            writeFileSync(`${sshsigOut}.tmp`, sshsig);
+            renameSync(`${sshsigOut}.tmp`, sshsigOut);
+            console.log(`signed ${args.envelope} as ${args.id}, and in SSH signature form (${sshsigOut})`);
             return;
         }
         case "sign-key": {
             need(args, "envelope", "private-key", "id", "out");
-            writeFileSync(args.out, signWithKey(readFileSync(args.envelope), readFileSync(args["private-key"], "utf8"), args.id));
+            const pem = readFileSync(args["private-key"], "utf8");
+            writeFileSync(args.out, signWithKey(readFileSync(args.envelope), pem, args.id));
+            if (args["sshsig-out"]) {
+                const publicKey = createPublicKey(pem).export({ format: "der", type: "spki" }).subarray(SPKI_ED25519_PREFIX.length).toString("base64");
+                writeFileSync(args["sshsig-out"], signSshsigWithKey(readFileSync(args.envelope), pem, publicKey));
+            }
             console.log(`signed ${args.envelope} as ${args.id} (local key: not for a release)`);
             return;
         }
@@ -274,9 +485,10 @@ function main(argv) {
             let publicKey = args["public-key"];
             if (!publicKey) {
                 need(args, "keys-file");
-                publicKey = JSON.parse(readFileSync(args["keys-file"], "utf8")).keys.find((k) => k.id === args.id)?.public_key;
-                if (!publicKey) throw new Error(`the keys file has no key ${args.id}`);
+                publicKey = pinnedKey(args["keys-file"], args.id);
             }
+            const sshsigFile = join(args.dir, sshsigName(args.tag));
+            const sshsig = existsSync(sshsigFile) ? readFileSync(sshsigFile, "utf8") : undefined;
             const m = verifyRelease({
                 envelope: read(envelopeName(args.tag)),
                 signatures: read(signatureName(args.tag)).toString("utf8"),
@@ -285,8 +497,13 @@ function main(argv) {
                 publicKeyB64: publicKey,
                 id: args.id,
                 files: args.files ? listFiles(args.files) : undefined,
+                sshsig,
             });
-            console.log(`verified ${args.tag}: ${m.files.length} files${m.images?.length ? `, ${m.images.length} image(s)` : ""}`);
+            // The real tool too, on the runner: what a person's system will run against what the release published.
+            if (sshsig !== undefined && args["no-ssh-keygen"] === undefined) {
+                sshKeygenVerify({ envelope: read(envelopeName(args.tag)), sshsig, publicKeyB64: publicKey });
+            }
+            console.log(`verified ${args.tag}: ${m.files.length} files${m.images?.length ? `, ${m.images.length} image(s)` : ""}${sshsig !== undefined ? ", SSH signature" : ""}`);
             return;
         }
         case "self-check": {

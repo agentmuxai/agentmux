@@ -50,12 +50,14 @@ export const mappedNames = (mapped) => [...Object.keys(mapped.surface), ...Objec
  */
 export function dependentAliases(defaults, mapped) {
     const mappedSet = new Set(mappedNames(mapped));
+    // Tokens kept at the window's value inside a pane on purpose (`windowLevel`): never re-resolved, and nothing reads a mapped token through them.
+    const windowLevel = new Set(mapped.windowLevel ?? []);
     const dependent = new Set();
     let grew = true;
     while (grew) {
         grew = false;
         for (const [name, value] of defaults) {
-            if (mappedSet.has(name) || dependent.has(name)) continue;
+            if (mappedSet.has(name) || dependent.has(name) || windowLevel.has(name)) continue;
             if (varsIn(value).some((v) => mappedSet.has(v) || dependent.has(v))) {
                 dependent.add(name);
                 grew = true;

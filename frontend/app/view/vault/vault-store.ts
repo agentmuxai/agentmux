@@ -12,6 +12,7 @@ import { createRoot, createSignal } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import type { ExportResult } from "@/types/rpc/ExportResult";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
@@ -73,7 +74,9 @@ const store = createRoot(() => {
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [changedMs, setChangedMs] = createSignal(0);
-    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
+    // The `changedMs` the list in `vaults` was read at; -1 until it is read.
+    const [listAsOf, setListAsOf] = createSignal(-1);
+    return { entries, setEntries, vaults, setVaults, signinVaults, setSigninVaults, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs, listAsOf, setListAsOf };
 });
 
 export const vaultEntries = store.entries;
@@ -90,9 +93,14 @@ export const vaultError = store.error;
 export const vaultLoading = store.loading;
 /** When the Vault last changed, for sections that load on their own. */
 export const vaultChangedMs = store.changedMs;
+/** The person's Vaults when the list is current: read since the Vault last changed. `null` when it is not (the list is
+ *  kept current only while a Vault view is on screen), and a caller shows what it was given instead. */
+export const currentVaults = (): VaultInfo[] | null => (store.listAsOf() >= store.changedMs() ? store.vaults() : null);
 
 export async function refreshVault(): Promise<void> {
     store.setLoading(true);
+    // A change that arrives while the list is being read leaves it marked as older than the change.
+    const asOf = store.changedMs();
     try {
         const data = await call<{
             entries: VaultEntryInfo[];
@@ -104,6 +112,7 @@ export async function refreshVault(): Promise<void> {
         }>("list");
         store.setEntries(data.entries);
         store.setVaults(data.vaults ?? []);
+        store.setListAsOf(asOf);
         store.setSigninVaults(data.signin_vaults ?? {});
         store.setProblem(data.problem);
         store.setRequests(data.requests);
@@ -196,16 +205,19 @@ export const allowSetting = (entryId: string, setting: string) => call<unknown>(
 
 /** What the host needs to export: which entries (all when left out) and the
  *  passphrase; the host asks where to save. `null` if the person closed the dialog. */
-export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx" }): Promise<{ count: number; file_name: string } | null> {
+export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx"; linksOnly?: boolean }): Promise<ExportResult | null> {
     const relay = getApi()?.approvals?.vaultExport;
     if (!relay) throw new Error("Export needs the AgentMux desktop app.");
-    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format })) as {
+    // `links_only`: a `.vault` file of the linked entries, which hold no value; srv leaves every other entry out.
+    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName, format: args.format, links_only: args.linksOnly || undefined })) as {
         cancelled?: boolean;
         count?: number;
         file_name?: string;
+        links_only?: boolean;
     };
     if (res?.cancelled) return null;
-    return { count: res?.count ?? 0, file_name: res?.file_name ?? "" };
+    // `links_only` is what srv wrote. An answer that does not say so is a whole export, whatever was asked for.
+    return { count: res?.count ?? 0, file_name: res?.file_name ?? "", links_only: res?.links_only === true };
 }
 
 /** The two unencrypted formats, for taking the Vault to another manager. */

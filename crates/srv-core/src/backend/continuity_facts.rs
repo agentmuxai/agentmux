@@ -113,6 +113,26 @@ pub(crate) fn render(facts: &Facts, now_ms: i64) -> String {
     lines.join("\n")
 }
 
+/// What a restart of the session would cost, in the words the log and the audit row use, or `None`
+/// when nothing is lost: a Kanban task held, a command still running (one found dead is not), or
+/// files with uncommitted changes in the working clone (SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md §3.2).
+pub(crate) fn something_lost(facts: &Facts) -> Option<&'static str> {
+    if !facts.tasks.is_empty() {
+        Some("holds a claimed task")
+    } else if facts.background.iter().any(|b| b.alive != Some(false)) {
+        Some("a background command is running")
+    } else if facts.repo.as_ref().is_some_and(|c| c.dirty_files > 0) {
+        Some("uncommitted changes in its working clone")
+    } else {
+        None
+    }
+}
+
+/// [`something_lost`] for the agent in `block_id`, read from the stores. Blocking reads.
+pub fn something_to_lose(mstore: &Store, identity: Option<&Store>, block_id: &str) -> Option<&'static str> {
+    something_lost(&collect(mstore, identity, block_id))
+}
+
 /// The facts for the agent in `block_id`, from the stores. Blocking reads: call off the async workers.
 pub(crate) fn collect(mstore: &Store, identity: Option<&Store>, block_id: &str) -> Facts {
     let mut facts = Facts::default();

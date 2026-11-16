@@ -43,6 +43,16 @@ describe("VoiceSetupNotice", () => {
         expect(screen.getByRole("status").textContent).toContain("add a Groq key, or choose local Whisper");
     });
 
+    it("says voice input is turned off, not that it isn't set up, when the switch is why", () => {
+        notSetUp._set(gap({ missing: "off", detail: null }));
+        render(() => <VoiceSetupNotice blockId="blk" />);
+        const text = screen.getByRole("status").textContent;
+        expect(text).toContain("Voice input is turned off");
+        expect(text).toContain("Turn it on in Settings > Recording");
+        expect(text).not.toContain("isn't set up");
+        expect(screen.getByRole("button", { name: "Open Recording settings" })).toBeTruthy();
+    });
+
     it("stays out of a pane whose mic was not the one asked for", () => {
         notSetUp._set(gap({ blockId: "other" }));
         render(() => <VoiceSetupNotice blockId="blk" />);

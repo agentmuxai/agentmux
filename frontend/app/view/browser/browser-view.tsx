@@ -20,6 +20,7 @@ import { Button } from "@/app/element/ui";
 import { BrowserSigninOffer, BrowserSigninPending } from "./browser-signin-offer";
 import { BrowserAttentionBanner } from "./browser-attention";
 import { BrowserNavBar } from "./browser-nav-bar";
+import { StreamedBrowserPane } from "./streamed/StreamedBrowserPane";
 import { BrowserPopupNotes } from "./browser-popups";
 import { DownloadStrip } from "./download-strip";
 import { DrivenByStrip } from "./driven-by-strip";
@@ -118,7 +119,15 @@ export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.El
     // them (HostCaps.nativeBrowserPane) gets a notice, never a pane that
     // issues commands nothing will answer.
     return (
-        <Show when={hostHas("nativeBrowserPane")} fallback={<BrowserPaneUnavailable />}>
+        <Show
+            when={hostHas("nativeBrowserPane")}
+            fallback={
+                // A host with no native browser may stream one from a server (the web UI of a headless server).
+                <Show when={hostHas("streamedBrowserPane")} fallback={<BrowserPaneUnavailable />}>
+                    <StreamedBrowserPane model={props.model} />
+                </Show>
+            }
+        >
             <BrowserViewInner model={props.model} />
         </Show>
     );

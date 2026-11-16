@@ -680,6 +680,8 @@ pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availa
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
 pub const COMMAND_AGENT_ACCOUNT_SWITCH: &str = "agent.account.switch";
+/// End the window an agent has to prepare for a change ("Switch now"). The window or an agent.
+pub const COMMAND_AGENT_PREP_NOW: &str = "agent.prep.now";
 /// The model panel's content for a pane: the routes that serve its harness with their models, what cannot be picked and
 /// why, and where the agent is now. The operator's window only.
 pub const COMMAND_AGENT_MODEL_PANEL: &str = "agent.model.panel";

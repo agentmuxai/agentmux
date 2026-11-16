@@ -365,6 +365,7 @@ fn bus_routes() -> Router<AppState> {
 fn authed_routes(state: &AppState) -> Router<AppState> {
     Router::new()
         .merge(service_shell_and_vault_routes())
+        .merge(streamed_browser_routes())
         .merge(agent_api_routes())
         .merge(muxspect_routes())
         .merge(memory_and_identity_routes())
@@ -384,6 +385,14 @@ fn authed_routes(state: &AppState) -> Router<AppState> {
             state.clone(),
             auth_middleware,
         ))
+}
+
+/// The streamed Browser pane of a headless server's web UI; 404 unless switched on.
+fn streamed_browser_routes() -> Router<AppState> {
+    Router::new().route(
+        "/agentmux/streamed-browser",
+        get(super::streamed_browser::handle).route_layer(middleware::from_fn(ws_origin_guard)),
+    )
 }
 
 /// The websocket and service calls, files, shells, widgets, the Vault and Google.
@@ -824,6 +833,8 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         .route("/api/v1/agent/self/context", post(app_api::agent_context::handle_context_self))
         .route("/api/v1/agent/self/compact", post(app_api::agent_context::handle_compact_self))
         .route("/api/v1/agent/self/fresh", post(app_api::agent_context::handle_fresh_self))
+        // An agent answering the window a user action gave it to prepare (SPEC_AGENT_PREP_BEFORE_SESSION_RESTART).
+        .route("/api/v1/agent/self/ready", post(crate::server::prep::handle_ready_self))
         // An agent reading and editing a definition's extra environment variables.
         .route("/api/v1/agent/env", post(app_api::agent_env::handle_agent_env))
         // The GitHub App's installation token for an agent's git and gh, through

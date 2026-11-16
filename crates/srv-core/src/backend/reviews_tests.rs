@@ -296,3 +296,128 @@ fn the_wire_names_are_what_the_route_documents() {
     assert_eq!(serde_json::to_value(WaitsOn::None).unwrap(), "none");
     assert!(v.get("repo_id").is_none() && v.get("checks").is_none(), "absent, not null");
 }
+
+// ---- one PR named by several cards ----
+
+#[test]
+fn two_cards_of_one_agent_naming_one_pr_both_take_its_events() {
+    let cards = [card(1, "claimed", "lazo", "agentmuxai/agentmux", 100), card(2, "review", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "approved", PrFlowBy::Bot, Some("aaaaaaaaaaaa"), 2_000)],
+        vec![checks("c1", "lazo", pr(55, 100), "passing", Some("aaaaaaaaaaaa"), 2_100)],
+        vec![merged("m1", "lazo", pr(55, 100), 3_000)],
+    );
+    let list = build(&cards, &f, 5_000);
+    assert_eq!(list.rows.len(), 2, "one row per card, and no orphan row for the PR");
+    for n in [1, 2] {
+        let row = list.rows.iter().find(|r| r.task.as_ref().map(|t| t.num) == Some(n)).unwrap();
+        assert_eq!(row.repo_id, Some(55), "task {n}");
+        assert_eq!(row.reviews.len(), 1, "task {n} has the review");
+        assert_eq!(row.checks.as_ref().map(|c| c.state.as_str()), Some("passing"), "task {n} has the checks");
+        assert_eq!((row.merge.as_str(), row.waits_on, row.why.as_str()), ("merged", WaitsOn::None, "merged"), "task {n}");
+    }
+}
+
+#[test]
+fn a_card_of_another_holder_naming_the_same_pr_takes_its_events_too() {
+    // The task was handed to camper after lazo's PR got its notices: both cards name the one pull request.
+    let cards = [card(1, "claimed", "lazo", "agentmuxai/agentmux", 100), card(2, "claimed", "camper", "agentmuxai/agentmux", 100)];
+    let f = flow(vec![review("r1", "lazo", pr(55, 100), "changes_requested", PrFlowBy::Bot, None, 2_000)], vec![], vec![]);
+    let list = build(&cards, &f, 5_000);
+    assert_eq!(list.rows.len(), 2);
+    assert!(list.rows.iter().all(|r| r.reviews.len() == 1 && r.repo_id == Some(55)));
+}
+
+#[test]
+fn two_cards_of_a_learned_repository_both_take_an_event_of_another_agent() {
+    // Repository 55 is learned from camper's single card; the event of a third agent for PR 100 reaches both cards of it.
+    let cards = [
+        card(1, "claimed", "lazo", "agentmuxai/agentmux", 100),
+        card(2, "claimed", "lazo", "agentmuxai/other", 100),
+        card(3, "claimed", "camper", "agentmuxai/agentmux", 7),
+        card(4, "claimed", "camper", "agentmuxai/agentmux", 100),
+    ];
+    let f = flow(
+        vec![
+            review("r0", "camper", pr(55, 7), "approved", PrFlowBy::Bot, None, 1_000),
+            review("r1", "lazo", pr(55, 100), "changes_requested", PrFlowBy::Bot, None, 2_000),
+        ],
+        vec![],
+        vec![],
+    );
+    let list = build(&cards, &f, 5_000);
+    let of = |n: i64| list.rows.iter().find(|r| r.task.as_ref().map(|t| t.num) == Some(n)).unwrap();
+    assert_eq!(of(1).reviews.len(), 1);
+    assert_eq!(of(4).reviews.len(), 1, "the other holder's card of the same repository and number");
+    assert!(of(2).reviews.is_empty(), "the card of the other repository does not");
+}
+
+// ---- checks of an older head ----
+
+#[test]
+fn failing_checks_of_an_older_head_are_not_the_failure_of_the_current_one() {
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "approved", PrFlowBy::Bot, Some("bbbbbbbbbbbb"), 3_000)],
+        vec![checks("c1", "lazo", pr(55, 100), "failing", Some("aaaaaaaaaaaa"), 2_000)],
+        vec![],
+    );
+    let r = &build(&cards, &f, 5_000).rows[0];
+    assert!(r.checks.is_none(), "no checks are known for the current commit");
+    assert_eq!((r.waits_on, r.why.as_str()), (WaitsOn::Author, "ready_to_merge"));
+}
+
+#[test]
+fn passing_checks_of_an_older_head_are_not_shown_as_current() {
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "changes_requested", PrFlowBy::Bot, Some("bbbbbbbbbbbb"), 3_000)],
+        vec![checks("c1", "lazo", pr(55, 100), "passing", Some("aaaaaaaaaaaa"), 2_000)],
+        vec![],
+    );
+    let r = &build(&cards, &f, 5_000).rows[0];
+    assert!(r.checks.is_none());
+    assert_eq!((r.waits_on, r.why.as_str()), (WaitsOn::Author, "changes_requested"));
+}
+
+#[test]
+fn a_push_after_the_checks_leaves_the_new_head_without_checks() {
+    // Checks of A, then a bot verdict that names B: B is the newest head and nothing says how B's checks went.
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "commented", PrFlowBy::Codex, Some("bbbbbbbbbbbb"), 3_000)],
+        vec![checks("c1", "lazo", pr(55, 100), "passing", Some("aaaaaaaaaaaa"), 2_000)],
+        vec![],
+    );
+    assert!(build(&cards, &f, 5_000).rows[0].checks.is_none());
+}
+
+#[test]
+fn the_newest_checks_of_the_current_head_win_over_those_of_an_older_one() {
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "approved", PrFlowBy::Bot, Some("bbbbbbbbbbbb"), 3_000)],
+        vec![
+            checks("c1", "lazo", pr(55, 100), "failing", Some("aaaaaaaaaaaa"), 2_000),
+            checks("c2", "lazo", pr(55, 100), "passing", Some("bbbbbbbbbbbb"), 3_500),
+        ],
+        vec![],
+    );
+    let r = &build(&cards, &f, 5_000).rows[0];
+    let c = r.checks.as_ref().unwrap();
+    assert_eq!((c.state.as_str(), c.head.as_deref(), c.at_ms), ("passing", Some("bbbbbbbbbbbb"), 3_500));
+    assert_eq!((r.waits_on, r.why.as_str()), (WaitsOn::Author, "ready_to_merge"));
+}
+
+#[test]
+fn checks_that_name_no_head_are_kept_because_they_cannot_be_told_apart() {
+    let cards = [card(7, "claimed", "lazo", "agentmuxai/agentmux", 100)];
+    let f = flow(
+        vec![review("r1", "lazo", pr(55, 100), "approved", PrFlowBy::Bot, Some("bbbbbbbbbbbb"), 3_000)],
+        vec![checks("c1", "lazo", pr(55, 100), "failing", None, 2_000)],
+        vec![],
+    );
+    let r = &build(&cards, &f, 5_000).rows[0];
+    assert_eq!(r.checks.as_ref().map(|c| c.state.as_str()), Some("failing"));
+    assert_eq!((r.waits_on, r.why.as_str()), (WaitsOn::Author, "checks_failing"));
+}

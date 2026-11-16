@@ -97,17 +97,25 @@
     font-weight: 400;
 }
 
-// A row one step or more under its lead: the marker before it says how far.
+// A row one step or more under its lead: the marker before it says how far, and a line down its left edge
+// says it is a report, not a row of its own: an indent of 14 px alone read as a flat list (#47761). The marker
+// is the 4 px gap above the row and carries the same line, so the line runs unbroken down a lead's reports (#47795).
 .swarm-seat-indent {
     flex: none;
-    height: 0;
+    height: 4px;
 }
 
 @for $d from 1 through 3 {
-    .swarm-seat-indent--d#{$d} + [data-swarm-key] {
-        margin-left: 14px * $d;
-        margin-top: 4px;
-        padding-top: 4px;
-        border-top: 1px solid var(--border-color);
+    .swarm-seat-indent--d#{$d} {
+        // The line takes 2 px of the indent, so the row's own content stays where it was.
+        margin-left: 14px * $d - 2px;
+        border-left: 2px solid color-mix(in srgb, var(--accent-color) 45%, transparent);
+
+        + [data-swarm-key] {
+            margin-left: 14px * $d - 2px;
+            border-left: 2px solid color-mix(in srgb, var(--accent-color) 45%, transparent);
+            padding-top: 4px;
+            border-top: 1px solid var(--border-color);
+        }
     }
 }

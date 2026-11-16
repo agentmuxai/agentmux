@@ -12,6 +12,17 @@ trap 'rm -rf "$W"' EXIT
 FAILS=0
 
 pass() { echo "ok   - $1"; }
+# Portable: GNU sed -i and sha256sum are not on a stock Mac (BSD sed reads the next word as a backup suffix).
+sha256_hex() { # the file on stdin
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum | cut -d ' ' -f 1
+    else
+        shasum -a 256 | cut -d ' ' -f 1
+    fi
+}
+sed_inplace() { # <sed expression> <file>
+    sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
+}
 fail() { echo "FAIL - $1"; FAILS=$((FAILS + 1)); }
 # expect <name> <expected exit> <must contain, or empty> <command...>
 expect() {
@@ -102,6 +113,11 @@ if command -v node > /dev/null 2>&1; then
 else
     echo "skip - node not found, key sync not checked"
 fi
+if command -v node > /dev/null 2>&1; then
+    want="$(sed -n 's/^export const SSHSIG_FLOOR = "\(.*\)";$/\1/p' "$REPO_ROOT/scripts/release-manifest.mjs")"
+    have="$(sed -n 's/^SSHSIG_FLOOR="\(.*\)"$/\1/p' "$SCRIPT")"
+    if [ -n "$want" ] && [ "$want" = "$have" ]; then pass "SSHSIG_FLOOR equals scripts/release-manifest.mjs's"; else fail "SSHSIG_FLOOR ('$have') differs from scripts/release-manifest.mjs ('$want')"; fi
+fi
 
 # ---- the download checks, against a release made here ----
 if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
@@ -126,10 +142,10 @@ else
     sign_release() {
         d="$1"; tag="$2"; listed="$3"; file="$4"
         size="$(wc -c < "$d/$file" | tr -d ' ')"
-        sha="$(sha256sum < "$d/$file" | cut -d ' ' -f 1)"
+        sha="$(sha256_hex < "$d/$file")"
         # The same shape release-manifest.mjs writes: indented JSON, each file as name, size, sha256.
         printf '{\n  "format": 1,\n  "version": "%s",\n  "tag": "%s",\n  "files": [\n    {\n      "name": "%s",\n      "size": %s,\n      "sha256": "%s"\n    }\n  ]\n}\n' "$VER" "$tag" "$listed" "$size" "$sha" > "$d/AgentMux-$VER-manifest.json"
-        msha="$(sha256sum < "$d/AgentMux-$VER-manifest.json" | cut -d ' ' -f 1)"
+        msha="$(sha256_hex < "$d/AgentMux-$VER-manifest.json")"
         printf '{\n  "format": 1,\n  "tag": "%s",\n  "manifest_sha256": "%s",\n  "created_at": "2026-11-04T00:00:00Z"\n}\n' "$tag" "$msha" > "$d/AgentMux-$VER-envelope.json"
         printf 't1 %s\n' "$(openssl pkeyutl -sign -inkey "$W/priv.pem" -rawin -in "$d/AgentMux-$VER-envelope.json" | openssl base64 -A)" > "$d/AgentMux-$VER-envelope.json.sig"
     }
@@ -137,7 +153,7 @@ else
         rel="$1"; shift
         rm -rf "$W/h" && mkdir -p "$W/h"
         HOME="$W/h" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none \
-            AGENTMUX_INSTALL_TEST_KEYS="$TESTKEYS" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --no-launch --method download --version "$VER" "$@"
+            AGENTMUX_INSTALL_TEST_KEYS="${KEYS:-$TESTKEYS}" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --no-launch --method download --version "$VER" "$@"
     }
 
     make_release "$W/good" "v$VER"
@@ -151,10 +167,10 @@ else
     expect "a same-size different file is refused" 1 "does not match the manifest's SHA-256" run_install "$W/badhash"
 
     cp -r "$W/good" "$W/badsig"; first="$(cut -c4 "$W/badsig/AgentMux-$VER-envelope.json.sig" | head -n 1)"; swap=A; [ "$first" = A ] && swap=B
-    sed -i "s/^t1 ./t1 $swap/" "$W/badsig/AgentMux-$VER-envelope.json.sig"
+    sed_inplace "s/^t1 ./t1 $swap/" "$W/badsig/AgentMux-$VER-envelope.json.sig"
     expect "a wrong signature is refused" 1 "signature does not match" run_install "$W/badsig"
 
-    cp -r "$W/good" "$W/badmanifest"; sed -i 's/"format": 1/"format":  1/' "$W/badmanifest/AgentMux-$VER-manifest.json"
+    cp -r "$W/good" "$W/badmanifest"; sed_inplace 's/"format": 1/"format":  1/' "$W/badmanifest/AgentMux-$VER-manifest.json"
     expect "a changed manifest is refused" 1 "not the one the envelope names" run_install "$W/badmanifest"
 
     make_release "$W/othertag" "v1.2.3"
@@ -236,9 +252,11 @@ else
 
     # ---- a system whose openssl cannot check Ed25519 (a stock Mac's LibreSSL 3.3.6): which check ran, and what --require-signature does ----
     mkdir -p "$W/libre"
-    printf '#!/bin/sh\ncase "$1" in\n    version) echo "LibreSSL 3.3.6" ;;\n    pkeyutl) echo "usage: pkeyutl [-in file] [-inkey file] [-sign] [-verify]" >&2; exit 1 ;;\n    *) exit 1 ;;\nesac\n' > "$W/libre/openssl"
+    printf '#!/bin/sh\ncase "$1" in\n    version) echo "LibreSSL 3.3.6" ;;\n    pkeyutl) echo "usage: pkeyutl [-in file] [-inkey file] [-sign] [-verify]" >&2; exit 1 ;;\n    base64) exec "%s" "$@" ;;\n    *) exit 1 ;;\nesac\n' "$(command -v openssl)" > "$W/libre/openssl"
     chmod +x "$W/libre/openssl"
-    run_libre() { PATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="${PLACES:-$W/nowhere}" run_install "$@"; }
+    # A system whose ssh-keygen has no -Y (OpenSSH before 8.0) as well: the hash-only case, the one these checks are about.
+    mkdir -p "$W/oldssh"; printf '#!/bin/sh\necho "ssh-keygen: illegal option -- Y" >&2\nexit 1\n' > "$W/oldssh/ssh-keygen"; chmod +x "$W/oldssh/ssh-keygen"
+    run_libre() { PATH="$W/oldssh:$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="${PLACES:-$W/nowhere}" run_install "$@"; }
     expect "LibreSSL: installs on the hashes and says the signature was NOT checked" 0 "signature NOT checked" run_libre "$W/good"
     expect "LibreSSL: names the openssl that cannot" 0 "LibreSSL 3.3.6" run_libre "$W/good"
     expect "LibreSSL: says what was checked instead" 0 "size and SHA-256" run_libre "$W/good"
@@ -250,6 +268,62 @@ else
     PLACES="$(command -v openssl)" expect "that check is also what --require-signature wants" 0 "signature of the release checked" run_libre "$W/good" --require-signature
     PLACES="$(command -v openssl)" expect "and a wrong signature is refused there" 1 "signature does not match" run_libre "$W/badsig"
     expect "the real openssl: the message names Ed25519 and the version" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_install "$W/good"
+
+    # ---- the SSH signature of the same envelope, checked with the system's ssh-keygen (what a stock Mac can do) ----
+    if [ -n "${CI:-}" ] && ! command -v ssh-keygen > /dev/null 2>&1; then fail "ssh-keygen is installed where CI runs (a skip here would hide these checks)"; fi
+    if ! command -v ssh-keygen > /dev/null 2>&1; then
+        echo "skip - no ssh-keygen: the SSH signature checks are not run"
+    else
+        ssh-keygen -q -t ed25519 -N '' -f "$W/sshA" -C a && ssh-keygen -q -t ed25519 -N '' -f "$W/sshB" -C b
+        rawkey() { awk '{print $2}' "$1.pub" | openssl base64 -d -A | tail -c 32 | openssl base64 -A; }
+        KEYA="t2:$(rawkey "$W/sshA")"
+        # sign_ssh <release dir> <key> [namespace]: the envelope's SSH signature as AgentMux-<v>-envelope.json.sshsig
+        sign_ssh() {
+            cp "$1/AgentMux-$VER-envelope.json" "$W/ev.json"
+            rm -f "$W/ev.json.sig"
+            ssh-keygen -q -Y sign -f "$2" -n "${3:-agentmux-release}" "$W/ev.json" && mv "$W/ev.json.sig" "$1/AgentMux-$VER-envelope.json.sshsig"
+        }
+        run_ssh() { KEYS="$KEYA" PATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" run_install "$@"; }
+
+        rm -rf "$W/ssh-good" && cp -r "$W/good" "$W/ssh-good" && sign_ssh "$W/ssh-good" "$W/sshA"
+        expect "SSH signature: a stock-Mac-like system (LibreSSL) checks the release with ssh-keygen" 0 "signature of the release checked: Ed25519 (SSH signature), with " run_ssh "$W/ssh-good"
+        expect "SSH signature: the install goes on to match the manifest" 0 "matches the signed manifest" run_ssh "$W/ssh-good"
+        refuses_to_contain "SSH signature: nothing says the signature was not checked" "NOT checked" run_ssh "$W/ssh-good"
+        expect "SSH signature: --require-signature passes with it" 0 "signature of the release checked" run_ssh "$W/ssh-good" --require-signature
+
+        cp -r "$W/ssh-good" "$W/ssh-changed" && printf ' ' >> "$W/ssh-changed/AgentMux-$VER-envelope.json"
+        expect "SSH signature: a changed envelope is refused" 1 "signature does not match" run_ssh "$W/ssh-changed"
+
+        rm -rf "$W/ssh-ns" && cp -r "$W/good" "$W/ssh-ns" && sign_ssh "$W/ssh-ns" "$W/sshA" "another-namespace"
+        expect "SSH signature: another namespace is refused" 1 "signature does not match" run_ssh "$W/ssh-ns"
+
+        rm -rf "$W/ssh-other" && cp -r "$W/good" "$W/ssh-other" && sign_ssh "$W/ssh-other" "$W/sshB"
+        expect "SSH signature: a good signature by a key that is not pinned is refused (the key inside it is never trusted)" 1 "signature does not match" run_ssh "$W/ssh-other"
+        expect "SSH signature: it is accepted when that key is the pinned one" 0 "signature of the release checked" env KEYS="t2:$(rawkey "$W/sshB")" PATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" AGENTMUX_INSTALL_TEST_KEYS="t2:$(rawkey "$W/sshB")" HOME="$W/h3" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none AGENTMUX_INSTALL_RELEASE_BASE="$W/ssh-other" sh "$SCRIPT" --no-launch --method download --version "$VER"
+
+        # No quiet downgrade: from the floor on, a release without the SSH signature is refused where only that check is possible.
+        expect "SSH signature: from the floor on, a release without one is refused, not installed on hashes" 1 "should carry AgentMux-$VER-envelope.json.sshsig" run_ssh "$W/good"
+        refuses_to_contain "SSH signature: the refusal is not a hash-only install" "matches the manifest" run_ssh "$W/good"
+        # A suffix on the version is ignored: 9.9.9-rc1 is at the floor 9.9.9 (never below it), and below 9.9.10.
+        OLDVER="$VER"; OLDNAME="$NAME"; VER="9.9.9-rc1"; NAME="AgentMux_${VER}_amd64-portable.tar.xz"
+        make_release "$W/rc" "v$VER"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=9.9.9 expect "SSH signature: a version with a suffix is at the floor, not below it" 1 "should carry AgentMux-$VER-envelope.json.sshsig" run_ssh "$W/rc"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=9.9.10 expect "SSH signature: and below the next floor it is hashes only" 0 "signature NOT checked" run_ssh "$W/rc"
+        VER="$OLDVER"; NAME="$OLDNAME"
+        # Below the floor (a release from before the first one that carries it): today's behaviour, said plainly.
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, hashes only, and it says so" 0 "signature NOT checked" run_ssh "$W/good"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, it says the release is older than the first with an SSH signature, not that ssh-keygen is missing" 0 "is older than 99.0.0, the first with an SSH signature" run_ssh "$W/good"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 refuses_to_contain "SSH signature: below the floor it does not blame ssh-keygen" "no ssh-keygen of OpenSSH 8.0 or newer" run_ssh "$W/good"
+        AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "SSH signature: below the floor, --require-signature refuses" 1 "cannot be checked here" run_ssh "$W/good" --require-signature
+        # An ssh-keygen with no -Y (OpenSSH before 8.0) cannot check: hashes only, and --require-signature refuses.
+        run_oldssh() { KEYS="$KEYA" PATH="$W/oldssh:$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" run_install "$@"; }
+        expect "SSH signature: an old OpenSSH (no -Y) falls back to hashes and says so" 0 "signature NOT checked" run_oldssh "$W/good"
+        expect "SSH signature: an old OpenSSH is named as the reason" 0 "no ssh-keygen of OpenSSH 8.0 or newer" run_oldssh "$W/good"
+        expect "SSH signature: an old OpenSSH is not blamed for a missing .sshsig" 0 "matches the manifest" run_oldssh "$W/good"
+        expect "SSH signature: an old OpenSSH with --require-signature is refused" 1 "OpenSSH 8.0 or newer" run_oldssh "$W/good" --require-signature
+        # With OpenSSL 3 the existing check is used first and needs no .sshsig.
+        expect "SSH signature: with OpenSSL 3 the .sig is checked and no .sshsig is needed" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_install "$W/good"
+    fi
 
     # ---- curl with no CA certificates ----
     for code in 60 77 6; do mkdir -p "$W/curl$code"; printf '#!/bin/sh\nexit %s\n' "$code" > "$W/curl$code/curl"; chmod +x "$W/curl$code/curl"; done

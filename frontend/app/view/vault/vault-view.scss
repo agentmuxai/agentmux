@@ -478,6 +478,39 @@
     overflow-wrap: break-word;
 }
 
+// The export dialog's formats: the names in one column and what each is in the next, whatever a name's length.
+.vault-export-format {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    // Off the list of entries under it.
+    margin-bottom: var(--space-2);
+
+    > .vault-check {
+        display: grid;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
+        align-items: baseline;
+        // `.vault-check`'s gap is between the parts of one line; here the columns have the grid's.
+        row-gap: 0;
+    }
+}
+
+// A narrow dialog has no room for two columns of words: what a format is goes under its name, and those lines
+// start in one column too. Measured on the dialog's own body, not on the pane: at 150% chrome zoom a dialog in a
+// 600 px pane is about 360 px wide in its own lengths.
+@container vault-dialog (max-width: 400px) {
+    .vault-export-format {
+        grid-template-columns: auto minmax(0, 1fr);
+        // Each format is now two or three lines: a little room says which name a line belongs to.
+        row-gap: var(--space-2);
+
+        > .vault-check > span {
+            grid-column: 2;
+        }
+    }
+}
+
 .vault-check-entry {
     padding-left: 1.5em;
     // An entry's own name (a key, a URL) may break anywhere, so the row shrinks to the dialog.
@@ -607,6 +640,13 @@
     white-space: nowrap;
 }
 
+// What a link says now and what is asked for: one thing a line, so a date is not lost at the end of a long list of
+// readers.
+.vault-link-said-line {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
 // A batch of imports: a row for every secret, each with its tick. A long list scrolls inside the question, so the
 // answers stay in view; no row is summarised.
 .vault-batch-rows {
@@ -620,6 +660,11 @@
     li + li {
         border-top: 1px solid var(--border-color);
     }
+}
+
+// The Vault a batch is saved to: wide enough for a Vault's name, never the whole width of a maximized card.
+.vault-batch-vault .ui-input {
+    max-width: 24em;
 }
 
 // The tick, then the entry it becomes; the secret it is read from sits under the entry.

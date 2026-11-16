@@ -8,6 +8,7 @@
 // global.ts), the shared base module both files import, so this module stays
 // out of global.ts's import cycle.
 
+import { paneCount } from "@/app/platform/pane-rect-registry";
 import { keepInactiveTabsLaidOut } from "@/app/workspace/window-tab-visibility";
 import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
@@ -37,14 +38,16 @@ export { switchIntentTabId };
 
 /** Publish `tabId` as the switch intent, starting or extending the switch
  *  chain from the committed tab. Returns a cancel for when the backend
- *  didn't move after all. */
-function showSwitchIntent(tabId: string): () => void {
+ *  didn't move after all. The write goes through `guardWrite`, so a caller that survives a throwing flush still
+ *  gets the cancel: the intent is already published then, and must be clearable. */
+function showSwitchIntent(tabId: string, guardWrite: (write: () => void) => void = (write) => write()): () => void {
     if (switchIntentTabId() == null) switchChain = new Set([activeTabId()]);
     switchChain.add(tabId);
-    setSwitchIntentTabId(tabId);
-    return () => {
+    const cancel = () => {
         if (switchIntentTabId() === tabId) setSwitchIntentTabId(null);
     };
+    guardWrite(() => setSwitchIntentTabId(tabId));
+    return cancel;
 }
 
 /**
@@ -302,11 +305,37 @@ export function createTab() {
 let tabSwitchInFlight = false;
 let tabSwitchSeq = 0;
 
+/**
+ * Run one step of a switch that writes signals. A signal write flushes its dependents at once, and when one of
+ * them throws (a `<Show>` child read after its condition went false) the write throws too, although the value is
+ * already set. Left to escape, it skipped the rest of the switch: no RPC, the reveal gate held, `tabSwitchInFlight`
+ * stuck (#47767). The step is counted and logged with its stack, and the switch goes on.
+ */
+function guardStep(name: string, counter: { threw: number }, step: () => void): void {
+    try {
+        step();
+    } catch (e) {
+        counter.threw++;
+        console.error(`[tab-switch] a binding threw during ${name}; the switch goes on`, e);
+    }
+}
+
+/** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
+ *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
+function logSwitch(tabId: string, current: boolean, gated: boolean, rpcMs: number, frameMs: number, threw: number): void {
+    const rpc = rpcMs < 0 ? "failed" : `${Math.round(rpcMs)}ms`;
+    console.info(
+        `[tab-switch] to=${tabId} rpc=${rpc} frames=${Math.round(frameMs)}ms gated=${gated} browser-panes=${paneCount()} threw=${threw}${current ? "" : " superseded=true"}`
+    );
+}
+
 export async function setActiveTab(tabId: string): Promise<void> {
     const ws = workspace();
     if (ws == null) return;
     const fromTabId = activeTabId();
     if (fromTabId === tabId) return;
+    const clickedAt = performance.now();
+    const guard = { threw: 0 };
     // Canonical chokepoint for tab-switch perf marks. Wraps every entry
     // path: click (tabbar), keyboard (Ctrl+Tab/1..9 in keymodel),
     // palette (command-registry), test MuxAPI (cef-api). markEnd lands
@@ -341,22 +370,27 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // has no catch-up for the gate to hide (ANALYSIS_WINDOW_TAB_SWITCH_
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
-    if (gated) holdRevealGate(tabId);
-    const cancelIntent = showSwitchIntent(tabId);
+    if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
+    const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
+    let rpcMs = -1;
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
+        rpcMs = performance.now() - clickedAt;
     } catch (e) {
         // The backend didn't move: show the committed tab again.
-        if (mySeq === tabSwitchSeq) cancelIntent();
+        if (mySeq === tabSwitchSeq) guardStep("the switch cancel", guard, cancelIntent);
         throw e;
     } finally {
         // Pair with holdRevealGate above. Also lifts the gate on
         // the RPC-throws path so the user isn't stuck on a hidden
         // source tab.
-        if (gated) scheduleRevealLift();
-        else logUngatedReveal(tabId);
+        guardStep("the reveal lift", guard, () => {
+            if (gated) scheduleRevealLift();
+            else logUngatedReveal(tabId);
+        });
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
+                logSwitch(tabId, mySeq === tabSwitchSeq, gated, rpcMs, performance.now() - clickedAt, guard.threw);
                 if (mySeq === tabSwitchSeq) {
                     markEnd("tab-switch");
                     tabSwitchInFlight = false;

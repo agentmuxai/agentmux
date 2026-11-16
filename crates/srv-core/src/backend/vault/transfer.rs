@@ -28,7 +28,8 @@ use super::import::{self, Incoming, Mapping, MappingNeeded, ReadError, Source};
 use super::kinds::{self, VaultSection};
 use super::seal::{self, Parts};
 use super::signins;
-use super::{new_id, record, validate, PERSON};
+use super::source_link::Link;
+use super::{linked, new_id, record, validate, PERSON};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::VaultRow;
 use agentmux_common::time::now_ms;
@@ -93,15 +94,29 @@ pub fn suggest_passphrase() -> Result<String, String> {
 pub struct ExportResult {
     pub count: usize,
     pub file_name: String,
+    /// The file holds linked entries only, and so no value. The dialog says "no value is in the file" only on this
+    /// word, never on what it asked for: a part of the app that does not know the option writes a whole export.
+    pub links_only: bool,
 }
 
 /// Writes the chosen entries (all when `ids` is `None`) to `path`, encrypted to
 /// `passphrase`.
 pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Path) -> Result<ExportResult, String> {
+    export_of(store, ids, passphrase, path, false)
+}
+
+/// [`export`], of the linked entries only (`super::linked`): where each key lives, who reads it and when it last
+/// changed, to show on another machine. No value is in the file: a link holds none, and an entry that holds one is
+/// left out even when `ids` names it.
+pub fn export_links(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Path) -> Result<ExportResult, String> {
+    export_of(store, ids, passphrase, path, true)
+}
+
+fn export_of(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Path, links_only: bool) -> Result<ExportResult, String> {
     if passphrase.chars().count() < MIN_PASSPHRASE {
         return Err(format!("a passphrase is at least {MIN_PASSPHRASE} characters"));
     }
-    let entries = gather(store, ids)?;
+    let entries = if links_only { gather_links(store, ids)? } else { gather(store, ids)? };
     let count = entries.len();
     let file = VaultFile { format: FORMAT.into(), version: VERSION, exported_at: now_ms(), app_version: env!("CARGO_PKG_VERSION").into(), entries };
     let plain = Zeroizing::new(serde_json::to_vec(&file).map_err(|e| e.to_string())?);
@@ -118,8 +133,25 @@ pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pa
     w.finish().map_err(|e| format!("couldn't finish encrypting: {e}"))?;
     write_atomically(path, &out)?;
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    record(store, "", "", PERSON, "exported", &file_name, &format!("{count} entries"));
-    Ok(ExportResult { count, file_name })
+    let what = if links_only { format!("{count} linked entries, no values") } else { format!("{count} entries") };
+    record(store, "", "", PERSON, "exported", &file_name, &what);
+    Ok(ExportResult { count, file_name, links_only })
+}
+
+/// The linked entries among the chosen ones (among all when `ids` is `None`), for a file that holds no value.
+fn gather_links(store: &Store, ids: Option<&[String]>) -> Result<Vec<Incoming>, String> {
+    let rows = store.vault_list().map_err(|e| e.to_string())?;
+    let links: Vec<String> = rows.into_iter().filter(|r| linked::is_linked_row(r) && ids.is_none_or(|ids| ids.contains(&r.id))).map(|r| r.id).collect();
+    if links.is_empty() {
+        return Err("there are no linked entries to export".into());
+    }
+    let entries = gather(store, Some(&links))?;
+    // A link holds no value. One that does is wrong (`verify` finds it), and this file promises none.
+    if let Some(label) = entries.iter().find(|e| !e.parts.is_empty()).map(|e| e.label.clone()) {
+        wipe(entries);
+        return Err(format!("the linked entry {label:?} holds a value, which a link never should: nothing was exported"));
+    }
+    Ok(entries)
 }
 
 /// The chosen entries (all when `ids` is `None`), opened: every part in the clear, for the caller to
@@ -229,6 +261,8 @@ pub struct PreviewEntry {
     pub label: String,
     pub kind: String,
     pub duplicate: bool,
+    /// A linked entry: it says where a key lives and brings no value.
+    pub linked: bool,
 }
 
 #[derive(Debug, Serialize, ts_rs::TS)]
@@ -254,6 +288,8 @@ pub struct ImportPreview {
     pub file_name: String,
     pub total: usize,
     pub duplicates: usize,
+    /// How many of `duplicates` are linked entries: one is a duplicate by its kind and place, having no value.
+    pub duplicate_links: usize,
     pub sections: Vec<PreviewSection>,
     pub skipped: Vec<Skipped>,
     /// What the file is, found from its contents.
@@ -269,9 +305,14 @@ pub struct ImportPreview {
 /// How many entries of each section the preview lists.
 const PREVIEW_FIRST: usize = 5;
 
-/// What a duplicate is: the same site and username for a login, the same kind
-/// and main value for anything else.
+/// What a duplicate is: the same place for a linked entry (it has no value to compare), the same site and
+/// username for a login, the same kind and main value for anything else.
 fn fingerprint(kind: &kinds::Kind, fields: &BTreeMap<String, String>, parts: &Parts) -> Option<String> {
+    if linked::is_linked(fields) {
+        let place = Link::of(fields)?;
+        // Each field on its own: a `#` or a `|` in a location must not make two places one.
+        return serde_json::to_string(&("link", kind.name, &place.kind, &place.location, &place.key, &place.region)).ok();
+    }
     if kind.name == "login" {
         let site = fields.get("site")?.trim().trim_end_matches('/').to_lowercase();
         let user = fields.get("username").map(|u| u.trim().to_lowercase()).unwrap_or_default();
@@ -341,7 +382,8 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
             skipped.push(Skipped { label: e.label, reason: why });
             continue;
         }
-        if parts.get(kind.parts[0]).is_none() {
+        // A linked entry is the place it names and holds nothing (`validate` saw to both).
+        if !linked::is_linked(&fields) && parts.get(kind.parts[0]).is_none() {
             skipped.push(Skipped { label: e.label, reason: format!("it has no {}", kind.parts[0]) });
             continue;
         }
@@ -366,6 +408,7 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
         file_name: file_name.clone(),
         total: entries.len(),
         duplicates: entries.iter().filter(|e| e.duplicate_of.is_some()).count(),
+        duplicate_links: entries.iter().filter(|e| e.duplicate_of.is_some() && linked::is_linked(&e.fields)).count(),
         sections,
         skipped,
         source,
@@ -397,7 +440,7 @@ fn preview_sections(entries: &[StagedEntry]) -> Vec<PreviewSection> {
         };
         sections[slot].count += 1;
         if sections[slot].first.len() < PREVIEW_FIRST {
-            sections[slot].first.push(PreviewEntry { label: e.label.clone(), kind: e.kind.name.into(), duplicate: e.duplicate_of.is_some() });
+            sections[slot].first.push(PreviewEntry { label: e.label.clone(), kind: e.kind.name.into(), duplicate: e.duplicate_of.is_some(), linked: linked::is_linked(&e.fields) });
         }
     }
     sections

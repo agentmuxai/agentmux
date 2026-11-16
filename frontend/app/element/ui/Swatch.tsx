@@ -90,7 +90,10 @@ export interface SwatchGridProps<T extends string> {
  * not choose: a preview is what moving shows. The whole grid is one Tab stop (the chosen swatch, or the first enabled one).
  */
 export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Element {
-    const buttons: HTMLButtonElement[] = [];
+    let group: HTMLDivElement | undefined;
+    // The grid's own buttons in their current order, looked up when a key is pressed: a list kept from the ref callbacks
+    // would go stale when `For` reuses a button after the options reorder or one is removed.
+    const buttonAt = (i: number) => group?.querySelectorAll<HTMLButtonElement>("[role=radio]")[i];
     const columns = () => Math.max(1, props.columns ?? 4);
     const isDisabled = (i: number) => !!props.options[i]?.disabled;
     const chosen = () => props.options.findIndex((o) => o.value === props.value);
@@ -106,7 +109,7 @@ export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Ele
     const move = (to: number | null) => {
         if (to == null || isDisabled(to)) return;
         setActive(to);
-        buttons[to]?.focus();
+        buttonAt(to)?.focus();
     };
 
     const onKeyDown = (e: KeyboardEvent, index: number) => {
@@ -129,6 +132,7 @@ export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Ele
 
     return (
         <div
+            ref={group}
             role="radiogroup"
             aria-label={props.ariaLabel}
             class={clsx("ui-swatch-grid", props.class)}
@@ -137,7 +141,6 @@ export function SwatchGrid<T extends string>(props: SwatchGridProps<T>): JSX.Ele
             <For each={props.options}>
                 {(option, i) => (
                     <Swatch
-                        ref={(el) => (buttons[i()] = el)}
                         color={option.color}
                         ink={option.ink}
                         label={option.label}

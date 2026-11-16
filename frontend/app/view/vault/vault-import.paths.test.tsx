@@ -52,6 +52,7 @@ const PREVIEW = {
     file_name: "backup.vault",
     total: 3,
     duplicates: 0,
+    duplicate_links: 0,
     sections: [
         { section: "personal", count: 1, first: [{ label: "Alex", kind: "ssn", duplicate: false }] },
         {
@@ -511,6 +512,27 @@ describe("the preview", () => {
         expect(github.textContent).not.toContain("already in your Vault");
     });
 
+    it("marks a linked entry as one, and no other", async () => {
+        const linked = { label: "Invoice provider key", kind: "api-key", duplicate: true, linked: true };
+        vaultImport.mockResolvedValueOnce(
+            previewStep({
+                duplicates: 1,
+                duplicate_links: 1,
+                sections: [{ section: "api-keys", count: 2, first: [linked, { label: "Stripe", kind: "api-key", duplicate: false }] }],
+            })
+        );
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        const [invoice, stripe] = Array.from(dialog().querySelectorAll(".vault-import-section li"));
+        const badge = invoice.querySelector(".ui-pill");
+        expect(badge?.textContent).toBe("Linked");
+        expect(badge?.getAttribute("title")).toBe("This entry holds no value. It says where the key lives and who reads it.");
+        // Its kind and whether the Vault has it are still said.
+        expect(invoice.textContent).toContain("API key or token");
+        expect(invoice.textContent).toContain("· already in your Vault");
+        expect(stripe.querySelector(".ui-pill")).toBeNull();
+    });
+
     it("lists what cannot be imported, with the reason, and nothing when all can", async () => {
         vaultImport.mockResolvedValueOnce(
             previewStep({ skipped: [{ label: "Odd one", reason: 'unknown kind "rocket"' }] })
@@ -565,6 +587,30 @@ describe("what to do with duplicates", () => {
         render(() => <VaultImportDialog onClose={vi.fn()} />);
         await screen.findByText(/to import/);
         expect(screen.getByText("4 already in your Vault")).toBeInTheDocument();
+    });
+
+    it("says what makes a linked entry one the Vault already has, when some or all of them are links", async () => {
+        const VALUE = "The same value (or the same site and username, for a login).";
+        const PLACE = "The same kind of key in the same place.";
+        vaultImport.mockResolvedValueOnce(previewStep({ duplicates: 2, duplicate_links: 2 }));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.getByText(`${PLACE} A linked entry has no value to compare.`)).toBeInTheDocument();
+        expect(dialog().textContent).not.toContain("The same value");
+        cleanup();
+
+        vaultImport.mockResolvedValueOnce(previewStep({ duplicates: 3, duplicate_links: 1 }));
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.getByText(`${VALUE} For a linked entry, the same kind of key in the same place.`)).toBeInTheDocument();
+        cleanup();
+
+        // An answer that does not count the links (an older srv) reads as before.
+        const { duplicate_links: _, ...older } = PREVIEW;
+        vaultImport.mockResolvedValueOnce({ preview: { ...older, duplicates: 1 }, pick_id: "pick-1", file_name: "backup.vault" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import/);
+        expect(screen.getByText(VALUE)).toBeInTheDocument();
     });
 
     it("skips them unless told otherwise, and sends whichever was chosen", async () => {

@@ -63,7 +63,8 @@ pub struct ReviewsVerdict {
     pub stale: bool,
 }
 
-/// The checks of the PR's newest head srv heard of.
+/// The checks of the PR's newest head srv heard of. A PR whose newest head has no checks event (a push, or a verdict on a
+/// commit the checks did not name) has none: checks of an older head are not shown as the current ones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ReviewsChecks {
@@ -217,11 +218,12 @@ pub fn waits_on(i: &WaitsInput<'_>) -> (WaitsOn, &'static str) {
 /// The key a pull request has in the events: its repository's id and its number.
 type EventKey = (u64, u64);
 
-/// Binds each pull request the events name to the card that holds it. Whether a card is the one: it has the
-/// event's agent (the notices go to the PR's own agent) and the PR's number. Two cards of one agent with the
-/// same number in different repositories are told apart by a repository id learned from a match with one
-/// candidate; with none learned the event stays unbound.
-fn bind(cards: &[CardIn], flow: &PrFlowSnapshot) -> HashMap<EventKey, usize> {
+/// Binds each pull request the events name to the cards that name it. A card is the one when it has the event's
+/// agent (the notices go to the PR's own agent) and the PR's number. Two cards of one agent with the same number in
+/// different repositories are told apart by a repository id learned from a match with one candidate; with none learned
+/// the event stays unbound. Once the repository is settled, every card of it with that number holds the same pull
+/// request (two tasks of one agent, or one whose holder changed), so each of them gets the events.
+fn bind(cards: &[CardIn], flow: &PrFlowSnapshot) -> HashMap<EventKey, Vec<usize>> {
     let mut triples: BTreeSet<(String, u64, u64)> = BTreeSet::new();
     let mut add = |agent: &str, repo_id: u64, number: u64| {
         triples.insert((agent.to_ascii_lowercase(), repo_id, number));
@@ -233,35 +235,41 @@ fn bind(cards: &[CardIn], flow: &PrFlowSnapshot) -> HashMap<EventKey, usize> {
     let candidates = |agent: &str, number: u64| -> Vec<usize> {
         cards.iter().enumerate().filter(|(_, c)| c.number == number && !c.agent.is_empty() && c.agent == agent).map(|(i, _)| i).collect()
     };
-    let mut bound: HashMap<EventKey, usize> = HashMap::new();
+    let of_pr = |repo: &str, number: u64| -> Vec<usize> {
+        cards.iter().enumerate().filter(|(_, c)| c.number == number && c.repo == repo).map(|(i, _)| i).collect()
+    };
+    let mut bound: HashMap<EventKey, Vec<usize>> = HashMap::new();
     let mut known: HashMap<u64, String> = HashMap::new();
-    let mut later: Vec<(String, u64, u64)> = Vec::new();
+    let mut later: Vec<EventKey> = Vec::new();
     for (agent, repo_id, number) in &triples {
         let found = candidates(agent, *number);
         let repos: BTreeSet<&str> = found.iter().map(|&i| cards[i].repo.as_str()).collect();
         if repos.len() == 1 {
-            let i = found[0];
-            let repo = &cards[i].repo;
+            let repo = &cards[found[0]].repo;
             // One repository id is one repository: a card the id does not match is not this PR's card.
             if known.iter().any(|(id, r)| (id == repo_id) != (r == repo)) {
                 continue;
             }
             known.insert(*repo_id, repo.clone());
-            bound.entry((*repo_id, *number)).or_insert(i);
+            let slot = bound.entry((*repo_id, *number)).or_default();
+            for i in of_pr(repo, *number) {
+                if !slot.contains(&i) {
+                    slot.push(i);
+                }
+            }
         } else {
-            later.push((agent.clone(), *repo_id, *number));
+            later.push((*repo_id, *number));
         }
     }
-    for (agent, repo_id, number) in later {
+    for (repo_id, number) in later {
         if bound.contains_key(&(repo_id, number)) {
             continue;
         }
         let Some(repo) = known.get(&repo_id) else { continue };
-        // The repository is known: the one card of it with this number (its holder may have changed).
-        let by_agent = candidates(&agent, number).into_iter().find(|&i| &cards[i].repo == repo);
-        let any = || cards.iter().position(|c| c.number == number && &c.repo == repo);
-        if let Some(i) = by_agent.or_else(any) {
-            bound.insert((repo_id, number), i);
+        // The repository is known: every card of it with this number (a holder may have changed).
+        let all = of_pr(repo, number);
+        if !all.is_empty() {
+            bound.insert((repo_id, number), all);
         }
     }
     bound
@@ -290,7 +298,6 @@ fn events_of<'a>(flow: &'a PrFlowSnapshot, key: EventKey) -> Events<'a> {
 
 /// The row for one pull request from its events and, when a task names it, its card.
 fn row_of(ev: &Events<'_>, key: Option<EventKey>, card: Option<&CardIn>, orphan_agent: Option<&str>) -> ReviewRow {
-    let checks = ev.checks.iter().copied().max_by_key(|e| e.at_ms).map(|e| ReviewsChecks { state: e.state.clone(), head: e.head.clone(), at_ms: e.at_ms });
     // The newest commit anything named: the latest event of any kind (a verdict of any reviewer, or checks) that carries
     // a head. A verdict given on another commit, no later than that event, is of an older head.
     let newest_head: Option<(&str, u64)> = ev
@@ -299,6 +306,19 @@ fn row_of(ev: &Events<'_>, key: Option<EventKey>, card: Option<&CardIn>, orphan_
         .filter_map(|e| e.head.as_deref().map(|h| (h, e.at_ms)))
         .chain(ev.checks.iter().filter_map(|e| e.head.as_deref().map(|h| (h, e.at_ms))))
         .max_by_key(|(_, at)| *at);
+    // The checks of that commit: the newest checks event that names it, or names no commit (it cannot be told apart).
+    // Failing checks of commit A followed by an approval of commit B are not B's failure, and passing ones of A are
+    // not B's pass: with no checks event for B there are none to show, and none to wait on.
+    let checks = ev
+        .checks
+        .iter()
+        .copied()
+        .filter(|e| match (&e.head, newest_head) {
+            (Some(h), Some((nh, _))) => h.as_str() == nh,
+            _ => true,
+        })
+        .max_by_key(|e| e.at_ms)
+        .map(|e| ReviewsChecks { state: e.state.clone(), head: e.head.clone(), at_ms: e.at_ms });
     // Verdicts: the newest of each reviewer kind.
     let mut verdicts: Vec<ReviewsVerdict> = Vec::new();
     for by in [PrFlowBy::Bot, PrFlowBy::Codex, PrFlowBy::Person] {
@@ -349,9 +369,11 @@ fn row_of(ev: &Events<'_>, key: Option<EventKey>, card: Option<&CardIn>, orphan_
 pub fn build(cards: &[CardIn], flow: &PrFlowSnapshot, now_ms: i64) -> ReviewsList {
     let bound = bind(cards, flow);
     let mut by_card: HashMap<usize, EventKey> = HashMap::new();
-    for (key, &i) in &bound {
-        // A card holds one PR; if two keys claim it, the older binding (lower repo id) keeps it.
-        by_card.entry(i).and_modify(|k| *k = (*k).min(*key)).or_insert(*key);
+    for (key, idxs) in &bound {
+        for &i in idxs {
+            // A card holds one PR; if two keys claim it, the older binding (lower repo id) keeps it.
+            by_card.entry(i).and_modify(|k| *k = (*k).min(*key)).or_insert(*key);
+        }
     }
     let mut rows: Vec<ReviewRow> = Vec::new();
     for (i, card) in cards.iter().enumerate() {

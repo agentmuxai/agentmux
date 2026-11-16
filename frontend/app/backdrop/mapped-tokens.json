@@ -38,5 +38,8 @@
         "--term-green",
         "--term-magenta",
         "--term-yellow"
+    ],
+    "windowLevel": [
+        "--app-warning-color"
     ]
 }

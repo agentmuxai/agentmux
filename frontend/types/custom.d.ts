@@ -110,6 +110,8 @@ declare global {
         tearOff: boolean;
         /** Browser panes (native CEF child browsers). */
         nativeBrowserPane: boolean;
+        /** Browser panes whose page runs in a browser on the server and is streamed (the web UI of a headless server). */
+        streamedBrowserPane: boolean;
         /** Native open/save file dialogs. */
         nativeDialogs: boolean;
         /** In-app update check and install. */
@@ -220,8 +222,9 @@ declare global {
         vaultCopy?(args: { id: string; part: string; label: string }): Promise<unknown>;
         /** Export the Vault to a `.vault` file: the host asks where to save, then srv
          *  writes it encrypted to `passphrase`. Answers `{ count, file_name }`, or
-         *  `{ cancelled: true }`. */
-        vaultExport?(args: { ids?: string[]; passphrase?: string; default_name?: string; format?: "vault" | "kdbx" | "csv" | "json"; pick_id?: string; confirmed?: boolean; cancel?: boolean }): Promise<unknown>;
+         *  `{ cancelled: true }`. `links_only` writes a `.vault` file of the linked entries
+         *  alone, with no value in it. */
+        vaultExport?(args: { ids?: string[]; passphrase?: string; default_name?: string; format?: "vault" | "kdbx" | "csv" | "json"; links_only?: boolean; pick_id?: string; confirmed?: boolean; cancel?: boolean }): Promise<unknown>;
         /** Import from a `.vault` file: with no `pick_id` the host asks which file;
          *  with one it reads the same file again with `passphrase`. */
         vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;

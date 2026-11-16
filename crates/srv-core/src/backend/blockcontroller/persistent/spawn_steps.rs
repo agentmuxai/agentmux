@@ -139,8 +139,8 @@ impl PersistentSubprocessController {
         self.flush_superseded_effects(superseded_effects);
         self.arm_route_trial();
 
-        let continuation =
-            self.disclose_fresh_start(&attempted_resume_sid, my_generation, had_retry_payload);
+        let continuation = self.disclose_fresh_start(&attempted_resume_sid, my_generation, had_retry_payload);
+        let continuation = self.carry_prep_handoff(continuation);
         let pid = child.id().unwrap_or(0);
         Ok(Launch {
             child,

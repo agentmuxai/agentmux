@@ -17,6 +17,7 @@ use agentmux_common::time::now_ms;
 use serde::Deserialize;
 use zeroize::{Zeroize, Zeroizing};
 
+use super::source_link::AWS_SECRET;
 use super::{history, kinds, record_row, seal, validate, vaults, versions, NewEntry, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultActivityRow, VaultRow};
@@ -91,11 +92,12 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// The Activity line's target: `aws-sm:<id>` and `#<key>` when a field is picked.
+    /// The Activity line's target: `aws-secret:<id>` and `#<key>` when a field is picked, as a link's line and a
+    /// check's line name an AWS place (`source_link`), so the history's Where column names it one way.
     pub fn from_text(&self) -> String {
         match &self.source.key {
-            Some(key) => format!("aws-sm:{}#{key}", self.source.aws_secret_id),
-            None => format!("aws-sm:{}", self.source.aws_secret_id),
+            Some(key) => format!("{AWS_SECRET}:{}#{key}", self.source.aws_secret_id),
+            None => format!("{AWS_SECRET}:{}", self.source.aws_secret_id),
         }
     }
 

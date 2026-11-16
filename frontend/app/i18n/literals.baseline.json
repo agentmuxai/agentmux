@@ -381,7 +381,7 @@
     "frontend/app/view/vault/vault-entry-grants.tsx": 4,
     "frontend/app/view/vault/vault-export.tsx": 32,
     "frontend/app/view/vault/vault-history.tsx": 14,
-    "frontend/app/view/vault/vault-import.tsx": 44,
+    "frontend/app/view/vault/vault-import.tsx": 43,
     "frontend/app/view/vault/vault-manage.tsx": 20,
     "frontend/app/view/vault/vault-requests-list.tsx": 5,
     "frontend/app/view/vault/vault-reveal.tsx": 6,

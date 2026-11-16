@@ -410,18 +410,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         #[cfg(not(target_os = "macos"))]
                         {
                             tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
-                            let result = CheckCliAuthResult {
-                                authenticated: false,
-                                email: None,
-                                auth_method: None,
-                                raw_output: "no credentials found".to_string(),
-                            };
-                            return Ok(result);
+                            return Ok(CheckCliAuthResult::signed_out("no credentials found"));
                         }
                         #[cfg(target_os = "macos")]
-                        tracing::info!(
-                            "claude auth check: no credentials file — checking Keychain via CLI (macOS)"
-                        );
+                        {
+                            // No login keychain: say so instead of asking the CLI, whose read of it
+                            // makes macOS open its "Keychain Not Found" dialog on every poll.
+                            if let Some(result) = super::keychain_probe::no_keychain_result().await {
+                                return Ok(result);
+                            }
+                            tracing::info!("claude auth check: no credentials file — checking Keychain via CLI (macOS)");
+                        }
                     } else {
                         // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
                         tracing::info!("claude auth check: credentials found, validating via CLI");
@@ -458,6 +457,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     email,
                     auth_method,
                     raw_output,
+                    store_problem: None,
                 };
                 Ok(result)
             }

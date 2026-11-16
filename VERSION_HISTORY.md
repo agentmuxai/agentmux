@@ -1,5 +1,118 @@
 # AgentMux Version History
 
+## 0.60.30 — 2026-11-16
+
+- Dragging a single pane tab over another pane's body now reflows the layout live, as dragging a whole pane does, and the tab lands where it was shown
+- i18n: the literal-text ratchet covers every .tsx file and the strings written in braces, so its baseline is the real translation work still to do
+- The sensitive-message card's Show message button always answers: it scrolls to the message and marks its row (also when the row is already on screen), closes the Messages panel that covered the conversation, and opens the panel on a message the conversation has no row for
+- Browser panes: a new pane asks for the keyboard once, when its page exists, instead of up to six times while it opens
+- Vault: an entry can record where its machine copy lives (an AWS secret, a GitHub Actions secret or another place). Agents see the place in the Vault's list, and a check says whether that copy still holds the entry's value (same, different or could not read) without showing either
+- A very large agent history no longer leaves its pane blank: srv counts an uncounted transcript once, the pane waits for it, and a fork copies only the newest part of its parent's history
+- Editor: find in the hex viewer. Ctrl+F searches a file for hex bytes (with ?? for any byte) or text (UTF-8 or UTF-16), on srv, so files of any size can be searched
+- A drone's API block can send a Vault entry as its Authorization (or another) header: the person is asked the first time, the call goes only to the https site the drone names with no redirect, and the response is cleaned of the value.
+- The nightly performance check can be started with a chosen A build, to place a change between two nights that are not neighbours
+- An expect trigger's long gap, kept through the weekly sweep, no longer counts again toward its hourly limit, so a new gap within the hour still alerts
+- A file pasted into an agent's working folder is moved to the Trash when its @mention is taken out before the message is sent
+- swarm: a stale cloud record of a reinstalled machine is hidden once the LAN lists that machine under a new id, instead of showing for up to ten minutes
+- task dev and task init install with npm ci, so they can no longer rewrite package-lock.json
+- Browser tool: a link's click answer says something a reader can use, a label's own input no longer reads as covering it, and a wait for idle isn't fooled by a page that says it is still busy
+- Help and the shortcut settings name the Meta key "Super" on Linux, as the other key labels already do
+- Connectors: OpenAI offers Sign in with ChatGPT as well as an API key, and Anthropic, OpenAI and Google say what each way to connect is, the plans it works with, what it costs and where to get a key
+- A Codex App Server agent now sees the pictures attached to a message (localImage inputs before its text), besides the numbered path list
+- Shift, Ctrl, Alt or Cmd with an arrow key in the agent input box always selects or moves the caret and never recalls another message
+- Keyboard shortcuts: Show puts the caret back on the row, Export without a clipboard tool shows the text to copy, the change notice names the agent, and an import with or without a platform no longer leaves two entries for one command
+- Drone: a Run block runs a fixed command in a locked-down container (no network, no mounts, no shell), and refuses values from outside the drone in its command line
+- Browser pane: clicking or pressing Up or Down in a login field opens the list of your saved Vault sign-ins under the address bar; the page keeps focus, and nothing opens while an agent's input is reaching the pane
+- A drone's API block can be filled for a common GitHub read or write from a preset, and a {{reference | jsonstr}} filter keeps text inside a JSON string
+- Check that new global migrations are additive: a test over the registry, and a rule in the migrations docs
+- The agent pane's shell drawer is resized from a clear line on the input box's bottom border, above its header row
+- Editor: the hex viewer's find drops a search that was running when the file changed, and its narrow find strip keeps the close button with the status text
+- A restarted agent's continuation record is cut by section, so what is in flight and the identifiers survive, and it carries what AgentMux knows right now
+- A toast over a browser pane now shows above the page on macOS and Linux, not under its native window
+- Remove the shell integration folders of instances that are gone, and stop creating the unused db_migrations table in new identity stores
+- Drone Run block: keep a command's early output when it says more than a megabyte, and keep the cleanup armed while the container is removed
+- The status bar's Restart to update chip no longer shows a tooltip that drew over its panel's buttons
+- A Browser click that starts a navigation now waits for the load of the frame that navigates, so its answer names the new page, not the old one
+- The macOS server package can be signed with the Developer ID certificate and notarized, so a downloaded tarball is not blocked by Gatekeeper (off until a repository variable turns it on)
+- The server's launchd and systemd service files set HOME and a minimal PATH that starts with the package's own folder, and setup --no-service says it removed the service
+- Attachment tiles in the composer can be dragged into a new order, and the drop overlay says how many of the dropped files fit
+- Atlas: the zoom buttons keep the map centred in the pane, and the wheel zooms about the pointer inside a zoomed pane and for line-step wheels and pinch
+- Shell integration cleanup: read an instance's recorded data folder verbatim, so a folder name ending in a space isn't mistaken for a deleted one
+- Atlas: the map is formed for its pane's shape on first load, so it fills a tall, square or wide pane with cards a person can read
+- A job's poll can ask a site's list over https with a Vault key the person already gave the drone, and a poll never asks the person
+- Drone: replay a finished run from a step as a new run (replaydronerun): its blocks that send, file or start say what they said before unless asked to run for real
+- Windows releases publish the frontend's source maps as one archive beside the installer, and scripts/source-maps.mjs checks a build's maps and decodes a stack from an installed build against them
+- Reviews pane: every task's pull request and its review state in one viewer (GET /api/v1/reviews)
+- A browser that is not signed in to a headless server now says so and names the command (agentmux open), instead of a reconnect loop ending in Press Restore
+- agentmux start, setup, status and doctor now say when another AgentMux version holds the shared folder and what to do, and the service no longer restarts the refused server every few seconds
+- Attachments for container agents: copies go into the pane's working folder instead of being refused
+- Atlas: the pane zoom keys and Ctrl+scroll now scale the bar and the cards, and the map is fitted to the room that is left
+- Drone: a Join reads which branches failed per pass of a loop, not from what a branch last left behind
+- An attached PDF's tile shows its first page and an attached video's tile its first frame, drawn in the window from the stored file
+- Internal: the server's core now builds as its own package (agentmux-srv-core) next to the server layer (agentmux-srv); no change in behavior
+- A forked agent keeps its parent's running summary when only the newest part of the history is copied, and a long summary is read back whole
+- install.sh: uses an OpenSSL 3 from Homebrew or MacPorts to check the release signature when the system openssl cannot, and says plainly which check ran; refuses the macOS Intel server up front; says to install ca-certificates when curl cannot check certificates; prints the full path and the PATH line after installing into ~/.local/bin
+- Agent pane: the picker (no agent chosen) and a history tab no longer show the "agent is running, its history is loading" banner after 20 s
+- Linux: removing the .rpm takes its folders under /opt/agentmux, and the release's upgrade check removes the new package and checks nothing is left
+- A press that starts on a button (pane, window-tab, pane-tab and document-tab close buttons and the rest) never starts a drag or a tear-off
+- A drone's node says which {{trigger.…}} fields it reads are typed and which are outside text, from each job's trigger
+- The headless server finds agentmux-bashwrap beside itself in the server package, and serves the web UI's files only on its own addresses
+- A browser that used one headless server version shows the new interface after an upgrade on a normal reload: the page and the files without a hash are revalidated by their content, and no file carries a fixed date
+- Agent pane: an attachment tile in a sent message reads the same as in the tray (it no longer washes out on the message's inverted bubble) and a sent PDF's tile shows its page count
+- Keyboard shortcuts: the import preview no longer says merging replaces your keys for a command it only adds a key for on the other platform
+- agentmux: logs --since, status shows the service, doctor checks the Node.js minimum, sign-in probe gives up after 3 seconds
+- A new agent is linked to its account when it is created, so its first start finds it and does not come up Not signed in; a signed-out agent's failure row offers its linked account
+- Fix a stray non-UTF-8 byte in the tab drag code that broke the Linux frontend build
+- CI checks that every tracked source file is valid UTF-8
+- The status bar counts every pending Vault request whatever pane asked, and no longer counts a Vault wait twice
+- Show in Help's shortcuts goes to the Settings pane you already have open in another tab, and a pane opened from the widget bar is no longer hidden behind a magnified one
+- Keyboard shortcuts: importing a key with no platform that only one platform takes (a ⌘ key on a Mac) now imports for the other platform instead of being refused
+- Pane backdrops phase 0: the pane colour scope (properties, registry, PaneScope), the aliases it re-resolves, and the colour-literal ratchet's per-file list
+- The log now has a per-pane frame-time sample while the person scrolls or types, and a slow-flush line that names the pane
+- Tasks: a new get action returns one task whole (the brief it was filed with, its card and history), so an agent can re-read a brief after a compaction
+- A websocket message handled in 200 ms or more is named in the log (kind, size, block), so a long UI freeze says which message caused it
+- A colour Swatch and SwatchGrid in the UI kit: a choosable colour sample with radio semantics, a ring on the chosen one, arrow-key focus and a hover or focus preview
+- The Windows installer honours /NOICONS (no Start Menu folder), and an installed AgentMux removes the files of versions older than the previous one from its runtime folder ten minutes after it starts
+- Pane backdrops phase 1, part A: a pane's backdrop record in block meta, read into the pane's colour scope on its frame (nothing in the UI sets one yet)
+- Atlas: in a narrow or square pane, a leader's reports wrap into rows so a large machine fits at a readable card size
+- The status bar shows one summary of what waits on you: agents running, asks, browser, Vault and Kanban tasks as an icon and a number each, with one list that goes to each
+- A container agent is never made from the retired agent-claude image (it becomes the base image, never the developer one, and a container already made from it is recreated), a container whose image lacks agentmux-bashwrap or agentmux-mcp is refused at start with a plain message and stopped, and update_container changes the image the next start uses
+- Agent pane scrolling stays smooth while several agents stream: a frame flushes at most three panes and stops once its flushes take 8 ms, and a pane nobody is looking at can flush less often
+- Dragging a pane or a pane tab shows drop guides over the hovered pane: each spot is a small picture of the layout its drop leaves, and a drop into another window tab lands once, from a pinned tab too; on Windows the carried pane fades over the guides
+- Attachments for container agents: a document's extracted-text companion is rehomed too, not left pointing at a host path
+- Swarm: a parked agent whose pane is back no longer shows a red "its tab is still loading" note; a slow show after a successful open is a short info notice
+- A test build started with AGENTMUX_TEST_OFFSCREEN=1 creates every window off-screen and never saves that position, so a tester's window no longer shows on a real display
+- Pane backdrops: the agent pane's panel, modal, hover, tab strip, solid-block and grey colours follow a pane's backdrop, and a test fails when the pane reads a fixed colour the backdrop does not reach
+- Pane backdrops: toneMove makes a colour read on a surface by moving its lightness only, proved over the terminal palette on a pale and a dark surface
+- CI: a PR that changes more than Rust files and documentation runs the production frontend build, so a break only the bundler sees cannot reach main
+- Kanban: a task's brief is kept whole when it is edited or filed from the board (it was cut at 4000 characters), and text over a limit is refused with the limit named instead of cut
+- Pane backdrops: the agent pane's transcript colours from the terminal palette are moved to read on a pane's backdrop, from the active theme's own palette, read once per theme change
+- The status bar's list keeps the asks that ended in the last two minutes, so a tone you heard after it was answered elsewhere can still be traced
+- A stopped container agent keeps its queued messages instead of restarting; a send to a container agent mid-turn answers queued, not injected; Agents delete says the workspace folder is kept; a fake-image test covers the missing AgentMux tools
+- The status bar's list also keeps asks that only another window's agent reported, and keeps the requester's name when its pane closes first
+- Kanban: a task's drawer has an Open PRs button that opens the Reviews pane at that task's PRs
+- The status bar's ended-asks list no longer records a hidden Browser wait as answered, or one ask twice
+- CI: the Linux test leg builds the core and the server layer once; the two alone builds now name the same packages as the run after them
+- The status bar and the waiting tone now cover a browser pane's camera, microphone, location and notification prompts: a person's own pane says what the page wants, and an agent-driven one is announced for its countdown
+- A macOS test build with AGENTMUX_TEST_OFFSCREEN=1 now never shows a window (every way to order one in is blocked, and a watchdog stops it if one is on the screen), instead of refusing to start
+- Vault: an agent's show of an entry leaves out the AWS profile its machine copy is read under, and a check whose place was changed while it was being read says so instead of answering for the new place
+- Browser pane: the saved sign-ins list under a login field now closes when you press anywhere else in the app (another pane, the address bar, the tab strip)
+- The status bar's last-sound item redraws at most once a second, which gave back about a fifth of the UI's CPU in busy windows
+- Browser pane: no saved sign-ins list in a user name field that has no password field yet (the first step of a user-name-first sign-in), where a pick could not fill
+- Vault: an agent can copy up to 40 secrets from AWS Secrets Manager under one approval (import_batch); the card has a row and a tick per secret, and Activity shows a batch's lines together
+- Browser pane: after you pick a saved sign-in with Tab, focus stays where Tab sent it instead of jumping back into the filled field
+- Vault: a linked entry records where a key lives and who reads it, and holds no value. It has a check that reads only the place's description, badges in the pane, and a batch import can make one per row without reading anything
+- A sent message's attachment strip wraps onto more rows when its +N is opened, so every tile is reachable, and folds again with a Show fewer tile
+- A pane backdrop keeps primary text at 4.5:1 on a hovered or selected row, for mid-tone custom colours too
+- A container agent's gh works through timeout, xargs, env and scripts too: gh on PATH asks AgentMux for the repository's token, and a gh command with no repository says to add -R owner/repo
+- Vault: a batch import card says which agents may use the Vault it saves to, lets you send the list to another Vault, and a batch of links goes to your Fleet Vault when you have one
+- A hidden window still drains its streaming panes when it is hidden after a frame was requested
+- A backdrop's transcript colours read at 4.5:1 on all three of the pane's layers, on mid-tone custom colours too
+- A macOS test build with AGENTMUX_TEST_OFFSCREEN=1 is now an accessory app: no Dock icon and no activation
+- The Store install's update row now says what Update in the Store does and that a Restart now button appears once it is downloaded; the Store check logs what it listed
+- Swarm: the minute log line says how many animated marks are on screen and how many are behind the clock
+- README: the widget tables rebuilt from widgets.json (Settings on the bar, Atlas and Reviews added, Media and Jobs removed from More), and the menus, sections, MuxAPI counts, Local-first, architecture, build, release and artifact sections corrected against the code
+
 ## 0.60.29 — 2026-11-15
 
 - A Drone run can be cancelled, which stops its Agent block's process, and a block can have its own timeout; a drone job can use a timeout and cancel_other

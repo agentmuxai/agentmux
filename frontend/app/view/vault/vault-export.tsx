@@ -13,9 +13,11 @@ import { createStore, type SetStoreFunction } from "solid-js/store";
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, Field, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { SECTION_LABELS } from "./vault-kinds";
+import { isLinked } from "./vault-linked";
 import {
     cancelPlainPlace,
     choosePlainPlace,
@@ -48,14 +50,20 @@ export function passphraseStrength(p: string): Strength {
 
 const ORDER: VaultSection[] = ["personal", "cards", "api-keys", "logins", "notes"];
 
-type Format = "vault" | "kdbx" | PlainFormat;
+// `links` is a `.vault` file of the linked entries only: no value is in it.
+type Format = "vault" | "links" | "kdbx" | PlainFormat;
 
 type Group = { section: VaultSection; entries: VaultEntryInfo[] };
+
+/** What was saved. `whole`: the links alone were asked for and a whole export was written, values and all. */
+type Saved = { count: number; file_name: string; whole?: boolean };
 
 /** The dialog's signals and the entries it can export: which are chosen, the passphrase typed twice, the format, and for an unencrypted file the place and the word. */
 interface ExportState {
     onClose: () => void;
     entries: () => VaultEntryInfo[];
+    /** The entries the chosen format can hold: the linked ones for a file of links only, else all. */
+    held: () => VaultEntryInfo[];
     chosen: Record<string, boolean>;
     setChosen: SetStoreFunction<Record<string, boolean>>;
     pass: Accessor<string>;
@@ -68,8 +76,8 @@ interface ExportState {
     setBusy: Setter<boolean>;
     error: Accessor<string | null>;
     setError: Setter<string | null>;
-    done: Accessor<{ count: number; file_name: string } | null>;
-    setDone: Setter<{ count: number; file_name: string } | null>;
+    done: Accessor<Saved | null>;
+    setDone: Setter<Saved | null>;
     // An AgentMux `.vault` file, or a KeePass database to take to another manager.
     format: Accessor<Format>;
     setFormat: Setter<Format>;
@@ -91,12 +99,13 @@ function createExportState(props: { onClose: () => void }): ExportState {
     const [show, setShow] = createSignal(false);
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
-    const [done, setDone] = createSignal<{ count: number; file_name: string } | null>(null);
+    const [done, setDone] = createSignal<Saved | null>(null);
     const [format, setFormat] = createSignal<Format>("vault");
     const [place, setPlace] = createSignal<PlainPlace | null>(null);
     const [typed, setTyped] = createSignal("");
+    const held = () => (format() === "links" ? entries().filter((e) => isLinked(e.fields)) : entries());
     const groups = createMemo(() =>
-        ORDER.map((section) => ({ section, entries: entries().filter((e) => e.section === section) })).filter(
+        ORDER.map((section) => ({ section, entries: held().filter((e) => e.section === section) })).filter(
             (g) => g.entries.length > 0
         )
     );
@@ -104,6 +113,7 @@ function createExportState(props: { onClose: () => void }): ExportState {
     return {
         onClose: props.onClose,
         entries,
+        held,
         chosen,
         setChosen,
         pass,
@@ -132,14 +142,14 @@ function createExportState(props: { onClose: () => void }): ExportState {
 /** An unencrypted CSV or JSON: no passphrase, but the place is chosen first and the person types a word. */
 const plainFormat = (s: ExportState): PlainFormat | null =>
     s.format() === "csv" || s.format() === "json" ? (s.format() as PlainFormat) : null;
-const selected = (s: ExportState) => s.entries().filter((e) => s.chosen[e.id]);
+const selected = (s: ExportState) => s.held().filter((e) => s.chosen[e.id]);
 const matches = (s: ExportState) => s.pass() === s.again();
 const ready = (s: ExportState) =>
     plainFormat(s) ? selected(s).length > 0 : selected(s).length > 0 && s.pass().length >= MIN_PASSPHRASE && matches(s);
 const confirmed = (s: ExportState) => s.typed().trim().toLowerCase() === PLAIN_CONFIRM_WORD;
 const today = () => new Date().toISOString().slice(0, 10);
 const chosenIds = (s: ExportState) =>
-    selected(s).length === s.entries().length ? undefined : selected(s).map((e) => e.id);
+    selected(s).length === s.held().length ? undefined : selected(s).map((e) => e.id);
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 function pickFormat(s: ExportState, f: Format) {
@@ -210,15 +220,21 @@ async function suggest(s: ExportState) {
 async function save(s: ExportState) {
     s.setBusy(true);
     s.setError(null);
+    const links = s.format() === "links";
     try {
         const res = await exportVault({
             ids: chosenIds(s),
             passphrase: s.pass(),
-            defaultName: `agentmux-${today()}`,
-            format: s.format() as "vault" | "kdbx",
+            defaultName: links ? `agentmux-links-${today()}` : `agentmux-${today()}`,
+            format: links ? "vault" : (s.format() as "vault" | "kdbx"),
+            linksOnly: links,
         });
         if (res) {
-            s.setDone(res);
+            // "No value is in the file" is said on srv's word that it wrote the links alone, not on what was asked
+            // for. Without it the file is a whole export, and the dialog says that.
+            const whole = links && !res.links_only;
+            if (whole) s.setFormat("vault");
+            s.setDone({ count: res.count, file_name: res.file_name, whole });
             s.setPass("");
             s.setAgain("");
         }
@@ -245,12 +261,17 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
                 description={
                     plainFormat(s)
                         ? "Saves a file with every secret in it, unencrypted, for another password manager. Anyone who can open the file can read them."
-                        : "Saves a password-protected backup. Anyone with the file and its passphrase can read every secret in it."
+                        : s.format() === "links"
+                          ? t("vault.export.linksAbout")
+                          : "Saves a password-protected backup. Anyone with the file and its passphrase can read every secret in it."
                 }
             />
             <ModalBody>
                 <Show when={!s.done()} fallback={<ExportDone s={s} />}>
-                    <FormatPicker s={s} />
+                    {/* The list is laid out by the dialog's own width (`vault-dialog-scope`), which chrome zoom narrows. */}
+                    <div class="vault-dialog-scope">
+                        <FormatPicker s={s} />
+                    </div>
                     <EntryChoices s={s} />
                     <Show when={!plainFormat(s)}>
                         <PassphraseFields s={s} />
@@ -286,6 +307,11 @@ function ExportDone(props: { s: ExportState }): JSX.Element {
                 Saved {s.done()!.count} {s.done()!.count === 1 ? "entry" : "entries"} to{" "}
                 <strong>{s.done()!.file_name}</strong>.
             </p>
+            <Show when={s.done()!.whole}>
+                <p class="warden-manager-error" role="alert">
+                    {t("vault.export.linksNotWritten")}
+                </p>
+            </Show>
             <Show when={plainFormat(s)}>
                 <p class="warden-manager-error" role="alert">
                     This file isn't encrypted. Import it into the other manager, then delete it, and empty the trash or
@@ -343,6 +369,9 @@ function FormatPicker(props: { s: ExportState }): JSX.Element {
                 name="AgentMux Vault file"
                 hint=".vault, recommended: every kind, part and detail"
             />
+            <Show when={props.s.entries().some((e) => isLinked(e.fields))}>
+                <FormatOption s={props.s} value="links" name={t("vault.export.linksName")} hint={t("vault.export.linksHint")} />
+            </Show>
             <FormatOption
                 s={props.s}
                 value="kdbx"

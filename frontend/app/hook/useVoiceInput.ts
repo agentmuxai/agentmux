@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createEffect, createRoot, untrack } from "solid-js";
 import { createSignalAtom, type SignalAtom } from "@/util/util";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { createWhisperVoiceSession } from "./whisperVoiceEngine";
@@ -17,7 +18,7 @@ export interface PaneVoiceHandle {
 export interface VoiceSetupGap {
     /** The pane whose mic was asked for. */
     blockId: string | null;
-    /** `groq-key`, `whisper-cli` or `whisper-model`. */
+    /** `groq-key`, `whisper-cli` or `whisper-model`; `off` when voice input is switched off. */
     missing: string;
     /** srv's own sentence for it. */
     detail: string | null;
@@ -242,6 +243,39 @@ function facadeSignal<T>(pick: (s: VoiceSession) => SignalAtom<T> | undefined, f
 
 let _facade: VoiceSession | null = null;
 
+/** Voice input is switched off (`voice:enabled: false`, Settings > Recording). Off is off for every way of starting
+ *  it: the button, the shortcut, and anything added later, because they all start it through `getVoiceSession()`. */
+export function voiceInputOff(): boolean {
+    return getSettingsKeyAtom("voice:enabled")() === false;
+}
+
+/** `VoiceSetupGap.missing` when what is missing is the switch itself. */
+const VOICE_OFF_GAP = "off";
+
+/** A start was asked for while voice input is off. A pane with the line above its composer says it there, and it
+ *  stays until it is dismissed or voice input is back on; any other pane gets the app's toast. */
+function sayVoiceIsOff(blockId: string, handle: PaneVoiceHandle): void {
+    if (handle.showsSetupNotice) getVoiceSession().notSetUp?._set({ blockId, missing: VOICE_OFF_GAP, detail: null });
+    else window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "voice-off" }));
+}
+
+/**
+ * A press of a pane's microphone by the keyboard shortcut (`pane:voice`): starts voice input into that pane, stops it
+ * when that pane has it, or moves it there when another pane has it, as a click on the pane's button does. Switched
+ * off, nothing starts and the person is told so (the button is not there to say it); nothing happens when voice
+ * input can't run here; a stop always goes through.
+ */
+export function toggleVoiceFor(blockId: string, handle: PaneVoiceHandle): void {
+    const voice = getVoiceSession();
+    const wasListening = voice.isListening();
+    if (!wasListening && voiceInputOff()) return sayVoiceIsOff(blockId, handle);
+    if (!wasListening && !voice.isAvailable()) return;
+    const wasMine = wasListening && voice.currentTargetId() === blockId;
+    // The pane is bound first: the session reads its handle on every result, so a press in another pane retargets.
+    voice.registerPane(blockId, handle);
+    if (!wasListening || wasMine) voice.toggleListening();
+}
+
 /**
  * Returns a STABLE facade object (same identity forever) so long-lived
  * callers that cache the return value once at component setup — MicButton.tsx,
@@ -262,9 +296,26 @@ export function getVoiceSession(): VoiceSession {
         lastErrorDetail: facadeSignal((s) => s.lastErrorDetail, NULL_STRING_SIGNAL),
         notSetUp: facadeSignal((s) => s.notSetUp, NO_GAP_SIGNAL),
         level: facadeSignal((s) => s.level, NO_LEVEL_SIGNAL),
-        isAvailable: () => ensureVoiceSession().isAvailable(),
-        toggleListening: () => ensureVoiceSession().toggleListening(),
+        isAvailable: () => !voiceInputOff() && ensureVoiceSession().isAvailable(),
+        toggleListening: () => {
+            const session = ensureVoiceSession();
+            // Switched off, nothing starts it. A session that is listening can always be stopped.
+            if (voiceInputOff() && !session.isListening()) return;
+            session.toggleListening();
+        },
         registerPane: (blockId, handle) => ensureVoiceSession().registerPane(blockId, handle),
     };
+    // Switched off while it listens: it stops, and the microphone is let go. Switched back on, a line that said it
+    // was off has nothing left to say.
+    createRoot(() =>
+        createEffect(() => {
+            if (voiceInputOff()) {
+                if (_session?.isListening()) _session.toggleListening();
+                return;
+            }
+            const gap = _session?.notSetUp ?? NO_GAP_SIGNAL;
+            if (untrack(gap)?.missing === VOICE_OFF_GAP) gap._set(null);
+        })
+    );
     return _facade;
 }

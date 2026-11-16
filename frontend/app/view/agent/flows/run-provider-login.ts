@@ -82,7 +82,8 @@ import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { mergeBlockEnv } from "@/app/store/block-meta";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
-import { loginBackend } from "./login-backend";
+import { codeDeliveredAt, loginBackend } from "./login-backend";
+import { whyFromStoreProblem, type NotStoredWhy } from "@/app/agent-model/login-store-notice";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 import { companionCliEnv } from "../providers/companion-env";
 
@@ -173,6 +174,8 @@ export type ProviderLoginOutcome =
     | "inapp-success" // tier 1 + awaitTier1Completion: in-app login completed (child done, credential landed) and the account was persisted/linked here
     | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 3 fallback; the user already has the URL in hand
     | "inapp-ended" // tier 1 + awaitTier1Completion: the login child exited without a credential (a code it did not accept, or it was closed), well before the window ran out
+    | "inapp-no-keychain" // tier 1 + awaitTier1Completion: macOS has no login keychain to keep the sign-in in; found before the person did the flow
+    | "inapp-unfinished" // tier 1 + awaitTier1Completion: the code was sent to the login and it still did not finish (stuck after the code, not slow to authorize)
     | "terminal-success" // tier 3: terminal login completed and was detected
     | "terminal-cli-signed-in" // tier 3, cli-managed provider: the CLI's own check passed; there is no account to save
     | "terminal-timeout" // tier 3: terminal opened, but no login within 5 min (or cancelled)
@@ -298,6 +301,10 @@ async function pollForCliAuthReady(
  *  contract. */
 const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
 
+/** How long a login that was handed its code is given to finish before it counts as stuck after the code. The
+ *  CLI exchanges a code in a few seconds; this leaves room for a slow network and a person answering a dialog. */
+const CODE_SETTLE_MS = 60 * 1_000;
+
 /** Completion detector for the awaited in-app login session
  *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.1): the login is done
  *  when the spawned login child has EXITED, credential material exists in
@@ -347,7 +354,7 @@ async function pollForInAppLoginCompletion(
     authEnv: Record<string, string>,
     isCancelled: () => boolean,
     opts: { pollMs?: number; timeoutMs?: number } = {},
-): Promise<{ completed: boolean; superseded: boolean; ended?: boolean }> {
+): Promise<{ completed: boolean; superseded: boolean; ended?: boolean; notStored?: NotStoredWhy }> {
     const pollMs = opts.pollMs ?? 2_000;
     const timeoutMs = opts.timeoutMs ?? INAPP_COMPLETION_TIMEOUT_MS;
     const deadline = performance.now() + timeoutMs;
@@ -370,6 +377,9 @@ async function pollForInAppLoginCompletion(
             { timeout: 10000 },
         );
         initialAuthed = !!result.authenticated;
+        // Before the person does the whole flow: a sign-in that could not be kept is not worth starting.
+        const why = whyFromStoreProblem(result.store_problem);
+        if (why) return await notStoredOutcome(why, myGeneration);
     } catch {
         // Treat as "wasn't authenticated" — the safer default for the OR
         // condition below (fresh mints, the common case, correctly report
@@ -408,8 +418,14 @@ async function pollForInAppLoginCompletion(
                 { timeout: 10000 },
             );
             authed = !!result.authenticated;
+            const why = whyFromStoreProblem(result.store_problem);
+            if (why) return await notStoredOutcome(why, myGeneration);
         } catch {
             // keep polling on transient RPC errors
+        }
+        const delivered = codeDeliveredAt();
+        if (childActive && !authed && delivered !== null && Date.now() - delivered >= CODE_SETTLE_MS) {
+            return await notStoredOutcome("unfinished", myGeneration);
         }
         if (!childActive) {
             if (authed && (credentialChanged || !initialAuthed)) return { completed: true, superseded: false };
@@ -418,6 +434,30 @@ async function pollForInAppLoginCompletion(
         }
     }
     return { completed: false, superseded: false };
+}
+
+/**
+ * A login that could not be kept, unless another surface's login took over while the check was away: then it is
+ * not ours to report, and the caller must not reap the newer one.
+ */
+async function notStoredOutcome(
+    why: NotStoredWhy,
+    myGeneration: number | undefined,
+): Promise<{ completed: boolean; superseded: boolean; notStored?: NotStoredWhy }> {
+    const now = await loginBackend()
+        .status()
+        .then((s) => s.generation)
+        .catch(() => undefined);
+    if (myGeneration !== undefined && now !== undefined && now !== myGeneration) {
+        return { completed: false, superseded: true };
+    }
+    return { completed: false, superseded: false, notStored: why };
+}
+
+/** Why an awaited in-app login ended without a credential. */
+function inAppFailure(ended?: boolean, notStored?: NotStoredWhy): ProviderLoginOutcome {
+    if (notStored) return notStored === "no-keychain" ? "inapp-no-keychain" : "inapp-unfinished";
+    return ended ? "inapp-ended" : "inapp-timeout";
 }
 
 export async function runProviderLogin(p: RunProviderLoginParams): Promise<ProviderLoginOutcome> {
@@ -485,7 +525,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
                 deadlineMs: Date.now() + INAPP_COMPLETION_TIMEOUT_MS,
             });
             const isCancelled = p.isCancelled ?? (() => false);
-            const { completed, superseded, ended } = await pollForInAppLoginCompletion(
+            const { completed, superseded, ended, notStored } = await pollForInAppLoginCompletion(
                 p.cliPath,
                 p.provider.authCheckCommand,
                 authEnvForTiers,
@@ -503,7 +543,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
             if (!superseded) {
                 await loginBackend().cancel().catch(() => {});
             }
-            if (!completed) return ended ? "inapp-ended" : "inapp-timeout";
+            if (!completed) return inAppFailure(ended, notStored);
             // Same persist + one-retry + loud-error contract as tiers 2/3
             // below (reagent P2 / REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_
             // WORKING_2026_07_27.md): the credential is genuinely on disk, so

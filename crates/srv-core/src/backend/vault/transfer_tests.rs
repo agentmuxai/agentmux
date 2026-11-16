@@ -118,6 +118,129 @@ fn a_chosen_selection_is_all_that_is_exported() {
     assert!(export(&s, Some(&["nope".to_string()]), PASS, &path).unwrap_err().contains("nothing to export"));
 }
 
+/// A linked entry: a made-up AWS secret's key, who reads it and when it last changed.
+fn link(s: &Store, label: &str, location: &str) -> String {
+    let said = [("link", "only"), ("source_kind", "aws-secret"), ("source_location", location), ("source_key", "api.token"), ("source_region", "eu-west-1"), ("readers", "invoice-sync (lambda): at run time"), ("rotated", "2026-10-01")];
+    create(s, NewEntry { kind: "api-key".into(), label: label.into(), fields: fields(&said), tags: vec![], parts: Parts::default() }).unwrap()
+}
+
+fn fields_of(s: &Store, id: &str) -> BTreeMap<String, String> {
+    serde_json::from_str(&s.vault_get(id).unwrap().unwrap().fields).unwrap()
+}
+
+/// `json` as a `.vault` file's contents, encrypted to [`PASS`].
+fn vault_file(dir: &tempfile::TempDir, name: &str, json: &str) -> std::path::PathBuf {
+    let path = dir.path().join(name);
+    let mut out = Vec::new();
+    let mut w = age::Encryptor::with_user_passphrase(age::secrecy::SecretString::from(PASS.to_string())).wrap_output(&mut out).unwrap();
+    std::io::Write::write_all(&mut w, json.as_bytes()).unwrap();
+    w.finish().unwrap();
+    std::fs::write(&path, out).unwrap();
+    path
+}
+
+#[test]
+fn a_links_only_export_holds_the_linked_entries_and_no_value() {
+    let s = store();
+    let held = seed(&s);
+    let invoice = link(&s, "Invoice provider key", "prod/invoice-sync");
+    link(&s, "Mail provider key", "prod/mailer");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("links.vault");
+    // Of what is chosen, the links: an entry that holds a value is left out even when it is named.
+    assert_eq!(export_links(&s, Some(&[held[0].clone(), invoice.clone()]), PASS, &path).unwrap().count, 1);
+    assert!(export_links(&s, Some(&held), PASS, &path).unwrap_err().contains("no linked entries"));
+    // The answer says what was written, for the dialog to say "no value" on: links only here, not in a whole export.
+    assert!(!export(&s, None, PASS, &dir.path().join("whole.vault")).unwrap().links_only);
+    let wrote = export_links(&s, None, PASS, &path).unwrap();
+    assert_eq!((wrote.count, wrote.links_only), (2, true));
+    let line = s.vault_activity_all().unwrap().into_iter().rfind(|r| r.action == "exported").unwrap();
+    assert_eq!((line.target.as_str(), line.outcome.as_str()), ("links.vault", "2 linked entries, no values"));
+    // The file as the next machine reads it: two entries, and not a part among them.
+    wipe(&s);
+    let preview = inspect(&s, &path, Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.skipped.len()), (2, 0));
+    assert!(preview.sections.iter().flat_map(|s| &s.first).all(|e| e.linked), "every entry of the file is listed as a link");
+    commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
+    assert!(s.vault_list().unwrap().iter().all(|row| linked::is_linked_row(row) && all_parts(&s, &row.id).is_empty()));
+}
+
+#[test]
+fn an_import_takes_a_link_as_a_link_and_knows_it_again_by_its_place() {
+    let s = store();
+    seed(&s);
+    let invoice = link(&s, "Invoice provider key", "prod/invoice-sync");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("all.vault");
+    // A whole export carries the links with the rest.
+    assert_eq!(export(&s, None, PASS, &path).unwrap().count, 4);
+    wipe(&s);
+    let preview = inspect(&s, &path, Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.skipped.len(), preview.duplicates), (4, 0, 0));
+    // The preview says which of them is a link.
+    let links: Vec<&str> = preview.sections.iter().flat_map(|s| &s.first).filter(|e| e.linked).map(|e| e.label.as_str()).collect();
+    assert_eq!(links, ["Invoice provider key"]);
+    assert_eq!(commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().added, 4);
+    // It comes in under its own id, with its place and what is said of it, and holds nothing.
+    let said = fields_of(&s, &invoice);
+    assert_eq!((said["link"].as_str(), said["source_location"].as_str(), said["source_region"].as_str(), said["readers"].as_str(), said["rotated"].as_str()), ("only", "prod/invoice-sync", "eu-west-1", "invoice-sync (lambda): at run time", "2026-10-01"));
+    assert!(all_parts(&s, &invoice).is_empty());
+
+    // The same file again: the link is a duplicate by its place, so nothing doubles.
+    let again = inspect(&s, &path, Some(PASS)).unwrap();
+    assert_eq!((again.duplicates, again.duplicate_links), (4, 1));
+    assert_eq!(commit(&s, &again.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().skipped, 4);
+    assert_eq!(s.vault_list().unwrap().len(), 4);
+
+    // Replaced, it takes what the file says of the key, stays a link and stays where it is. The same secret in
+    // another region is another key.
+    let newer = r#"{"format":"agentmux-vault","version":1,"exported_at":0,"entries":[
+        {"kind":"api-key","label":"Invoice provider key","fields":{"link":"only","source_kind":"aws-secret","source_location":"prod/invoice-sync","source_key":"api.token","source_region":"eu-west-1","readers":"invoice-sync (lambda): at run time\nrelease (workflow): on a tag","rotated":"2026-11-02"},"parts":{}},
+        {"kind":"api-key","label":"Invoice provider key, second region","fields":{"link":"only","source_kind":"aws-secret","source_location":"prod/invoice-sync","source_key":"api.token","source_region":"us-east-1"},"parts":{}}
+    ]}"#;
+    let preview = inspect(&s, &vault_file(&dir, "newer.vault", newer), Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.duplicates), (2, 1));
+    let done = commit(&s, &preview.token, Duplicates::Replace, PERSONAL_VAULT).unwrap();
+    assert_eq!((done.added, done.replaced), (1, 1));
+    let said = fields_of(&s, &invoice);
+    assert_eq!((said["link"].as_str(), said["rotated"].as_str(), said["readers"].lines().count()), ("only", "2026-11-02", 2));
+    assert!(all_parts(&s, &invoice).is_empty());
+
+    // A place is its fields, not the line it is written as: a `#` in a location is not a key.
+    let other = |label: &str, location: &str, key: &str| {
+        let said = [("link", "only"), ("source_kind", "other"), ("source_location", location), ("source_key", key)];
+        create(&s, NewEntry { kind: "api-key".into(), label: label.into(), fields: fields(&said), tags: vec![], parts: Parts::default() }).unwrap()
+    };
+    other("Console token", "https://example.com/#token", "");
+    let lookalike = r#"{"format":"agentmux-vault","version":1,"exported_at":0,"entries":[
+        {"kind":"api-key","label":"Another token","fields":{"link":"only","source_kind":"other","source_location":"https://example.com/","source_key":"token"},"parts":{}}
+    ]}"#;
+    let preview = inspect(&s, &vault_file(&dir, "lookalike.vault", lookalike), Some(PASS)).unwrap();
+    assert_eq!((preview.total, preview.duplicates), (1, 0));
+    cancel(&preview.token);
+}
+
+#[test]
+fn a_link_that_holds_a_value_or_names_no_place_does_not_come_in() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{"format":"agentmux-vault","version":1,"exported_at":0,"entries":[
+        {"kind":"api-key","label":"Good link","fields":{"link":"only","source_kind":"aws-secret","source_location":"prod/mailer"},"parts":{}},
+        {"kind":"api-key","label":"Link with a value","fields":{"link":"only","source_kind":"aws-secret","source_location":"prod/x"},"parts":{"value":"made-up-value"}},
+        {"kind":"api-key","label":"Link to nowhere","fields":{"link":"only"},"parts":{}},
+        {"kind":"api-key","label":"Not a link","fields":{"link":"maybe"},"parts":{"value":"made-up-value"}},
+        {"kind":"api-key","label":"No value","parts":{}}
+    ]}"#;
+    let preview = inspect(&s, &vault_file(&dir, "links.vault", json), Some(PASS)).unwrap();
+    assert_eq!(preview.total, 1);
+    let why: BTreeMap<_, _> = preview.skipped.iter().map(|k| (k.label.as_str(), k.reason.as_str())).collect();
+    assert!(why["Link with a value"].contains("holds no value"));
+    assert!(why["Link to nowhere"].contains("where the key lives"));
+    assert!(why["Not a link"].contains("link is"));
+    assert!(why["No value"].contains("no value"));
+    assert_eq!(commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().added, 1);
+}
+
 #[test]
 fn a_short_passphrase_is_refused_and_no_file_is_written() {
     let s = store();

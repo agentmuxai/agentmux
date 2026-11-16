@@ -13,6 +13,7 @@
  */
 
 import type { LaunchPhase } from "@/app/agent-model/launch-phase";
+import type { NotStoredWhy } from "@/app/agent-model/login-store-notice";
 
 /** Display-only estimate of tier 1's link-capture wait, shown as the
  *  `waiting-for-login-link` countdown. Must track cli_login.rs's
@@ -109,6 +110,7 @@ export type LoginStep =
 export type LoginFailure =
     | { kind: "save-failed" }
     | { kind: "not-detected"; stage: "link" | "inapp" | "terminal" }
+    | { kind: "not-stored"; why: NotStoredWhy }
     | { kind: "unavailable" }
     | { kind: "error"; message: string };
 

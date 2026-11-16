@@ -23,6 +23,8 @@ import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import { accountPickerItems, planBind, type BindMode } from "./account-picker";
 import { AnotherAccountLogin } from "./AnotherAccountLogin";
 import { computeAccountBindCandidates } from "./bind-account-candidates";
+import { usePrepWindow, type PrepMeta } from "./prep-window";
+import { switchNotice } from "./switch-notice";
 
 /** Where the hook reads accounts and links from, and how it shows its picker; real ones by default. */
 export interface AccountBindingDeps {
@@ -32,6 +34,8 @@ export interface AccountBindingDeps {
     showPicker: (items: ContextMenuItem[], e: MouseEvent) => void;
     /** `agent.account.switch`: srv links the account and restarts the agent's panes, now or after its turn. */
     switchAccount: (agentId: string, accountId: string) => Promise<{ status: string; account_label: string; failed: string[] }>;
+    /** `agent.prep.now`: the person pressed "Switch now" while the agent was given its window to prepare. */
+    prepNow: (agentId: string) => Promise<unknown>;
     /** What the signed-in-accounts menu says about an account's quota, if anything ("out of quota until …"). */
     quotaNote: (accountId: string) => string | undefined;
     notify: (type: "info" | "warning" | "error", title: string, message?: string) => void;
@@ -46,6 +50,7 @@ const defaultDeps: AccountBindingDeps = {
     showPicker: (items, e) => ContextMenuModel.showContextMenu(items, e),
     switchAccount: (agentId, accountId) =>
         RpcApi.AgentAccountSwitchCommand(TabRpcClient, { agent_id: agentId, account: accountId, when: "after_turn" }),
+    prepNow: (agentId) => RpcApi.AgentPrepNowCommand(TabRpcClient, { agent_id: agentId }),
     quotaNote: () => undefined,
     signInAnother: (blockId, onSignedIn) =>
         void openPaneModal(blockId, AnotherAccountLogin, { onSignedIn }, { source: "signin", waits: false }),
@@ -74,6 +79,10 @@ export interface AccountBinding {
     canSwitchAccount: Accessor<boolean>;
     /** The account a queued switch is waiting to move to (after the current turn), as the chip names it. */
     pendingAccountLabel: Accessor<string | undefined>;
+    /** While the agent has its window to reach a safe point before the switch: the chip's countdown line. */
+    prepCountdown: Accessor<string | undefined>;
+    /** "Switch now": ends that window, so the switch runs at once. */
+    onSwitchNow: () => void;
     /** Re-read the linked account (the identity links changed). */
     refreshLinkedAccountId: () => Promise<void>;
 }
@@ -87,6 +96,10 @@ export interface AccountBindingOptions {
     bindExistingAccount: (account: Account) => Promise<void>;
     /** `agent:pending_account` of this pane: the account id a queued switch moves to. */
     pendingAccountId?: Accessor<string | undefined>;
+    /** `agent:prep` of this pane: the window the agent has before a switch (srv writes it). */
+    prep?: Accessor<PrepMeta | null | undefined>;
+    /** The agent's name, for the countdown line. */
+    agentName?: Accessor<string | undefined>;
     /** The agent is signed out: its chip menu offers "Log in" (`onLogin`) next to the accounts. */
     signedOut?: Accessor<boolean>;
     onLogin?: () => void;
@@ -201,6 +214,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
         const a = id ? accountCache().find((x) => x.id === id) : undefined;
         return a ? accountLabel(a, accountCache()) : undefined;
     });
+    const { prepCountdown, onSwitchNow } = usePrepWindow(opts, deps);
     const switchTo = async (account: Account) => {
         // Picking the account it is on cancels a queued switch; with none queued there is nothing to do.
         if (account.id === linkedAccountId() && !opts.pendingAccountId?.()) return;
@@ -213,13 +227,8 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
             const r = await deps.switchAccount(agentId, accountId);
             // Connectors' account cards and open detail list agents from the links.
             notifyLinksChanged();
-            if (r.status === "unchanged") {
-                deps.notify("info", `Staying on ${label}`, "The queued switch was cancelled.");
-            } else if (r.status === "queued") {
-                deps.notify("info", `Switching to ${label} after this turn`, "The agent keeps working; it moves when the turn ends.");
-            } else if (r.failed.length > 0) {
-                deps.notify("warning", `Switched to ${label}, with a problem`, r.failed.join(" "));
-            }
+            const notice = switchNotice(r, label);
+            if (notice) deps.notify(...notice);
             await refreshLinkedAccountId();
         } catch (e: any) {
             deps.notify("error", `Couldn't switch to ${label}`, String(e?.message ?? e));
@@ -258,6 +267,8 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
         onSwitchAccount,
         canSwitchAccount,
         pendingAccountLabel,
+        prepCountdown,
+        onSwitchNow,
         refreshLinkedAccountId,
     };
 }

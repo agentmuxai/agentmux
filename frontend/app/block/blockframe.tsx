@@ -26,6 +26,9 @@ import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
+import { BackdropPicker } from "@/app/backdrop/BackdropPicker";
+import { supportsBackdrop } from "@/app/backdrop/meta";
+import { closeBackdropPicker, isBackdropPickerOpen, openBackdropPicker, releaseBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
@@ -202,7 +205,15 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that
     // implement getSettingsMenuItems (sysinfo).
-    return [{ type: "separator" as const }, { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems }];
+    // A backdrop is offered on the pane types whose own colours follow it. Phase 1 is the agent pane; a terminal keeps its
+    // own default text colour until phase 2 gives it the backdrop's, and would be unreadable on a pale one (spec §6, §14).
+    const backdropItems =
+        supportsBackdrop(blockData?.meta?.view) ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
+    return [
+        { type: "separator" as const },
+        { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
+        ...backdropItems,
+    ];
 }
 
 function handleHeaderContextMenu(
@@ -1373,10 +1384,15 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // is not a backdrop. A drag preview is a second frame for the same block: it reads the live scope, never owns it.
     const backdrop = usePaneBackdrop(
         nodeModel.blockId,
-        () => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg }),
+        // A view that doesn't follow a backdrop yet (a terminal, a widget, the browser) gets none, whatever its meta says.
+        () => (supportsBackdrop(s.blockData()?.meta?.view) ? { backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg } : {}),
         { owner: !props.preview }
     );
     const backdropVars = getPaneScope(nodeModel.blockId);
+    const pickerOpen = isBackdropPickerOpen(nodeModel.blockId);
+    // Only the live frame owns the picker's flag: a drag preview is a second frame for the same block, and its unmounting
+    // must not close the live pane's picker or delete the flag the live frame still holds.
+    if (!props.preview) onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
 
     return (
         <div
@@ -1418,6 +1434,13 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             {renderFrameInner(s)}
+            <Show when={pickerOpen() && !props.preview}>
+                <BackdropPicker
+                    blockId={nodeModel.blockId}
+                    meta={() => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg })}
+                    onClose={() => closeBackdropPicker(nodeModel.blockId)}
+                />
+            </Show>
             {renderFrameOverlays(s)}
         </div>
     );

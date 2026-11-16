@@ -101,6 +101,7 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/auth/pending", post(handle_pending))
         .route("/auth/confirm", post(handle_confirm))
         .route("/auth/logout", post(handle_logout))
+        .route("/auth/sessions", post(handle_sessions))
         .route("/auth/enter", get(handle_page).post(handle_enter))
         .route("/auth/enter.js", get(handle_script))
         .route("/auth/enter.css", get(handle_style))
@@ -312,6 +313,15 @@ async fn handle_logout(headers: HeaderMap, body: Bytes) -> Response {
     proved(&admitted, json!({ "revoked": revoked }))
 }
 
+/// `POST /auth/sessions`: how many browsers are signed in now. A number only; nothing that names or reaches one.
+async fn handle_sessions(headers: HeaderMap, body: Bytes) -> Response {
+    let admitted = match channel_gate(&headers, "/auth/sessions", &body).await {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    proved(&admitted, json!({ "sessions": store().session_count(Instant::now()) }))
+}
+
 // ---- The browser's routes (the code) ----
 
 /// `GET /auth/enter`: the page. It holds no secret; the code is in the fragment, which is never sent.
@@ -405,12 +415,17 @@ fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     hval(headers, "cookie")?.split(';').filter_map(|c| c.trim().split_once('=')).find(|(n, _)| *n == name).map(|(_, v)| v)
 }
 
-/// The token a request carries: `X-AM-Session`, or on `/ws` the protocol offered beside [`WS_PROTOCOL`].
+/// The routes a browser opens as a WebSocket, which can carry no header: the token travels as a protocol.
+fn is_websocket_route(path: &str) -> bool {
+    path == "/ws" || path == super::streamed_browser::ROUTE
+}
+
+/// The token a request carries: `X-AM-Session`, or on a WebSocket route the protocol offered beside [`WS_PROTOCOL`].
 fn session_token<'a>(headers: &'a HeaderMap, path: &str) -> Option<&'a str> {
     if let Some(t) = hval(headers, TOKEN_HEADER) {
         return Some(t);
     }
-    if path != "/ws" {
+    if !is_websocket_route(path) {
         return None;
     }
     hval(headers, "sec-websocket-protocol")?.split(',').map(str::trim).find(|p| !p.is_empty() && *p != WS_PROTOCOL)

@@ -11,7 +11,10 @@
 //! - every other kind is an entry whose secret is a protected custom field named for it
 //!   (`SSN`, `Card number`, `API key`, …: [`kdbx_names`]), with plain details as unprotected
 //!   custom fields and the entry's tags as KeePass tags and as groups (a tag `A/B` is the group
-//!   `A` > `B`, the first tag choosing the group).
+//!   `A` > `B`, the first tag choosing the group);
+//! - a linked entry, which holds no value, is an entry with no secret field: its place, who reads the
+//!   key, when it last changed and where else it is kept are unprotected custom fields, and
+//!   `Linked entry kind` says it is a link and of which kind.
 //!
 //! The importer reads the same names, so a database leaves and comes back as the same entries.
 
@@ -24,6 +27,7 @@ use keepass::{Database, DatabaseKey};
 
 use super::import::Incoming;
 use super::kdbx_names::{self, COMPANIONS, DETAILS};
+use super::linked;
 use super::transfer::{gather, wipe, write_atomically, ExportResult, MIN_PASSPHRASE};
 use super::{record, PERSON};
 use crate::backend::storage::store::Store;
@@ -51,7 +55,7 @@ pub(super) fn export_with(store: &Store, ids: Option<&[String]>, passphrase: &st
     write_atomically(path, &bytes?)?;
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     record(store, "", "", PERSON, "exported", &file_name, &format!("{count} entries to KeePass"));
-    Ok(ExportResult { count, file_name })
+    Ok(ExportResult { count, file_name, links_only: false })
 }
 
 /// The database's bytes.
@@ -141,10 +145,14 @@ fn fill(entry: &mut keepass::db::Entry, e: &Incoming) {
         }
     }
     // Where the entry's machine copy is: no secret, and the same for every kind.
-    for (name, title) in super::source_link::TITLES {
+    for (name, title) in super::source_link::TITLES.into_iter().chain(linked::TITLES) {
         if let Some(v) = field(name) {
             entry.set_unprotected(title, v);
         }
+    }
+    // A link holds no value, so no secret field says what kind of entry it is: this one does.
+    if linked::is_linked(&e.fields) {
+        entry.set_unprotected(linked::KIND_TITLE, e.kind.clone());
     }
 }
 

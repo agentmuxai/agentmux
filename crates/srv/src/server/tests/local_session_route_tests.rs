@@ -348,6 +348,30 @@ async fn a_browser_signs_itself_out_and_no_other_browser_with_it() {
     assert_eq!(call(&router, signout(&[("sec-fetch-site", "same-origin")], &cookie_a, &token_a)).await.0, 403);
 }
 
+/// `sessions` answers a number, counts only browsers that are fully signed in, and goes down as they sign out.
+#[tokio::test]
+async fn the_sessions_route_counts_the_browsers_signed_in() {
+    let _only = ONE_AT_A_TIME.lock().await;
+    ensure_shape();
+    let router = build_router(test_state());
+    let mut open = Open::connect(&router).await;
+    open.ask(&router, "/auth/logout", "{}").await;
+    let count = |body: String| serde_json::from_str::<serde_json::Value>(&body).unwrap()["sessions"].as_u64().unwrap();
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 0);
+
+    // A browser that has entered its code but is not confirmed is not signed in.
+    let code = field(&open.ask(&router, "/auth/code", "{}").await, "code");
+    call(&router, from_page("/auth/enter", &format!(r#"{{"code":"{code}"}}"#))).await;
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 0, "pending is not signed in");
+
+    let (cookie, token) = signed_in_browser(&router).await;
+    signed_in_browser(&router).await;
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 2);
+    let signout = from_browser(Method::POST, "/auth/signout", &cookie, &token, &[("sec-fetch-site", "same-origin")]);
+    assert_eq!(call(&router, signout).await.0, 200);
+    assert_eq!(count(open.ask(&router, "/auth/sessions", "{}").await), 1);
+}
+
 // ---- The proof of the key ----
 
 /// The key is never sent: where it used to be accepted, it is now refused, on every key route.
@@ -355,7 +379,7 @@ async fn a_browser_signs_itself_out_and_no_other_browser_with_it() {
 async fn the_key_itself_is_not_accepted_on_any_command_route() {
     ensure_shape();
     let router = build_router(test_state());
-    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout"] {
+    for path in ["/auth/code", "/auth/pending", "/auth/confirm", "/auth/logout", "/auth/sessions"] {
         let req = request(Method::POST, path, &[("host", HOST), (AUTH_KEY_HEADER, KEY)], r#"{"code":"x","accept":true}"#);
         let (status, _, body) = call(&router, req).await;
         assert_eq!((status, body.as_str()), (403, "not accepted"), "{path}");
@@ -429,6 +453,18 @@ fn the_token_is_a_header_or_on_the_websocket_the_protocol_beside_the_fixed_name(
     assert_eq!(session_token(&ws, "/agentmux/service"), None, "a protocol header is a token on /ws only");
     assert_eq!(session_token(&headers(&[("sec-websocket-protocol", "amx-session")]), "/ws"), None);
     assert_eq!(session_token(&HeaderMap::new(), "/ws"), None);
+}
+
+/// A signed-in browser opens the streamed pane's socket with the token as a protocol (it cannot set a header), and the
+/// route it opens is the one `routes.rs` registers; the token is read on that route and on no other besides `/ws`.
+#[test]
+fn the_streamed_browser_socket_carries_its_token_as_a_protocol_too() {
+    use crate::server::streamed_browser::ROUTE;
+    assert!(crate::server::route_scan::registered_routes().iter().any(|r| r.path == ROUTE), "{ROUTE} is not the registered route");
+    let ws = headers(&[("sec-websocket-protocol", "amx-session, tok123")]);
+    assert_eq!(session_token(&ws, ROUTE), Some("tok123"));
+    assert_eq!(session_token(&headers(&[("sec-websocket-protocol", "amx-session")]), ROUTE), None);
+    assert_eq!(session_token(&ws, "/agentmux/streamed-browser/other"), None);
 }
 
 #[test]

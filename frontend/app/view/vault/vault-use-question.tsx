@@ -5,16 +5,16 @@
 // countdown: the card in the agent's pane and, for a use with no pane, the
 // window's prompt (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4).
 
-import { createEffect, createSignal, For, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
+import { createEffect, createRoot, createSignal, For, onCleanup, Show, type Accessor, type Component, type JSX, type Setter } from "solid-js";
 
 import { tip } from "@/app/element/tip";
-import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
+import { Button, Field, Pill, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import { CardTyped } from "./vault-use-card";
-import { answerUse, holdUse, vaultUses, type UseDecision } from "./vault-store";
+import { answerUse, currentVaults, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
 // whether or not a Vault pane was opened.
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -104,7 +104,7 @@ export function promptTitle(u: UseRequest, short = false): string {
 
 /** The line under the question: what the agent never sees. */
 function promptNote(u: UseRequest): string {
-    if (u.batch) return linksOnly(u.batch) ? t("vault.batchCard.noteLinks") : t("vault.batchCard.note");
+    if (u.batch) return linksOnly(u.batch) ? t("vault.batchCard.noteLinks") : t("vault.batchCard.note", { count: u.batch.items.length });
     if (u.import) return "The agent never sees the value: AgentMux reads it.";
     if (u.link?.only) return t("vault.linkCard.noteLinked");
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
@@ -167,6 +167,42 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
     );
 }
 
+/** A line of what an entry says of its key, and how the change asked for touches it. */
+export type SaidLine = { text: string; mark?: "changed" | "added" | "removed" };
+
+const SAID_MARKS = { changed: "vault.linkCard.changed", added: "vault.linkCard.added", removed: "vault.linkCard.removed" } as const;
+
+/** What an entry says of its key, one thing a line ("Read by: …", "Last changed: …", "Also kept at: …"), as srv
+ *  writes it. With `against` (what is recorded now) each line of what is asked for is marked when it is new or
+ *  differs, and a thing the change takes away is a line of its own: the difference is said in a word, not left
+ *  for the eye to find in two long lines. */
+export function saidLines(text: string, against?: string): SaidLine[] {
+    const split = (said: string) => said.split("\n").filter(Boolean).map((line) => ({ what: line.split(": ")[0], text: line }));
+    const lines = split(text);
+    if (against === undefined) return lines.map(({ text }) => ({ text }));
+    const before = split(against);
+    const asked = lines.map(({ what, text }): SaidLine => {
+        const was = before.find((b) => b.what === what);
+        return was?.text === text ? { text } : { text, mark: was ? "changed" : "added" };
+    });
+    const gone = before.filter((b) => !lines.some((line) => line.what === b.what)).map((b): SaidLine => ({ text: b.what, mark: "removed" }));
+    return [...asked, ...gone];
+}
+
+function SaidLines(props: { name: string; text: string; against?: string }): JSX.Element {
+    return (
+        <span data-link={props.name}>
+            <For each={saidLines(props.text, props.against)}>
+                {(line) => (
+                    <span class="vault-link-said-line" data-said={line.mark ?? "same"}>
+                        <Show when={line.mark}>{(mark) => <Pill tone="accent">{t(SAID_MARKS[mark()])}</Pill>}</Show> <Clipped text={line.text} max={CLIP.about} />
+                    </span>
+                )}
+            </For>
+        </span>
+    );
+}
+
 /** A change to where an entry's machine copy is: the place it has now and the place the agent asks for. */
 function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["link"]> }): JSX.Element {
     return (
@@ -179,17 +215,15 @@ function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
                 </Show>
                 <Show when={props.link.about_from}>
-                    <br />
-                    <span data-link="about-from"><Clipped text={props.link.about_from} max={CLIP.about} /></span>
+                    <SaidLines name="about-from" text={props.link.about_from} />
                 </Show>
             </p>
             <p data-link="to">
                 {t("vault.linkCard.askedFor")} <Show when={props.link.to} fallback={t("vault.linkCard.noPlaceAsked")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
                 </Show>
-                <Show when={props.link.about_to}>
-                    <br />
-                    <span data-link="about-to"><Clipped text={props.link.about_to} max={CLIP.about} /></span>
+                <Show when={props.link.about_to || props.link.about_from}>
+                    <SaidLines name="about-to" text={props.link.about_to} against={props.link.about_from} />
                 </Show>
             </p>
         </>
@@ -239,11 +273,17 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
     );
 }
 
-/** Who may use what is in a Vault, as the batch card says it. */
-function vaultOpenTo(agents: VaultAgents): string {
-    if (agents.mode === "all") return t("vault.batchCard.openToAll");
-    if (agents.mode === "none" || agents.agents.length === 0) return t("vault.batchCard.openToNone");
-    return t("vault.batchCard.openToNamed", { agents: clip(agents.agents.join(", "), CLIP.reason) });
+/** The most agents a batch's card names before it counts the rest: a long list pushed the rows out of a narrow card. */
+const NAMED_AGENTS = 3;
+
+/** Who may use what is in a Vault, as the batch card says it. `whole` is every name, when the line counts some. */
+function vaultOpenTo(agents: VaultAgents): { text: string; whole?: string } {
+    if (agents.mode === "all") return { text: t("vault.batchCard.openToAll") };
+    if (agents.mode === "none" || agents.agents.length === 0) return { text: t("vault.batchCard.openToNone") };
+    const names = agents.agents.map((name) => clip(name, CLIP.name));
+    if (names.length <= NAMED_AGENTS) return { text: t("vault.batchCard.openToNamed", { agents: names.join(", ") }) };
+    const shown = names.slice(0, NAMED_AGENTS).join(", ");
+    return { text: t("vault.batchCard.openToNamedMore", { agents: shown, count: names.length - NAMED_AGENTS }), whole: agents.agents.join(", ") };
 }
 
 /** A batch of imports: the one account, region and Vault, and a row for every secret with its tick. A row left
@@ -252,20 +292,34 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
     const b = props.batch;
     const a = props.answer;
     const links = () => linksOnly(b);
-    // The Vault the rows go into as the card stands: the one asked for, or the one the person chose.
-    const into = () => b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };
+    // "The key is", "It is read": one row is said as one.
+    const count = b.items.length;
+    // The Vault the rows go into as the card stands: the one asked for, or the one the person chose. Who may use it
+    // is read from the person's Vaults while that list is current, so a change made in the Vaults dialog shows on a
+    // card that is already open; otherwise it is what srv said when it asked.
+    const into = () => {
+        const asked = b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };
+        return { name: asked.name, agents: currentVaults()?.find((v) => v.name === asked.name)?.agents ?? asked.agents };
+    };
+    const openTo = () => vaultOpenTo(into().agents);
+    // A batch of both kinds: how many of the ticked rows are read and copied, and how many are only recorded.
+    const mixed = () => !links() && b.items.some((item) => item.link);
+    const ticked = () => {
+        const recorded = a.rows().filter((i) => b.items[i]?.link).length;
+        return { read: a.rows().length - recorded, links: recorded };
+    };
     const offered = (): SelectOption[] => b.vaults.map((v) => ({ value: v.name, label: clip(v.name, CLIP.label) }));
     return (
         <>
             <p data-batch="source">
-                <Show when={b.region} fallback={t(links() ? "vault.batchCard.linksAtDefaultRegion" : "vault.batchCard.fromDefaultRegion", { service: b.service })}>
-                    <Rich k={links() ? "vault.batchCard.linksAt" : "vault.batchCard.from"} params={{ service: b.service, region: b.region }} />
+                <Show when={b.region} fallback={t(links() ? "vault.batchCard.linksAtDefaultRegion" : "vault.batchCard.fromDefaultRegion", { service: b.service, count })}>
+                    <Rich k={links() ? "vault.batchCard.linksAt" : "vault.batchCard.from"} params={{ service: b.service, region: b.region, count }} />
                 </Show>{" "}
                 <Show when={!links()}>
                     <span {...tip(clip(b.profile, CLIP.label) === b.profile ? undefined : b.profile)}>
-                        <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin")}>
-                            <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label) }} />}>
-                                <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label) }} />
+                        <Show when={b.profile} fallback={t("vault.batchCard.defaultLogin", { count })}>
+                            <Show when={b.grant} fallback={<Rich k="vault.batchCard.profile" params={{ profile: clip(b.profile, CLIP.label), count }} />}>
+                                <Rich k="vault.batchCard.grant" params={{ profile: clip(b.profile, CLIP.label), count }} />
                             </Show>
                         </Show>
                     </span>
@@ -273,12 +327,17 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
             </p>
             <p data-batch="vault" {...tip(clip(into().name, CLIP.label) === into().name ? undefined : into().name)}>
                 <Rich k={links() ? "vault.batchCard.linksInto" : "vault.batchCard.into"} params={{ vault: clip(into().name, CLIP.label) }} />{" "}
-                <span data-batch="agents">{vaultOpenTo(into().agents)}</span>
+                <span data-batch="agents" {...tip(openTo().whole)}>
+                    {openTo().text}
+                </span>
             </p>
             <Show when={b.vaults.length > 1}>
-                <Field label={t("vault.batchCard.chooseVault")} layout="stacked">
+                <Field label={t("vault.batchCard.chooseVault")} layout="stacked" class="vault-batch-vault">
                     <Select value={a.vault()} onChange={a.setVault} options={offered()} ariaLabel={t("vault.batchCard.chooseVault")} disabled={a.busy()} />
                 </Field>
+            </Show>
+            <Show when={mixed()}>
+                <p data-batch="mixed">{t("vault.batchCard.mixed", ticked())}</p>
             </Show>
             <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
                 <For each={b.items}>
@@ -393,6 +452,49 @@ function holdOnActivity(u: UseRequest): () => void {
     };
 }
 
+/** What the person has chosen on a batch's card so far: the rows left ticked, by their place in its list, and the
+ *  Vault they go into. */
+interface BatchChoice {
+    rows: Accessor<number[]>;
+    setRows: Setter<number[]>;
+    vault: Accessor<string>;
+    setVault: Setter<string>;
+}
+
+/** Every row ticked, and the Vault that was asked for: how a batch's card starts. */
+function newBatchChoice(u: UseRequest): BatchChoice {
+    const [rows, setRows] = createSignal<number[]>(u.batch ? u.batch.items.map((_, i) => i) : []);
+    const [vault, setVault] = createSignal(u.batch?.vault ?? "");
+    return { rows, setRows, vault, setVault };
+}
+
+// A batch's card is shown in the agent's pane and, while the Vault pane is open, there too. Its choice is kept once
+// for the use, so both copies show the same thing and either Allow sends what the person sees.
+const batchChoices = new Map<string, BatchChoice>();
+let forgetsBatchChoices = false;
+
+/** The one choice of the batch `u`, shared by every copy of its card; a use that is no batch has none to share. */
+function batchChoiceOf(u: UseRequest): BatchChoice {
+    if (!u.batch) return newBatchChoice(u);
+    if (!forgetsBatchChoices) {
+        forgetsBatchChoices = true;
+        // A use that was answered, or given up, takes its choice with it.
+        createRoot(() =>
+            createEffect(() => {
+                const waiting = new Set(vaultUses().map((x) => x.id));
+                for (const id of [...batchChoices.keys()]) if (!waiting.has(id)) batchChoices.delete(id);
+            })
+        );
+    }
+    let choice = batchChoices.get(u.id);
+    if (!choice) {
+        // Owned by no card, so it outlives the copy that made it.
+        choice = createRoot(() => newBatchChoice(u));
+        batchChoices.set(u.id, choice);
+    }
+    return choice;
+}
+
 /** The person's answer to `u` as it is being given: the decision, and the value
  *  they type when no entry holds it yet (spec §6.5). `done` runs once it is
  *  answered, here or elsewhere (another window, or the agent gave up). */
@@ -405,10 +507,9 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
     const [card, setCard] = createSignal(u.choices?.some((c) => c.id === u.entry_id) ? u.entry_id : "");
-    // The rows of a batch the person leaves ticked, by their place in its list: all of them to begin with.
-    const [rows, setRows] = createSignal<number[]>(u.batch ? u.batch.items.map((_, i) => i) : []);
-    // The Vault a batch's rows go into: the one asked for, until the person chooses another the card offers.
-    const [vault, setVault] = createSignal(u.batch?.vault ?? "");
+    // The rows of a batch the person leaves ticked (all of them to begin with) and the Vault they go into (the one
+    // asked for, until the person chooses another the card offers): one choice for every copy of the card.
+    const { rows, setRows, vault, setVault } = batchChoiceOf(u);
     const tickRow = (row: number, on: boolean) => setRows((was) => (on ? [...was.filter((r) => r !== row), row].sort((x, y) => x - y) : was.filter((r) => r !== row)));
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) done();
@@ -417,8 +518,9 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
         setBusy(true);
         try {
             await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined);
-            // The typed value doesn't outlive the answer.
+            // The typed value doesn't outlive the answer, and neither does what was chosen on a batch's card.
             setTyped("");
+            batchChoices.delete(u.id);
             setAnswered(true);
             done();
         } catch (e) {

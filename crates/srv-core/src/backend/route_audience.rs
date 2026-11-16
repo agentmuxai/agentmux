@@ -28,6 +28,8 @@ pub const DESKTOP: &str = "desktop control can launch programs on the host, so c
                        Ask a native agent or your leader.";
 /// Generic gateways that reach everything else.
 pub const GATEWAY: &str = "this is a generic gateway to the host that container agents can't use. Use the specific tool for what you need.";
+/// A streamed Browser pane runs its page in the server's own network position.
+pub const STREAMED_BROWSER: &str = "a streamed page runs with the server's own network reach, which a container agent does not have. Use your own Browser tool.";
 /// Reading host files for the windows.
 pub const HOST_FILES: &str = "this reads files on the host for the app's windows. A container agent reads its own files in /workspace directly; \
                           to show one in a pane, open it with the editor.";
@@ -105,6 +107,9 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Prefix("/api/messaging/"), Audience::AppOnly(APP_ONLY)),
     (Match::Exact("/api/post-chat-message"), Audience::AppOnly(APP_ONLY)),
     (Match::Prefix("/webhook/"), Audience::AppOnly(APP_ONLY)),
+    // The web UI's streamed Browser pane (404 unless the headless server switched it on): its page reaches whatever the
+    // server reaches, so it is the signed-in person's, never a container agent's
+    (Match::Exact("/agentmux/streamed-browser"), Audience::AppOnly(STREAMED_BROWSER)),
     // Generic gateways
     (Match::Exact("/agentmux/service"), Audience::NativeOnly(HostCap::Exec, GATEWAY)),
     (Match::Exact("/ws"), Audience::NativeOnly(HostCap::Exec, GATEWAY)),
@@ -231,6 +236,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/agent/self/compact"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/context"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/fresh"), Audience::Everyone),
+    (Match::Route("/api/v1/agent/self/ready"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/mcp-heal"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/mcp-health"), Audience::Everyone),
     (Match::Route("/api/v1/agent/self/quit"), Audience::Everyone),

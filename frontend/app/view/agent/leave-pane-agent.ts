@@ -51,6 +51,7 @@ export const LEFT_AGENT_META: Record<string, null> = {
     "agent:last_failure": null,
     "agent:launch_blocked": null,
     "agent:pending_account": null,
+    "agent:prep": null,
     "agent:context": null,
 };
 

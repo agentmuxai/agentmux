@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::backend::agent_state::{self, AgentState};
+use crate::backend::agent_state;
 use crate::backend::blockcontroller;
 use crate::backend::obj::{self, Block};
 use crate::backend::storage::identities::IdentityAccount;
@@ -130,7 +130,7 @@ pub(super) fn restart(state: &AppState, block: &Block) -> Result<(), String> {
 
 /// Whether the pane is in a turn: it isn't moved under it.
 pub(super) fn busy(state: &AppState, block_id: &str) -> bool {
-    matches!(agent_state::current_state(&state.mstore, block_id), Some(AgentState::Working | AgentState::Waiting))
+    agent_state::in_turn(&state.mstore, block_id)
 }
 
 /// `identity.account.move_agents`. BLOCKING (store reads, link writes, restarts).
@@ -182,7 +182,7 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
             .collect();
         // The one door the composer and agents use: an agent in a turn is queued, not left.
         match super::switch::switch_to(state, "operator", &agent_id, to, &provider, &same_provider, super::switch::AccountSwitchWhen::AfterTurn) {
-            Ok(r) if r.status == super::switch::AccountSwitchStatus::Queued => result.busy.extend(agents),
+            Ok(r) if matches!(r.status, super::switch::AccountSwitchStatus::Queued | super::switch::AccountSwitchStatus::Preparing) => result.busy.extend(agents),
             Ok(r) if r.failed.is_empty() => result.moved.extend(agents),
             // Linked, but some panes didn't restart. The failures don't say which pane, and the
             // strip names the agent, so the counts are what matters: one failure per pane that

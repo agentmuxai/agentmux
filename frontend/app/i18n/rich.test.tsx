@@ -7,6 +7,8 @@ vi.mock("./locales/en.json", () => ({
         "t.plain": "Just text",
         "t.mixed": "<strong>Google:</strong> your name (the <code>openid</code> permission).",
         "t.name": "Connected as <strong>{{who}}</strong> today",
+        "t.keys.one": "The key is in <strong>{{place}}</strong>.",
+        "t.keys.other": "The {{count}} keys are in <strong>{{place}}</strong>.",
     },
 }));
 
@@ -46,6 +48,16 @@ describe("Rich", () => {
         expect(strong).toHaveLength(1);
         expect(strong[0].textContent).toBe("<strong>x</strong>@a.b");
         expect(container.querySelector("strong strong")).toBeNull();
+    });
+
+    it("takes the plural variant a count picks, and still fills the names", () => {
+        const one = render(() => <Rich k="t.keys" params={{ count: 1, place: "eu-west-1" }} />);
+        expect(one.container.textContent).toBe("The key is in eu-west-1.");
+        expect(one.container.querySelector("strong")?.textContent).toBe("eu-west-1");
+        cleanup();
+        const many = render(() => <Rich k="t.keys" params={{ count: 3, place: "<em>x</em>" }} />);
+        expect(many.container.textContent).toBe("The 3 keys are in <em>x</em>.");
+        expect(many.container.querySelector("em")).toBeNull();
     });
 
     it("renders plain text", () => {

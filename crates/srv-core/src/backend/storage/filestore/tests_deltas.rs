@@ -110,6 +110,138 @@ fn a_uuid_is_taken_only_in_its_canonical_form() {
     }
 }
 
+/// A delta line as the current CLI writes it: the message id comes after the uuid.
+fn delta_api(kind: &str, index: u32, text: &str, parent: Option<&str>, n: u64, api: &str) -> String {
+    let base = delta(kind, index, text, parent, n);
+    format!("{}\",\"api_message_id\":\"{api}\"}}\n", base.strip_suffix("\"}\n").unwrap())
+}
+
+/// Two replies, each with a text block 0 and a tool block 1, then the same block numbers again for the
+/// next message, as the CLI numbers them.
+fn api_replies() -> Vec<u8> {
+    let mut s = String::new();
+    let mut n = 0u64;
+    for api in ["msg_01AAAAAAAAAAAAAAAAAAAAAA", "msg_01BBBBBBBBBBBBBBBBBBBBBB"] {
+        s += &other("message_start", n);
+        for i in 0..6 {
+            n += 1;
+            s += &delta_api("text", 0, &format!("word {i} "), None, n, api);
+        }
+        for i in 0..6 {
+            n += 1;
+            s += &delta_api("json", 1, &format!("{{\\\"n\\\": {i}}}"), None, n, api);
+        }
+        s += &other("message_stop", n);
+        n += 1;
+        s += "{\"type\":\"assistant\"}\n";
+    }
+    s.into_bytes()
+}
+
+#[test]
+fn a_line_with_an_api_message_id_is_taken_and_comes_back_exactly() {
+    let raw = api_replies();
+    let (payload, stats) = encode(&raw).expect("has delta lines");
+    assert_eq!(stats.lines, 24, "every line, each with its message id");
+    assert!(stats.api);
+    assert_eq!(&payload[..4], b"AMD3", "a frame with a message id is a codec 3 payload");
+    assert_eq!(decode(&payload, raw.len()).unwrap(), raw);
+    assert!(payload.len() < raw.len() / 2, "{} of {}", payload.len(), raw.len());
+}
+
+#[test]
+fn the_same_block_number_in_two_messages_is_two_blocks() {
+    // Block 0's text of message A is not followed by block 0's text of message B: each message's block is one run.
+    let raw = api_replies();
+    let (payload, _) = encode(&raw).unwrap();
+    let rebuilt = decode(&payload, raw.len()).unwrap();
+    assert_eq!(rebuilt, raw);
+    let text = String::from_utf8(rebuilt).unwrap();
+    assert!(text.find("msg_01AAAAAAAAAAAAAAAAAAAAAA").unwrap() < text.find("msg_01BBBBBBBBBBBBBBBBBBBBBB").unwrap());
+}
+
+#[test]
+fn a_frame_with_no_message_id_stays_a_codec_two_payload() {
+    let (payload, stats) = encode(&reply()).unwrap();
+    assert!(!stats.api);
+    assert_eq!(&payload[..4], b"AMD2", "so a build that reads codecs 1 and 2 still reads it");
+}
+
+#[test]
+fn lines_with_and_without_a_message_id_mix() {
+    let mut s = String::new();
+    s += &delta("text", 0, "plain ", None, 1);
+    s += &delta_api("text", 0, "with id ", None, 2, "msg_01X");
+    s += &delta_api("text", 0, "again ", None, 3, "msg_01X");
+    s += &delta("text", 0, "plain again", None, 4);
+    let raw = s.into_bytes();
+    let (payload, stats) = encode(&raw).unwrap();
+    assert_eq!((stats.lines, stats.api), (4, true));
+    assert_eq!(decode(&payload, raw.len()).unwrap(), raw);
+}
+
+#[test]
+fn a_message_id_that_is_not_plain_leaves_the_line_as_it_was() {
+    for tail in [
+        "\",\"api_message_id\":\"msg_\\u0031\"}\n",    // an escape in the id
+        "\",\"api_message_id\":\"msg_1\",\"x\":1}\n",   // something after it
+        "\",\"api_message_id\":null}\n",                 // not a string
+        "\",\"api_message_id\":\"msg_1\"}",              // no end of line
+        "\",\"api_message_id\":\"msg_1\n\"}\n",          // a line break inside
+    ] {
+        let base = delta("text", 0, "hi", None, 1);
+        let line = format!("{}{tail}", base.strip_suffix("\"}\n").unwrap());
+        assert!(parse_delta(line.as_bytes()).is_none(), "{tail:?}");
+    }
+}
+
+#[test]
+fn a_frame_stored_with_codec_three_reads_like_any_other() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
+    let fs = FileStore::open_in_memory().unwrap();
+    let (z, n) = ("agent:a:current", "output");
+    let mut data = Vec::new();
+    let mut k = 0u64;
+    while data.len() < 20 * 65536 {
+        data.extend_from_slice(other("message_start", k).as_bytes());
+        let api = format!("msg_01{k:022}");
+        for i in 0..40 {
+            data.extend_from_slice(delta_api("text", 0, &format!("word {i} of reply {k}, "), None, k * 100 + i, &api).as_bytes());
+        }
+        data.extend_from_slice(format!("{{\"type\":\"assistant\",\"n\":{k}}}\n").as_bytes());
+        k += 1;
+    }
+    fs.make_file(z, n, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.append_lines(z, n, &data).unwrap();
+    let plain = super::super::frames::encode(super::super::frames::CODEC_ZSTD, &data[..16 * 65536]).unwrap().1.len();
+    let out = fs.frame_parts(z, n, 0, 16, super::super::frames::CODEC_DELTA_API).unwrap();
+    let super::super::frames::FrameOutcome::Framed { stored, codec, .. } = out else { panic!("{out:?}") };
+    assert_eq!(codec, super::super::frames::CODEC_DELTA_API);
+    assert!(stored < plain, "codec 3 {stored} < codec 1 {plain}");
+    assert_eq!(fs.read_file(z, n).unwrap().unwrap(), data);
+    let size = data.len() as i64;
+    assert_eq!(fs.read_bytes_db(z, n, 0, size).unwrap(), data);
+}
+
+#[test]
+fn asking_for_codec_two_leaves_a_line_with_a_message_id_alone() {
+    use super::super::frames::{encode as frame_encode, CODEC_DELTAS, CODEC_DELTA_API, CODEC_ZSTD};
+    // Only lines with a message id: codec 2 has nothing to take, so the frame is plain zstd, which every build reads.
+    let raw = api_replies();
+    assert_eq!(frame_encode(CODEC_DELTAS, &raw).unwrap().0, CODEC_ZSTD);
+    assert_eq!(frame_encode(CODEC_DELTA_API, &raw).unwrap().0, CODEC_DELTA_API);
+    // Mixed with plain lines: codec 2 takes those and keeps the rest as they were, in a payload codec 2 readers read.
+    let mut mixed = reply();
+    mixed.extend_from_slice(&raw);
+    let (codec, stored) = frame_encode(CODEC_DELTAS, &mixed).unwrap();
+    assert_eq!(codec, CODEC_DELTAS);
+    let payload = zstd::bulk::decompress(&stored, mixed.len() + 65536).unwrap();
+    assert_eq!(&payload[..4], b"AMD2");
+    assert_eq!(decode(&payload, mixed.len()).unwrap(), mixed);
+    // A frame with no message id is codec 2 either way.
+    assert_eq!(frame_encode(CODEC_DELTA_API, &reply()).unwrap().0, CODEC_DELTAS);
+}
+
 #[test]
 fn a_frame_without_delta_lines_is_left_to_codec_one() {
     assert!(encode(b"{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n").is_none());
@@ -173,13 +305,13 @@ fn escaped_text() -> impl Strategy<Value = String> {
 
 #[derive(Debug, Clone)]
 enum Line {
-    Delta { json: bool, index: u32, text: String, sub: bool },
+    Delta { json: bool, index: u32, text: String, sub: bool, api: Option<u8> },
     Other(String),
 }
 
 fn line() -> impl Strategy<Value = Line> {
     prop_oneof![
-        3 => (any::<bool>(), 0u32..20, escaped_text(), any::<bool>()).prop_map(|(json, index, text, sub)| Line::Delta { json, index, text, sub }),
+        3 => (any::<bool>(), 0u32..20, escaped_text(), any::<bool>(), prop::option::of(0u8..3)).prop_map(|(json, index, text, sub, api)| Line::Delta { json, index, text, sub, api }),
         1 => "[a-z{}\":,]{0,40}".prop_map(|s| Line::Other(format!("{s}\n"))),
     ]
 }
@@ -194,8 +326,12 @@ proptest! {
         let mut raw = String::new();
         for (n, l) in lines.iter().enumerate() {
             match l {
-                Line::Delta { json, index, text, sub } => {
-                    raw += &delta(if *json { "json" } else { "text" }, *index, text, sub.then_some("toolu_01X"), n as u64)
+                Line::Delta { json, index, text, sub, api } => {
+                    let (kind, parent) = (if *json { "json" } else { "text" }, sub.then_some("toolu_01X"));
+                    raw += &match api {
+                        Some(a) => delta_api(kind, *index, text, parent, n as u64, &format!("msg_0{a}")),
+                        None => delta(kind, *index, text, parent, n as u64),
+                    }
                 }
                 Line::Other(s) => raw += s,
             }
@@ -231,7 +367,7 @@ proptest! {
 #[test]
 #[ignore]
 fn replay_a_real_store() {
-    use super::super::frames::{decode_uncached, encode, Frame, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
+    use super::super::frames::{decode_uncached, encode, Frame, CODEC_DELTAS, CODEC_DELTA_API, CODEC_ZSTD, FRAME_PARTS};
     use sha2::{Digest, Sha256};
     let Ok(path) = std::env::var("AGENTMUX_FRAMES_REPLAY_DB") else { return };
     let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
@@ -243,7 +379,7 @@ fn replay_a_real_store() {
         .collect::<Result<_, _>>()
         .unwrap();
     let pds = 65536usize;
-    let (mut raw_total, mut z1, mut z2, mut frames, mut taken_lines, mut c2_frames, mut skipped) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut raw_total, mut z1, mut z2, mut z3, mut frames, mut taken_lines, mut c2_frames, mut c3_frames, mut skipped) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     for (zone, size) in &files {
         let parts = (*size as usize).div_ceil(pds);
         let mut first = 0usize;
@@ -270,19 +406,24 @@ fn replay_a_real_store() {
             assert_eq!(decode_uncached(&mk(c1, d1.clone())).unwrap(), raw, "{zone} frame {first}: codec 1");
             let (c2, d2) = encode(CODEC_DELTAS, &raw).unwrap();
             assert_eq!(decode_uncached(&mk(c2, d2.clone())).unwrap(), raw, "{zone} frame {first}: codec {c2}");
-            if c2 == CODEC_DELTAS {
+            if c2 == CODEC_DELTAS || c2 == CODEC_DELTA_API {
                 c2_frames += 1;
                 taken_lines += encode_stats(&raw);
             }
+            // Codec 3: the same frame, also taking the lines that carry an api_message_id.
+            let (c3, d3) = encode(CODEC_DELTA_API, &raw).unwrap();
+            assert_eq!(decode_uncached(&mk(c3, d3.clone())).unwrap(), raw, "{zone} frame {first}: codec {c3}");
+            c3_frames += usize::from(c3 == CODEC_DELTA_API);
             raw_total += raw.len();
             z1 += d1.len();
             z2 += d2.len();
+            z3 += d3.len();
             frames += 1;
         }
     }
     let mb = |n: usize| n as f64 / 1e6;
     println!(
-        "REPLAY files={} frames={frames} (codec 2: {c2_frames}) skipped={skipped} raw={:.1} MB codec1={:.1} MB ({:.2}x) codec2={:.1} MB ({:.2}x, {:.1}% smaller than codec 1) delta lines left out={taken_lines}",
+        "REPLAY files={} frames={frames} (codec 2: {c2_frames}, codec 3: {c3_frames}) skipped={skipped} raw={:.1} MB codec1={:.1} MB ({:.2}x) codec2={:.1} MB ({:.2}x, {:.1}% smaller than codec 1) codec3={:.1} MB ({:.2}x, {:.1}% smaller than codec 1) delta lines left out={taken_lines}",
         files.len(),
         mb(raw_total),
         mb(z1),
@@ -290,6 +431,9 @@ fn replay_a_real_store() {
         mb(z2),
         raw_total as f64 / z2.max(1) as f64,
         100.0 * (1.0 - z2 as f64 / z1.max(1) as f64),
+        mb(z3),
+        raw_total as f64 / z3.max(1) as f64,
+        100.0 * (1.0 - z3 as f64 / z1.max(1) as f64),
     );
 }
 

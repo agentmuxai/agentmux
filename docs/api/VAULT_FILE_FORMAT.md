@@ -78,13 +78,55 @@ sign-in) aren't exported: they belong to one install.
 | `note` | `text` | none |
 
 The first part of a kind (`value`, `number`, `account`, `password`, `text`) is its main
-value and is required. `totp` holds a one-time-code seed, stored and exported but not yet
-used to fill anything. Unknown parts or fields make the entry be skipped, with the reason shown.
+value and is required, except for a linked entry (below). `totp` holds a one-time-code seed,
+stored and exported but not yet used to fill anything. Unknown parts or fields make the entry
+be skipped, with the reason shown.
+
+## Linked entries
+
+A linked entry records where a key lives and holds no value
+(docs/specs/SPEC_VAULT_LINKED_ENTRIES_FLEET_VAULT_AND_BATCH_IMPORT_2026_11_15.md §2). In a
+file it is an entry of an ordinary kind whose `fields` say `"link": "only"` and whose `parts`
+are empty:
+
+```json
+{
+  "id": "api-key-invoice-provider-key",
+  "kind": "api-key",
+  "label": "Invoice provider key",
+  "fields": {
+    "link": "only",
+    "source_kind": "aws-secret",
+    "source_location": "prod/invoice-sync",
+    "source_key": "api.token",
+    "source_region": "eu-west-1",
+    "readers": "invoice-sync (lambda): at run time",
+    "rotated": "2026-10-01"
+  },
+  "tags": [],
+  "parts": {}
+}
+```
+
+- `source_kind` and `source_location` are required: a link says where the key lives.
+  `source_key`, `source_region` and `source_profile` narrow it. Any entry may carry these
+  `source_*` fields, to say where a copy of its value is kept.
+- `readers` (who or what reads the key, one line each), `rotated` (the date the key last
+  changed, `YYYY-MM-DD`) and `copies` (other places it is kept, one `kind: location#key` line
+  each) say more of it. `readers` and `copies` may be on an entry that holds its value too.
+- A linked entry with a part, or with no place, is skipped on import, with the reason shown.
+- When it was last checked isn't in the file: Activity belongs to one install.
+
+The export dialog's **Linked entries only** writes a `.vault` file of the linked entries and
+nothing else, so no value is in it. It is encrypted to a passphrase like any other, and is a
+way to show on another computer which keys exist and where they live.
 
 ## What counts as a duplicate on import
 
 An incoming entry duplicates one already in the Vault when:
 
+- for a linked entry, the kind and the place match (`source_kind`, `source_location`,
+  `source_key` and `source_region`);
 - for a `login`, the site (compared without case or a trailing `/`) and the username match;
 - for any other kind, the kind and the main value match.
 

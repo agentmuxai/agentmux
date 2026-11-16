@@ -207,7 +207,7 @@
 147 crates/srv-core/src/backend/tower/sampler.rs::group
 184 crates/srv-core/src/backend/tower/sampler.rs::render
 107 crates/srv-core/src/backend/vault/import/bitwarden.rs::read_plain
-115 crates/srv-core/src/backend/vault/import/kdbx.rs::entry_into
+110 crates/srv-core/src/backend/vault/import/kdbx.rs::entry_into
 206 crates/srv-core/src/backend/vault/import/onepux.rs::item_into
 123 crates/srv-core/src/backend/widget/packages.rs::describe
 102 crates/srv/src/bootstrap/logging.rs::init_logging
@@ -292,7 +292,7 @@
 129 crates/srv/src/server/shell_secrets.rs::inject
 135 crates/srv/src/server/system_install_handlers.rs::spawn_system_install_task
 107 crates/srv/src/server/ui_handlers.rs::handle_host_browser_popup
-201 crates/srv/src/server/vault_handlers.rs::handle_host_vault
+188 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 120 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
 231 crates/srv/src/server/websocket.rs::handle_ws_connection
@@ -352,7 +352,7 @@
 130 frontend/app/view/accounts/accounts-manager.tsx::AccountsManager
 143 frontend/app/view/agent/buildRuntimeArgs.ts::buildRuntimeArgs
 140 frontend/app/view/agent/cli-notice.ts::parseCliNoticeFrame
-111 frontend/app/view/agent/commands/global/login.ts::runLogin
+110 frontend/app/view/agent/commands/global/login.ts::runLogin
 116 frontend/app/view/agent/components/AgentDocumentView.tsx::AgentDocumentView
 115 frontend/app/view/agent/components/AgentEnvPanel.tsx::AgentEnvPanel
 120 frontend/app/view/agent/components/AgentSessionNotices.tsx::AgentSessionNotices
@@ -367,7 +367,7 @@
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
-168 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
+166 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 227 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator

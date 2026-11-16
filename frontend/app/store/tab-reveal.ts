@@ -266,12 +266,17 @@ function liftTabGate(source: "settle" | "orphaned-hold", hitCap: boolean, elapse
  *   premature blank.
  */
 export function holdRevealGate(targetTabId: string): void {
-    setGateTargetTabId(targetTabId);
-    setTabSwitching(true);
+    // A write flushes its dependents, and one that throws makes the write throw (the value is set). The timers
+    // below must still be armed, or the gate has no safety net (#47767): they come first, the writes after.
     cancelDetector(tabHandle);
     // Firing here means scheduleRevealLift() was never called to replace
     // this safety net — an orphaned hold, not ordinary settle latency.
     armFallback(tabHandle, () => liftTabGate("orphaned-hold", true, MAX_GATE_MS), MAX_GATE_MS);
+    try {
+        setGateTargetTabId(targetTabId);
+    } finally {
+        setTabSwitching(true);
+    }
 }
 
 /**
@@ -280,8 +285,9 @@ export function holdRevealGate(targetTabId: string): void {
  * detector. That's what handles rapid Ctrl-Tab spam.
  */
 export function scheduleRevealLift(): void {
-    setTabSwitching(true);
+    // The detector starts first: a throwing dependent of the write must not leave the gate without its lift.
     startDetector(tabHandle, (hitCap, elapsedMs) => liftTabGate("settle", hitCap, elapsedMs));
+    setTabSwitching(true);
 }
 
 // ─── Leaf-scoped gate (generalization — SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22) ──

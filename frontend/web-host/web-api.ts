@@ -350,12 +350,14 @@ function dragApi() {
     } satisfies Partial<AppApi>;
 }
 
-export function buildWebApi(): AppApi {
+export function buildWebApi(options: { streamedBrowserPane?: boolean } = {}): AppApi {
     window.addEventListener("pointermove", (e) => (lastPointer = { x: e.screenX, y: e.screenY }), { passive: true });
     const platform = browserPlatform();
 
     return {
         ...desktopOnlyApi(),
+        // The one capability a server can give a browser tab: Browser panes whose page runs on the server.
+        getHostCaps: () => ({ ...NO_HOST_CAPS, streamedBrowserPane: options.streamedBrowserPane === true }),
         ...linkAndClipboardApi(),
         ...identityAndEnvApi(platform),
         ...uiHooksApi(),
