@@ -228,7 +228,7 @@ describe("the question before an agent changes where a machine copy is", () => {
         deadline_ms: Date.now() + 120_000,
         expires_ms: Date.now() + 120_000,
         goes_ahead: false,
-        link,
+        link: { about_from: "", about_to: "", only: false, ...link },
     });
     const shown = async (link: { from: string; to: string }) => {
         uses = [use(link)];

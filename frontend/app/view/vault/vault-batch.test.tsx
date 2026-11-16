@@ -22,9 +22,9 @@ const batch = (over: Partial<UseBatch> = {}): UseBatch => ({
     grant: false,
     vault: "Fleet",
     items: [
-        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false },
-        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false },
-        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", replaces: true },
+        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false, link: false },
+        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false, link: false },
+        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", replaces: true, link: false },
     ],
     ...over,
 });
@@ -191,5 +191,8 @@ describe("a batch's lines in the Activity tab", () => {
         expect(outcomeOf("denied")?.warn).toBe(true);
         expect(outcomeOf("partly done")?.warn).toBe(true);
         expect(outcomeOf("same")).toEqual({ text: "same", warn: false });
+        // A check of a linked entry that found its place there is good news; one that found it changed or gone is not.
+        expect(outcomeOf("present")).toEqual({ text: "present", warn: false });
+        expect(outcomeOf("missing: AWS has no secret by that id, in that region")?.warn).toBe(true);
     });
 });

@@ -31,6 +31,8 @@ import {
 import { kindsIn, type VaultInput, vaultKind, type VaultKind } from "./vault-kinds";
 import { firstSaveNotice } from "./vault-prompts";
 import { MachineCopyFields, offersSource, sourceFields } from "./vault-source";
+import { isLinked, LinkedFields, linkFields } from "./vault-linked";
+import { t } from "@/app/i18n/i18n";
 import { createEntry, updateEntry, vaultEntries } from "./vault-store";
 import { VaultField } from "./vault-vaults";
 // Loaded with the form, which an agent's pane opens without a Vault pane: a
@@ -155,6 +157,16 @@ function createFormState(props: FormProps): FormState {
     };
 }
 
+/** The plain fields as they are saved: the kind's own, where a machine copy is, and what a link says of its key. */
+function savedFields(s: FormState, k: VaultKind): Record<string, string> {
+    return { ...pick(s.fields, k.fields), ...sourceFields(s.fields), ...linkFields(s.fields) };
+}
+
+/** The secret parts as they are saved: a linked entry holds none, whatever was typed before it was made one. */
+function savedParts(s: FormState, k: VaultKind): Record<string, string> {
+    return isLinked(s.fields) ? {} : pick(s.parts, k.parts);
+}
+
 /** Only this kind's inputs: switching kinds leaves the others' typing behind. */
 function pick(src: Record<string, string>, inputs: VaultInput[]): Record<string, string> {
     return Object.fromEntries(inputs.map((i) => [i.name, src[i.name] ?? ""]).filter(([, v]) => v !== ""));
@@ -174,18 +186,18 @@ async function save(s: FormState) {
             await updateEntry({
                 id: s.editing.id,
                 label: s.label(),
-                fields: { ...pick(s.fields, k.fields), ...sourceFields(s.fields) },
+                fields: savedFields(s, k),
                 tags: s.editing.tags,
-                parts: pick(s.parts, k.parts),
-                clear: k.parts.filter((p) => s.clear[p.name]).map((p) => p.name),
+                parts: savedParts(s, k),
+                clear: isLinked(s.fields) ? [] : k.parts.filter((p) => s.clear[p.name]).map((p) => p.name),
             });
             s.props.onClose(s.editing.id);
         } else {
             const res = await createEntry({
                 kind: k.name,
                 label: s.label(),
-                fields: { ...pick(s.fields, k.fields), ...sourceFields(s.fields) },
-                parts: pick(s.parts, k.parts),
+                fields: savedFields(s, k),
+                parts: savedParts(s, k),
                 request_id: s.request?.id,
                 vault: s.vault(),
             });
@@ -223,9 +235,11 @@ export function VaultEntryForm(props: FormProps): JSX.Element {
                 description={
                     request?.why
                         ? `Why: ${request.why}`
-                        : editing
-                          ? "Values aren't shown. Type one to replace it; leave it empty to keep it."
-                          : undefined
+                        : editing && isLinked(editing.fields)
+                          ? t("vault.linked.editDescription")
+                          : editing
+                            ? "Values aren't shown. Type one to replace it; leave it empty to keep it."
+                            : undefined
                 }
             />
             <ModalBody>
@@ -283,14 +297,17 @@ function FormFields({ s }: { s: FormState }) {
                     maxLength={200}
                 />
             </Field>
-            <For each={(s.kind()?.parts ?? []).filter((p) => !p.legacy && p.name !== "exp_year")}>
-                {(p) => <PartRow s={s} p={p} />}
-            </For>
+            <Show when={!isLinked(s.fields)}>
+                <For each={(s.kind()?.parts ?? []).filter((p) => !p.legacy && p.name !== "exp_year")}>
+                    {(p) => <PartRow s={s} p={p} />}
+                </For>
+            </Show>
             <For each={(s.kind()?.fields ?? []).filter((f) => !f.kept && (!f.profile || !!s.fields.site?.trim()))}>
                 {(f) => <FieldRow s={s} f={f} />}
             </For>
             <Show when={offersSource(s.kind()?.section, s.fields)}>
                 <MachineCopyFields fields={s.fields} setFields={s.setFields} />
+                <LinkedFields fields={s.fields} setFields={s.setFields} isNew={!s.editing && !s.request} />
             </Show>
             {/* Enter in a field saves. */}
             <input type="submit" hidden />
