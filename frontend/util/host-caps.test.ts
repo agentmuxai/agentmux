@@ -14,7 +14,10 @@ afterEach(() => {
 describe("host capabilities", () => {
     it("CEF and no-caps hosts list the same capabilities", () => {
         expect(Object.keys(NO_HOST_CAPS).sort()).toEqual(Object.keys(CEF_HOST_CAPS).sort());
-        expect(Object.values(CEF_HOST_CAPS).every(Boolean)).toBe(true);
+        // Every capability but one: a streamed Browser pane is what a browser tab gets from a server, never the desktop.
+        const desktop = Object.entries(CEF_HOST_CAPS).filter(([name]) => name !== "streamedBrowserPane");
+        expect(desktop.every(([, on]) => on)).toBe(true);
+        expect(CEF_HOST_CAPS.streamedBrowserPane).toBe(false);
         expect(Object.values(NO_HOST_CAPS).some(Boolean)).toBe(false);
     });
 

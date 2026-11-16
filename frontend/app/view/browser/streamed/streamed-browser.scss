@@ -1,0 +1,93 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A streamed Browser pane: a bar over a stage that holds the page's canvas.
+
+.streamed-browser {
+    .streamed-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-2);
+        background: var(--main-bg-color);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .streamed-bar-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--main-text-color);
+        cursor: pointer;
+
+        &:hover:not(:disabled) {
+            background: var(--hover-bg-color, var(--border-color));
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+    }
+
+    .streamed-bar-address {
+        flex: 1;
+        min-width: 0;
+        height: 28px;
+        padding: 0 var(--space-2);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        font-size: var(--text-md);
+    }
+
+    .streamed-stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        background: var(--main-bg-color);
+        outline: none;
+
+        &:focus-visible {
+            box-shadow: inset 0 0 0 1px var(--accent-color, var(--border-color));
+        }
+    }
+
+    // At the frame's own size, from the top left: a click lands where the person sees it.
+    .streamed-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: block;
+    }
+
+    .streamed-status {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        color: var(--main-text-color);
+        background: color-mix(in srgb, var(--main-bg-color) 80%, transparent);
+        text-align: center;
+        padding: var(--space-4);
+    }
+
+    .streamed-status-btn {
+        padding: var(--space-1) var(--space-3);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--main-text-color);
+        cursor: pointer;
+    }
+}
