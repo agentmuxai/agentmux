@@ -101,6 +101,13 @@ describe("the agent pane inside a backdrop", () => {
         }
     });
 
+    it("keeps the window's own warning colour as it is inside a pane: defined on :root, listed window-level, and not re-resolved", () => {
+        expect(defaults.has("--app-warning-color")).toBe(true);
+        expect(mapped.windowLevel).toContain("--app-warning-color");
+        const aliases = readFileSync(join(ROOT, "frontend/app/backdrop/_aliases.scss"), "utf8");
+        expect(aliases).not.toContain("--app-warning-color");
+    });
+
     it("sees what it should: the scan finds the agent pane's files and a known fixed colour", () => {
         expect(agentSources().length).toBeGreaterThan(100);
         expect(fixedColour.has("--attention-color")).toBe(true);

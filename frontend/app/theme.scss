@@ -585,6 +585,9 @@
     --tint-4: color-mix(in srgb, var(--main-text-color) 10%, transparent);
     --error-bg:     color-mix(in srgb, var(--error-color) 12%, transparent);
     --error-line:   color-mix(in srgb, var(--error-color) 30%, transparent);
+    // The window's own warning colour, kept as it is inside a pane's backdrop, where --warning-color is the pane's ink
+    // (frontend/app/backdrop/mapped-tokens.json, windowLevel): for a mark that must read as a warning on any backdrop.
+    --app-warning-color: var(--warning-color);
     --warning-bg:   color-mix(in srgb, var(--warning-color) 12%, transparent);
     --warning-line: color-mix(in srgb, var(--warning-color) 30%, transparent);
     --accent-bg:    color-mix(in srgb, var(--accent-color) 12%, transparent);

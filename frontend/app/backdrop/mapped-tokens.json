@@ -27,5 +27,8 @@
     },
     "channels": [
         "--accent-color-rgb"
+    ],
+    "windowLevel": [
+        "--app-warning-color"
     ]
 }
