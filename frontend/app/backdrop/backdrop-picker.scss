@@ -56,3 +56,16 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
+
+// A missed target is told in the window's own warning colour, which is outside the pane's scope: inside it
+// `--warning-color` is the pane's ink, near white or black on a hard surface, and a neutral box does not read as a warning.
+// The box and the icon carry the colour; the text stays the pane's own ink, the part held to 4.5:1.
+.backdrop-picker-readout.is-missed {
+    border-color: color-mix(in srgb, var(--app-warning-color) 55%, transparent);
+    background: color-mix(in srgb, var(--app-warning-color) 14%, transparent);
+    color: var(--main-text-color);
+
+    > :first-child:not(.ui-notice-body) {
+        color: var(--app-warning-color);
+    }
+}
