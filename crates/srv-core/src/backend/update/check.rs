@@ -224,18 +224,23 @@ impl AppUpdateStatus {
 /// there is no file list or checksum yet), or a release with no file for this computer. `None` when it can, and
 /// for installs that never download (the Store, an unknown install): the release page is their way, not a fault.
 fn download_blocked(state: &str, kind: &InstallKind, release: &Release, has_asset: bool, below_floor: bool) -> Option<String> {
-    if state != "available" || below_floor || has_asset {
+    if state != "available" || below_floor {
         return None;
     }
+    // A macOS app that can't be replaced where it is finds its file in the release all the same, so this
+    // comes before the file is looked at.
     if let Some(why) = kind.blocked_reason() {
         return Some(format!("This install can't upgrade itself where it is: {why}."));
     }
-    if !kind.can_download() {
+    if has_asset || !kind.can_download() {
         return None;
     }
-    Some(match release.assets.is_empty() {
-        true => release.body.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "The release's file list isn't available yet.".to_string()),
-        false => "This release has no file for this computer.".to_string(),
+    Some(if let Some(note) = &release.limit_note {
+        note.clone()
+    } else if release.assets.is_empty() {
+        "The release's file list isn't available yet.".to_string()
+    } else {
+        "This release has no file for this computer.".to_string()
     })
 }
 
@@ -254,6 +259,9 @@ pub(crate) struct Release {
     prerelease: bool,
     #[serde(default)]
     assets: Vec<GithubAsset>,
+    /// Set only on a release known by its tag alone ([`release_from_tag`]): why there are no files.
+    #[serde(skip)]
+    limit_note: Option<String>,
 }
 
 /// A file attached to a GitHub release. `digest` is `sha256:<hex>`.
@@ -488,11 +496,12 @@ fn release_from_tag(tag: &str, note: Option<String>) -> Release {
     Release {
         tag_name: tag.to_string(),
         html_url: format!("{RELEASE_PAGE_PREFIX}{tag}"),
-        body: note,
+        body: note.clone(),
         published_at: None,
         draft: false,
         prerelease: false,
         assets: Vec::new(),
+        limit_note: note,
     }
 }
 
@@ -745,6 +754,7 @@ mod tests {
             draft: false,
             prerelease: false,
             assets: Vec::new(),
+            limit_note: None,
         }
     }
 
@@ -833,6 +843,21 @@ mod tests {
         let mac = InstallKind::MacApp { app: "/Applications/AgentMux.app".into(), blocked: Some("it is on a read-only volume".into()) };
         let blocked = status_for("0.59.41", "stable", &release("v99.0.0"), 1, &mac).download_blocked.unwrap();
         assert_eq!(blocked, "This install can't upgrade itself where it is: it is on a read-only volume.");
+        // ...also when the release does list its file (the usual case): the file is there, the app can't be replaced.
+        // (Asked directly with the file found, so the test doesn't depend on the architecture it runs on.)
+        let with_file = download_blocked("available", &mac, &release("v99.0.0"), true, false);
+        assert_eq!(with_file.as_deref(), Some("This install can't upgrade itself where it is: it is on a read-only volume."));
+        // An install that can replace itself, with its file found, has nothing to say.
+        assert_eq!(download_blocked("available", &InstallKind::WindowsSetup, &release("v99.0.0"), true, false), None);
+    }
+
+    #[test]
+    fn a_release_whose_files_are_not_up_yet_never_shows_its_notes_as_the_reason() {
+        // A real release with an empty file list and a changelog (and the floor line): the reason is the plain one.
+        let notes = "- A long changelog line\n<!-- agentmux:min-upgrade-from=0.50.0 -->\n".repeat(2000);
+        let not_up_yet = Release { body: Some(notes), ..release("v99.0.0") };
+        let why = status_for("0.59.41", "stable", &not_up_yet, 1, &InstallKind::WindowsSetup).download_blocked.unwrap();
+        assert_eq!(why, "The release's file list isn't available yet.");
     }
 
     #[test]

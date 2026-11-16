@@ -61,7 +61,7 @@
     "frontend/app/statusbar/InstancePanelRows.tsx": 1,
     "frontend/app/statusbar/InstancePanelSections.tsx": 17,
     "frontend/app/statusbar/LanPeerRow.tsx": 14,
-    "frontend/app/statusbar/maintenance-parts.tsx": 39,
+    "frontend/app/statusbar/maintenance-parts.tsx": 40,
     "frontend/app/statusbar/MaintenanceSection.tsx": 1,
     "frontend/app/statusbar/MultiInputStatus.tsx": 1,
     "frontend/app/statusbar/MuxBusIndicator.tsx": 1,
