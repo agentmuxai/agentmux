@@ -76,7 +76,6 @@ const GROK_AUTH =
     "https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md";
 const GROK_DOCS = "https://docs.x.ai/build/overview";
 const KIMI_PLATFORM = "https://platform.kimi.ai/docs/overview";
-const KIMI_PRODUCTS = "https://platform.kimi.ai/docs/guide/product-plans";
 const KIMI_CODE_PROVIDERS = "https://moonshotai.github.io/kimi-code/en/configuration/providers";
 const OPENROUTER_AUTH = "https://openrouter.ai/docs/api-reference/authentication";
 const OPENROUTER_FAQ = "https://openrouter.ai/docs/faq";
@@ -226,27 +225,13 @@ export const PROVIDER_GUIDES: ProviderGuide[] = [
         brand: "kimi",
         options: [
             {
-                kind: "key",
-                title: "API key",
-                what: read2("A key from the Kimi API Platform.", KIMI_PLATFORM),
-                billedAgainst: read2(
-                    "Pay as you go on the Kimi API Platform, which has no subscription plan. This is separate from Kimi Membership and Kimi Code.",
-                    KIMI_PRODUCTS
-                ),
-                drives: ["Kimi Code CLI"],
-                key: {
-                    calledOnVendorSite: "API Key",
-                    createAt: read2("https://platform.kimi.ai/console/api-keys", KIMI_PLATFORM),
-                },
-                pickWhen: "Have a Kimi API Platform key? Add it.",
-            },
-            {
                 kind: "inside",
                 title: "Kimi Code signs in inside the agent",
                 what: read2("Kimi Code has its own sign-in: open a Kimi agent and run /login.", KIMI_CODE_PROVIDERS),
+                drives: ["Kimi Code CLI"],
             },
         ],
-        pointers: [],
+        pointers: [{ label: "Kimi API Platform docs", url: read2(KIMI_PLATFORM, KIMI_PLATFORM) }],
     },
 ];
 

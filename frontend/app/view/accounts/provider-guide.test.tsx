@@ -5,6 +5,7 @@
 // AgentMux can do. Then the explanation draws only facts that have a source.
 
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
+import { ACCOUNT_BRAND_ORDER } from "@/app/view/identity/identity-model";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +13,7 @@ const openLink = vi.hoisted(() => vi.fn());
 vi.mock("@/app/store/global", () => ({ openLink }));
 
 import { SERVICE_CATALOG } from "./accounts-catalog";
+import { CLI_SIGN_INS } from "./cli-sign-ins";
 import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetails";
 import { OtherAgentsSection, otherAgentsShown } from "./OtherAgentsSection";
 import { guideFor, optionForMode, OTHER_AGENTS, PROVIDER_GUIDES, shown, type Fact, type ProviderGuide } from "./provider-guide";
@@ -176,15 +178,13 @@ describe("the tiles that have no sign-in to run", () => {
         expect(guideFor("xai")?.options.map((o) => o.kind)).toEqual(["inside"]);
     });
 
-    it("gives Moonshot a key, named by the provider id the Kimi agent and srv's key class use", () => {
+    it("gives Moonshot text only: Kimi Code's sign-in, and no key form until a key is seen reaching the CLI", () => {
         const kimi = SERVICE_CATALOG.find((t) => t.id === "kimi");
         expect(kimi?.displayName).toBe("Moonshot");
-        expect(kimi?.authModes).toEqual(["key"]);
-        expect(kimi?.keyKind).toBe("api_key");
-        expect(PROVIDERS["kimi"]?.authType).toBe("api-key");
-        expect(optionForMode(guideFor("kimi"), "key")?.key?.createAt.value).toBe("https://platform.kimi.ai/console/api-keys");
-        expect(optionForMode(guideFor("kimi"), "key")?.key?.prefix).toBeUndefined();
-        expect(guideFor("kimi")?.options.some((o) => o.kind === "inside")).toBe(true);
+        expect(kimi?.authModes).toEqual([]);
+        expect(kimi?.signIn).toBeUndefined();
+        expect(guideFor("kimi")?.options.map((o) => o.kind)).toEqual(["inside"]);
+        expect(optionForMode(guideFor("kimi"), "key")).toBeUndefined();
     });
 
     it("puts Copilot under GitHub as text, with no sign-in of its own", () => {
@@ -276,18 +276,13 @@ describe("the tile guides draw", () => {
         expect(openLink).toHaveBeenCalledWith("https://docs.x.ai/build/overview");
     });
 
-    it("Moonshot's key, where to make one, and Kimi Code's own sign-in", () => {
-        const g = guideFor("kimi")!;
-        render(() => (
-            <>
-                <ProviderGuideInside guide={g} />
-                <ProviderGuideDetails guide={g} />
-            </>
-        ));
+    it("Kimi Code's own sign-in in plain view, with the platform docs", () => {
+        const { container } = render(() => <ProviderGuideInside guide={guideFor("kimi")!} />);
+        expect(container.querySelector("details")).toBeNull();
         expect(screen.getByText("Kimi Code signs in inside the agent")).toBeTruthy();
         expect(screen.getByText(/open a Kimi agent and run \/login/)).toBeTruthy();
-        screen.getByRole("button", { name: "Make one" }).click();
-        expect(openLink).toHaveBeenCalledWith("https://platform.kimi.ai/console/api-keys");
+        screen.getByRole("button", { name: "Kimi API Platform docs" }).click();
+        expect(openLink).toHaveBeenCalledWith("https://platform.kimi.ai/docs/overview");
     });
 
     it("Copilot's plans under GitHub, with nothing to pick between", () => {
@@ -302,5 +297,18 @@ describe("the tile guides draw", () => {
         expect(screen.getByText(/Copilot Student/)).toBeTruthy();
         expect(screen.getByText("Usage is counted in GitHub AI Credits.")).toBeTruthy();
         expect(container.querySelector("details")).toBeNull();
+    });
+});
+
+describe("the CLI sign-ins", () => {
+    it("are exactly the tiles that run a sign-in, with the brand each names", () => {
+        const fromTiles = Object.fromEntries(SERVICE_CATALOG.flatMap((t) => (t.signIn ? [[t.signIn.provider, t.signIn.brand]] : [])));
+        expect(fromTiles).toEqual(CLI_SIGN_INS);
+    });
+});
+
+describe("the accounts' brands", () => {
+    it("group under every tile, so a connected account counts on its tile", () => {
+        expect([...ACCOUNT_BRAND_ORDER].sort()).toEqual(SERVICE_CATALOG.map((t) => t.id).sort());
     });
 });

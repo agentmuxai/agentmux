@@ -225,6 +225,20 @@ export function deleteResultNotice(result: {
     return parts.length > 0 ? parts.join(" ") : null;
 }
 
+/** The brands accounts are grouped under, in order: one per tile of Connectors' gallery (a test holds the two together). */
+export const ACCOUNT_BRAND_ORDER: readonly AccountProvider[] = [
+    "github",
+    "google",
+    "aws",
+    "openai",
+    "anthropic",
+    "xai",
+    "kimi",
+    "slack",
+    "custom",
+    "agentmux",
+];
+
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     github: "GitHub",
     openai: "OpenAI",
@@ -663,8 +677,7 @@ export class IdentityViewModel implements ViewModel {
     // See docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
-        const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
-        for (const p of order) {
+        for (const p of ACCOUNT_BRAND_ORDER) {
             const group = this.accountsAtom().filter((a) => brandForProvider(a.provider) === p);
             if (group.length > 0) map.set(p, group);
         }

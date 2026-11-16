@@ -1,6 +1,6 @@
 # Spec: Connectors show every way to connect each provider, with plain explanations
 
-**Status:** active — PR 1 (the guide data, the explanations on the Anthropic, OpenAI and Google tiles, the ChatGPT sign-in, the panel rename) in #7409, merging when the operator approves this spec (task #27097; the build is #27098). PR 2 (§8) adds Reconnect for a CLI sign-in, the xAI and Moonshot tiles (text and key entry only), Copilot under GitHub (text) and the other agents (task #47787, vendor pages re-read 2026-11-16). The device-code fallback and the sign-ins for Grok Build and Copilot are not built: each waits for a real sign-in seen working, which needs the operator's OK for a lab.
+**Status:** active — PR 1 (the guide data, the explanations on the Anthropic, OpenAI and Google tiles, the ChatGPT sign-in, the panel rename) in #7409, merging when the operator approves this spec (task #27097; the build is #27098). PR 2 (§8) adds Reconnect for a CLI sign-in, the xAI and Moonshot tiles (text only), Copilot under GitHub (text) and the other agents (task #47787, vendor pages re-read 2026-11-16). The device-code fallback and the sign-ins for Grok Build and Copilot are not built: each waits for a real sign-in seen working, which needs the operator's OK for a lab.
 **Date:** 2026-11-14
 **Author:** Naki-2@narko
 **Verified against:** `agentmux` `main` @ `086e28e98` (code read) and the vendor pages named in §6, fetched 2026-11-14.
@@ -54,7 +54,7 @@ Per provider, after this build:
 | Google | Gmail, Calendar, Drive (exists) | | Antigravity (Google plan), Gemini CLI |
 | GitHub | GitHub App (exists), Copilot (PR 2) | personal access token (exists) | |
 | xAI (new tile, PR 2) | Grok Build sign-in | | |
-| Moonshot (new tile, PR 2) | | Moonshot Platform key | Kimi Code sign-in |
+| Moonshot (new tile, PR 2) | | Moonshot Platform key (the form waits until a key is seen reaching the Kimi CLI, §9) | Kimi Code sign-in |
 | Other agents (a list under the tiles) | | | Muse Code, Qwen Code, DeepSeek Harness, OpenRouter-routed agents, Pi, Kilo, Cline, OpenCode, goose, Aider, Crush |
 
 AWS, Slack, Custom and AgentMux keep their tiles and get one short explanation each (§4.4).
@@ -150,7 +150,7 @@ Connect OpenAI
 - *Key:* console.x.ai, billed from prepaid credits. This is not an AgentMux option today (§3), so it is not offered.
 
 **Moonshot** (new tile, PR 2)
-- *API key.* "A key from the Kimi API Platform (platform.kimi.ai/console/api-keys), billed separately from a Kimi membership."
+- *API key (not built yet, §9 decision 2):* "A key from the Kimi API Platform (platform.kimi.ai/console/api-keys), billed separately from a Kimi membership."
 - Inside the agent: "Kimi Code has its own sign-in; open a Kimi agent and run /login."
 
 **Other agents (as built in PR 2):** each agent's line says only what its own page says (§6.1), because the pages disagree: Muse Code and goose prompt on first use, Qwen Code opens its /auth menu, Pi, Kilo, OpenCode and Cline have a command (/login, /connect, cline auth), Crush has a model picker (ctrl+l) where you paste a key, Aider reads keys from flags, environment variables, .env or YAML, and DeepSeek Harness starts a web page (dsh web). The blanket sentence below is therefore not shown; Qwen Code gets an OpenRouter key pointer and DeepSeek Harness a DeepSeek one. Planned wording was: one line each: "Asks you to sign in or paste a key the first time it runs", with its docs link (from `catalog.ts`), and for OpenRouter-routed agents a key from openrouter.ai/keys (starts `sk-or-v1-`, paid from credits, each key can have a credit limit); for DeepSeek a key from platform.deepseek.com/api_keys, billed per token from a topped-up or granted balance.
@@ -228,6 +228,6 @@ The operator has not answered these four. AgentY decided them on 2026-11-16 unde
 2. **Kimi's key variable:** the build checks it. srv injects a Kimi key as `MOONSHOT_API_KEY` (`provider_class("kimi")`), while the Kimi Code docs list `KIMI_API_KEY` for the CLI and say it doesn't read shell variables unless `api_key_env` is declared. A bound Kimi account must be seen reaching the CLI before the Moonshot tile ships (PR 2). If it doesn't, that is its own bug.
 3. **Google individuals:** text only. Connectors offers no Gemini CLI sign-in, because Google's README sends individuals to Antigravity (which AgentMux treats as signing in inside the agent).
 
-**Result of decision 2 (PR 2, 2026-11-16).** The vendor pages disagree on the name: Moonshot's platform page uses `MOONSHOT_API_KEY`, while the Kimi CLI's configuration page names `KIMI_API_KEY` for its `kimi` provider and never mentions `MOONSHOT_API_KEY`. srv now injects a Kimi key under both names (`provider_class("kimi")`). A key has not been seen reaching a running Kimi CLI, because narko holds no Moonshot key: the Moonshot tile's copy promises nothing beyond what the two pages say, and a seen check is still owed.
+**Result of decision 2 (PR 2, 2026-11-16).** The vendor pages disagree on the name: Moonshot's platform page uses `MOONSHOT_API_KEY`, while the Kimi CLI's configuration page names `KIMI_API_KEY` for its `kimi` provider and never mentions `MOONSHOT_API_KEY`. narko holds no Moonshot key, so no key has been seen reaching a running Kimi CLI, and AgentX decided (2026-11-16) that the rule holds: the Moonshot tile is text only (Kimi Code's `/login`), there is no key form, and srv's injection (`MOONSHOT_API_KEY` only) is unchanged. The key form, and whatever the injection needs to be, ship together once a key is seen working.
 
 4. **Staying current:** a weekly Schedule job that re-reads the §6.1 pages and opens a task when one differs: yes, later, as its own task. Until then the dated source line on each fact is the check.

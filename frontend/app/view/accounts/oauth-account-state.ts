@@ -10,7 +10,7 @@
 import { createSignal } from "solid-js";
 
 import type { Account } from "@/app/view/identity/identity-model";
-import { SERVICE_CATALOG } from "./accounts-catalog";
+import { CLI_SIGN_INS } from "./cli-sign-ins";
 import { supportsOAuth } from "./oauth-catalog";
 
 /** An account connected through srv's service-OAuth flow (its tokens in the keychain). */
@@ -132,7 +132,8 @@ export function setOAuthNote(accountId: string, note: OAuthNote | null): void {
  *  Connectors doesn't run yet. */
 export function cliSignInOf(a: Pick<Account, "kind" | "provider" | "secret_ref">): { provider: string; brand: string } | undefined {
     if (a.kind !== "oauth" || a.secret_ref?.backend !== "oauth_config_dir") return undefined;
-    return SERVICE_CATALOG.find((t) => t.signIn?.provider === a.provider)?.signIn;
+    const brand = CLI_SIGN_INS[a.provider];
+    return brand ? { provider: a.provider, brand } : undefined;
 }
 
 /** A CLI sign-in the provider no longer accepts: the statuses srv counts as unable to run an agent. */
