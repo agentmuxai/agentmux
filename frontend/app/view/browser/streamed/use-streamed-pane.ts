@@ -50,6 +50,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     let handle: StreamedHandle | null = null;
     let size = { w: 0, h: 0 };
     let visible = false;
+    /** An address asked for while the socket was still opening: kept, and sent as soon as it opens. */
+    let pendingNav: object | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const close = () => {
@@ -68,6 +70,10 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                 onFrame: draw,
                 onOpen: () => {
                     setStatus("live");
+                    if (pendingNav) {
+                        handle?.send(pendingNav);
+                        pendingNav = null;
+                    }
                     // The pane may have been resized while the socket was opening: the server has the size it started with.
                     if (clampSide(size.w) !== started.w || clampSide(size.h) !== started.h) {
                         handle?.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
@@ -98,7 +104,11 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
         status,
         nav,
         error,
-        send: (message) => handle?.send(message),
+        send: (message) => {
+            if (status() === "live") handle?.send(message);
+            // An address typed while connecting is not lost; input and other moves are not for a page that is not there yet.
+            else if ((message as { t?: string; go?: string }).t === "nav" && (message as { go?: string }).go === "url") pendingNav = message;
+        },
         resized: (w, h) => {
             size = { w, h };
             clearTimeout(timer);
