@@ -955,9 +955,23 @@ export class BrowserViewModel {
         this._dispatch({ type: "LoadFailed", reason: msg }, "onError");
     }
 
+    /**
+     * Whether the host has this pane's page: the rectangle sync says so when it creates the page and when
+     * it closes it (asleep, or the view gone). Until then there is nothing to give the keyboard to.
+     */
+    private pageLive = false;
+
+    setPageLive(live: boolean): void {
+        this.pageLive = live;
+    }
+
     giveFocus(): boolean {
-        this.diag(`giveFocus closed=${this.closed}`);
-        if (this.closed) return false;
+        this.diag(`giveFocus closed=${this.closed} page=${this.pageLive}`);
+        // No page yet (the pane is being created, or is asleep): false, so the shared routine keeps the
+        // keys in the pane's own frame and tries again, and the host is asked once, when the page exists
+        // (use-pane-rect-sync.ts). Asking before sent up to four requests per open for a pane the host
+        // did not have (docs/reports/REPORT_BROWSER_PANE_OPEN_PATH_AUDIT_2026_11_14.md, finding 6).
+        if (this.closed || !this.pageLive) return false;
         // "The caret is already in this pane's URL bar -- keep it" is decided
         // before this is ever called, by the shared pane-selection guard
         // (userCaretInBlock in focusManager.giveBlockFocus), scoped to THIS

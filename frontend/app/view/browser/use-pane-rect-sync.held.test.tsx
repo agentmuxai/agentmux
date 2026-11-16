@@ -31,6 +31,7 @@ import { usePaneRectSync, type PaneRectSync } from "./use-pane-rect-sync";
 
 const model = {
     blockId: "held1",
+    setPageLive: () => {},
     closed: false,
     urlAtom: () => "https://agentmux.ai/",
     driverAgentAtom: () => undefined,
