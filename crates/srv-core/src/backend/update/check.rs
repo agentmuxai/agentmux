@@ -20,7 +20,10 @@
 //! got yet (and, once held, with its ETag, which saves the download; an
 //! unauthenticated 304 still counts against the limit, as measured). When
 //! GitHub still refuses, the check says so and when it lifts, and a newer release is
-//! still reported, without a download until the API answers.
+//! still reported. Its files and checksums then come from the release's signed
+//! manifest at its download address (`update::signed_source`), which the API's limit
+//! doesn't touch; where that gives no answer either, there is no download until the
+//! API answers.
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
 //! event when it changes, and read on demand with `app.update-status`. It
@@ -262,6 +265,29 @@ pub(crate) struct Release {
     /// Set only on a release known by its tag alone ([`release_from_tag`]): why there are no files.
     #[serde(skip)]
     limit_note: Option<String>,
+}
+
+impl Release {
+    /// A release whose file list was read from its signed manifest (`update::signed_source`) rather than from
+    /// GitHub's API: the file for this install, when the manifest has one, with the checksum the manifest
+    /// signs. The manifest has no notes, so the body carries only the upgrade floor this build knows.
+    pub(crate) fn from_signed(tag: &str, asset: Option<&ReleaseAsset>, floor: Option<&str>) -> Release {
+        Release {
+            body: floor.map(|f| format!("{FLOOR_MARKER}{f} -->")),
+            assets: asset
+                .map(|a| GithubAsset { name: a.name.clone(), size: a.size, browser_download_url: a.url.clone(), digest: Some(format!("sha256:{}", a.sha256)) })
+                .into_iter()
+                .collect(),
+            limit_note: asset.is_none().then(|| "This release has no file for this computer.".to_string()),
+            ..release_from_tag(tag, None)
+        }
+    }
+
+    /// Whether it lists a file called `name`.
+    #[cfg(test)]
+    pub(crate) fn has_signed_file(&self, name: &str) -> bool {
+        self.assets.iter().any(|a| a.name == name)
+    }
 }
 
 /// A file attached to a GitHub release. `digest` is `sha256:<hex>`.
@@ -544,6 +570,30 @@ async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> R
     Ok(ApiAnswer::Fresh(Box::new(release), etag))
 }
 
+/// The upgrade floor of the repo when this build was made (`UPGRADE_FLOOR`): a floor only rises, so no later
+/// release's is lower.
+const BUILD_FLOOR: &str = include_str!("../../../../../UPGRADE_FLOOR");
+
+/// The oldest version known to upgrade in place: this build's own floor, or a later one an answer from the API
+/// carried. A signed manifest doesn't carry one.
+fn known_floor() -> Option<String> {
+    let built = Some(BUILD_FLOOR.trim().to_string()).filter(|f| version_core(f).is_some());
+    let cached = RELEASE_CACHE.lock().as_ref().and_then(|(_, r)| r.body.as_deref().and_then(upgrade_floor));
+    [built, cached].into_iter().flatten().max_by_key(|f| version_core(f))
+}
+
+/// The release `tag` names, while the API gives no answer (it limits this computer or failed): its files and
+/// checksums from the signed manifest at its download address (`update::signed_source`). `None` when that
+/// gives no answer either: the release stays known by its tag.
+async fn release_without_api(client: &reqwest::Client, tag: &str, limited_until_ms: i64, now_ms: i64) -> Option<Release> {
+    use crate::backend::update::signed_source::{release_for, Got};
+    match release_for(client, tag, env!("CARGO_PKG_VERSION"), &install_kind(), known_floor().as_deref(), limited_until_ms, now_ms).await {
+        Got::Release(r) => Some(r),
+        Got::NothingNew => Some(release_from_tag(tag, None)),
+        Got::None => None,
+    }
+}
+
 /// The latest release, with as few calls to GitHub's API as possible (see the
 /// module doc). The error is what the person is told.
 async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result<Release, String> {
@@ -559,7 +609,10 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
     let limited = API_LIMITED_UNTIL_MS.load(Ordering::Relaxed);
     match plan(tag.as_deref(), cached.as_ref(), limited, now_ms) {
         Plan::UseCache => cached.map(|(_, r)| r).ok_or_else(|| "no release held".to_string()),
-        Plan::Degraded => Ok(release_from_tag(tag.as_deref().unwrap_or_default(), Some(degraded_note(limited)))),
+        Plan::Degraded => {
+            let tag = tag.as_deref().unwrap_or_default();
+            Ok(release_without_api(client, tag, limited, now_ms).await.unwrap_or_else(|| release_from_tag(tag, Some(degraded_note(limited)))))
+        }
         Plan::Limited => Err(limited_message(limited)),
         Plan::Api(etag) => match api_get(client, etag.as_deref(), now_ms).await {
             Ok(ApiAnswer::Fresh(release, etag)) => {
@@ -571,11 +624,14 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
                 API_LIMITED_UNTIL_MS.store(until, Ordering::Relaxed);
                 tracing::info!(until_ms = until, "update check: GitHub's API is limiting this computer");
                 match tag {
-                    Some(tag) => Ok(release_from_tag(&tag, Some(degraded_note(until)))),
+                    Some(tag) => Ok(release_without_api(client, &tag, until, now_ms).await.unwrap_or_else(|| release_from_tag(&tag, Some(degraded_note(until))))),
                     None => Err(limited_message(until)),
                 }
             }
-            Err(ApiMiss::Other(e)) => Err(format!("couldn't reach GitHub: {e}")),
+            Err(ApiMiss::Other(e)) => match tag {
+                Some(tag) => release_without_api(client, &tag, 0, now_ms).await.ok_or_else(|| format!("couldn't reach GitHub: {e}")),
+                None => Err(format!("couldn't reach GitHub: {e}")),
+            },
         },
     }
 }

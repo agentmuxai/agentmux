@@ -65,6 +65,11 @@ pub fn parse_config_text<T: serde::de::DeserializeOwned>(content: &str) -> Resul
     serde_json::from_str(&jsonc_to_json(content))
 }
 
+/// Whether a config file's text holds nothing but whitespace and comments: an empty file, to the reader.
+pub fn config_text_is_blank(content: &str) -> bool {
+    jsonc_to_json(content).trim().is_empty()
+}
+
 /// A JSONC config file's text as plain JSON, with the same line and column for every character.
 pub(super) fn jsonc_to_json(content: &str) -> String {
     // An editor may have saved the file with a byte-order mark.
