@@ -138,6 +138,26 @@ describe("pressed rows whose click never arrives", () => {
         expect(logs.some((l) => l.includes("[swarm] last 60s") && l.includes("lost=1"))).toBe(true);
     });
 
+    it("the minute line says how many marks animate and how many are behind the clock, when there are any", () => {
+        let health = { marks: 0, frozen: 0, tick: 0 };
+        const logs: string[] = [];
+        const timers: Array<() => void> = [];
+        const trace = createSelectTrace({
+            now: () => 1,
+            log: (l) => logs.push(l),
+            setTimer: (fn) => timers.push(fn),
+            clearTimer: () => {},
+            marks: () => health,
+        });
+        trace.rebuilt();
+        timers.shift()!();
+        expect(logs[0]).not.toContain("marks=");
+        health = { marks: 6, frozen: 2, tick: 480 };
+        trace.rebuilt();
+        timers.shift()!();
+        expect(logs[1]).toMatch(/ marks=6 frozen=2 tick=480$/);
+    });
+
     it("a cancelled pointer sequence is not a lost click", () => {
         const { trace, advance } = harness();
         trace.pressed("block-aaaaaaaa", { isConnected: true });

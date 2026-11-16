@@ -14,7 +14,7 @@
 import { createEffect, onCleanup, type JSX } from "solid-js";
 
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { acquireTicker, sharedTick, TICKER_MS } from "./shared-ticker";
+import { acquireTicker, registerMark, sharedTick, TICKER_MS } from "./shared-ticker";
 
 export const SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
 export const SPINNER_FRAME_MS = TICKER_MS;
@@ -23,13 +23,26 @@ export const SPINNER_STILL = "*";
 /** `class` styles the mark where it sits; the default is the Working row's. */
 export function AsciiSpinner(props: { class?: string }): JSX.Element {
     const reducedMotion = () => shouldReduceMotion("status");
+    let drew: (tick: number) => void = () => {};
     createEffect(() => {
         if (reducedMotion()) return;
+        const mark = registerMark();
+        drew = mark.drew;
         onCleanup(acquireTicker());
+        onCleanup(() => {
+            drew = () => {};
+            mark.release();
+        });
     });
+    const frame = () => {
+        if (reducedMotion()) return SPINNER_STILL;
+        const t = sharedTick();
+        drew(t);
+        return SPINNER_FRAMES[t % SPINNER_FRAMES.length];
+    };
     return (
         <span class={props.class ?? "agent-spinner-ascii"} aria-hidden="true">
-            {reducedMotion() ? SPINNER_STILL : SPINNER_FRAMES[sharedTick() % SPINNER_FRAMES.length]}
+            {frame()}
         </span>
     );
 }
