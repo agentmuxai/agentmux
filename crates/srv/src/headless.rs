@@ -44,6 +44,9 @@ static PORTS: OnceLock<(Option<u16>, Option<u16>)> = OnceLock::new();
 /// `--frontend-dir` / `--allowed-origin`, held in-process like the ports.
 static WEB: OnceLock<WebOptions> = OnceLock::new();
 
+/// The directory srv keeps its databases in (`--wavedata`, else the resolved data dir), set once headless started.
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
 /// The file the key was read from or written to, when it came from a file (not the environment).
 static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -61,6 +64,11 @@ struct WebOptions {
 pub enum Listener {
     Web,
     Ws,
+}
+
+/// The data directory this headless srv uses (the one its databases and key file are in), when headless.
+pub fn data_dir() -> Option<&'static Path> {
+    DATA_DIR.get().map(PathBuf::as_path)
 }
 
 /// Is this process running headless (after `prepare_env`)?
@@ -135,6 +143,7 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     // file (Codex P1/P2 on #3893).
     let data_dir = effective_data_dir(cli.wavedata.as_deref(), &paths.data_dir);
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
+    let _ = DATA_DIR.set(data_dir.clone());
     crate::backend::base::acquire_data_dir_lock(&data_dir)?;
 
     // Secrets: one store per machine, like the keychain, so under the shared

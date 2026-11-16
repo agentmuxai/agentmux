@@ -48,6 +48,7 @@ mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod container_pane_snapshot;
+mod streamed_browser;
 pub(crate) mod files_root;
 mod container_workspace;
 mod model_gateway_handlers;

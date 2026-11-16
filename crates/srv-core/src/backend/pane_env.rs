@@ -559,6 +559,8 @@ mod spawn_site_coverage {
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
         ("src/backend/fs_watch/pool.rs", "\"wsl.exe\"", 2,
          "test: an ignored test writes and removes a file inside a WSL distro"),
+        ("src/server/streamed_browser/chromium.rs", "&binary", 1,
+         "sanitized: the streamed Browser pane's Chromium (unix only), sanitize_external_command: it opens pages from the web and gets none of srv's AGENTMUX_ environment"),
         ("src/server/editor_handlers/file_io.rs", "\"explorer.exe\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/editor_handlers/file_io.rs", "\"open\"", 1,

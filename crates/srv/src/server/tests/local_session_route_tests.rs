@@ -455,6 +455,18 @@ fn the_token_is_a_header_or_on_the_websocket_the_protocol_beside_the_fixed_name(
     assert_eq!(session_token(&HeaderMap::new(), "/ws"), None);
 }
 
+/// A signed-in browser opens the streamed pane's socket with the token as a protocol (it cannot set a header), and the
+/// route it opens is the one `routes.rs` registers; the token is read on that route and on no other besides `/ws`.
+#[test]
+fn the_streamed_browser_socket_carries_its_token_as_a_protocol_too() {
+    use crate::server::streamed_browser::ROUTE;
+    assert!(crate::server::route_scan::registered_routes().iter().any(|r| r.path == ROUTE), "{ROUTE} is not the registered route");
+    let ws = headers(&[("sec-websocket-protocol", "amx-session, tok123")]);
+    assert_eq!(session_token(&ws, ROUTE), Some("tok123"));
+    assert_eq!(session_token(&headers(&[("sec-websocket-protocol", "amx-session")]), ROUTE), None);
+    assert_eq!(session_token(&ws, "/agentmux/streamed-browser/other"), None);
+}
+
 #[test]
 fn the_cookie_is_found_by_its_name_among_others() {
     let hs = headers(&[("cookie", "a=1; amx-s-test-instance=zzz; amx-s-other=yyy")]);
