@@ -41,10 +41,22 @@ function rgbTriplet(hex: string): string | undefined {
 /** What the transcript's terminal-palette colours are held to on a pane's surfaces (WCAG, as for muted text). */
 export const ANSI_CONTRAST = 4.5;
 
-/** A palette colour moved, in lightness only, to read on the hardest of the pane's three layers (so it reads on all of them). */
+/**
+ * A palette colour moved, in lightness only, to read on all three of the pane's layers. The layer that is hardest for
+ * the colour changes as it moves (a colour that clears the raised layer can still miss the overlay one), so it is
+ * moved again against whichever layer it is worst on, until it reads on all of them or stops moving.
+ */
 function readableOn(hex: string, surfaces: Surfaces): string {
-    const hardest = [surfaces.surface, surfaces.raised, surfaces.overlay].sort((a, b) => contrastRatio(hex, a) - contrastRatio(hex, b))[0];
-    return toneMove(hex, hardest, ANSI_CONTRAST).hex;
+    const layers = [surfaces.surface, surfaces.raised, surfaces.overlay];
+    let out = hex;
+    for (let pass = 0; pass < layers.length + 1; pass++) {
+        const worst = layers.reduce((a, b) => (contrastRatio(out, b) < contrastRatio(out, a) ? b : a));
+        if (contrastRatio(out, worst) >= ANSI_CONTRAST) break;
+        const next = toneMove(out, worst, ANSI_CONTRAST).hex;
+        if (next === out) break;
+        out = next;
+    }
+    return out;
 }
 
 /**

@@ -412,6 +412,20 @@
     overflow-wrap: anywhere;
 }
 
+// A linked entry: its two badges after its label, and what it says of its key under where the key is kept.
+.vault-linked-badges {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-left: var(--space-1);
+    vertical-align: middle;
+}
+
+.vault-linked-said {
+    margin-top: var(--space-1);
+    overflow-wrap: anywhere;
+}
+
 // An entry's earlier values: last characters, when and by whom replaced, Restore.
 // The History dialog's All / Changes / Uses buttons sit together on the left.
 .vault-history-filters {
@@ -591,6 +605,56 @@
 
 .vault-import-region {
     white-space: nowrap;
+}
+
+// A batch of imports: a row for every secret, each with its tick. A long list scrolls inside the question, so the
+// answers stay in view; no row is summarised.
+.vault-batch-rows {
+    list-style: none;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+    max-height: 16em;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+
+    li + li {
+        border-top: 1px solid var(--border-color);
+    }
+}
+
+// The tick, then the entry it becomes; the secret it is read from sits under the entry.
+.vault-batch-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-2);
+    align-items: start;
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+}
+
+.vault-batch-entry {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--space-2);
+    overflow-wrap: anywhere;
+}
+
+.vault-batch-secret {
+    grid-column: 2;
+}
+
+// The Activity tab: the line of a secret of a batch, shown under the batch's own line. Set in from it, with a rule
+// down the group's edge: an indent of the first cell alone was hard to see (the macOS look check).
+.vault-activity-nested > td:first-child {
+    padding-left: calc(var(--space-4) * 2);
+    box-shadow: inset 3px 0 0 var(--border-color);
+}
+
+// When it happened, who did it and what they did are a word or two. Beside a long place they keep their words whole
+// ("teste / r" and "importe / d" in one Linux look check; "just no / w" in a batch's set-in lines in the next), and
+// still break when one is longer than the pane.
+.vault-table td.vault-activity-word {
+    overflow-wrap: break-word;
 }
 
 // What the agent says it wants an entry for, on the approval: quoted and attributed.

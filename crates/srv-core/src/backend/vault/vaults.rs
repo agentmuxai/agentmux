@@ -20,11 +20,12 @@ const MAX_NAME: usize = 60;
 const MAX_VAULTS: usize = 50;
 
 /// Which agents may use a Vault's entries.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "mode", content = "agents", rename_all = "lowercase")]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub enum VaultAgents {
     /// Every agent on this machine (Personal's setting, today's behaviour).
+    #[default]
     All,
     /// None: the person uses the entries themselves (reveal, copy, a browser fill they approve).
     None,
@@ -42,7 +43,7 @@ pub struct VaultInfo {
     pub entries: u32,
 }
 
-fn agents_of(row: &VaultInfoRow) -> VaultAgents {
+pub fn agents_of(row: &VaultInfoRow) -> VaultAgents {
     match row.agents.as_str() {
         "none" => VaultAgents::None,
         "named" => VaultAgents::Named(serde_json::from_str(&row.agent_ids).unwrap_or_default()),

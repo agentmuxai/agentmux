@@ -149,7 +149,7 @@ hasOlderHistory, nothing older = false
 hasOlderHistory, paging allowed = true
 hasOlderHistory, paging not allowed = false
 liveFeed.setFollowingBottom(true)
-highlightNodeId: same
+highlightNodeId = null
 scrollCommand: same
 zoomFactor = 1
 new activity before the list reports = false

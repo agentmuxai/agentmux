@@ -15,6 +15,7 @@ import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { formatWhen } from "./vault-format";
+import { isLinked, uncheckedDays } from "./vault-linked";
 
 export const SOURCE_FIELDS = ["source_kind", "source_location", "source_key", "source_region", "source_profile"] as const;
 
@@ -54,8 +55,9 @@ export function machineCopy(fields: Record<string, string>): string {
 }
 
 export interface SourceCheck {
-    /** `same`, `different`, or `unread` for a place that could not be read. */
-    state: "same" | "different" | "unread";
+    /** `same`, `different`, or `unread` for a place that could not be read; for a linked entry, whose place is
+     *  described and not read, `present`, `changed` or `missing`. */
+    state: "same" | "different" | "unread" | "present" | "changed" | "missing";
     /** What it found and when, and for a place that could not be read, why: the line says it, not a tooltip. */
     text: string;
 }
@@ -67,6 +69,15 @@ export function sourceCheck(e: Pick<VaultEntryInfo, "source_checked">, now = Dat
     const when = formatWhen(checked.at, now);
     if (checked.outcome === "same") return { state: "same", text: `same as the Vault's value, checked ${when}` };
     if (checked.outcome === "different") return { state: "different", text: `different from the Vault's value, checked ${when}` };
+    if (checked.outcome === "present") return { state: "present", text: t("vault.linked.present", { when }) };
+    for (const [word, state, key] of [
+        ["changed since recorded", "changed", "vault.linked.changed"],
+        ["missing", "missing", "vault.linked.missing"],
+    ] as const) {
+        if (!checked.outcome.startsWith(word)) continue;
+        const said = checked.outcome.slice(word.length).replace(/^:\s*/, "");
+        return { state, text: `${t(key, { when })}${said ? `: ${said}` : ""}` };
+    }
     const why = checked.outcome.replace(/^could not read:?\s*/, "");
     return { state: "unread", text: `could not be read, checked ${when}${why ? `: ${why}` : ""}` };
 }
@@ -82,12 +93,20 @@ export function MachineCopyLine(props: { entry: VaultEntryInfo; children?: JSX.E
             {(place) => (
                 <div class="vault-machine-copy">
                     <span class="vault-machine-copy-text">
-                        {t("vault.machineCopy.line")} <span class="warden-manager-mono vault-import-id">{place()}</span>
+                        {isLinked(props.entry.fields) ? t("vault.linked.keptAt") : t("vault.machineCopy.line")} <span class="warden-manager-mono vault-import-id">{place()}</span>
                         <Show when={sourceCheck(props.entry)} fallback={<span class="vault-machine-copy-check"> · {t("vault.machineCopy.notChecked")}</span>}>
                             {(check) => (
-                                <span class={check().state === "same" ? "vault-machine-copy-check" : "vault-machine-copy-check vault-expiry-warn"} data-check={check().state}>
+                                <span class={["same", "present"].includes(check().state) ? "vault-machine-copy-check" : "vault-machine-copy-check vault-expiry-warn"} data-check={check().state}>
                                     {" "}
                                     · {check().text}
+                                </span>
+                            )}
+                        </Show>
+                        <Show when={uncheckedDays(props.entry)}>
+                            {(days) => (
+                                <span class="vault-machine-copy-check vault-expiry-warn" data-unchecked={days()}>
+                                    {" "}
+                                    · {t("vault.linked.unchecked", { count: days() })}
                                 </span>
                             )}
                         </Show>

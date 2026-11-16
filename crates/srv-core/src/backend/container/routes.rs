@@ -59,6 +59,7 @@ mod tests {
             "/api/v1/vault/generate",
             "/api/v1/vault/history",
             "/api/v1/vault/import",
+            "/api/v1/vault/import_batch",
             "/api/v1/vault/show",
             "/api/v1/vault/update",
             "/api/v1/vault/verify",

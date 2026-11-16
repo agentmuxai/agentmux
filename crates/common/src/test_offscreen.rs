@@ -87,6 +87,25 @@ fn engage(_process: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `NSApplicationActivationPolicy` raw values.
+const ACTIVATION_REGULAR: isize = 0;
+const ACTIVATION_ACCESSORY: isize = 1;
+
+fn activation_policy(off_screen: bool) -> isize {
+    if off_screen {
+        ACTIVATION_ACCESSORY
+    } else {
+        ACTIVATION_REGULAR
+    }
+}
+
+/// The macOS activation policy the host sets: a normal Dock app, or an accessory app in test window
+/// mode (no Dock tile, no menu bar, never activated by itself), so a test run leaves no icon in the
+/// person's Dock and cannot take the keyboard from their frontmost app.
+pub fn macos_activation_policy() -> isize {
+    activation_policy(active())
+}
+
 /// The start of a process: when it runs off-screen it first makes sure it can (on macOS, that no
 /// window will ever be ordered in), and refuses (one line on stderr, exit status 2, nothing started)
 /// when it cannot. It then logs [`start_line`] if there is one.
@@ -148,6 +167,14 @@ mod tests {
         assert_eq!(initial_rect(None), None);
         assert_eq!(initial_rect(Some((5, 6, 7, 8))), None);
         assert_eq!(place_rect((10, 20, 30, 40)), (10, 20, 30, 40));
+    }
+
+    #[test]
+    fn a_test_build_is_an_accessory_app_and_a_normal_one_is_not() {
+        assert_eq!(activation_policy(true), 1);
+        assert_eq!(activation_policy(false), 0);
+        // The tests run without the variable set.
+        assert_eq!(macos_activation_policy(), 0);
     }
 
     #[test]

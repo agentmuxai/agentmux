@@ -392,7 +392,7 @@
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
 141 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
-367 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
+365 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
 285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
@@ -417,7 +417,7 @@
 102 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
-121 frontend/app/view/vault/vault-entries.tsx::VaultEntries
+116 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun
