@@ -352,6 +352,22 @@ describe("the backdrop", () => {
         }
     });
 
+    it("a drag preview of a block that is unmounted leaves the live pane's open picker open, and Backdrop… still reopens it", () => {
+        const meta = { view: "agent" };
+        const live = setup({ meta });
+        openBackdropPicker(live.blockId);
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        const preview = setup({ blockId: live.blockId, preview: true, meta });
+        preview.view.unmount();
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        closeBackdropPicker(live.blockId);
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).toBeNull();
+        buildPaneColorSubmenu({ oid: live.blockId, meta } as unknown as Block)
+            .find((i) => i.label === "Backdrop…")!
+            .click!();
+        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+    });
+
     it("a terminal with a backdrop record already in its meta renders exactly as one without", () => {
         const record = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
         const bare = setup({ meta: { view: "term" } });
