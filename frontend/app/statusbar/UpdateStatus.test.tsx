@@ -670,7 +670,7 @@ describe("Maintenance on a Microsoft Store install", () => {
             render(() => <MaintenanceSection />);
             expect(await screen.findByRole("button", { name: "Update in the Store" })).toBeTruthy();
             expect(screen.getByText("Update available")).toBeTruthy();
-            expect(screen.getByText("The Store downloads the update. Restart now then installs it and opens AgentMux again.")).toBeTruthy();
+            expect(screen.getByText("Update in the Store asks the Microsoft Store to download the update. When it is downloaded, a Restart now button appears here: it installs the update and opens AgentMux again.")).toBeTruthy();
             // Never named after the installed version, and never called "not listed".
             expect(screen.queryByText(`v${version} is in the Microsoft Store`)).toBeNull();
             expect(screen.queryByText(/hasn't listed it/)).toBeNull();
@@ -882,11 +882,11 @@ describe("Maintenance on a Microsoft Store install", () => {
         }
     });
 
-    it("says before the click that Restart now installs it and opens AgentMux again", async () => {
+    it("says before the click what the button does, and that a Restart now button appears once it is downloaded", async () => {
         updateStatus.mockResolvedValue(STORE);
         render(() => <MaintenanceSection />);
         await screen.findByRole("button", { name: "Update in the Store" });
-        expect(screen.getByText("The Store downloads v0.59.27. Restart now then installs it and opens AgentMux again.")).toBeTruthy();
+        expect(screen.getByText("Update in the Store asks the Microsoft Store to download v0.59.27. When it is downloaded, a Restart now button appears here: it installs the update and opens AgentMux again.")).toBeTruthy();
     });
 
     it("on a start that came back updated, tells the person once", async () => {
