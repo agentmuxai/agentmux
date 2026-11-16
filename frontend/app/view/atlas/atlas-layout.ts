@@ -257,17 +257,25 @@ export function fitScale(layout: { width: number; height: number }, pane: PaneSh
     return Math.min((pane.w - FIT_PAD * 2) / layout.width, (pane.h - FIT_PAD * 2) / layout.height);
 }
 
+/** Two pictures whose cards fill their box within this share of each other count as equally full. */
+const DENSE_EPS = 0.01;
+
 const rowsOf = (l: AtlasLayout): number => new Set(l.regions.map((r) => r.y)).size;
 
 /**
  * The candidate that fits `pane` best: the largest scale (no larger than a fit enlarges to, and no smaller than
- * a card reads at, where the overflow is then what counts), then the most of the pane covered, then the fewest rows.
+ * a card reads at, where the overflow is then what counts), then the least empty room inside the picture (cards over
+ * its bounding box: a taller, narrower grid under wide trees has the same scale and covers more of the pane, but half
+ * of its box is empty), then the most of the pane covered, then the fewest rows.
  */
-export function pickBest(candidates: readonly AtlasLayout[], pane: PaneShape): AtlasLayout {
+export function pickBest(candidates: readonly AtlasLayout[], pane: PaneShape, preferFull = false): AtlasLayout {
     const score = (l: AtlasLayout) => {
         const k = Math.max(MIN_READABLE_K, Math.min(FIT_MAX_K, fitScale(l, pane)));
         const raw = fitScale(l, pane);
-        return { k, raw, cover: Math.min(l.width * k, pane.w) * Math.min(l.height * k, pane.h), rows: rowsOf(l) };
+        // Only the By seat picture (no region boxes) asks for it; the machine boxes have room of their own.
+        const dense =
+            preferFull && l.width * l.height > 0 ? (l.nodes.size * NODE_W * NODE_H) / (l.width * l.height) : 0;
+        return { k, raw, dense, cover: Math.min(l.width * k, pane.w) * Math.min(l.height * k, pane.h), rows: rowsOf(l) };
     };
     let best = candidates[0];
     let bs = score(best);
@@ -279,7 +287,9 @@ export function pickBest(candidates: readonly AtlasLayout[], pane: PaneShape): A
             (Math.abs(s.k - bs.k) <= 1e-6 && s.k <= MIN_READABLE_K + 1e-6 && s.raw > bs.raw + 1e-6) ||
             (Math.abs(s.k - bs.k) <= 1e-6 &&
                 Math.abs(s.raw - bs.raw) <= 1e-6 &&
-                (s.cover > bs.cover + 1 || (Math.abs(s.cover - bs.cover) <= 1 && s.rows < bs.rows)));
+                (s.dense > bs.dense + DENSE_EPS ||
+                    (Math.abs(s.dense - bs.dense) <= DENSE_EPS &&
+                        (s.cover > bs.cover + 1 || (Math.abs(s.cover - bs.cover) <= 1 && s.rows < bs.rows)))));
         if (better) {
             best = c;
             bs = s;
@@ -353,7 +363,8 @@ export function layoutBySeat(graph: AtlasGraph, pane?: PaneShape): AtlasLayout {
         reportColsChoices(graph).flatMap((reportCols) =>
             GRID_COLS_CHOICES.map((cols) => seatWithCols(graph, cols, reportCols))
         ),
-        pane
+        pane,
+        true
     );
 }
 
