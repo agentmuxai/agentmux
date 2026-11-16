@@ -43,7 +43,6 @@
     "frontend/app/modals/replace-pane-confirm.tsx": 2,
     "frontend/app/modals/userinputmodal.tsx": 3,
     "frontend/app/notification/copy-details-button.tsx": 2,
-    "frontend/app/notification/notificationbubbles.tsx": 1,
     "frontend/app/notification/notificationitem.tsx": 1,
     "frontend/app/statusbar/AmbientPurposes.tsx": 9,
     "frontend/app/statusbar/BackendStatus.tsx": 24,

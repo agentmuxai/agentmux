@@ -20,8 +20,39 @@
     overflow-x: hidden;
 }
 
-// "+N more": the toasts past the first few, shown on click.
-.notification-bubbles .notification-more {
-    align-self: flex-end;
-    font-size: var(--text-xs);
+// The stack's own row, above the toasts: "+N more" (the toasts past the first few, shown on click) and
+// "Dismiss all". A card like the toasts, so its text sits on the toast surface and not on whatever the
+// stack floats over, where "+N more" could not be read.
+.notification-stack-bar {
+    // In an expanded stack that scrolls, the row stays at the top edge and the toasts pass under it.
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex: none;
+    align-items: center;
+    align-self: stretch;
+    gap: var(--space-3);
+    min-height: 36px;
+    padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+    border: 0.5px solid var(--tint-4);
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    box-shadow: 0px 8px 32px 0px rgba(0, 0, 0, 0.25);
+    font-size: var(--text-base);
+
+    .notification-more {
+        // The row's label, in the toast title's size and weight; its padding is taken back so the text
+        // lines up with the toasts' icons.
+        margin-left: calc(-1 * var(--ui-pad-x));
+        color: var(--main-text-color);
+        font-size: var(--text-base);
+        font-weight: 500;
+    }
+
+    .notification-dismiss-all {
+        margin-left: auto;
+        font-size: var(--text-base);
+    }
 }

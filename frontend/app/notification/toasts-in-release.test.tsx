@@ -56,4 +56,19 @@ describe("closing a toast", () => {
             dispose();
         });
     });
+
+    it("closes them all at once, persistent ones too, telling each sender once", () => {
+        const onA = vi.fn();
+        const onSticky = vi.fn();
+        createRoot((dispose) => {
+            setNotifications([toast("a", { onClose: onA }), toast("sticky", { persistent: true, onClose: onSticky }), toast("b")]);
+            const { closeAllNotifications, notifications } = useNotification();
+            closeAllNotifications();
+            expect(notifications()).toEqual([]);
+            closeAllNotifications(); // nothing left: nobody is told again
+            expect(onA).toHaveBeenCalledTimes(1);
+            expect(onSticky).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
 });

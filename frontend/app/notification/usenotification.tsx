@@ -109,6 +109,22 @@ export function useNotification() {
         notif?.onClose?.();
     };
 
+    /** "Dismiss all": every toast goes as if its X were pressed, each sender told once. The ones behind "+N more"
+     *  and the ones that stay until closed go too. */
+    const closeAllNotifications = () => {
+        const all = untrack(notifications);
+        if (all.length === 0) return;
+        setNotifications([]);
+        for (const notif of all) {
+            try {
+                notif.onClose?.();
+            } catch (err) {
+                // One sender's failure must not keep the others from hearing.
+                console.error("[toasts] a toast's close handler failed", err);
+            }
+        }
+    };
+
     const hideNotification = (id: string) => {
         setNotifications((prevNotifications) =>
             prevNotifications.map((n) => (n.id === id ? { ...n, hidden: true } : n))
@@ -177,6 +193,7 @@ export function useNotification() {
         resumeToast,
         removeNotification,
         closeNotification,
+        closeAllNotifications,
         removeAllNotifications,
         hideNotification,
         hideAllNotifications,

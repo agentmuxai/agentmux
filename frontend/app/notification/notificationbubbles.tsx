@@ -2,8 +2,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { t } from "@/app/i18n/i18n";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { Button } from "@/element/button";
+import { focusManager } from "@/app/store/focusManager";
+import { Button } from "@/element/ui";
 import { atoms } from "@/store/global";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
@@ -57,6 +59,7 @@ const NotificationBubbles = (): JSX.Element => {
         notifications,
         hoveredId,
         closeNotification,
+        closeAllNotifications,
         copyNotification,
         handleActionClick,
         formatTimestamp,
@@ -73,15 +76,28 @@ const NotificationBubbles = (): JSX.Element => {
     });
 
     const visible = createMemo(() => visibleNotifications(notifications(), expanded()));
-    const more = () => notifications().filter((n) => !n.hidden).length - visible().length;
+    const shownCount = () => notifications().filter((n) => !n.hidden).length;
+    const more = () => shownCount() - visible().length;
     // Back to the short list once everything fits again.
     createEffect(() => {
-        if (expanded() && notifications().filter((n) => !n.hidden).length <= MAX_VISIBLE_NOTIFICATIONS) {
+        if (expanded() && shownCount() <= MAX_VISIBLE_NOTIFICATIONS) {
             setExpanded(false);
         }
     });
 
-    const { bottom, maxHeight, setStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
+    const { bottom, maxHeight, setStack: setPlacedStack } = useToastPlacement(() => isOpen() && !notificationPopoverMode(), visible);
+    let stack: HTMLDivElement | undefined;
+    const setStack = (el: HTMLDivElement) => {
+        stack = el;
+        setPlacedStack(el);
+    };
+    /** "Dismiss all": every toast goes, the ones behind "+N more" included. The button goes with them, so a caret
+     *  that was in the stack (the button was reached by keyboard) returns to the selected pane, not to <body>. */
+    const dismissAll = () => {
+        const caretInStack = !!stack?.contains(document.activeElement);
+        closeAllNotifications();
+        if (caretInStack) focusManager.ensureSelectionFocused("toasts-dismissed");
+    };
     // The stack is an unzoomed shell placed in real pixels; the body inside it carries the chrome zoom.
     const floatingStyles = () => ({
         position: "fixed",
@@ -100,10 +116,24 @@ const NotificationBubbles = (): JSX.Element => {
                         class="notification-bubbles-body"
                         style={maxHeight() === undefined ? undefined : { "max-height": `calc(${maxHeight()}px / var(--zoomfactor))` }}
                     >
-                        <Show when={more() > 0}>
-                            <Button className="notification-more ghost grey" onClick={() => setExpanded(true)}>
-                                +{more()} more
-                            </Button>
+                        {/* Above the toasts and, in a stack that scrolls, held at its top edge (sticky). */}
+                        <Show when={shownCount() > 1}>
+                            <div class="notification-stack-bar">
+                                <Show when={more() > 0}>
+                                    <Button class="notification-more" tone="quiet" aria-expanded="false" onClick={() => setExpanded(true)}>
+                                        {t("toasts.more", { count: more() })}
+                                    </Button>
+                                </Show>
+                                <Button
+                                    class="notification-dismiss-all"
+                                    density="compact"
+                                    // A pointer press leaves the caret where it is (a composer, say).
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={dismissAll}
+                                >
+                                    {t("toasts.dismissAll")}
+                                </Button>
+                            </div>
                         </Show>
                         <For each={visible()}>
                             {(notif) => (
