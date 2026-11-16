@@ -436,6 +436,15 @@ irm https://agentmux.ai/install.ps1 | iex           # Windows (PowerShell)
 winget install --id 9P9QCXNNCRK3 --source msstore   # Windows, from the Microsoft Store
 ```
 
+**AgentMux Headless** (no desktop window: it runs in the background and its web UI is a browser on its own loopback address) installs the same way, from the same signed release:
+
+```bash
+curl -fsSL https://agentmux.ai/install.sh | sh -s -- --headless                          # macOS (Apple Silicon) and Linux
+& ([scriptblock]::Create((irm https://agentmux.ai/install.ps1))) -Headless              # Windows (PowerShell)
+```
+
+Then run `agentmux setup`. On Windows the script installs under `%LOCALAPPDATA%\AgentMux\Headless`, for you only, with no administrator rights; run it again to update.
+
 Every file and command for every platform, with each file's size and SHA-256 and the Linux package repositories, is on [All Downloads](https://agentmux.ai/downloads).
 
 **Nightly builds** — built daily from `main`. Windows artifacts are kept 7 days, the others for the repository's default retention. [![Nightly builds](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml)
@@ -466,7 +475,8 @@ Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. 
 | Linux x64 (Debian/Ubuntu) | `AgentMux_*_amd64.deb` |
 | Linux x64 (Fedora/RHEL) | `AgentMux-*-1.x86_64.rpm` |
 | Linux x64 (portable) | `AgentMux_*_amd64-portable.tar.xz` |
-| Server, no desktop (Linux x64, Linux arm64, macOS Apple Silicon) | `agentmux-server-*-linux-x64.tar.gz`, `agentmux-server-*-linux-arm64.tar.gz`, `agentmux-server-*-macos-arm64.tar.gz` |
+| AgentMux Headless (Linux x64, Linux arm64, macOS Apple Silicon) | `agentmux-headless-*-linux-x64.tar.gz`, `agentmux-headless-*-linux-arm64.tar.gz`, `agentmux-headless-*-macos-arm64.tar.gz` |
+| AgentMux Headless (Windows x64) | `agentmux-headless-*-windows-x64.zip` |
 | Install scripts | `install.sh` (macOS and Linux), `install.ps1` (Windows) |
 | Signed manifest | `AgentMux-*-manifest.json`, `AgentMux-*-envelope.json` and `AgentMux-*-envelope.json.sig`: the size and SHA-256 of every file, signed; the install scripts check downloads against them |
 

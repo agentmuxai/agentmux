@@ -84,6 +84,20 @@ foreach ($sh in $shells) {
     Expect "-Method package-manager cannot add the other kind" 1 "use -Method download" $sh $setupNoPackage @("-DryRun", "-NoLaunch", "-Force", "-Method", "package-manager")
     Expect "-Interactive is accepted" 0 "done" $sh (WithWinget "ai") @("-DryRun", "-NoLaunch", "-Interactive")
 
+    # -Headless: the plan, the refusals, and that the desktop app being installed does not stop it
+    $hl = @("-Headless", "-DryRun", "-Version", "0.60.31")
+    $lad = @{ LOCALAPPDATA = (Join-Path $work "lad-dry") }
+    $headlessEnv = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "ai"; LOCALAPPDATA = $lad.LOCALAPPDATA }
+    Expect "-Headless dry run names the zip" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $headlessEnv $hl
+    Expect "-Headless dry run: the folder, the junction and the PATH entry" 0 "junction" $sh $headlessEnv $hl
+    Expect "-Headless dry run puts one entry on the PATH, for this user only" 0 "to your PATH (this user only)" $sh $headlessEnv $hl
+    Expect "-Headless dry run points to agentmux setup" 0 "agentmux setup" $sh $headlessEnv $hl
+    Expect-Absent "-Headless never uses winget" "winget install" $sh $headlessEnv $hl
+    Expect "-Headless has no package-manager method" 1 "has no package-manager method" $sh $headlessEnv @("-Headless", "-Method", "package-manager", "-DryRun")
+    $withDesktop = @{ AGENTMUX_INSTALL_INSTALLED = "setup"; AGENTMUX_INSTALL_WINGET = "ai"; LOCALAPPDATA = $lad.LOCALAPPDATA }
+    Expect "-Headless goes ahead when the desktop app is installed" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $withDesktop $hl
+    Expect "-Help describes -Headless" 0 "-Headless" $sh $none @("-Help")
+
     # A real winget run, with a stand-in for winget: its output is shown, and its exit code decides (a failure is not read as success).
     $fakeOk = Join-Path $work "fake-winget-ok.cmd"
     [IO.File]::WriteAllText($fakeOk, "@echo off`r`necho fake winget output`r`nexit /b 0`r`n")
@@ -111,6 +125,13 @@ $want = ($keysJson.keys | ForEach-Object { "$($_.id):$($_.public_key)" }) -join 
 $have = ""
 foreach ($line in (Get-Content -LiteralPath $script)) { if ($line -match '^\s*\$UpdateKeys = "(.*)"\s*$') { $have = $Matches[1] } }
 if ($want -eq $have) { Pass "UpdateKeys equals crates/common/update-keys.json" } else { Fail "UpdateKeys equals crates/common/update-keys.json" "'$have' differs from '$want'" }
+
+# ---- the SSH signature floor is the app's ----
+$wantFloor = ""
+foreach ($line in (Get-Content -LiteralPath (Join-Path $repoRoot "scripts/release-manifest.mjs"))) { if ($line -match '^export const SSHSIG_FLOOR = "(.*)";\s*$') { $wantFloor = $Matches[1] } }
+$haveFloor = ""
+foreach ($line in (Get-Content -LiteralPath $script)) { if ($line -match '^\s*\$SshsigFloor = "(.*)"\s*$') { $haveFloor = $Matches[1] } }
+if ($wantFloor -and $wantFloor -eq $haveFloor) { Pass "SshsigFloor equals scripts/release-manifest.mjs's" } else { Fail "SshsigFloor equals scripts/release-manifest.mjs's" "'$haveFloor' differs from '$wantFloor'" }
 
 # ---- the download checks, against a release made here ----
 $openssl = Get-Command openssl -ErrorAction SilentlyContinue
@@ -193,6 +214,143 @@ if (-not $canSign) {
 
         # With the app's real key the test signature must not verify.
         Expect "another key's signature is refused" 1 "signature does not match" $sh (Run-Release $sh $good "k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE=") $dl
+
+        # ---- AgentMux Headless: the zip is checked, unpacked and linked ----
+        $hver = "9.9.9"
+        $zipName = "agentmux-headless-$hver-windows-x64.zip"
+        $isWin = ($PSVersionTable.PSEdition -eq "Desktop") -or ($PSVersionTable.Platform -eq "Win32NT")
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-HeadlessZip([string]$Path, [string[]]$Files, [string]$ExtraEntry) {
+            $stage = Join-Path $work ("zipstage-" + [Guid]::NewGuid().ToString("N"))
+            foreach ($f in $Files) {
+                $full = Join-Path $stage $f
+                New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+                [IO.File]::WriteAllText($full, "stand-in $f", $utf8)
+            }
+            if (-not $Files) { New-Item -ItemType Directory -Path $stage -Force | Out-Null }
+            [IO.Compression.ZipFile]::CreateFromDirectory($stage, $Path)
+            if ($ExtraEntry) {
+                $za = [IO.Compression.ZipFile]::Open($Path, "Update")
+                try { $e = $za.CreateEntry($ExtraEntry); $w = New-Object IO.StreamWriter($e.Open()); $w.Write("x"); $w.Close() } finally { $za.Dispose() }
+            }
+        }
+        # A signed release with the Headless zip as its one file (the manifest lists $Listed).
+        function New-HeadlessRelease([string]$Dir, [string]$ZipPath, [string]$Listed) {
+            if (-not $Listed) { $Listed = $zipName }
+            New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+            Copy-Item -LiteralPath $ZipPath -Destination (Join-Path $Dir $zipName)
+            $size = (Get-Item (Join-Path $Dir $zipName)).Length
+            $sha = (Get-FileHash -LiteralPath (Join-Path $Dir $zipName) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $manifest = "{`n  `"format`": 1,`n  `"version`": `"$hver`",`n  `"tag`": `"v$hver`",`n  `"files`": [`n    {`n      `"name`": `"$Listed`",`n      `"size`": $size,`n      `"sha256`": `"$sha`"`n    }`n  ]`n}`n"
+            [IO.File]::WriteAllText((Join-Path $Dir "AgentMux-$hver-manifest.json"), $manifest, $utf8)
+            $msha = (Get-FileHash -LiteralPath (Join-Path $Dir "AgentMux-$hver-manifest.json") -Algorithm SHA256).Hash.ToLowerInvariant()
+            $envPath = Join-Path $Dir "AgentMux-$hver-envelope.json"
+            [IO.File]::WriteAllText($envPath, "{`n  `"format`": 1,`n  `"tag`": `"v$hver`",`n  `"manifest_sha256`": `"$msha`",`n  `"created_at`": `"2026-11-16T00:00:00Z`"`n}`n", $utf8)
+            $sigBin = Join-Path $work "hsign.bin"
+            & openssl pkeyutl -sign -inkey $priv -rawin -in $envPath -out $sigBin 2>$null
+            [IO.File]::WriteAllText((Join-Path $Dir "AgentMux-$hver-envelope.json.sig"), ("t1 " + [Convert]::ToBase64String([IO.File]::ReadAllBytes($sigBin)) + "`n"), $utf8)
+        }
+        $goodZip = Join-Path $work "good-headless.zip"
+        New-HeadlessZip $goodZip @("bin\agentmux.exe", "bin\agentmux-srv.exe", "bin\agentmux-bashwrap.exe", "web\index.html") ""
+        $hrel = Join-Path $work "hrel-$sh"
+        New-HeadlessRelease $hrel $goodZip ""
+        $lad2 = Join-Path $work "lad-$sh"
+        function HeadlessEnv([string]$Dir, [string]$Local) {
+            $e = Run-Release $sh $Dir $testKeys
+            $e["LOCALAPPDATA"] = $Local
+            $e["AGENTMUX_INSTALL_NO_PATH"] = "1"
+            return $e
+        }
+        $hargs = @("-Headless", "-Version", $hver)
+
+        # What needs a junction runs on Windows only (a junction does not exist elsewhere).
+        if ($isWin) {
+            Expect "Headless: a good zip is installed" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hrel $lad2) $hargs
+            $folder = Join-Path $lad2 "AgentMux\Headless"
+            if ((Test-Path (Join-Path $folder "$hver\bin\agentmux.exe")) -and (Test-Path (Join-Path $folder "current\bin\agentmux-srv.exe")) -and (Test-Path (Join-Path $folder "$hver\web\index.html"))) { Pass "Headless: the programs are in the version folder and reached through current" } else { Fail "Headless: the programs are in the version folder and reached through current" "missing under $folder" }
+            $cur = Get-Item -LiteralPath (Join-Path $folder "current") -Force
+            if ($cur.Attributes -band [IO.FileAttributes]::ReparsePoint) { Pass "Headless: current is a link" } else { Fail "Headless: current is a link" "not a reparse point" }
+            Expect "Headless: running it again changes nothing" 0 "already installed" $sh (HeadlessEnv $hrel $lad2) $hargs
+            Expect "Headless: -Force installs it again" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hrel $lad2) ($hargs + "-Force")
+            # an older version folder is removed once the link has moved
+            New-Item -ItemType Directory -Path (Join-Path $folder "9.9.8\bin") -Force | Out-Null
+            Expect "Headless: an update moves the link" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hrel $lad2) ($hargs + "-Force")
+            if (-not (Test-Path (Join-Path $folder "9.9.8"))) { Pass "Headless: the older version folder is removed" } else { Fail "Headless: the older version folder is removed" "still there" }
+            # a "current" that is a real folder is never touched
+            $lad3 = Join-Path $work "lad3-$sh"
+            New-Item -ItemType Directory -Path (Join-Path $lad3 "AgentMux\Headless\current") -Force | Out-Null
+            Expect "Headless: a current that is not a link is refused" 1 "not touching it" $sh (HeadlessEnv $hrel $lad3) $hargs
+        } else {
+            Write-Host "skip - Headless install steps that need a junction run on Windows only"
+        }
+
+        $hbad = Join-Path $work "hbad-$sh"; Copy-Release $hrel $hbad
+        [IO.File]::AppendAllText((Join-Path $hbad $zipName), "x")
+        $lad4 = Join-Path $work "lad4-$sh"
+        Expect "Headless: a changed zip is refused" 1 "bytes, the manifest says" $sh (HeadlessEnv $hbad $lad4) $hargs
+        if (-not (Test-Path (Join-Path $lad4 "AgentMux\Headless\$hver")) -and -not (Test-Path (Join-Path $lad4 "AgentMux\Headless\current"))) { Pass "Headless: a refused zip leaves no version folder and no link" } else { Fail "Headless: a refused zip leaves no version folder and no link" "something was written" }
+
+        $hunlisted = Join-Path $work "hunlisted-$sh"; New-HeadlessRelease $hunlisted $goodZip "Other.zip"
+        Expect "Headless: a release whose manifest does not list the zip says so" 1 "no AgentMux Headless package for Windows" $sh (HeadlessEnv $hunlisted (Join-Path $work "lad5-$sh")) $hargs
+
+        $hwrongsig = Join-Path $work "hwrongsig-$sh"; Copy-Release $hrel $hwrongsig
+        $wrongKeyEnv = HeadlessEnv $hwrongsig (Join-Path $work "lad9-$sh"); $wrongKeyEnv["AGENTMUX_INSTALL_TEST_KEYS"] = "k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE="
+        Expect "Headless: another key's signature is refused" 1 "signature does not match" $sh $wrongKeyEnv $hargs
+
+        $notPkg = Join-Path $work "notpkg.zip"
+        New-HeadlessZip $notPkg @("readme.txt") ""
+        $hnotpkg = Join-Path $work "hnotpkg-$sh"; New-HeadlessRelease $hnotpkg $notPkg ""
+        Expect "Headless: a zip that is not a Headless package is refused" 1 "is not an AgentMux Headless package" $sh (HeadlessEnv $hnotpkg (Join-Path $work "lad6-$sh")) $hargs
+
+        $slipZip = Join-Path $work "slip.zip"
+        New-HeadlessZip $slipZip @("bin\agentmux.exe", "bin\agentmux-srv.exe", "web\index.html") "..\evil.txt"
+        $hslip = Join-Path $work "hslip-$sh"; New-HeadlessRelease $hslip $slipZip ""
+        Expect "Headless: a zip with an entry outside its folder is refused" 1 "outside its own folder" $sh (HeadlessEnv $hslip (Join-Path $work "lad7-$sh")) $hargs
+        if (-not (Test-Path (Join-Path $work "lad7-$sh\AgentMux\evil.txt")) -and -not (Test-Path (Join-Path $work "lad7-$sh\evil.txt"))) { Pass "Headless: nothing was written outside the folder" } else { Fail "Headless: nothing was written outside the folder" "evil.txt exists" }
+
+        # The SSH signature, with this system's real ssh-keygen when it can sign (OpenSSH 8.0 or later): the same envelope, signed by a throwaway key.
+        $realKeygen = Get-Command ssh-keygen -ErrorAction SilentlyContinue
+        if ($realKeygen) {
+            $sk = Join-Path $work "sshkey-$sh"
+            & $realKeygen.Source -q -t ed25519 -N '""' -f $sk 2>$null | Out-Null
+            if (-not (Test-Path -LiteralPath "$sk.pub")) { & $realKeygen.Source -q -t ed25519 -N "" -f $sk 2>$null | Out-Null }
+            if (Test-Path -LiteralPath "$sk.pub") {
+                $pubLine = (Get-Content -LiteralPath "$sk.pub" -TotalCount 1).Split(" ")[1]
+                $blob = [Convert]::FromBase64String($pubLine)
+                $sshKeys = "s1:" + [Convert]::ToBase64String($blob[($blob.Length - 32)..($blob.Length - 1)])
+                $srel = Join-Path $work "hssh-$sh"; Copy-Release $hrel $srel
+                $envFile = Join-Path $srel "AgentMux-$hver-envelope.json"
+                Copy-Item -LiteralPath $envFile -Destination (Join-Path $work "env-to-sign.json") -Force
+                & $realKeygen.Source -Y sign -f $sk -n agentmux-release (Join-Path $work "env-to-sign.json") 2>$null | Out-Null
+                $signed = Join-Path $work "env-to-sign.json.sig"
+                if (Test-Path -LiteralPath $signed) {
+                    Copy-Item -LiteralPath $signed -Destination (Join-Path $srel "AgentMux-$hver-envelope.json.sshsig") -Force
+                    $sshEnv = HeadlessEnv $srel (Join-Path $work "lad10-$sh"); $sshEnv["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $sshEnv["AGENTMUX_INSTALL_TEST_KEYS"] = $sshKeys; $sshEnv["AGENTMUX_INSTALL_SSHSIG_FLOOR"] = "0.0.1"
+                    $r = Invoke-Install $sh $sshEnv $hargs
+                    if ($r.Out.Contains("signature of the release checked: Ed25519 (SSH signature), with ssh-keygen")) { Pass "SSH signature: a good one is checked with ssh-keygen" } else { Fail "SSH signature: a good one is checked with ssh-keygen" $r.Out }
+                    # the same signature over a changed envelope is refused
+                    $changed = Join-Path $work "hssh-changed-$sh"; Copy-Release $srel $changed
+                    [IO.File]::AppendAllText((Join-Path $changed "AgentMux-$hver-envelope.json"), " ")
+                    Expect "SSH signature: a signature of another envelope is refused" 1 "signature does not match" $sh (@{} + (HeadlessEnv $changed (Join-Path $work "lad11-$sh")) + @{ AGENTMUX_INSTALL_NO_OPENSSL = "1"; AGENTMUX_INSTALL_TEST_KEYS = $sshKeys; AGENTMUX_INSTALL_SSHSIG_FLOOR = "0.0.1" }) $hargs
+                    # from the floor on, a release with no SSH signature is not installed
+                    $nosig = Join-Path $work "hssh-none-$sh"; Copy-Release $srel $nosig
+                    Remove-Item -LiteralPath (Join-Path $nosig "AgentMux-$hver-envelope.json.sshsig")
+                    Expect "SSH signature: a release at or above the floor with none is refused" 1 "should carry" $sh (@{} + (HeadlessEnv $nosig (Join-Path $work "lad12-$sh")) + @{ AGENTMUX_INSTALL_NO_OPENSSL = "1"; AGENTMUX_INSTALL_TEST_KEYS = $sshKeys; AGENTMUX_INSTALL_SSHSIG_FLOOR = "0.0.1" }) $hargs
+                } else { Write-Host "skip - ssh-keygen here cannot sign (-Y sign); the SSH signature checks are not run" }
+            } else { Write-Host "skip - ssh-keygen here could not make a key; the SSH signature checks are not run" }
+        } else { Write-Host "skip - no ssh-keygen on this system; the SSH signature checks are not run" }
+
+        # No OpenSSL 3: the SSH signature, or the plain refusal below the floor
+        $noSsl = HeadlessEnv $hrel (Join-Path $work "lad8-$sh"); $noSsl["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $noSsl["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen")
+        # Said before anything is linked, so it can be read on any platform whatever happens after the download.
+        $r = Invoke-Install $sh $noSsl $hargs
+        if ($r.Out.Contains("signature NOT checked") -and $r.Out.Contains("what is checked instead")) { Pass "no OpenSSL and no ssh-keygen: the hashes only, said plainly" } else { Fail "no OpenSSL and no ssh-keygen: the hashes only, said plainly" $r.Out }
+        Expect "no OpenSSL and no ssh-keygen: -RequireSignature refuses" 1 "cannot be checked here" $sh $noSsl ($hargs + "-RequireSignature")
+        $belowFloor = $noSsl.Clone(); $belowFloor["AGENTMUX_INSTALL_SSHSIG_FLOOR"] = "99.0.0"
+        $fakeKeygen = Join-Path $work "fake-ssh-keygen.cmd"
+        [IO.File]::WriteAllText($fakeKeygen, "@echo off`r`nexit /b 0`r`n")
+        $belowFloor["AGENTMUX_INSTALL_SSH_KEYGEN"] = $fakeKeygen
+        if ($isWin) { Expect "a release below the SSH signature floor says so" 1 "is older than" $sh $belowFloor ($hargs + "-RequireSignature") }
     }
 }
 

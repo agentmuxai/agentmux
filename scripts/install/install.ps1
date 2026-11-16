@@ -8,6 +8,10 @@
 # and otherwise downloads the installer and checks it against the release's signed manifest, then runs it silently
 # (per user, no administrator rights).
 #
+# With -Headless it installs AgentMux Headless instead (no desktop app: it runs in the background and its web UI is a browser on its
+# own loopback address), from the same signed release, for this user only, no administrator rights:
+#   & ([scriptblock]::Create((irm https://agentmux.ai/install.ps1))) -Headless
+#
 # Plain text, no prompts, ASCII only. Works in Windows PowerShell 5.1 and PowerShell 7.
 # Options (a script block, since a pipe cannot take any):
 #   & ([scriptblock]::Create((irm https://agentmux.ai/install.ps1))) -DryRun
@@ -19,6 +23,7 @@ function Install-AgentMux {
         [string]$Version = "",
         [ValidateSet("auto", "package-manager", "download")][string]$Method = "auto",
         [switch]$DryRun,
+        [switch]$Headless,
         [switch]$NoLaunch,
         [switch]$Force,
         [switch]$RequireSignature,
@@ -38,6 +43,12 @@ function Install-AgentMux {
     # The public keys the app pins to verify a release (crates/common/update-keys.json), as "<id>:<base64 of the 32 raw bytes>".
     # scripts/install/install.test.ps1 fails when this and that file disagree.
     $UpdateKeys = "k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE="
+    # The first release that carries AgentMux-<v>-envelope.json.sshsig: the same envelope signed by the same key in SSH signature form,
+    # which this system's ssh-keygen can check where there is no OpenSSL 3 (most Windows machines). From this release on, a release
+    # without one is not installed. scripts/install/install.test.ps1 fails when this and install.sh's value differ.
+    $SshsigFloor = "0.60.31"
+    $SshsigNamespace = "agentmux-release"
+    $ssh = @{ Why = ""; Out = "" }
 
     function Say([string]$Text) { Write-Host "agentmux-install: $Text" }
     function Die([string]$Text) { throw "agentmux-install: error: $Text" }
@@ -52,6 +63,9 @@ Usage: install.ps1 [options]
 
   -Version <x.y.z>      install this release (default: the latest)
   -Method <m>           auto (default), package-manager or download
+  -Headless             install AgentMux Headless (no desktop app) for this user, from the signed release:
+                        %LOCALAPPDATA%\AgentMux\Headless\<version>, a "current" junction to it, and its bin folder on your PATH.
+                        Run it again to update. Then run  agentmux setup
   -DryRun               print what it would do and change nothing
   -NoLaunch             do not start AgentMux when done
   -Force                install even if AgentMux is already installed
@@ -60,12 +74,13 @@ Usage: install.ps1 [options]
   -Help                 this text
 
 Environment: AGENTMUX_INSTALL_INSTALLED, AGENTMUX_INSTALL_WINGET, AGENTMUX_INSTALL_TEST_KEYS and
-AGENTMUX_INSTALL_RELEASE_BASE and AGENTMUX_INSTALL_WINGET_EXE replace what it looks at or runs, and AGENTMUX_INSTALL_NO_RUN_SETUP stops
+AGENTMUX_INSTALL_RELEASE_BASE, AGENTMUX_INSTALL_SSH_KEYGEN, AGENTMUX_INSTALL_SSHSIG_FLOOR, AGENTMUX_INSTALL_NO_OPENSSL, AGENTMUX_INSTALL_NO_PATH and AGENTMUX_INSTALL_WINGET_EXE replace what it looks at or runs, and AGENTMUX_INSTALL_NO_RUN_SETUP stops
 short of running the installer (used by its tests).
 "@
         return
     }
 
+    if ($Headless -and $Method -eq "package-manager") { Die "-Headless installs from the release download: it has no package-manager method" }
     if ($Version -and $Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "-Version must look like 0.60.14" }
 
     # ---- the platform ----
@@ -97,7 +112,9 @@ short of running the installer (used by its tests).
         return ""
     }
 
-    $installed = Get-InstalledKind
+    # Headless runs beside the desktop app of the same version, so the desktop app being installed is not a reason to stop.
+    $installed = ""
+    if (-not $Headless) { $installed = Get-InstalledKind }
     if ($installed -and -not $Force) {
         if ($installed -eq "store") { $how = "from the Microsoft Store, which updates it" } else { $how = "with the installer: it updates from its version panel, or with  winget upgrade" }
         Say "AgentMux is already installed ($how)."
@@ -149,6 +166,7 @@ short of running the installer (used by its tests).
 
     # True when this openssl can check an Ed25519 signature in one shot (OpenSSL 3).
     function Test-CanCheckSignature {
+        if ($env:AGENTMUX_INSTALL_NO_OPENSSL) { return $false } # for the tests: a system with no OpenSSL 3
         if (-not (Get-Command openssl -ErrorAction SilentlyContinue)) { return $false }
         $old = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
@@ -187,6 +205,87 @@ short of running the installer (used by its tests).
         return 1
     }
 
+    # Is x.y.z (maybe with a suffix) at or above the floor? A suffix on the last part is ignored, so 0.60.31-rc1 compares as 0.60.31:
+    # at the floor, never below it (a pre-release of the floor's version must carry the signature too).
+    function Test-VersionAtLeast([string]$V, [string]$Min) {
+        $a = @($V -split '\.')
+        $b = @($Min -split '\.')
+        for ($i = 0; $i -lt 3; $i++) {
+            $na = 0
+            $nb = 0
+            if ($i -lt $a.Count -and $a[$i] -match '^([0-9]+)') { $na = [int]$Matches[1] }
+            if ($i -lt $b.Count -and $b[$i] -match '^([0-9]+)') { $nb = [int]$Matches[1] }
+            if ($na -ne $nb) { return ($na -gt $nb) }
+        }
+        return $true
+    }
+
+    function Get-SshKeygen {
+        if ($env:AGENTMUX_INSTALL_SSH_KEYGEN) { return $env:AGENTMUX_INSTALL_SSH_KEYGEN }
+        $c = Get-Command ssh-keygen -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+        return $null
+    }
+
+    # True when this system's ssh-keygen can check an SSH signature (-Y verify, OpenSSH 8.0 and later).
+    function Test-CanCheckSshsig([string]$Exe) {
+        if (-not $Exe) { return $false }
+        $old = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try { $out = (& $Exe -Y verify 2>&1 | Out-String) } catch { return $false } finally { $ErrorActionPreference = $old }
+        return ($out -notmatch 'illegal option|invalid option|unknown option|unsupported option')
+    }
+
+    # 0 checked and good, 1 checked and bad, 2 cannot check (no ssh-keygen -Y, or a release from before the floor: $ssh.Why says which).
+    # From the floor on, a missing .sshsig is a failure, not a fallback. The signer is only ever one of the pinned keys, put in an
+    # allowed-signers file here; the key carried inside the signature is checked against them by ssh-keygen, never trusted.
+    function Test-Sshsig([string]$Envelope, [string]$Base, [string]$Work) {
+        $ssh.Why = ""
+        $ssh.Out = ""
+        $exe = Get-SshKeygen
+        if (-not (Test-CanCheckSshsig $exe)) { $ssh.Why = "tool"; return 2 }
+        $floor = $SshsigFloor
+        if ($env:AGENTMUX_INSTALL_SSHSIG_FLOOR) { $floor = $env:AGENTMUX_INSTALL_SSHSIG_FLOOR }
+        if (-not (Test-VersionAtLeast $Version $floor)) { $ssh.Why = "floor"; return 2 }
+        $sshsig = Join-Path $Work "envelope.sshsig"
+        try { Get-Url "$Base/AgentMux-$Version-envelope.json.sshsig" $sshsig } catch {
+            Die "this release ($Version) should carry AgentMux-$Version-envelope.json.sshsig (every release from $SshsigFloor on does) and it could not be downloaded: not installing"
+        }
+        $keys = $UpdateKeys
+        if ($env:AGENTMUX_INSTALL_TEST_KEYS) { $keys = $env:AGENTMUX_INSTALL_TEST_KEYS }
+        $lines = @()
+        foreach ($entry in ($keys -split '\s+')) {
+            if (-not $entry) { continue }
+            try { $raw = [Convert]::FromBase64String($entry.Substring($entry.IndexOf(":") + 1)) } catch { continue }
+            if ($raw.Length -ne 32) { continue }
+            # The key as an SSH key blob: the string "ssh-ed25519" (4-byte length 11), then the 32 raw bytes (length 32).
+            $blob = [byte[]](0, 0, 0, 11) + [Text.Encoding]::ASCII.GetBytes("ssh-ed25519") + [byte[]](0, 0, 0, 32) + $raw
+            $lines += ("{0} namespaces=`"{0}`" ssh-ed25519 {1}" -f $SshsigNamespace, [Convert]::ToBase64String($blob))
+        }
+        $allowed = Join-Path $Work "allowed_signers"
+        [IO.File]::WriteAllText($allowed, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+        # The envelope goes to ssh-keygen's standard input as its exact bytes (a redirect that adds a line ending would fail a good release).
+        $psi = New-Object Diagnostics.ProcessStartInfo
+        $psi.FileName = $exe
+        $psi.Arguments = '-Y verify -f "' + $allowed + '" -I ' + $SshsigNamespace + ' -n ' + $SshsigNamespace + ' -s "' + $sshsig + '"'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $proc = [Diagnostics.Process]::Start($psi)
+        $bytes = [IO.File]::ReadAllBytes($Envelope)
+        try { $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length); $proc.StandardInput.Close() } catch { }
+        $outText = $proc.StandardOutput.ReadToEnd()
+        $errText = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -eq 0) { return 0 }
+        foreach ($text in @($outText, $errText)) {
+            if (-not $ssh.Out -and $text) { $ssh.Out = ("" + ($text -split "`r?`n" | Select-Object -First 1)).Trim() }
+        }
+        return 1
+    }
+
     # Download a release file and check it against the signed manifest. Returns the path of the file.
     function Get-VerifiedFile([string]$Name, [string]$Work) {
         $base = $env:AGENTMUX_INSTALL_RELEASE_BASE
@@ -198,12 +297,21 @@ short of running the installer (used by its tests).
         Get-Url "$base/AgentMux-$Version-envelope.json" $envelopeFile
         Get-Url "$base/AgentMux-$Version-envelope.json.sig" $sigFile
 
+        # The signature is checked with OpenSSL 3 when this system has it, else with ssh-keygen (the SSH signature of the same envelope).
         $sigState = Test-Signature $envelopeFile $sigFile $Work
-        if ($sigState -eq 0) { Say "signature of the release checked" }
-        elseif ($sigState -eq 1) { Die "the release's signature does not match: not installing" }
-        else {
-            if ($RequireSignature) { Die "the release's signature cannot be checked here (it needs OpenSSL 3 on the path) and -RequireSignature was given" }
-            Say "signature not checked: this system has no OpenSSL 3; checking the hashes only"
+        $how = "Ed25519, with OpenSSL"
+        if ($sigState -eq 2) { $sigState = Test-Sshsig $envelopeFile $base $Work; $how = "Ed25519 (SSH signature), with ssh-keygen" }
+        if ($sigState -eq 0) { Say "signature of the release checked: $how" }
+        elseif ($sigState -eq 1) {
+            $extra = ""
+            if ($ssh.Out) { $extra = " (ssh-keygen says: $($ssh.Out))" }
+            Die "the release's signature does not match: not installing$extra"
+        } else {
+            $why = "there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SshsigFloor on carry"
+            if ($ssh.Why -eq "floor") { $why = "this release ($Version) is older than $SshsigFloor, the first with an SSH signature" }
+            if ($RequireSignature) { Die "the release's signature cannot be checked here (no OpenSSL 3 on the path, and $why) and -RequireSignature was given" }
+            Say "signature NOT checked: this system has no OpenSSL 3, and $why"
+            Say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
         }
 
         $envelope = Get-Content -LiteralPath $envelopeFile -Raw | ConvertFrom-Json
@@ -212,7 +320,10 @@ short of running the installer (used by its tests).
 
         $manifest = Get-Content -LiteralPath $manifestFile -Raw | ConvertFrom-Json
         $entry = $manifest.files | Where-Object { $_.name -eq $Name } | Select-Object -First 1
-        if (-not $entry) { Die "the signed manifest does not list $Name" }
+        if (-not $entry) {
+            if ($Name -like "agentmux-headless-*") { Die "this release has no AgentMux Headless package for Windows (the signed manifest does not list $Name)" }
+            Die "the signed manifest does not list $Name"
+        }
 
         Show "download $Name"
         $dest = Join-Path $Work $Name
@@ -262,6 +373,109 @@ short of running the installer (used by its tests).
         }
     }
 
+    # ---- AgentMux Headless (-Headless) ----
+    # %LOCALAPPDATA%\AgentMux\Headless\<version>\ holds the zip's contents (bin\, web\); "current" is a directory junction to it (a
+    # junction needs no administrator rights, a symlink would); the one PATH entry is ...\Headless\current\bin. Everything stays in
+    # the profile: nothing runs as administrator and nothing is written outside it. `agentmux setup` registers the sign-in task.
+
+    # True when $Path is a junction (or link) to $Target.
+    function Test-LinkTo([string]$Path, [string]$Target) {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if (-not $item -or -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $t = @($item.Target) | Select-Object -First 1
+        if (-not $t) { return $false }
+        return ([IO.Path]::GetFullPath("$t").TrimEnd('\', '/') -eq [IO.Path]::GetFullPath($Target).TrimEnd('\', '/'))
+    }
+
+    # Point the "current" junction at $Target. A folder that is not a link is never touched.
+    function Set-CurrentJunction([string]$Path, [string]$Target) {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($item) {
+            if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { Die "$Path exists and is not a link made by this installer: not touching it" }
+            [IO.Directory]::Delete($Path) # removes the link, not the folder it points to
+        }
+        New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+    }
+
+    # Add $Dir to the user's PATH once (any entry that expands to it counts), keeping the entries as they were written.
+    function Add-ToUserPath([string]$Dir) {
+        if ($env:AGENTMUX_INSTALL_NO_PATH) { Say "test mode: your PATH was not changed"; return }
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
+        try {
+            $raw = [string]$key.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $parts = @($raw -split ';' | Where-Object { $_ })
+            $has = $false
+            foreach ($part in $parts) {
+                if ([Environment]::ExpandEnvironmentVariables($part).TrimEnd('\').Equals($Dir.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { $has = $true }
+            }
+            if (-not $has) { $key.SetValue("Path", (($parts + $Dir) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString) }
+        } finally { $key.Close() }
+        # Setting and clearing a throwaway user variable makes Windows tell the running programs that the environment changed.
+        [Environment]::SetEnvironmentVariable("AGENTMUX_PATH_NOTIFY", "1", "User")
+        [Environment]::SetEnvironmentVariable("AGENTMUX_PATH_NOTIFY", $null, "User")
+        if (-not (($env:Path -split ';') -contains $Dir)) { $env:Path = "$env:Path;$Dir" }
+    }
+
+    function Install-Headless {
+        if (-not $env:LOCALAPPDATA) { Die "LOCALAPPDATA is not set: there is no profile folder to install into" }
+        if (-not $Version) { $Version = Get-LatestVersion }
+        $root = Join-Path $env:LOCALAPPDATA "AgentMux\Headless"
+        $target = Join-Path $root $Version
+        $current = Join-Path $root "current"
+        $binDir = Join-Path $current "bin"
+        $name = "agentmux-headless-$Version-windows-x64.zip"
+        Say "installing AgentMux Headless $Version into $target"
+        if ($DryRun) {
+            Show "download $name and check it against the signed manifest"
+            Show "unpack it into $target"
+            Show "junction $current -> $target"
+            Show "add $binDir to your PATH (this user only)"
+            Show "remove the folders of other versions under $root"
+            Say "next: open a new PowerShell window, then run  agentmux setup"
+            return
+        }
+        if (-not $Force -and (Test-Path -LiteralPath (Join-Path $target "bin\agentmux.exe")) -and (Test-LinkTo $current $target)) {
+            Say "AgentMux Headless $Version is already installed: $target"
+            Say "Nothing changed. Use -Force to install it again."
+            return
+        }
+        $work = Join-Path ([IO.Path]::GetTempPath()) ("agentmux-install-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $work | Out-Null
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        # Unpacked beside its final place (the same drive), then moved: a download or unpack that fails leaves nothing half-installed.
+        $stage = Join-Path $root (".stage-" + [Guid]::NewGuid().ToString("N"))
+        try {
+            $zip = Get-VerifiedFile $name $work
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                foreach ($entry in $archive.Entries) {
+                    if ($entry.FullName -match '(^|[\\/])\.\.([\\/]|$)' -or $entry.FullName -match '^([A-Za-z]:|[\\/])') { Die "$name has an entry outside its own folder ($($entry.FullName)): not installing" }
+                }
+            } finally { $archive.Dispose() }
+            [IO.Compression.ZipFile]::ExtractToDirectory($zip, $stage)
+            foreach ($want in @("bin\agentmux.exe", "bin\agentmux-srv.exe", "web\index.html")) {
+                if (-not (Test-Path -LiteralPath (Join-Path $stage $want))) { Die "$name is not an AgentMux Headless package (no $want)" }
+            }
+            if (Test-Path -LiteralPath $target) {
+                try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop } catch { Die "could not replace $target (is AgentMux Headless running from it? run  agentmux stop  and try again)" }
+            }
+            Move-Item -LiteralPath $stage -Destination $target
+            Set-CurrentJunction $current $target
+        } finally {
+            Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        Add-ToUserPath $binDir
+        # The folders of the other versions go once the link has moved. One that is in use stays, and is named.
+        foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $_.Name -ne $Version -and $_.Name -match '^[0-9]+\.[0-9]+\.[0-9]+' })) {
+            $old = $dir.FullName
+            try { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction Stop } catch { Say "could not remove the old folder $old (is AgentMux Headless running from it?): delete it once it has stopped" }
+        }
+        Say "installed AgentMux Headless ${Version}: $target"
+        Say "next: open a new PowerShell window (so your PATH is read), then run  agentmux setup  to choose a port, start AgentMux Headless and sign in"
+    }
+
     function Start-AgentMux([string]$Kind) {
         if ($NoLaunch -or $DryRun -or $env:AGENTMUX_INSTALL_NO_RUN_SETUP) { return }
         Say "starting AgentMux"
@@ -281,6 +495,11 @@ short of running the installer (used by its tests).
     # Everything above only defines functions; nothing is installed until here, so a download cut short (irm | iex) does nothing.
     # What is installed decides which way in is open: the Store id is the Store's copy, AgentMux.AI and the download are the
     # installer's, and the two kinds are never mixed.
+    if ($Headless) {
+        Install-Headless
+        Say "done"
+        return
+    }
     $kind = "setup"
     $done = $false
     $useWinget = ($Method -ne "download") -and (Test-Winget)
