@@ -241,6 +241,24 @@ describe("BackdropPicker", () => {
         expect(field.value).toBe("#3366");
     });
 
+    it("keeps a bad hex and its error on a pane with a custom-colour record when other block meta changes", () => {
+        const record = { kind: "color", hex: "#336699", polarity: "follow", version: 1 };
+        const t = mount({ backdrop: record });
+        const input = t.container.querySelector<HTMLInputElement>("input[placeholder='#rrggbb']")!;
+        fireEvent.input(input, { target: { value: "zzz" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+        expect(t.container.textContent).toContain("Use #rrggbb or #rgb.");
+        expect(written()).toEqual([]);
+        // An update to the block that is not the backdrop: the record is the same one, handed over as a new object.
+        t.setMeta({ backdrop: { ...record }, title: "renamed", cwd: "/elsewhere" } as never);
+        expect(input.value).toBe("zzz");
+        expect(t.container.textContent).toContain("Use #rrggbb or #rgb.");
+        // A real change of the record does reset it.
+        t.setMeta({ backdrop: { ...record, hex: "#112233" } });
+        expect(input.value).toBe("#112233");
+        expect(t.container.textContent).not.toContain("Use #rrggbb or #rgb.");
+    });
+
     it("leaves a polarity just chosen alone when the pane's other meta changes before its write lands, with a record or none", () => {
         // With a record: the click writes the new polarity, and the meta still says Follow when an unrelated update arrives.
         const withRecord = mount({ backdrop: teal });
