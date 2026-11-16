@@ -174,6 +174,56 @@ fn a_batch_is_one_vault_and_only_one_the_agent_may_use() {
 }
 
 #[test]
+fn a_batch_of_links_goes_to_fleet_when_it_names_no_vault_and_the_agent_may_use_it() {
+    let s = store();
+    let links = || batch(vec![BatchItem { link: true, ..item("prod/invoice-sync", "Invoice provider key") }, BatchItem { link: true, ..item("prod/mailer", "Mail provider key") }]);
+    // No Vault by that name: the agent's first, as for any batch.
+    assert_eq!(check(&s, &links(), "builder").unwrap().vault_name, "Personal");
+    // The person made a Fleet this agent is not in: it is as if it weren't there.
+    let fleet = vaults::create(&s, "Fleet", VaultAgents::Named(vec!["someone-else".into()])).unwrap();
+    assert_eq!(check(&s, &links(), "builder").unwrap().vault_name, "Personal");
+    vaults::update(&s, &fleet.id, "Fleet", VaultAgents::Named(vec!["builder".into()])).unwrap();
+    let plan = check(&s, &links(), "builder").unwrap();
+    assert_eq!((plan.vault_id.as_str(), plan.vault_name.as_str()), (fleet.id.as_str(), "Fleet"));
+    assert!(plan.items.iter().all(|p| matches!(&p.target, Target::Link { vault_id, .. } if *vault_id == fleet.id)));
+    // A Vault the batch names is the one it goes into, and a batch that copies anything keeps the agent's first.
+    assert_eq!(check(&s, &BatchRequest { vault: Some("Personal".into()), ..links() }, "builder").unwrap().vault_name, "Personal");
+    let mut mixed = links();
+    mixed.items.push(item("hosts/alpha", "Alpha"));
+    assert_eq!(check(&s, &mixed, "builder").unwrap().vault_name, "Personal");
+}
+
+#[test]
+fn the_person_may_send_a_batch_to_another_vault_the_agent_may_use() {
+    let s = store();
+    let fleet = vaults::create(&s, "Fleet", VaultAgents::Named(vec!["builder".into()])).unwrap();
+    vaults::create(&s, "Closed", VaultAgents::None).unwrap();
+    let plan = check(&s, &three(), "builder").unwrap();
+    assert_eq!(plan.vault_name, "Personal");
+    // The card offers the Vaults this agent may use, the batch's own among them, and never one it may not.
+    assert_eq!(choices(&s, &plan, "builder").iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["Personal", "Fleet"]);
+    assert!(choices(&s, &plan, "someone-else").is_empty(), "one Vault is no choice");
+
+    // The same batch, in the Vault the person chose: its id and references stay, every new entry goes there.
+    let mut named = three();
+    named.items[0].vault = Some("Personal".into());
+    let moved = check_into(&s, &named, "builder", "Fleet", &plan).unwrap();
+    assert_eq!((moved.id.as_str(), &moved.refs, moved.vault_id.as_str(), moved.vault_name.as_str()), (plan.id.as_str(), &plan.refs, fleet.id.as_str(), "Fleet"));
+    assert!(moved.items.iter().all(|p| matches!(&p.target, Target::New { vault_id, .. } if *vault_id == fleet.id) && p.refs == plan.refs));
+    assert_ne!(moved.approved(&[0, 1, 2]).list, plan.approved(&[0, 1, 2]).list, "the list approved names the Vault it goes into");
+    // Not to a Vault the agent may not use, whoever asks for it.
+    assert!(check_into(&s, &three(), "builder", "Closed", &plan).unwrap_err().contains("no Vault"));
+
+    // A row that replaces an entry's value stays with its entry: no choice is offered, and none is taken.
+    let stripe = entry(&s, "Stripe", "personal");
+    let mut req = three();
+    req.items[0] = BatchItem { aws_secret_id: "pay/stripe".into(), id: Some(stripe), ..Default::default() };
+    let replacing = check(&s, &req, "builder").unwrap();
+    assert!(choices(&s, &replacing, "builder").is_empty());
+    assert!(check_into(&s, &req, "builder", "Fleet", &replacing).unwrap_err().contains("one batch, one Vault"));
+}
+
+#[test]
 fn no_entry_and_no_secret_is_in_a_batch_twice() {
     let s = store();
     let mut req = three();
