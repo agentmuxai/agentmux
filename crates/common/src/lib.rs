@@ -31,6 +31,7 @@ pub mod log_retention;
 pub mod muxbus_reconnect;
 pub mod incidents;
 pub mod login_pty;
+pub mod owner_only;
 pub mod pagefile;
 pub mod platform_name;
 pub mod agent_roots;

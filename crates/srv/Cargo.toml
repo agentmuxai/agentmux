@@ -15,6 +15,12 @@ path = "src/main.rs"
 name = "agentmux"
 path = "src/agentmux_cli/main.rs"
 
+# What the Windows logon task runs: a program of the graphical subsystem, so no console window shows at sign-in. It
+# starts `agentmux run` from its own folder and waits for it.
+[[bin]]
+name = "agentmuxw"
+path = "src/agentmuxw.rs"
+
 [dependencies]
 # The server's core: storage, registry, identity, agents, the event bus (crates/srv-core).
 agentmux-srv-core = { path = "../srv-core" }

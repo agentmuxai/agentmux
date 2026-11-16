@@ -69,11 +69,11 @@ const MIB: u64 = 1024 * 1024;
 
 pub fn evaluate(f: &Facts) -> Vec<Check> {
     let mut out = Vec::new();
-    let supported = matches!(f.os, "linux" | "macos") && matches!(f.arch, "x86_64" | "aarch64");
+    let supported = (matches!(f.os, "linux" | "macos") && matches!(f.arch, "x86_64" | "aarch64")) || (f.os == "windows" && f.arch == "x86_64");
     out.push(if supported {
         check("platform", Level::Ok, format!("{} {}", f.os, f.arch), None)
     } else {
-        check("platform", Level::Fail, format!("{} {} is not in the first package (Linux and macOS, x86_64 and arm64)", f.os, f.arch), Some("use a Linux or macOS machine, or the container image"))
+        check("platform", Level::Fail, format!("{} {} is not in a package (Linux and macOS on x86_64 and arm64, Windows on x86_64)", f.os, f.arch), Some("use one of those machines, or the container image"))
     });
     for (what, found, flag) in [("server program", &f.srv, "--srv-bin"), ("web UI", &f.web, "--web-dir")] {
         out.push(match found {
@@ -324,7 +324,7 @@ mod tests {
     }
 
     fn running(version: &str) -> ServerState {
-        ServerState { pid: 9, version: version.into(), channel: "headless".into(), web_port: 7380, ws_port: 7381, started_unix: 0, key_file: "/k".into(), data_dir: "/d".into(), srv: "/s".into() }
+        ServerState { pid: 9, version: version.into(), channel: "headless".into(), web_port: 7380, ws_port: 7381, started_unix: 0, key_file: "/k".into(), data_dir: "/d".into(), srv: "/s".into(), supervisor: None }
     }
 
     #[test]
@@ -335,8 +335,8 @@ mod tests {
     }
 
     #[test]
-    fn only_linux_and_macos_on_x86_64_or_arm64_are_supported() {
-        for (os, arch, ok) in [("linux", "x86_64", true), ("linux", "aarch64", true), ("macos", "aarch64", true), ("macos", "x86_64", true), ("windows", "x86_64", false), ("linux", "riscv64", false), ("freebsd", "x86_64", false)] {
+    fn only_the_packaged_platforms_are_supported() {
+        for (os, arch, ok) in [("linux", "x86_64", true), ("linux", "aarch64", true), ("macos", "aarch64", true), ("macos", "x86_64", true), ("windows", "x86_64", true), ("windows", "aarch64", false), ("linux", "riscv64", false), ("freebsd", "x86_64", false)] {
             let facts = Facts { os, arch, ..good() };
             assert_eq!(level_of(&evaluate(&facts), "platform"), vec![if ok { Level::Ok } else { Level::Fail }], "{os} {arch}");
         }

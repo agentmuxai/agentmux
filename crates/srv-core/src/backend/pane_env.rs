@@ -383,6 +383,8 @@ mod spawn_site_coverage {
          "own-exe: `agentmux` runs the server program of its own install (`migrate --prepare`, and the `open` and `logout` sign-in client); the command drops every AGENTMUX_* variable of the shell it runs in before it spawns anything"),
         ("src/agentmux_cli/main.rs", "srv", 1,
          "own-exe: `agentmux run` becomes the server program of its own install (exec), with the channel's own folders in its environment; the shell's AGENTMUX_* variables were dropped first"),
+        ("src/agentmuxw.rs", "agentmux", 1,
+         "own-exe: `agentmuxw`, the Windows logon task's program, runs the `agentmux.exe` in its own folder with `run` and a channel name, and nothing else; no environment is added"),
         ("src/agentmux_cli/main.rs", "exe", 1,
          "own-exe: `agentmux start` runs `agentmux run` in the background from its own executable; the shell's AGENTMUX_* variables were dropped first"),
         ("src/agentmux_cli/service.rs", "program", 1,
