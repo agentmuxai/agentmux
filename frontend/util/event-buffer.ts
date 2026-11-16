@@ -204,7 +204,7 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
 
         // Source-restart detection. Both srv and launcher reducers
         // reset `event_version` to 0 on process restart (see
-        // `crates/srv/src/state.rs::default` and
+        // `crates/srv-core/src/state.rs::default` and
         // `crates/launcher/src/state.rs::default`); after a restart
         // the next emitted event is `version=1`. Without resetting
         // here, every post-restart event would fail the stale gate

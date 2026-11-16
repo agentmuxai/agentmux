@@ -5,7 +5,7 @@
  *  action does, and srv's announcements count only in the windows they name
  *  (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2). */
 
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The pane's block object, which the registry watches: present until deleted.
@@ -27,6 +27,7 @@ import {
     endWaitingForYou,
     isAgentWaitingForYou,
     isWaitingForYou,
+    onWaitingEnded,
     startWaitingForYou,
     type UserAttention,
     waitingApps,
@@ -171,5 +172,47 @@ describe("what the status bar's summary reads of the registry", () => {
         startWaitingForYou("b9", "question", "Which branch?");
         applyUserAttention({ key: "v9", block_id: "b9", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
         expect(waitingPanes()[0].kinds?.slice().sort()).toEqual(["own", "vault"]);
+    });
+
+    it("lists the pane again, with its remaining kinds, when one of two waits ends", () => {
+        __resetWaitingForYou();
+        startWaitingForYou("b8", "question", "Which branch?");
+        applyUserAttention({ key: "v8", block_id: "b8", kind: "vault", text: "x", window_ids: [], since_ms: 0, active: true }, "w1");
+        const seen: string[][] = [];
+        createRoot((dispose) => {
+            createEffect(() => seen.push(waitingPanes()[0]?.kinds?.slice().sort() ?? []));
+            return dispose;
+        });
+        endWaitingForYou("b8", "question");
+        expect(seen[seen.length - 1]).toEqual(["vault"]);
+    });
+});
+
+describe("the end of a pane's last wait", () => {
+    it("tells its listeners what it was, how long it had waited and how it ended, once, when the last wait ends", () => {
+        const ended: unknown[] = [];
+        const stop = onWaitingEnded((e) => ended.push(e));
+        startWaitingForYou("b1", "permission", "Allow Bash?");
+        startWaitingForYou("b1", "srv:k1", "Allow?", { what: "asks you to confirm", kind: "confirm" });
+        endWaitingForYou("b1", "srv:k1", "submitted");
+        expect(ended, "one wait is left, so the pane still waits").toEqual([]);
+        endWaitingForYou("b1", "permission", "closed");
+        expect(ended).toEqual([
+            { blockId: "b1", what: "asks to approve a Bash call", kind: "own", since: expect.any(Number), reason: "closed" },
+        ]);
+        stop();
+        startWaitingForYou("b2", "question", "Which?");
+        endWaitingForYou("b2", "question");
+        expect(ended, "a listener that stopped hears nothing").toHaveLength(1);
+    });
+
+    it("names a request with no pane by the kind srv announced it as", () => {
+        const ended: { blockId: string; kind: string; reason: string }[] = [];
+        const stop = onWaitingEnded((e) => ended.push(e));
+        applyUserAttention({ key: "k9", kind: "consent", active: true, text: "Agent access", block_id: "", window_ids: [] } as UserAttention, "w1");
+        applyUserAttention({ key: "k9", kind: "consent", active: false, text: "", block_id: "", window_ids: [] } as UserAttention, "w1");
+        expect(ended).toMatchObject([{ kind: "consent", reason: "submitted" }]);
+        expect(ended[0].blockId).toContain("k9");
+        stop();
     });
 });

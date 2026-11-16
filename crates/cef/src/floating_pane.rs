@@ -1255,6 +1255,7 @@ fn create_popup(
         .collect();
     title_utf16.push(0);
 
+    let (x, y) = agentmux_common::test_offscreen::place((x, y));
     let hwnd = unsafe {
         CreateWindowExW(
             WS_EX_TOOLWINDOW,

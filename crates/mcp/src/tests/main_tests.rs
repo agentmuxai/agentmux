@@ -144,8 +144,9 @@ fn stop_self_warns_and_requires_the_users_quote() {
 #[test]
 fn deferred_delivery_text_is_clean_and_names_the_target() {
     let t = deferred_delivery_text("Camper");
-    assert!(t.starts_with("QUEUED for Camper — their agent is starting up, restarting or stopping"), "{t}");
-    assert!(!t.contains("mid-turn") && !t.contains("turn ends"), "nothing waits for a turn: {t}");
+    assert!(t.starts_with("QUEUED for Camper — their agent cannot take it yet"), "{t}");
+    assert!(t.contains("starting up, restarting or") && t.contains("one turn at a time"), "both reasons are named: {t}");
+    assert!(!t.contains("injected") && !t.contains("Delivered"), "it says nothing was delivered: {t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
     assert!(t.ends_with("Don't resend it."), "{t}");
 }
@@ -338,7 +339,7 @@ fn send_message_outcome_reads_the_answer_in_a_fixed_order() {
 fn message_send_description_lists_every_answer() {
     let v: Value = serde_json::from_str(MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
-    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)", "HELD for X (peer_offline)", "HELD for X (usage_limit", "(unavailable)",
+    for s in ["Delivered to X", "QUEUED for X — their agent cannot take it yet", "HELD for X (not_running)", "HELD for X (needs_login)", "HELD for X (peer_offline)", "HELD for X (usage_limit", "(unavailable)",
               "via the cloud relay (unconfirmed", "signed in from your account", "(needs_login)", "(not_found)", "id="] {
         assert!(d.contains(s), "missing {s:?}");
     }

@@ -202,7 +202,7 @@ describe("remote media", () => {
 
 describe("Operator Config tells agents about video and audio", () => {
     const manifest = JSON.parse(
-        readFileSync(join(__dirname, "../../../crates/srv/operator-config-seed.json"), "utf8"),
+        readFileSync(join(__dirname, "../../../crates/srv-core/operator-config-seed.json"), "utf8"),
     ) as { version: number; entries: { id: string; instructions: string }[] };
     const entry = manifest.entries.find((e) => e.id === "operator-config-rich-output")!;
 

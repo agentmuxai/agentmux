@@ -6,7 +6,7 @@
  * below this instance's own tree.
  * docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md section 3.
  *
- * The data comes from `swarm.other-instances` (crates/srv/src/backend/swarm_remote.rs).
+ * The data comes from `swarm.other-instances` (crates/srv-core/src/backend/swarm_remote.rs).
  * It lists this machine's other channels and the LAN hosts (Phases 1 and 2),
  * with each agent's state and summary line where its instance reports them
  * (Phase 4); cloud installs arrive later as more hosts with their own `tier`.

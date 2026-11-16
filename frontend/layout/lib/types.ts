@@ -439,6 +439,12 @@ export interface NodeModel {
      */
     activeBlockId?: Accessor<string>;
     /**
+     * The tab whose content the pane shows in front, where that is not `activeBlockId`: while the active tab
+     * is dragged out of the pane and has left it, the tab that takes its place (app/tab/pane-leaf-state.ts
+     * `useShownBlockId`). Set on the node model the pane's chrome gets; the strip marks this tab in front.
+     */
+    shownBlockId?: Accessor<string>;
+    /**
      * The `ViewModel` instance the leaf's currently-mounted `Block` owns, or
      * `null` in the brief window between an old stack member's `Block`
      * unmounting and the new one's mounting. Pushed by `block.tsx` itself

@@ -16,7 +16,7 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { extensionOf } from "./files-sort";
 
-/** The sizes srv offers, in pixels (crates/srv/src/backend/file_icons/request.rs). */
+/** The sizes srv offers, in pixels (crates/srv-core/src/backend/file_icons/request.rs). */
 export const ICON_PX = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256] as const;
 /** Icons kept as object URLs; past this the least recently used is released. */
 const MAX_CACHED = 200;

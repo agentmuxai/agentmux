@@ -186,6 +186,32 @@ $gap: 6px;
         content-visibility: auto;
         contain-intrinsic-size: $tile $tile;
 
+        // Dragging a tile into a new order: the held one dims, and a line on the edge it would land on
+        // (inside the tile: content-visibility clips anything drawn outside it).
+        &.is-dragging {
+            opacity: 0.45;
+        }
+
+        &.is-drop-before::before,
+        &.is-drop-after::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--accent-color);
+            z-index: var(--z-over-badge);
+            pointer-events: none;
+        }
+
+        &.is-drop-before::before {
+            left: 0;
+        }
+
+        &.is-drop-after::after {
+            right: 0;
+        }
+
         // A kit Button drawn as a thumbnail: the kit's size, padding and fill give way to the tile's.
         &__main.ui-button {
             position: relative;
@@ -423,6 +449,12 @@ $gap: 6px;
 
         .agent-attachment-tray__tiles {
             padding-top: 2px;
+        }
+
+        // "+N" opened: the tiles wrap onto more rows, at the same size, instead of running past the bubble's edge.
+        &.is-expanded .agent-attachment-tray__tiles {
+            flex-wrap: wrap;
+            overflow: visible;
         }
     }
 }

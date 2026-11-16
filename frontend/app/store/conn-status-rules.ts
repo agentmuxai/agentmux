@@ -4,7 +4,7 @@
 // What a pane does with its connection's status (conn-status.ts). srv says
 // how a connection is: connecting while a login may be under way (an SSH
 // terminal's ssh at a password prompt), connected once logged in, and
-// disconnected or error once it is gone (crates/srv/src/backend/remote/link.rs).
+// disconnected or error once it is gone (crates/srv-core/src/backend/remote/link.rs).
 
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 

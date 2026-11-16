@@ -12,6 +12,7 @@
  */
 
 import type { AttentionItem } from "@/app/notification/attention-list";
+import type { EndedAsk } from "@/app/notification/ended-asks";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
@@ -51,6 +52,8 @@ export interface Summary {
     parts: SummaryPart[];
     /** How many things wait on the person (Asks, Browser, Vault and tasks): the badge when the bar is narrow. */
     waiting: number;
+    /** The asks that already ended, newest first (a list of their own: they are not waiting, so not in `waiting`). */
+    ended: EndedAsk[];
 }
 
 export interface SummaryInput {
@@ -64,6 +67,8 @@ export interface SummaryInput {
     requests: VaultRequest[];
     /** Kanban tasks that need the person. */
     tasks: number;
+    /** The asks that ended in the last two minutes. */
+    ended?: EndedAsk[];
 }
 
 /** Whether a pane waits only on Vault requests: the Vault's own lists count those, so it is not also an agent waiting. */
@@ -139,5 +144,5 @@ export function summarize(input: SummaryInput): Summary {
         // A task row stands for all of them; the count is the Kanban's own.
         { id: "tasks", count: input.tasks, rows: taskRows },
     ];
-    return { parts, waiting: parts.filter((p) => p.id !== "agents").reduce((n, p) => n + p.count, 0) };
+    return { parts, waiting: parts.filter((p) => p.id !== "agents").reduce((n, p) => n + p.count, 0), ended: input.ended ?? [] };
 }

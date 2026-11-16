@@ -156,6 +156,10 @@ fn restore_and_bring_onscreen(hwnd: isize) -> (bool, bool) {
             return (restored, false);
         }
         let window = Rect { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+        // A test build keeps its windows off-screen on purpose (AGENTMUX_TEST_OFFSCREEN): focus does not bring one back.
+        if agentmux_common::test_offscreen::active() {
+            return (restored, false);
+        }
         let Some(to) = onscreen_rect(window, &display_work_areas()) else {
             return (restored, false);
         };

@@ -184,7 +184,7 @@ let log_dir = dirs::home_dir()
 
 ### Change 2: `AGENTMUX_LOG_DIR` env var (P0)
 
-**File:** `crates/srv/src/backend/blockcontroller/shell.rs` (~line 486)
+**File:** `crates/srv-core/src/backend/blockcontroller/shell.rs` (~line 486)
 
 ```rust
 // Inject log directory so agents can find logs without guessing.
@@ -370,7 +370,7 @@ if let Ok(entries) = std::fs::read_dir(&log_dir) {
 
 ### Change 7: `muxlog` shell helper (P2)
 
-**Files:** `crates/srv/src/backend/shellintegration/{bash.sh,zsh.sh}`
+**Files:** `crates/srv-core/src/backend/shellintegration/{bash.sh,zsh.sh}`
 
 ```bash
 muxlog() {
@@ -392,7 +392,7 @@ muxlog() {
 }
 ```
 
-**File:** [`crates/srv/src/backend/shellintegration/pwsh.ps1`](../crates/srv/src/backend/shellintegration/pwsh.ps1)
+**File:** [`crates/srv-core/src/backend/shellintegration/pwsh.ps1`](../crates/srv-core/src/backend/shellintegration/pwsh.ps1)
 
 ```powershell
 function muxlog {

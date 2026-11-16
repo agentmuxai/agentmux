@@ -15,6 +15,7 @@
 //! Nothing here prints a key, a code or a token.
 
 mod doctor;
+mod logs;
 mod process;
 mod service;
 mod settings;
@@ -138,9 +139,12 @@ enum Cmd {
     Logout,
     /// The server's log.
     Logs {
-        /// How many of the last lines to show.
-        #[arg(long, default_value_t = 50)]
-        lines: usize,
+        /// How many of the last lines to show (50 when `--since` is not given).
+        #[arg(long)]
+        lines: Option<usize>,
+        /// Only the lines written in the last while: a number and s, m, h or d (`30m`, `1h`).
+        #[arg(long, value_name = "AGE")]
+        since: Option<String>,
         /// Keep showing new lines until interrupted.
         #[arg(short, long)]
         follow: bool,
@@ -186,7 +190,13 @@ fn dispatch(cli: Cli) -> i32 {
         Cmd::Status { json } => cmd_status(&paths, json),
         Cmd::Open { print, origin } => cmd_client(&paths, "open", &client_args(print, origin)),
         Cmd::Logout => cmd_client(&paths, "logout", &[]),
-        Cmd::Logs { lines, follow } => cmd_logs(&paths, lines, follow),
+        Cmd::Logs { lines, since, follow } => match since.as_deref().map(logs::parse_age).transpose() {
+            Ok(age) => cmd_logs(&paths, lines, age, follow),
+            Err(e) => {
+                warn!("logs --since: {e}");
+                2
+            }
+        },
         Cmd::Version { .. } => unreachable!("answered above"),
     }
 }
@@ -600,6 +610,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
     let healthy = record.as_ref().is_some_and(|s| process::health_ok(s.web_port));
     let uptime = record.as_ref().map(|s| agentmux_common::time::now_secs_u64().saturating_sub(s.started_unix));
     let blocked = state::read_blocked(&paths.instance_dir).filter(|_| record.is_none());
+    let service = user_home().is_ok_and(|h| service::installed(&h, &paths.channel));
     if json {
         println!(
             "{}",
@@ -613,7 +624,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
                 "url": record.as_ref().map(ServerState::url),
                 "uptime_secs": uptime,
                 "data_dir": record.as_ref().map(|s| s.data_dir.clone()),
-                "service": user_home().is_ok_and(|h| service::installed(&h, &paths.channel)),
+                "service": service,
                 "blocked": blocked.as_ref().map(|b| serde_json::json!({ "owner": b.owner, "reason": b.reason, "since_unix": b.since_unix, "what_to_do": b.sentence() })),
             })
         );
@@ -621,6 +632,7 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         println!("AgentMux {} is {} (pid {}, channel {}, up {})", s.version, if healthy { "running" } else { "running but not answering yet" }, s.pid, s.channel, human_duration(uptime.unwrap_or(0)));
         println!("  open:  {}", s.url());
         println!("  data:  {}", s.data_dir.display());
+        println!("  service: {}", service_line(service));
         if s.version != VERSION {
             tell!("  installed version is {VERSION}: `agentmux restart` runs it");
         }
@@ -630,6 +642,11 @@ fn cmd_status(paths: &DataPaths, json: bool) -> i32 {
         tell!("AgentMux is not running (channel {}). Start it with `agentmux start`.", paths.channel);
     }
     if healthy { 0 } else { 1 }
+}
+
+/// What `status` says of the service: whether the server starts by itself at every login.
+fn service_line(installed: bool) -> &'static str {
+    if installed { "installed (starts at every login)" } else { "none (runs only when started)" }
 }
 
 fn human_duration(secs: u64) -> String {
@@ -687,6 +704,7 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
         missing_libs: doctor::missing_libs(),
         certs_found: doctor::system_certs_found(),
         installed_version: VERSION,
+        node_version: doctor::node_version(),
         blocked: state::read_blocked(&paths.instance_dir),
         service_installed: service_text.is_some(),
         service_names_exe: service_text.zip(exe).map(|(text, exe)| service::file_names_exe(&text, &exe)),
@@ -814,7 +832,7 @@ fn cmd_client(paths: &DataPaths, name: &str, extra: &[String]) -> i32 {
     }
 }
 
-fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
+fn cmd_logs(paths: &DataPaths, lines: Option<usize>, since: Option<Duration>, follow: bool) -> i32 {
     use std::io::{Read, Seek, SeekFrom, Write};
     let path = state::log_path(&paths.instance_dir);
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -822,7 +840,15 @@ fn cmd_logs(paths: &DataPaths, lines: usize, follow: bool) -> i32 {
         return 1;
     };
     let mut out = std::io::stdout();
-    for line in state::last_lines(&text, lines) {
+    // With `--since` the whole window is shown unless `--lines` also caps it; without it, the last 50 lines.
+    let shown: Vec<&str> = match since {
+        Some(age) => {
+            let window = logs::since(&text, logs::cutoff(age));
+            window[window.len().saturating_sub(lines.unwrap_or(usize::MAX))..].to_vec()
+        }
+        None => state::last_lines(&text, lines.unwrap_or(50)),
+    };
+    for line in shown {
         if writeln!(out, "{line}").is_err() {
             return 0;
         }
@@ -904,6 +930,8 @@ mod tests {
             vec!["open", "--origin", "http://127.0.0.1:8080"],
             vec!["logout"],
             vec!["logs", "--lines", "5", "-f"],
+            vec!["logs", "--since", "1h"],
+            vec!["logs", "--since", "30m", "--lines", "20"],
             vec!["version", "--json"],
         ] {
             assert!(parse(&args).is_ok(), "{args:?}");
@@ -1078,6 +1106,12 @@ mod tests {
     fn version_names_the_commit_when_the_build_has_one() {
         assert_eq!(version_line("agentmux", "stable", Some("3f9c2a1b7d")), format!("agentmux {VERSION} (channel stable, commit 3f9c2a1b7d)"));
         assert_eq!(version_line("agentmux", "stable", None), format!("agentmux {VERSION} (channel stable)"));
+    }
+
+    #[test]
+    fn status_says_whether_the_server_starts_at_every_login() {
+        assert!(service_line(true).starts_with("installed") && service_line(true).contains("every login"));
+        assert!(service_line(false).starts_with("none") && service_line(false).contains("only when started"));
     }
 
     #[test]

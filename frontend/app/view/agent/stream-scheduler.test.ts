@@ -3,15 +3,23 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    BACKGROUND_DELAY_MS,
+    FRAME_BUDGET_MS,
+    HIDDEN_DELAY_MS,
+    HIDDEN_DRAIN_MS,
     INPUT_WINDOW_MS,
+    MAX_PANES_PER_FRAME_IDLE,
     MAX_PANES_PER_FRAME_WHILE_INTERACTING,
+    MAX_WAIT_MS,
     SLOW_FLUSH_MS,
     STARVATION_MS,
+    type FlushRate,
     __markInputForTests,
     __resetStreamSchedulerForTests,
     cancelStreamFlush,
     hasPendingStreamFlush,
     requestStreamFlush,
+    streamSchedulerStats,
 } from "./stream-scheduler";
 
 // Manual frames and a controllable clock.
@@ -291,5 +299,182 @@ describe("slow flushes in the log", () => {
         expect(warn).toHaveBeenCalledTimes(13);
         expect(warn.mock.calls[12][0]).toMatch(/\(\+3 slow flushes not logged\)$/);
         warn.mockRestore();
+    });
+});
+
+describe("a frame's own limits", () => {
+    it(`flushes at most ${MAX_PANES_PER_FRAME_IDLE} panes in a frame even when nobody is typing, the rest the frame after`, () => {
+        const order: string[] = [];
+        for (const id of ["a", "b", "c", "d", "e"]) requestStreamFlush(id, () => order.push(id));
+        frame();
+        expect(order).toEqual(["a", "b", "c"]);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["a", "b", "c", "d", "e"]);
+    });
+
+    it("stops adding panes once the frame's flushes took the budget, but always runs one", () => {
+        const order: string[] = [];
+        const slow = (id: string) => () => {
+            order.push(id);
+            clock += FRAME_BUDGET_MS + 2; // a flush that blew the budget by itself
+        };
+        for (const id of ["a", "b", "c"]) requestStreamFlush(id, slow(id));
+        frame();
+        expect(order).toEqual(["a"]);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["a", "b"]);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["a", "b", "c"]);
+    });
+
+    it("does not count a pane's own delay against the frame: two quick flushes share a frame", () => {
+        const order: string[] = [];
+        for (const id of ["a", "b"]) requestStreamFlush(id, () => order.push(id));
+        frame();
+        expect(order).toEqual(["a", "b"]);
+    });
+});
+
+describe("flush rates", () => {
+    beforeEach(() => {
+        // Only the timers: the frame callback and the clock stay the manual ones set up above.
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    });
+    /** Move the manual clock and let a timer-armed wake-up fire, then run the frame it asks for. */
+    const advance = (ms: number): void => {
+        clock += ms;
+        vi.advanceTimersByTime(ms);
+        frame();
+    };
+
+    it("a background pane is not due until BACKGROUND_DELAY_MS after its request", () => {
+        const order: string[] = [];
+        requestStreamFlush("bg", () => order.push("bg"), () => "background");
+        frame();
+        expect(order).toEqual([]);
+        advance(BACKGROUND_DELAY_MS);
+        expect(order).toEqual(["bg"]);
+    });
+
+    it("a hidden pane waits HIDDEN_DELAY_MS, and the visible panes go first", () => {
+        const order: string[] = [];
+        requestStreamFlush("hid", () => order.push("hid"), () => "hidden");
+        requestStreamFlush("bg", () => order.push("bg"), () => "background");
+        requestStreamFlush("full", () => order.push("full"));
+        frame(); // only the full pane is due
+        expect(order).toEqual(["full"]);
+        advance(BACKGROUND_DELAY_MS);
+        expect(order).toEqual(["full", "bg"]);
+        advance(HIDDEN_DELAY_MS);
+        expect(order).toEqual(["full", "bg", "hid"]);
+    });
+
+    it("at most one hidden pane flushes in a frame", () => {
+        const order: string[] = [];
+        for (const id of ["h1", "h2", "h3"]) requestStreamFlush(id, () => order.push(id), () => "hidden");
+        advance(HIDDEN_DELAY_MS);
+        expect(order).toEqual(["h1"]);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["h1", "h2"]);
+        clock += 16;
+        frame();
+        expect(order).toEqual(["h1", "h2", "h3"]);
+    });
+
+    it("reads the rate at each frame, so a pane that is shown flushes at once", () => {
+        const order: string[] = [];
+        let rate: FlushRate = "hidden";
+        requestStreamFlush("p", () => order.push("p"), () => rate);
+        advance(10);
+        expect(order).toEqual([]);
+        rate = "full";
+        requestStreamFlush("p", () => order.push("p"), () => rate); // asks again: the wake-up is recomputed
+        frame();
+        expect(order).toEqual(["p"]);
+    });
+
+    it("a request that has waited MAX_WAIT_MS goes before the full panes", () => {
+        const order: string[] = [];
+        requestStreamFlush("old", () => order.push("old"), () => "background");
+        clock += MAX_WAIT_MS;
+        for (const id of ["f1", "f2", "f3"]) requestStreamFlush(id, () => order.push(id));
+        vi.advanceTimersByTime(MAX_WAIT_MS);
+        frame();
+        expect(order).toEqual(["old", "f1", "f2"]); // the cap of three, with the starved one first
+    });
+
+    it("a page that draws no frames flushes the oldest pane every HIDDEN_DRAIN_MS", () => {
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        const order: string[] = [];
+        for (const id of ["a", "b"]) requestStreamFlush(id, () => order.push(id));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS - 1);
+        expect(order).toEqual([]);
+        vi.advanceTimersByTime(1);
+        expect(order).toEqual(["a"]);
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS);
+        expect(order).toEqual(["a", "b"]);
+        expect(streamSchedulerStats().drained).toBe(2);
+    });
+
+    it("a background request is not left behind the later wake-up a hidden pane had set", () => {
+        const order: string[] = [];
+        requestStreamFlush("hid", () => order.push("hid"), () => "hidden");
+        requestStreamFlush("bg", () => order.push("bg"), () => "background");
+        advance(BACKGROUND_DELAY_MS);
+        expect(order).toEqual(["bg"]);
+    });
+
+    it("drains a page that was hidden after its frame was already requested", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a")); // a frame is now pending and will never fire
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        requestStreamFlush("b", () => order.push("b"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS);
+        expect(order).toEqual(["a"]);
+    });
+
+    it("drains when the page is hidden after its frame was requested, with no further request", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a")); // a frame is now pending and will never fire
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS - 1);
+        expect(order).toEqual([]);
+        vi.advanceTimersByTime(1);
+        expect(order).toEqual(["a"]);
+        expect(streamSchedulerStats().drained).toBe(1);
+    });
+
+    it("stops draining when the page is shown again, and the next frame flushes", () => {
+        const order: string[] = [];
+        requestStreamFlush("a", () => order.push("a"));
+        Object.defineProperty(document, "hidden", { value: true, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS - 1);
+        Object.defineProperty(document, "hidden", { value: false, configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(HIDDEN_DRAIN_MS * 2);
+        expect(order).toEqual([]);
+        expect(streamSchedulerStats().drained).toBe(0);
+        frame();
+        expect(order).toEqual(["a"]);
+    });
+
+    it("counts what it did", () => {
+        for (const id of ["a", "b", "c", "d"]) requestStreamFlush(id, () => {});
+        frame();
+        const s = streamSchedulerStats();
+        expect(s.frames).toBe(1);
+        expect(s.panes).toBe(MAX_PANES_PER_FRAME_IDLE);
+        expect(s.maxPanesInFrame).toBe(MAX_PANES_PER_FRAME_IDLE);
+        expect(s.deferred).toBe(1);
     });
 });

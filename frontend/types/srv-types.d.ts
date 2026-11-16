@@ -157,7 +157,7 @@ declare global {
     // ── v7 — Bundles ────────────────────────────────────────────
 
     // ── Browser pane bookmarks ───────────────────────────────────────────
-    // crates/srv/src/backend/bookmarks_store.rs — a global (shared_dir,
+    // crates/srv-core/src/backend/bookmarks_store.rs — a global (shared_dir,
     // NOT settings.json — see the spec for why) flat list, not per-agent
     // or per-channel. See
     // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
@@ -166,10 +166,10 @@ declare global {
     // crates/srv/src/server/app_api/bundle/import.rs — bundle.import.preview /
     // bundle.import.commit. See docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
     // Its wire types are no longer declared here: ts-rs generates them into
-    // frontend/types/rpc/ from crates/srv/src/backend/rpc_types/bundle_import.rs.
+    // frontend/types/rpc/ from crates/srv-core/src/backend/rpc_types/bundle_import.rs.
 
     // ── v1 composable model — standalone MCP Server + Skill primitives ─────
-    // Mirrors crates/srv/src/backend/storage/mcp_servers.rs::McpServer and
+    // Mirrors crates/srv-core/src/backend/storage/mcp_servers.rs::McpServer and
     // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).
 
     /** `mcp.probe`/`mcp.catalog.probe`'s response shape — a protocol-level
@@ -197,7 +197,7 @@ declare global {
     // ────────────────────────────────────────────────────────────────
     // Unified agent types (Drone Phase 1.5). Shared between the agent
     // pane and the drone Agent block. Mirror of
-    // crates/srv/src/agents/types.rs — camelCase via serde
+    // crates/srv-core/src/agents/types.rs — camelCase via serde
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
@@ -752,6 +752,20 @@ declare global {
         "frame:activebordercolor"?: string;
         /** The "Pane Color" pick, a palette slot id (`"azure"`); `null` after "Default". */
         "frame:color"?: string | null;
+        /**
+         * The pane's backdrop: a background that brings its own readable foreground
+         * (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §9). Read it through `parseBackdrop`
+         * (app/backdrop/meta.ts); `null` or absent when the pane has none.
+         */
+        backdrop?: {
+            kind: "builtin" | "color" | "image";
+            id?: string;
+            hex?: string;
+            imageId?: string;
+            polarity?: "follow" | "dark" | "light";
+            version?: number;
+            [key: string]: unknown;
+        } | null;
         /** Legacy "Pane Color" pick, an HSL hue 0–360, read as the slot nearest it; no longer written. */
         "frame:hue"?: number | null;
         "frame:title"?: string;
@@ -1715,7 +1729,7 @@ declare global {
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`
     // is a `serde_json::Value` the frontend treats as an optional property, and
     // ts-rs rejects `#[ts(optional)]` on non-`Option<T>` fields. Keep it in sync
-    // with crates/srv/src/backend/rpc_types/native_memory.rs by hand.
+    // with crates/srv-core/src/backend/rpc_types/native_memory.rs by hand.
     // wshrpc.NativeMemoryWriteProvenance — optional caller-supplied context
     // for a memory write, see SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
     type NativeMemoryWriteProvenance = {

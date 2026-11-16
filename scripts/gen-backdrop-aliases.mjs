@@ -42,7 +42,7 @@ export function rootDefaults(scss) {
 export const varsIn = (value) => [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]);
 
 /** The mapped tokens, flattened to their names. */
-export const mappedNames = (mapped) => [...Object.keys(mapped.surface), ...Object.keys(mapped.ink), ...mapped.channels];
+export const mappedNames = (mapped) => [...Object.keys(mapped.surface), ...Object.keys(mapped.ink), ...mapped.channels, ...(mapped.ansi ?? [])];
 
 /**
  * The tokens that depend, directly or through one another, on a mapped token, in the order `defaults` has them.

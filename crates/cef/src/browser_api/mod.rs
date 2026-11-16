@@ -103,6 +103,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
         .route("/agentmux/browser/card_form", post(vault_card_form::card_form_route))
         .route("/agentmux/browser/signin_fill", post(signin_fill::signin_fill_route))
+        .route("/agentmux/browser/signin_list_clear", post(signin_fill::signin_list_clear_route))
         .route("/agentmux/browser/signup_fill", post(signup_fill::signup_fill_route))
         .route("/agentmux/browser/signup_probe", post(signup_probe::signup_probe_route))
         .route("/agentmux/browser/capture_value", post(capture::capture_value_route))

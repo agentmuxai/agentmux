@@ -5,6 +5,8 @@
 
 import { createRoot, createEffect } from "solid-js";
 import { describe, expect, it } from "vitest";
+import { contrastRatio } from "../block/pane-color-scheme";
+import { ANSI_TOKENS } from "./ansi";
 import { BUILTINS, deriveBuiltin } from "./builtins";
 import { getPaneScope, INK_TOKEN_MAP, MAPPED_TOKENS, registerPaneScope, releasePaneScope, scopeVars, SURFACE_TOKEN_MAP } from "./scope";
 
@@ -50,6 +52,15 @@ describe("scopeVars", () => {
         }
     });
 
+    it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {
+        expect(vars["--modal-bg-color"]).toBe("var(--surface-overlay)");
+        expect(vars["--block-bg-solid-color"]).toBe("var(--surface)");
+        expect(vars["--panel-bg-color"]).toBe("color-mix(in srgb, var(--surface-raised) 50%, transparent)");
+        expect(vars["--tab-strip-bg"]).toBe("color-mix(in srgb, var(--ink-text) 3%, transparent)");
+        expect(vars["--hover-bg-color"]).toBe("var(--ink-hover)");
+        expect(vars["--grey-text-color"]).toBe("var(--ink-faint)");
+    });
+
     it("gives --accent-color-rgb the accent's channels, which rgba(var(--accent-color-rgb), a) needs", () => {
         const n = parseInt(derived.ink.accent.slice(1, 7), 16);
         expect(vars["--accent-color-rgb"]).toBe(`${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`);
@@ -58,13 +69,54 @@ describe("scopeVars", () => {
     it("sets every token the map names, and every ink property a mapped token reads", () => {
         for (const token of MAPPED_TOKENS) expect(vars[token], token).toBeTruthy();
         for (const source of new Set(Object.values(INK_TOKEN_MAP))) expect(vars[source], source).toBeTruthy();
-        expect(Object.keys(SURFACE_TOKEN_MAP)).toEqual(["--main-bg-color", "--block-bg-color", "--elevated-bg-color"]);
+        expect(Object.keys(SURFACE_TOKEN_MAP)).toEqual([
+            "--main-bg-color",
+            "--block-bg-color",
+            "--elevated-bg-color",
+            "--modal-bg-color",
+            "--panel-bg-color",
+            "--block-bg-solid-color",
+            "--tab-strip-bg",
+        ]);
     });
 
     it("takes color-scheme from the side the surface is on", () => {
         const light = deriveBuiltin(BUILTINS[0].id, "light")!;
         expect(scopeVars(light)["color-scheme"]).toBe("light");
         expect(vars["color-scheme"]).toBe("dark");
+    });
+});
+
+describe("scopeVars with the theme's terminal palette", () => {
+    // The default theme's palette, as a stand-in for whatever theme is active.
+    const palette = Object.fromEntries(
+        ANSI_TOKENS.map((t, i) => [t, ["#3465a4", "#32afff", "#34e2e2", "#58c142", "#ad7fa8", "#06989a", "#4e9a06", "#bc3fbc", "#c4a000"][i]])
+    );
+
+    it("sets none of them without the palette, so they stay the theme's", () => {
+        const vars = scopeVars(derived);
+        for (const token of ANSI_TOKENS) expect(token in vars, token).toBe(false);
+    });
+
+    it("sets each one read to 4.5:1 on all three layers, on a pale and on a dark backdrop", () => {
+        for (const [id, scheme] of [["yellow", "light"], ["indigo", "dark"]] as const) {
+            const d = deriveBuiltin(id, scheme)!;
+            const vars = scopeVars(d, palette);
+            for (const token of ANSI_TOKENS) {
+                for (const layer of Object.values(d.surfaces)) expect(contrastRatio(vars[token], layer), `${token} on ${id} ${layer}`).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    });
+
+    it("keeps a palette colour that already reads, as it is", () => {
+        const dark = deriveBuiltin("indigo", "dark")!;
+        expect(scopeVars(dark, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"]).toBe("#34e2e2");
+    });
+
+    it("moves one that doesn't: bright cyan on a pale backdrop", () => {
+        const pale = deriveBuiltin("yellow", "light")!;
+        const moved = scopeVars(pale, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"];
+        expect(moved).not.toBe("#34e2e2");
     });
 });
 

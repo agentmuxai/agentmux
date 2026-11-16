@@ -45,15 +45,15 @@ export const DENY = [
 
 /** The shipped manifests. */
 export const SEED_FILES = [
-    "crates/srv/agent-seed.json",
-    "crates/srv/operator-config-seed.json",
-    "crates/srv/src/config/starter-mcp-servers.json",
+    "crates/srv-core/agent-seed.json",
+    "crates/srv-core/operator-config-seed.json",
+    "crates/srv-core/src/config/starter-mcp-servers.json",
 ];
 
 /** Shipped text that lives in code. */
 export const USER_FACING_FILES = [
-    "crates/srv/src/backend/bundle_import_skill_text.rs",
-    "crates/srv/src/backend/builtin_skills/disk-cleanup.md",
+    "crates/srv-core/src/backend/bundle_import_skill_text.rs",
+    "crates/srv-core/src/backend/builtin_skills/disk-cleanup.md",
 ];
 
 /**
@@ -63,12 +63,12 @@ export const USER_FACING_FILES = [
  */
 export const ALLOW = [
     {
-        file: "crates/srv/agent-seed.json",
+        file: "crates/srv-core/agent-seed.json",
         text: "if a `gh-agent` command is installed here, use `gh-agent auth status` instead, and run `gh-agent doctor` if it fails",
         reason: "The setup check names gh-agent only as the alternative on a machine that has it; every other machine is told to use gh.",
     },
     {
-        file: "crates/srv/agent-seed.json",
+        file: "crates/srv-core/agent-seed.json",
         text: "If neither `gh` nor `gh-agent` is installed",
         reason: "The same conditional: the N/A case is for a machine with neither CLI.",
     },

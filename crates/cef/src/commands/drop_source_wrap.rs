@@ -243,9 +243,12 @@ unsafe extern "system" fn wrapper_give_feedback(this: *mut c_void, effect: u32) 
     let inner = wrapper.inner;
     let answer = ((*(*inner).vtbl).give_feedback)(inner as *mut c_void, effect);
     // A pane drag shows no shell picture from its first move: the pane's own picture follows instead, and while
-    // it is being taken the drag shows nothing rather than the shell's ghost for a frame. If no picture has come
-    // by PICTURE_GRACE (none could be taken, or the host refused it), the shell's ghost is the fallback again.
+    // it is being taken the drag shows nothing rather than the shell's ghost for a frame. Nor while that picture
+    // is held out of sight over the pane's own layout, where the layout shows the pane and the hand holds
+    // nothing (`picture_held`). If no picture has come by PICTURE_GRACE (none could be taken, or the host
+    // refused it), the shell's ghost is the fallback again.
     let picture_wanted_gone = super::live_follow::picture_shown()
+        || super::live_follow::picture_held()
         || super::tear_off_hook::pane_drag_age().is_some_and(|age| age < PICTURE_GRACE);
     set_shell_drag_image_visible(wrapper.data, !picture_wanted_gone);
     if wants_arrow(effect, super::tear_off_hook::hook_session_active()) {

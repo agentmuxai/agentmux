@@ -10,7 +10,7 @@
 //
 // Manifest version 5 (2026-04-23): replaces the AgentX/Y/Z + Agent1/2/3
 // layout with per-CLI definitions. The re-seed engine in
-// `crates/srv/src/backend/agent_seed.rs` deletes old seeded rows
+// `crates/srv-core/src/backend/agent_seed.rs` deletes old seeded rows
 // and inserts the new set on version bump — user customisations to
 // the old rows are lost. This is intentional: the old layout
 // conflated 6 agents into 3 providers, which no longer matches the
@@ -339,7 +339,7 @@ const manifest = {
     memories: SEED_MEMORIES,
 };
 
-// Write the manifest to `crates/srv/agent-seed.json` directly
+// Write the manifest to `crates/srv-core/agent-seed.json` directly
 // rather than emitting it on stdout. Previously this script did
 // `process.stdout.write(...)` and callers redirected via
 // `node gen-seed.js > agent-seed.json`. On Windows PowerShell,
@@ -359,11 +359,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const json = JSON.stringify(manifest, null, 2) + "\n";
 
-const outPath = resolve(__dirname, "..", "crates", "srv", "agent-seed.json");
+const outPath = resolve(__dirname, "..", "crates", "srv-core", "agent-seed.json");
 if (process.argv.includes("--check")) {
     const committed = JSON.parse(readFileSync(outPath, "utf8"));
     if (JSON.stringify(committed) !== JSON.stringify(manifest)) {
-        process.stderr.write("gen-seed: crates/srv/agent-seed.json differs from scripts/gen-seed.js; edit the script and run it.\n");
+        process.stderr.write("gen-seed: crates/srv-core/agent-seed.json differs from scripts/gen-seed.js; edit the script and run it.\n");
         process.exit(1);
     }
     process.stdout.write("gen-seed: agent-seed.json matches.\n");

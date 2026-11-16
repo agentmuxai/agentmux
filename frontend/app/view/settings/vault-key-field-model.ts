@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // A settings key kept in the Vault: how a setting names its entry (`vault:<entry id>`, the spelling srv reads in
-// crates/srv/src/backend/vault/setting_key.rs) and which entries can hold such a key.
+// crates/srv-core/src/backend/vault/setting_key.rs) and which entries can hold such a key.
 
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 

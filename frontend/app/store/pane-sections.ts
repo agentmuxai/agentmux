@@ -68,7 +68,7 @@ export function sectionOf<Id extends string>(
  *  History and Audit became panes). An old pin, widget entry, saved pane or `am.panes.open` call
  *  naming the old pair keeps working through this table: the widget bridge, `sectionProblem`, the
  *  widget bar's pins, `openWarden` and srv's `resolve_section`
- *  (crates/srv/src/backend/wconfig/types.rs, which has the same table) all read it. A section of the
+ *  (crates/srv-core/src/backend/wconfig/types.rs, which has the same table) all read it. A section of the
  *  Vault (`vault/cards`) keeps its own `vault:section`, which the Vault pane reads under the same key. */
 const MOVED_SECTIONS: readonly { from: { view: string; section: string }; to: { view: string; section?: string } }[] = [
     { from: { view: "warden", section: "kanban" }, to: { view: "kanban" } },

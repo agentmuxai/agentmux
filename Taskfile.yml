@@ -306,6 +306,13 @@ tasks:
             docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3.
         cmd: bash scripts/check-no-transition-all.sh
 
+    check:utf8:
+        desc: >-
+            Fails if a tracked source file is not valid UTF-8 or starts with a
+            byte-order mark. The production frontend build rejects such a file;
+            tsc and vitest do not.
+        cmd: node scripts/check-utf8.mjs
+
     build:frontend:
         desc: Build the frontend (production mode).
         cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts

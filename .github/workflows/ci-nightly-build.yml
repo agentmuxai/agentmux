@@ -248,9 +248,9 @@ jobs:
       # Without it cargo stops at the first failing binary, and on macOS one
       # failing remote test kept srv's whole suite from running for six nights.
       #
-      # On Linux the srv unit test binary is built first, alone: a workspace run compiles the
-      # agentmux-srv crate twice at once (as the binary srv's integration tests start via
-      # CARGO_BIN_EXE_agentmux-srv, and as the unit test binary), each rustc growing to ~8 GB, which
+      # On Linux the srv unit test binaries are built first, one at a time: a workspace run compiles the
+      # server core twice at once (as the library the binary srv's integration tests start via
+      # CARGO_BIN_EXE_agentmux-srv link, and as the unit test binary), each rustc growing to ~8 GB, which
       # is what took the runner down (see the swap step above). Built one after the other they never
       # overlap, and the workspace run reuses the result. A [resources] line every 5 seconds (memory,
       # swap, free disk, biggest process) goes to the log, so if a runner still goes the log says why.
@@ -265,6 +265,7 @@ jobs:
             done) &
             monitor=$!
             trap 'kill $monitor 2>/dev/null' EXIT
+            cargo test --no-run -p agentmux-srv-core --lib
             cargo test --no-run -p agentmux-srv --bin agentmux-srv
           fi
           cargo test --workspace --no-fail-fast -- --test-threads=1
@@ -381,6 +382,8 @@ jobs:
         run: bash tools/lint/check-input-handler-layout-reads.sh
       - name: muxbus credential store gate
         run: bash scripts/check-muxbus-credential-store.sh
+      - name: Tracked source files are valid UTF-8
+        run: node scripts/check-utf8.mjs
 
   # Plan step 3 of the CI test-speed and DRY follow-ups plan (PR #4534):
   # repo-wide broken doc links and comments naming a missing file, so a break

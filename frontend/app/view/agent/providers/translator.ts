@@ -39,7 +39,7 @@ export interface OutputTranslator {
 /**
  * The paired device a stored user record says sent it: srv adds
  * `"amx":{"via":"viewer","device":…,"message_id":…}` beside a message the
- * user sent from their phone (`crates/srv/src/backend/viewer/origin.rs`).
+ * user sent from their phone (`crates/srv-core/src/backend/viewer/origin.rs`).
  * Undefined for every other record.
  */
 export function deviceOrigin(rawEvent: unknown): string | undefined {

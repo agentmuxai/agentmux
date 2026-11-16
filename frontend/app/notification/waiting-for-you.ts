@@ -114,6 +114,25 @@ function watch(blockId: string, source: string, stillWaiting: () => boolean): vo
     watches.set(key, dispose);
 }
 
+/** A pane's last wait that has just ended: what it was and how long it lasted (the status bar's list of asks that already ended). */
+export interface EndedWait {
+    blockId: string;
+    what: string;
+    /** The kind srv announced it as, or [`OWN_WAIT`] for a question or permission. */
+    kind: string;
+    /** When it began (unix ms). */
+    since: number;
+    reason: "submitted" | "closed";
+}
+
+const endListeners = new Set<(ended: EndedWait) => void>();
+
+/** Calls `listener` when a pane's last wait ends, with the pane still known to the rest of the window. Returns the way to stop. */
+export function onWaitingEnded(listener: (ended: EndedWait) => void): () => void {
+    endListeners.add(listener);
+    return () => void endListeners.delete(listener);
+}
+
 /** `source` no longer waits in pane `blockId`: `submitted` when the user
  *  answered, `closed` when it went away unanswered. */
 export function endWaitingForYou(blockId: string, source: string, reason: "submitted" | "closed" = "submitted"): void {
@@ -121,12 +140,20 @@ export function endWaitingForYou(blockId: string, source: string, reason: "submi
     watches.get(key)?.();
     watches.delete(key);
     const sources = waiting.get(blockId);
+    const entry = sources?.get(source);
     if (!sources?.delete(source)) return;
-    if (sources.size > 0) return;
+    if (sources.size > 0) {
+        // What the pane still waits on changed (its kinds), though it still waits.
+        bump();
+        return;
+    }
+    const began = since.get(blockId) ?? 0;
     waiting.delete(blockId);
     since.delete(blockId);
     bump();
     firePaneEvent(blockId, { type: "waiting-ended", reason });
+    const ended: EndedWait = { blockId, what: entry?.what ?? "", kind: entry?.kind || OWN_WAIT, since: began, reason };
+    for (const listener of endListeners) listener(ended);
 }
 
 /** A pane that waits on the user in this window. */
@@ -224,7 +251,7 @@ function whatForKind(kind: string): string {
 }
 
 /** srv's announcement of a call to action it holds open (`userattention`,
- *  crates/srv/src/backend/user_attention.rs), as its Rust type. */
+ *  crates/srv-core/src/backend/user_attention.rs), as its Rust type. */
 export type UserAttention = UserAttentionEvent;
 
 /** Apply one of srv's announcements, if it's for this window: one that
@@ -252,6 +279,8 @@ let installed = false;
 export function installWaitingForYou(): void {
     if (installed) return;
     installed = true;
+    // The asks that end are kept for two minutes for the status bar's list. Loaded when used: it reads this registry's ends.
+    void import("./ended-asks").then((m) => m.installEndedAsks()).catch(() => {});
     onMuxEvent(WpsEvent.UserAttention, (data) => applyUserAttention(data, windowId()));
     // What was already open when this window started.
     void RpcApi.NotifyAttentionCommand(TabRpcClient)

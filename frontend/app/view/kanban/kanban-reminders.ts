@@ -4,7 +4,7 @@
 /**
  * The Kanban's backlog reminder setting, shared by its two switches (Settings ›
  * Advanced and the Kanban's toolbar) so they read and describe it the same way.
- * srv reads it in `crates/srv/src/backend/kanban.rs` (`reminders_enabled`).
+ * srv reads it in `crates/srv-core/src/backend/kanban.rs` (`reminders_enabled`).
  * SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md.
  */
 

@@ -179,7 +179,7 @@ function createHandleClose(props: WorkspaceProps, lists: TabLists, selection: Ta
         // Don't pre-select the neighbor via a separate SetActiveTab RPC
         // before closing: CloseTab's own DeleteTab reducer command already
         // reassigns the workspace's active tab to the correct neighbor
-        // atomically (crates/srv/src/reducer/tab.rs::handle_delete_tab)
+        // atomically (crates/srv-core/src/reducer/tab.rs::handle_delete_tab)
         // in the SAME state transition as the removal (§5).
         const closingActiveTab = tabId === activeTabId();
         // The optimistic hide (§8/§10) — for BOTH paths now: the

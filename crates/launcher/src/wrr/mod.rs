@@ -614,7 +614,7 @@ pub fn apply_hwnd_position_changed(
     // Compute the corrective target ONCE (reagent P2 PR #722 round 2)
     // — used both as the gate for `fire_corrective` and as the
     // event payload below.
-    let corrective_target = if !r.foregrounded_since_open && !r.corrective_window_move_emitted {
+    let corrective_target = if !r.foregrounded_since_open && !r.corrective_window_move_emitted && !agentmux_common::test_offscreen::active() {
         pick_primary_centered(&monitors)
     } else {
         None

@@ -39,8 +39,14 @@ vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
         return () => {};
     },
 }));
+/** The drag's payload, as the cross-window monitor keeps it. */
+const payload: { current: unknown } = { current: null };
 vi.mock("@/app/drag/CrossWindowDragMonitor", () => ({
-    setCurrentDragPayload: (p: unknown) => payloadCalls.push(p),
+    setCurrentDragPayload: (p: unknown) => {
+        payload.current = p;
+        payloadCalls.push(p);
+    },
+    getCurrentDragPayload: () => payload.current,
 }));
 vi.mock("@/layout/lib/paneBodyDrop", () => ({
     pillZone: () => zone.current,
@@ -71,6 +77,7 @@ import { PaneTabStrip } from "./PaneTabStrip";
 import { paneTabItemType } from "@/app/drag/drag-types";
 import { endDrag } from "@/app/drag/drag-session";
 import { resetFlashBudget } from "./drop-blink-clock";
+import { beginTabTearOff, endTabTearOff, tabGoneFrom, tabTearOffOfferedIn } from "@/layout/lib/tabTearOff";
 
 afterEach(() => cleanup());
 beforeEach(() => {
@@ -78,6 +85,8 @@ beforeEach(() => {
     resetFlashBudget();
     dropTargetCalls.length = 0;
     payloadCalls.length = 0;
+    payload.current = null;
+    endTabTearOff();
     ghostCalls.length = 0;
     clearCalls.length = 0;
     Object.assign(layout, { takes: false, placing: false, reads: true, drops: true, begun: [], registered: [], followed: [], dropped: [] });
@@ -363,5 +372,86 @@ describe("PaneTabStrip bodyDrop", () => {
         config.onDrop(many);
         vi.runAllTimers();
         expect(onReceiveForeignTab).toHaveBeenCalledWith("dragged");
+    });
+
+    /** Tab "a" of this pane, dragged over this pane's own body. */
+    const ownTab = () => pill({ blockId: "a", sourceNodeId: "pane-self" });
+    const ownPayload = { kind: "pane-tab", blockId: "a", sourceNodeId: "pane-self", sourceTabId: "wtab" };
+
+    it("places nothing for its own tab while the tab's place offers the tear-off, and a release there tears it off", () => {
+        const { config, place, showOverlay } = renderPane();
+        const model = (layout.registered[0] as [unknown])[0] as any;
+        beginTabTearOff(model, "a", "pane-self");
+        payload.current = ownPayload;
+        layout.takes = true;
+        // The body's edge, where the tab would otherwise be placed beside its own pane.
+        zone.current = { kind: "place", direction: 2, side: "left" };
+
+        config.onDragStart(ownTab());
+        later();
+        config.onDrag(ownTab());
+        expect(layout.begun).toHaveLength(0);
+        expect(ghostCalls).toHaveLength(0);
+        expect(showOverlay._set).not.toHaveBeenCalledWith(true);
+        expect(tabTearOffOfferedIn(model, "pane-self")).toBe(true);
+
+        config.onDrop(ownTab());
+        // Kept for the monitor, marked: it tears the tab off where the pointer is.
+        expect(payload.current).toEqual({ ...ownPayload, selfRelease: true });
+        // The red is over and the pane shows the tab gone until the tear-off is done.
+        expect(tabTearOffOfferedIn(model, "pane-self")).toBe(false);
+        expect(tabGoneFrom(model, "pane-self")).toBe("a");
+        vi.runAllTimers();
+        expect(place).not.toHaveBeenCalled();
+        // A tear-off that never came: the tab is back in its pane.
+        expect(tabGoneFrom(model, "pane-self")).toBeUndefined();
+    });
+
+    it("a release over its own header while the place offers the tear-off is the strip's, not a tear-off", () => {
+        const { config, header } = renderPane();
+        const model = (layout.registered[0] as [unknown])[0] as any;
+        beginTabTearOff(model, "a", "pane-self");
+        payload.current = ownPayload;
+        header.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 320, width: 400, height: 320, x: 0, y: 0, toJSON: () => ({}) });
+
+        config.onDragStart(ownTab());
+        config.onDrop(ownTab());
+        vi.runAllTimers();
+        expect(payload.current).toEqual(ownPayload);
+    });
+
+    it("another pane taking the tab ends the offer in the pane it came from", () => {
+        const { config } = renderPane();
+        const model = (layout.registered[0] as [unknown])[0] as any;
+        // The tab comes from another pane of this layout. Over this pane where nothing takes it, the offer stays.
+        beginTabTearOff(model, "dragged", "pane-other");
+        layout.reads = false;
+        config.onDragEnter(pill());
+        expect(tabTearOffOfferedIn(model, "pane-other")).toBe(true);
+        // This pane would take it as a tab.
+        layout.reads = true;
+        zone.current = { kind: "join" };
+        later();
+        config.onDrag(pill());
+        expect(tabTearOffOfferedIn(model, "pane-other")).toBe(false);
+        expect(tabGoneFrom(model, "pane-other")).toBe("dragged");
+    });
+
+    it("its own pane places the tab once the tab has left it, and a release in its middle then does nothing", async () => {
+        const { tabTearOffShown } = await import("@/layout/lib/tabTearOff");
+        const { config } = renderPane();
+        const model = (layout.registered[0] as [unknown])[0] as any;
+        beginTabTearOff(model, "a", "pane-self");
+        payload.current = ownPayload;
+        tabTearOffShown();
+        layout.takes = true;
+        zone.current = { kind: "place", direction: 2, side: "left" };
+        config.onDragEnter(ownTab());
+        expect(layout.begun).toHaveLength(1);
+
+        zone.current = { kind: "none" };
+        config.onDrop(ownTab());
+        vi.runAllTimers();
+        expect(payload.current).toEqual(ownPayload);
     });
 });

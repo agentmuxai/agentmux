@@ -21,6 +21,7 @@ import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { SwarmFilterBar } from "../swarm/swarm-filter-bar";
 import { CardFacts } from "./atlas-card-facts";
 import { inContainer } from "./atlas-containers";
+import { edgePath } from "./atlas-edge-path";
 import { ExtraCard, ExtraNodes, ServicesRegion } from "./atlas-extras";
 import { AtlasFleetBar } from "./atlas-fleet-bar";
 import { flowEndResolver, labelKeepOut } from "./atlas-flow";
@@ -233,16 +234,6 @@ function Card(props: {
     );
 }
 
-/** The path of a line from a lead's node to a report's: down from the lead's bottom, up to the report's top. */
-function edgePath(from: { x: number; y: number }, to: { x: number; y: number }): string {
-    const x1 = from.x + NODE_W / 2;
-    const y1 = from.y + NODE_H;
-    const x2 = to.x + NODE_W / 2;
-    const y2 = to.y;
-    const mid = (y1 + y2) / 2;
-    return `M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`;
-}
-
 /** The map itself: a box per machine, the lines, and a node per running agent, in map pixels. */
 function AtlasMap(props: {
     data: AtlasData;
@@ -297,7 +288,7 @@ function AtlasMap(props: {
                                 <path
                                     class="atlas-edge"
                                     classList={{ "atlas-edge--spawned": edge.kind === "spawned" }}
-                                    d={edgePath(from()!, to()!)}
+                                    d={edgePath(from()!, to()!, props.layout.wrapped.get(edge.to) === edge.from)}
                                 />
                             </Show>
                         );

@@ -3,7 +3,7 @@
 
 /**
  * Is this stored value a real title? The frontend's port of
- * `crates/srv/src/ambient/validate.rs` (`is_usable_title`), used before a stored
+ * `crates/srv-core/src/ambient/validate.rs` (`is_usable_title`), used before a stored
  * `term:ambient_summary` is shown, so a value that is about the ABSENCE of a title
  * never reaches the swarm row, the pane header or a tooltip.
  *
@@ -16,7 +16,7 @@
  * displaying with no migration.
  *
  * The two implementations cannot drift: both test suites load the one corpus in
- * `crates/srv/src/ambient/title_corpus.json`. Change a list here only together with
+ * `crates/srv-core/src/ambient/title_corpus.json`. Change a list here only together with
  * the Rust lists and that file. See
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.1.
  */

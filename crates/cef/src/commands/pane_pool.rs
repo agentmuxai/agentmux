@@ -525,6 +525,7 @@ pub fn promote_pane_pool_window(
     parent_hwnd: isize,
     snapshot: Option<&str>,
 ) -> Option<String> {
+    let (x, y) = agentmux_common::test_offscreen::place((x, y));
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Foundation::HWND;

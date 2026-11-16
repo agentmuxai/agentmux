@@ -13,7 +13,7 @@ import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 import { onSessionEnded } from "./drag-session";
 import { noteHostEscape } from "./host-escape";
-import { followPaneDrag, type LandingSource } from "./pane-live-follow";
+import { followPaneDrag, type HomeLayout } from "./pane-live-follow";
 
 let listening = false;
 let watching = false;
@@ -26,10 +26,10 @@ function inOrder(call: () => Promise<unknown>): void {
 
 /**
  * Arm the Escape hook for the drag that just began. A no-op off Windows. With `follow`, the same hook also
- * moves the picture of that pane with the cursor, wherever it goes, sized to its `landing` while a drop is
- * armed (pane-live-follow.ts).
+ * moves the picture of that pane with the cursor, shown wherever it goes except over the body of its `home`
+ * layout (pane-live-follow.ts).
  */
-export function watchEscapeDuringDrag(follow?: { blockId: string; landing?: LandingSource }): void {
+export function watchEscapeDuringDrag(follow?: { blockId: string; home?: HomeLayout }): void {
     if (!isWindows()) return;
     if (!listening) {
         listening = true;
@@ -43,7 +43,7 @@ export function watchEscapeDuringDrag(follow?: { blockId: string; landing?: Land
     inOrder(async () => {
         const sourceWindowLabel = await getApi().getWindowLabel();
         await getApi().startTabDragTracking({ sourceWindowLabel, escapeOnly: true, ...(follow ? { paneFollow: true } : {}) });
-        if (follow) void followPaneDrag(follow.blockId, sourceWindowLabel, follow.landing);
+        if (follow) void followPaneDrag(follow.blockId, sourceWindowLabel, follow.home);
     });
 }
 
