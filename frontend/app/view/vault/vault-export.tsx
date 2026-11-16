@@ -268,7 +268,10 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
             />
             <ModalBody>
                 <Show when={!s.done()} fallback={<ExportDone s={s} />}>
-                    <FormatPicker s={s} />
+                    {/* The list is laid out by the dialog's own width (`vault-dialog-scope`), which chrome zoom narrows. */}
+                    <div class="vault-dialog-scope">
+                        <FormatPicker s={s} />
+                    </div>
                     <EntryChoices s={s} />
                     <Show when={!plainFormat(s)}>
                         <PassphraseFields s={s} />

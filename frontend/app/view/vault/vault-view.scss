@@ -496,9 +496,10 @@
     }
 }
 
-// A narrow pane has no room for two columns of words: what a format is goes under its name, and those lines
-// start in one column too.
-@container modal-mount (max-width: 440px) {
+// A narrow dialog has no room for two columns of words: what a format is goes under its name, and those lines
+// start in one column too. Measured on the dialog's own body, not on the pane: at 150% chrome zoom a dialog in a
+// 600 px pane is about 360 px wide in its own lengths.
+@container vault-dialog (max-width: 400px) {
     .vault-export-format {
         grid-template-columns: auto minmax(0, 1fr);
         // Each format is now two or three lines: a little room says which name a line belongs to.
