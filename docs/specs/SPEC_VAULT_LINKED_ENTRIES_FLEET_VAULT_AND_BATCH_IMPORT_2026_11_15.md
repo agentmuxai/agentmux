@@ -238,3 +238,11 @@ Agent2, 2026-11-16, task #47648. The links-only export of §6's R1, with these c
 - **A link is known again by its place.** On import a linked entry duplicates one in the Vault when the kind and the place match (`source_kind`, `source_location`, `source_key`, `source_region`), so importing the same file twice doubles nothing. "Replace" takes what the file says of the key (readers, date, other places); the entry stays a link, in the Vault it is in.
 - **When a link was last checked is not carried.** The check's result is in the history, which belongs to one machine: on the other machine the link reads "not checked yet" until it is checked there.
 - **The history line** of a links-only export says how many linked entries were written and that no value was.
+
+After the macOS and Linux look checks of B5 (task #47784), where a link was still worded as a value:
+
+- **The export answer says what was written.** srv answers `links_only` with the count and the file's name, and the dialog says "no value is in the file" on that word, not on what it asked for. An answer without it (a part of the app that does not know the option) is a whole export: the dialog then says the file is a full backup and to delete it if no value was wanted.
+- **The import preview marks a link.** Each listed entry says whether it is a link, and shows the Linked badge. The preview also counts how many of the duplicates are links, and the line under "already in your Vault" says a link is the same by its kind and place.
+- **Deleting a link** says that the record of where the key lives is removed and the key itself is not touched.
+- **The export dialog's formats** start in one column, and in a narrow pane what a format is goes under its name.
+- **Dialogs and the pane's zoom.** A Vault dialog follows the app's chrome zoom, as every dialog does, and not the pane's own zoom. That is the app's rule for dialogs, not a Vault choice.

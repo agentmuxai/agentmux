@@ -3,7 +3,11 @@ import type { PreviewSection } from "./PreviewSection";
 import type { Skipped } from "./Skipped";
 import type { Source } from "./Source";
 
-export type ImportPreview = { token: string, file_name: string, total: number, duplicates: number, sections: Array<PreviewSection>, skipped: Array<Skipped>, 
+export type ImportPreview = { token: string, file_name: string, total: number, duplicates: number, 
+/**
+ * How many of `duplicates` are linked entries: one is a duplicate by its kind and place, having no value.
+ */
+duplicate_links: number, sections: Array<PreviewSection>, skipped: Array<Skipped>, 
 /**
  * What the file is, found from its contents.
  */

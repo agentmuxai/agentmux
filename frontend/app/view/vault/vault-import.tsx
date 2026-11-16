@@ -11,7 +11,8 @@ import { createSignal, For, onCleanup, onMount, Show, type Accessor, type JSX, t
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button, Field, SegmentedControl, Select, TextInput } from "@/app/element/ui";
+import { Button, Field, Pill, SegmentedControl, Select, TextInput } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { ensureBrowserProfiles } from "@/app/view/browser/browser-profiles";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
@@ -47,14 +48,22 @@ const DUPLICATE_CHOICES: { value: Duplicates; label: string }[] = [
     { value: "keep_both", label: "Keep both" },
 ];
 
-/** What to do with entries the file shares with the Vault; nothing is asked when there are none. */
-function DuplicatesChoice(props: { count: number; value: Duplicates; onChange: (d: Duplicates) => void }): JSX.Element {
+/** What makes an entry of the file one the Vault already has. A linked entry has no value to compare: it is the
+ *  same when its kind and its place are. */
+function duplicatesAbout(count: number, links: number): string {
+    if (links <= 0) return t("vault.import.duplicates");
+    return links >= count ? t("vault.import.duplicateLinks") : t("vault.import.duplicatesMixed");
+}
+
+/** What to do with entries the file shares with the Vault; nothing is asked when there are none. `links` is how
+ *  many of them are linked entries. */
+function DuplicatesChoice(props: { count: number; links: number; value: Duplicates; onChange: (d: Duplicates) => void }): JSX.Element {
     return (
         <Show when={props.count > 0}>
             <Field
                 label={`${props.count} already in your Vault`}
                 layout="stacked"
-                description="The same value (or the same site and username, for a login)."
+                description={duplicatesAbout(props.count, props.links)}
             >
                 <SegmentedControl
                     options={DUPLICATE_CHOICES}
@@ -465,7 +474,12 @@ function PreviewStep(props: { s: ImportState; preview: Accessor<ImportPreview> }
             <Show when={preview().browser_signins > 0}>
                 <BrowserProfileField s={s} count={preview().browser_signins} />
             </Show>
-            <DuplicatesChoice count={preview().duplicates} value={s.duplicates()} onChange={s.setDuplicates} />
+            <DuplicatesChoice
+                count={preview().duplicates}
+                links={preview().duplicate_links ?? 0}
+                value={s.duplicates()}
+                onChange={s.setDuplicates}
+            />
             <Show when={preview().skipped.length > 0}>
                 <SkippedList skipped={preview().skipped} />
             </Show>
@@ -512,6 +526,12 @@ function SectionPreview(props: { section: ImportPreview["sections"][number] }): 
                     {(e) => (
                         <li>
                             {e.label} <span class="warden-manager-dim">{vaultKind(e.kind)?.label ?? e.kind}</span>
+                            <Show when={e.linked}>
+                                {" "}
+                                <Pill tone="accent" icon="link" title={t("vault.linked.badgeTip")}>
+                                    {t("vault.linked.badge")}
+                                </Pill>
+                            </Show>
                             <Show when={e.duplicate}>
                                 <span class="vault-dup"> · already in your Vault</span>
                             </Show>

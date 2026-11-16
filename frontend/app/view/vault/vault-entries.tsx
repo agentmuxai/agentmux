@@ -165,7 +165,12 @@ function DeleteEntryConfirm(props: { entry: VaultEntryInfo; onConfirm: () => Pro
             open={true}
             scope="pane"
             title={`Delete ${props.entry.label}?`}
-            description="Its value is deleted from this computer. Agents that use it by name will be told it's gone."
+            description={
+                // A link keeps no value: what goes is the record of where the key lives.
+                isLinked(props.entry.fields)
+                    ? t("vault.linked.deleteAbout")
+                    : "Its value is deleted from this computer. Agents that use it by name will be told it's gone."
+            }
             confirmLabel="Delete"
             destructive
             onConfirm={props.onConfirm}

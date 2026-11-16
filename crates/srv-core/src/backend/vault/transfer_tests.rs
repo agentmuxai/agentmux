@@ -150,13 +150,17 @@ fn a_links_only_export_holds_the_linked_entries_and_no_value() {
     // Of what is chosen, the links: an entry that holds a value is left out even when it is named.
     assert_eq!(export_links(&s, Some(&[held[0].clone(), invoice.clone()]), PASS, &path).unwrap().count, 1);
     assert!(export_links(&s, Some(&held), PASS, &path).unwrap_err().contains("no linked entries"));
-    assert_eq!(export_links(&s, None, PASS, &path).unwrap().count, 2);
+    // The answer says what was written, for the dialog to say "no value" on: links only here, not in a whole export.
+    assert!(!export(&s, None, PASS, &dir.path().join("whole.vault")).unwrap().links_only);
+    let wrote = export_links(&s, None, PASS, &path).unwrap();
+    assert_eq!((wrote.count, wrote.links_only), (2, true));
     let line = s.vault_activity_all().unwrap().into_iter().rfind(|r| r.action == "exported").unwrap();
     assert_eq!((line.target.as_str(), line.outcome.as_str()), ("links.vault", "2 linked entries, no values"));
     // The file as the next machine reads it: two entries, and not a part among them.
     wipe(&s);
     let preview = inspect(&s, &path, Some(PASS)).unwrap();
     assert_eq!((preview.total, preview.skipped.len()), (2, 0));
+    assert!(preview.sections.iter().flat_map(|s| &s.first).all(|e| e.linked), "every entry of the file is listed as a link");
     commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap();
     assert!(s.vault_list().unwrap().iter().all(|row| linked::is_linked_row(row) && all_parts(&s, &row.id).is_empty()));
 }
@@ -173,6 +177,9 @@ fn an_import_takes_a_link_as_a_link_and_knows_it_again_by_its_place() {
     wipe(&s);
     let preview = inspect(&s, &path, Some(PASS)).unwrap();
     assert_eq!((preview.total, preview.skipped.len(), preview.duplicates), (4, 0, 0));
+    // The preview says which of them is a link.
+    let links: Vec<&str> = preview.sections.iter().flat_map(|s| &s.first).filter(|e| e.linked).map(|e| e.label.as_str()).collect();
+    assert_eq!(links, ["Invoice provider key"]);
     assert_eq!(commit(&s, &preview.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().added, 4);
     // It comes in under its own id, with its place and what is said of it, and holds nothing.
     let said = fields_of(&s, &invoice);
@@ -181,7 +188,7 @@ fn an_import_takes_a_link_as_a_link_and_knows_it_again_by_its_place() {
 
     // The same file again: the link is a duplicate by its place, so nothing doubles.
     let again = inspect(&s, &path, Some(PASS)).unwrap();
-    assert_eq!(again.duplicates, 4);
+    assert_eq!((again.duplicates, again.duplicate_links), (4, 1));
     assert_eq!(commit(&s, &again.token, Duplicates::Skip, PERSONAL_VAULT).unwrap().skipped, 4);
     assert_eq!(s.vault_list().unwrap().len(), 4);
 

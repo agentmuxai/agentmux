@@ -12,6 +12,7 @@ import { createRoot, createSignal } from "solid-js";
 import { getApi } from "@/util/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import type { ExportResult } from "@/types/rpc/ExportResult";
 import type { ImportPreview } from "@/types/rpc/ImportPreview";
 import type { ImportResult } from "@/types/rpc/ImportResult";
 import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
@@ -196,7 +197,7 @@ export const allowSetting = (entryId: string, setting: string) => call<unknown>(
 
 /** What the host needs to export: which entries (all when left out) and the
  *  passphrase; the host asks where to save. `null` if the person closed the dialog. */
-export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx"; linksOnly?: boolean }): Promise<{ count: number; file_name: string } | null> {
+export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string; format?: "vault" | "kdbx"; linksOnly?: boolean }): Promise<ExportResult | null> {
     const relay = getApi()?.approvals?.vaultExport;
     if (!relay) throw new Error("Export needs the AgentMux desktop app.");
     // `links_only`: a `.vault` file of the linked entries, which hold no value; srv leaves every other entry out.
@@ -204,9 +205,11 @@ export async function exportVault(args: { ids?: string[]; passphrase: string; de
         cancelled?: boolean;
         count?: number;
         file_name?: string;
+        links_only?: boolean;
     };
     if (res?.cancelled) return null;
-    return { count: res?.count ?? 0, file_name: res?.file_name ?? "" };
+    // `links_only` is what srv wrote. An answer that does not say so is a whole export, whatever was asked for.
+    return { count: res?.count ?? 0, file_name: res?.file_name ?? "", links_only: res?.links_only === true };
 }
 
 /** The two unencrypted formats, for taking the Vault to another manager. */

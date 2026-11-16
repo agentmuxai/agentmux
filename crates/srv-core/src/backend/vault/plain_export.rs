@@ -44,7 +44,7 @@ pub fn export(store: &Store, ids: Option<&[String]>, format: &str, path: &Path) 
     write_private(path, &bytes?)?;
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     record(store, "", "", PERSON, "exported", &file_name, &format!("{count} entries, unencrypted {}", format.to_uppercase()));
-    Ok(ExportResult { count, file_name })
+    Ok(ExportResult { count, file_name, links_only: false })
 }
 
 /// The CSV's bytes.
