@@ -207,7 +207,7 @@ pub(crate) fn key(state: &AppState, block_id: &str, key: &str) -> Answer {
         "Escape" => return close(state, block_id),
         "Enter" | "Tab" => {
             let Some(at) = open.cursor.filter(|c| *c < n) else { return answer_of(Some(&open)) };
-            pick(state, block_id, &open, at);
+            pick(state, block_id, &open, at, key == "Tab");
             return close(state, block_id);
         }
         _ => {}
@@ -215,12 +215,13 @@ pub(crate) fn key(state: &AppState, block_id: &str, key: &str) -> Answer {
     show(state, block_id, Some(open))
 }
 
-/// The person chose item `at` with the keyboard: do what a click on it does.
-fn pick(state: &AppState, block_id: &str, open: &Open, at: usize) {
+/// The person chose item `at` with the keyboard: do what a click on it does. `tabbed`: with Tab, which moved
+/// focus on before this runs, so the fill gives it back to where it went.
+fn pick(state: &AppState, block_id: &str, open: &Open, at: usize, tabbed: bool) {
     let (state, block_id) = (state.clone(), block_id.to_string());
     if open.strong {
         tokio::spawn(async move {
-            if let Err(e) = super::browser_signup::make(&state, &block_id).await {
+            if let Err(e) = super::browser_signup::make_picked(&state, &block_id, tabbed).await {
                 tracing::info!(error = %e, "[signin-list] the strong password wasn't made");
             }
         });
@@ -229,7 +230,7 @@ fn pick(state: &AppState, block_id: &str, open: &Open, at: usize) {
     let Some(row) = open.rows.get(at) else { return };
     let entry = row.entry.clone();
     tokio::spawn(async move {
-        if let Err(e) = super::browser_signin_fill::fill(&state, &block_id, &entry).await {
+        if let Err(e) = super::browser_signin_fill::fill_picked(&state, &block_id, &entry, tabbed).await {
             tracing::info!(error = %e, "[signin-list] the sign-in wasn't typed");
         }
     });
