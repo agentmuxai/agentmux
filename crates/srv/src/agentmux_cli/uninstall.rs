@@ -12,11 +12,25 @@ use std::path::{Path, PathBuf};
 /// The command that installs the current release over this one, checked against the signed manifest.
 pub const INSTALL_COMMAND: &str = "curl -fsSL https://agentmux.ai/install.sh | sh -s -- --headless";
 
-/// What `agentmux update` says.
-pub fn update_text() -> String {
+/// What `agentmux update` says. `channel` is the one the person asked about: its restart command names it unless it is the default.
+pub fn update_text(channel: &str, default_channel: &str) -> String {
+    let restart = if channel == default_channel { "agentmux restart".to_string() } else { format!("agentmux --channel {channel} restart") };
     format!(
-        "AgentMux Headless is updated by running its install command again; it checks the new version against the signed manifest and puts it beside this one:\n  {INSTALL_COMMAND}\nThen run `agentmux restart` to start the new version."
+        "AgentMux Headless is updated by running its install command again; it checks the new version against the signed manifest and puts it beside this one:\n  {INSTALL_COMMAND}\nThen run `{restart}` to start the new version."
     )
+}
+
+/// The channel folders under `channels_dir` other than `this`: the other instances that run from the same install.
+pub fn other_channels(channels_dir: &Path, this: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(channels_dir) else { return Vec::new() };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| name != this)
+        .collect();
+    names.sort();
+    names
 }
 
 /// The folder the install script made (`~/.agentmux/headless`, or `~/.agentmux/server` from before the rename),
@@ -55,9 +69,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn update_names_the_one_command_and_the_restart() {
-        let text = update_text();
-        assert!(text.contains("install.sh | sh -s -- --headless") && text.contains("agentmux restart"), "{text}");
+    fn update_names_the_one_command_and_the_restart_of_the_channel_asked_about() {
+        let text = update_text("headless", "headless");
+        assert!(text.contains("install.sh | sh -s -- --headless") && text.contains("`agentmux restart`"), "{text}");
+        let other = update_text("work", "headless");
+        assert!(other.contains("`agentmux --channel work restart`") && !other.contains("`agentmux restart`"), "{other}");
+    }
+
+    #[test]
+    fn the_other_channels_are_the_folders_beside_this_one() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["headless", "work", "alpha"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        std::fs::write(dir.path().join("note.txt"), b"x").unwrap();
+        assert_eq!(other_channels(dir.path(), "headless"), vec!["alpha".to_string(), "work".to_string()]);
+        assert!(other_channels(&dir.path().join("missing"), "headless").is_empty());
     }
 
     #[test]

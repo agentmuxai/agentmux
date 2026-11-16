@@ -159,8 +159,8 @@ enum Cmd {
     Update,
     /// Remove AgentMux Headless that the install command put here: its login service and its program folder.
     Uninstall {
-        /// Also delete this channel's own folder (its settings, key and log). Your agents, accounts and history
-        /// are in the shared folder and are never removed.
+        /// Also delete this channel's own folder: its settings, key and log, and the workspaces, windows, tabs and
+        /// files it keeps. Your agents, accounts and history are in the shared folder and are never removed.
         #[arg(long)]
         remove_data: bool,
         /// Do not ask before deleting with --remove-data.
@@ -216,7 +216,7 @@ fn dispatch(cli: Cli) -> i32 {
             }
         },
         Cmd::Update => {
-            tell!("{}", uninstall::update_text());
+            tell!("{}", uninstall::update_text(&paths.channel, DEFAULT_CHANNEL));
             0
         }
         Cmd::Uninstall { remove_data, yes } => cmd_uninstall(&paths, remove_data, yes),
@@ -869,10 +869,28 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
         if !setup::Ask::interactive(&terminal) {
             return fail("--remove-data deletes this channel's settings, key and log, and there is no terminal to ask on: add --yes");
         }
-        if !setup::Ask::yes_no(&mut terminal, &format!("Also delete {} (its settings, key and log)?", dir.display()), false) {
+        if !setup::Ask::yes_no(&mut terminal, &format!("Also delete {}: its settings, key and log, and the workspaces, windows, tabs and files this channel keeps?", dir.display()), false) {
             tell!("Nothing was removed.");
             return 1;
         }
+    }
+    // The program folder is shared by every channel run from this install: another channel that is running, or has a
+    // login service, would be left with its program gone.
+    let in_use: Vec<String> = paths
+        .instance_dir
+        .parent()
+        .map(|channels| uninstall::other_channels(channels, &paths.channel))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|name| {
+            service::installed(&home, name) || paths.instance_dir.parent().is_some_and(|c| state::read(&c.join(name)).is_some_and(|s| process::is_server(s.pid)))
+        })
+        .collect();
+    if !in_use.is_empty() {
+        return fail(&format!(
+            "the install is also used by the channel(s) {}: stop each (`agentmux --channel <name> stop`) and remove its login service (`agentmux --channel <name> setup --no-service`), then run uninstall again",
+            in_use.join(", ")
+        ));
     }
     match service::remove(&home, &paths.channel) {
         Ok(Some(file)) => tell!("Removed the login service ({}).", file.display()),
@@ -898,7 +916,7 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
             Ok(()) => tell!("Removed {}.", dir.display()),
             Err(e) => return fail(&format!("cannot remove {}: {e}", dir.display())),
         },
-        None => tell!("This channel's settings, key and log stay in {} (`--remove-data` deletes them). Your agents, accounts and history are in the shared folder and were not touched.", paths.instance_dir.display()),
+        None => tell!("This channel's settings, key and log stay in {} (`--remove-data` deletes them, with the workspaces and files it keeps). Your agents, accounts and history are in the shared folder and were not touched.", paths.instance_dir.display()),
     }
     0
 }
