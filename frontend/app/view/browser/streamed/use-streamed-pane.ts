@@ -61,11 +61,18 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
         setStatus("connecting");
         setError("");
         const at = nav()?.url || startUrl();
+        const started = { w: clampSide(size.w), h: clampSide(size.h) };
         handle = openStreamedPane(
-            { url: at && at !== "about:blank" ? at : "", w: clampSide(size.w), h: clampSide(size.h) },
+            { url: at && at !== "about:blank" ? at : "", ...started },
             {
                 onFrame: draw,
-                onOpen: () => setStatus("live"),
+                onOpen: () => {
+                    setStatus("live");
+                    // The pane may have been resized while the socket was opening: the server has the size it started with.
+                    if (clampSide(size.w) !== started.w || clampSide(size.h) !== started.h) {
+                        handle?.send({ t: "resize", w: clampSide(size.w), h: clampSide(size.h) });
+                    }
+                },
                 onMessage: (m) => {
                     if (m.t === "nav") {
                         setNav(m);

@@ -95,4 +95,17 @@ describe("a streamed pane's state", () => {
         expect(pane.status()).toBe("connecting");
         dispose();
     });
+
+    it("sends the newest size once the socket opens when the pane changed size while it was opening", () => {
+        vi.useFakeTimers();
+        const { pane, dispose } = mount();
+        pane.shown(true);
+        pane.resized(800, 600);
+        vi.advanceTimersByTime(150);
+        pane.resized(1000, 700);
+        vi.advanceTimersByTime(150);
+        events!.onOpen();
+        expect(sent).toContainEqual({ t: "resize", w: 1000, h: 700 });
+        dispose();
+    });
 });
