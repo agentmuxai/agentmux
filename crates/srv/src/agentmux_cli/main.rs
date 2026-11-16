@@ -286,6 +286,39 @@ fn exe_dir() -> Result<PathBuf, String> {
     exe.parent().map(Path::to_path_buf).ok_or_else(|| "cannot find this command's own folder".to_string())
 }
 
+/// Make the channel's folders. On Windows, which has no folder modes, a channel folder that is new is limited to the person
+/// first (the data and the key made inside it inherit that), and one that is not new must already be theirs alone: another
+/// account of the computer being able to open it is refused, in words that name the folder and the command that fixes it.
+fn ensure_channel_dirs(paths: &DataPaths) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use agentmux_common::owner_only;
+        let dir = &paths.instance_dir;
+        if !dir.exists() {
+            if let Some(parent) = dir.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            }
+            std::fs::create_dir(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+            owner_only::restrict_to_user(dir)?;
+        }
+        let key = paths.data_dir.join(KEY_FILE_NAME);
+        for path in [dir.clone(), key] {
+            if !path.exists() {
+                continue;
+            }
+            let others = owner_only::others_who_can_open(&path)?;
+            if !others.is_empty() {
+                let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+                    (Ok(domain), Ok(name)) if !domain.is_empty() && !name.is_empty() => format!("{domain}\\{name}"),
+                    _ => "%USERNAME%".to_string(),
+                };
+                return Err(owner_only::refusal(&path, &others, &user));
+            }
+        }
+    }
+    paths.ensure_dirs().map_err(|e| format!("cannot create the channel's folders: {e}"))
+}
+
 /// `existing` with `dir` in front of it (once), so the helpers installed beside the server are found first.
 fn path_with_dir(dir: Option<&Path>, existing: Option<std::ffi::OsString>) -> std::ffi::OsString {
     let existing = existing.unwrap_or_default();
@@ -352,8 +385,8 @@ fn cmd_version(channel: &str, json: bool) -> i32 {
 }
 
 fn cmd_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
-    if let Err(e) = paths.ensure_dirs() {
-        return fail(&format!("cannot create the channel's folders: {e}"));
+    if let Err(e) = ensure_channel_dirs(paths) {
+        return fail(&e);
     }
     if let Some(other) = running(paths).filter(|s| s.pid != std::process::id()) {
         warn!("AgentMux Headless is already running (pid {}) at {}", other.pid, other.url());
@@ -496,8 +529,8 @@ fn cmd_start(paths: &DataPaths, args: &ServerArgs) -> i32 {
     if let Some(code) = service_ignores(paths, args) {
         return code;
     }
-    if let Err(e) = paths.ensure_dirs() {
-        return fail(&format!("cannot create the channel's folders: {e}"));
+    if let Err(e) = ensure_channel_dirs(paths) {
+        return fail(&e);
     }
     if let Some(s) = running(paths) {
         println!("AgentMux is already running: {}", s.url());
@@ -770,7 +803,7 @@ fn facts(paths: &DataPaths, port: u16, srv_flag: Option<&Path>, web_dir_flag: Op
         arch: std::env::consts::ARCH,
         srv: find(find_srv_in, srv_flag),
         web: find(find_web_in, web_dir_flag),
-        folders: paths.ensure_dirs().map_err(|e| format!("cannot create the channel's folders: {e}")).and_then(|()| doctor::writable(&paths.instance_dir)),
+        folders: ensure_channel_dirs(paths).and_then(|()| doctor::writable(&paths.instance_dir)),
         free_bytes: agentmux_common::disk_space::volume_free_total_bytes(&paths.instance_dir).map(|(free, _)| free),
         key_mode: doctor::mode_of(&key_file),
         port,
