@@ -64,32 +64,33 @@ pub enum Removal {
 /// Remove the program folder `base`. On Windows `running` (this program, inside `base`) stays until it ends: everything
 /// else is removed now, and a hidden helper removes the folder as soon as this command has ended.
 pub fn remove_program_folder(base: &Path, running: &Path) -> Result<Removal, String> {
-    let failed = |e: std::io::Error| format!("cannot remove {}: {e}", base.display());
+    let failed = |e: std::io::Error| format!("cannot remove {}: {e}", super::service::plain_path(base).display());
     if !cfg!(windows) {
         return std::fs::remove_dir_all(base).map(|()| Removal::Gone).map_err(failed);
     }
-    // A junction is taken away itself, never what it leads to.
+    // The `current` junction is what makes this folder an install: it goes last, so a removal that stops half way (a
+    // locked file, a virus scanner) can be run again. It is taken away itself, never what it leads to.
     let current = base.join("current");
+    remove_all_but(base, &[running, &current]).map_err(failed)?;
     if current.symlink_metadata().is_ok() {
-        let _ = std::fs::remove_dir(&current);
+        std::fs::remove_dir(&current).or_else(|_| std::fs::remove_file(&current)).map_err(failed)?;
     }
-    remove_all_but(base, running).map_err(failed)?;
     if !running.exists() {
         return std::fs::remove_dir_all(base).map(|()| Removal::Gone).map_err(failed);
     }
     Ok(if later_removal(base) { Removal::RestAfterExit } else { Removal::RestIsYours })
 }
 
-/// Everything under `dir` except the file `keep` and the folders that lead to it.
-fn remove_all_but(dir: &Path, keep: &Path) -> std::io::Result<()> {
+/// Everything under `dir` except the entries in `keep` and the folders that lead to them.
+fn remove_all_but(dir: &Path, keep: &[&Path]) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path == keep {
+        if keep.contains(&path.as_path()) {
             continue;
         }
         let meta = path.symlink_metadata()?;
         if meta.is_dir() && !meta.file_type().is_symlink() {
-            if keep.starts_with(&path) {
+            if keep.iter().any(|k| k.starts_with(&path)) {
                 remove_all_but(&path, keep)?;
             } else {
                 std::fs::remove_dir_all(&path)?;
@@ -229,10 +230,11 @@ mod tests {
         std::fs::write(base.join("0.60.30").join("web").join("index.html"), b"w").unwrap();
         std::fs::create_dir(base.join("current")).unwrap();
         let running = new.join("agentmux.exe");
-        remove_all_but(&base, &running).unwrap();
+        let current = base.join("current");
+        remove_all_but(&base, &[&running, &current]).unwrap();
         assert!(running.is_file(), "the running program stays");
         assert!(!old.exists() && !new.join("agentmux-srv.exe").exists() && !base.join("0.60.30").join("web").exists());
-        assert!(!base.join("current").exists());
+        assert!(current.exists(), "`current` is what a second run finds the install by: it goes last");
     }
 
     #[cfg(unix)]
