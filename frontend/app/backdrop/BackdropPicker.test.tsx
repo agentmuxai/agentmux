@@ -267,6 +267,36 @@ describe("BackdropPicker", () => {
         }
     });
 
+    it("consumes the Escape that closes it, so the layout's own window-level Esc (un-magnify) does not also run; and leaves one it didn't use alone", () => {
+        const layout = vi.fn();
+        window.addEventListener("keydown", layout);
+        try {
+            const t = mount();
+            const composer = t.container.querySelector("[data-testid=composer]")!;
+            const closing = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+            composer.dispatchEvent(closing);
+            expect(t.onClose).toHaveBeenCalledTimes(1);
+            expect(closing.defaultPrevented).toBe(true);
+            expect(layout).not.toHaveBeenCalled();
+            cleanup();
+
+            // No picker open: the layout's handler sees the Esc as before.
+            const bare = document.createElement("input");
+            document.body.appendChild(bare);
+            bare.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+            expect(layout).toHaveBeenCalledTimes(1);
+
+            // A picker open in another pane does not take an Esc pressed outside its own pane.
+            const t2 = mount();
+            bare.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+            expect(t2.onClose).not.toHaveBeenCalled();
+            expect(layout).toHaveBeenCalledTimes(2);
+            bare.remove();
+        } finally {
+            window.removeEventListener("keydown", layout);
+        }
+    });
+
     it("leaves an Escape pressed in another pane, or one another handler used, alone", () => {
         const t = mount();
         const outside = document.createElement("input");

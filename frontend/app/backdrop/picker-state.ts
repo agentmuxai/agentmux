@@ -36,8 +36,9 @@ export function releaseBackdropPicker(blockId: string): void {
  * The picker's keyboard hold on its pane: the panel takes focus when it opens (so Esc works at once, and a screen
  * reader is placed in it), and Esc closes it from anywhere inside its own pane. A swatch click can hand focus on to
  * the pane's composer or terminal; Esc must still reach the picker there. An Esc another handler already used
- * (`defaultPrevented`) is left to it, and one pressed in another pane is none of this picker's business. When it
- * closes, focus goes back to where it was.
+ * (`defaultPrevented`) is left to it, and one pressed in another pane is none of this picker's business. The Esc that
+ * closes it is consumed, so a handler further out (the layout's, which un-magnifies a pane) does not act on it too.
+ * When it closes, focus goes back to where it was.
  */
 export function useDialogKeys(panel: () => HTMLElement | undefined, close: () => void): void {
     // Where focus was when the picker opened: given back when it closes, if focus is then in the picker or nowhere.
@@ -50,7 +51,11 @@ export function useDialogKeys(panel: () => HTMLElement | undefined, close: () =>
     const onKey = (e: KeyboardEvent) => {
         if (e.key !== "Escape" || e.defaultPrevented) return;
         const frame = panel()?.closest(".block-frame-default");
-        if (frame && e.target instanceof Node && frame.contains(e.target)) close();
+        if (!frame || !(e.target instanceof Node) || !frame.contains(e.target)) return;
+        // Used here, so used: a magnified pane's own Esc (the layout's, on `window`) must not also un-magnify it.
+        e.preventDefault();
+        e.stopPropagation();
+        close();
     };
     document.addEventListener("keydown", onKey);
     onCleanup(() => document.removeEventListener("keydown", onKey));
