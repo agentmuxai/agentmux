@@ -39,11 +39,19 @@
 //! common case: a DOM menu open over a pane is not something the user is
 //! simultaneously trying to click through elsewhere on that same pane.
 //!
+//! A toast is the case that is not: it floats over a page the user is working
+//! in, so a pane whose holes are all toasts (`MouseRouting::ByPixel`) keeps
+//! the mouse and the keyboard, and `pane_hole_mouse` routes the mouse by
+//! pixel with the polling the paragraph above passed over: over a toast the
+//! window ignores it, anywhere else it does not.
+//!
 //! Must run on the CEF UI thread (= AppKit main thread).
 
 #![cfg(target_os = "macos")]
 
 use std::ffi::c_char;
+
+use crate::browser_panes::overlay_holes::{LocalRect, MouseRouting};
 
 type Id = *mut std::ffi::c_void;
 type Sel = *const std::ffi::c_void;
@@ -92,12 +100,16 @@ struct CGRect {
 /// * `holes` — overlay rects ALREADY intersected/clipped against
 ///   `pane_rect`, physical px, absolute (same origin as `pane_rect`).
 ///
+/// * `routing` — where the mouse goes while the holes are open (`overlay_holes::mouse_routing`):
+///   the whole window passes it to the app, or only the pixels of a toast do.
+///
 /// Empty `holes` clears the mask (full pane visible). Returns false when
 /// the window could not be found (caller may fall back to whole-pane hide).
 pub fn apply_pane_overlay_hole_mask(
     overlay_wnum: isize,
     pane_rect: (i32, i32, i32, i32),
     holes: &[(i32, i32, i32, i32)],
+    routing: MouseRouting,
 ) -> bool {
     if overlay_wnum <= 0 {
         return false;
@@ -122,7 +134,6 @@ pub fn apply_pane_overlay_hole_mask(
         let sel_set_opaque = sel_registerName(b"setOpaque:\0".as_ptr() as _);
         let sel_set_bg = sel_registerName(b"setBackgroundColor:\0".as_ptr() as _);
         let sel_clear_color = sel_registerName(b"clearColor\0".as_ptr() as _);
-        let sel_set_ignores_mouse = sel_registerName(b"setIgnoresMouseEvents:\0".as_ptr() as _);
 
         let get_id: extern "C" fn(Id, Sel) -> Id =
             std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
@@ -202,7 +213,7 @@ pub fn apply_pane_overlay_hole_mask(
             // Clear the mask — full pane visible again. Re-engage mouse
             // events for the whole window now that nothing overlaps it.
             set_ptr(layer, sel_set_mask, std::ptr::null_mut());
-            set_bool(overlay_win, sel_set_ignores_mouse, 0);
+            super::pane_hole_mouse::apply(overlay_win, overlay_wnum, MouseRouting::Page, Vec::new());
             call_void(overlay_win, sel_invalidate_shadow);
             tracing::debug!(overlay_wnum, "[pane-hole-mask] mask cleared");
             return true;
@@ -218,6 +229,7 @@ pub fn apply_pane_overlay_hole_mask(
         let (px, py, _pw, _ph) = pane_rect;
         let path = CGPathCreateMutable();
         CGPathAddRect(path, std::ptr::null(), bounds);
+        let mut local_holes: Vec<LocalRect> = Vec::new(); // the holes in the window's own points, for the mouse
         for &(hx, hy, hw, hh) in holes {
             if hw <= 0 || hh <= 0 {
                 continue;
@@ -228,6 +240,7 @@ pub fn apply_pane_overlay_hole_mask(
             let lh = hh as f64 / scale;
             // Flip: layer origin is bottom-left.
             let ly = bounds.size.h - ly_top - lh;
+            local_holes.push((lx, ly, lw, lh));
             CGPathAddRect(
                 path,
                 std::ptr::null(),
@@ -252,19 +265,15 @@ pub fn apply_pane_overlay_hole_mask(
         set_ptr(mask_layer, sel_set_path, path);
         CGPathRelease(path); // setPath: copies/retains the path
         set_id(layer, sel_set_mask, mask_layer);
-        // Only NOW, after the mask is actually applied — setting this earlier
-        // (e.g. right after the holes.is_empty() check) would leave the
-        // window permanently click-inert with no visual hole if the
-        // CAShapeLayer allocation above ever failed (reagent P2 on #2130).
-        // AppKit routes every event for this window to whatever's behind it
-        // instead (the main window, where the DOM overlay actually lives).
-        // See the module doc comment for why this is window-wide rather
-        // than per-hole.
-        set_bool(overlay_win, sel_set_ignores_mouse, 1);
+        // Only NOW, after the mask is actually applied: earlier, a failed CAShapeLayer allocation above
+        // would leave the window click-inert with no visual hole (reagent P2 on #2130). See the module doc
+        // for what the mouse does with each routing.
+        super::pane_hole_mouse::apply(overlay_win, overlay_wnum, routing, local_holes);
         call_void(overlay_win, sel_invalidate_shadow);
         tracing::debug!(
             overlay_wnum,
             hole_count = holes.len(),
+            ?routing,
             "[pane-hole-mask] mask applied"
         );
         true

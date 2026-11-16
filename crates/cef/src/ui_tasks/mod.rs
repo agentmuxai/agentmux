@@ -36,6 +36,8 @@ mod pane_geometry;
 mod snap_preview;
 #[cfg(target_os = "macos")]
 pub mod pane_hole_mask;
+#[cfg(target_os = "macos")]
+mod pane_hole_mouse;
 mod platform_macos;
 #[cfg(target_os = "windows")]
 pub(crate) mod stall_watch;

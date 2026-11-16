@@ -148,10 +148,13 @@ const FREEZE_WAIT_CAP_MS = 300;
 const clipWaiters = new Map<number, () => void>();
 let lastClipAnswered: Promise<void> = Promise.resolve();
 
-function rectsKey(rects: readonly OverlayRect[]): string {
+/** A rect as the host receives it: `passive` only when the overlay is one (see `PaneOverlayOptions.passive`). */
+type SentRect = OverlayRect & { passive?: true };
+
+function rectsKey(rects: readonly SentRect[]): string {
     if (rects.length === 0) return "";
     let s = "";
-    for (const r of rects) s += `${r.x},${r.y},${r.w},${r.h}|`;
+    for (const r of rects) s += `${r.x},${r.y},${r.w},${r.h}${r.passive ? "p" : ""}|`;
     return s;
 }
 
@@ -163,9 +166,18 @@ const releaseListeners = new Set<() => void>();
 // and popovers, registered with `{ keys: true }`. The rest only clip (a status
 // bar tooltip, a drag hole): they neither take focus nor handle Escape/arrows.
 const keyOverlays = new Set<number>();
+// Ids (in `overlayRects`) of overlays registered with `{ passive: true }`: a toast.
+const passiveOverlays = new Set<number>();
 export interface PaneOverlayOptions {
     /** The overlay takes the keyboard while open (Escape closes it, arrows move in it). */
     keys?: boolean;
+    /**
+     * The overlay is shown over a page without taking it over (a toast): it cuts its hole, but the keyboard
+     * stays with the page and the page stays live around the hole, while the overlay's own pixels still take
+     * the mouse. The host (macOS) then does not hand the keys to the app or turn the pane's mouse off for the
+     * whole window, as it does for a menu or a dialog. Ignored with `keys`, which takes the keyboard.
+     */
+    passive?: boolean;
 }
 let releaseScheduled = false;
 
@@ -221,12 +233,25 @@ async function flushClipAndTell(): Promise<void> {
     }
 }
 
-async function flushClip(): Promise<void> {
+/** Every overlay's rect now, explicitly registered and auto-discovered, and whether each is a passive one's. */
+function collectOverlayRects(): { rects: OverlayRect[]; passive: boolean[] } {
     const rects: OverlayRect[] = [];
-    for (const r of overlayRects.values()) rects.push(r);
-    for (const r of autoOverlayRects.values()) {
-        if (r.w > 0 && r.h > 0) rects.push(r);
+    const passive: boolean[] = [];
+    for (const [id, r] of overlayRects) {
+        rects.push(r);
+        passive.push(passiveOverlays.has(id) && !keyOverlays.has(id));
     }
+    for (const r of autoOverlayRects.values()) {
+        if (r.w > 0 && r.h > 0) {
+            rects.push(r);
+            passive.push(false);
+        }
+    }
+    return { rects, passive };
+}
+
+async function flushClip(): Promise<void> {
+    const { rects, passive } = collectOverlayRects();
 
     // Short-circuits — see discussion #1097, fix #1.
     //
@@ -284,11 +309,12 @@ async function flushClip(): Promise<void> {
     // 1px seam. The intersection gate above stays in CSS px because the
     // pane-rect registry it tests against is CSS px.
     const dpr = window.devicePixelRatio || 1;
-    const rectsToSend: OverlayRect[] = (intersects ? rects : []).map((r) => ({
+    const rectsToSend: SentRect[] = (intersects ? rects : []).map((r, i) => ({
         x: Math.round(r.x * dpr),
         y: Math.round(r.y * dpr),
         w: Math.round(r.w * dpr),
         h: Math.round(r.h * dpr),
+        ...(passive[i] ? { passive: true as const } : {}),
     }));
     const sendKey = rectsKey(rectsToSend);
     // Identical-rect deduplication — if the menu closes-then-reopens
@@ -414,6 +440,7 @@ export interface PaneOverlayHandle {
 export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions): PaneOverlayHandle {
     const id = nextOverlayId++;
     if (opts?.keys) keyOverlays.add(id);
+    if (opts?.passive) passiveOverlays.add(id);
     let released = false;
     registeredOverlayEls.add(el);
     const update = (): void => {
@@ -447,6 +474,7 @@ export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions):
             styleObserver?.disconnect();
             const dropped = dropOverlayRect(id);
             keyOverlays.delete(id);
+            passiveOverlays.delete(id);
             if (dropped) sendClip();
         },
     };
@@ -532,6 +560,7 @@ export function usePaneOverlayRect(getRect: Accessor<OverlayRect | undefined>, o
 export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, opts?: PaneOverlayOptions): void {
     const id = nextOverlayId++;
     if (opts?.keys) keyOverlays.add(id);
+    if (opts?.passive) passiveOverlays.add(id);
     // The context reaches an overlay rendered through a Portal too, where the
     // DOM marker check below can't see its tab or pane-stack member.
     const ownerShown = useOwnerShown();
@@ -586,6 +615,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, 
         styleObserver?.disconnect();
         const dropped = dropOverlayRect(id);
         keyOverlays.delete(id);
+        passiveOverlays.delete(id);
         if (dropped) sendClip();
     });
 }

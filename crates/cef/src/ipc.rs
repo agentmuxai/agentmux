@@ -1145,43 +1145,7 @@ async fn route_command(
 
             Ok(serde_json::json!(true))
         }
-        "browser_panes_set_overlay_clip" => {
-            // Apply a clip region to every pane HWND that excludes the given
-            // overlay rectangles. The pane stays visible everywhere except
-            // under the overlays — DOM overlays render through the holes.
-            // Empty list restores full visibility.
-            //
-            // `window_label` scopes the clip to panes owned by the
-            // requesting window so a modal in window B doesn't also
-            // hide panes in window A (Codex P1 on PR #544). Defaults to
-            // "main" for back-compat with older frontends that omit it.
-            //
-            // Each rect: { x, y, w, h } in main-window client pixel coords.
-            let window_label = args
-                .get("window_label")
-                .and_then(|v| v.as_str())
-                .unwrap_or("main")
-                .to_string();
-            let rects: Vec<(i32, i32, i32, i32)> = args
-                .get("rects")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|item| {
-                            let x = item.get("x")?.as_i64()? as i32;
-                            let y = item.get("y")?.as_i64()? as i32;
-                            let w = item.get("w")?.as_i64()? as i32;
-                            let h = item.get("h")?.as_i64()? as i32;
-                            Some((x, y, w, h))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            state
-                .browser_panes
-                .set_pane_overlay_clip(state, &window_label, &rects);
-            Ok(serde_json::json!(true))
-        }
+        "browser_panes_set_overlay_clip" => Ok(set_overlay_clip(state, args)),
         "pane_media_revoke" => {
             // User-facing revoke. Two steps, and BOTH are required:
             //
@@ -1286,6 +1250,47 @@ async fn route_command(
 
         _ => Err(format!("Unknown command: {}", cmd)),
     }
+}
+
+/// `browser_panes_set_overlay_clip`: the overlay rects of a window, to cut out of its browser panes.
+fn set_overlay_clip(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+    // Apply a clip region to every pane HWND that excludes the given
+    // overlay rectangles. The pane stays visible everywhere except
+    // under the overlays — DOM overlays render through the holes.
+    // Empty list restores full visibility.
+    //
+    // `window_label` scopes the clip to panes owned by the
+    // requesting window so a modal in window B doesn't also
+    // hide panes in window A (Codex P1 on PR #544). Defaults to
+    // "main" for back-compat with older frontends that omit it.
+    //
+    // Each rect: { x, y, w, h } in main-window client pixel coords, and `passive: true` when
+    // it is an overlay shown over the page without taking it over (a toast; macOS only acts on it).
+    let window_label = args
+        .get("window_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main")
+        .to_string();
+    let (rects, passive): (Vec<(i32, i32, i32, i32)>, Vec<bool>) = args
+        .get("rects")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let x = item.get("x")?.as_i64()? as i32;
+                    let y = item.get("y")?.as_i64()? as i32;
+                    let w = item.get("w")?.as_i64()? as i32;
+                    let h = item.get("h")?.as_i64()? as i32;
+                    let passive = item.get("passive").and_then(|v| v.as_bool()).unwrap_or(false);
+                    Some(((x, y, w, h), passive))
+                })
+                .unzip()
+        })
+        .unwrap_or_default();
+    state
+        .browser_panes
+        .set_pane_overlay_clip(state, &window_label, &rects, &passive);
+    serde_json::json!(true)
 }
 
 /// The app's own content in `window_label` takes the keyboard from its panes.

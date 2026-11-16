@@ -32,10 +32,12 @@ export function visibleNotifications(all: NotificationType[], expanded: boolean)
 /** The stack's box. It cuts a hole through a browser pane's native window it floats over, so the toasts show above
  *  the page. `data-pane-overlay` does that on Windows alone (pane-overlay-auto.ts); `usePaneOverlay` does it on
  *  every platform, and the same rect registered twice on Windows is one hole. It mounts only while there is a
- *  stack, so the hole is there for exactly as long. */
+ *  stack, so the hole is there for exactly as long. It is `passive`: a toast is not a menu, so the page under it keeps
+ *  the keyboard and stays live around the stack (the host routes the mouse by pixel: the toasts take it, the page
+ *  takes the rest). */
 const ToastStackBox = (props: { setStack: (el: HTMLDivElement) => void; style: JSX.CSSProperties; children: JSX.Element }): JSX.Element => {
     let box: HTMLDivElement | undefined;
-    usePaneOverlay(() => box);
+    usePaneOverlay(() => box, { passive: true });
     return (
         <div
             ref={(el) => {

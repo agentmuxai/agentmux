@@ -16,6 +16,8 @@ use cef::*;
 use crate::state::AppState;
 
 use super::BrowserPaneManager;
+#[cfg(target_os = "macos")]
+use super::overlay_holes;
 
 impl BrowserPaneManager {
     /// Tell every live pane browser it has lost focus, at the Chromium level.
@@ -383,9 +385,10 @@ impl BrowserPaneManager {
         state: &Arc<AppState>,
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
+        passive: &[bool],
     ) {
         if crate::pane_backend::window_is_views(state, window_label) {
-            self.set_pane_overlay_clip_views(state, window_label, overlay_rects);
+            self.set_pane_overlay_clip_views(state, window_label, overlay_rects, passive);
         } else {
             #[cfg(target_os = "windows")]
             self.set_pane_overlay_clip_hwnd(state, window_label, overlay_rects);
@@ -393,11 +396,14 @@ impl BrowserPaneManager {
     }
 
     /// The Views body of `set_pane_overlay_clip` (Windows calls it in Views pane mode).
+    /// `passive[i]` marks `overlay_rects[i]` as shown over the page without taking it over (a toast);
+    /// only macOS acts on it (`overlay_holes`).
     pub fn set_pane_overlay_clip_views(
         &self,
         state: &Arc<AppState>,
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
+        passive: &[bool],
     ) {
         // Publish to AppState so resize_browser_pane_view can consult the
         // same authoritative rect list when computing pane visibility on
@@ -414,6 +420,7 @@ impl BrowserPaneManager {
             state.clone(),
             window_label.to_string(),
             overlay_rects.to_vec(),
+            passive.to_vec(),
         );
         cef::post_task(cef::ThreadId::UI, Some(&mut task));
     }
@@ -499,20 +506,6 @@ fn clip_sig_clipped(
     h.finish()
 }
 
-/// Two axis-aligned rects intersect iff neither is fully to one side of the
-/// other. Coordinates: (x, y, width, height). Used by the macOS hole mask to
-/// pick the overlay rects that cover part of a pane.
-#[cfg(target_os = "macos")]
-fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
-    let (ax, ay, aw, ah) = a;
-    let (bx, by, bw, bh) = b;
-    let a_right = ax + aw;
-    let a_bottom = ay + ah;
-    let b_right = bx + bw;
-    let b_bottom = by + bh;
-    !(a_right <= bx || b_right <= ax || a_bottom <= by || b_bottom <= ay)
-}
-
 // Views pane-airspace task (Linux, macOS, and Windows in Views pane mode) —
 // fired by `set_pane_overlay_clip_views`. For each live OverlayController of the
 // window, cut the overlay rects out of it (`views_clip` on Windows and Linux, the
@@ -526,6 +519,8 @@ wrap_task! {
         // Mirrors the window_label filtering in the Windows path.
         window_label: String,
         overlay_rects: Vec<(i32, i32, i32, i32)>,
+        // Whether each of `overlay_rects` is a passive overlay (a toast), by index; may be shorter.
+        passive: Vec<bool>,
     }
 
     impl Task {
@@ -587,18 +582,8 @@ wrap_task! {
                     // the frontend freeze-frame that compensated for it) only
                     // remains as the fallback when the overlay NSWindow can't
                     // be found. See ui_tasks/pane_hole_mask.rs.
-                    let holes: Vec<(i32, i32, i32, i32)> = self
-                        .overlay_rects
-                        .iter()
-                        .filter(|or| rects_intersect(**or, pane_rect))
-                        .map(|&(ox, oy, ow, oh)| {
-                            let hx = ox.max(px);
-                            let hy = oy.max(py);
-                            let hr = (ox + ow).min(px + pw);
-                            let hb = (oy + oh).min(py + ph);
-                            (hx, hy, hr - hx, hb - hy)
-                        })
-                        .collect();
+                    let holes = overlay_holes::holes_in_pane(pane_rect, &self.overlay_rects, &self.passive);
+                    let hole_rects: Vec<(i32, i32, i32, i32)> = holes.iter().map(|h| h.rect).collect();
                     let wnum = self
                         .state
                         .browser_pane_overlay_wnums
@@ -607,15 +592,20 @@ wrap_task! {
                         .copied()
                         .unwrap_or(0);
                     let masked = crate::ui_tasks::pane_hole_mask::apply_pane_overlay_hole_mask(
-                        wnum, pane_rect, &holes,
+                        wnum,
+                        pane_rect,
+                        &hole_rects,
+                        overlay_holes::mouse_routing(&holes),
                     );
-                    if !holes.is_empty() {
+                    if overlay_holes::takes_keys(&holes) {
                         // A DOM menu/popover is open over this pane and the
                         // whole overlay now ignores the mouse: the keyboard
                         // belongs to that DOM overlay too (Escape to close,
                         // typing into a popover field), not the page under it.
                         // Only when THIS pane holds the keyboard — an overlay
                         // over pane A must not take it from pane B's page.
+                        // A passive overlay (a toast) takes nothing: the page
+                        // keeps the keyboard while it is shown over it.
                         crate::ui_tasks::reclaim_key_from_pane(&label);
                     }
                     if masked {

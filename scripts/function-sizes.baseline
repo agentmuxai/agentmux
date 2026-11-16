@@ -26,7 +26,7 @@
 240 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass
 168 crates/cef/src/browser_pane/hwnd.rs::install_browser_pane_subclass::wndproc_hook
 293 crates/cef/src/browser_panes/clip.rs::BrowserPaneManager::set_pane_overlay_clip_hwnd
-120 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
+115 crates/cef/src/browser_panes/clip.rs::SetPaneOverlayClipViewsTask::Task::execute
 143 crates/cef/src/browser_panes/mod.rs::BrowserPaneManager::create
 417 crates/cef/src/client/crash_recovery.rs::AgentMuxHandler::on_render_process_terminated
 246 crates/cef/src/client/error_catalog.rs::describe
@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 153 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1102 crates/cef/src/ipc.rs::route_command
+1066 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -85,7 +85,7 @@
 467 crates/cef/src/ui_tasks/drag.rs::Win32BeginMoveTask::Task::execute
 124 crates/cef/src/ui_tasks/drag.rs::run_macos_native_drag_loop
 781 crates/cef/src/ui_tasks/pane_geometry.rs::SetPaneBoundsViewsTask::Task::execute
-176 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
+174 crates/cef/src/ui_tasks/pane_hole_mask.rs::apply_pane_overlay_hole_mask
 293 crates/cef/src/ui_tasks/platform_macos.rs::swizzled_nsapp_send_event
 369 crates/cef/src/ui_tasks/window.rs::CloseWindowTask::Task::execute
 141 crates/cef/src/ui_tasks/window.rs::CreateWindowTask::Task::execute
@@ -329,7 +329,7 @@
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 120 frontend/app/notification/notificationitem.tsx::NotificationItem
-111 frontend/app/platform/pane-overlay.ts::flushClip
+108 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
 139 frontend/app/statusbar/BackendStatus.tsx::BackendStatus
