@@ -105,39 +105,62 @@ let failed = null;
 try {
     await signIn(context, page);
 
-    // Click Browser, load the first page.
+    // Click Browser, wait until the pane is live, load the first page.
     await page.getByText("Browser", { exact: true }).first().click({ timeout: 30000 });
     const address = page.getByLabel("Address");
     await address.waitFor({ timeout: 30000 });
     const stage = page.locator(".streamed-stage");
     const canvas = page.locator(".streamed-canvas");
+    // Each step stays on screen about this long, so a person watching the video can see it.
+    const HOLD_MS = 4000;
+    const hold = () => sleep(HOLD_MS);
     let since = Date.now();
-    await address.fill(`${pages}/motion.html`);
-    await address.press("Enter");
-    const loaded = await waitForEvent((e) => e.k === "load" && e.v.startsWith("/motion.html"), since, 20000);
-    record("load /motion.html", !!loaded, loaded ? `the page loaded at ${loaded.v}` : "the page never reported loading");
-    await sleep(5000);
-    const frameSize = await canvas.evaluate((c) => `${c.width}x${c.height}`);
-    record("frames arrive", frameSize !== "300x150", `the canvas holds frames of ${frameSize}`);
 
+    /** Type an address and go; the step is done only when the page reported its load and the bar shows the address. */
+    async function go(name) {
+        const url = `${pages}/${name}`;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            since = Date.now();
+            await address.fill(url);
+            await address.press("Enter");
+            const loaded = await waitForEvent((e) => e.k === "load" && e.v.startsWith(`/${name}`), since, 15000);
+            if (loaded) {
+                const shown = await address.inputValue();
+                record(`load /${name}`, shown.includes(name), shown.includes(name) ? `the page loaded at ${loaded.v}, the bar shows ${shown}` : `the page loaded but the bar shows "${shown}"`);
+                return true;
+            }
+        }
+        record(`load /${name}`, false, "the page never reported loading, after two tries");
+        return false;
+    }
     const at = async (x, y) => {
         const box = await canvas.boundingBox();
         return { x: box.x + x, y: box.y + y };
     };
 
+    // The moving page: two pictures of the pane a second apart must differ.
+    await go("motion.html");
+    await sleep(1000);
+    const first = await canvas.screenshot();
+    await sleep(1000);
+    const second = await canvas.screenshot();
+    const moved = Buffer.compare(first, second) !== 0;
+    const frameSize = await canvas.evaluate((c) => `${c.width}x${c.height}`);
+    record("the stream moves", moved, moved ? `two pictures a second apart differ (frames of ${frameSize})` : `two pictures a second apart are the same (frames of ${frameSize})`);
+    await hold();
+
     // The form page: click a field, type, paste.
-    await address.fill(`${pages}/form.html`);
-    await address.press("Enter");
-    await waitForEvent((e) => e.k === "load" && e.v.startsWith("/form.html"), since, 20000);
+    await go("form.html");
     since = Date.now();
     let p = await at(100, 96);
     await page.mouse.click(p.x, p.y);
     const click = await waitForEvent((e) => e.k === "click", since);
     record("click a field", !!click && click.v === "100,96", click ? `the page saw a click at ${click.v}` : "the page saw no click");
     since = Date.now();
-    await page.keyboard.type("hello", { delay: 60 });
+    await page.keyboard.type("hello", { delay: 120 });
     const typed = await waitForEvent((e) => e.k === "input" && e.v === "hello", since);
     record("type", !!typed, typed ? "the field holds hello" : "the page never saw the text");
+    await hold();
     p = await at(100, 160);
     await page.mouse.click(p.x, p.y);
     since = Date.now();
@@ -148,30 +171,34 @@ try {
     });
     const pasted = await waitForEvent((e) => e.k === "input" && e.v === "pasted text", since);
     record("paste", !!pasted, pasted ? "the text area holds the pasted text (a synthetic paste event, not the system clipboard)" : "the page never saw the paste");
+    await hold();
 
-    // The long page: the wheel.
-    await address.fill(`${pages}/scroll.html`);
-    await address.press("Enter");
-    await waitForEvent((e) => e.k === "load" && e.v.startsWith("/scroll.html"), since, 20000);
+    // The long page: the wheel, in steps so the scrolling can be seen.
+    await go("scroll.html");
     since = Date.now();
     p = await at(400, 300);
     await page.mouse.move(p.x, p.y);
-    await page.mouse.wheel(0, 600);
-    const scrolled = await waitForEvent((e) => e.k === "scroll" && Number(e.v) > 0, since);
-    record("wheel", !!scrolled, scrolled ? `the page scrolled to ${scrolled.v}` : "the page never scrolled");
+    for (let i = 0; i < 4; i++) {
+        await page.mouse.wheel(0, 150);
+        await sleep(500);
+    }
+    const scrolled = await waitForEvent((e) => e.k === "scroll" && Number(e.v) >= 450, since);
+    record("wheel", !!scrolled, scrolled ? `the page scrolled to ${scrolled.v}` : "the page never scrolled that far");
+    await hold();
 
     // The keys page: a few keys, with the stage focused.
-    await address.fill(`${pages}/keys.html`);
-    await address.press("Enter");
-    await waitForEvent((e) => e.k === "load" && e.v.startsWith("/keys.html"), since, 20000);
+    await go("keys.html");
     since = Date.now();
     p = await at(300, 300);
     await page.mouse.click(p.x, p.y);
-    for (const k of ["a", "b", "Enter", "ArrowLeft"]) await page.keyboard.press(k);
+    for (const k of ["a", "b", "Enter", "ArrowLeft"]) {
+        await page.keyboard.press(k);
+        await sleep(500);
+    }
     await sleep(800);
     const keys = (await pageLog()).filter((e) => e.k === "key" && e.t >= since).map((e) => e.v);
-    const want = ["a", "b", "Enter", "ArrowLeft"];
-    record("keys", want.every((k) => keys.includes(k)), `the page saw: ${keys.join(" ")}`);
+    record("keys", ["a", "b", "Enter", "ArrowLeft"].every((k) => keys.includes(k)), `the page saw: ${keys.join(" ")}`);
+    await hold();
 
     // One resize of the pane: the window gets smaller, the page follows.
     since = Date.now();
@@ -179,7 +206,7 @@ try {
     const box = await stage.boundingBox();
     const resized = await waitForEvent((e) => e.k === "resize" && e.v === `${Math.floor(box.width)}x${Math.floor(box.height)}`, since, 10000);
     record("resize", !!resized, resized ? `the page followed the pane to ${resized.v}` : `the pane is ${Math.floor(box.width)}x${Math.floor(box.height)} and the page never reported that size`);
-    await sleep(2000);
+    await hold();
 } catch (e) {
     failed = e;
     record("the pass", false, String(e.message ?? e));
