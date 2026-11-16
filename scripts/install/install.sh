@@ -27,6 +27,12 @@ TAP_CASK_URL="https://raw.githubusercontent.com/agentmuxai/homebrew-tap/main/Cas
 # The public keys the app pins to verify a release (crates/common/update-keys.json), as "<id>:<base64 of the 32 raw bytes>".
 # scripts/install/install.test.sh fails when this and that file disagree.
 UPDATE_KEYS="k1:m9HRZ4UOiBU2vyrjlHXj1D0CjfhAazI2DGdII9JSJLE="
+# The first release that carries AgentMux-<v>-envelope.json.sshsig, the same envelope signed by the same key in SSH signature
+# form, which the system's ssh-keygen can check where its openssl cannot (a stock Mac). From this release on, a release
+# without it is refused on a system that can only check that way: never a quiet fall back to hashes. scripts/release-manifest.mjs
+# has the same value (SSHSIG_FLOOR) and scripts/install/install.test.sh fails when they differ.
+SSHSIG_FLOOR="0.60.31"
+SSHSIG_NAMESPACE="agentmux-release"
 
 DRY_RUN=0
 FORCE=0
@@ -243,6 +249,54 @@ verify_signature() {
     return 1
 }
 
+# Is `$1` (x.y.z, maybe with a suffix) at or above `$2` (x.y.z)? A suffix on the last part is ignored, so 0.60.31-rc1 compares
+# as 0.60.31: at the floor, never below it (a pre-release of the floor's version must carry the signature too).
+version_at_least() {
+    va="$1"; vb="$2"
+    for part in 1 2 3; do
+        na="${va%%.*}"; na="${na%%[!0-9]*}"; nb="${vb%%.*}"; nb="${nb%%[!0-9]*}"
+        [ "${na:-0}" -eq "${nb:-0}" ] || { [ "${na:-0}" -gt "${nb:-0}" ]; return; }
+        case "$va" in *.*) va="${va#*.}" ;; *) va=0 ;; esac
+        case "$vb" in *.*) vb="${vb#*.}" ;; *) vb=0 ;; esac
+    done
+    return 0
+}
+
+# Base64 with whatever is here: openssl (LibreSSL does this) or base64.
+b64_decode() { if have openssl; then openssl base64 -d -A; else base64 -d; fi; }
+b64_encode() { if have openssl; then openssl base64 -A; else base64 | tr -d '\n'; fi; }
+
+# True when this system's ssh-keygen can check an SSH signature (`-Y verify`, OpenSSH 8.0 and later).
+can_check_sshsig() {
+    have ssh-keygen || return 1
+    ck_out="$(ssh-keygen -Y verify 2>&1 < /dev/null || true)"
+    case "$ck_out" in *"illegal option"* | *"invalid option"* | *"unknown option"* | *"unsupported option"*) return 1 ;; esac
+    return 0
+}
+
+# verify_sshsig <envelope> <release base> -> 0 checked and good, 1 checked and bad, 2 cannot check (no ssh-keygen -Y, or a release
+# from before the floor). From the floor on, a missing or unreadable .sshsig is a failure (die), not a fallback: a release that
+# could have been checked this way and has no signature is not installed. The signer is only ever one of the pinned keys, put
+# in an allowed-signers file here; the key carried inside the signature is checked against them by ssh-keygen, never trusted.
+verify_sshsig() {
+    SSH_WHY=""
+    can_check_sshsig || { SSH_WHY=tool; return 2; }
+    version_at_least "$VERSION" "${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}" || { SSH_WHY=floor; return 2; }
+    if ! ( fetch "$2/AgentMux-$VERSION-envelope.json.sshsig" "$TMP/envelope.sshsig" ) > /dev/null 2>&1; then
+        die "this release ($VERSION) should carry AgentMux-$VERSION-envelope.json.sshsig (every release from $SSHSIG_FLOOR on does) and it could not be downloaded: not installing"
+    fi
+    : > "$TMP/allowed_signers"
+    keys="${AGENTMUX_INSTALL_TEST_KEYS:-$UPDATE_KEYS}"
+    for entry in $keys; do
+        b64="${entry#*:}"
+        # The key as an SSH key blob: the string "ssh-ed25519" (4-byte length 11), then the 32 raw bytes (length 32).
+        blob="$({ printf '\000\000\000\013ssh-ed25519\000\000\000\040'; printf '%s' "$b64" | b64_decode; } | b64_encode)" || return 1
+        printf '%s namespaces="%s" ssh-ed25519 %s\n' "$SSHSIG_NAMESPACE" "$SSHSIG_NAMESPACE" "$blob" >> "$TMP/allowed_signers"
+    done
+    if ssh-keygen -Y verify -f "$TMP/allowed_signers" -I "$SSHSIG_NAMESPACE" -n "$SSHSIG_NAMESPACE" -s "$TMP/envelope.sshsig" < "$1" > "$TMP/sshsig.out" 2>&1; then return 0; fi
+    return 1
+}
+
 # Pull `"key":"value"` or `"key":number` out of a JSON text with no spaces or newlines in it.
 json_field() { printf '%s' "$1" | sed -n 's/.*"'"$2"'":"\{0,1\}\([^",}]*\)"\{0,1\}.*/\1/p' | head -n 1; }
 
@@ -258,14 +312,32 @@ download_verified() {
 
     dv_sig=0
     verify_signature "$TMP/envelope.json" "$TMP/envelope.sig" || dv_sig=$?
+    dv_how=""
+    if [ "$dv_sig" = 0 ]; then
+        dv_how="Ed25519, with $("$OPENSSL" version 2> /dev/null | head -n 1)"
+    elif [ "$dv_sig" = 2 ]; then
+        # Not with openssl: the SSH signature of the same envelope, with the system's ssh-keygen, when it can.
+        dv_sig=0
+        verify_sshsig "$TMP/envelope.json" "$dv_base" || dv_sig=$?
+        if [ "$dv_sig" = 0 ]; then
+            dv_tool="ssh-keygen"
+            if have ssh; then dv_v="$(ssh -V 2>&1 | head -n 1 | sed 's/,.*//')"; case "$dv_v" in OpenSSH*) dv_tool="$dv_v" ;; esac; fi
+            dv_how="Ed25519 (SSH signature), with $dv_tool"
+        fi
+    fi
     case "$dv_sig" in
-        0) say "signature of the release checked: Ed25519, with $("$OPENSSL" version 2> /dev/null | head -n 1)" ;;
-        1) die "the release's signature does not match: not installing" ;;
+        0) say "signature of the release checked: $dv_how" ;;
+        1) die "the release's signature does not match: not installing$([ -s "$TMP/sshsig.out" ] && printf ' (ssh-keygen says: %s)' "$(head -n 1 "$TMP/sshsig.out")")" ;;
         *)
             dv_ossl="$(openssl version 2> /dev/null | head -n 1 || true)"
             [ -n "$dv_ossl" ] || dv_ossl="no openssl"
-            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl; the check needs OpenSSL 3) and --require-signature was given"
-            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it)"
+            # Why the SSH signature was not used either: this release is older than the first that has one, or there is no usable ssh-keygen.
+            case "${SSH_WHY:-tool}" in
+                floor) dv_why="this release ($VERSION) is older than ${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}, the first with an SSH signature" ;;
+                *) dv_why="there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SSHSIG_FLOOR on carry" ;;
+            esac
+            [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl cannot, and $dv_why) and --require-signature was given"
+            say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it), and $dv_why"
             say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
             ;;
     esac
