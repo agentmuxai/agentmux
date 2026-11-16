@@ -207,7 +207,7 @@
 147 crates/srv-core/src/backend/tower/sampler.rs::group
 184 crates/srv-core/src/backend/tower/sampler.rs::render
 107 crates/srv-core/src/backend/vault/import/bitwarden.rs::read_plain
-115 crates/srv-core/src/backend/vault/import/kdbx.rs::entry_into
+110 crates/srv-core/src/backend/vault/import/kdbx.rs::entry_into
 206 crates/srv-core/src/backend/vault/import/onepux.rs::item_into
 123 crates/srv-core/src/backend/widget/packages.rs::describe
 102 crates/srv/src/bootstrap/logging.rs::init_logging

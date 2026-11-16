@@ -8,7 +8,7 @@
 import { createEffect, createRoot, createSignal, For, onCleanup, Show, type Accessor, type Component, type JSX, type Setter } from "solid-js";
 
 import { tip } from "@/app/element/tip";
-import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
+import { Button, Field, Pill, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -167,6 +167,42 @@ function UseTarget(props: { use: UseRequest }): JSX.Element {
     );
 }
 
+/** A line of what an entry says of its key, and how the change asked for touches it. */
+export type SaidLine = { text: string; mark?: "changed" | "added" | "removed" };
+
+const SAID_MARKS = { changed: "vault.linkCard.changed", added: "vault.linkCard.added", removed: "vault.linkCard.removed" } as const;
+
+/** What an entry says of its key, one thing a line ("Read by: …", "Last changed: …", "Also kept at: …"), as srv
+ *  writes it. With `against` (what is recorded now) each line of what is asked for is marked when it is new or
+ *  differs, and a thing the change takes away is a line of its own: the difference is said in a word, not left
+ *  for the eye to find in two long lines. */
+export function saidLines(text: string, against?: string): SaidLine[] {
+    const split = (said: string) => said.split("\n").filter(Boolean).map((line) => ({ what: line.split(": ")[0], text: line }));
+    const lines = split(text);
+    if (against === undefined) return lines.map(({ text }) => ({ text }));
+    const before = split(against);
+    const asked = lines.map(({ what, text }): SaidLine => {
+        const was = before.find((b) => b.what === what);
+        return was?.text === text ? { text } : { text, mark: was ? "changed" : "added" };
+    });
+    const gone = before.filter((b) => !lines.some((line) => line.what === b.what)).map((b): SaidLine => ({ text: b.what, mark: "removed" }));
+    return [...asked, ...gone];
+}
+
+function SaidLines(props: { name: string; text: string; against?: string }): JSX.Element {
+    return (
+        <span data-link={props.name}>
+            <For each={saidLines(props.text, props.against)}>
+                {(line) => (
+                    <span class="vault-link-said-line" data-said={line.mark ?? "same"}>
+                        <Show when={line.mark}>{(mark) => <Pill tone="accent">{t(SAID_MARKS[mark()])}</Pill>}</Show> <Clipped text={line.text} max={CLIP.about} />
+                    </span>
+                )}
+            </For>
+        </span>
+    );
+}
+
 /** A change to where an entry's machine copy is: the place it has now and the place the agent asks for. */
 function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["link"]> }): JSX.Element {
     return (
@@ -179,17 +215,15 @@ function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.from} max={CLIP.reason} /></strong>
                 </Show>
                 <Show when={props.link.about_from}>
-                    <br />
-                    <span data-link="about-from"><Clipped text={props.link.about_from} max={CLIP.about} /></span>
+                    <SaidLines name="about-from" text={props.link.about_from} />
                 </Show>
             </p>
             <p data-link="to">
                 {t("vault.linkCard.askedFor")} <Show when={props.link.to} fallback={t("vault.linkCard.noPlaceAsked")}>
                     <strong class="warden-manager-mono vault-import-id"><ClippedId text={props.link.to} max={CLIP.reason} /></strong>
                 </Show>
-                <Show when={props.link.about_to}>
-                    <br />
-                    <span data-link="about-to"><Clipped text={props.link.about_to} max={CLIP.about} /></span>
+                <Show when={props.link.about_to || props.link.about_from}>
+                    <SaidLines name="about-to" text={props.link.about_to} against={props.link.about_from} />
                 </Show>
             </p>
         </>
@@ -268,6 +302,12 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
         return { name: asked.name, agents: currentVaults()?.find((v) => v.name === asked.name)?.agents ?? asked.agents };
     };
     const openTo = () => vaultOpenTo(into().agents);
+    // A batch of both kinds: how many of the ticked rows are read and copied, and how many are only recorded.
+    const mixed = () => !links() && b.items.some((item) => item.link);
+    const ticked = () => {
+        const recorded = a.rows().filter((i) => b.items[i]?.link).length;
+        return { read: a.rows().length - recorded, links: recorded };
+    };
     const offered = (): SelectOption[] => b.vaults.map((v) => ({ value: v.name, label: clip(v.name, CLIP.label) }));
     return (
         <>
@@ -295,6 +335,9 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                 <Field label={t("vault.batchCard.chooseVault")} layout="stacked" class="vault-batch-vault">
                     <Select value={a.vault()} onChange={a.setVault} options={offered()} ariaLabel={t("vault.batchCard.chooseVault")} disabled={a.busy()} />
                 </Field>
+            </Show>
+            <Show when={mixed()}>
+                <p data-batch="mixed">{t("vault.batchCard.mixed", ticked())}</p>
             </Show>
             <ul class="vault-batch-rows" aria-label={t("vault.batchCard.rows")}>
                 <For each={b.items}>

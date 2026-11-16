@@ -352,13 +352,24 @@ impl BatchPlan {
         hex::encode(h.finalize()).chars().take(16).collect()
     }
 
-    /// What the batch asked for, for the line of one that ran nothing: "7 secrets from AWS Secrets Manager".
+    /// Whether every row is a link: nothing is read or copied, and only where the keys live is recorded.
+    pub fn links_only(&self) -> bool {
+        self.items.iter().all(Plan::is_link)
+    }
+
+    /// What the batch asked for, for the line of one that ran nothing: "7 secrets from AWS Secrets Manager", or
+    /// for a list of links only "where 7 keys live in AWS Secrets Manager".
     pub fn asked_text(&self) -> String {
+        if self.links_only() {
+            let n = self.items.len();
+            return format!("where {n} key{} in {SERVICE}", if n == 1 { " lives" } else { "s live" });
+        }
         format!("{} from {SERVICE}", secrets(self.items.len()))
     }
 
     /// The outcome and the text of the line of a batch that ran: how many rows were approved, stored and failed, the
-    /// approved list's fingerprint, and the rows the person left out.
+    /// approved list's fingerprint, and the rows the person left out. Approved rows that are all links were read
+    /// from nowhere and hold nothing: they are "recorded".
     pub fn ran_text(&self, approved: &Approved, results: &[ItemResult]) -> (&'static str, String) {
         let stored = results.iter().filter(|r| r.id.is_some()).count();
         let failed = results.len() - stored;
@@ -367,7 +378,8 @@ impl BatchPlan {
             (0, _) => "failed",
             _ => "partly done",
         };
-        let mut text = format!("{} of {} approved, {stored} stored, {failed} failed; list {}", approved.items.len(), self.items.len(), approved.list);
+        let kept = if approved.items.iter().all(Plan::is_link) { "recorded" } else { "stored" };
+        let mut text = format!("{} of {} approved, {stored} {kept}, {failed} failed; list {}", approved.items.len(), self.items.len(), approved.list);
         if !approved.left_out.is_empty() {
             text.push_str(&format!("; not approved: {}", listed(&approved.left_out)));
         }

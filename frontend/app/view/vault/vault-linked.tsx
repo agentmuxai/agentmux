@@ -68,8 +68,12 @@ export function LinkedBadges(props: { entry: VaultEntryInfo }): JSX.Element {
     );
 }
 
-/** What an entry says of its key beside the place: who reads it, when it last changed, where else it is kept. */
-export function LinkedDetails(props: { entry: VaultEntryInfo }): JSX.Element {
+/** What is said after one of the entry's other places: what its newest check found (`copyCheck`, vault-source). */
+export type CopyNote = (line: string) => { text: string; warn: boolean } | null;
+
+/** What an entry says of its key beside the place: who reads it, when it last changed, where else it is kept, and
+ *  for each of those other places what `copyNote` says of its newest check. */
+export function LinkedDetails(props: { entry: VaultEntryInfo; copyNote?: CopyNote }): JSX.Element {
     const said = () =>
         [
             { name: "readers", label: t("vault.linked.readers"), lines: linesOf(props.entry.fields.readers) },
@@ -80,7 +84,25 @@ export function LinkedDetails(props: { entry: VaultEntryInfo }): JSX.Element {
         <For each={said()}>
             {(s) => (
                 <div class="vault-linked-said" data-said={s.name}>
-                    {s.label} <span class={s.name === "readers" ? undefined : "warden-manager-mono vault-import-id"}>{s.lines.join("; ")}</span>
+                    {s.label}{" "}
+                    <Show when={s.name === "copies"} fallback={<span class={s.name === "readers" ? undefined : "warden-manager-mono vault-import-id"}>{s.lines.join("; ")}</span>}>
+                        <For each={s.lines}>
+                            {(line, i) => (
+                                <>
+                                    {i() > 0 ? "; " : ""}
+                                    <span class="warden-manager-mono vault-import-id">{line}</span>
+                                    <Show when={props.copyNote?.(line)}>
+                                        {(note) => (
+                                            <span class={note().warn ? "vault-machine-copy-check vault-expiry-warn" : "vault-machine-copy-check"} data-copy-check={line}>
+                                                {" "}
+                                                · {note().text}
+                                            </span>
+                                        )}
+                                    </Show>
+                                </>
+                            )}
+                        </For>
+                    </Show>
                 </div>
             )}
         </For>

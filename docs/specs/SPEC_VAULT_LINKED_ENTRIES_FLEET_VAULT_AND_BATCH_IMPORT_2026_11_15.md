@@ -214,7 +214,7 @@ Agent2, 2026-11-15, task #47648. Linked entries, as §2 says, with these choices
 - **Health** counts `linked`, `linked_changed_or_missing` and `linked_unchecked_for_30_days`, and no longer counts a link as unused. `verify` finds a link with a value wrong, and not one without. An expiry reminder follows a link's `expires` as any entry's. A check that says changed or missing has no reminder of its own yet.
 - **In the pane** a link has the badges "Linked" and "Readable outside the Vault", "no value kept" where the last characters go, "Kept at:" with the newest check, then who reads it, the date recorded and the other places. It has no Show or copy; "Copy the place" copies the location. The form shows no value input for one.
 - **`list` and `show`** give `link_only`, the place, `readers`, `rotated`, `copies` and the newest check; never the login.
-- **Not in this build:** a `.vault` export writes a link as an entry with its fields and no value, and an import skips one as an entry with no value (B5 changes the import and adds the links-only export; this line first said the export left links out, which was wrong); KeePass export and import do not carry `link`, `readers`, `rotated` or `copies`; linked entries do not default to a Vault named Fleet (B4).
+- **Not in this build:** a `.vault` export writes a link as an entry with its fields and no value, and an import skips one as an entry with no value (B5 changes the import and adds the links-only export; this line first said the export left links out, which was wrong); KeePass export and import do not carry `link`, `readers`, `rotated` or `copies` (they do since the follow-ups at the end); linked entries do not default to a Vault named Fleet (B4).
 
 ## As built (B4)
 
@@ -246,3 +246,15 @@ After the macOS and Linux look checks of B5 (task #47784), where a link was stil
 - **Deleting a link** says that the record of where the key lives is removed and the key itself is not touched.
 - **The export dialog's formats** start in one column, and in a narrow pane what a format is goes under its name.
 - **Dialogs and the pane's zoom.** A Vault dialog follows the app's chrome zoom, as every dialog does, and not the pane's own zoom. That is the app's rule for dialogs, not a Vault choice.
+
+## As built (follow-ups to B2 and B3)
+
+Agent2, 2026-11-16, task #47765. From the review and look checks of B2 and B3:
+
+- **A KeePass database carries a link.** A whole export to KeePass writes a linked entry as an entry with no secret field: its place, and "Read by", "Last changed" and "Also kept at" as unprotected custom fields, and a field "Linked entry kind" that says it is a link and of which kind. The import reads the same names, so the entry comes back a link of that kind, with what it says of the key. An entry that has since been given a password or a secret field in the other app is not a link any more and comes in as what it now is. An entry that holds a value keeps "Read by" and "Also kept at" across the round trip too. The "Linked entries only" choice is still for `.vault` files alone.
+- **A batch of links only says "recorded".** Such a batch reads and copies nothing, so its history line says where N keys live and how many were recorded, and its refusals say nothing was recorded. A batch with at least one value to copy reads as before.
+- **The history names an AWS place one way.** An import's line names its source as `aws-secret:<id>#<key>`, as a link's line and a check's line do.
+- **The machine copy line of an AWS place** says the region and the profile when the entry names them.
+- **Each other place says what its newest check found.** On the entry's "Also kept at" line every place is followed by its newest check as the entry is now, "not checked yet", or "can't be checked from here" for a place no check can describe (until now that was only in the answer the asking agent got). A place found changed or missing, or one that could not be read, is marked.
+- **A batch of both kinds says how many of each.** When a batch has rows that are read and rows that are links, the card says above the rows how many of the ticked ones are read and copied and how many are only recorded, and the line follows the ticks.
+- **The card for a change to what a link says shows one thing a line.** Who reads the key, when it last changed and where else it is kept each have a line, in what is recorded now and in what is asked for, so the date is not at the end of a long list of readers. In what is asked for, a line that differs is marked "changed", one that was not there "new", and a thing the change takes away is a line marked "removed".

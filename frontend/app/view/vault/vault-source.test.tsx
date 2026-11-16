@@ -76,7 +76,9 @@ describe("the link's fields and what a check found", () => {
     });
 
     it("names the place the way a person reads it", () => {
-        expect(machineCopy(AWS)).toBe("AWS secret staging/app, key db.password");
+        // An AWS place names its region and the profile it is read with: the same name elsewhere is another secret.
+        expect(machineCopy(AWS)).toBe("AWS secret staging/app, key db.password, region eu-west-1");
+        expect(machineCopy({ ...AWS, source_profile: "readonly" })).toBe("AWS secret staging/app, key db.password, region eu-west-1, profile readonly");
         expect(machineCopy({ source_kind: "aws-secret", source_location: "staging/app" })).toBe("AWS secret staging/app");
         expect(machineCopy({ source_kind: "github-secret", source_location: "example-org/example-app", source_key: "DEPLOY_TOKEN" })).toBe("GitHub secret DEPLOY_TOKEN of example-org/example-app");
         expect(machineCopy({ source_kind: "other", source_location: "the office safe" })).toBe("the office safe");

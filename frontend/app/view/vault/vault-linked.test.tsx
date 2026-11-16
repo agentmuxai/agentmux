@@ -162,6 +162,31 @@ describe("a linked entry in the list", () => {
         expect(other.textContent).not.toContain("holds no value");
     });
 
+    it("says what the newest check found of each other place, or that it can't be checked from here", async () => {
+        const [ci, replica, spare] = ["github-secret: example-org/example-app#EXAMPLE_TOKEN", "aws-secret: prod/invoice-sync-replica#api.token", "aws-secret: prod/invoice-sync-spare"];
+        entries = [
+            entry({
+                fields: { link: "only", ...PLACE, copies: [ci, replica, spare].join("\n") },
+                copies_checked: [
+                    { place: ci, cannot: "this kind of place can't be described from here: only an AWS secret is, today" },
+                    { place: replica, cannot: "", checked: { at: Date.now() - 2 * DAY, outcome: "changed since recorded: the place last changed on 2026-11-02, after the 2026-10-01 recorded" } },
+                    { place: spare, cannot: "" },
+                ],
+            }),
+        ];
+        await refreshVault();
+        render(() => <VaultEntries section="api-keys" />);
+        const said = row("api-key-invoice").querySelector('[data-said="copies"]')!;
+        const note = (place: string) => said.querySelector(`[data-copy-check="${place}"]`)!;
+        expect(note(ci).textContent?.trim()).toBe("· can't be checked from here");
+        expect(note(replica).textContent).toContain("the place last changed on 2026-11-02, after the 2026-10-01 recorded");
+        expect(note(spare).textContent?.trim()).toBe("· not checked yet");
+        // Only the place found changed is marked.
+        expect([ci, replica, spare].map((p) => note(p).classList.contains("vault-expiry-warn"))).toEqual([false, true, false]);
+        // The places themselves read as before, each followed by its note.
+        expect(said.textContent?.replace(/\s+/g, " ")).toContain(`Also kept at: ${ci} · can't be checked from here; ${replica} · `);
+    });
+
     it("leaves an entry that holds its value as it was", async () => {
         entries = [entry({ id: "api-key-staging", label: "Staging database", fields: { ...PLACE }, parts_set: ["value"], tail: "k4vz" })];
         await refreshVault();
@@ -224,6 +249,7 @@ describe("the questions that make or change a linked entry", () => {
         expect(card.querySelector('[data-batch="source"]')?.textContent).toBe("The keys are in AWS Secrets Manager in eu-west-1. Nothing is read. ");
         expect(card.querySelector('[data-batch="vault"]')?.textContent).toContain("becomes a linked entry in the Vault Fleet");
         expect([...card.querySelectorAll('[data-row="link"]')].map((r) => r.textContent?.trim())).toEqual(["link only (no value read)", "link only (no value read)"]);
+        expect(card.querySelector('[data-batch="mixed"]')).toBeNull();
         expect(card.textContent).toContain("nothing is recorded without a yes");
         expect(card.textContent).toContain("No value is read and none is kept.");
         expect(card.textContent).not.toContain("work-read");
@@ -238,16 +264,25 @@ describe("the questions that make or change a linked entry", () => {
         expect(card.textContent).toContain("Agent1 wants to copy 2 secrets from AWS Secrets Manager into your Vault: mixed");
         expect(card.querySelectorAll('[data-row="link"]').length).toBe(1);
         expect(card.querySelector('[data-row="copy"]')?.textContent?.trim()).toBe("new login entry");
+        // How many of the ticked rows are read, and how many only recorded; it follows the ticks.
+        const mixed = () => card.querySelector('[data-batch="mixed"]')?.textContent;
+        expect(mixed()).toBe("Ticked: 1 to read and copy, 1 to record only.");
+        fireEvent.click(within(card).getAllByRole("checkbox")[0]);
+        await waitFor(() => expect(mixed()).toBe("Ticked: 1 to read and copy, 0 to record only."));
     });
 
     it("shows what a link says now and what is asked for, when an agent changes who reads the key", async () => {
         const place = "the AWS secret prod/invoice-sync, key api.token, region eu-west-1";
-        const link = { from: place, to: place, about_from: "Read by: invoice-sync (lambda): at run time.", about_to: "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag.", only: true };
+        const [readers, more, date, copy] = ["Read by: invoice-sync (lambda): at run time.", "Read by: invoice-sync (lambda): at run time; release (workflow): on a tag.", "Last changed: 2026-10-01.", "Also kept at: aws-secret: prod/invoice-sync-replica."];
+        const link = { from: place, to: place, about_from: [readers, date, copy].join("\n"), about_to: [more, date, "Expires: 2027-01-01."].join("\n"), only: true };
         const card = await shown({ entry_id: "api-key-invoice", link });
         expect(card.textContent).toContain("Agent1 wants to change what the Vault says about the key Invoice provider key");
         expect(card.textContent).toContain("is a linked entry: it holds no value");
-        expect(card.querySelector('[data-link="about-from"]')?.textContent).toBe(link.about_from);
-        expect(card.querySelector('[data-link="about-to"]')?.textContent).toBe(link.about_to);
+        // One thing a line, the date on its own; what is recorded now carries no mark.
+        const lines = (name: string) => [...card.querySelectorAll(`[data-link="${name}"] .vault-link-said-line`)].map((l) => [l.getAttribute("data-said"), l.textContent?.trim()]);
+        expect(lines("about-from")).toEqual([["same", readers], ["same", date], ["same", copy]]);
+        // What is asked for says in a word which line differs, which is new and what is taken away.
+        expect(lines("about-to")).toEqual([["changed", `changed ${more}`], ["same", date], ["added", "new Expires: 2027-01-01."], ["removed", "removed Also kept at"]]);
         // The place stays as it is, so the card does not speak of changing it.
         expect(card.textContent).toContain("nothing is changed without a yes.");
         expect(card.textContent).toContain("This is what the Vault tells the next agent about the key.");
