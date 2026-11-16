@@ -38,14 +38,16 @@ export { switchIntentTabId };
 
 /** Publish `tabId` as the switch intent, starting or extending the switch
  *  chain from the committed tab. Returns a cancel for when the backend
- *  didn't move after all. */
-function showSwitchIntent(tabId: string): () => void {
+ *  didn't move after all. The write goes through `guardWrite`, so a caller that survives a throwing flush still
+ *  gets the cancel: the intent is already published then, and must be clearable. */
+function showSwitchIntent(tabId: string, guardWrite: (write: () => void) => void = (write) => write()): () => void {
     if (switchIntentTabId() == null) switchChain = new Set([activeTabId()]);
     switchChain.add(tabId);
-    setSwitchIntentTabId(tabId);
-    return () => {
+    const cancel = () => {
         if (switchIntentTabId() === tabId) setSwitchIntentTabId(null);
     };
+    guardWrite(() => setSwitchIntentTabId(tabId));
+    return cancel;
 }
 
 /**
@@ -369,10 +371,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // SMOOTHNESS_2026_09_24.md §6.4, measured on #3686).
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
-    let cancelIntent = () => {};
-    guardStep("the switch intent", guard, () => {
-        cancelIntent = showSwitchIntent(tabId);
-    });
+    const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
