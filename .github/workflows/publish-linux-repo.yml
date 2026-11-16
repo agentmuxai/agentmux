@@ -14,6 +14,11 @@ name: Publish Linux repository
 on:
   workflow_call:
     inputs:
+      suite-proof:
+        description: "Set only by release-core.yml: 'later' (the jobs that send anything out of the run need its suite) or the result of its suite job. Blank outside release-core.yml: check 6 of the release gate is then the commit's own push run."
+        required: false
+        type: string
+        default: ""
       version:
         description: 'The release to add, like 0.60.8 (no leading v; blank: the latest published release)'
         required: false
@@ -51,6 +56,7 @@ jobs:
         shell: bash
         env:
           REPO: ${{ github.repository }}
+          SUITE_PROOF: ${{ inputs.suite-proof }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
           RUN_REF: ${{ github.ref }}
@@ -67,7 +73,7 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             gate="$RUNNER_TEMP/release-gate.mjs"
             gh api -H "Accept: application/vnd.github.raw+json" "repos/${REPO}/contents/scripts/release-gate.mjs?ref=main" > "$gate"
-            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO"
+            node "$gate" --ref-type "$REF_TYPE" --ref-name "$REF_NAME" --sha "$RUN_SHA" --repo "$REPO" --suite-proof "$SUITE_PROOF"
             if [ "$HEAD_SHA" != "$RUN_SHA" ]; then
               echo "::error::the checkout ($HEAD_SHA) is not the tagged commit ($RUN_SHA)"; exit 1
             fi
