@@ -45,6 +45,7 @@ describe("scopeVars", () => {
         expect(vars["--secondary-text-color"]).toBe("var(--ink-muted)");
         expect(vars["--tertiary-text-color"]).toBe("var(--ink-faint)");
         expect(vars["--border-color"]).toBe("var(--ink-border)");
+        expect(vars["--menu-edge-color"]).toBe("var(--ink-border)");
         expect(vars["--accent-color"]).toBe("var(--ink-accent)");
         expect(vars["--accent-fg-color"]).toBe("var(--ink-accent)");
         expect(vars["--link-color"]).toBe("var(--ink-accent)");
@@ -56,6 +57,7 @@ describe("scopeVars", () => {
 
     it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {
         expect(vars["--modal-bg-color"]).toBe("var(--surface-overlay)");
+        expect(vars["--menu-bg-color"]).toBe("var(--surface-overlay)");
         expect(vars["--block-bg-solid-color"]).toBe("var(--surface)");
         expect(vars["--panel-bg-color"]).toBe("color-mix(in srgb, var(--surface-raised) 50%, transparent)");
         expect(vars["--tab-strip-bg"]).toBe("color-mix(in srgb, var(--ink-text) 3%, transparent)");
@@ -76,6 +78,7 @@ describe("scopeVars", () => {
             "--block-bg-color",
             "--elevated-bg-color",
             "--modal-bg-color",
+            "--menu-bg-color",
             "--panel-bg-color",
             "--block-bg-solid-color",
             "--tab-strip-bg",
