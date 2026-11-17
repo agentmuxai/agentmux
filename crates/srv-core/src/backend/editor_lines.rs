@@ -168,16 +168,22 @@ fn skip_lines<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: 
 }
 
 /// Where each of the `n` lines that begin at `from` starts (the first is `from`), and the offset just after the last
-/// of them (the size, when the file has fewer). One pass over the run, so a line of gigabytes is read once.
-fn starts_in<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: Unit, block: usize) -> std::io::Result<(Vec<u64>, u64)> {
+/// of them (the size, when the file has fewer). One pass over the run, so a line of gigabytes is read once. When the
+/// run reaches the end of the file (`to_eof`) the last line is not read at all: its end is the size.
+fn starts_in<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, to_eof: bool, unit: Unit, block: usize) -> std::io::Result<(Vec<u64>, u64)> {
     let mut starts = Vec::new();
     if n == 0 || from >= size {
         return Ok((starts, from.min(size)));
     }
     starts.push(from);
+    // The breaks to find: one after each line, except the last when it is known to end where the file does.
+    let need = if to_eof { n - 1 } else { n };
+    if need == 0 {
+        return Ok((starts, size));
+    }
     let block = block_size(unit, block);
     let mut buf = vec![0u8; block];
-    let (mut at, mut left) = (from, n);
+    let (mut at, mut left) = (from, need);
     file.seek(SeekFrom::Start(from))?;
     while at < size {
         let want = (size - at).min(block as u64) as usize;
@@ -187,15 +193,17 @@ fn starts_in<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: U
             if found.is_some() {
                 return;
             }
+            // A break starts the next line, unless the file ends there or the run is complete.
+            if (starts.len() as u64) < n && end < size {
+                starts.push(end);
+            }
             left -= 1;
             if left == 0 {
                 found = Some(end);
-            } else if end < size {
-                starts.push(end);
             }
         });
         if let Some(end) = found {
-            return Ok((starts, end.min(size)));
+            return Ok((starts, if to_eof { size } else { end.min(size) }));
         }
         at += want as u64;
     }
@@ -260,9 +268,10 @@ fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64, with_starts: bo
     let mut file = std::fs::File::open(path)?;
     let start = line_start(&mut file, &idx, from_line, unit, BLOCK)?;
     let wanted = count.min(idx.total_lines.saturating_sub(from_line));
+    let to_eof = from_line.saturating_add(count) >= idx.total_lines;
     let (starts, end) = if with_starts {
-        starts_in(&mut file, start, wanted, idx.size, unit, BLOCK)?
-    } else if from_line.saturating_add(count) >= idx.total_lines {
+        starts_in(&mut file, start, wanted, idx.size, to_eof, unit, BLOCK)?
+    } else if to_eof {
         (Vec::new(), idx.size)
     } else {
         (Vec::new(), skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)?)
@@ -460,13 +469,35 @@ mod tests {
     fn starts_in_a_run_of_utf16_and_a_file_that_ends_in_a_break() {
         let utf16 = |t: &str| t.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>();
         let data = utf16("ab\ncd\nef\n");
-        let (got, end) = starts_in(&mut Cursor::new(data.clone()), 0, 3, data.len() as u64, Unit::Utf16Le, 4).unwrap();
+        let (got, end) = starts_in(&mut Cursor::new(data.clone()), 0, 3, data.len() as u64, true, Unit::Utf16Le, 4).unwrap();
         assert_eq!((got, end), (vec![0, 6, 12], data.len() as u64));
         let text = b"a\nb\n";
-        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 2, 4, Unit::Byte, 3).unwrap();
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 2, 4, true, Unit::Byte, 3).unwrap();
         assert_eq!((got, end), (vec![0, 2], 4));
         // More lines asked for than there are: what there is.
-        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 9, 4, Unit::Byte, 3).unwrap();
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 9, 4, true, Unit::Byte, 3).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
+    }
+
+    /// A run that reaches the end of the file doesn't read its last line: a file of one gigantic line is not scanned
+    /// again for its starts, and the last page of any file doesn't read through a gigantic last line.
+    #[test]
+    fn a_run_to_the_end_of_the_file_does_not_read_its_last_line() {
+        let mut data = b"a
+b
+".to_vec();
+        data.extend(std::iter::repeat(b'x').take(1000));
+        let size = data.len() as u64;
+        let mut file = Cursor::new(data.clone());
+        let (got, end) = starts_in(&mut file, 0, 3, size, true, Unit::Byte, 4).unwrap();
+        assert_eq!((got, end), (vec![0, 2, 4], size));
+        assert!(file.position() <= 8, "read to {}", file.position());
+        // One line only: nothing is read.
+        let mut file = Cursor::new(data.clone());
+        let (got, end) = starts_in(&mut file, 4, 1, size, true, Unit::Byte, 4).unwrap();
+        assert_eq!((got, end, file.position()), (vec![4], size, 0));
+        // Not to the end: the run's own end is found, and the answer is the same as before.
+        let (got, end) = starts_in(&mut Cursor::new(data), 0, 2, size, false, Unit::Byte, 4).unwrap();
         assert_eq!((got, end), (vec![0, 2], 4));
     }
 
