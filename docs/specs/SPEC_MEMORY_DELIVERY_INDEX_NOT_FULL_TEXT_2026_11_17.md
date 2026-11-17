@@ -140,7 +140,7 @@ An index helps only if the agent opens a file when it matters. Three measures:
 
 **Wording.** The index opens with a sentence that makes opening the default, not an option: "Read a file before you act on what its line describes; the line is all you have until you do." Each line is the file's description, which the memory-writing guidance asks to say when the file applies. ALWAYS (3.3) is the safety net for rules that must hold every time, so the index never has to be the only carrier of a rule that cannot be missed.
 
-**A calibrated check (a lab: not run until the operator says yes through AgentY).**
+**A calibrated check (a lab; its result is below).**
 
 - Question: when the memory is an index, does an agent open and use the file it needs, as often as when it is given the text?
 - Fixture: a throwaway agent on my own task dev, with made-up memory: 12 files, of which 3 each hold one fact that is needed for a task (for example a made-up name for a made-up build slot) and 9 are unrelated. No real memory text.
@@ -151,7 +151,23 @@ An index helps only if the agent opens a file when it matters. Three measures:
   - **Floor:** nothing delivered (shows the agent cannot guess the fact).
 - Measure per run: whether the right file was opened before the answer, whether the answer is right, tokens of the delivery.
 - Pass: treatment correct at least 90% and within 10 points of control; sensitivity at least 30 points below treatment; floor near 0.
-- Cost: 40 runs of a short task, about an hour on a development machine, no real mouse or screen use, no network. I will ask AgentY for the operator's yes before running it, as the rules require; the build does not wait for it, because the delivery path is covered by tests and the operator checks a real compaction before anyone calls it fixed.
+- Cost: short headless runs on a development machine, no real mouse or screen use. The build did not wait for it: the delivery path is covered by tests, and the operator checks a real compaction before anyone calls it fixed.
+
+**Result (run 2026-11-17).** The arm texts were composed with the real `compose_items_tail` and `index::render`; each run was a headless `claude -p` session (one model, the `Memory` tool and `Read` available, the text delivered through a `SessionStart` hook as the real path does). 12 runs per arm (4 per task, 3 tasks), in random order:
+
+| Arm | Correct | Opened the right file | Delivery |
+|---|---|---|---|
+| Control (full text of 12 files) | 12/12 | not applicable | 5,607 characters, about 1,970 tokens |
+| Treatment (index) | 12/12 | 12/12 | 1,753 characters, about 600 tokens |
+| Sensitivity (3 relevant files vague in name and description) | 0/12 | 0/12 | 1,472 characters |
+| Floor (nothing delivered) | 0/12 | not applicable | 0 |
+
+All four pass criteria hold. Two things the lab taught about the instrument, both from pilots that are not in the table:
+
+- **The `Memory` tool is itself a way to find memory.** Where a task plainly lacks a fact (which slot, whom to page), an agent with no delivery at all looked through its memory unprompted and answered right (floor 4 of 6). So the tasks are rules the agent has no reason to know it needs (a commit trailer, a branch prefix, an incident tag), each with a plausible wrong default; that is where an index earns its place, and why a description must say when the file applies.
+- **A file name is part of the line.** With vague descriptions and descriptive names the agent still opened the right file, so the sensitivity arm hides both.
+
+Limits: one model, 12 files, three tasks. It says nothing about an index of 200 files or a weaker model.
 
 **Operator check.** The operator watches one real compaction in the release that carries this, as AgentY asked.
 
