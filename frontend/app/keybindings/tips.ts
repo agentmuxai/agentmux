@@ -78,7 +78,7 @@ export const TIPS: TipRow[] = [
         area: "Panes",
         gesture: "mod+wheel",
         where: "over a pane",
-        label: "Zoom that pane; over the title bar, status bar or a pane's header, zoom the app's frame instead",
+        label: "Zoom that pane (in the Editor, the part under the pointer); over the title bar, status bar or a pane's header, zoom the app's frame instead",
         source: { file: "frontend/app/store/chrome-zoom-target.ts", anchor: "export function isOverChrome(target: HTMLElement): boolean" },
     },
     {
@@ -269,6 +269,14 @@ export const TIPS: TipRow[] = [
         where: "in the editor's file tree",
         label: "Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it",
         source: { file: "frontend/app/view/editor/file-tree-state.ts", anchor: "const move = treeMove(list, current, e.key, pageSize());" },
+    },
+    {
+        id: "editor:tree:zoom",
+        area: "Editor",
+        gesture: "mod+wheel",
+        where: "over the editor's file tree",
+        label: "Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or the pointer",
+        source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: 'class="editor-tree-zoom"' },
     },
 
     // Library defaults (CodeMirror basicSetup), checked by hand on macOS,

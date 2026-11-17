@@ -24,6 +24,8 @@ import { MENU_ICON } from "@/app/util/menu-icons";
 import { editorDocTabs } from "./editor-doc-tabs";
 import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
+import { MAIN_PART, zoomPartAttrs } from "@/app/store/zoom-parts";
+import { TREE_PART } from "./editor-zoom-parts";
 import "./editor-view.scss";
 import { keyLabel } from "@/app/keybindings";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
@@ -105,7 +107,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     const names = createNameBoxes(model, () => focusEditorBody(model, cm, root, shows));
     const focus = useFocusRegion(root);
     const runEditorCommand = useEditorCommands({ model, cm, root, docTabs, ...shows, focusRegion: focus.focusRegion, triggerSaveAs: names.triggerSaveAs, startRename: () => names.startRename() });
-    const { contentZoomed, rootZoom } = useEditorZoom(model, cm, root);
+    const { contentZoomed, mainZoom, treeZoom } = useEditorZoom(model, cm, root);
     useEditorKeys(root, docTabs, runEditorCommand);
 
     const session = new CodeMirrorSession({ model, cm, root, container: containerRef, setLiveDoc, runEditorCommand });
@@ -130,8 +132,6 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             ref={(el) => { rootRef = el; }}
             class="editor-view"
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
-            data-zoom-scope={contentZoomed() ? "chrome" : undefined}
-            style={{ zoom: rootZoom() }}
             onFocusIn={focus.trackFocusRegion}
             onFocusOut={focus.leaveFocusRegion}
         >
@@ -149,7 +149,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     model={model}
                     tree={tree}
                     focusRegion={focus.focusRegion}
-                    onResize={treeResizeHandler(model, rootZoom)}
+                    treeZoom={treeZoom}
+                    onResize={treeResizeHandler(model, treeZoom)}
                     onFocusEditor={() => focusEditorBody(model, cm, root, shows)}
                 />
             </Show>
@@ -159,13 +160,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 names={names}
                 shows={shows}
                 focusRegion={focus.focusRegion}
+                mainZoom={mainZoom}
+                contentZoomed={contentZoomed}
                 lspState={session.lsp.lspState}
                 banner={banner}
                 liveDoc={liveDoc}
                 setContainerRef={setContainerRef}
                 emptyShortcuts={emptyShortcuts}
                 showTreeButton={showTreeButton}
-                onPreviewResize={previewResizeHandler(model, rootZoom)}
+                onPreviewResize={previewResizeHandler(model, mainZoom)}
             />
             <EditorDialogs tree={tree} />
         </div>
@@ -177,6 +180,7 @@ function EditorTreeColumn(props: {
     model: EditorViewModel;
     tree: TreeMenu;
     focusRegion: Accessor<"tree" | "body" | null>;
+    treeZoom: Accessor<number>;
     onResize: (e: MouseEvent) => void;
     onFocusEditor: () => void;
 }): JSX.Element {
@@ -186,11 +190,14 @@ function EditorTreeColumn(props: {
             <div
                 class="editor-tree-column editor-region"
                 classList={{ "editor-region--focused": props.focusRegion() === "tree" }}
+                // The stored width is the tree's at 100%: it is drawn that much wider at a higher level.
                 style={{
-                    width: `${model.treeWidthAtom()}px`,
-                    flex: `0 1 ${model.treeWidthAtom()}px`,
+                    width: `${model.treeWidthAtom() * props.treeZoom()}px`,
+                    flex: `0 1 ${model.treeWidthAtom() * props.treeZoom()}px`,
                 }}
             >
+                {/* The tree's part of the pane: its own zoom (`editor:tree_zoom`), never the chrome's. */}
+                <div class="editor-tree-zoom" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom() }}>
                 <FileTree
                     model={model.treeModel}
                     activeFilePath={model.filePathAtom()}
@@ -209,6 +216,7 @@ function EditorTreeColumn(props: {
                     onStartRename={(path) => tree.setRenamingPath(path)}
                     onFocusEditor={props.onFocusEditor}
                 />
+                </div>
             </div>
             <div
                 class="editor-tree-resize-handle"
@@ -226,6 +234,8 @@ function EditorMainColumn(props: {
     names: NameBoxes;
     shows: EditorShows;
     focusRegion: Accessor<"tree" | "body" | null>;
+    mainZoom: Accessor<number>;
+    contentZoomed: Accessor<boolean>;
     lspState: Accessor<LspState | null>;
     banner: ReturnType<typeof useLspBanner>;
     liveDoc: Accessor<string>;
@@ -252,6 +262,14 @@ function EditorMainColumn(props: {
                     "editor-region--focused": model.treeExpandedAtom() && props.focusRegion() === "body",
                 }}
             >
+                {/* The document's part of the pane: the pane's own zoom (`term:zoom`). A PDF's tab strip and
+                    viewer bar follow chrome zoom, as before (`data-zoom-scope`). */}
+                <div
+                    class="editor-main-zoom"
+                    {...zoomPartAttrs(MAIN_PART)}
+                    data-zoom-scope={props.contentZoomed() ? "chrome" : undefined}
+                    style={{ zoom: props.mainZoom() }}
+                >
                 <EditorTabBar model={model} docTabs={docTabs} names={props.names} showTreeButton={props.showTreeButton} />
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
@@ -295,6 +313,7 @@ function EditorMainColumn(props: {
                 <Show when={showsText() && lspState() && lspState()?.kind !== "disposed"}>
                     <EditorLspStatusChip kind={statusChipKind()} text={statusChipText()} />
                 </Show>
+                </div>
             </div>
         </>
     );

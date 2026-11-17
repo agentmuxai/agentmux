@@ -11,7 +11,7 @@
  */
 
 import { createSignal } from "solid-js";
-import { readZoom } from "./zoom-factor";
+import { PANE_ZOOM_KEY, readZoom } from "./zoom-factor";
 
 /** How long after a write settles the level is still held, for its update to reach the cache. */
 export const LOCAL_ZOOM_HOLD_MS = 1500;
@@ -28,10 +28,11 @@ export function heldPaneZoom(blockId: string): number | undefined {
 
 /**
  * A pane's zoom: the level just written while it is held, else what its meta says. Reactive in
- * both, so a pane's memo follows the zoom as it is asked for and the stored value after.
+ * both, so a pane's memo follows the zoom as it is asked for and the stored value after. `subject`
+ * is the block id, or a part's (`subjectId`, zoom-parts.ts) with that part's meta `key`.
  */
-export function paneZoom(blockId: string, meta: { "term:zoom"?: unknown } | null | undefined): number {
-    return heldPaneZoom(blockId) ?? readZoom(meta, blockId);
+export function paneZoom(subject: string, meta: object | null | undefined, key: string = PANE_ZOOM_KEY): number {
+    return heldPaneZoom(subject) ?? readZoom(meta, subject, key);
 }
 
 /** A write of `level` is on its way. Returns the write's number, for `settlePaneZoom`. */
