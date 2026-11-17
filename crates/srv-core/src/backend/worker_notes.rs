@@ -374,14 +374,20 @@ fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str) -> LastWord
     let Some(activity) = read_recent_activity(filestore, mstore, block_id) else {
         return LastWords::default();
     };
-    let text = activity
-        .text
+    LastWords { text: ended_turn_text(&activity.text), asked: matches!(activity.ending, TurnEnding::AssistantAsked | TurnEnding::AskedUser) }
+}
+
+/// The newest assistant message of the turn that ended: the one after the last `[user]` entry of the digest. A
+/// turn that was only tool calls has none, and quoting an older turn's message would repeat the same words, as if
+/// they were new, in every note that follows.
+fn ended_turn_text(digest: &str) -> String {
+    digest
         .lines()
         .rev()
+        .take_while(|l| !l.starts_with("[user] "))
         .find_map(|l| l.strip_prefix("[assistant] "))
         .map(|t| clip(t, LAST_WORDS_CHARS))
-        .unwrap_or_default();
-    LastWords { text, asked: matches!(activity.ending, TurnEnding::AssistantAsked | TurnEnding::AskedUser) }
+        .unwrap_or_default()
 }
 
 fn turn_end_body(name: &str, words: LastWords) -> String {

@@ -110,6 +110,20 @@ fn lines_of(data: &[u8], from: u64, mid_line: bool, from_end: bool, max: usize) 
     Lines { lines: kept.into_iter().map(|(_, t)| t).collect(), next: from + next_at as u64, more: more_than_max }
 }
 
+/// Whether the agent's zone is still the copy being written: false when the block's own copy is clearly newer
+/// (the zone stopped receiving lines), so a watch reads what the agent is writing now and agrees with
+/// `Agents transcript` (`TranscriptSource::resolve`, the same rule), not hours-old lines from the zone.
+fn zone_is_live(
+    gfs: &crate::backend::storage::filestore::FileStore,
+    zone: &str,
+    own_fs: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+    slack_ms: i64,
+) -> bool {
+    let stat = |fs: &crate::backend::storage::filestore::FileStore, zone: &str| fs.stat(zone, OUTPUT_FILE).ok().flatten().map(|f| (f.size, f.modts));
+    !crate::backend::transcript::source::own_is_newer(stat(own_fs, block_id), stat(gfs, zone), slack_ms)
+}
+
 /// The transcript, whole in memory (an archived session) or read in spans from the file store the pane
 /// reads: the agent's own zone in the global transcript store when it has content, else the block's.
 struct Source {
@@ -133,6 +147,7 @@ impl Source {
             return Ok(Some(Source { fs: state.filestore.clone(), zone: block_id.to_string(), size: bytes.len() as i64, whole: Some(bytes) }));
         }
         let (fs, zone) = super::global_output_source(&state.filestore, &state.global_transcript_store, &state.mstore, block_id, OUTPUT_FILE)
+            .filter(|(gfs, zone)| zone_is_live(gfs, zone, &state.filestore, block_id, crate::backend::transcript::source::OWN_NEWER_SLACK_MS))
             .unwrap_or_else(|| (state.filestore.clone(), block_id.to_string()));
         let stat = fs.stat(&zone, OUTPUT_FILE).map_err(|e| format!("filestore stat: {e}"))?;
         Ok(stat.map(|f| Source { fs, zone, whole: None, size: f.size }))
