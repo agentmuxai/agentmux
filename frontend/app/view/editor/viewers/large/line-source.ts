@@ -39,11 +39,20 @@ export interface LineText {
     hidden?: string;
 }
 
-/** The label a TextDecoder knows for the probe's encoding. */
+/** The label a TextDecoder knows for an encoding: srv's name for it once it has said (WHATWG names, "windows-1251",
+ *  "Shift_JIS"), else the probe's ("legacy" is not UTF-8 and nothing more: Windows-1252 until srv says). */
 export function decoderLabel(encoding: string | undefined): string {
-    if (encoding === "utf-16le" || encoding === "utf-16be") return encoding;
-    // Not UTF-8: the read path's detector decides; the common case is a Windows code page.
-    return encoding === "legacy" ? "windows-1252" : "utf-8";
+    if (!encoding) return "utf-8";
+    return encoding === "legacy" ? "windows-1252" : encoding;
+}
+
+/** A decoder for an encoding, UTF-8 when the browser doesn't know its name. */
+function decoderOf(encoding: string | undefined): TextDecoder {
+    try {
+        return new TextDecoder(decoderLabel(encoding));
+    } catch {
+        return new TextDecoder("utf-8");
+    }
 }
 
 /** `text` cut to what is shown. */
@@ -54,7 +63,7 @@ function cut(text: string): LineText {
 
 /** The lines in `bytes`, which run from a line's start to just after a line break (or the file's end). */
 export function linesOfBytes(bytes: Uint8Array, encoding: string | undefined): LineText[] {
-    const text = new TextDecoder(decoderLabel(encoding)).decode(bytes);
+    const text = decoderOf(encoding).decode(bytes);
     const lines = text.split("\n");
     // The break after the last line leaves nothing after it.
     if (lines[lines.length - 1] === "") lines.pop();
@@ -72,7 +81,7 @@ export class LineSource {
     constructor(
         private readonly index: IndexLines,
         private readonly read: ReadRange,
-        private readonly encoding: string | undefined,
+        private encoding: string | undefined,
         private readonly keep = PAGES_KEPT
     ) {}
 
@@ -129,6 +138,8 @@ export class LineSource {
         if (this.stamp && this.stamp !== stamp) this.pages.clear();
         this.stamp = stamp;
         this.total = r.total_lines;
+        // What srv found in the file's own bytes beats the probe's "legacy".
+        if (r.encoding) this.encoding = r.encoding;
     }
 
     private async fetchPage(page: number): Promise<LineText[]> {
@@ -149,7 +160,7 @@ export class LineSource {
         if (length <= 0) return { text: "" };
         const got = Math.min(length, LINE_READ_BYTES);
         const bytes = await this.read(r.start, r.start + got - 1);
-        const text = new TextDecoder(decoderLabel(this.encoding)).decode(bytes).replace(/\r?\n$/, "");
+        const text = decoderOf(this.encoding).decode(bytes).replace(/\r?\n$/, "");
         // What isn't read is known in bytes only; what was read and not shown, in characters (about as many bytes).
         const hidden = length - got + Math.max(0, text.length - LINE_SHOWN_MAX);
         return hidden > 0 ? { text: text.slice(0, LINE_SHOWN_MAX), hidden: `+${formatBytes(hidden)}` } : { text };

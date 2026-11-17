@@ -33,7 +33,7 @@ function serve(text: string) {
     for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10 && i + 1 < bytes.length) starts.push(i + 1);
     indexLines.mockImplementation(async (_c: unknown, req: { from_line: number; count: number }) => {
         const at = (n: number) => (n >= starts.length ? bytes.length : starts[n]);
-        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(req.from_line), end: at(req.from_line + req.count) };
+        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(req.from_line), end: at(req.from_line + req.count), encoding: "utf-8" };
     });
     fetchMediaRange.mockImplementation(async (_path: string, start: number, end: number) => ({
         blob: { arrayBuffer: async () => bytes.slice(start, end + 1).buffer } as unknown as Blob,
@@ -136,7 +136,7 @@ describe("the Large text viewer", () => {
     });
 
     it("moves a file of more than 400,000 lines by the distance the wheel moved, small events and all", async () => {
-        indexLines.mockImplementation(async () => ({ total_lines: 500_000, size: 10_000_000, mtime: 1, start: 0, end: 0 }));
+        indexLines.mockImplementation(async () => ({ total_lines: 500_000, size: 10_000_000, mtime: 1, start: 0, end: 0, encoding: "utf-8" }));
         await mount();
         // A trackpad: sixty events of a quarter line each are fifteen lines, not sixty.
         for (let i = 0; i < 60; i++) fireEvent.wheel(grid(), { deltaY: ROW_H / 4, deltaMode: 0 });

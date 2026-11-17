@@ -321,4 +321,7 @@ pub struct FileIndexLinesResult {
     pub start: u64,
     #[ts(type = "number")]
     pub end: u64,
+    /// The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found from the start of the
+    /// file: the probe says only "legacy" for a file that isn't UTF-8.
+    pub encoding: String,
 }
