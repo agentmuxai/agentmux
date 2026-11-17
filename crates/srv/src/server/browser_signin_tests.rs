@@ -468,7 +468,7 @@ async fn a7_removing_a_share_stops_a_card_waiting_on_it() {
         for _ in 0..200 {
             if uses::uses().list().iter().any(|u| u.agent == agent) {
                 crate::backend::vault::shares::remove(&state.identity_store, &id, &who).unwrap();
-                share_removed(&state, &id);
+                share_removed(&state, &id, &who);
                 return;
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -479,6 +479,31 @@ async fn a7_removing_a_share_stops_a_card_waiting_on_it() {
     remove.await.unwrap();
     assert_eq!(status, StatusCode::FORBIDDEN, "the card was answered No: {body}");
     assert!(typed(&s).is_none(), "nothing typed for a share that was removed");
+}
+
+#[tokio::test]
+async fn a7_removing_one_agents_share_leaves_an_ordinary_card_on_the_entry_waiting() {
+    let (owner, other) = (format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple()), format!("uid-share-other-{}", uuid::Uuid::new_v4().simple()));
+    let s = setup_as(Some(&own_profile(&owner)), Some(&owner)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, &other);
+    // A card from an ordinary sign-in on the same entry, from an agent it was never shared with.
+    let id = uuid::Uuid::new_v4().to_string();
+    let card = UseRequest { id: id.clone(), agent: format!("ordinary-{}", uuid::Uuid::new_v4().simple()), entry_id: entry.clone(), signin: true, shared: false, ..Default::default() };
+    let state = s.state.clone();
+    let asked = tokio::spawn(async move { crate::server::vault_ask::ask(&state, "", card, Duration::from_secs(30), "an ordinary sign-in").await.0 });
+    for _ in 0..200 {
+        if uses::uses().list().iter().any(|u| u.id == id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    // Another agent's share is removed: the ordinary card is neither answered nor recorded as denied.
+    crate::backend::vault::shares::remove(&s.state.identity_store, &entry, &other).unwrap();
+    share_removed(&s.state, &entry, &other);
+    assert!(uses::uses().list().iter().any(|u| u.id == id), "the ordinary card is still waiting");
+    uses::uses().answer(&id, UseAnswer::of(Decision::Once));
+    assert_eq!(asked.await.unwrap(), Ended::Once, "it ended by the person's own answer");
 }
 
 #[tokio::test]

@@ -292,6 +292,7 @@ fn use_request(agent: &str, agent_pane: String, c: &Chosen, incognito: bool, age
         },
         kind: "login".to_string(),
         signin: true,
+        shared: c.shared,
         requested_ms: agentmux_common::time::now_ms_u64(),
         ..Default::default()
     }
@@ -380,15 +381,17 @@ pub(crate) async fn handle_signin(
     }
 }
 
-/// The person removed the share of login `id`: a card still waiting on a sign-in with it, from an agent it no longer names,
-/// is answered No, so it does not stay up for a sign-in that cannot go ahead (A7). One answered or timing out later types
-/// nothing either: it was bound to the entry as it was shown.
-pub(crate) fn share_removed(state: &AppState, id: &str) {
+/// The person removed the share of login `id` with `who` (an agent's uid, or `*`): a card still waiting on a sign-in asked
+/// through that share, from an agent the entry no longer names, is answered No, so it does not stay up for a sign-in that
+/// cannot go ahead (A7). Any other card on the entry (an ordinary sign-in, another agent's share) is left for the person.
+/// A card answered or timing out later types nothing either if the entry changed: it was bound to the entry as shown.
+pub(crate) fn share_removed(state: &AppState, id: &str, who: &str) {
     let Ok(Some(row)) = state.identity_store.vault_get(id) else { return };
     let fields = signins::fields_of(&row);
-    for u in uses::uses().list().into_iter().filter(|u| u.signin && u.entry_id == id) {
+    for u in uses::uses().list().into_iter().filter(|u| u.signin && u.shared && u.entry_id == id) {
         let uid = state.reactive_handler.get_agent(&u.agent).and_then(|a| a.uid).unwrap_or_default();
-        if !crate::backend::vault::shares::names(&fields, &uid) {
+        let removed = who == crate::backend::vault::shares::EVERY_AGENT || uid == who;
+        if removed && !crate::backend::vault::shares::names(&fields, &uid) {
             uses::uses().answer(&u.id, uses::UseAnswer::of(uses::Decision::Deny));
         }
     }
