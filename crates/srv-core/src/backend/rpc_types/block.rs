@@ -866,11 +866,22 @@ pub struct CommandPaneOpenData {
     #[ts(optional)]
     pub follow_folder: Option<bool>,
     /// `view: "editor"` only: the viewer to open `file` in, instead of the
-    /// one the editor picks from the file's content. Only `"text"` for now,
-    /// sent by `muxsh edit` (any file as text); any other value is an error.
+    /// one the editor picks from the file's content: `text`, `image`,
+    /// `media`, `pdf`, `hex` or `info`; any other value is an error. `muxsh
+    /// edit` sends `text` (any file as text).
     /// SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
     #[ts(optional)]
     pub viewer: Option<String>,
+    /// `editor` only: the byte offset the hex viewer opens at (its cursor is
+    /// put there and scrolled into view). Ignored by any other viewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub offset: Option<u64>,
+    /// `editor` only: the 1-based page the PDF viewer opens at. Ignored by
+    /// any other viewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page: Option<u32>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the pane has listed it, written to `block.meta["files:select"]`
     /// (a one-shot request the view clears). Set by the `OpenFiles` MCP tool.
@@ -1209,6 +1220,8 @@ mod app_api_manifest_contract_tests {
             target_block_id: None,
             follow_folder: None,
             viewer: None,
+            offset: None,
+            page: None,
             select: None,
             line: None,
             new: None,

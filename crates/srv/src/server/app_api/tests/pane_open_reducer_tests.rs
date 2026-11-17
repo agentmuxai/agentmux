@@ -69,6 +69,8 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         target_block_id: None,
         follow_folder: None,
         viewer: None,
+        offset: None,
+        page: None,
         select: None,
         line: None,
         new: None,
@@ -173,6 +175,8 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         target_block_id: None,
         follow_folder: None,
         viewer: None,
+        offset: None,
+        page: None,
         select: None,
         line: None,
         new: None,
@@ -552,6 +556,8 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         target_block_id: None,
         follow_folder: None,
         viewer: None,
+        offset: None,
+        page: None,
         select: None,
         line: None,
         new: None,
@@ -598,6 +604,8 @@ fn editor_open_cmd(
         target_block_id: None,
         follow_folder: None,
         viewer: None,
+        offset: None,
+        page: None,
         select: None,
         line: None,
         new: None,
@@ -1154,8 +1162,20 @@ async fn open_editor_reuse_queues_the_viewer_with_the_file() {
     ] {
         assert_eq!(open_pane(&state, cmd).await.expect("open_pane reuse").block_id, editor.block_id);
     }
-    let err = open_pane(&state, reuse("/tmp/photo.png", None, Some("hex"))).await.unwrap_err();
+    let err = open_pane(&state, reuse("/tmp/photo.png", None, Some("hexdump"))).await.unwrap_err();
     assert!(err.starts_with("INVALID_ARG"), "{err}");
+
+    // A position rides with the file: a hex offset, a PDF page, a text line (0 counts as absent).
+    for (file, viewer, line, offset, page) in [
+        ("/tmp/blob.bin", Some("hex"), None, Some(4096), None),
+        ("/tmp/paper.pdf", Some("pdf"), None, None, Some(7)),
+        ("/tmp/code.rs", None, Some(42), None, None),
+        ("/tmp/zero.rs", None, Some(0), None, Some(0)),
+    ] {
+        let mut cmd = reuse(file, None, viewer);
+        (cmd.line, cmd.offset, cmd.page) = (line, offset, page);
+        assert_eq!(open_pane(&state, cmd).await.expect("open_pane reuse").block_id, editor.block_id);
+    }
 
     let block: Block = state.mstore.must_get(&editor.block_id).unwrap();
     assert_eq!(
@@ -1164,6 +1184,10 @@ async fn open_editor_reuse_queues_the_viewer_with_the_file() {
             { "path": "/tmp/photo.png", "viewer": "text" },
             "/tmp/plain.md",
             { "path": "/tmp/render.png", "follow_folder": true },
+            { "path": "/tmp/blob.bin", "viewer": "hex", "offset": 4096 },
+            { "path": "/tmp/paper.pdf", "viewer": "pdf", "page": 7 },
+            { "path": "/tmp/code.rs", "line": 42 },
+            "/tmp/zero.rs",
         ])
     );
 }
@@ -1335,16 +1359,18 @@ fn editor_meta_carries_the_line_to_open_at() {
 }
 
 /// `viewer` on an editor open (`muxsh edit`) becomes `editor:viewer`, which
-/// the editor's initial open uses; only "text" is a viewer it takes.
+/// the editor's initial open uses; only the editor's own viewers are taken.
 #[test]
 fn editor_meta_carries_the_viewer_to_open_in() {
     let mut cmd = editor_open_cmd(None, "/tmp/photo.png", None, None);
     assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:viewer"));
     cmd.viewer = Some("text".into());
     assert_eq!(pane::build_pane_meta(&cmd).unwrap()["editor:viewer"], "text");
-    cmd.viewer = Some("image".into());
+    cmd.viewer = Some("hex".into());
+    assert_eq!(pane::build_pane_meta(&cmd).unwrap()["editor:viewer"], "hex");
+    cmd.viewer = Some("hexdump".into());
     let err = pane::build_pane_meta(&cmd).unwrap_err();
-    assert!(err.starts_with("INVALID_ARG") && err.contains("text"), "{err}");
+    assert!(err.starts_with("INVALID_ARG") && err.contains("text") && err.contains("hex"), "{err}");
 
     let parsed: CommandPaneOpenData =
         serde_json::from_value(serde_json::json!({ "view": "editor", "file": "/tmp/a.png", "viewer": "text" })).unwrap();

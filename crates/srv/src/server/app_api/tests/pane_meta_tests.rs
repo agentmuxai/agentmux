@@ -72,6 +72,28 @@ fn an_editor_with_everything_set_writes_each_key_once() {
 }
 
 #[test]
+fn an_editor_open_names_any_viewer_and_where_in_the_file() {
+    let mut c = cmd("editor");
+    c.file = Some("/work/a.bin".into());
+    for viewer in ["text", "image", "media", "pdf", "hex", "info"] {
+        c.viewer = Some(viewer.into());
+        assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!(viewer));
+    }
+    c.viewer = Some("hexdump".into());
+    assert!(build_pane_meta(&c).unwrap_err().starts_with("INVALID_ARG"));
+
+    c.viewer = Some("hex".into());
+    c.offset = Some(0);
+    c.page = Some(3);
+    let meta = build_pane_meta(&c).unwrap();
+    assert_eq!((meta["editor:offset"].clone(), meta["editor:page"].clone()), (json!(0), json!(3)), "offset 0 is a request too");
+    c.offset = None;
+    c.page = Some(0);
+    let meta = build_pane_meta(&c).unwrap();
+    assert!(!meta.contains_key("editor:offset") && !meta.contains_key("editor:page"), "no offset, and page 0 is none");
+}
+
+#[test]
 fn a_terminal_is_a_shell_and_takes_a_folder_only_when_it_names_one() {
     let mut c = cmd("term");
     let meta = build_pane_meta(&c).unwrap();

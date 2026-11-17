@@ -394,7 +394,7 @@
 139 frontend/app/view/browser/use-browser-auth.ts::useBrowserAuth
 365 frontend/app/view/browser/use-pane-rect-sync.ts::usePaneRectSync
 118 frontend/app/view/bundle/components/BundleImportConfirmModal.tsx::BundleImportConfirmModalPanel
-285 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
+282 frontend/app/view/editor/editor-model.ts::EditorViewModel::constructor
 118 frontend/app/view/global-bundle/GlobalMemoryFullView.tsx::EntryView
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel

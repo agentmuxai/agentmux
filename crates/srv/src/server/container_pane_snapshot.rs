@@ -101,6 +101,8 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
         split_reference_block_id: req.split_reference_block_id.clone(),
         focus: req.focus,
         line: req.line,
+        offset: req.offset,
+        page: req.page,
         tree_expanded: req.tree_expanded,
         follow_folder: (req.view == "media" || req.follow_folder == Some(true)).then_some(true),
         ..Default::default()

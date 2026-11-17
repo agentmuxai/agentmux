@@ -61,7 +61,8 @@ import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./vie
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
-import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
 import { openRemoteFile } from "./open-from-remote";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
@@ -90,6 +91,10 @@ export type EditorMode = "preview" | "source" | "split";
 export interface OpenFileOpts {
     followFolder?: boolean;
     viewer?: string;
+    /** Where to land: a text line, a hex byte offset, a PDF page (the viewer that reads it takes it). */
+    line?: number;
+    offset?: number;
+    page?: number;
 }
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
@@ -510,10 +515,7 @@ export class EditorViewModel {
             this._docTabsSaver.holds(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
         } else if (typeof legacyFile === "string" && legacyFile) {
-            const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
-            const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
-            void this.openFile(legacyFile, { followFolder, viewer });
-            if (followFolder || viewer) void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null });
+            this.openInitialFile(legacyFile, meta);
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
@@ -546,6 +548,17 @@ export class EditorViewModel {
         // check needed here, and having both would double-open).
     }
 
+    /** Opens the pane's initial `file` the way pane.open asked (following its folder, in a viewer, at a byte or page), once. */
+    private openInitialFile(file: string, meta: MetaType | undefined): void {
+        const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
+        const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
+        const at = readPositionMeta(meta);
+        void this.openFile(file, { followFolder, viewer, ...at });
+        if (followFolder || viewer || at.offset !== undefined || at.page !== undefined) {
+            void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null, ...POSITION_META_CLEARED });
+        }
+    }
+
     /** The line to put the cursor on now that `path`'s content is in the
      *  editor, once; undefined for any other file or while it is loading. */
     takeOpenAtLine(path: string | undefined): number | undefined {
@@ -569,7 +582,25 @@ export class EditorViewModel {
      *  paths like double-click in the tree, path-input submit, drag-drop,
      *  programmatic open. The pinned tab survives subsequent tree clicks. */
     async openFile(filePath: string, opts?: OpenFileOpts): Promise<void> {
-        return this._openFileWithMode(filePath, "pinned", opts);
+        // The text view already showing this file takes a line now; a file that is still to load takes it when it does.
+        const showingNow = !!opts?.line && (!opts.viewer || opts.viewer === "text") && this.cmViewRef.current != null && !this.loadingAtom() && canonicalizePath(this.filePathAtom() ?? "") === canonicalizePath(filePath);
+        this.noteOpenPosition(filePath, opts);
+        await this._openFileWithMode(filePath, "pinned", opts);
+        if (showingNow) this.landOpenAtLine();
+    }
+
+    /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
+    private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
+        if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
+    }
+
+    /** Puts the cursor on the line a request named, in the view that shows its file now. */
+    private landOpenAtLine(): void {
+        const view = this.cmViewRef.current;
+        const line = this.takeOpenAtLine(this.filePathAtom());
+        if (view && line) view.dispatch(cursorAtLine(view.state, line));
     }
 
     /** Open a file as a *preview* tab (VS Code-style). Use for tree single-
@@ -641,7 +672,8 @@ export class EditorViewModel {
         if (followFolder) dispatch(this.blockId, { type: "SetFollowFolder", tabId, follow: true, source: "system" });
         if (opts?.viewer && isViewerId(opts.viewer)) {
             const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
-            if (tab?.viewerOverride !== opts.viewer) {
+            // Never over unsaved text: the viewer that replaces it keeps no buffer (the user's own "Reopen with" refuses too).
+            if (tab?.viewerOverride !== opts.viewer && !tab?.dirty) {
                 dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer: opts.viewer, override: true, source: "system" });
                 this._contentByTab.delete(tabId);
             }

@@ -196,6 +196,16 @@ describe("the Editor's document tabs", () => {
         expect(model.tabsAtom()).toHaveLength(0);
     });
 
+    it("an open that names another viewer leaves a tab with unsaved changes in the text viewer", async () => {
+        model = mount().model;
+        await model.openFile("c:/repo/a.ts");
+        await until(() => model!.contentAtom() !== "");
+        model.onContentChange("const a = 2;\n");
+        await model.openFile("c:/repo/a.ts", { viewer: "hex", offset: 4 });
+        expect(model.activeViewer()).toBe("text");
+        expect(model.dirtyAtom()).toBe(true);
+    });
+
     it("moves the tab in front, and reopens the last closed tab (Ctrl+Shift+T)", async () => {
         model = mount().model;
         await model.openFile("c:/repo/a.ts");
