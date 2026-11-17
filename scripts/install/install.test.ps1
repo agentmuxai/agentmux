@@ -412,9 +412,9 @@ if (-not $canSign) {
         Expect "Headless below the floor: refused in a dry run too" 1 "is in releases from 0.60.31 on" $sh $floorEnv @("-Headless", "-Version", "0.60.30", "-DryRun")
         Expect "Headless at the floor: goes ahead (dry run)" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $floorEnv @("-Headless", "-Version", "0.60.31", "-DryRun")
 
-        # A "latest" below the floor is not the latest: refused, on both paths; at or above, it is used
+        # A "latest" below the floor is not the latest for Headless (this script ships with a release from the floor on): refused. The desktop path keeps working with the hash and Ed25519 checks, as install.sh does.
         $latestOld = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; AGENTMUX_INSTALL_LATEST = "0.60.30"; LOCALAPPDATA = (Join-Path $work "lad14-$sh") }
-        Expect "latest below the floor: the desktop path is refused" 1 "is older than 0.60.31" $sh $latestOld @("-Method", "download", "-DryRun")
+        Expect "latest below the floor: the desktop path still installs it (hashes and Ed25519 only)" 0 "AgentMux-0.60.30-x64-setup.exe" $sh $latestOld @("-Method", "download", "-DryRun")
         Expect "latest below the floor: Headless is refused" 1 "is older than 0.60.31" $sh $latestOld @("-Headless", "-DryRun")
         $latestOk = $latestOld.Clone(); $latestOk["AGENTMUX_INSTALL_LATEST"] = "0.60.31"
         Expect "latest at the floor: the desktop path uses it" 0 "AgentMux-0.60.31-x64-setup.exe" $sh $latestOk @("-Method", "download", "-DryRun")

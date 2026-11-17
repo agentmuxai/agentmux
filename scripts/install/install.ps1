@@ -171,8 +171,6 @@ short of running the installer (used by its tests).
             if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "the latest release's address ($loc) is not a version" }
         }
         if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "the latest version ($v) is not a version" }
-        $floor = Get-SshsigFloorVersion
-        if (-not (Test-VersionAtLeast $v $floor)) { Die "the latest release the network gives ($v) is older than $floor, which this script ships with, so it is not the latest: not installing. If you mean an older release, give it with -Version" }
         return $v
     }
 
@@ -448,8 +446,12 @@ short of running the installer (used by its tests).
 
     function Install-Headless {
         if (-not $env:LOCALAPPDATA) { Die "LOCALAPPDATA is not set: there is no profile folder to install into" }
-        if (-not $Version) { $Version = Get-LatestVersion }
         $floor = Get-SshsigFloorVersion
+        if (-not $Version) {
+            $Version = Get-LatestVersion
+            # This script ships with a release from the floor on, so a latest below it is not the latest (a stale or replayed answer): refuse it.
+            if (-not (Test-VersionAtLeast $Version $floor)) { Die "the latest release the network gives ($Version) is older than $floor, which this script ships with, so it is not the latest: not installing. If you mean an older release, give it with -Version" }
+        }
         if (-not (Test-VersionAtLeast $Version $floor)) { Die "AgentMux Headless for Windows is in releases from $floor on, and $Version is older: there is nothing to install" }
         $root = Join-Path $env:LOCALAPPDATA "AgentMux\Headless"
         $target = Join-Path $root $Version
