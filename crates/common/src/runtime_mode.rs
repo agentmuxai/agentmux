@@ -425,7 +425,7 @@ pub fn portable_build_label(exe_dir: &Path) -> Option<String> {
 pub const RECORDED_CHANNEL_FILE: &str = "agentmux-channel";
 
 /// The channel named in the record file `path`, if it names one.
-fn read_channel_file(path: &Path) -> Option<String> {
+pub(crate) fn read_channel_file(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
@@ -594,7 +594,9 @@ pub fn inside_appimage(exe: &Path, roots: &[std::ffi::OsString]) -> bool {
 pub fn recorded_channel() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     if let Some(appimage) = running_appimage(&exe) {
-        return read_channel_file(&appimage_channel_file(&appimage));
+        // Beside the file; else the channel kept for this same file by a start from where it was, when a
+        // move or a rename left that record behind (`appimage_record`).
+        return read_channel_file(&appimage_channel_file(&appimage)).or_else(|| crate::appimage_record::moved_channel(&appimage));
     }
     // macOS: beside the `.app` an upgrade replaced.
     if cfg!(target_os = "macos") {

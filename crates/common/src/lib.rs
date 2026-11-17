@@ -5,6 +5,7 @@
 
 pub mod agent_create_types;
 pub mod api_types;
+pub mod appimage_record;
 pub mod file_rename_types;
 pub mod browser_control_types;
 pub mod build_kind;
