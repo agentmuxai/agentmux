@@ -47,7 +47,7 @@ pub struct AgentRuntime {
     pub agent_id: String,
     pub state: AgentRuntimeState,
     /// Why, for a state that has a reason: `usage_limit`, `needs_login`, `starts_on_first_message` or
-    /// `browser_request`.
+    /// `browser_request`; for `error`, the class of its last failure (`rate_limited`, `network`...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,

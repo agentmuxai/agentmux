@@ -31,12 +31,19 @@
  * button was later released somewhere else, since no further
  * mouseenter/mouseleave would ever fire for a row the cursor had already
  * left.
+ *
+ * Entry also waits when the row came to be under a pointer still resting
+ * where it last pressed (`isRestingAtPress`): a menu that closed on the
+ * click uncovered the row, or the click put this row where another was.
+ * The browser reports the row as entered, but nobody pointed at it. The
+ * peek opens once the pointer moves on the row, as the tooltips do
+ * (tooltip-state.ts, title-tooltip.ts).
  */
 
 import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { PEEK_ENTER_DELAY_MS } from "../components/hover-anchor";
 import { peekBridgeRow, peekPanelOpenAfterLeaveRow } from "../components/peek-bridge";
-import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
+import { isPrimaryButtonDown, isRestingAtPress, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 export interface NodePeek {
     /** The row is hovered (after the enter delay). Drives the overlay's `show`. */
@@ -52,8 +59,36 @@ export interface NodePeek {
     panelVisible: Accessor<boolean>;
     rowEl: Accessor<HTMLElement | undefined>;
     setRowEl: (el: HTMLElement) => void;
-    handlePeekEnter: () => void;
+    /** The row's `onMouseEnter`. Hand it the event: it says where the pointer is. */
+    handlePeekEnter: (e?: PointerPlace) => void;
     handlePeekLeave: () => void;
+}
+
+/** Where a pointer event happened. */
+type PointerPlace = { clientX: number; clientY: number };
+
+/**
+ * A row that came under a resting pointer waits here for the pointer to move on it. `start` begins the wait,
+ * `cancel` ends it, and `onMoved` gets the first move that is away from where the pointer pressed.
+ */
+function createMoveWait(rowEl: Accessor<HTMLElement | undefined>, onMoved: (e: PointerEvent) => void) {
+    let stop: (() => void) | undefined;
+    const cancel = () => {
+        stop?.();
+        stop = undefined;
+    };
+    const start = () => {
+        const row = rowEl();
+        if (!row || stop) return;
+        const onMove = (e: PointerEvent) => {
+            if (isRestingAtPress(e)) return;
+            cancel();
+            onMoved(e);
+        };
+        row.addEventListener("pointermove", onMove, { passive: true });
+        stop = () => row.removeEventListener("pointermove", onMove);
+    };
+    return { start, cancel, waiting: () => stop !== undefined };
 }
 
 export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
@@ -64,8 +99,15 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
     // pointer crossing to it, peek-bridge.ts), so this peek is waiting for that
     // to end. Cleared when the pointer leaves this row.
     let waitingForBridge = false;
+    // The row came under a pointer resting where it pressed: a move on the row is then its enter.
+    const moveWait = createMoveWait(rowEl, (e) => handlePeekEnter(e));
 
-    const handlePeekEnter = () => {
+    const handlePeekEnter = (e?: PointerPlace) => {
+        if (e && isRestingAtPress(e)) {
+            clearTimeout(timer);
+            moveWait.start();
+            return;
+        }
         if (isPrimaryButtonDown()) return;
         clearTimeout(timer);
         // Re-checked when the delay elapses, not just at call time: the
@@ -84,6 +126,7 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
         }, delayMs);
     };
     const handlePeekLeave = () => {
+        moveWait.cancel();
         clearTimeout(timer);
         waitingForBridge = false;
         setIsPeeking(false);
@@ -123,11 +166,14 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
     // already waited.
     onCleanup(
         onPrimaryButtonRelease(() => {
+            // Not for a row the press itself uncovered: it is still waiting for the pointer to move.
+            if (moveWait.waiting()) return;
             if (rowEl()?.matches(":hover")) handlePeekEnter();
         }),
     );
 
     onCleanup(() => clearTimeout(timer));
+    onCleanup(moveWait.cancel);
 
     const panelVisible = () => {
         if (isPeeking()) return true;

@@ -201,6 +201,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             let block = block_id.as_deref().and_then(|b| mstore.get::<Block>(b).ok().flatten());
             let color = block.as_ref().and_then(block_color);
             let (runtime_state, detail, resets_at, desired) = runtime_of(&status_of(mstore, live.as_deref(), block.as_ref(), &net, now_ms));
+            let detail = detail.or_else(|| error_reason(runtime_state, block.as_ref()));
             let blocked = blocked_start(runtime_state, desired, waiting_for.contains(&d.id), || super::agent_lifecycle::start_blocked(state, &d.id));
             let waiting_in = (requests_open && runtime_state == AgentRuntimeState::Idle)
                 .then(|| live.as_deref().and_then(|b| request_pane(&state.reactive_handler.names_for_block(b))))
@@ -223,6 +224,12 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
             }
         })
         .collect()
+}
+
+/// Why an agent in `error` is, when its last run's failure was classified (`rate_limited`, `network`...):
+/// whether it is worth another try is not in `error` itself (#2617).
+pub fn error_reason(state: AgentRuntimeState, block: Option<&Block>) -> Option<String> {
+    (state == AgentRuntimeState::Error).then(|| block.and_then(|b| crate::backend::worker_failure_note::code_name(&b.meta))).flatten()
 }
 
 /// Where an agent runs: its pane's mode is the current truth; a definition with no pane says it by its
@@ -514,6 +521,19 @@ mod tests {
         assert_eq!(agent_of_block(&block).as_deref(), Some("ann"));
         block.meta.insert(crate::backend::obj::HISTORY_READER_META_KEY.to_string(), serde_json::json!("ann"));
         assert_eq!(agent_of_block(&block), None, "a reader carries the id but is not the pane");
+    }
+
+    /// An agent in `error` says why when its last failure was classified, so a viewer can tell a rate limit
+    /// from a crash (#2617); any other state, or an unclassified error, adds no reason.
+    #[test]
+    fn an_error_state_carries_the_class_of_its_last_failure() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("agent:last_failure".to_string(), serde_json::json!({ "code": "rate_limited", "title": "x", "retryable": true }));
+        let block = Block { meta, ..Default::default() };
+        assert_eq!(error_reason(AgentRuntimeState::Error, Some(&block)).as_deref(), Some("rate_limited"));
+        assert_eq!(error_reason(AgentRuntimeState::Idle, Some(&block)), None, "only `error` takes it");
+        assert_eq!(error_reason(AgentRuntimeState::Error, Some(&Block::default())), None, "nothing classified");
+        assert_eq!(error_reason(AgentRuntimeState::Error, None), None);
     }
 
     #[test]

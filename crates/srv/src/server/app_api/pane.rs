@@ -426,12 +426,16 @@ const VIEWERS: [&str; 7] = ["text", "large", "image", "media", "pdf", "hex", "in
 
 /// pane.open's `viewer`, checked against the Editor's viewers.
 pub(crate) fn requested_viewer(cmd: &CommandPaneOpenData) -> Result<Option<&'static str>, String> {
-    match cmd.viewer.as_deref() {
-        None => Ok(None),
-        Some(asked) => VIEWERS.iter().find(|v| **v == asked).map(|v| Some(*v)).ok_or_else(|| {
-            format!("INVALID_ARG: viewer {asked:?} isn't one the editor opens a file in (one of {})", VIEWERS.join(", "))
-        }),
+    let Some(asked) = cmd.viewer.as_deref() else { return Ok(None) };
+    let viewer = VIEWERS.iter().find(|v| **v == asked).ok_or_else(|| {
+        format!("INVALID_ARG: viewer {asked:?} isn't one the editor opens a file in (one of {})", VIEWERS.join(", "))
+    })?;
+    // The other viewers read this computer's files; a file on an SSH host reaches the Editor as text only.
+    let on_host = cmd.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local" && crate::backend::fs_ops::remote::ssh_connection(Some(c)).is_some());
+    if on_host && *viewer != "text" {
+        return Err(format!("INVALID_ARG: viewer {asked:?} can't show a file on an SSH host yet; only \"text\" opens there"));
     }
+    Ok(Some(*viewer))
 }
 
 /// Where in the file pane.open asks to land: a text line, a hex byte offset, a PDF page. Each is read by its own viewer

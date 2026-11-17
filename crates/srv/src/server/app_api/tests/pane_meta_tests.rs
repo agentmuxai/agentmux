@@ -205,6 +205,26 @@ fn local_or_no_connection_records_nothing_and_the_other_views_have_none() {
 }
 
 #[test]
+fn a_file_on_an_ssh_host_opens_as_text_only() {
+    let mut c = cmd("editor");
+    c.file = Some("/home/u/a.bin".into());
+    c.connection = Some("dev@host.example".into());
+    c.viewer = Some("text".into());
+    assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!("text"));
+    for viewer in ["image", "media", "pdf", "hex", "info"] {
+        c.viewer = Some(viewer.into());
+        let err = build_pane_meta(&c).unwrap_err();
+        assert!(err.starts_with("INVALID_ARG") && err.contains("SSH host") && err.contains("text"), "{viewer}: {err}");
+    }
+    // This computer, and a WSL distribution, read through the local viewers.
+    for conn in [None, Some("local"), Some("wsl://Ubuntu")] {
+        c.connection = conn.map(str::to_string);
+        c.viewer = Some("hex".into());
+        assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!("hex"), "{conn:?}");
+    }
+}
+
+#[test]
 fn media_reads_this_computers_files_only_so_an_ssh_connection_is_refused() {
     let mut c = cmd("media");
     c.file = Some("/shots/a.png".into());
