@@ -70,6 +70,37 @@ export interface TextPart {
     hit: boolean;
 }
 
+/** How many bytes `text` takes in a file of `encoding`. A single-byte encoding other than UTF-8 is a byte a character. */
+function bytesIn(text: string, encoding: string | undefined): number {
+    const enc = (encoding ?? "utf-8").toLowerCase();
+    if (enc === "utf-16le" || enc === "utf-16be") return text.length * 2;
+    if (enc === "utf-8" || enc === "utf8") return new TextEncoder().encode(text).length;
+    return text.length;
+}
+
+/**
+ * Which of the places `needle` occurs in `line` (0 for the first) is the match that starts `byteInLine` bytes into the
+ * line, in a file of `encoding`: the one the search found, among several on the line. The first that starts at or past
+ * that byte when none starts exactly there (a byte-order mark or an odd character shifts the count); -1 when there is
+ * none in the text drawn (a long line is cut short), or nothing to find.
+ */
+export function hitOrdinal(line: string, needle: string, byteInLine: number, encoding: string | undefined): number {
+    if (!needle) return -1;
+    let ordinal = 0;
+    let at = 0; // the char the bytes below are counted to
+    let bytes = 0; // the bytes of line[0..at]
+    for (;;) {
+        const i = line.indexOf(needle, at);
+        if (i < 0) return -1;
+        bytes += bytesIn(line.slice(at, i), encoding);
+        at = i;
+        if (bytes >= byteInLine) return ordinal;
+        ordinal++;
+        bytes += bytesIn(needle, encoding);
+        at = i + needle.length;
+    }
+}
+
 /** `line` cut at each place `needle` occurs in it, for marking them. */
 export function splitHits(line: string, needle: string): TextPart[] {
     if (!needle) return [{ text: line, hit: false }];
