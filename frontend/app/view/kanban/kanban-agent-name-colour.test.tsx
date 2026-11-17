@@ -18,6 +18,7 @@ vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
 import { contrastRatio, paneRoleColor } from "@/app/block/pane-color-scheme";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
+import { PALETTE } from "@/app/theme/palette";
 import { AgentChip } from "./kanban-card";
 import type { KanbanAgent } from "./kanban-types";
 
@@ -69,12 +70,27 @@ describe("the name colour is readable on every theme", () => {
     /** Text at the chip's size (`--text-xs`): WCAG 1.4.3 AA. */
     const MIN_CONTRAST = 4.5;
 
-    it.each(ids)("%s: every hue reads against the theme's surface", (id) => {
+    /** A theme's surface (`--main-bg-color`), as `#rrggbb`. */
+    const surfaceOf = (id: string): string => {
         const m = readFileSync(join(themes, `${id}.scss`), "utf8").match(
             /--main-bg-color:\s*rgba\((\d+),\s*(\d+),\s*(\d+)/
         );
         expect(m, `${id} sets --main-bg-color`).not.toBeNull();
-        const surface = "#" + [1, 2, 3].map((i) => Number(m![i]).toString(16).padStart(2, "0")).join("");
+        return "#" + [1, 2, 3].map((i) => Number(m![i]).toString(16).padStart(2, "0")).join("");
+    };
+
+    // Black and White too: where the neutral is the theme's own colour its name is a grey, and a grey that is
+    // only strong enough for a line (3:1) is not strong enough to read.
+    it.each(ids)("%s: every colour of the palette, Black and White included, reads against the theme's surface", (id) => {
+        const surface = surfaceOf(id);
+        for (const slot of PALETTE) {
+            const colour = paneRoleColor(undefined, slot.id, LIGHT_THEME_IDS.has(id), "identity")!;
+            expect(contrastRatio(colour, surface), `${slot.name} on ${id} (${surface})`).toBeGreaterThanOrEqual(MIN_CONTRAST);
+        }
+    });
+
+    it.each(ids)("%s: every hue reads against the theme's surface", (id) => {
+        const surface = surfaceOf(id);
         let worst = { ratio: Infinity, hue: 0 };
         for (let hue = 0; hue < 360; hue += 5) {
             const colour = paneRoleColor(hue, undefined, LIGHT_THEME_IDS.has(id), "identity")!;

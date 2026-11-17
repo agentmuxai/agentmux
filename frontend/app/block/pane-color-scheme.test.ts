@@ -96,23 +96,20 @@ describe("pane colour scheme", () => {
     // The focus ring tells you which pane has focus. Under HSL an unfocused
     // yellow border (OKLCH L 0.56) was brighter than a focused blue ring
     // (0.50), so a yellow pane next to a blue one could look focused when it
-    // was not. Now every hue's focused ring stands out from the page more than
-    // any hue's unfocused border: brighter on dark, darker on light.
+    // was not. Now every colour's focused ring stands out from the page more than
+    // every colour's unfocused border: brighter on dark, darker on light. Black and
+    // White are held to it too, against the hues and against each other.
     for (const [theme, light, page] of [
         ["dark", false, "#000000"],
         ["light", true, "#ffffff"],
     ] as const) {
-        const prominence = (ids: Identity[], role: "identity" | "border") => ids.map((id) => contrastRatio(paneRoleColor(id.hue, id.hex, light, role)!, page));
+        const prominence = (id: Identity, role: "identity" | "border") => contrastRatio(paneRoleColor(id.hue, id.hex, light, role)!, page);
 
-        it(`${theme} theme: every focused ring stands out more than any hue's unfocused border`, () => {
-            expect(Math.min(...prominence(IDENTITIES, "identity"))).toBeGreaterThan(Math.max(...prominence(HUE_IDENTITIES, "border")) * 1.5);
-        });
-
-        // Not across the two neutrals: White's unfocused border on a dark theme is brighter than Black's focused
-        // ring (graphite), and the same the other way round on a light theme. Each still stands clear of its own.
-        it(`${theme} theme: Black's and White's focused rings stand out more than their own unfocused borders`, () => {
-            for (const id of NEUTRAL_IDENTITIES) {
-                expect(prominence([id], "identity")[0], id.name).toBeGreaterThan(prominence([id], "border")[0] * 1.5);
+        it(`${theme} theme: every colour's focused ring stands out more than every colour's unfocused border`, () => {
+            for (const focused of IDENTITIES) {
+                for (const unfocused of IDENTITIES) {
+                    expect(prominence(focused, "identity"), `${focused.name} focused beside ${unfocused.name} unfocused`).toBeGreaterThan(prominence(unfocused, "border") * 1.5);
+                }
             }
         });
     }
@@ -160,19 +157,20 @@ describe("Black and White", () => {
     it("draws the tones the spec lists, greys with no chroma", () => {
         const hexes = (theme: "dark" | "light", neutral: "black" | "white") =>
             (["identity", "border", "pill", "pillActive", "headerTint", "widgetTint"] as const).map((role) => paneRoleColor(undefined, neutral, theme === "light", role));
-        expect(hexes("dark", "black")).toEqual(["#747474", "#484848", "#0d0d0d", "#000000", "#090909", "#747474"]);
-        expect(hexes("dark", "white")).toEqual(["#f5f5f5", "#868686", "#4d4d4d", "#636363", "#3d3d3d", "#f5f5f5"]);
-        expect(hexes("light", "black")).toEqual(["#0b0b0b", "#717171", "#bebebe", "#a4a4a4", "#d1d1d1", "#0b0b0b"]);
-        expect(hexes("light", "white")).toEqual(["#868686", "#cacaca", "#fafafa", "#ffffff", "#ffffff", "#868686"]);
+        expect(hexes("dark", "black")).toEqual(["#9e9e9e", "#484848", "#0d0d0d", "#000000", "#090909", "#9e9e9e"]);
+        expect(hexes("dark", "white")).toEqual(["#f5f5f5", "#7a7a7a", "#4d4d4d", "#636363", "#3d3d3d", "#f5f5f5"]);
+        expect(hexes("light", "black")).toEqual(["#0b0b0b", "#929292", "#bebebe", "#a4a4a4", "#d1d1d1", "#0b0b0b"]);
+        expect(hexes("light", "white")).toEqual(["#696969", "#cacaca", "#fafafa", "#ffffff", "#ffffff", "#696969"]);
     });
 
     for (const theme of ["dark", "light"] as const) {
         for (const slot of NEUTRALS) {
             const c = (role: PaneColorRole) => slotRoleColor(slot, theme === "light", role);
 
-            it(`${theme}, ${slot.name}: its line clears 3:1 against its own fills and against the chrome it is drawn on`, () => {
+            // The chrome asks more than the fills: an agent's name is written on it in the same tone.
+            it(`${theme}, ${slot.name}: its line clears 3:1 against its own fills, and reads as text (4.5:1) on the chrome it is drawn on`, () => {
                 for (const role of FILLS) expect(contrastRatio(c("identity"), c(role)), role).toBeGreaterThanOrEqual(3);
-                for (const surface of CHROME[theme]) expect(contrastRatio(c("identity"), surface), surface).toBeGreaterThanOrEqual(3);
+                for (const surface of CHROME[theme]) expect(contrastRatio(c("identity"), surface), surface).toBeGreaterThanOrEqual(4.5);
             });
 
             it(`${theme}, ${slot.name}: the theme's text keeps 4.5:1 on each of its fills`, () => {
