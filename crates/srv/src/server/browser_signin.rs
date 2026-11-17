@@ -181,6 +181,9 @@ struct Chosen {
     user: String,
     profile: String,
     created: i64,
+    /// The entry's `updated_at` as the person is shown it: a request is bound to the entry as it was then, so one edited
+    /// while it waits (a share removed and made again included) types nothing and is given no Always (A7).
+    updated: i64,
 }
 
 /// Why nothing was typed: the outcome kept in the Vault's activity, how the
@@ -224,9 +227,9 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
         Ok((entry, origin, user)) => {
             let row = state.identity_store.vault_get(&entry).ok().flatten();
             let shared = row.as_ref().is_some_and(|r| crate::backend::vault::signins::fields_of(r).get(signins::PROFILE).map(String::as_str) != Some(profile));
-            let (label, created) = row.map(|r| (r.label, r.created_at)).unwrap_or_default();
+            let (label, created, updated) = row.map(|r| (r.label, r.created_at, r.updated_at)).unwrap_or_default();
             let grant_agent = if shared { own.clone().unwrap_or_else(|| agent.to_string()) } else { agent.to_string() };
-            Ok(Chosen { grant_agent, shared, entry, label, origin, user, profile: profile.to_string(), created })
+            Ok(Chosen { grant_agent, shared, entry, label, origin, user, profile: profile.to_string(), created, updated })
         }
         Err(e) => {
             // A login the agent may use for this page, which the person hasn't shared with it: say how to ask (A8).
@@ -304,8 +307,8 @@ async fn ask(state: &AppState, block_id: &str, agent: &str, agent_pane: String, 
         Ended::WentAhead => Ok(true),
         Ended::Always => {
             // Only for the entry the person was shown, not one made again with its id.
-            let (store, e, created) = (state.identity_store.clone(), c.entry.clone(), c.created);
-            let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)).await;
+            let (store, e, created, updated) = (state.identity_store.clone(), c.entry.clone(), c.created, c.updated);
+            let _ = tokio::task::spawn_blocking(move || store.vault_grant_add_unchanged(&e, &key, agentmux_common::time::now_ms(), created, updated)).await;
             Ok(false)
         }
         ended => {
@@ -361,7 +364,7 @@ pub(crate) async fn handle_signin(
         return err_response(code, e);
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone())), &reason, false).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone(), c.updated)), &reason, false).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
             let mut out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
@@ -373,6 +376,20 @@ pub(crate) async fn handle_signin(
         Err(e) => {
             noted(&state, &block_id, &agent, How::Refused(e.clone()));
             err_response(StatusCode::BAD_GATEWAY, e)
+        }
+    }
+}
+
+/// The person removed the share of login `id`: a card still waiting on a sign-in with it, from an agent it no longer names,
+/// is answered No, so it does not stay up for a sign-in that cannot go ahead (A7). One answered or timing out later types
+/// nothing either: it was bound to the entry as it was shown.
+pub(crate) fn share_removed(state: &AppState, id: &str) {
+    let Ok(Some(row)) = state.identity_store.vault_get(id) else { return };
+    let fields = signins::fields_of(&row);
+    for u in uses::uses().list().into_iter().filter(|u| u.signin && u.entry_id == id) {
+        let uid = state.reactive_handler.get_agent(&u.agent).and_then(|a| a.uid).unwrap_or_default();
+        if !crate::backend::vault::shares::names(&fields, &uid) {
+            uses::uses().answer(&u.id, uses::UseAnswer::of(uses::Decision::Deny));
         }
     }
 }
