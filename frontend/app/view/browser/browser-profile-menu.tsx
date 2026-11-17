@@ -170,7 +170,6 @@ export function BrowserProfileButton(props: {
                     class={clsx("browser-nav-btn browser-profile-btn", {
                         "browser-profile-btn-incognito": identity().kind === "incognito",
                     })}
-                    // Drawn straight on the toolbar: a Black or White profile takes the neutral's line tone there.
                     style={profile() ? { color: profileMarkColor(profile()!.color) } : undefined}
                     icon={identity().kind === "incognito" ? INCOGNITO_ICON : "circle-user"}
                     label={`Profile: browsing as ${name()}`}
