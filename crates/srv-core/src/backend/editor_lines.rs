@@ -167,6 +167,41 @@ fn skip_lines<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: 
     Ok(size)
 }
 
+/// Where each of the `n` lines that begin at `from` starts (the first is `from`), and the offset just after the last
+/// of them (the size, when the file has fewer). One pass over the run, so a line of gigabytes is read once.
+fn starts_in<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: Unit, block: usize) -> std::io::Result<(Vec<u64>, u64)> {
+    let mut starts = Vec::new();
+    if n == 0 || from >= size {
+        return Ok((starts, from.min(size)));
+    }
+    starts.push(from);
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let (mut at, mut left) = (from, n);
+    file.seek(SeekFrom::Start(from))?;
+    while at < size {
+        let want = (size - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        let mut found = None;
+        breaks_in(&buf[..want], at, unit, |end| {
+            if found.is_some() {
+                return;
+            }
+            left -= 1;
+            if left == 0 {
+                found = Some(end);
+            } else if end < size {
+                starts.push(end);
+            }
+        });
+        if let Some(end) = found {
+            return Ok((starts, end.min(size)));
+        }
+        at += want as u64;
+    }
+    Ok((starts, size))
+}
+
 /// Where line `line` (0-based) starts; the size for a line past the last.
 pub fn line_start<F: Read + Seek>(file: &mut F, idx: &LineIndex, line: u64, unit: Unit, block: usize) -> std::io::Result<u64> {
     if line >= idx.total_lines {
@@ -220,13 +255,19 @@ fn index_of(path: &Path, unit: Unit) -> std::io::Result<Arc<LineIndex>> {
 }
 
 /// The answer for `count` lines from line `from_line` of `path`.
-fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64) -> std::io::Result<FileIndexLinesResult> {
+fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64, with_starts: bool) -> std::io::Result<FileIndexLinesResult> {
     let idx = index_of(path, unit)?;
     let mut file = std::fs::File::open(path)?;
     let start = line_start(&mut file, &idx, from_line, unit, BLOCK)?;
     let wanted = count.min(idx.total_lines.saturating_sub(from_line));
-    let end = if from_line.saturating_add(count) >= idx.total_lines { idx.size } else { skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)? };
-    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone() })
+    let (starts, end) = if with_starts {
+        starts_in(&mut file, start, wanted, idx.size, unit, BLOCK)?
+    } else if from_line.saturating_add(count) >= idx.total_lines {
+        (Vec::new(), idx.size)
+    } else {
+        (Vec::new(), skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)?)
+    };
+    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone(), starts })
 }
 
 /// `fileindexlines`. This computer's files only, like `fileprobe`.
@@ -237,7 +278,7 @@ pub fn register(engine: &std::sync::Arc<WshRpcEngine>) {
             return Err(format!("fileindexlines: at most {MAX_COUNT} lines a call"));
         }
         let path = expand_home_dir_safe(&cmd.path);
-        tokio::task::spawn_blocking(move || lines_of(&path, unit, cmd.from_line, cmd.count).map_err(|e| format!("fileindexlines: {e}")))
+        tokio::task::spawn_blocking(move || lines_of(&path, unit, cmd.from_line, cmd.count, cmd.line_starts.unwrap_or(false)).map_err(|e| format!("fileindexlines: {e}")))
             .await
             .map_err(|e| format!("fileindexlines: {e}"))?
     });
@@ -334,20 +375,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("log.txt");
         std::fs::write(&path, "a\nbb\nccc\ndddd\n").unwrap();
-        let r = lines_of(&path, Unit::Byte, 1, 2).unwrap();
+        let r = lines_of(&path, Unit::Byte, 1, 2, false).unwrap();
         assert_eq!((r.total_lines, r.size, r.start, r.end), (4, 14, 2, 9));
         // Past the last line: the rest of the file, then nothing.
-        let r = lines_of(&path, Unit::Byte, 3, 10).unwrap();
+        let r = lines_of(&path, Unit::Byte, 3, 10, false).unwrap();
         assert_eq!((r.start, r.end), (9, 14));
-        let r = lines_of(&path, Unit::Byte, 9, 10).unwrap();
+        let r = lines_of(&path, Unit::Byte, 9, 10, false).unwrap();
         assert_eq!((r.start, r.end), (14, 14));
-        let r = lines_of(&path, Unit::Byte, 0, 0).unwrap();
+        let r = lines_of(&path, Unit::Byte, 0, 0, false).unwrap();
         assert_eq!((r.start, r.end), (0, 0));
         // The file grew: the kept index is not reused.
         std::fs::write(&path, "a\nbb\nccc\ndddd\neeeee\nf").unwrap();
-        let r = lines_of(&path, Unit::Byte, 0, 100).unwrap();
+        let r = lines_of(&path, Unit::Byte, 0, 100, false).unwrap();
         assert_eq!((r.total_lines, r.size), (6, 21));
-        assert!(lines_of(&dir, Unit::Byte, 0, 1).is_err(), "a folder is no file");
+        assert!(lines_of(&dir, Unit::Byte, 0, 1, false).is_err(), "a folder is no file");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -375,10 +416,58 @@ mod tests {
         let path = dir.join("ru.txt");
         let (cyrillic, _, _) = encoding_rs::WINDOWS_1251.encode("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}, \u{43c}\u{438}\u{440}! \u{41a}\u{430}\u{43a} \u{434}\u{435}\u{43b}\u{430}?\n");
         std::fs::write(&path, &cyrillic).unwrap();
-        assert_eq!(lines_of(&path, Unit::Byte, 0, 1).unwrap().encoding, "windows-1251");
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1, false).unwrap().encoding, "windows-1251");
         std::fs::write(&path, "just ascii\n").unwrap();
-        assert_eq!(lines_of(&path, Unit::Byte, 0, 1).unwrap().encoding, "utf-8");
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1, false).unwrap().encoding, "utf-8");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A file of a huge line (here 3 MB, bigger than a read block) between short ones.
+    #[test]
+    fn says_where_each_line_starts_with_the_one_pass_that_finds_the_end() {
+        let dir = std::env::temp_dir().join(format!("fileindexlines-starts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("huge.txt");
+        let mut data = b"first\n".to_vec();
+        data.extend(std::iter::repeat(b'x').take(3 << 20));
+        data.extend_from_slice(b"\nthird\r\nfourth");
+        std::fs::write(&path, &data).unwrap();
+        let want = starts(&data);
+        assert_eq!(want.len(), 4);
+
+        let r = lines_of(&path, Unit::Byte, 0, 4, true).unwrap();
+        assert_eq!(r.starts, want);
+        assert_eq!((r.start, r.end), (0, data.len() as u64));
+
+        // From the middle, and a run that stops short of the end of the file.
+        let r = lines_of(&path, Unit::Byte, 1, 2, true).unwrap();
+        assert_eq!(r.starts, want[1..3].to_vec());
+        assert_eq!((r.start, r.end), (want[1], want[3]));
+
+        // Past the end of the file: no lines.
+        let r = lines_of(&path, Unit::Byte, 9, 5, true).unwrap();
+        assert!(r.starts.is_empty());
+        assert_eq!((r.start, r.end), (data.len() as u64, data.len() as u64));
+
+        // Not asked for: not sent, and the range is the same.
+        let r = lines_of(&path, Unit::Byte, 0, 4, false).unwrap();
+        assert!(r.starts.is_empty());
+        assert_eq!(r.end, data.len() as u64);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn starts_in_a_run_of_utf16_and_a_file_that_ends_in_a_break() {
+        let utf16 = |t: &str| t.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>();
+        let data = utf16("ab\ncd\nef\n");
+        let (got, end) = starts_in(&mut Cursor::new(data.clone()), 0, 3, data.len() as u64, Unit::Utf16Le, 4).unwrap();
+        assert_eq!((got, end), (vec![0, 6, 12], data.len() as u64));
+        let text = b"a\nb\n";
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 2, 4, Unit::Byte, 3).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
+        // More lines asked for than there are: what there is.
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 9, 4, Unit::Byte, 3).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
     }
 
     #[test]

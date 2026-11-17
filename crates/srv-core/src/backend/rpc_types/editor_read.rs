@@ -301,6 +301,10 @@ pub struct FileIndexLinesReq {
     #[serde(default)]
     #[ts(type = "number")]
     pub count: u64,
+    /// Also say where each of those lines starts (`starts` in the answer), found in the same pass that finds `end`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_starts: Option<bool>,
 }
 
 /// Response for `fileindexlines`: the bytes `[start, end)` hold lines `from_line` up to `from_line + count` (fewer at
@@ -324,4 +328,9 @@ pub struct FileIndexLinesResult {
     /// The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found from the start of the
     /// file: the probe says only "legacy" for a file that isn't UTF-8.
     pub encoding: String,
+    /// Where each of the lines starts, in order, when the request asked (`line_starts`): the one after the last starts
+    /// at `end`. Empty otherwise.
+    #[serde(default)]
+    #[ts(type = "Array<number>")]
+    pub starts: Vec<u64>,
 }
