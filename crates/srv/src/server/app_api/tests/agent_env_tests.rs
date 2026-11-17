@@ -510,7 +510,7 @@ async fn a_key_is_written_only_with_the_address_of_a_server_of_its_own() {
 async fn only_a_change_of_address_opens_a_notice() {
     let state = test_state();
     let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
-    for set in [json!({ "ANTHROPIC_MODEL": "sonnet" }), json!({ "API_TIMEOUT_MS": "1000" })] {
+    for set in [json!({ "ANTHROPIC_SMALL_FAST_MODEL": "haiku" }), json!({ "API_TIMEOUT_MS": "1000" })] {
         // (An agent with no address of its own: nothing moved.)
         let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -556,7 +556,7 @@ async fn a_route_or_container_agent_can_still_set_a_model_name_and_take_endpoint
         })
         .unwrap();
     for target in [&routed, &container] {
-        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": target.id, "set": { "ANTHROPIC_MODEL": "sonnet" } })).await;
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": target.id, "set": { "ANTHROPIC_SMALL_FAST_MODEL": "haiku" } })).await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
     // Settings the operator left in a container agent's environment can be removed by an agent.
@@ -598,4 +598,28 @@ async fn an_undo_after_the_environment_was_edited_again_is_refused() {
     let why = undo_endpoint(&state, &notice, "you").unwrap_err();
     assert!(why.contains("changed again"), "{why}");
     assert!(stored(&state, &lolly).unwrap().contains("ANTHROPIC_BASE_URL"), "the later edit and the endpoint both stand");
+}
+
+// Agents env_set must not say "accepted" for a name that changes nothing: ANTHROPIC_MODEL is read only for an agent
+// pointed at a server of its own; every other launch passes the pane's own --model.
+#[tokio::test]
+async fn anthropic_model_is_refused_where_it_has_no_effect_and_taken_with_a_server_of_its_own() {
+    let state = test_state();
+    let (me, lolly) = (agent(&state, "host", false), agent(&state, "host", false));
+    for set in [json!({ "ANTHROPIC_MODEL": "claude-fable-5-2" }), json!({ "ANTHROPIC_MODEL": "claude-fable-5-2", "API_TIMEOUT_MS": "1000" })] {
+        let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": set })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        let error = body["error"].as_str().unwrap();
+        assert!(error.contains("no effect") && error.contains("Agents update"), "it says what to use instead: {body}");
+    }
+    assert_eq!(stored(&state, &lolly), None, "nothing was written");
+    // With a server of its own in the same call the model is what it asks that server for.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_BASE_URL": SERVER, "ANTHROPIC_MODEL": "flint:40b-a2b" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // ... and afterwards on its own.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "set": { "ANTHROPIC_MODEL": "flint:80b" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Taking the model name away is always allowed.
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": lolly.id, "unset": ["ANTHROPIC_MODEL"] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }

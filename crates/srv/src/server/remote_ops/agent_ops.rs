@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `agents.start`, `agents.open`, `agents.stop`, `agents.set_seat`, `agents.rename`, `agents.env_get` and `agents.env_set`: an
+//! `agents.start`, `agents.open`, `agents.stop`, `agents.set_seat`, `agents.rename`, `agents.update` (model and effort), `agents.env_get` and `agents.env_set`: an
 //! agent controls another machine's agents as it controls its own (spec §4.3, P3). Each runs the code of
 //! the local `Agents` action with the remote agent (`slug@machine`) as the actor, so every rule a local
 //! caller meets is met here too: a stop of another agent waits for the person's keep-running window, a
@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
-use crate::server::app_api::{agent_env, agent_lifecycle, agent_open_remote, agent_rename, agent_seats};
+use crate::server::app_api::{agent_definition, agent_env, agent_lifecycle, agent_open_remote, agent_rename, agent_seats};
 
 /// A refusal of the local code, as the requester reads it.
 fn refused((status, message): (StatusCode, String)) -> RemoteRefusal {
@@ -64,6 +64,18 @@ pub(super) async fn rename(state: &AppState, caller: &RemoteCaller, params: Valu
     let req: agent_rename::RenameRequest =
         serde_json::from_value(params).map_err(|e| RemoteRefusal::new("invalid_arg", format!("rename: {e}")))?;
     agent_rename::run_remote(state, &caller.actor(), req).await.map_err(refused)
+}
+
+/// The agent `agent` (an id or slug on this machine) has its definition, model or effort changed, as a local `Agents update` does.
+pub(super) async fn update(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
+    // From another machine only what the pane's own picker sets: the rest of an update (a spend cap, leaving a model
+    // route, how the agent is listed) is for this machine's agents and its person.
+    if let Some(other) = params.as_object().and_then(|m| m.keys().find(|k| !matches!(k.as_str(), "agent" | "model" | "effort"))) {
+        return Err(RemoteRefusal::new("invalid_arg", format!("update over host takes agent, model and effort; {other} is changed on that machine")));
+    }
+    let req: agent_definition::UpdateRequest =
+        serde_json::from_value(params).map_err(|e| RemoteRefusal::new("invalid_arg", format!("update: {e}")))?;
+    agent_definition::run_remote(state, &caller.actor(), req).await.map_err(refused)
 }
 
 pub(super) async fn env_get(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
