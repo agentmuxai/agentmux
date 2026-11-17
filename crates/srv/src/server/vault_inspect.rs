@@ -75,8 +75,9 @@ pub(crate) struct IdBody {
 pub(crate) async fn handle_vault_show(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<IdBody>) -> Response {
     let agent = who(&state, caller.as_deref(), &body.auth);
     let Some(id) = body.id.filter(|i| !i.trim().is_empty()) else { return error(StatusCode::BAD_REQUEST, "show needs an id: the entry to look at (list shows them)") };
+    let uid = agent.as_deref().and_then(|a| state.reactive_handler.get_agent(a)).and_then(|a| a.uid);
     let (store, key) = (state.identity_store.clone(), key().await);
-    answer(move || inspect::show(&store, &id, agent.as_deref(), &key, crate::backend::vault::expiry::today())).await
+    answer(move || inspect::show_as(&store, &id, (agent.as_deref(), uid.as_deref()), &key, crate::backend::vault::expiry::today())).await
 }
 
 /// `POST /api/v1/vault/verify`

@@ -118,6 +118,10 @@ pub(crate) fn purge_identity_store_rows(
     if let Err(e) = id_store.agent_credentials_purge_agent(agent_id) {
         tracing::warn!(agent_id, caller, error = %e, "cloud credentials left behind for deleted agent");
     }
+    // The logins the person shared with it, and the "Always" it held for them (spec A9).
+    if let Err(e) = crate::backend::vault::shares::forget_agent(identity_store, agent_id) {
+        tracing::warn!(agent_id, caller, error = %e, "logins shared with a deleted agent left shared");
+    }
     match identity_store.agent_dependents_purge(agent_id) {
         Ok(0) => {}
         Ok(removed) => tracing::debug!(

@@ -159,15 +159,19 @@ pub(crate) async fn fill_picked(state: &AppState, block_id: &str, entry: &str, k
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>, reason: &str, keep_focus: bool) -> Result<(String, bool), String> {
     let origins = form_origins(block_id);
+    // An agent's sign-in is limited to the Vaults it may use, and in its own profile's tab to the logins shared with it.
+    let own = shown.is_some().then(|| super::browser_signin::own_uid(state, actor, profile)).flatten();
+    let agent = shown.is_some().then(|| actor.to_string());
     let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
     let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
+        let who = agent.as_deref().map(|a| (a, own.as_deref()));
         let Some((created, site)) = shown else {
-            return signins::for_fill(&store, &id, &profile, &origins);
+            return signins::for_fill(&store, &id, &profile, &origins, who);
         };
         if store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| r.created_at) != Some(created) {
             return Err("the sign-in was deleted or replaced while the person was asked, so nothing was typed".to_string());
         }
-        let found = signins::for_fill(&store, &id, &profile, &origins)?;
+        let found = signins::for_fill(&store, &id, &profile, &origins, who)?;
         if found.0 != site {
             return Err(format!("the sign-in's site was changed from {site} while the person was asked, so nothing was typed"));
         }

@@ -34,6 +34,7 @@ pub mod route_key;
 pub mod scrub;
 pub mod seal;
 pub mod setting_key;
+pub mod shares;
 pub mod signins;
 pub mod signups;
 pub mod slots;
@@ -117,6 +118,9 @@ pub struct VaultAgentEntry {
     /// Where a copy of its value lives outside the Vault, and what the newest check of it found.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<source_link::AgentLink>,
+    /// A login the person shared with this agent's own browser profile (never with whom else, A8).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shared_with_you: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -217,6 +221,9 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         }
         if k == signins::PROFILE && !signins::is_profile(v) {
             return Err(format!("{v:?} isn't a browser profile: personal or profile:<id>"));
+        }
+        if k == shares::SHARED && v.split(',').any(|w| w.trim() != shares::EVERY_AGENT && !shares::is_uid(w.trim())) {
+            return Err("shared lists agents by their permanent uid, or *".into());
         }
         if k == signins::PROXY && v != "yes" {
             return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
@@ -800,6 +807,11 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
 /// Every entry `agent` may use, as it may see it. Reads no value, so it never needs the
 /// keychain. An agent that isn't proven (`None`) sees the Vaults open to every agent.
 pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
+    list_for_agent_as(store, agent, None)
+}
+
+/// [`list_for_agent`], telling the agent whose permanent uid is `uid` which logins are shared with it.
+pub fn list_for_agent_as(store: &Store, agent: Option<&str>, uid: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
     let vaults = store.vaults().map_err(|e| e.to_string())?;
     Ok(store
         .vault_list()
@@ -814,7 +826,8 @@ pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAge
             let expires = expiry::of(&r).map(|d| d.to_string());
             let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
             let source = source_link::for_agent(store, &r);
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source })
+            let shared_with_you = uid.is_some_and(|u| shares::names(&signins::fields_of(&r), u));
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source, shared_with_you })
         })
         .collect())
 }

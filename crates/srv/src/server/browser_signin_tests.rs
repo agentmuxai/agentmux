@@ -75,6 +75,11 @@ struct Setup {
 /// An agent with its own browser pane of `identity`, a sign-in form of a site
 /// of its own on the page, and the host's stand-in.
 async fn setup(identity: Option<&str>) -> Setup {
+    setup_as(identity, None).await
+}
+
+/// [`setup`] for an agent with the permanent uid `uid`, which a share names.
+async fn setup_as(identity: Option<&str>, uid: Option<&str>) -> Setup {
     seal::use_test_key();
     let state = crate::server::tests::test_state();
     let host = Arc::new(Host::default());
@@ -91,7 +96,10 @@ async fn setup(identity: Option<&str>) -> Setup {
     }
     state.mstore.insert(&mut block).unwrap();
     let agent = format!("signer-{}", uuid::Uuid::new_v4());
-    state.reactive_handler.register_agent(&agent, &block.oid, None).unwrap();
+    match uid {
+        Some(u) => state.reactive_handler.register_agent_full(&agent, &block.oid, None, 0, None, Some(u), "test.share").unwrap(),
+        None => state.reactive_handler.register_agent(&agent, &block.oid, None).unwrap(),
+    };
     let key = state.mstore.agent_jekt_key_ensure(&agent).unwrap();
     let ts = agentmux_common::time::now_secs();
     let sig = agentmux_common::jekt_sign::sign_jekt(&key, "ui-automation-identity", &agent, "__srv__", ts, "");
@@ -358,4 +366,83 @@ async fn a_sign_in_whose_site_is_edited_while_the_person_is_asked_is_not_typed()
     assert_ne!(status, StatusCode::OK, "{body}");
     assert!(body.to_string().contains("nothing was typed"), "{body}");
     assert!(typed(&s).is_none(), "nothing typed into a site the person wasn't asked about");
+}
+
+// ---- A login the person shared with an agent's own browser profile (spec section 5) ----
+
+const OWNER: &str = "uid-share-owner-0001";
+
+fn own_profile(uid: &str) -> String {
+    format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(uid))
+}
+
+fn share(s: &Setup, entry: &str, who: &str) {
+    crate::backend::vault::shares::add(&s.state.identity_store, entry, who).unwrap();
+}
+
+#[tokio::test]
+async fn a4_an_agent_signs_in_with_a_login_shared_with_it_in_its_own_profile() {
+    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    let entry = save(&s, "alex@example.com");
+    // Not shared: nothing is offered, and the agent is told how to ask.
+    let (status, body) = signin(&s, Some(&entry)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("Vault share"), "{body}");
+    assert!(typed(&s).is_none());
+    // Shared: it asks as a sign-in does, and Always is kept for this entry, the uid, the profile and the site.
+    share(&s, &entry, OWNER);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
+    let (status, body) = signin(&s, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = ask.await.unwrap();
+    assert!(asked.signin && asked.offer_always && asked.reason.contains("shared this login"), "{asked:?}");
+    let sent = typed(&s).expect("typed into the agent's own tab");
+    assert_eq!((sent["origin"].as_str(), sent["password"].as_str()), (Some(s.site.as_str()), Some("correct horse")));
+    assert!(!body.to_string().contains("correct horse") && !body.to_string().contains("alex@example.com"), "{body}");
+    let held = |agent: &str, profile: &str, site: &str| s.state.identity_store.vault_grant_check(&entry, &grant_key(agent, profile, site)).unwrap();
+    assert!(held(OWNER, &own_profile(OWNER), &s.site), "named by its uid");
+    assert!(!held(&s.auth.agent_id, &own_profile(OWNER), &s.site), "not by a name");
+    assert!(!held(OWNER, &own_profile(OWNER), "https://elsewhere.example.com"), "for the site approved only");
+    // A granted use shows its notice and asks nobody; removing the share ends it.
+    crate::backend::vault::shares::remove(&s.state.identity_store, &entry, OWNER).unwrap();
+    assert!(!held(OWNER, &own_profile(OWNER), &s.site), "the Always went with the share");
+    let (status, _) = signin(&s, Some(&entry)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "no longer shared");
+}
+
+#[tokio::test]
+async fn a4_not_in_another_agents_tab_another_profile_or_incognito() {
+    let work = "profile:p-0123456789ab";
+    // A login of the Work profile, shared with the agent: offered in the agent's own profile's tab only.
+    for (identity, what) in [(None, "Personal's tab"), (Some("profile:p-aaaaaaaaaaaa"), "another profile's tab"), (Some("incognito:aaaaaaaa-1111"), "an Incognito tab"), (Some(own_profile("uid-someone-else").as_str()), "another agent's profile")] {
+        let s = setup_as(identity, Some(OWNER)).await;
+        let space = Space { profile: work.into(), origin: s.site.clone(), realm: String::new(), proxy: false };
+        let entry = signins::save(&s.state.identity_store, &space, "alex", "correct horse").unwrap();
+        share(&s, &entry, OWNER);
+        let (status, body) = signin(&s, Some(&entry)).await;
+        assert_ne!(status, StatusCode::OK, "{what}: {body}");
+        assert!(typed(&s).is_none(), "{what}: nothing typed");
+        assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id), "{what}: nobody was asked");
+    }
+}
+
+#[tokio::test]
+async fn a4_a_container_agent_cannot_use_an_unshared_personal_login() {
+    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    save(&s, "alex");
+    let (status, body) = signin(&s, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(typed(&s).is_none() && uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+}
+
+#[tokio::test]
+async fn a3_every_agent_still_asks_on_first_use() {
+    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, crate::backend::vault::shares::EVERY_AGENT);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, _) = signin(&s, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(ask.await.unwrap().signin, "the person was asked");
+    assert!(typed(&s).is_none());
 }

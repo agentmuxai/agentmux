@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use super::source_link::{self, Link};
-use super::{expiry, history, kinds, linked, record_line, seal, signins, signups, validate, vaults, Line, Parts};
+use super::{expiry, history, kinds, linked, record_line, seal, shares, signins, signups, validate, vaults, Line, Parts};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::vault::{VaultRow, VALUE_SETTING};
 
@@ -81,6 +81,9 @@ pub struct Shown {
     /// The newest check of the place its fields name, when there is one of the entry as it is now.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<source_link::VaultSourceCheck>,
+    /// A login the person shared with this agent's own browser profile (never with whom else, A8).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shared_with_you: bool,
 }
 
 fn expiry_state(row: &VaultRow, today: chrono::NaiveDate) -> (&'static str, Option<i64>) {
@@ -94,7 +97,13 @@ fn expiry_state(row: &VaultRow, today: chrono::NaiveDate) -> (&'static str, Opti
 /// last use, for an entry in a Vault `agent` may use. It is what an agent is given, so the login the entry's machine
 /// copy is read under is not among the fields, as in `list`.
 pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today: chrono::NaiveDate) -> Result<Shown, String> {
+    show_as(store, id, (agent, None), key, today)
+}
+
+/// [`show`], telling the agent `(name, permanent uid)` whether the login is shared with it.
+pub fn show_as(store: &Store, id: &str, (agent, uid): (Option<&str>, Option<&str>), key: &KeyResult, today: chrono::NaiveDate) -> Result<Shown, String> {
     let row = entry_for(store, id, agent)?;
+    let shared_with_you = uid.is_some_and(|u| shares::names(&fields_of(&row), u));
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     let (parts_set, readable) = match key.as_ref().ok().and_then(|k| seal::open(k, &row.id, &row.sealed).ok()) {
         Some(mut parts) => {
@@ -127,6 +136,7 @@ pub fn show(store: &Store, id: &str, agent: Option<&str>, key: &KeyResult, today
         created_at: row.created_at,
         updated_at: row.updated_at,
         last_used_at: row.last_used_at,
+        shared_with_you,
     })
 }
 
@@ -157,7 +167,7 @@ pub struct Updated {
 /// person's to set, like choosing a sign-in Vault. An agent that could change them could point a login's password at
 /// a site of its own.
 fn person_only(field: &str) -> bool {
-    [signins::SITE, signins::REALM, signins::PROFILE, signins::PROXY].contains(&field)
+    [signins::SITE, signins::REALM, signins::PROFILE, signins::PROXY, shares::SHARED].contains(&field)
 }
 
 /// Tags AgentMux itself sets to keep a sign-in from being offered (the site refused it, or it was made on a sign-up
@@ -179,7 +189,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
     let mut fields = now.clone();
     for (name, value) in asked {
         if person_only(name) {
-            return Err(format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane"));
+            return Err(format!("{name} decides where a saved sign-in is offered, and to whom: the person sets it in the Vault pane (an agent asks to be given a login with Vault share)"));
         }
         if !kind.fields.contains(&name.as_str()) && !source_link::is_field(name) && !linked::is_field(name) {
             return Err(format!("a {} entry has no field {name:?}", kind.name));
