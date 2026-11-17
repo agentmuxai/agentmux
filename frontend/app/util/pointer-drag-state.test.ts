@@ -184,6 +184,13 @@ describe("pointer-drag-state", () => {
             expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
         });
 
+        it("ends when the wheel is turned: what the wheel brings under the pointer is hovered like anything else", () => {
+            window.dispatchEvent(at("pointerdown", 100, 20));
+            window.dispatchEvent(at("pointerup", 100, 20));
+            window.dispatchEvent(new WheelEvent("wheel", { clientX: 100, clientY: 20, deltaY: 40, bubbles: true }));
+            expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(false);
+        });
+
         it("counts a press with any mouse button, and none by touch", () => {
             window.dispatchEvent(at("pointerdown", 100, 20, { button: 2 }));
             expect(isRestingAtPress({ clientX: 100, clientY: 20 })).toBe(true);
