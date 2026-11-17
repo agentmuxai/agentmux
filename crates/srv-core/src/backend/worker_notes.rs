@@ -23,9 +23,12 @@ use crate::backend::mps::{Broker, MuxEvent};
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
+use super::worker_failure_note::FAILED_AT;
 
 /// The fewest milliseconds between two notes about the same worker.
 const NOTE_GAP_MS: u64 = 60_000;
+/// How long an exit waits for the failure that ended the turn, so its note can leave the cause to that failure's.
+const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1_000);
 /// How much of a worker's last message a note quotes.
 const LAST_WORDS_CHARS: usize = 200;
 
@@ -148,13 +151,39 @@ pub fn install(
             if !seen.first(&ev) {
                 continue;
             }
-            let (store, filestore) = (mstore.clone(), filestore.clone());
-            let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
-            if let Ok(Some((leader_block, text, wait_key))) = note {
-                deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
+            if let WorkerEvent::Failed { block_id, .. } = &ev {
+                FAILED_AT.lock().record(block_id, std::time::Instant::now());
+            }
+            let (mstore, filestore, config) = (mstore.clone(), filestore.clone(), config.clone());
+            if matches!(ev, WorkerEvent::Exited { .. }) {
+                // Off the loop, so the wait delays no other worker's note.
+                tokio::spawn(note_exit(ev, mstore, filestore, config));
+            } else {
+                send_note(ev, mstore, filestore, config).await;
             }
         }
     });
+}
+
+/// The note for `ev`, delivered.
+async fn send_note(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+    let store = mstore.clone();
+    let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
+    if let Ok(Some((leader_block, text, wait_key))) = note {
+        deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
+    }
+}
+
+/// An exit's note, unless the failure that ended the turn speaks for it (#2617): its `agentfailure` follows the
+/// exit within milliseconds and names the cause, so the exit waits `EXIT_SETTLE` for it.
+async fn note_exit(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+    let WorkerEvent::Exited { block_id, .. } = &ev else { return };
+    let (block_id, heard_at) = (block_id.clone(), std::time::Instant::now());
+    tokio::time::sleep(EXIT_SETTLE).await;
+    if FAILED_AT.lock().speaks_for_exit(&block_id, heard_at) {
+        return;
+    }
+    send_note(ev, mstore, filestore, config).await;
 }
 
 /// A worker pane's worker and leader, as srv knows them.
@@ -234,7 +263,10 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
             turn_end_body(&worker.name, words)
         }
         WorkerEvent::Exited { .. } => format!("Your worker {} stopped: its process exited.", worker.name),
-        WorkerEvent::Failed { title, .. } => format!("Your worker {} stopped with an error: {title}.", worker.name),
+        WorkerEvent::Failed { title, .. } => {
+            let meta = mstore.get::<Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
+            super::worker_failure_note::failed_body(&worker.name, title, &meta, agentmux_common::time::now_ms_u64())
+        }
         WorkerEvent::Asked { .. } => format!(
             "Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.",
             worker.name
