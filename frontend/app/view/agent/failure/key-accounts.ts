@@ -12,8 +12,6 @@ import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 
 /** The mark a key account carries wherever it is named, so it cannot be mistaken for a plan. */
 export const API_MARK = "API";
-/** Why a container agent's menu has no key rows. */
-export const KEYS_NOT_FOR_CONTAINERS = "API keys aren't offered to container agents yet";
 
 /** An Anthropic API key: provider `anthropic`, kind `api_key`. */
 export function isKeyAccount(a: { provider?: string; kind?: string } | null | undefined): boolean {
@@ -57,17 +55,13 @@ export function boundLabel(accounts: readonly Account[], linkedId: string | unde
     return bound && isKeyAccount(bound) ? keyLabel(bound) : boundAccountEmail(accounts, linkedId);
 }
 
-/** The accounts the chip menu offers a providerId agent, newest first. A container agent is not offered a key. */
-export function menuChoices(accounts: readonly Account[], providerId: string, container: boolean): Account[] {
+/** The accounts the chip menu offers a providerId agent, newest first. A container agent is offered the same as a native one:
+ *  its container reaches the gateway, never the key. */
+export function menuChoices(accounts: readonly Account[], providerId: string): Account[] {
     const provider = resolveProviderAlias(providerId);
     return accounts
-        .filter((a) => offered(providerId, a, (x) => resolveProviderAlias(x.provider) === provider) && !(container && isKeyAccount(a)))
+        .filter((a) => offered(providerId, a, (x) => resolveProviderAlias(x.provider) === provider))
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-}
-
-/** Whether a container agent has keys it is not offered, so its menu says why. */
-export function keysHeldBack(accounts: readonly Account[], providerId: string, container: boolean): boolean {
-    return container && resolveProviderAlias(providerId) === "claude" && accounts.some((a) => isKeyAccount(a) && offered(providerId, a, () => false));
 }
 
 /** One account's row in the chip menu: a plan by its login and quota note, a key by its name and the mark. */

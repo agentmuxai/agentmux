@@ -594,7 +594,8 @@ fn prune(dir: &Path, today: &str) {
         .collect();
     let doomed = files_to_remove(&files, today, KEEP_DAYS, MAX_BYTES)
         .into_iter()
-        .chain(rollups_to_remove(&files, today, ROLLUP_KEEP_DAYS, ROLLUP_MAX_BYTES));
+        .chain(rollups_to_remove(&files, today, ROLLUP_KEEP_DAYS, ROLLUP_MAX_BYTES))
+        .chain(events_to_remove(&files, today, ROLLUP_KEEP_DAYS));
     for name in doomed {
         if let Err(e) = std::fs::remove_file(dir.join(&name)) {
             tracing::warn!(error = %e, file = %name, "[record] an old day could not be removed");
@@ -602,9 +603,46 @@ fn prune(dir: &Path, today: &str) {
     }
 }
 
+/// The events of the months that overlap `from_ms` to `to_ms` taken in that window, newest `limit` in time order,
+/// and how many the window holds. Each is the line as written: `t`, `kind` and numbers.
+pub fn read_events(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> (usize, Vec<serde_json::Value>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return (0, Vec::new()) };
+    let mut files: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| Some((agentmux_common::record_events::month_of_file(e.file_name().to_str()?)?.to_string(), e.path())))
+        .collect();
+    files.sort();
+    let mut out: Vec<(u64, serde_json::Value)> = Vec::new();
+    for (_, path) in files {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        out.extend(
+            text.lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .filter_map(|v| Some((v["t"].as_u64().filter(|t| *t >= from_ms && *t <= to_ms)?, v))),
+        );
+    }
+    out.sort_by_key(|(t, _)| *t);
+    let total = out.len();
+    out.drain(..total.saturating_sub(limit));
+    (total, out.into_iter().map(|(_, v)| v).collect())
+}
+
+/// The events files to delete: a month that ended more than `keep_days` before `today`.
+pub fn events_to_remove(files: &[(String, u64)], today: &str, keep_days: i64) -> Vec<String> {
+    let Ok(today_date) = chrono::NaiveDate::parse_from_str(today, DAY_FORMAT) else { return Vec::new() };
+    files
+        .iter()
+        .filter_map(|(name, _)| {
+            let start = chrono::NaiveDate::parse_from_str(&format!("{}-01", agentmux_common::record_events::month_of_file(name)?), DAY_FORMAT).ok()?;
+            let end = start.checked_add_months(chrono::Months::new(1))?;
+            ((today_date - end).num_days() > keep_days).then(|| name.clone())
+        })
+        .collect()
+}
+
 /// Where this machine keeps its record: the `record` folder of the data directory.
 pub fn default_dir() -> Option<PathBuf> {
-    agentmux_common::data_paths::DataPaths::from_env().map(|p| p.data_dir.join("record"))
+    agentmux_common::record_events::record_dir()
 }
 
 /// What the record holds on disk.
@@ -617,6 +655,9 @@ pub struct Inventory {
     pub raw_first_day: Option<String>,
     pub rollup_months: u32,
     pub rollup_bytes: u64,
+    /// Stall events kept (`agentmux_common::record_events`), in bytes.
+    #[serde(default)]
+    pub event_bytes: u64,
     /// The oldest month kept, `2026-01`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollup_first_month: Option<String>,
@@ -634,6 +675,8 @@ pub fn inventory(dir: &Path) -> Inventory {
         if day_from_file(&name).is_some() {
             inv.raw_bytes += size;
             days.push(name.trim_end_matches(&format!(".{EXT}")).to_string());
+        } else if agentmux_common::record_events::month_of_file(&name).is_some() {
+            inv.event_bytes += size;
         } else if month_from_file(&name).is_some() {
             inv.rollup_bytes += size;
             months.push(name.trim_start_matches(ROLLUP_PREFIX).trim_end_matches(&format!(".{EXT}")).to_string());
@@ -1032,6 +1075,27 @@ mod tests {
         assert_eq!((inv.raw_first_day.as_deref(), inv.rollup_first_month.as_deref()), (Some("2026-11-16"), Some("2026-11")));
         assert!(inv.raw_bytes > 0 && inv.rollup_bytes > 0);
         assert_eq!(inventory(&tmp.path().join("nothing")), Inventory::default());
+    }
+
+    #[test]
+    fn events_are_read_back_by_window_and_counted_and_old_months_go() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("record");
+        for i in 0..5u64 {
+            agentmux_common::record_events::append_event(&dir, NOON + i * 60_000, "ui_stall", serde_json::json!({ "ms": 1_000 * (i + 1) })).unwrap();
+        }
+        // The next month's file, and a line with no time that is not an event.
+        agentmux_common::record_events::append_event(&dir, NOON + 30 * DAY_MS, "srv_stall", serde_json::json!({ "ms": 7 })).unwrap();
+        std::fs::write(dir.join("events-2026-10.jsonl"), "{\"kind\":\"x\"}
+not json
+").unwrap();
+        let (total, last2) = read_events(&dir, 0, NOON + 10 * DAY_MS, 2);
+        assert_eq!(total, 5);
+        assert_eq!(last2.iter().map(|e| e["ms"].as_u64().unwrap()).collect::<Vec<_>>(), [4_000, 5_000]);
+        assert_eq!(read_events(&dir, 0, u64::MAX, 100).0, 6);
+        assert_eq!(inventory(&dir).event_bytes > 0, true);
+        let files: Vec<(String, u64)> = ["events-2025-09.jsonl", "events-2026-09.jsonl", "events-2026-11.jsonl", "2026-11-15.jsonl"].iter().map(|n| (n.to_string(), 10)).collect();
+        assert_eq!(events_to_remove(&files, "2026-11-16", 366), ["events-2025-09.jsonl"]);
     }
 
     #[test]

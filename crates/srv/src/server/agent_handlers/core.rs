@@ -755,6 +755,8 @@ pub(crate) async fn delete_agent_definition(state: &AppState, id: &str, via: &'s
     // Deleting an agent is the one thing that deletes its parked block (and stops it).
     crate::sagas::park_agents::delete_parked_blocks_of(state, id).await;
     state.mstore.agent_def_delete(id).map_err(|e| format!("{via}: {e}"))?;
+    // A key account's gateway token ends with the agent, before the container's own cleanup (which also ends it) runs.
+    crate::backend::model_gateway::token::revoke(id, crate::backend::model_gateway::catalog::KEY_ROUTE_ID);
     super::purge_identity_store_rows(&state.identity_store, &state.id_store, id, via);
     // A container agent's container and volumes (a developer agent's build output is gigabytes) go with it.
     // The container is named by the definition's id, a UUID that no later agent is given, so a new agent
@@ -868,5 +870,18 @@ mod tests {
             exported.provider, "codex",
             "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_an_agent_ends_its_api_key_token() {
+        use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+        let state = test_state();
+        seed_drifted_agent(&state, "agent-del-key", "bundle-none");
+        let on_key = token::renew_for_account("agent-del-key", "agent-del-key", KEY_ROUTE_ID, "acct", None);
+        let other = token::renew_for_account("agent-keep-key", "agent-keep-key", KEY_ROUTE_ID, "acct", None);
+        delete_agent_definition(&state, "agent-del-key", "test").await.unwrap();
+        assert_eq!(token::grant_for(&on_key), None);
+        assert!(token::grant_for(&other).is_some(), "another agent's token stays");
+        token::revoke("agent-keep-key", KEY_ROUTE_ID);
     }
 }

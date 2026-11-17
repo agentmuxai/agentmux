@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 153 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1102 crates/cef/src/ipc.rs::route_command
+1103 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -162,7 +162,6 @@
 211 crates/srv-core/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv-core/src/backend/bundle_export.rs::export_bundle
 130 crates/srv-core/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
-106 crates/srv-core/src/backend/container.rs::ContainerManager::create_and_start
 115 crates/srv-core/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner
 170 crates/srv-core/src/backend/fs_ops/host_jobs.rs::Transfer::entry
 128 crates/srv-core/src/backend/fs_ops/host_jobs.rs::Transfer::file
@@ -328,7 +327,7 @@
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
 138 frontend/app/modals/command-palette.tsx::CommandPaletteModal
-120 frontend/app/notification/notificationitem.tsx::NotificationItem
+114 frontend/app/notification/notificationitem.tsx::NotificationItem
 111 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
@@ -367,7 +366,7 @@
 257 frontend/app/view/agent/components/my-agents-list-data.ts::useMyAgentsData
 326 frontend/app/view/agent/components/shell-highlight/tokenize.ts::Scanner::scanListInner
 189 frontend/app/view/agent/failure/failure-accessory.ts::failureToRow
-157 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
+156 frontend/app/view/agent/failure/useAccountBinding.ts::useAccountBinding
 227 frontend/app/view/agent/flows/launch-flow.ts::runLaunchFlow
 220 frontend/app/view/agent/flows/run-provider-login.ts::runProviderLogin
 136 frontend/app/view/agent/history/HistoryNavigator.tsx::HistoryNavigator

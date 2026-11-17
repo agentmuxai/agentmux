@@ -99,7 +99,7 @@ async fn a_key_known_to_be_rejected_is_refused_saying_so() {
 }
 
 #[tokio::test]
-async fn a_container_agent_and_an_agent_on_a_model_route_are_not_moved_onto_a_key() {
+async fn a_container_agent_takes_a_key_like_a_host_agent_and_an_agent_on_a_model_route_does_not() {
     let state = test_state();
     let _plain = setup(&state).await;
     // The agent's pane runs in a container.
@@ -115,11 +115,15 @@ async fn a_container_agent_and_an_agent_on_a_model_route_are_not_moved_onto_a_ke
         .unwrap();
     agent_def(&state, "box");
     state.identity_store.agent_identity_link("box", "old", "claude").unwrap();
-    let err = switch::switch(&state, "", &switch_req("box", "key1", AfterTurn)).unwrap_err();
-    assert!(err.contains("container agents"), "{err}");
-    assert_eq!(linked_account(&state, "box"), ["old"], "nothing changed");
-    // …but a plan is still a move.
+    // Its container reaches the gateway, never the key: a key is a move for it as for a host agent, and a plan is a move back.
+    let r = switch::switch(&state, "", &switch_req("box", "key1", AfterTurn)).unwrap();
+    assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("box").unwrap().into_iter().map(|l| (l.provider, l.account_id)).collect::<Vec<_>>(), [("anthropic".to_string(), "key1".to_string())], "one payer");
+    assert!(crate::server::spend_watch::spends_through_gateway(&state, "box"), "a container agent on a key is counted and capped at the gateway too");
+    let token = crate::backend::model_gateway::token::token_for_account("box", "box", crate::backend::model_gateway::catalog::KEY_ROUTE_ID, "key1");
     assert_eq!(switch::switch(&state, "", &switch_req("box", "plan2", AfterTurn)).unwrap().status, switch::AccountSwitchStatus::Switched);
+    assert_eq!(crate::backend::model_gateway::token::grant_for(&token), None, "its token ended when it left the key");
+    assert_eq!(linked_account(&state, "box"), ["plan2"]);
 
     assert!(switch::receiving(&state, "ag", "key1").is_some(), "before it is on a route, a key can be received");
     crate::backend::model_gateway::launch::set_choice(&state.mstore, "ag", "claude", "openrouter", "").unwrap();

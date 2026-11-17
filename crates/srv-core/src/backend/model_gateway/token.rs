@@ -7,6 +7,7 @@
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 
 /// Prefix that marks a gateway token in logs and bug reports.
@@ -22,12 +23,19 @@ pub struct Grant {
     pub route: String,
     /// The API-key account the token spends, for the key route (`catalog::KEY_ROUTE_ID`); empty on a model route.
     pub account: String,
+    /// The one address the token may be used from: the container's own on the agents network (Linux), set at the start of
+    /// each container turn. `None` for a host agent's token, and for a container's on a platform where the container reaches
+    /// srv through Docker's own forwarding (Docker Desktop), where the token holds for this machine.
+    pub peer: Option<IpAddr>,
 }
 
 #[derive(Default)]
 struct Registry {
     by_digest: HashMap<[u8; 32], Grant>,
     by_agent: HashMap<(String, String), String>,
+    /// A key-route token that [`renew_for_account`] replaced, and whose agent and route it was for: only so a turn that was
+    /// set up with it can still say whose turn it is ([`current_grant_of_replaced`]). It authorizes nothing.
+    replaced: HashMap<[u8; 32], (String, String)>,
 }
 
 fn registry() -> &'static Mutex<Registry> {
@@ -56,8 +64,42 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     let key = (def_id.to_string(), route.to_string());
     let token = reg.by_agent.get(&key).cloned().unwrap_or_else(mint);
     reg.by_agent.insert(key, token.clone());
-    reg.by_digest.insert(digest(&token), Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string() });
+    // A token a container turn is running on keeps its address when the next message's environment asks for it again.
+    let peer = reg.by_digest.get(&digest(&token)).and_then(|g| g.peer);
+    reg.by_digest.insert(digest(&token), Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string(), peer });
     token
+}
+
+/// The key route's token for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
+/// working at once unless it already holds exactly this grant (the same agent, account and address): two panes of one
+/// container agent run turns that overlap, and the second must not end the token the first is running on. A container's
+/// token ends with the container ([`revoke_agent`]), so a recreated container, a new address or another account is always
+/// given a new one.
+pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, peer: Option<IpAddr>) -> String {
+    let mut reg = registry().lock().unwrap();
+    let key = (def_id.to_string(), route.to_string());
+    let grant = Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string(), peer };
+    if let Some(old) = reg.by_agent.get(&key).cloned() {
+        if reg.by_digest.get(&digest(&old)) == Some(&grant) {
+            return old;
+        }
+        reg.by_agent.remove(&key);
+        reg.by_digest.remove(&digest(&old));
+        reg.replaced.insert(digest(&old), key.clone());
+    }
+    let token = mint();
+    reg.by_agent.insert(key, token.clone());
+    reg.by_digest.insert(digest(&token), grant);
+    token
+}
+
+/// The agent's current grant for a token that [`renew_for_account`] replaced, while the agent still holds one for that route:
+/// a message queued during a container agent's first turn was set up with the token that turn then replaced. The replaced
+/// token itself is never accepted ([`grant_for`] says none); this only names whose turn it is. Gone with the agent's token.
+pub fn current_grant_of_replaced(token: &str) -> Option<Grant> {
+    let reg = registry().lock().unwrap();
+    let key = reg.replaced.get(&digest(token))?;
+    reg.by_digest.get(&digest(reg.by_agent.get(key)?)).cloned()
 }
 
 pub fn grant_for(token: &str) -> Option<Grant> {
@@ -70,8 +112,28 @@ pub fn grant_for(token: &str) -> Option<Grant> {
 /// Ends the agent's access to `route` without touching its environment: the next request is refused.
 pub fn revoke(def_id: &str, route: &str) {
     let mut reg = registry().lock().unwrap();
-    if let Some(token) = reg.by_agent.remove(&(def_id.to_string(), route.to_string())) {
+    let key = (def_id.to_string(), route.to_string());
+    if let Some(token) = reg.by_agent.remove(&key) {
         reg.by_digest.remove(&digest(&token));
+    }
+    reg.replaced.retain(|_, k| *k != key);
+}
+
+/// Ends every token for `route` that was made for the agent `name` names: its definition id or its routing id (slug). A
+/// container is named from the agent's id, so this is what its stop, recreation and removal can say.
+pub fn revoke_agent(name: &str, route: &str) {
+    let mut reg = registry().lock().unwrap();
+    let ended: Vec<(String, String)> = reg
+        .by_agent
+        .keys()
+        .filter(|(def_id, r)| r == route && reg.by_agent.get(&(def_id.clone(), r.clone())).and_then(|t| reg.by_digest.get(&digest(t))).is_some_and(|g| g.def_id == name || g.agent == name))
+        .cloned()
+        .collect();
+    for key in ended {
+        if let Some(token) = reg.by_agent.remove(&key) {
+            reg.by_digest.remove(&digest(&token));
+        }
+        reg.replaced.retain(|_, k| *k != key);
     }
 }
 
@@ -90,6 +152,69 @@ mod tests {
         revoke("gw-def", "openrouter");
         assert_eq!(grant_for(&a), None);
         assert_ne!(token_for("gw-agent", "gw-def", "openrouter"), a);
+    }
+
+    #[test]
+    fn a_renewed_token_replaces_the_old_one_and_holds_its_address() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let first = token_for_account("tk-agent", "tk-def", "anthropic", "acct");
+        let second = renew_for_account("tk-agent", "tk-def", "anthropic", "acct", Some(ip));
+        assert_ne!(first, second);
+        assert_eq!(grant_for(&first), None, "the earlier token ends when the next turn's begins");
+        assert_eq!(grant_for(&second).unwrap().peer, Some(ip));
+        // The next message's environment asks for the agent's token again: the running turn's token keeps its address.
+        assert_eq!(token_for_account("tk-agent", "tk-def", "anthropic", "acct"), second);
+        assert_eq!(grant_for(&second).unwrap().peer, Some(ip));
+        revoke("tk-def", "anthropic");
+    }
+
+    #[test]
+    fn a_turn_that_overlaps_another_on_the_same_grant_keeps_its_token_and_any_change_ends_it() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let other: IpAddr = "172_30_0_10".replace('_', ".").parse().unwrap();
+        let first = renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(ip));
+        // A second pane's turn on the same container: the first turn's token keeps working.
+        assert_eq!(renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(ip)), first);
+        assert!(grant_for(&first).is_some());
+        // A new address (the container was made again) or another account is given a new token and the old one ends.
+        let moved = renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(other));
+        assert_ne!(moved, first);
+        assert_eq!(grant_for(&first), None);
+        let switched = renew_for_account("ov-agent", "ov-def", "anthropic", "acct-2", Some(other));
+        assert_ne!(switched, moved);
+        assert_eq!(grant_for(&moved), None);
+        revoke("ov-def", "anthropic");
+    }
+
+    #[test]
+    fn a_replaced_token_names_the_agents_current_grant_only_while_the_agent_holds_one() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let spawned = token_for_account("rp-agent", "rp-def", "anthropic", "acct");
+        let bound = renew_for_account("rp-agent", "rp-def", "anthropic", "acct", Some(ip));
+        assert_eq!(grant_for(&spawned), None, "the replaced token is never accepted");
+        assert_eq!(current_grant_of_replaced(&spawned), grant_for(&bound));
+        assert_eq!(current_grant_of_replaced(&bound), None, "a live token is not a replaced one");
+        assert_eq!(current_grant_of_replaced("amxg_never-made"), None);
+        revoke_agent("rp-def", "anthropic");
+        assert_eq!(current_grant_of_replaced(&spawned), None, "it ends with the agent's token");
+        // The same after a revoke by id.
+        let spawned = token_for_account("rp-agent", "rp-def", "anthropic", "acct");
+        renew_for_account("rp-agent", "rp-def", "anthropic", "acct", Some(ip));
+        revoke("rp-def", "anthropic");
+        assert_eq!(current_grant_of_replaced(&spawned), None);
+    }
+
+    #[test]
+    fn revoking_an_agent_ends_its_token_for_that_route_only() {
+        let key = token_for_account("rv-agent", "rv-def", "anthropic", "acct");
+        let model = token_for("rv-agent", "rv-def", "openrouter");
+        let other = token_for_account("rv-other", "rv-def-2", "anthropic", "acct");
+        revoke_agent("rv-def", "anthropic");
+        assert_eq!(grant_for(&key), None);
+        assert!(grant_for(&model).is_some(), "another route's token stays");
+        assert!(grant_for(&other).is_some(), "another agent's token stays");
+        revoke("rv-def", "openrouter");
+        revoke("rv-def-2", "anthropic");
     }
 
     #[test]

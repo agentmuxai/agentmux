@@ -148,18 +148,19 @@ export class LineSource {
         this.note(r);
         if (r.end <= r.start) return [];
         if (r.end - r.start <= PAGE_BYTES_MAX) return linesOfBytes(await this.read(r.start, r.end - 1), this.encoding);
-        // A page with a line this long: each line's start, and how much more there is.
+        // A page with a line this long: srv said where each line starts (in the pass that found the page's end), so
+        // each line is read for its start only, and the huge one is never read whole.
         const lines: LineText[] = [];
-        for (let i = 0; i < Math.min(PAGE_LINES, this.total - from); i++) lines.push(await this.longLine(from + i));
+        for (let i = 0; i < r.starts.length; i++) lines.push(await this.longLine(r.starts[i], i + 1 < r.starts.length ? r.starts[i + 1] : r.end));
         return lines;
     }
 
-    private async longLine(n: number): Promise<LineText> {
-        const r = await this.index(n, 1);
-        const length = r.end - r.start;
+    /** The line holding bytes `[start, end)`: its first LINE_READ_BYTES are read. */
+    private async longLine(start: number, end: number): Promise<LineText> {
+        const length = end - start;
         if (length <= 0) return { text: "" };
         const got = Math.min(length, LINE_READ_BYTES);
-        const bytes = await this.read(r.start, r.start + got - 1);
+        const bytes = await this.read(start, start + got - 1);
         const text = decoderOf(this.encoding).decode(bytes).replace(/\r?\n$/, "");
         // What isn't read is known in bytes only; what was read and not shown, in characters (about as many bytes).
         const hidden = length - got + Math.max(0, text.length - LINE_SHOWN_MAX);

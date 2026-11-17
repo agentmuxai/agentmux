@@ -40,6 +40,12 @@ pub(crate) fn personal_memory_host_dir(claude_config_dir: Option<&str>, working_
     Some(dir.to_string_lossy().into_owned())
 }
 
+/// Whether the agent is pointed at the gateway's key route (an API-key account). Decided from where its requests go, never
+/// from whether its token is still live: a token that has ended must not make the agent look like a plan agent.
+fn on_the_key_route(env_vars: &std::collections::HashMap<String, String>) -> bool {
+    env_vars.get("ANTHROPIC_BASE_URL").is_some_and(|url| super::key_route::names_key_route(url))
+}
+
 impl ContainerMountSpec {
     /// What an agent started with `env_vars` in `working_dir` gets mounted: its bound
     /// account's credentials, its workspace, and, for an agent with a Claude config dir,
@@ -50,9 +56,12 @@ impl ContainerMountSpec {
         let working_dir = crate::backend::base::expand_home_dir_safe(working_dir).to_string_lossy().into_owned();
         let working_dir = working_dir.as_str();
         let config_dir = env_vars.get("CLAUDE_CONFIG_DIR").map(String::as_str).filter(|d| !d.is_empty());
+        // An agent on an API key has no login of its own: the folder it runs in is the provider's default one, and whatever
+        // sign-in that holds is the person's, never the container's. Its memory folder is still shared.
+        let login_dir = config_dir.filter(|_| !on_the_key_route(env_vars));
         Self {
-            claude_config_host_dir: config_dir.and_then(super::credentials_dir_if_file_backed),
-            keychain_config_dir: config_dir
+            claude_config_host_dir: login_dir.and_then(super::credentials_dir_if_file_backed),
+            keychain_config_dir: login_dir
                 .filter(|dir| cfg!(target_os = "macos") && !std::path::Path::new(dir).join(CLAUDE_CREDENTIALS_FILE).is_file())
                 .map(str::to_string),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
@@ -317,6 +326,56 @@ mod tests {
         assert_eq!(with.claude_config_host_dir.as_deref(), Some(account.path().to_str().unwrap()));
         assert_eq!(with.keychain_config_dir, None, "a file-backed account is never staged from the Keychain");
         assert_eq!(ContainerMountSpec::for_agent(&HashMap::new(), "").keychain_config_dir, None, "no bound account, nothing to stage");
+    }
+
+    #[test]
+    fn an_agent_on_an_api_key_mounts_no_login_from_the_folder_it_runs_in_and_still_shares_its_memory() {
+        use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token, PATH_PREFIX};
+        // The provider's default folder: the person's own sign-in may be in it, as a file or in the macOS Keychain.
+        let default_dir = tempfile::tempdir().unwrap();
+        std::fs::write(default_dir.path().join(CLAUDE_CREDENTIALS_FILE), "{}").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let mut env = HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), default_dir.path().to_string_lossy().into_owned())]);
+        let plan = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
+        assert!(plan.claude_config_host_dir.is_some(), "a plan account's login is mounted");
+        let key_token = token::renew_for_account("km-slug", "km-def", KEY_ROUTE_ID, "km-acct", None);
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), key_token);
+        env.insert("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{PATH_PREFIX}{KEY_ROUTE_ID}"));
+        let key = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
+        assert_eq!(key.claude_config_host_dir, None, "no credentials file is given to a key agent's container");
+        assert_eq!(key.keychain_config_dir, None, "and no Keychain login is staged for it");
+        assert_eq!(key.memory_host_dir, plan.memory_host_dir, "its Personal Memory folder is shared as before");
+        assert!(key.memory_host_dir.is_some());
+        // A model route does not make an agent a key agent.
+        let mut model = env.clone();
+        model.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token::token_for("km-model-slug", "km-model-def", "openrouter"));
+        model.insert("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{PATH_PREFIX}openrouter"));
+        assert!(ContainerMountSpec::for_agent(&model, work.path().to_str().unwrap()).claude_config_host_dir.is_some());
+        token::revoke("km-model-def", "openrouter");
+        token::revoke("km-def", KEY_ROUTE_ID);
+    }
+
+    #[test]
+    fn an_agent_on_an_api_key_mounts_no_login_even_when_its_token_has_ended() {
+        use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token, PATH_PREFIX};
+        let default_dir = tempfile::tempdir().unwrap();
+        std::fs::write(default_dir.path().join(CLAUDE_CREDENTIALS_FILE), "{}").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let ended = token::renew_for_account("ke-slug", "ke-def", KEY_ROUTE_ID, "ke-acct", None);
+        token::revoke("ke-def", KEY_ROUTE_ID);
+        assert_eq!(token::grant_for(&ended), None);
+        let base = ("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{PATH_PREFIX}{KEY_ROUTE_ID}"));
+        let config = ("CLAUDE_CONFIG_DIR".to_string(), default_dir.path().to_string_lossy().into_owned());
+        // The token has ended, and in another case there is none: either way the agent is still on the key route.
+        for token in [Some(ended), None] {
+            let mut env = HashMap::from([base.clone(), config.clone()]);
+            if let Some(t) = token {
+                env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), t);
+            }
+            let plan = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
+            assert_eq!(plan.claude_config_host_dir, None, "the person's own sign-in is never mounted for a key agent");
+            assert_eq!(plan.keychain_config_dir, None);
+        }
     }
 
     #[test]

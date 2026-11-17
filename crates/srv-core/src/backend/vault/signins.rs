@@ -66,7 +66,7 @@ pub struct Space {
     pub proxy: bool,
 }
 
-pub(super) fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
+pub fn fields_of(row: &VaultRow) -> BTreeMap<String, String> {
     serde_json::from_str(&row.fields).unwrap_or_default()
 }
 
@@ -157,12 +157,38 @@ pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<V
         .collect())
 }
 
+/// The logins shared with the agent whose permanent uid is `uid`, saved for exactly these frame origins, whatever
+/// browser profile they belong to (spec §5, A4): `(entry id, origin, user name)`, newest first.
+fn shared_with(store: &Store, origins: &[String], uid: &str) -> Result<Vec<(String, String, String)>, String> {
+    let mut rows: Vec<VaultRow> = store
+        .vault_list()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|r| {
+            let f = fields_of(r);
+            r.kind == "login" && super::shares::names(&f, uid) && f.get(SITE).is_some_and(|s| origins.contains(s)) && !f.contains_key(REALM) && !f.contains_key(PROXY) && offered(r)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(rows.into_iter().map(|r| (r.id.clone(), fields_of(&r).get(SITE).cloned().unwrap_or_default(), fields_of(&r).get(USERNAME).cloned().unwrap_or_default())).collect())
+}
+
 /// [`offered_for`], limited to the sign-ins in Vaults `agent` may use: what an agent's own
 /// `Browser` `signin` chooses from. A sign-in in a Vault it may not use is one that is not there.
+/// `own_uid` is the agent's permanent uid when the tab is in the agent's own browser profile: the logins
+/// shared with it are offered there too, and in no other tab (A4, A5).
 /// (The key button the person presses lists every sign-in.)
-pub fn offered_for_agent(store: &Store, profile: &str, origins: &[String], agent: &str) -> Result<Vec<(String, String, String)>, String> {
+pub fn offered_for_agent(store: &Store, profile: &str, origins: &[String], agent: &str, own_uid: Option<&str>) -> Result<Vec<(String, String, String)>, String> {
+    let mut found = offered_for(store, profile, origins)?;
+    if let Some(uid) = own_uid {
+        for shared in shared_with(store, origins, uid)? {
+            if !found.iter().any(|f| f.0 == shared.0) {
+                found.push(shared);
+            }
+        }
+    }
     let mut usable = Vec::new();
-    for found in offered_for(store, profile, origins)? {
+    for found in found {
         if super::vaults::entry_usable(store, &found.0, Some(agent))? {
             usable.push(found);
         }
@@ -170,12 +196,23 @@ pub fn offered_for_agent(store: &Store, profile: &str, origins: &[String], agent
     Ok(usable)
 }
 
+/// Whether the entry `id` is a login `agent` may use, saved for one of `origins` and not shared with the agent whose uid is
+/// `uid`: what the agent is told to ask for with `Vault` `share` (A8).
+pub fn unshared_for(store: &Store, id: &str, origins: &[String], agent: &str, uid: &str) -> bool {
+    let Ok(Some(row)) = store.vault_get(id) else { return false };
+    let f = fields_of(&row);
+    row.kind == "login" && f.get(SITE).is_some_and(|s| origins.contains(s)) && !super::shares::names(&f, uid) && super::vaults::entry_usable(store, id, Some(agent)).unwrap_or(false)
+}
+
 /// What a fill of entry `id` types: `(origin, user name, password, label)`, if it
 /// is a sign-in `profile` holds for one of the frame origins the page shows a
 /// form for. Anything else is refused: a sign-in never goes to another site or
 /// another profile's tab.
-pub fn for_fill(store: &Store, id: &str, profile: &str, origins: &[String]) -> Result<(String, String, zeroize::Zeroizing<String>, String), String> {
-    let found = offered_for(store, profile, origins)?;
+pub fn for_fill(store: &Store, id: &str, profile: &str, origins: &[String], agent: Option<(&str, Option<&str>)>) -> Result<(String, String, zeroize::Zeroizing<String>, String), String> {
+    let found = match agent {
+        Some((name, own_uid)) => offered_for_agent(store, profile, origins, name, own_uid)?,
+        None => offered_for(store, profile, origins)?,
+    };
     let Some((_, origin, user)) = found.into_iter().find(|(e, _, _)| e == id) else {
         return Err("that sign-in isn't saved for this page's site in this tab's profile, so nothing was typed".to_string());
     };
@@ -297,8 +334,9 @@ pub fn counts(store: &Store) -> Result<BTreeMap<String, u32>, String> {
 
 /// Profile `id` (named `name`) is being deleted: its sign-ins move to Personal,
 /// tagged with where they came from, or are deleted with it (§9.4). Returns how
-/// many there were.
-pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Result<usize, String> {
+/// many there were. `owner` is the agent (by permanent uid) whose own profile it is: the logins shared with that
+/// agent, and the "Always" it holds, end with the profile, so the profile made for it next starts with none (A9).
+pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool, owner: Option<&str>) -> Result<usize, String> {
     let profile = format!("profile:{id}");
     let rows: Vec<VaultRow> =
         store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| fields_of(r).get(PROFILE) == Some(&profile)).collect();
@@ -311,6 +349,9 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
     }
     // The profile is going: it keeps no sign-in Vault of its own (reached only when every sign-in was dealt with).
     store.signin_vault_set(&profile, PERSONAL_VAULT).map_err(|e| e.to_string())?;
+    if let Some(uid) = owner {
+        super::shares::forget_agent(store, uid)?;
+    }
     Ok(rows.len())
 }
 

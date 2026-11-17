@@ -19,26 +19,40 @@ const MAX_ROLLUPS: usize = 1_000;
 const MAX_RAW: usize = 600;
 const DEFAULT_ROLLUPS: usize = 24;
 const DEFAULT_RAW: usize = 12;
+const MAX_EVENTS: usize = 500;
+const DEFAULT_EVENTS: usize = 50;
 const DAY_MS: u64 = 86_400_000;
 
-/// What was asked: `kind` (`rollup`, the default, or `raw`), the window `from_ms` to `to_ms` and how many of its
-/// newest lines (`limit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Rollup,
+    Raw,
+    Events,
+}
+
+/// What was asked: `kind` (`rollup`, the default, `raw` or `events`), the window `from_ms` to `to_ms` (or one UTC
+/// `day`) and how many of its newest lines (`limit`).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Ask {
-    pub raw: bool,
+    pub kind: Kind,
     pub from_ms: u64,
     pub to_ms: u64,
     pub limit: usize,
 }
 
 pub(crate) fn parse_ask(query: &HashMap<String, String>) -> Result<Ask, String> {
-    let raw = match query.get("kind").map(String::as_str) {
-        None | Some("rollup") => false,
-        Some("raw") => true,
-        Some(other) => return Err(format!("kind is \"rollup\" or \"raw\", not {other:?}")),
+    let kind = match query.get("kind").map(String::as_str) {
+        None | Some("rollup") => Kind::Rollup,
+        Some("raw") => Kind::Raw,
+        Some("events") => Kind::Events,
+        Some(other) => return Err(format!("kind is \"rollup\", \"raw\" or \"events\", not {other:?}")),
     };
     let num = |key: &str| query.get(key).map(|v| v.parse::<u64>().map_err(|_| format!("{key} is a number of milliseconds, not {v:?}")));
-    let (max, default) = if raw { (MAX_RAW, DEFAULT_RAW) } else { (MAX_ROLLUPS, DEFAULT_ROLLUPS) };
+    let (max, default) = match kind {
+        Kind::Raw => (MAX_RAW, DEFAULT_RAW),
+        Kind::Rollup => (MAX_ROLLUPS, DEFAULT_ROLLUPS),
+        Kind::Events => (MAX_EVENTS, DEFAULT_EVENTS),
+    };
     let limit = match query.get("limit") {
         Some(v) => v.parse::<usize>().map_err(|_| format!("limit is a number, not {v:?}"))?.clamp(1, max),
         None => default,
@@ -54,19 +68,26 @@ pub(crate) fn parse_ask(query: &HashMap<String, String>) -> Result<Ask, String> 
             .ok_or_else(|| format!("day is a date like 2026-11-16, not {day:?}"))? as u64;
         (from_ms, to_ms) = (start, start + DAY_MS - 1);
     }
-    Ok(Ask { raw, from_ms, to_ms, limit })
+    Ok(Ask { kind, from_ms, to_ms, limit })
 }
 
 /// The answer for `ask` read from `dir`: what the record holds, the lines, and `matched`: how many lines the window
 /// holds in all (more than `lines` when the limit cut it).
 pub(crate) fn answer(dir: &std::path::Path, ask: &Ask) -> serde_json::Value {
     let inventory = record::inventory(dir);
-    if ask.raw {
-        let (matched, lines) = record::read_raw(dir, ask.from_ms, ask.to_ms, ask.limit);
-        json!({ "kind": "raw", "inventory": inventory, "matched": matched, "lines": lines })
-    } else {
-        let (matched, lines) = record::read_rollups(dir, ask.from_ms, ask.to_ms, ask.limit);
-        json!({ "kind": "rollup", "inventory": inventory, "matched": matched, "lines": lines })
+    match ask.kind {
+        Kind::Raw => {
+            let (matched, lines) = record::read_raw(dir, ask.from_ms, ask.to_ms, ask.limit);
+            json!({ "kind": "raw", "inventory": inventory, "matched": matched, "lines": lines })
+        }
+        Kind::Rollup => {
+            let (matched, lines) = record::read_rollups(dir, ask.from_ms, ask.to_ms, ask.limit);
+            json!({ "kind": "rollup", "inventory": inventory, "matched": matched, "lines": lines })
+        }
+        Kind::Events => {
+            let (matched, lines) = record::read_events(dir, ask.from_ms, ask.to_ms, ask.limit);
+            json!({ "kind": "events", "inventory": inventory, "matched": matched, "lines": lines })
+        }
     }
 }
 
@@ -94,11 +115,14 @@ mod tests {
 
     #[test]
     fn what_is_asked_has_defaults_and_limits() {
-        assert_eq!(parse_ask(&q(&[])).unwrap(), Ask { raw: false, from_ms: 0, to_ms: u64::MAX, limit: DEFAULT_ROLLUPS });
+        assert_eq!(parse_ask(&q(&[])).unwrap(), Ask { kind: Kind::Rollup, from_ms: 0, to_ms: u64::MAX, limit: DEFAULT_ROLLUPS });
         let raw = parse_ask(&q(&[("kind", "raw"), ("limit", "99999"), ("from_ms", "5")])).unwrap();
-        assert_eq!((raw.raw, raw.from_ms, raw.limit), (true, 5, MAX_RAW));
+        assert_eq!((raw.kind, raw.from_ms, raw.limit), (Kind::Raw, 5, MAX_RAW));
+        let events = parse_ask(&q(&[("kind", "events"), ("limit", "99999")])).unwrap();
+        assert_eq!((events.kind, events.limit), (Kind::Events, MAX_EVENTS));
+        assert_eq!(parse_ask(&q(&[("kind", "events")])).unwrap().limit, DEFAULT_EVENTS);
         assert_eq!(parse_ask(&q(&[("limit", "0")])).unwrap().limit, 1);
-        assert!(parse_ask(&q(&[("kind", "all")])).unwrap_err().contains("\"rollup\" or \"raw\""));
+        assert!(parse_ask(&q(&[("kind", "all")])).unwrap_err().contains("\"events\""));
         assert!(parse_ask(&q(&[("from_ms", "yesterday")])).unwrap_err().contains("from_ms"));
         // A day is its UTC day: 2026-11-16 starts at 1_794_787_200_000.
         let day = parse_ask(&q(&[("day", "2026-11-16")])).unwrap();

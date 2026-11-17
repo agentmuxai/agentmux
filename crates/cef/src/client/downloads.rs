@@ -328,6 +328,20 @@ fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallb
     });
 }
 
+/// `1` in the environment of a dev-build instance turns the Save As panel off (see [`test_save_dir`]).
+const TEST_DOWNLOADS_ENV: &str = "AGENTMUX_TEST_DOWNLOADS";
+
+/// Where a test instance saves a download without asking: a folder in that instance's own data home, never the
+/// person's Downloads. Only when the switch is `1` and the binary is a source-tree build; a published build, and
+/// an instance with no data home to put it in, ignore the switch and ask as usual. The switch is read from the
+/// process environment, which a page cannot set.
+fn test_save_dir(switch: Option<&str>, dev_build: bool, data_dir: Option<&str>) -> Option<PathBuf> {
+    if switch != Some("1") || !dev_build {
+        return None;
+    }
+    data_dir.filter(|d| !d.is_empty()).map(|d| Path::new(d).join("test-downloads"))
+}
+
 /// Open the Save As dialog for a download, starting at the folder it would go to.
 fn show_save_dialog(block_id: &str, id: u32, suggested: &str, cb: &BeforeDownloadCallback) {
     let path = default_save_path(suggested);
@@ -707,6 +721,19 @@ wrap_download_handler! {
                 }
                 super::agent_downloads::Before::Refuse => return 0,
             }
+            // A test instance saves into its own data home with no panel, so the strip, Cancel and Show in
+            // folder can be checked without a native window on a screen (#196, D0).
+            if let Some(dir) = test_save_dir(
+                std::env::var(TEST_DOWNLOADS_ENV).ok().as_deref(),
+                agentmux_common::is_dev_self(),
+                self.state.version_data_dir.lock().as_deref(),
+            ) {
+                let _ = std::fs::create_dir_all(&dir);
+                let path = dir.join(safe_download_name(&suggested));
+                tracing::info!(target: "pane-download", %block_id, id, "test instance: saving without asking");
+                cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                return 1;
+            }
             // `can_download` already checked, but another download may have
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
@@ -1076,6 +1103,21 @@ mod tests {
             LAST_DOWNLOAD_DIR.lock().clone(),
             Some(tmp.path().to_path_buf())
         );
+    }
+
+    #[test]
+    fn the_test_switch_saves_into_the_instances_own_data_home_in_a_dev_build_only() {
+        let home = Some("/data/instance");
+        assert_eq!(test_save_dir(Some("1"), true, home), Some(Path::new("/data/instance").join("test-downloads")));
+        // A published build ignores the switch, whatever it says.
+        assert_eq!(test_save_dir(Some("1"), false, home), None);
+        // Anything but 1, or nothing, asks as usual.
+        for off in [None, Some("0"), Some("true"), Some("")] {
+            assert_eq!(test_save_dir(off, true, home), None);
+        }
+        // No data home to put it in: ask rather than fall back to some other folder.
+        assert_eq!(test_save_dir(Some("1"), true, None), None);
+        assert_eq!(test_save_dir(Some("1"), true, Some("")), None);
     }
 
     #[test]

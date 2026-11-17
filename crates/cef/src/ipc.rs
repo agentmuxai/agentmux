@@ -244,6 +244,7 @@ async fn route_command(
         "incident_acknowledge" => crate::commands::incidents::incident_acknowledge(state, args),
         // The keys the app wants forwarded out of a focused browser pane (SPEC_KEYBOARD_SHORTCUTS_SETTINGS §7).
         "set_host_keys" => crate::client::host_keys::set_host_keys(args),
+        "set_menu_keys" => crate::client::menu_keys::set_menu_keys(args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),

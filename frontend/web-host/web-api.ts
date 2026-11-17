@@ -347,6 +347,7 @@ function dragApi() {
         liveFollowQuiet: resolved(undefined),
         liveFollowFade: resolved(undefined),
         setHostKeys: noop,
+        setMenuKeys: noop,
     } satisfies Partial<AppApi>;
 }
 

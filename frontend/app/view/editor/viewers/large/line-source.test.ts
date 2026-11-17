@@ -19,7 +19,16 @@ function fileOf(text: string, mtime = 1) {
     for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10 && i + 1 < bytes.length) starts.push(i + 1);
     const index = vi.fn(async (from: number, count: number) => {
         const at = (n: number) => (n >= starts.length ? bytes.length : starts[n]);
-        return { total_lines: starts.length, size: bytes.length, mtime, start: at(from), end: at(from + count), encoding: "utf-8" };
+        const first = Math.min(from, starts.length);
+        return {
+            total_lines: starts.length,
+            size: bytes.length,
+            mtime,
+            start: at(from),
+            end: at(from + count),
+            encoding: "utf-8",
+            starts: starts.slice(first, from + count),
+        };
     });
     const read = vi.fn(async (start: number, end: number) => bytes.slice(start, end + 1));
     return { index, read, lines: starts.length };
@@ -91,12 +100,12 @@ describe("LineSource", () => {
         const f = fileOf(text, 1);
         const s = new LineSource(f.index, f.read, "utf-8");
         await s.ensure(0, 0);
-        f.index.mockImplementation(async () => ({ total_lines: 450, size: 5, mtime: 2, start: 0, end: 0, encoding: "utf-8" }));
+        f.index.mockImplementation(async () => ({ total_lines: 450, size: 5, mtime: 2, start: 0, end: 0, encoding: "utf-8", starts: [] }));
         await s.ensure(200, 200);
         expect(s.has(0, 0)).toBe(false);
     });
 
-    it("reads a page with a huge line one line at a time, each line's start only", async () => {
+    it("reads a page with a huge line one line at a time, each line's start only, after one call to the index", async () => {
         const big = "y".repeat(PAGE_BYTES_MAX + 10);
         const f = fileOf(`first\n${big}\nlast\n`);
         const s = new LineSource(f.index, f.read, "utf-8");
@@ -105,14 +114,15 @@ describe("LineSource", () => {
         expect(s.lineAt(1)?.text).toHaveLength(LINE_SHOWN_MAX);
         expect(s.lineAt(1)?.hidden).toMatch(/^\+4(\.\d+)? MB$/);
         expect(s.lineAt(2)?.text).toBe("last");
-        // Nothing read was bigger than a line's start.
+        // Nothing read was bigger than a line's start, and the index was asked once: it said where every line starts.
         for (const [a, b] of f.read.mock.calls) expect(b - a + 1).toBeLessThanOrEqual(LINE_READ_BYTES);
+        expect(f.index).toHaveBeenCalledTimes(1);
     });
 
     it("decodes a legacy file with the encoding srv found in it, not a fixed code page", async () => {
         // "Привет" in Windows-1251; the probe only said "legacy".
         const bytes = Uint8Array.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x0a]);
-        const index = vi.fn(async () => ({ total_lines: 1, size: bytes.length, mtime: 1, start: 0, end: bytes.length, encoding: "windows-1251" }));
+        const index = vi.fn(async () => ({ total_lines: 1, size: bytes.length, mtime: 1, start: 0, end: bytes.length, encoding: "windows-1251", starts: [0] }));
         const s = new LineSource(index, async (a, b) => bytes.slice(a, b + 1), "legacy");
         await s.ensure(0, 0);
         expect(s.lineAt(0)?.text).toBe("Привет");

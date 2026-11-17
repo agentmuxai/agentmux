@@ -9,6 +9,7 @@
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import type { HostKey } from "@/app/keybindings/host-keys";
+import type { MenuKey } from "@/app/keybindings/menu-keys";
 import type { HealthPayload } from "@/app/store/health-signals";
 import { jsContextMenuApi } from "@/app/host/js-context-menu";
 import { benchMark } from "@/util/startup-bench";
@@ -245,6 +246,9 @@ function windowEventApi() {
         },
         setHostKeys: (keys: HostKey[]) => {
             invokeCommand("set_host_keys", { keys }).catch(console.error);
+        },
+        setMenuKeys: (keys: MenuKey[]) => {
+            invokeCommand("set_menu_keys", { keys }).catch(console.error);
         },
 
         // --- Updater ---
