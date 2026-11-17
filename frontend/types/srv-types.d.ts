@@ -1143,6 +1143,8 @@ declare global {
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "browser:searchsuggestions"?: boolean;
+        /** Downloads in a browser pane open the Save As dialog. On unless false; off saves into Downloads. */
+        "browser:askdownloadlocation"?: boolean;
         /** Hidden browser panes hibernate (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md). On unless false. */
         "browser:hibernate"?: boolean;
         /** Minutes a browser pane is hidden before it hibernates (default 30). */

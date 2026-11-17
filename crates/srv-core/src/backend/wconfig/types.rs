@@ -164,6 +164,11 @@ pub struct SettingsType {
     /// computer (history, typed URLs). Incognito tabs never ask, as in Chrome.
     #[serde(rename = "browser:searchsuggestions", default, skip_serializing_if = "Option::is_none")]
     pub browser_search_suggestions: Option<bool>,
+    /// A download in a browser pane opens the system Save As dialog so you choose where it goes
+    /// (docs/specs/SPEC_BROWSER_PANE_DOWNLOADS_2026_10_14.md §10 Q1). On unless false. Off: a download
+    /// saves into your Downloads folder, under a name that doesn't replace a file.
+    #[serde(rename = "browser:askdownloadlocation", default, skip_serializing_if = "Option::is_none")]
+    pub browser_ask_download_location: Option<bool>,
     /// A browser pane out of sight for a while hibernates: its page closes to
     /// free its memory and loads again when the pane is about to be seen
     /// (docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md). On unless false.

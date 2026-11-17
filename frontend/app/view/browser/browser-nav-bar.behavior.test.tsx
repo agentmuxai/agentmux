@@ -147,6 +147,7 @@ function mount(url = "https://example.com/"): Rig {
         titleAtom: () => "Example Domain",
         faviconUrlAtom: () => "https://example.com/favicon.ico",
         showControlsAtom: controls,
+        pastDownloadsAtom: () => [],
         loadingAtom: () => false,
         canGoBackAtom: () => false,
         canGoForwardAtom: () => false,

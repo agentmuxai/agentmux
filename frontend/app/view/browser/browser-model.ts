@@ -31,8 +31,10 @@ import {
     DONE_ROW_MS,
     dismissDownload,
     type DownloadRow,
+    justFinished,
     type DownloadUpdate,
 } from "./downloads";
+import { createDownloadHistory } from "./download-history";
 import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -229,6 +231,9 @@ export class BrowserViewModel {
     private _downloadUnsub: (() => void) | null = null;
     /** A finished row folds away after `DONE_ROW_MS`; these are its timers. */
     private _downloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** The downloads that ended, kept for the Downloads menu after the strip's row is gone. */
+    private _history = createDownloadHistory();
+    pastDownloadsAtom: Accessor<DownloadRow[]> = this._history.past;
 
     /** The host's own notice that a navigation stopped, for when srv couldn't
      *  be told: shown when srv has no banner up, and taken down here. */
@@ -742,7 +747,13 @@ export class BrowserViewModel {
         // every pane's event; only the pane it is for keeps it.
         void getApi().listen<DownloadUpdate>("pane-download-update", (payload) => {
             if (this.closed || payload.block_id !== this.blockId) return;
-            this._downloads[1]((rows) => applyDownloadUpdate(rows, payload));
+            const ended: { row: DownloadRow | null } = { row: null };
+            this._downloads[1]((rows) => {
+                const next = applyDownloadUpdate(rows, payload);
+                ended.row = justFinished(rows, next, payload);
+                return next;
+            });
+            this._history.record(ended.row);
             if ((payload.state === "done" || payload.state === "cancelled") && payload.download_id != null) {
                 const key = String(payload.download_id);
                 clearTimeout(this._downloadTimers.get(key));
@@ -1186,7 +1197,13 @@ export class BrowserViewModel {
                 this._downloads[1]((rows) =>
                     rows.map((r) => (r.path === path ? { ...r, reason: "Couldn't open the folder." } : r)),
                 );
+                this._history.revealFailed(path);
             });
+    }
+
+    /** Empty the Downloads menu's list (the files stay where they are). */
+    clearPastDownloads(): void {
+        this._history.clear();
     }
 
     dismissDownload(key: string): void {

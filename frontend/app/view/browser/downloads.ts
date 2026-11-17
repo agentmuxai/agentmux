@@ -97,6 +97,36 @@ export function dismissDownload(rows: DownloadRow[], key: string): DownloadRow[]
     return rows.filter((r) => r.key !== key);
 }
 
+/** The most past downloads the pane's Downloads menu keeps; the oldest go first. */
+export const PAST_MAX = 30;
+
+const isFinal = (state: DownloadRow["state"] | undefined): boolean =>
+    state === "done" || state === "failed" || state === "cancelled";
+
+/** The row a host update just finished, or null when it finished nothing: a progress update, the flood line, a
+ *  repeat of an end already seen, or a late update for a row that was folded away. `before` is the rows ahead of
+ *  the update and `after` the rows once it was applied. */
+export function justFinished(before: DownloadRow[], after: DownloadRow[], u: DownloadUpdate): DownloadRow | null {
+    if (u.download_id == null || !isFinal(u.state as DownloadRow["state"])) return null;
+    const key = String(u.download_id);
+    if (isFinal(before.find((r) => r.key === key)?.state)) return null;
+    const row = after.find((r) => r.key === key);
+    return row && isFinal(row.state) ? row : null;
+}
+
+/** `past` with `row` first, as a line of its own: the strip's row is hidden after a while, but this one stays, so
+ *  its key is a number the pane counts up (the host's id repeats when a pane changes profile). */
+export function rememberPast(past: DownloadRow[], row: DownloadRow, seq: number): DownloadRow[] {
+    return [{ ...row, key: `past-${seq}` }, ...past].slice(0, PAST_MAX);
+}
+
+/** What a past download's line says after its name: the size saved, `cancelled`, or why it failed. */
+export function pastStatus(row: DownloadRow): string {
+    if (row.state === "done") return row.reason ?? (row.total > 0 ? formatBytes(row.total) : formatBytes(row.received));
+    if (row.state === "cancelled") return "cancelled";
+    return row.reason ?? "failed";
+}
+
 /** The progress words: `4.2 MB of 18.0 MB`, or `4.2 MB` when the total is unknown. */
 export function progressText(row: DownloadRow): string {
     if (row.total > 0) return `${formatBytes(row.received)} of ${formatBytes(row.total)}`;
