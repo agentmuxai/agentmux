@@ -96,13 +96,69 @@ fn an_entry_kept_on_this_machine_is_not_touched_by_a_write_or_a_removal() {
     assert_eq!(put(&store, &entry("never-seen", "x", 1)), Outcome::Applied(Applied::Created));
 }
 
-#[test]
-fn entries_that_existed_before_the_fleet_stay_on_their_machine() {
+/// A machine whose entry "hand-copied" existed when the scope table was made, so it is `machine` by default.
+fn store_with_default_machine_entry() -> Store {
     let store = Store::open_in_memory().unwrap();
     store.bundle_upsert(&bundle("hand-copied", "local wording", true)).unwrap();
     store.bundle_scope_ensure().unwrap();
+    assert_eq!(store.bundle_scope_get("hand-copied").unwrap(), SCOPE_MACHINE);
+    store
+}
+
+#[test]
+fn a_newer_write_replaces_an_entry_that_was_machine_only_by_default_and_it_then_follows_the_fleet() {
+    let store = store_with_default_machine_entry();
+    assert_eq!(put(&store, &entry("hand-copied", "pushed wording", 9_000)), Outcome::Applied(Applied::Adopted));
+
+    let b = store.bundle_get("hand-copied").unwrap().unwrap();
+    assert_eq!((b.instructions.as_str(), b.updated_at), ("pushed wording", 9_000));
+    assert_eq!(store.bundle_scope_get("hand-copied").unwrap(), SCOPE_FLEET);
+    assert!(!store.bundle_scope_is_default_machine("hand-copied").unwrap());
+    assert_eq!(Outcome::Applied(Applied::Adopted).to_json(), serde_json::json!({ "outcome": "adopted" }));
+
+    // The old text is still there, and the version says why the entry changed by itself.
+    let versions = store.bundle_version_list("hand-copied").unwrap();
+    let old = crate::backend::storage::bundle_versions::content_hash("Rules hand-copied", "local wording");
+    assert!(versions.iter().any(|v| v.content_hash == old), "the old text stays in the history, though it had no version of its own");
+    let latest = store.bundle_version_latest("hand-copied").unwrap().unwrap();
+    assert_eq!((latest.source.as_str(), latest.written_by.as_str()), (FLEET_SOURCE, "loap@charlie"));
+    let detail: serde_json::Value = serde_json::from_str(&latest.source_detail).unwrap();
+    assert_eq!(detail["lifted_machine_default"], true);
+
+    assert_eq!(put(&store, &entry("hand-copied", "newer still", 10_000)), Outcome::Applied(Applied::Updated), "after that it is an ordinary fleet entry");
+}
+
+#[test]
+fn a_default_machine_entry_with_the_same_text_follows_the_fleet_without_a_new_version() {
+    let store = store_with_default_machine_entry();
+    let versions = store.bundle_version_list("hand-copied").unwrap().len();
+    assert_eq!(put(&store, &entry("hand-copied", "local wording", 9_000)), Outcome::Applied(Applied::Adopted));
+    assert_eq!(store.bundle_scope_get("hand-copied").unwrap(), SCOPE_FLEET);
+    assert_eq!(store.bundle_version_list("hand-copied").unwrap().len(), versions, "the text did not change");
+}
+
+#[test]
+fn a_default_machine_entry_that_is_newer_here_keeps_its_text_and_its_scope() {
+    let store = store_with_default_machine_entry();
+    assert_eq!(put(&store, &entry("hand-copied", "pushed wording", 50)), Outcome::Skipped(Skipped::Older));
+    assert_eq!(store.bundle_get("hand-copied").unwrap().unwrap().instructions, "local wording");
+    assert_eq!(store.bundle_scope_get("hand-copied").unwrap(), SCOPE_MACHINE);
+}
+
+#[test]
+fn an_entry_whose_owner_chose_machine_is_kept_even_when_it_was_machine_by_default_before() {
+    let store = store_with_default_machine_entry();
+    store.bundle_scope_set("hand-copied", SCOPE_MACHINE).unwrap();
     assert_eq!(put(&store, &entry("hand-copied", "pushed wording", 9_000)), Outcome::Skipped(Skipped::MachineScope));
     assert_eq!(store.bundle_get("hand-copied").unwrap().unwrap().instructions, "local wording");
+}
+
+#[test]
+fn a_removal_does_not_lift_a_default_machine_entry() {
+    let store = store_with_default_machine_entry();
+    let removal = FleetRemoval { id: "hand-copied".into(), removed_at: 9_000, edited_by: String::new() };
+    assert_eq!(apply_remove(&store, &removal, REMOTE).unwrap(), Outcome::Skipped(Skipped::MachineScope));
+    assert!(store.bundle_get("hand-copied").unwrap().unwrap().is_global);
 }
 
 #[test]

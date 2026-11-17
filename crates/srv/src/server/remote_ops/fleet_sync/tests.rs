@@ -205,3 +205,65 @@ async fn two_machines_each_running_the_loop_end_with_the_same_entries() {
     sync_peers(b.clone(), &[peer("a")], &mut seen_b, &call_ba, now + Duration::from_secs(30)).await;
     assert_eq!(a_sees_b.asked().len() + b_sees_a.asked().len(), quiet, "converged: nothing more is sent");
 }
+
+/// A machine that already held "a" when its scope table was made, so it is `machine` there by default.
+fn machine_with_default_entry(id: &str, text: &str) -> Arc<Store> {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(json!({
+        "id": id, "name": format!("Rules {id}"), "instructions": text, "is_global": true,
+        "mcp_servers": "[]", "skills": "[]", "updated_at": 100,
+    }))
+    .unwrap();
+    store.bundle_upsert(&bundle).unwrap();
+    store.bundle_scope_ensure().unwrap();
+    store
+}
+
+#[tokio::test]
+async fn an_entry_the_peer_keeps_for_its_owner_is_reported_as_not_applied_and_not_counted_as_sent() {
+    let (mine, theirs) = (machine(), machine_with_default_entry("a", "their wording"));
+    theirs.bundle_scope_set("a", "machine").unwrap();
+    write(&mine, "a", "my newer wording", 5_000);
+    write(&mine, "b", "fresh", 6_000);
+    let fake = Fake::new(theirs.clone());
+    let call = fake.call();
+    let (mut seen, report) = (HashMap::new(), super::status::Status::default());
+
+    sync_peers_with(mine.clone(), &[peer("charlie")], &mut seen, &call, Instant::now(), &report).await;
+
+    assert_eq!(theirs.bundle_get("a").unwrap().unwrap().instructions, "their wording");
+    let snap = report.snapshot();
+    assert_eq!(snap["peers"]["charlie"]["sent"], 1, "only b arrived");
+    assert_eq!(snap["peers"]["charlie"]["not_applied"], json!({ "a": "machine_scope" }));
+    assert_eq!(snap["peers"]["charlie"]["error"], Value::Null);
+}
+
+#[tokio::test]
+async fn a_peers_default_machine_entry_takes_the_newer_write_and_counts_as_sent() {
+    let (mine, theirs) = (machine(), machine_with_default_entry("a", "their wording"));
+    write(&mine, "a", "my newer wording", 5_000);
+    let fake = Fake::new(theirs.clone());
+    let call = fake.call();
+    let (mut seen, report) = (HashMap::new(), super::status::Status::default());
+
+    sync_peers_with(mine.clone(), &[peer("charlie")], &mut seen, &call, Instant::now(), &report).await;
+
+    assert_eq!(theirs.bundle_get("a").unwrap().unwrap().instructions, "my newer wording");
+    assert_eq!(theirs.bundle_scope_get("a").unwrap(), "fleet");
+    let snap = report.snapshot();
+    assert_eq!(snap["peers"]["charlie"]["sent"], 1);
+    assert_eq!(snap["peers"]["charlie"]["not_applied"], json!({}));
+}
+
+#[tokio::test]
+async fn a_peer_that_cannot_be_listed_shows_the_reason_in_the_status() {
+    let (mine, theirs) = (machine(), machine());
+    write(&mine, "a", "one", 1_000);
+    let fake = Fake::new(theirs);
+    *fake.refuse_list.lock().unwrap() = Some("peer_cannot_do_remote_ops");
+    let call = fake.call();
+    let (mut seen, report) = (HashMap::new(), super::status::Status::default());
+
+    sync_peers_with(mine, &[peer("old-build")], &mut seen, &call, Instant::now(), &report).await;
+    assert_eq!(report.snapshot()["peers"]["old-build"]["error"], "list: peer_cannot_do_remote_ops");
+}
