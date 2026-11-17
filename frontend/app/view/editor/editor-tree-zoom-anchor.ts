@@ -35,7 +35,9 @@ function pickRow(scroller: HTMLElement, box: DOMRect, point: ZoomPoint | null): 
     }
     const selected = scroller.querySelector<HTMLElement>("[role=treeitem][aria-selected=true]");
     if (selected) {
-        const r = selected.getBoundingClientRect(); // perf:allow-layout-read — once per zoom gesture, before the change
+        // The selected row's own line: an expanded folder's item also holds every row below it.
+        const line = selected.querySelector<HTMLElement>(".file-tree-row") ?? selected;
+        const r = line.getBoundingClientRect(); // perf:allow-layout-read — once per zoom gesture, before the change
         if (r.bottom > box.top && r.top < box.bottom) return selected;
     }
     const { x, y } = anchorPoint(box, null);

@@ -1,6 +1,6 @@
 # SPEC: the Editor's file tree and the editor zoom separately
 
-**Status:** approved (all four section-7 decisions as recommended); the build is split into two PRs: shared mechanism + Editor first, Files second (§9). Spec task #47856; the build is #47857. Owner: Camper@narko. Written 2026-11-16 against origin/main `ccf775a5f8`. Local and uncommitted: it ships in the build PR.
+**Status:** active. Approved (all four section-7 decisions as recommended); the build is split into two PRs: shared mechanism + Editor first, Files second (§9). Spec task #47856; the build is #47857. Owner: Camper@narko. Written 2026-11-16 against origin/main `ccf775a5f8`. Local and uncommitted: it ships in the build PR.
 Everything in §2 was read from the code, not run. The build's first step confirms the three things marked **(verify)** in a `task dev` of its own.
 
 ## 1. The request
