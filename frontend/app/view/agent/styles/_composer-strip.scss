@@ -272,6 +272,12 @@
             background-color: var(--hover-bg-color);
         }
 
+        // One cursor: a mouse resting over a row while the keys move on leaves that row unfilled, so only the row the
+        // keys (or the pointer, when it enters a row) are on has a fill.
+        &:hover:not(.active) {
+            background: transparent;
+        }
+
         // A model route's row, the last of the panel: it opens its models in place. A line above it sets the
         // routes apart from the Effort rows, which stay with the harness's own models.
         &.is-disclosure {

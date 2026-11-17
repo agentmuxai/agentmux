@@ -32,6 +32,11 @@ describe("the model panel's row the keys are on", () => {
         expect(active).toMatch(/background-color:\s*var\(--hover-bg-color\)/);
     });
 
+    it("leaves a hovered row that is not the active one unfilled, so one row has a fill", () => {
+        const row = block(scss, ".agent-runtime-dropup-row");
+        expect(block(row, "&:hover:not(.active)")).toMatch(/background:\s*transparent/);
+    });
+
     it("is not given a fill on a row that cannot be chosen", () => {
         const row = block(scss, ".agent-runtime-dropup-row");
         expect(block(row, "&.is-disabled")).toMatch(/&:hover\s*{\s*background:\s*transparent/);
