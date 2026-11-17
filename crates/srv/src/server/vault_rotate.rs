@@ -114,14 +114,25 @@ fn rotation_request(agent: &str, row: &crate::backend::storage::vault::VaultRow,
     }
 }
 
+/// The pane of the agent asking, proven. A rotation runs its `set` and `verify` commands on the host, which a container
+/// agent can't do (`/api/v1/shell/` is refused to it for the same reason), so one is refused before the person is asked.
+fn host_pane(state: &AppState, caller: Option<&super::caller::Caller>, auth: &UiAutomationAuth) -> Result<String, Response> {
+    let pane = super::ui_handlers::verified_block_id(state, caller, auth)
+        .map_err(|e| error(StatusCode::FORBIDDEN, format!("rotate needs to know which agent asks (its token or its signed identity): {e}")))?;
+    if super::browser_identity::in_container(state, &pane) {
+        return Err(error(StatusCode::FORBIDDEN, "rotate runs its commands on the host, which a container agent can't do: ask the person to rotate it, or a native agent"));
+    }
+    Ok(pane)
+}
+
 /// `POST /api/v1/vault/rotate`.
-pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body): Json<RotateBody>) -> Response {
+pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<RotateBody>) -> Response {
     let Some(auth) = body.auth.clone() else {
-        return error(StatusCode::FORBIDDEN, "rotate needs the agent's signed identity");
+        return error(StatusCode::FORBIDDEN, "rotate needs to know which agent asks (its token or its signed identity)");
     };
-    let block_id = match super::ui_handlers::verified_block_id(&state, None, &auth) {
+    let block_id = match host_pane(&state, caller.as_deref(), &auth) {
         Ok(b) => b,
-        Err(e) => return error(StatusCode::FORBIDDEN, format!("rotate needs the agent's signed identity: {e}")),
+        Err(refused) => return refused,
     };
     let agent: String = auth.agent_id.chars().take(64).collect();
     let reason = match vault::history::require_reason(body.reason.as_deref()) {
@@ -185,10 +196,10 @@ pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, Json(body
     let cwd = body.cwd.as_deref();
     let pending = format!("{}@pending", row.id);
     let set_env = HashMap::from([("NEW_SECRET".to_string(), pending.clone()), ("OLD_SECRET".to_string(), row.id.clone())]);
-    let set_ran = run(&state, &block_id, &auth, &agent, &set, cwd, set_env, &reason).await;
+    let set_ran = run(&state, caller.as_deref(), &block_id, &auth, &agent, &set, cwd, set_env, &reason).await;
     // 3. verify, with the pending value.
     let verify_ran = match (&set_ran, verify.is_empty()) {
-        (Ok(r), false) if r.ok() => Some(run(&state, &block_id, &auth, &agent, &verify, cwd, HashMap::from([("NEW_SECRET".to_string(), pending)]), &reason).await),
+        (Ok(r), false) if r.ok() => Some(run(&state, caller.as_deref(), &block_id, &auth, &agent, &verify, cwd, HashMap::from([("NEW_SECRET".to_string(), pending)]), &reason).await),
         _ => None,
     };
     // A set that never started gave no service the value: it is dropped, not kept.
@@ -288,8 +299,10 @@ fn clip(s: &str) -> String {
 
 /// Runs `cmd` as `Terminal` `run` would with `secrets`, approved with the
 /// rotation, and waits for it to end.
+#[allow(clippy::too_many_arguments)]
 async fn run(
     state: &AppState,
+    caller: Option<&super::caller::Caller>,
     block_id: &str,
     auth: &UiAutomationAuth,
     agent: &str,
@@ -310,7 +323,7 @@ async fn run(
     }))
     .map_err(|e| not_started(e.to_string()))?;
     let approved = super::shell_secrets::Preapproved { env: secrets };
-    let resp = super::http_shell::create_shell(state.clone(), req, Some(&approved)).await;
+    let resp = super::http_shell::create_shell(state.clone(), caller, req, Some(&approved)).await;
     let status = resp.status();
     // A success means the shell was spawned: from here on it may have run.
     let lost = |why: String| RunError { started: status.is_success(), why };

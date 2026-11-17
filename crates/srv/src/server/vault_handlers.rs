@@ -430,8 +430,8 @@ pub(crate) struct ListBody {
 
 /// `POST /api/v1/vault/list`: the entries of the Vaults the proven agent may use. An agent that
 /// doesn't prove who it is sees only the Vaults open to every agent, as `GET /api/v1/vault` does.
-pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, Json(body): Json<ListBody>) -> Response {
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ListBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let proven = pane.is_some();
     let store = state.identity_store.clone();
     match tokio::task::spawn_blocking(move || vault::list_for_agent(&store, proven.then_some(agent.as_str()))).await {
@@ -462,8 +462,8 @@ pub(crate) struct HistoryBody {
 /// `POST /api/v1/vault/history`: an entry's history (who did what, when, under which version, and why), for an
 /// entry in a Vault the proven agent may use. It holds no value
 /// (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §5.3).
-pub(crate) async fn handle_vault_history(State(state): State<AppState>, Json(body): Json<HistoryBody>) -> Response {
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+pub(crate) async fn handle_vault_history(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<HistoryBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let proven = pane.is_some();
     let store = state.identity_store.clone();
     let limit = body.limit.unwrap_or(100);
@@ -484,13 +484,13 @@ pub(crate) async fn handle_vault_history(State(state): State<AppState>, Json(bod
 /// person isn't asked: the value is no secret of theirs, nobody has seen it, and
 /// using it later asks as every use does. The answer names the entry, never the
 /// value.
-pub(crate) async fn handle_vault_generate(State(state): State<AppState>, Json(body): Json<GenerateBody>) -> Response {
+pub(crate) async fn handle_vault_generate(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<GenerateBody>) -> Response {
     let Some(auth) = body.auth.as_ref() else {
-        return error(StatusCode::FORBIDDEN, "generate needs the agent's signed identity: the Vault records who made each entry");
+        return error(StatusCode::FORBIDDEN, "generate needs to know which agent asks (its token or its signed identity): the Vault records who made each entry");
     };
-    let agent: String = match super::ui_handlers::verified_block_id(&state, None, auth) {
+    let agent: String = match super::ui_handlers::verified_block_id(&state, caller.as_deref(), auth) {
         Ok(_) => auth.agent_id.chars().take(64).collect(),
-        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs the agent's signed identity: {e}")),
+        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs to know which agent asks (its token or its signed identity): {e}")),
     };
     let store = state.identity_store.clone();
     let request = body.request;
@@ -553,14 +553,18 @@ fn hold_use(body: &Value) -> Result<(Value, bool), String> {
     Ok((json!({}), true))
 }
 
-/// Who the request says is asking, and its pane: the agent whose signature
-/// verified, else a plain "not a verified agent".
-pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
+/// Who the request says is asking, and its pane: the agent whose token or signature
+/// verified (a container agent has a token and no signing key), else a plain "not a verified agent".
+pub(super) fn asking_agent(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> (String, Option<String>) {
     const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
-    match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, None, a))) {
+    match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, caller, a))) {
         Some((a, Ok(pane))) => (a.agent_id.chars().take(64).collect(), Some(pane)),
         Some((a, Err(e))) => {
-            tracing::warn!(claimed = %a.agent_id, error = %e, "a Vault request's signed identity didn't verify");
+            tracing::warn!(claimed = %a.agent_id, error = %e, "a Vault request's identity didn't verify");
             (UNVERIFIED.to_string(), None)
         }
         None => (UNVERIFIED.to_string(), None),
@@ -574,7 +578,7 @@ pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_
 /// Asking again for the same kind and label is safe: a verified agent whose
 /// session ended mid-wait joins the request already open, or gets the answer
 /// the person gave, and no second form opens. Every answer carries `request_id`.
-pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(body): Json<RequestBody>) -> Response {
+pub(crate) async fn handle_vault_request(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<RequestBody>) -> Response {
     if vault::kinds::kind(&body.kind).is_none() {
         let kinds: Vec<&str> = vault::kinds::KINDS.iter().map(|k| k.name).collect();
         return error(StatusCode::BAD_REQUEST, format!("unknown kind {:?}; one of {}", body.kind, kinds.join(", ")));
@@ -588,7 +592,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         Ok(r) => r,
         Err(e) => return error(StatusCode::BAD_REQUEST, e),
     };
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let vault_id = match body.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         None => String::new(),
         Some(which) => {
@@ -657,3 +661,6 @@ fn answered(request_id: &str, answer: Result<requests::Answer, ()>) -> Response 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod identity_tests;
