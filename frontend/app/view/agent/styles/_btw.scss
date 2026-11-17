@@ -12,6 +12,7 @@
 // already anchors to.
 
 @use "../../../mixins.scss";
+@use "../../../element/menu-frame";
 .agent-view {
     .btw-overlay {
         position: absolute;
@@ -21,9 +22,7 @@
         max-height: min(420px, calc(100% - var(--space-3) * 2));
         display: flex;
         flex-direction: column;
-        background: var(--main-bg-color);
-        border: 1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        @include menu-frame.menu-surface;
         font-size: var(--text-sm);
         overflow: hidden;
         // Below the tab strip's contained z-index (var(--z-pane-overlay, 4))
