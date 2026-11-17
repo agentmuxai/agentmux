@@ -5,6 +5,8 @@
 // colour, and a white initial on white could not be read
 // (docs/specs/SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md §3.4).
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -31,5 +33,13 @@ describe("ProfileBadge", () => {
 
     it("does not mark a hue, an older colour or a colour it cannot read", () => {
         for (const color of ["#3b82f6", "#53a3f2", "not-a-colour"]) expect(badge(color).className, color).toBe("browser-profile-badge");
+    });
+
+    // A menu's icon slot mutes its glyph to 70%. A badge there is the profile's colour, not a glyph: at 70% a
+    // White badge read light grey on a dark menu and a Black one dark grey on a light menu.
+    it("is at full strength in a menu's icon slot", () => {
+        const scss = readFileSync(resolve(process.cwd(), "frontend/app/view/browser/browser-view.scss"), "utf8");
+        const rule = scss.match(/\.menu-item-icon:has\(> \.browser-profile-badge\)\s*\{([^}]*)\}/);
+        expect(rule?.[1]).toMatch(/opacity:\s*1;/);
     });
 });

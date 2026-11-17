@@ -20,7 +20,7 @@ import type { PaneTabContext } from "@/app/element/pane-tab-model";
 import { browserPaneTab } from "./browser";
 import { parseIdentity } from "@/app/util/browser-identity";
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { identityBadge } from "./browser-tab-badge";
+import { identityBadge, profileMarkColor } from "./browser-tab-badge";
 
 const ctx = (meta: Record<string, unknown>): PaneTabContext => ({ blockId: "b1", view: "browser", meta: { view: "browser", ...meta } as never, ordinal: 1, liveViewModel: null });
 const tab = browserPaneTab.tab!;
@@ -47,6 +47,19 @@ describe("identityBadge", () => {
 
     it("is a muted mark for Incognito", () => {
         expect(identityBadge(parseIdentity("incognito:11111111-2222-3333-4444-555555555555"))).toEqual({ color: "var(--secondary-text-color)", label: "Incognito" });
+    });
+});
+
+describe("profileMarkColor", () => {
+    it("is a hue profile's own colour, and nothing for a profile with none", () => {
+        expect(profileMarkColor("#3b82f6")).toBe("#3b82f6");
+        expect(profileMarkColor(undefined)).toBeUndefined();
+    });
+
+    it("is the neutral's line tone for Black and White, which shows on chrome of the neutral's own colour", () => {
+        expect(profileMarkColor("#000000")).toBe(paneRoleColor(undefined, "black", false, "identity"));
+        expect(profileMarkColor("#FFFFFF")).toBe(paneRoleColor(undefined, "white", false, "identity"));
+        expect(profileMarkColor("#000000")).not.toBe("#000000");
     });
 });
 

@@ -26,6 +26,7 @@ import {
 } from "@/app/util/browser-identity";
 import type { BrowserViewModel } from "./browser-model";
 import { followBrowserProfiles, loadBrowserProfiles, profileById, profileInitial, userProfiles } from "./browser-profiles";
+import { profileMarkColor } from "./browser-tab-badge";
 import { NewProfileModal } from "./new-profile-modal";
 import "./browser-profiles.scss";
 
@@ -169,7 +170,7 @@ export function BrowserProfileButton(props: {
                     class={clsx("browser-nav-btn browser-profile-btn", {
                         "browser-profile-btn-incognito": identity().kind === "incognito",
                     })}
-                    style={profile() ? { color: profile()!.color } : undefined}
+                    style={profile() ? { color: profileMarkColor(profile()!.color) } : undefined}
                     icon={identity().kind === "incognito" ? INCOGNITO_ICON : "circle-user"}
                     label={`Profile: browsing as ${name()}`}
                     // The menu opens on click; a tooltip over it would only get in the way.
