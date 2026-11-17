@@ -988,8 +988,10 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
             return 1;
         }
     }
-    // The program folder is shared by every channel run from this install: another channel that is running, or has a
-    // login service, would be left with its program gone.
+    // The program folder is shared by every channel run from this install: another channel whose running server, or whose
+    // login service, is a program inside it would be left with its program gone. A channel whose program is somewhere
+    // else (a package unpacked by hand, the folder the install script used before the rename) does not depend on it.
+    let plain_base = service::plain_path(&base);
     let in_use: Vec<String> = paths
         .instance_dir
         .parent()
@@ -997,7 +999,11 @@ fn cmd_uninstall(paths: &DataPaths, remove_data: bool, yes: bool) -> i32 {
         .unwrap_or_default()
         .into_iter()
         .filter(|name| {
-            service::installed(&home, name) || paths.instance_dir.parent().is_some_and(|c| state::read(&c.join(name)).is_some_and(|s| process::is_server(s.pid)))
+            service::runs_from(&home, name, &plain_base)
+                || paths
+                    .instance_dir
+                    .parent()
+                    .is_some_and(|c| state::read(&c.join(name)).is_some_and(|s| process::is_server(s.pid) && uninstall::is_under(&service::plain_path(&s.srv), &plain_base)))
         })
         .collect();
     if !in_use.is_empty() {

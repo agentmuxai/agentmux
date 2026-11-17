@@ -33,6 +33,25 @@ pub fn other_channels(channels_dir: &Path, this: &str) -> Vec<String> {
     names
 }
 
+/// Is `path` inside `base`? By whole path components, so `~/.agentmux/headless-old/bin/x` is not inside
+/// `~/.agentmux/headless`; case-insensitive on Windows, where the two spellings are the same folder.
+pub fn is_under(path: &Path, base: &Path) -> bool {
+    let key = |p: &Path| -> Vec<String> {
+        p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).map(|c| if cfg!(windows) { c.to_lowercase() } else { c }).collect()
+    };
+    let (path, base) = (key(path), key(base));
+    path.len() > base.len() && path.starts_with(&base)
+}
+
+/// Does `text` (a service definition) name a path inside `base`? Found by the base followed by a separator, so a folder
+/// that only starts with the same letters does not match; case-insensitive on Windows.
+pub fn text_names_under(text: &str, base: &Path) -> bool {
+    let fold = |s: &str| if cfg!(windows) { s.to_lowercase() } else { s.to_string() };
+    let (text, base) = (fold(text), fold(&base.to_string_lossy()));
+    let base = base.trim_end_matches(['/', '\\']);
+    !base.is_empty() && ['/', '\\'].iter().any(|sep| text.contains(&format!("{base}{sep}")))
+}
+
 /// The folder the install script made (`~/.agentmux/headless`, or `~/.agentmux/server` from before the rename; on Windows
 /// `%LOCALAPPDATA%\AgentMux\Headless`), found from this program's own path: `<base>/<version>/bin/<program>` with a
 /// `current` link (on Windows a junction) in `<base>`. `None` for a program that is anywhere else, so nothing is removed
@@ -162,6 +181,40 @@ mod tests {
         assert!(text.contains("install.sh | sh -s -- --headless") && text.contains("`agentmux restart`"), "{text}");
         let other = update_text("work", "headless");
         assert!(other.contains("`agentmux --channel work restart`") && !other.contains("`agentmux restart`"), "{other}");
+    }
+
+    #[test]
+    fn a_path_is_inside_an_install_by_whole_components() {
+        let base = Path::new(if cfg!(windows) { r"C:\Users\a\AppData\Local\AgentMux\Headless" } else { "/home/a/.agentmux/headless" });
+        assert!(is_under(&base.join("current").join("bin").join("agentmux"), base));
+        assert!(is_under(&base.join("0.60.31").join("bin"), base));
+        assert!(!is_under(base, base), "the folder itself is not inside itself");
+        let sibling = base.with_file_name(format!("{}-old", base.file_name().unwrap().to_string_lossy()));
+        assert!(!is_under(&sibling.join("bin").join("agentmux"), base), "a folder that only starts with the same name is another folder");
+        assert!(!is_under(Path::new(if cfg!(windows) { r"D:\unpacked\bin\agentmux" } else { "/opt/unpacked/bin/agentmux" }), base));
+        if cfg!(windows) {
+            assert!(is_under(Path::new(r"c:\users\A\appdata\local\agentmux\headless\current\bin\agentmux.exe"), base), "Windows paths differ in case only");
+        }
+    }
+
+    #[test]
+    fn a_service_definition_names_the_install_only_by_a_path_inside_it() {
+        let base = Path::new(if cfg!(windows) { r"C:\Users\a\AppData\Local\AgentMux\Headless" } else { "/home/a/.agentmux/headless" });
+        let inside = if cfg!(windows) {
+            r"<Command>C:\Users\a\AppData\Local\AgentMux\Headless\current\bin\agentmux.exe</Command>"
+        } else {
+            "ExecStart=/home/a/.agentmux/headless/current/bin/agentmux run"
+        };
+        let elsewhere = if cfg!(windows) {
+            r"<Command>C:\Users\a\AppData\Local\AgentMux\Headless-old\bin\agentmux.exe</Command>"
+        } else {
+            "ExecStart=/home/a/.agentmux/headless-old/bin/agentmux run"
+        };
+        let unpacked = if cfg!(windows) { r"<Command>D:\unpacked\bin\agentmux.exe</Command>" } else { "ExecStart=/opt/unpacked/bin/agentmux run" };
+        assert!(text_names_under(inside, base));
+        assert!(!text_names_under(elsewhere, base), "a folder that only starts with the same name is another folder");
+        assert!(!text_names_under(unpacked, base));
+        assert!(!text_names_under("", base) && !text_names_under(inside, Path::new("")));
     }
 
     #[test]
