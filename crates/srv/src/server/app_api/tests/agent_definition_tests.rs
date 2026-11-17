@@ -369,7 +369,7 @@ mod runtime_pick {
     }
 
     #[tokio::test]
-    async fn another_harness_than_claude_or_codex_is_refused_with_where_its_model_is_set() {
+    async fn another_harness_than_claude_is_refused_with_where_its_model_is_set() {
         let state = test_state();
         let me = agent(&state, "Asker");
         let mut def = test_agent_def(&uuid::Uuid::new_v4().to_string(), "Gem", "gemini", "host", 1, "");
@@ -377,5 +377,22 @@ mod runtime_pick {
         let (status, body) = update_call(&state, Some(&me), json!({ "agent": def.slug, "model": "sonnet" })).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert!(body["error"].as_str().unwrap().contains("picker"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_definitions_own_flags_are_checked_when_no_pane_is_open() {
+        let state = test_state();
+        let me = agent(&state, "Asker");
+        let mut def = test_agent_def(&uuid::Uuid::new_v4().to_string(), "Fixed Flags", "claude", "host", 1, "");
+        def.provider_flags = "--model opus --effort high".to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        for req in [json!({ "model": "sonnet" }), json!({ "effort": "low" })] {
+            let mut req = req;
+            req["agent"] = json!(def.slug);
+            let (status, body) = update_call(&state, Some(&me), req).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body["error"].as_str().unwrap().contains("provider flags"), "{body}");
+        }
+        assert!(state.mstore.agent_last_runtime_get(&def.id).unwrap().is_empty(), "nothing was remembered over the operator's flag");
     }
 }

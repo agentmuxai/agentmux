@@ -198,8 +198,6 @@ fn spend_apply(state: &AppState, target_uid: &str, plan: &SpendPlan) -> Result<V
     Ok(done)
 }
 
-/// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed, and what
-/// the audit row says beyond them.
 /// What `update` did: the agent, the definition fields changed, what the spend change did, and what a model or effort
 /// pick did.
 struct Updated {
@@ -209,6 +207,8 @@ struct Updated {
     applied: Option<serde_json::Value>,
 }
 
+/// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed, and what
+/// the audit row says beyond them.
 fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Updated, Refusal> {
     let target = target_of(state, &req.agent)?;
     // Before anything is applied: a refused spend change must not leave a model change behind it.

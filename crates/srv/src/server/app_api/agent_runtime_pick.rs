@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `model` and `effort` of `Agents update` for an agent that is not on a model route: the same runtime choice the pane's
+//! `model` and `effort` of `Agents update` for a Claude agent that is not on a model route: the same runtime choice the pane's
 //! picker makes (the Runtime menu, `/model`, `/effort`; `frontend/app/view/agent/runtime-apply.ts`), by an agent, on
 //! this machine or on another (`host`).
 //!
@@ -58,44 +58,37 @@ impl Picked {
     }
 }
 
-/// The harness the pick is for, or why there is none.
-fn harness_of(state: &AppState, agent: &AgentDefinition, model: Option<&str>, effort: Option<&str>) -> Result<&'static str, Refusal> {
+/// Why this agent cannot be given the pick: only a Claude agent takes it (Codex's model is its pane's picker's, and
+/// its remembered runtime is not read at launch).
+fn check_harness(state: &AppState, agent: &AgentDefinition) -> Result<(), Refusal> {
     let harness = state.id_store.resolve_effective_provider_id(agent);
     match crate::backend::providers::resolve_provider_alias(&harness) {
-        "claude" => Ok("claude"),
-        "codex" if effort.is_some() => Err(bad("a Codex agent's effort depends on the model it runs; its pane's picker sets it (Agents update takes only its model)")),
-        "codex" if model.is_some() => Ok("codex"),
+        "claude" => Ok(()),
         other => Err(bad(format!(
-            "Agents update model and effort are for Claude and Codex agents, and this agent runs {}: its model is chosen in its own pane's picker",
+            "Agents update model and effort are for Claude agents, and this agent runs {}: its model is chosen in its own pane's picker",
             if other.is_empty() { harness.as_str() } else { other }
         ))),
     }
 }
 
-/// Whether `model` can be given to this agent's harness, by name.
-fn check_model(harness: &str, model: &str) -> Result<(), Refusal> {
-    match harness {
-        "claude" if agent_runtime::is_claude_model_name(model) => Ok(()),
-        "claude" => Err(bad(format!("{model} is not a Claude model: use sonnet, opus, haiku or a model id such as claude-fable-5-2 (a model on a model route needs the agent on that route, which the person approves)"))),
-        _ => {
-            let listed = crate::backend::codex_models::installed_common_model_ids();
-            if listed.iter().any(|l| l == model) {
-                Ok(())
-            } else {
-                Err(bad(format!("{model} is not a model this agent's account lists: {}", listed.join(", "))))
-            }
-        }
+/// Whether `model` can be given to a Claude agent, by name.
+fn check_model(model: &str) -> Result<(), Refusal> {
+    if agent_runtime::is_claude_model_name(model) {
+        return Ok(());
     }
+    Err(bad(format!("{model} is not a Claude model: use sonnet, opus, haiku or a model id such as claude-fable-5-2 (a model on a model route needs the agent on that route, which the person approves)")))
 }
+
+const PINNED: &str = "the agent's definition carries its own --model or --effort in its provider flags: the operator changes it in My Agents";
 
 /// Why this pane cannot take the pick, or none.
 fn pane_refusal(meta: &MetaMapType, model: Option<&str>, effort: Option<&str>) -> Option<String> {
     let (pins_model, pins_effort) = agent_runtime::provider_flags_pin(meta);
     if model.is_some() && pins_model {
-        return Some("the agent's definition carries its own --model in its provider flags: the operator changes it in My Agents".to_string());
+        return Some(PINNED.to_string());
     }
     if effort.is_some() && pins_effort {
-        return Some("the agent's definition carries its own --effort in its provider flags: the operator changes it in My Agents".to_string());
+        return Some(PINNED.to_string());
     }
     if model.is_some() && agent_runtime::endpoint_model(meta).is_some() {
         return Some("the agent is pointed at a model server of its own, which it asks for the model ANTHROPIC_MODEL names: change that with Agents env_set".to_string());
@@ -118,12 +111,17 @@ fn remembered_with(state: &AppState, agent: &AgentDefinition, model: Option<&str
 
 /// Make the pick. Everything is checked before anything is written.
 pub(super) fn pick(state: &AppState, agent: &AgentDefinition, model: Option<&str>, effort: Option<&str>) -> Result<Picked, Refusal> {
-    let harness = harness_of(state, agent, model, effort)?;
+    check_harness(state, agent)?;
     if let Some(model) = model {
-        check_model(harness, model)?;
+        check_model(model)?;
     }
     if let Some(effort) = effort.filter(|e| !agent_runtime::is_claude_effort(e)) {
         return Err(bad(format!("{effort} is not an effort: low, medium, high, xhigh or max")));
+    }
+    // The definition's own flags count with no pane open too: the launch would put the remembered choice over them.
+    let (pins_model, pins_effort) = agent_runtime::flags_pin(&agent.provider_flags);
+    if (model.is_some() && pins_model) || (effort.is_some() && pins_effort) {
+        return Err(bad(PINNED));
     }
     let panes = crate::server::account_episodes::panes_of(state, &agent.id);
     if let Some(why) = panes.iter().find_map(|b| pane_refusal(&b.meta, model, effort)) {

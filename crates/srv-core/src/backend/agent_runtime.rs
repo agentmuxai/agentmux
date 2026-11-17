@@ -35,7 +35,7 @@ use crate::backend::obj::MetaMapType;
 use crate::backend::providers::default_model_for;
 
 mod choice;
-pub use choice::{is_claude_effort, is_claude_model_name, provider_flags_pin, runtime_choice, RuntimeChoice};
+pub use choice::{flags_pin, is_claude_effort, is_claude_model_name, provider_flags_pin, runtime_choice, RuntimeChoice};
 
 /// `DEFAULT_RUNTIME_CONFIG.permissionMode` in `frontend/app/agent-model/document-state.ts`.
 pub(crate) const DEFAULT_PERMISSION_MODE: &str = "bypass";

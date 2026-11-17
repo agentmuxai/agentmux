@@ -116,6 +116,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// action refuses a `host`, so a call never quietly runs here when it was meant for there.
 async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
     // Over host `update` takes only what the pane's picker sets (srv refuses the rest by name).
+    if action == "update" {
+        refuse_operator_fields(args)?;
+    }
     let params = if action == "update" { definition_params(args) } else { match action {
         "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
         // The public `agent` is `agent_id` by now (`ACTS` renames it for `OpenAgent`).
@@ -634,6 +637,15 @@ const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "resta
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
 
+/// Refuses what decides what an agent runs, where its traffic goes or which project files it reads: before a local
+/// request is made, and before a remote one is sent (over `host` it would otherwise be dropped without notice).
+fn refuse_operator_fields(args: &Value) -> Result<()> {
+    if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
+        anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
+    }
+    Ok(())
+}
+
 /// The body of an `update` request: the agent and each `update` field given.
 fn definition_params(args: &Value) -> Value {
     let mut params = json!({ "agent": str_arg(args, "agent") });
@@ -653,9 +665,7 @@ async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Resu
     let need = |key: &str| str_arg(args, key).ok_or_else(|| anyhow::anyhow!("missing required parameter: {key}"));
     let body = match action {
         "update" => {
-            if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
-                anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
-            }
+            refuse_operator_fields(args)?;
             need("agent")?;
             definition_params(args)
         }
@@ -850,6 +860,9 @@ mod tests {
         for field in ["shell", "provider_flags", "working_directory", "model_vendor_base_url"] {
             let e = call("Agents", &json!({ "action": "update", "agent": "pulse", field: "x" }), &cx).await.unwrap_err().to_string();
             assert!(e.contains(&format!("does not take {field}")), "{field}: {e}");
+            // Over host too: it is refused here, not dropped on its way to the other machine.
+            let e = call("Agents", &json!({ "action": "update", "agent": "pulse", "host": "narko", "model": "sonnet", field: "x" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("does not take {field}")), "host {field}: {e}");
         }
     }
 

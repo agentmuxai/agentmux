@@ -39,10 +39,13 @@ pub fn runtime_choice(meta: &MetaMapType, model: Option<&str>, effort: Option<&s
 /// Whether the agent definition's own provider flags (`agent:provider_flags`) carry a model and an effort: that is
 /// the operator's choice, which a runtime pick does not override (`with_runtime_flags`).
 pub fn provider_flags_pin(meta: &MetaMapType) -> (bool, bool) {
-    let flags: Vec<String> = crate::backend::obj::meta_get_string(meta, "agent:provider_flags", "")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
+    flags_pin(&crate::backend::obj::meta_get_string(meta, "agent:provider_flags", ""))
+}
+
+/// [`provider_flags_pin`] for the definition's flags as stored (`AgentDefinition::provider_flags`), which an agent with
+/// no pane open has only here.
+pub fn flags_pin(provider_flags: &str) -> (bool, bool) {
+    let flags: Vec<String> = provider_flags.split_whitespace().map(str::to_string).collect();
     (flag_value(&flags, &["--model", "-m"]).is_some(), flag_value(&flags, &["--effort"]).is_some())
 }
 
@@ -87,6 +90,7 @@ mod tests {
         assert_eq!(provider_flags_pin(&pinned), (true, false));
         assert_eq!(provider_flags_pin(&meta_of(json!({ "agent:provider_flags": "--effort=low" }))), (false, true));
         assert_eq!(provider_flags_pin(&meta_of(json!({}))), (false, false));
+        assert_eq!(flags_pin("--effort high -m opus"), (true, true));
         assert!(is_claude_model_name("claude-fable-5-2") && is_claude_model_name("sonnet"));
         assert!(!is_claude_model_name("gpt-5") && !is_claude_model_name("claude opus") && !is_claude_model_name(""));
         assert!(is_claude_effort("xhigh") && !is_claude_effort("ultra"));

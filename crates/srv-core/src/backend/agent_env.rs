@@ -536,9 +536,6 @@ pub fn diff(old: &str, new: &str) -> Change {
     change
 }
 
-/// `text` as an agent is shown it: the values of names it may not set hidden,
-/// a comment that may hold a secret and a skipped line as `# [hidden]`, every
-/// other line as written.
 /// Whether the environment in `text` points the agent at a server of its own: an `ANTHROPIC_BASE_URL` that is not
 /// Anthropic's. Only then does the launch ask for the model `ANTHROPIC_MODEL` names (`endpoint_model`); anywhere else it
 /// passes the model its pane's runtime chose, which that variable cannot change.
@@ -546,6 +543,9 @@ pub fn points_at_own_server(text: &str) -> bool {
     effective(text).iter().any(|(k, v)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") && !v.trim().is_empty() && !is_anthropic_url(v.trim()))
 }
 
+/// `text` as an agent is shown it: the values of names it may not set hidden,
+/// a comment that may hold a secret and a skipped line as `# [hidden]`, every
+/// other line as written.
 pub fn redacted(text: &str) -> String {
     let mut out: Vec<String> = text
         .lines()
