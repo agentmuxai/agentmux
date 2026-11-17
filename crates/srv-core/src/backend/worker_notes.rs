@@ -216,7 +216,12 @@ pub(crate) fn already_tells_its_leader(mstore: &Store, block_id: &str, sender: &
     let Some(sender_id) = defs.iter().find(|d| d.slug == sender || d.id == sender).map(|d| d.id.clone()) else { return false };
     // The same check `note_for` makes: a worker's own leader is told only through its live pane, by the ad-hoc
     // `agent:worker_of` relationship (not the formal Seats table `leader_pane_of` reads for a general seat lead).
-    sender_id == worker.leader_def_id && !live_panes_of(mstore, &worker.leader_def_id).is_empty()
+    if sender_id != worker.leader_def_id || live_panes_of(mstore, &worker.leader_def_id).is_empty() {
+        return false;
+    }
+    // Only suppressed when that note was actually admitted, not held by the one-note-a-minute throttle just
+    // below (#2629): a held note tells the leader nothing, so the sender's own note must go through instead.
+    super::worker_failure_note::failure_note_was_admitted(block_id)
 }
 
 /// The open panes (in a tab) of definition `def_id`.
@@ -284,7 +289,14 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
             worker.name
         ),
     };
-    let body = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64())?;
+    let admitted = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64());
+    if matches!(ev, WorkerEvent::Failed { .. }) {
+        // So `sender_failure_note::already_tells_its_leader` knows whether this failure's own note actually
+        // reached the leader, or was held by the throttle just below — a held note tells the leader nothing
+        // (#2629).
+        super::worker_failure_note::record_failure_admission(block_id, admitted.is_some());
+    }
+    let body = admitted?;
     Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), wait_key))
 }
 
