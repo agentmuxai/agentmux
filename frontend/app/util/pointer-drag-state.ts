@@ -23,6 +23,8 @@
  */
 
 let primaryButtonDown = false;
+/** Whether it was a mouse that pressed: only a mouse reports its buttons on every event that follows. */
+let heldByMouse = false;
 const releaseListeners = new Set<() => void>();
 
 /** Where the mouse was last pressed, until it moves away from there. */
@@ -36,15 +38,33 @@ const isAtPressPoint = (e: { clientX: number; clientY: number }): boolean =>
 function handlePointerDown(e: PointerEvent): void {
     // A tap's hover arrives after its press, at the same point, and is how touch shows a hover panel at all.
     pressPoint = e.pointerType === "touch" ? null : { x: e.clientX, y: e.clientY };
-    if (e.button === 0) primaryButtonDown = true;
+    if (e.button === 0) {
+        primaryButtonDown = true;
+        heldByMouse = e.pointerType === "mouse";
+    }
+}
+
+/**
+ * A release the page never heard. A press that opens something the system draws in a window of its own
+ * (the list of a native select, a system menu) hands the rest of the gesture to that window: the page
+ * gets no pointerup and no blur, and the button would read as held until the next full click. The next
+ * mouse event says what the button really is, so it is believed over the press that was remembered.
+ */
+function noticeMissedRelease(e: PointerEvent): void {
+    if (primaryButtonDown && heldByMouse && e.pointerType === "mouse" && (e.buttons & 1) === 0) released();
 }
 
 function handlePointerMove(e: PointerEvent): void {
     if (pressPoint !== null && !isAtPressPoint(e)) pressPoint = null;
+    noticeMissedRelease(e);
 }
 
 function handlePointerRelease(e: PointerEvent): void {
     if (e.button !== 0) return;
+    released();
+}
+
+function released(): void {
     primaryButtonDown = false;
     // Iterating the live Set on purpose, NOT a copy. Set iteration is
     // defined under concurrent deletion: an entry removed before it is
@@ -67,6 +87,8 @@ function handleWindowBlur(): void {
 if (typeof window !== "undefined") {
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
     window.addEventListener("pointermove", handlePointerMove, { capture: true, passive: true });
+    // An element's enter comes before the move that caused it, and hover panels decide on the enter.
+    window.addEventListener("pointerover", noticeMissedRelease, { capture: true, passive: true });
     window.addEventListener("pointerup", handlePointerRelease, { capture: true });
     window.addEventListener("pointercancel", handlePointerRelease, { capture: true });
     window.addEventListener("blur", handleWindowBlur);
