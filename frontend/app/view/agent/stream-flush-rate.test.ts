@@ -4,14 +4,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal } from "solid-js";
 
-const state = vi.hoisted(() => ({ focused: "" as string | undefined, throwOnFocus: false }));
+const state = vi.hoisted(() => ({
+    focused: "" as string | undefined,
+    throwOnFocus: false,
+    /** A reactive focus, as the layout's is; when set it is read instead of `focused`. */
+    focusRead: undefined as (() => string) | undefined,
+    focusReads: 0,
+}));
 const dormant = vi.hoisted(() => new Map<string, () => boolean>());
 
 vi.mock("@/app/store/block-component-registry", () => ({
     isBlockDormant: (id: string) => dormant.get(id) ?? (() => false),
     getFocusedBlockId: () => {
+        state.focusReads++;
         if (state.throwOnFocus) throw new Error("no layout");
-        return state.focused;
+        return state.focusRead ? state.focusRead() : state.focused;
     },
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
@@ -85,6 +92,8 @@ describe("a pane's flush queue asks the scheduler for the pane's rate", () => {
         dormant.clear();
         state.focused = "";
         state.throwOnFocus = false;
+        state.focusRead = undefined;
+        state.focusReads = 0;
         vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
             frames.push(cb);
             return frames.length;
@@ -133,6 +142,24 @@ describe("a pane's flush queue asks the scheduler for the pane's rate", () => {
         setDormant(false); // the helper's effect asks again, which re-arms the scheduler
         runFrame();
         expect(docs.length).toBeGreaterThan(0);
+        dispose();
+    });
+
+    it("a focus change does not re-run the helper's effect: it reads only its own pane's tab", () => {
+        let dormantReads = 0;
+        const [focus, setFocus] = createSignal("b");
+        dormant.set("b", () => (dormantReads++, false));
+        state.focusRead = focus;
+        const { model: m } = model();
+        // Nothing is pending, so the effect's own first request is the one that arms the scheduler and reads the rates.
+        const dispose = createRoot((d) => {
+            createPaneFlushQueue(m, "b");
+            return d;
+        });
+        const readsBefore = dormantReads;
+        expect(state.focusReads).toBeGreaterThan(0);
+        setFocus("other");
+        expect(dormantReads).toBe(readsBefore);
         dispose();
     });
 

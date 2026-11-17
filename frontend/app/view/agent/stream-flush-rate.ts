@@ -15,7 +15,7 @@
  * slot like the one being typed into.
  */
 
-import { createEffect } from "solid-js";
+import { createEffect, untrack } from "solid-js";
 import { getFocusedBlockId, isBlockDormant } from "@/app/store/block-component-registry";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
@@ -41,7 +41,8 @@ export function createPaneFlushQueue(model: AgentPaneModel, blockId: string): St
     const queue = createStreamFlushQueue(model, () => paneFlushRate(blockId));
     const dormant = isBlockDormant(blockId);
     createEffect(() => {
-        if (blockId && !dormant()) queue.scheduleFlush();
+        // Untracked: asking reads every pending pane's rate (their dormancy, the focus), and a focus change must not re-ask.
+        if (blockId && !dormant()) untrack(() => queue.scheduleFlush());
     });
     return queue;
 }
