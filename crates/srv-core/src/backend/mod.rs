@@ -265,6 +265,7 @@ pub mod google;
 /// A model route out of credits (HTTP 402): every agent on it is stopped, and each lead is told once.
 pub mod route_credits;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
+pub mod worker_failure_note;
 pub mod worker_notes;
 
 pub use oref::ORef;

@@ -26,6 +26,8 @@ use crate::backend::storage::store::Store;
 
 /// The fewest milliseconds between two notes about the same worker.
 const NOTE_GAP_MS: u64 = 60_000;
+/// How long an exit waits for the failure that ended the turn to be stored, so its note can name it.
+const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1_000);
 /// How much of a worker's last message a note quotes.
 const LAST_WORDS_CHARS: usize = 200;
 
@@ -148,6 +150,10 @@ pub fn install(
             if !seen.first(&ev) {
                 continue;
             }
+            if matches!(ev, WorkerEvent::Exited { .. }) {
+                // The failure that ended the turn is stored just after its exit is published.
+                tokio::time::sleep(EXIT_SETTLE).await;
+            }
             let (store, filestore) = (mstore.clone(), filestore.clone());
             let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
             if let Ok(Some((leader_block, text, wait_key))) = note {
@@ -233,8 +239,18 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
             }
             turn_end_body(&worker.name, words)
         }
-        WorkerEvent::Exited { .. } => format!("Your worker {} stopped: its process exited.", worker.name),
-        WorkerEvent::Failed { title, .. } => format!("Your worker {} stopped with an error: {title}.", worker.name),
+        WorkerEvent::Exited { .. } => {
+            // A failed turn's exit is followed within milliseconds by its `agentfailure`, which names the cause
+            // and what happens next; its note is the one to send (#2617).
+            if mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| super::worker_failure_note::stored(&b.meta).is_some()) {
+                return None;
+            }
+            format!("Your worker {} stopped: its process exited.", worker.name)
+        }
+        WorkerEvent::Failed { title, .. } => {
+            let meta = mstore.get::<Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
+            super::worker_failure_note::failed_body(&worker.name, title, &meta, agentmux_common::time::now_ms_u64())
+        }
         WorkerEvent::Asked { .. } => format!(
             "Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.",
             worker.name
