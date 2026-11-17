@@ -33,6 +33,30 @@ pub fn code_name(meta: &MetaMapType) -> Option<String> {
     serde_json::to_value(code).ok()?.as_str().map(str::to_string)
 }
 
+/// When each worker pane's last `agentfailure` was heard: the exit of the turn it ended is not news of its own.
+#[derive(Default)]
+pub(crate) struct FailedAt {
+    by_block: std::collections::HashMap<String, std::time::Instant>,
+}
+
+/// The pane's failure that belongs to an exit heard at `heard_at` came within this long before it or after it
+/// (the exit and the failure are published back to back; either may come first).
+const SAME_TURN: std::time::Duration = std::time::Duration::from_secs(2);
+
+impl FailedAt {
+    pub(crate) fn record(&mut self, block_id: &str, at: std::time::Instant) {
+        self.by_block.retain(|_, t| at.saturating_duration_since(*t) < SAME_TURN * 5);
+        self.by_block.insert(block_id.to_string(), at);
+    }
+
+    /// Whether a failure of this pane came within `SAME_TURN` of the exit heard at `heard_at`: its note says why.
+    pub(crate) fn speaks_for_exit(&self, block_id: &str, heard_at: std::time::Instant) -> bool {
+        self.by_block.get(block_id).is_some_and(|t| *t + SAME_TURN >= heard_at)
+    }
+}
+
+pub(crate) static FAILED_AT: std::sync::LazyLock<parking_lot::Mutex<FailedAt>> = std::sync::LazyLock::new(Default::default);
+
 fn minutes_until(at_ms: u64, now_ms: u64) -> u64 {
     at_ms.saturating_sub(now_ms).div_ceil(60_000).max(1)
 }
@@ -100,6 +124,20 @@ mod tests {
         assert!(failed_body("W", "Usage limit reached", &without, 1_000).contains("no reset time"));
         let past = meta(json!({ "code": "usage_limit", "title": "x", "retryable": false, "resetsAtMs": 5 }));
         assert!(failed_body("W", "x", &past, 1_000).contains("no reset time"), "a reset already past says nothing to wait for");
+    }
+
+    /// An exit is silenced only by a failure heard around it, never by one stored by an earlier turn (#2617).
+    #[test]
+    fn only_a_failure_heard_around_the_exit_speaks_for_it() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut failed = FailedAt::default();
+        assert!(!failed.speaks_for_exit("b", t0), "no failure heard");
+        failed.record("b", t0 + Duration::from_millis(30));
+        assert!(failed.speaks_for_exit("b", t0), "the failure came just after the exit");
+        assert!(failed.speaks_for_exit("b", t0 + Duration::from_secs(1)), "or just before it");
+        assert!(!failed.speaks_for_exit("b", t0 + Duration::from_secs(60)), "a failure of an earlier turn");
+        assert!(!failed.speaks_for_exit("other", t0), "another pane");
     }
 
     #[test]

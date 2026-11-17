@@ -223,8 +223,8 @@ async fn a_workers_credits_failure_adds_no_note_of_its_own() {
     assert_eq!(note_for(&state.mstore, &state.filestore, &failed(crate::agents::failure::ROUTE_CREDITS_TITLE)), None);
 }
 
-/// A worker's turn that died of a rate limit: its exit (published first) says nothing, and its failure's
-/// note names the class, that it is transient, and who retries it (#2617). A plain exit still says so.
+/// A worker's turn that died of a rate limit: its failure's note names the class, that it is transient, and
+/// who retries it (#2617); an exit with a failure stored by an earlier turn still says it stopped.
 #[tokio::test]
 async fn a_rate_limited_turns_note_names_the_cause_and_the_exit_adds_none() {
     let state = crate::test_support::core_parts();
@@ -245,7 +245,9 @@ async fn a_rate_limited_turns_note_names_the_cause_and_the_exit_adds_none() {
     GAPS.lock().by_worker.remove(&worker_id); // the plain exit's note used this worker's minute
     let failure = json!({ "code": "rate_limited", "title": "API rate limit", "detail": "", "retryable": true });
     dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ "agent:last_failure": failure }) }).await;
-    assert_eq!(note_for(&state.mstore, &state.filestore, &exited), None, "its failure's note is the one that says why");
+    GAPS.lock().by_worker.remove(&worker_id);
+    assert!(note_for(&state.mstore, &state.filestore, &exited).is_some(), "a failure stored by an earlier turn doesn't silence an exit");
+    GAPS.lock().by_worker.remove(&worker_id);
     let failed = WorkerEvent::Failed { block_id: worker_pane, title: "API rate limit".into() };
     let (_, text, wait) = note_for(&state.mstore, &state.filestore, &failed).expect("the leader is told");
     assert_eq!(wait, None);
