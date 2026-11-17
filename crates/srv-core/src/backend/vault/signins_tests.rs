@@ -130,14 +130,14 @@ fn a_deleted_profiles_sign_ins_move_to_personal_tagged_or_go_with_it() {
     save(&s, &space(PERSONAL, ""), "sam", "battery staple").unwrap();
     assert_eq!(counts(&s).unwrap(), BTreeMap::from([("p-0123456789ab".to_string(), 1)]));
 
-    assert_eq!(profile_deleted(&s, "p-0123456789ab", "Work", true).unwrap(), 1);
+    assert_eq!(profile_deleted(&s, "p-0123456789ab", "Work", true, None).unwrap(), 1);
     assert_eq!(fields(&s, &moved)["profile"], PERSONAL);
     assert!(s.vault_get(&moved).unwrap().unwrap().tags.contains("from deleted profile Work"));
     assert!(counts(&s).unwrap().is_empty());
     assert_eq!(super::super::activity(&s, 1).unwrap()[0].action, "moved to Personal");
 
     let gone = save(&s, &space("profile:p-ffff", ""), "alex", "correct horse").unwrap();
-    assert_eq!(profile_deleted(&s, "p-ffff", "Old", false).unwrap(), 1);
+    assert_eq!(profile_deleted(&s, "p-ffff", "Old", false, None).unwrap(), 1);
     assert!(s.vault_get(&gone).unwrap().is_none());
     assert_eq!(list_for_pane(&s).unwrap().0.len(), 2, "the others stay");
 }

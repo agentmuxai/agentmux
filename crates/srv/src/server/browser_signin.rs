@@ -71,6 +71,13 @@ pub(crate) fn grant_key(agent: &str, profile: &str, origin: &str) -> String {
     format!("signin:{agent}|{profile}|{origin}")
 }
 
+/// [`grant_key`] for a login shared with the agent: it is used in the agent's own profile (`profile`), and the key also
+/// names the profile the login is saved for (`saved`), so a login whose profile is edited afterwards is asked about again
+/// whatever writes it (A6).
+pub(crate) fn shared_grant_key(uid: &str, profile: &str, origin: &str, saved: &str) -> String {
+    grant_key(uid, profile, &format!("{origin}|{saved}"))
+}
+
 /// Which of the sign-ins the page can take, `(entry, origin, user)`, is meant.
 pub(crate) fn choose(found: Vec<(String, String, String)>, entry: Option<&str>) -> Result<(String, String, String), String> {
     if let Some(want) = entry {
@@ -175,6 +182,8 @@ struct Chosen {
     /// (A10), otherwise the agent.
     grant_agent: String,
     shared: bool,
+    /// The profile the entry is saved for (what a share's "Always" is also bound to).
+    saved: String,
     entry: String,
     label: String,
     origin: String,
@@ -226,10 +235,11 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
     match choose(found, entry) {
         Ok((entry, origin, user)) => {
             let row = state.identity_store.vault_get(&entry).ok().flatten();
-            let shared = row.as_ref().is_some_and(|r| crate::backend::vault::signins::fields_of(r).get(signins::PROFILE).map(String::as_str) != Some(profile));
+            let saved = row.as_ref().and_then(|r| crate::backend::vault::signins::fields_of(r).get(signins::PROFILE).cloned()).unwrap_or_default();
+            let shared = row.is_some() && saved != profile;
             let (label, created, updated) = row.map(|r| (r.label, r.created_at, r.updated_at)).unwrap_or_default();
             let grant_agent = if shared { own.clone().unwrap_or_else(|| agent.to_string()) } else { agent.to_string() };
-            Ok(Chosen { grant_agent, shared, entry, label, origin, user, profile: profile.to_string(), created, updated })
+            Ok(Chosen { grant_agent, shared, saved, entry, label, origin, user, profile: profile.to_string(), created, updated })
         }
         Err(e) => {
             // A login the agent may use for this page, which the person hasn't shared with it: say how to ask (A8).
@@ -247,7 +257,7 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
 /// Stop; otherwise they answered the Vault's prompt, in `agent_pane`. True when
 /// nobody answered it and it went ahead.
 async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool, reason: &str) -> Result<bool, Refusal> {
-    let key = grant_key(&c.grant_agent, &c.profile, &c.origin);
+    let key = if c.shared { shared_grant_key(&c.grant_agent, &c.profile, &c.origin, &c.saved) } else { grant_key(&c.grant_agent, &c.profile, &c.origin) };
     let (store, e, k) = (state.identity_store.clone(), c.entry.clone(), key.clone());
     let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
     if !granted {
