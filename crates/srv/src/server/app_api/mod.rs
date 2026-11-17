@@ -146,6 +146,7 @@ pub(crate) mod viewer;
 mod input_history;
 mod presence;
 pub(crate) mod tower_pane;
+pub(crate) mod record_read;
 mod blockstats;
 mod history_agents;
 mod audit_query;

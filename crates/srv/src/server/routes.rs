@@ -813,6 +813,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
         .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
+        // The record of AgentMux's own size over weeks (SPEC_LONG_RUNNING_ZERO_DEGRADATION §6).
+        .route("/api/v1/app/record", get(app_api::record_read::handle_record))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
 }
 
