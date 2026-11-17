@@ -53,6 +53,15 @@ fn drafts_in_the_thread_are_neither_counted_nor_their_recipients_taken_as_partic
 }
 
 #[test]
+fn a_new_mails_draft_has_a_thread_of_only_itself_and_gets_no_note() {
+    let mut draft = message("me@example.com", "bob@example.net", "");
+    draft["labelIds"] = json!(["DRAFT"]);
+    let t = context_of(&json!({ "messages": [draft] }));
+    assert_eq!((t.messages, t.people.len()), (0, 0));
+    assert_eq!(ThreadNote::of(&view("bob@example.net", ""), &t, "me@example.com"), ThreadNote::default());
+}
+
+#[test]
 fn a_recipient_in_the_thread_gets_no_warning_and_the_thread_is_named() {
     let note = ThreadNote::of(&view("Dana <dana@vendor.com>", ""), &thread(), "me@example.com");
     assert_eq!((note.warning, note.strangers), (None, false));

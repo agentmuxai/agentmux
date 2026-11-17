@@ -331,6 +331,19 @@ async fn a_thread_that_cannot_be_read_is_said_so_and_the_person_decides() {
 }
 
 #[tokio::test]
+async fn a_new_mails_draft_whose_thread_holds_only_itself_gets_no_warning() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    // Google gives every draft a threadId, a new mail's too; its thread is just the draft.
+    let alone = json!({ "id": "t1", "messages": [{ "id": "m", "labelIds": ["DRAFT"], "payload": { "headers": [{ "name": "From", "value": "me@example.com" }, { "name": "To", "value": "bob@example.net" }] } }] });
+    let google = StubGoogle::new(vec![(200, stored_reply("bob@example.net", "Hello")), (200, alone)]);
+    let person = Person::says(Answer::No);
+    let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    let text = person.asked()[0].1.clone();
+    assert!(text.starts_with("Naki wants to send") && !text.contains("thread"), "{text}");
+    assert!(!e.contains("taken part"), "{e}");
+}
+
+#[tokio::test]
 async fn a_draft_with_no_thread_reads_no_thread() {
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
     let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x"))]);

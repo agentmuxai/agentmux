@@ -110,6 +110,11 @@ impl ThreadNote {
     /// The draft's recipients against the thread `ctx`; `own` is the account's address, left out of
     /// the list of who is in the thread (it is in nearly every thread) but not of the comparison.
     pub fn of(view: &DraftView, ctx: &ThreadContext, own: &str) -> ThreadNote {
+        // Google gives a new mail's draft a thread of its own, holding only the draft: it replies
+        // into nothing, so there is nothing to say and nobody to warn about.
+        if ctx.messages == 0 {
+            return ThreadNote::default();
+        }
         let recipients: Vec<String> = [&view.to, &view.cc, &view.bcc].iter().flat_map(|r| addresses_in(r)).collect();
         let strangers = !recipients.iter().any(|r| ctx.people.contains(r));
         let own = own.trim().to_ascii_lowercase();
