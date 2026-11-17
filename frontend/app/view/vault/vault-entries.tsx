@@ -22,6 +22,7 @@ import { copyCheck, machineCopy, MachineCopyLine } from "./vault-source";
 import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
+import { canShare, EntryShares, VaultShareDialog } from "./vault-share";
 import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
 import { vaultNameOf, VaultMoveDialog } from "./vault-vaults";
 
@@ -140,7 +141,7 @@ function EntryValue(props: { entry: VaultEntryInfo }): JSX.Element {
 
 /** What a row offers: show or copy its value (a linked entry has none: its place is copied instead), change it, move
  *  it, read its history, put an earlier value back, delete it. */
-function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "change" | "move" | "history" | "versions" | "delete") => void; onError: (message: string | null) => void }): JSX.Element {
+function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "change" | "move" | "share" | "history" | "versions" | "delete") => void; onError: (message: string | null) => void }): JSX.Element {
     return (
         <td class="vault-actions">
             <Show when={!isLinked(props.entry.fields)} fallback={<CopyPlaceButton entry={props.entry} onError={props.onError} />}>
@@ -149,6 +150,9 @@ function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "cha
             <IconButton icon="pen" label="Change" density="compact" onClick={() => props.on("change")} />
             <Show when={vaultList().length > 1}>
                 <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => props.on("move")} />
+            </Show>
+            <Show when={canShare(props.entry)}>
+                <IconButton icon="share" label="Share with an agent" density="compact" onClick={() => props.on("share")} />
             </Show>
             <IconButton icon="book" label="History" density="compact" onClick={() => props.on("history")} />
             <Show when={props.entry.versions > 0}>
@@ -188,6 +192,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
     const [versionsOf, setVersionsOf] = createSignal<VaultEntryInfo | null>(null);
     const [moving, setMoving] = createSignal<VaultEntryInfo | null>(null);
+    const [sharing, setSharing] = createSignal<VaultEntryInfo | null>(null);
     const [historyOf, setHistoryOf] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && (!props.vault || e.vault_id === props.vault)));
@@ -204,8 +209,8 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
         }
     };
 
-    const act = (what: "reveal" | "change" | "move" | "history" | "versions" | "delete", e: VaultEntryInfo) => {
-        const open = { reveal: setRevealing, move: setMoving, history: setHistoryOf, versions: setVersionsOf, delete: setDeleting };
+    const act = (what: "reveal" | "change" | "move" | "share" | "history" | "versions" | "delete", e: VaultEntryInfo) => {
+        const open = { reveal: setRevealing, move: setMoving, share: setSharing, history: setHistoryOf, versions: setVersionsOf, delete: setDeleting };
         if (what === "change") setForm({ mode: "edit", entry: e });
         else open[what](e);
     };
@@ -273,6 +278,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
                                         <EntryLabel entry={e} />
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
                                         <EntryGrants entry={e} revoke={(grant) => void revoke(e.id, grant)} />
+                                        <EntryShares entry={e} onError={setError} />
                                     </td>
                                     <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
                                     <td class="warden-manager-dim">
@@ -290,6 +296,7 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
             <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
             <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
             <Show when={moving()}>{(entry) => <VaultMoveDialog entry={entry()} onClose={() => setMoving(null)} />}</Show>
+            <Show when={sharing()}>{(entry) => <VaultShareDialog entry={entry()} onClose={() => setSharing(null)} />}</Show>
             <Show when={versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => setVersionsOf(null)} />}</Show>
             <Show when={historyOf()}>{(e) => <VaultHistoryDialog entryId={e().id} label={e().label} onClose={() => setHistoryOf(null)} />}</Show>
             <Show when={deleting()}>{(e) => <DeleteEntryConfirm entry={e()} onConfirm={confirmDelete} onCancel={() => setDeleting(null)} />}</Show>

@@ -94,6 +94,7 @@ export function promptTitle(u: UseRequest, short = false): string {
         if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
         return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
     }
+    if (u.share) return `${agent} wants to sign in to ${siteOf(u.origin)} with ${label}`;
     if (u.account && u.change) return `${agent} wants to change your password on ${siteOf(u.origin)}`;
     if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
@@ -110,6 +111,7 @@ function promptNote(u: UseRequest): string {
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.share) return "The agent never sees the user name or the password. If you allow it, it can ask to sign in with this login from its own browser profile, and each sign-in still asks you. You can take it back from the login's card in the Vault.";
     if (u.account && u.change) return "The Vault makes the new password. The agent never sees it. The old one is kept for 7 days, and you can put it back. Check the site is the one you expect.";
     if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
@@ -128,6 +130,15 @@ function alwaysLabel(u: UseRequest): string {
 /** Where a fill or a sign-in goes, for a use that runs no command. */
 function UseTarget(props: { use: UseRequest }): JSX.Element {
     const u = props.use;
+    if (u.share) {
+        return (
+            <p>
+                The user name <strong class="warden-manager-mono"><Clipped text={u.field} max={CLIP.label} /></strong> and the password would be typed into the sign-in form on <strong>{siteOf(u.origin)}</strong>
+                <span class="warden-manager-dim"> ({u.origin})</span>, in <Clipped text={u.agent} max={CLIP.name} />
+                's own browser profile.
+            </p>
+        );
+    }
     return (
         <Show
             when={u.signin || u.account}
@@ -441,7 +452,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.share ? "nothing is shared without a yes." : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }
@@ -737,7 +748,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
                     <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => void a.decide("once")}>
-                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : "Allow once"}
+                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : u.share ? "Share it" : "Allow once"}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
                         <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>

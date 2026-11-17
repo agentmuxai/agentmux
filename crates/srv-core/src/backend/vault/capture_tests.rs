@@ -231,7 +231,7 @@ fn the_commit_writes_nothing_when_an_entry_changed_since_it_was_read() {
     fresh.id = "api-key-other".into();
     let writes = [
         CaptureWrite::Insert(fresh),
-        CaptureWrite::Replace { row: VaultRow { updated_at: read.updated_at + 1, ..read.clone() }, was: read.sealed.clone(), kept: Some(versions::of(&read, "Agent2-6", CAPTURED)) },
+        CaptureWrite::Replace { row: VaultRow { updated_at: read.updated_at + 1, ..read.clone() }, was: read.sealed.clone(), was_fields: read.fields.clone(), kept: Some(versions::of(&read, "Agent2-6", CAPTURED)) },
     ];
     assert!(!s.vault_capture_commit(&writes).unwrap());
     assert!(s.vault_get("api-key-other").unwrap().is_none(), "the insert was rolled back");
@@ -474,4 +474,32 @@ fn a_capture_into_an_entry_that_is_not_a_card_leaves_its_plain_fields_exactly_as
     assert!(matches!(cap.finish(&s, "sk_new_value_456\n", "sk_new_value_456", false, 0), Outcome::Stored { .. }));
     assert_eq!(s.vault_get(&id).unwrap().unwrap().fields, before, "the plain fields are byte for byte what they were");
     assert_eq!(value(&s, &id, "value"), "sk_new_value_456");
+}
+
+#[test]
+fn a_capture_beside_a_share_removal_leaves_the_share_removed() {
+    use crate::backend::vault::shares;
+    const AGENT: &str = "uid-pulp-0001";
+    let s = store();
+    for round in 0..40 {
+        let fields = [("username", "alex".to_string()), ("site", format!("https://race{round}.example.com"))].map(|(k, v)| (k.to_string(), v)).into();
+        let id = create(&s, NewEntry { kind: "login".into(), label: "Intranet".into(), fields, tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) }).unwrap();
+        shares::add(&s, &id, AGENT).unwrap();
+        let cap = plan(&s, &[into_id(&id, CaptureFrom::Line(1))], "Agent2-6", "rotate").unwrap();
+        std::thread::scope(|t| {
+            let w = t.spawn(|| {
+                // Stored, or withheld because the entry changed meanwhile: never a write that brings the share back.
+                let _ = cap.finish(&s, "pw_captured_value_001\n", "pw_captured_value_001", false, 0);
+            });
+            let r = t.spawn(|| shares::remove(&s, &id, AGENT));
+            w.join().unwrap();
+            assert!(r.join().unwrap().unwrap(), "round {round}: the share was there to remove");
+        });
+        let row = s.vault_get(&id).unwrap().unwrap();
+        assert!(!shares::listed(&crate::backend::vault::signins::fields_of(&row)).contains(&AGENT.to_string()), "round {round}: the removed share came back");
+    }
+    // On its own the capture is stored, so the race above is a real one.
+    let id = create(&s, NewEntry { kind: "login".into(), label: "Alone".into(), fields: [("site".to_string(), "https://alone.example.com".to_string())].into(), tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) }).unwrap();
+    let cap = plan(&s, &[into_id(&id, CaptureFrom::Line(1))], "Agent2-6", "rotate").unwrap();
+    assert!(matches!(cap.finish(&s, "pw_captured_value_001\n", "pw_captured_value_001", false, 0), Outcome::Stored { .. }));
 }

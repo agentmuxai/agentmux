@@ -315,7 +315,7 @@ pub fn refused(store: &Store, s: &Space) -> Result<(), String> {
         tags.push(REFUSED.to_string());
     }
     let changed = VaultRow { tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
-    if store.vault_update_kept(&changed, &row.sealed, None).map_err(|e| e.to_string())? {
+    if store.vault_update_kept(&changed, &row.sealed, &row.fields, None).map_err(|e| e.to_string())? {
         record(store, &row.id, &row.label, PERSON, "refused by the site", &s.origin, "done");
     }
     Ok(())
@@ -380,7 +380,7 @@ fn move_to_personal(store: &Store, id: &str, profile: &str, name: &str) -> Resul
             updated_at: now_ms(),
             ..row.clone()
         };
-        if store.vault_update_kept(&changed, &row.sealed, None).map_err(|e| e.to_string())? {
+        if store.vault_update_kept(&changed, &row.sealed, &row.fields, None).map_err(|e| e.to_string())? {
             record(store, &row.id, &row.label, PERSON, "moved to Personal", &format!("profile {name} was deleted"), "done");
             return Ok(());
         }

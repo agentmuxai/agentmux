@@ -166,6 +166,33 @@ fn check_share_target(state: &AppState, id: &str, agent: &str) -> Result<(), Str
     Err(format!("the Vault this login is in isn't open to {}: open the Vault to it first (in the Vault pane, the Vault's agents), then share the login", def.name))
 }
 
+/// What the pane shows of an entry's shares: each agent it is shared with (or every agent), how often it signed in
+/// with the login and when it last did, and the agents the person can still share it with. Never a value: the sign-ins
+/// are read from the entry's history, and an agent is named by its permanent uid, which is its definition's id.
+fn share_list(state: &AppState, id: &str) -> Result<Value, String> {
+    let store = &state.identity_store;
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let listed = vault::shares::listed(&vault::signins::fields_of(&row));
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let signed_in = store.vault_activity_for_entry(id, &[vault::signins::SIGNED_IN], row.created_at, 1000).map_err(|e| e.to_string())?;
+    let uses: Vec<(String, i64)> = signed_in
+        .iter()
+        .filter(|r| r.outcome == "done")
+        .map(|r| (state.reactive_handler.get_agent(&r.actor).and_then(|a| a.uid).unwrap_or_default(), r.at))
+        .collect();
+    let shares: Vec<Value> = listed
+        .iter()
+        .map(|who| {
+            let every = who == vault::shares::EVERY_AGENT;
+            let mine: Vec<i64> = uses.iter().filter(|(uid, _)| every || uid == who).map(|(_, at)| *at).collect();
+            let name = if every { "Every agent".to_string() } else { defs.iter().find(|d| &d.id == who).map_or_else(|| "an agent that is gone".to_string(), |d| d.name.clone()) };
+            json!({ "agent": who, "name": name, "uses": mine.len(), "last_used_ms": mine.iter().copied().max().unwrap_or(0) })
+        })
+        .collect();
+    let agents: Vec<Value> = defs.iter().filter(|d| !listed.contains(&d.id)).map(|d| json!({ "uid": d.id, "name": d.name })).collect();
+    Ok(json!({ "shares": shares, "agents": agents }))
+}
+
 /// The host ops on Vaults and on an entry's earlier values.
 fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), String> {
     let store: &crate::backend::storage::store::Store = &state.identity_store;
@@ -192,6 +219,8 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             check_share_target(state, &s("id"), &s("agent"))?;
             Ok((json!({ "changed": vault::shares::add(store, &s("id"), &s("agent"))? }), true))
         }
+        // Who a login is shared with, and the agents it could still be shared with (the Share dialog and the card's list).
+        "share_list" => Ok((share_list(state, &s("id"))?, false)),
         "share_remove" => {
             let changed = vault::shares::remove(store, &s("id"), &s("agent"))?;
             if changed {
@@ -289,7 +318,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "share_list" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -522,7 +551,9 @@ pub(crate) async fn handle_vault_generate(State(state): State<AppState>, caller:
     };
     let store = state.identity_store.clone();
     let request = body.request;
-    match tokio::task::spawn_blocking(move || vault::generate_entry(&store, request, &agent)).await {
+    // A login with a site is made for the agent's own browser profile, named by its permanent uid.
+    let own_profile = state.reactive_handler.get_agent(&agent).and_then(|a| a.uid).map(|uid| format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&uid)));
+    match tokio::task::spawn_blocking(move || vault::generate_entry_in(&store, request, &agent, own_profile.as_deref())).await {
         Ok(Ok(made)) => {
             publish(&state);
             Json(json!({ "status": "created", "id": made.id, "label": made.label, "kind": made.kind, "made": made.made })).into_response()
@@ -694,3 +725,5 @@ mod tests;
 mod identity_tests;
 #[cfg(test)]
 mod share_tests;
+#[cfg(test)]
+mod share_ask_tests;

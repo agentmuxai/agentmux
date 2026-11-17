@@ -73,6 +73,9 @@ pub struct UseRequest {
     #[serde(skip)]
     #[ts(skip)]
     pub shared: bool,
+    /// An agent asks the person to share a login with it (`Vault` `share`): `origin` is the login's site and `field`
+    /// its user name as the card shows it. Never goes ahead on silence, and never offers "Always".
+    pub share: bool,
     /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
     /// Vault makes the password. There is no entry yet; `origin` is the site.
     pub account: bool,
@@ -234,6 +237,7 @@ pub fn goes_ahead(req: &UseRequest) -> bool {
         && req.batch.is_none()
         && req.link.is_none()
         && !req.account
+        && !req.share
         && !req.agent.starts_with(DRONE_ACTOR)
         && goes_ahead_on_silence(&req.kind, req.needs_value)
 }

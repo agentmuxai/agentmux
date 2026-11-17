@@ -58,6 +58,24 @@ fn changes_machine_copy(arguments: &Value) -> bool {
     arguments.get("fields").and_then(Value::as_object).is_some_and(|f| f.keys().any(|k| k.starts_with("source_") || SAID_OF_THE_KEY.contains(&k.as_str())))
 }
 
+/// `share`: ask the person to share a login with this agent's own browser profile. Only for the caller itself: srv
+/// refuses a request that names another agent, and the answer says the login's label and site, never the user name or password.
+async fn share(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
+    let id = arguments.get("id").and_then(Value::as_str).unwrap_or("").trim();
+    if id.is_empty() {
+        anyhow::bail!("Vault share needs an id: the login to be given (list shows the logins you may use)");
+    }
+    let wait = arguments.get("wait_secs").and_then(Value::as_u64).unwrap_or(REQUEST_WAIT_SECS).min(REQUEST_WAIT_MAX_SECS);
+    let body = json!({
+        "id": id,
+        "reason": arguments.get("reason").and_then(Value::as_str),
+        "agent": arguments.get("agent").and_then(Value::as_str),
+        "wait_secs": wait,
+        "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault share needs this agent's signed identity: {e}"))?,
+    });
+    post_waiting(cx, &format!("{base}/api/v1/vault/share"), &body, "Vault share", wait).await
+}
+
 /// `check`: whether an entry's machine copy still holds the entry's value. The answer is `same`, `different` or
 /// `could not read` with why; neither value comes back.
 async fn check(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<String> {
@@ -265,9 +283,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "history" => history(arguments, cx, base).await,
                 "import" => import(arguments, cx, base).await,
                 "import_batch" => import_batch(arguments, cx, base).await,
+                "share" => share(arguments, cx, base).await,
                 "check" => check(arguments, cx, base).await,
                 action @ ("show" | "update" | "verify" | "health") => inspect(action, arguments, cx, base).await,
-                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, rotate, history, import, import_batch, check, show, update, verify or health"),
+                other => anyhow::bail!("Vault: unknown action {other:?}; use list, request, generate, share, rotate, history, import, import_batch, check, show, update, verify or health"),
             }
         }
         _ => Err(not_in_family()),
@@ -282,7 +301,7 @@ mod tests {
     fn the_schema_lists_every_action_and_every_kind_srv_knows() {
         let schema: Value = serde_json::from_str(crate::tool_schemas::VAULT_TOOL).unwrap();
         let actions = &schema["inputSchema"]["properties"]["action"]["enum"];
-        assert_eq!(actions, &json!(["list", "request", "generate", "rotate", "history", "import", "import_batch", "check", "show", "update", "verify", "health"]));
+        assert_eq!(actions, &json!(["list", "request", "generate", "share", "rotate", "history", "import", "import_batch", "check", "show", "update", "verify", "health"]));
         // srv's catalog (backend/vault/kinds.rs) is the source; this list
         // must name the same kinds.
         let srv = include_str!("../../../srv-core/src/backend/vault/kinds.rs");

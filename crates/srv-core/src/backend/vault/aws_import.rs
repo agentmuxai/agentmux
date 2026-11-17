@@ -467,9 +467,9 @@ fn replace_main(store: &Store, id: &str, created_at: i64, part: &str, value: &Ze
     }
     let kept = versions::of(&row, agent, IMPORTED);
     versions::prune(store);
-    let was = row.sealed.clone();
+    let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
     let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, updated_at: now_ms(), ..row };
-    if !store.vault_update_kept(&changed, &was, Some(&kept)).map_err(|e| e.to_string())? {
+    if !store.vault_update_kept(&changed, &was, &was_fields, Some(&kept)).map_err(|e| e.to_string())? {
         return Err(format!("{} changed while the secret was read, so nothing was saved", changed.label));
     }
     Ok(())
