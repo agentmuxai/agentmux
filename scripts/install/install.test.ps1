@@ -20,7 +20,7 @@ function Invoke-Install([string]$Shell, [hashtable]$EnvVars, [string[]]$ScriptAr
     $saved = @{}
     foreach ($k in $EnvVars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $EnvVars[$k]) }
     try {
-        $out = (& $Shell -NoProfile -NonInteractive -File $script @ScriptArgs 2>&1 | Out-String)
+        $out = (& $Shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script @ScriptArgs 2>&1 | Out-String)
         return @{ Code = $LASTEXITCODE; Out = $out }
     } finally {
         foreach ($k in $EnvVars.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
@@ -228,6 +228,7 @@ if (-not $canSign) {
                 [IO.File]::WriteAllText($full, "stand-in $f", $utf8)
             }
             if (-not $Files) { New-Item -ItemType Directory -Path $stage -Force | Out-Null }
+            if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
             [IO.Compression.ZipFile]::CreateFromDirectory($stage, $Path)
             if ($ExtraEntry) {
                 $za = [IO.Compression.ZipFile]::Open($Path, "Update")
@@ -361,8 +362,9 @@ if (-not $canSign) {
         $realKeygen = Get-Command ssh-keygen -ErrorAction SilentlyContinue
         if ($realKeygen) {
             $sk = Join-Path $work "sshkey-$sh"
-            & $realKeygen.Source -q -t ed25519 -N '""' -f $sk 2>$null | Out-Null
-            if (-not (Test-Path -LiteralPath "$sk.pub")) { & $realKeygen.Source -q -t ed25519 -N "" -f $sk 2>$null | Out-Null }
+            # An argument string, not an argument list: an empty passphrase is passed as "" the same way by Windows PowerShell 5.1 and PowerShell 7.3+.
+            foreach ($stale in @($sk, "$sk.pub")) { if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force } }
+            Start-Process -FilePath $realKeygen.Source -ArgumentList ('-q -t ed25519 -N "" -f "' + $sk + '"') -Wait -NoNewWindow | Out-Null
             if (Test-Path -LiteralPath "$sk.pub") {
                 $pubLine = (Get-Content -LiteralPath "$sk.pub" -TotalCount 1).Split(" ")[1]
                 $blob = [Convert]::FromBase64String($pubLine)
@@ -370,8 +372,10 @@ if (-not $canSign) {
                 $srel = Join-Path $work "hssh-$sh"; Copy-Release $hrel $srel
                 $envFile = Join-Path $srel "AgentMux-$hver-envelope.json"
                 Copy-Item -LiteralPath $envFile -Destination (Join-Path $work "env-to-sign.json") -Force
-                & $realKeygen.Source -Y sign -f $sk -n agentmux-release (Join-Path $work "env-to-sign.json") 2>$null | Out-Null
+                # ssh-keygen -Y sign does not overwrite a signature that is there: a stale one (another shell's, another key's) would be taken as this one.
                 $signed = Join-Path $work "env-to-sign.json.sig"
+                if (Test-Path -LiteralPath $signed) { Remove-Item -LiteralPath $signed -Force }
+                Start-Process -FilePath $realKeygen.Source -ArgumentList ('-Y sign -f "' + $sk + '" -n agentmux-release "' + (Join-Path $work "env-to-sign.json") + '"') -Wait -NoNewWindow | Out-Null
                 if (Test-Path -LiteralPath $signed) {
                     Copy-Item -LiteralPath $signed -Destination (Join-Path $srel "AgentMux-$hver-envelope.json.sshsig") -Force
                     $sshEnv = HeadlessEnv $srel (Join-Path $work "lad10-$sh"); $sshEnv["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $sshEnv["AGENTMUX_INSTALL_TEST_KEYS"] = $sshKeys; $sshEnv["AGENTMUX_INSTALL_SSHSIG_FLOOR"] = "0.0.1"
@@ -390,10 +394,12 @@ if (-not $canSign) {
         } else { Write-Host "skip - no ssh-keygen on this system; the SSH signature checks are not run" }
 
         # No OpenSSL 3 and no usable ssh-keygen: Headless is never installed from hashes alone, and says what to do.
-        $noSsl = HeadlessEnv $hrel (Join-Path $work "lad8-$sh"); $noSsl["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $noSsl["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen")
+        # Each case has a LOCALAPPDATA of its own: one that installed something would otherwise answer the next with "already installed".
+        function NoSslEnv([string]$Tag) { $e = HeadlessEnv $hrel (Join-Path $work "lad8-$Tag-$sh-$([Guid]::NewGuid().ToString('N'))"); $e["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $e["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen"); return $e }
+        $noSsl = NoSslEnv "a"
         Expect "no OpenSSL and no ssh-keygen: Headless is refused, never installed from hashes alone" 1 "not installed from hashes alone" $sh $noSsl $hargs
-        Expect "that says what to do: the OpenSSH client or OpenSSL 3" 1 "OpenSSH client" $sh $noSsl $hargs
-        if (-not (Test-Path (Join-Path $work "lad8-$sh\AgentMux\Headless\$hver"))) { Pass "no OpenSSL and no ssh-keygen: nothing was unpacked" } else { Fail "no OpenSSL and no ssh-keygen: nothing was unpacked" "a version folder exists" }
+        Expect "that says what to do: the OpenSSH client or OpenSSL 3" 1 "OpenSSH client" $sh (NoSslEnv "b") $hargs
+        if (-not (Test-Path (Join-Path $noSsl["LOCALAPPDATA"] "AgentMux\Headless\$hver"))) { Pass "no OpenSSL and no ssh-keygen: nothing was unpacked" } else { Fail "no OpenSSL and no ssh-keygen: nothing was unpacked" "a version folder exists" }
         # The desktop installer path keeps its hashes-only fallback, said plainly (and -RequireSignature still refuses it).
         $noSslDesktop = Run-Release $sh $good $testKeys; $noSslDesktop["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $noSslDesktop["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen")
         $r = Invoke-Install $sh $noSslDesktop $dl
