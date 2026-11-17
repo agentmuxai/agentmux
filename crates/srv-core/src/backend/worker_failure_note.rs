@@ -88,6 +88,26 @@ pub(crate) fn what_next(f: &StoredFailure, now_ms: u64) -> String {
     }
 }
 
+/// The note for whoever sent a message whose turn then exited on `f`, naming `target_name` (the agent that was
+/// sent the message): `None` for anything but a retryable transient failure (#2627) — a usage limit or a
+/// refused sign-in has its own path (the availability view, the limit wake), and is not a silently lost message.
+pub(crate) fn sender_body(target_name: &str, f: &StoredFailure) -> Option<String> {
+    if !f.retryable {
+        return None;
+    }
+    let why = match f.code {
+        FailureClass::RateLimited => "The provider rate-limited it (HTTP 429)",
+        FailureClass::Overloaded => "The provider was overloaded (HTTP 529)",
+        FailureClass::Network => "It could not reach the provider",
+        _ => return None,
+    };
+    Some(format!(
+        "Your message to {target_name} wasn't answered: its turn ended on an error, not a reply. {why}; this is \
+         transient and has no reset time. AgentMux retries it by itself only while {target_name}'s own pane is \
+         open in a window; otherwise send it another message if it still matters."
+    ))
+}
+
 /// The body of the note for a failed worker.
 pub(crate) fn failed_body(worker: &str, title: &str, meta: &MetaMapType, now_ms: u64) -> String {
     let base = format!("Your worker {worker} stopped with an error: {title}.");
@@ -138,6 +158,20 @@ mod tests {
         assert!(failed.speaks_for_exit("b", t0 + Duration::from_secs(1)), "or just before it");
         assert!(!failed.speaks_for_exit("b", t0 + Duration::from_secs(60)), "a failure of an earlier turn");
         assert!(!failed.speaks_for_exit("other", t0), "another pane");
+    }
+
+    #[test]
+    fn a_senders_note_is_only_for_a_retryable_transient_failure() {
+        let retryable = StoredFailure { code: FailureClass::RateLimited, retryable: true, resets_at_ms: None };
+        let body = sender_body("Lowly", &retryable).unwrap();
+        assert!(body.starts_with("Your message to Lowly wasn't answered: its turn ended on an error, not a reply. The provider rate-limited it (HTTP 429)"), "{body}");
+        assert!(body.contains("Lowly's own pane is open") && body.contains("send it another message"), "{body}");
+        assert!(sender_body("Lowly", &StoredFailure { code: FailureClass::UsageLimit, retryable: false, resets_at_ms: None }).is_none(), "its own path tells it");
+        assert!(sender_body("Lowly", &StoredFailure { code: FailureClass::Auth, retryable: false, resets_at_ms: None }).is_none());
+        assert!(
+            sender_body("Lowly", &StoredFailure { code: FailureClass::RateLimited, retryable: false, resets_at_ms: None }).is_none(),
+            "a class that is usually transient but wasn't marked retryable this time"
+        );
     }
 
     #[test]
