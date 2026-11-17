@@ -1,5 +1,102 @@
 # AgentMux Version History
 
+## 0.60.31 — 2026-11-16
+
+- release and install: each release carries a second signature of its envelope in SSH signature form, made by the same key, so a stock Mac's ssh-keygen can check the release when its openssl cannot; install.sh uses it and refuses a release from the first one that carries it that lacks it
+- A headless server can show a Browser pane in its web UI: a Chromium on the server streams the page as JPEG frames over a WebSocket and takes mouse, wheel, keyboard and paste back (off unless the server is started with AGENTMUX_STREAMED_BROWSER=1; this slice is the server side and a probe, the pane in the web UI follows)
+- Pane backdrops phase 1, part B: a Backdrop… entry in the pane menu opens an inline picker with the 16 built-ins, a custom colour, polarity, a contrast readout, live preview and Reset; the kit Swatch grid's arrow keys follow its buttons after its options are removed or reordered
+- agentmux version names the commit the build was made from
+- The web UI of a headless server can show a Browser pane: the page runs in a browser on the server and is drawn on a canvas, with the mouse, wheel, keyboard and paste going back and the pane following its size (when the server is started with the streamed browser on)
+- Vault: export the linked entries alone to a .vault file with no value in it, and an import now takes a linked entry instead of skipping it
+- The Claude sign-in panel says why a sign-in could not be kept (no macOS login keychain, or a code that was sent without the sign-in finishing) instead of "The login link timed out"
+- AgentMux Headless: the server package gets one name everywhere (agentmux-headless files, install.sh --headless, agentmux-headless command), agentmux update and uninstall, and the install scripts are also published as agentmux-install.sh and agentmux-install.ps1
+- The agent picker tile's last prompt no longer shows a background task's notification or other notes the CLI adds to the user turn
+- A working mark in the Swarm no longer freezes when another computation throws: the shared clock calls each animation directly
+- README: the install commands are the site's with a link to All Downloads, the provider lists name only what the picker offers, and voice input is described exactly; the API getting-started page and the CEF maintenance doc corrected
+- Voice input switched off in Settings > Recording is off everywhere: the Ctrl+Shift+V shortcut no longer starts it, switching it off stops a recording, and the server transcribes nothing
+- A Kanban card, its drawer and the agent pickers show an agent's display name (Tess), not its id (tess-2) (#47775)
+- A window tab click no longer does nothing when a binding throws during the switch, and each switch logs one line with its timings (#47767)
+- agentmux status shows how many browsers are signed in, asked of the running server (a signed /auth/sessions route and an agentmux-srv sessions command)
+- A slow colour-sweep test no longer times out on a busy CI runner and drops a release from the merge queue
+- With voice input switched off, the Ctrl+Shift+V shortcut says so and points to Settings > Recording, and a microphone test that is running in Settings stops
+- A window tab click clears its switch intent when the backend refuses, even if a binding threw while the intent was shown (#47785)
+- Vault batch card: the card in the agent's pane and the one in the Vault pane share their ticks and Vault choice, one key is said as one, a long list of agents is counted, and who may use the Vault follows a change made while the card is open
+- History: the store can read frames that clean the streaming deltas of current Claude lines (a message id after the uuid); writing them follows one release later
+- Atlas By seat: in a tall pane the agents with no lead stand in the columns that match the trees' width, so the right half is no longer empty (#47748)
+- Vault: a linked entry is said to be one in the import preview and in the delete dialog, the export formats line up, and a links-only export is confirmed by what was written
+- A release proves the full test suite on the tagged commit in its own job, so a release commit that has no push run of its own (merged in the same push as another pull request) can still be released
+- A switch of an agent's account now asks the agent to reach a safe point and leave a handoff first; the composer chip counts down and can switch at once
+- Vault: a KeePass export and import carry a linked entry, a batch of links only says recorded, and each other place of a key says what its newest check found
+- CI: every build and release workflow installs clippy and rustfmt with the Rust toolchain, so rustup no longer adds them in the middle of a build (the 0.60.30 Linux build failed there)
+- Swarm: in a narrow pane a row with no pane keeps its name and role badge (the No pane mark, age and context size give way first), and agents that report to a lead get a guide line down their rows
+- Atlas By seat: in a wide pane the agents with no lead may stand in more than six columns, so the cards can grow
+- Reviews pane: two tasks that name one pull request both show its review, checks and merge state, checks of an older commit are no longer shown as the current ones, and the task banner has a gap before its Show every task link
+- Vault: the check of an entry whose key is a CI secret (a GitHub Actions secret of a repository or an environment) says whether the secret is there and when it last changed, read with the GitHub CLI signed in on the computer. A container agent's check reads it only for an entry the person answered Always for; every read is a line in Audit
+- Swarm: the guide line down a lead's reports runs unbroken between rows
+- The Audit view shows fleet actions (an AWS credential grant, a seat change, a rename, a pane close) as action rows: who did it, what, to what and how it went, with no byte count or token estimate
+- Vault: in an agent's pane, a batch import's card lists its rows before the account and the Vault, so a narrow or zoomed pane shows what the answers allow
+- Drone replay: a handled failure in the source run fails again in the replay and takes its error edge, a stubbed for-each keeps its taint, and the loop's elapsed time starts over
+- Drone: a run restored from a checkpoint written before failed branches were kept still knows which Join branch failed
+- The agent pane's tab no longer shows an unread-messages pill; the count beside its Messages icon stays
+- README: cmux is credited for the tabs inside each pane
+- Vault: in an agent's pane every Vault card scrolls as a whole above its answers and may take 70% of the pane, so it can be read in a narrow, zoomed pane
+- The update button says what it does: Open the download page, with the page for this system and the reason it can't download here; the check retries soon after GitHub's limit ends
+- AgentMux Headless runs on Windows: agentmux start, status and stop work there (the server is found by its program, stop asks it over the signed channel, start returns even when its output is a pipe)
+- Swarm broadcast: Enter sends (Shift+Enter adds a line), and a Select all on host button selects only this computer's agents
+- AgentMux Headless on Windows starts at sign-in: agentmux setup registers a per-user Scheduled Task that runs as you with no administrator rights, through a small program that shows no console window
+- Connectors: Reconnect for a Claude or Codex sign-in that stopped working, xAI and Moonshot tiles (text), Copilot under GitHub (text), and an Other agents list
+- AgentMux Headless on Windows keeps its data and sign-in key to you alone: a channel folder that others can open is refused with the command that fixes it, the key file is limited to your account, and the server's address is bound for its own use
+- When GitHub's API limits update checks, the check reads the new release's files and checksums from its signed manifest, so the download is still offered
+- AgentMux Headless for Windows: the package workflow builds, packs and runs a Windows x64 zip, and the release publishes it
+- The streamed Browser pane follows a resize while the pane is dragged, no longer reopens a closed page on a resize, and shows a refused address over the page instead of pushing it down
+- A window that has been idle for a long time can now reload itself to free memory even with a find bar open: the bar comes back with its text and match, and a pane scrolled into older history, a stuck upload or a forgotten dialog no longer hold the reload for ever
+- The agent pane's question panel fits a narrow, zoomed pane: its header wraps, the options keep their height and the answer buttons stay in view
+- A failed action in the Audit view says why: its row ends (failed: the reason) instead of just (failed)
+- CI: a PR that changes a script test the specs-index job runs, or a script it imports, now runs that job on Windows too
+- Atlas: boxes are tighter, the gaps between them close as you zoom in so more of them are in view, and the last-sound line has no note sign
+- The streamed Browser pane keeps a server error readable when the connection ends
+- Test fixtures that looked like API keys, tokens and private keys are now built from pieces, so the container push guard no longer refuses a push that carries them
+- The release-signing tests run on Windows, macOS and Linux with a named stand-in signer, and a test can no longer reach the real signing service
+- A test build started with AGENTMUX_TEST_OFFSCREEN=1 now makes no sound and opens no audio output, whatever the sound setting says, and its start line says so
+- Toasts: the stack has a row at its top with a clear "+N more" and a "Dismiss all" button, which stays in place while an expanded stack scrolls
+- A new widgets.json starts with instructions and a worked example inside it; the file may carry comments, a mistake in it is shown in Settings with its line, and adding a pinned entry keeps your comments
+- The Audit pane's last-sound line names the agent, as the status bar's line does, when the sound's row is not in the list
+- The Gmail tool shows whether each mail's sender was proven: Google's own SPF, DKIM and DMARC verdicts with their domains, the Reply-To, ARC for forwarded mail and warning flags, plus the raw header lines on request
+- Backdrop picker: a previewed backdrop leaves the pane when High Contrast or forced colours come on while its swatch is still focused, and the preview follows a polarity change
+- AgentMux Headless on Windows: uninstall removes the install folder and its PATH entry, and setup checks that the program folder is the person's own
+- Agent picker: a tile shows your newest prompt when that prompt starts with a quoted CLI block (a task notification, a command's output) and then has your own words
+- CI: the Linux test job's last build runs with one job and the retry with one, so its two rustc no longer overlap at 14.7 GB
+- The agent's question panel in a narrow, zoomed pane shows the question and the first answer before you scroll, with a smaller header and two compact rows of buttons
+- A resync that replaces an agent's controller no longer holds the messages queued behind its turn: the replacement runs them, and what a stopped agent held is dropped when its block is deleted
+- Atlas: the zoom buttons no longer slide a map that still fits in the pane sideways on the first click from the fit
+- Tooltips: a tooltip goes away when you click its control and stays away until the pointer leaves, including a top-bar widget that is redrawn under the pointer by the click
+- AgentMux Headless on Windows: the helper that removes the program file after uninstall starts outside the install folder, so running uninstall from inside it still removes the folder
+- CI: a job on main that was cancelled or timed out, with nothing failing, is reported to one standing ci-stalled issue even after main has moved on, and no longer opens a main-red issue
+- An Anthropic API key added in Connectors > Accounts can be picked in an agent pane's account menu (marked API); the agent reaches Anthropic through AgentMux's gateway and never holds the key. Spec: docs/specs/SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md
+- Colours: the shared palette is 12 evenly spaced hues plus Black and White (14 in place of 16); colours already chosen move to their nearest of the 12, and the pickers show two rows of seven (docs/specs/SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md)
+- The host log now records, every five minutes per window, what is inside a renderer: JS heap, element count, mounted agent panes with their rows and find bars, and how long each recycle blocker has held.
+- The host log now says when the UI thread stops for seconds: how long, how big the host was, free memory, swap and disk, and on Linux what the thread was waiting on.
+- AgentMux Headless: uninstall is blocked only by another channel whose running server or login service is a program inside the install folder
+- Agents update takes model and effort for a Claude agent not on a model route (this machine or another, with host), as the pane's picker sets them; Agents env_set refuses ANTHROPIC_MODEL where it has no effect
+- Tooltips: hover tooltips keep showing after an option is picked in a native select with the mouse
+- The Windows Headless package leg tests the install layout and uninstall on the CI runner
+- install.ps1 -Headless installs AgentMux Headless on Windows: the signed zip, checked against the release's manifest, unpacked for this user only with a current link and one PATH entry; install.ps1 also checks the SSH signature where there is no OpenSSL 3
+- AgentMux Headless: the uninstall guard finds an install path in a login service definition as its writer spells it (a % in a unit, an & in a plist or task)
+- AgentMux now keeps a local record of its own memory for weeks: every five minutes one line (machine totals, AgentMux's parts and largest rows) in a file for the day, 14 days kept, nothing sent anywhere.
+- Release docs: the README's release-assets row and the release workflows' comments say Headless and install.sh --headless
+- An AppImage moved or renamed by AppImageLauncher's Integrate starts in the same channel, its Start at login entry follows it and runs without AppImageLauncher's Integrate dialog, and a login entry whose file is gone is logged
+- Pane open takes viewer, line, offset and page, so an agent can open a file in the hex viewer at a byte, a PDF at a page or a text file at a line
+- The memory record keeps an hourly rollup (min, median, p95, max) for a year, no longer writes window or page names, and no longer skips a line after a slow sample
+- A worker's failed turn now tells its leader the cause (rate limit, usage limit) and what happens next, and an agent in error shows the class of its last failure
+- Browser pane: a profile's badge is at full strength in the profile menu, and the toolbar's profile icon is readable for a Black or White profile
+- Pane colours: a Black or White agent's name reads clearly on every theme, and a focused pane's ring is always stronger than an unfocused pane's border, whichever two colours sit side by side
+- Pane open refuses a viewer other than text for a file on an SSH host, which the other viewers can't read
+- Agent pane: a transcript row's time and token panel no longer opens under a pointer left resting where a menu just closed; it opens once the pointer moves on the row
+- App record: read the memory record (summary, hourly series, export), and the rollup checkpoint survives an empty month file
+- A new fileindexlines command tells the Editor where a run of a big text file's lines is, the first piece of the Large text viewer
+- Agents update refuses an empty model or effort by name before it changes anything, and ANTHROPIC_MODEL and a model pick follow the definition's own model server
+- Agent pane: a tool result's frame goes around all of its text when lines are long (a Tasks claim or Tasks list answer), instead of crossing it
+
 ## 0.60.30 — 2026-11-16
 
 - Dragging a single pane tab over another pane's body now reflows the layout live, as dragging a whole pane does, and the tab lands where it was shown

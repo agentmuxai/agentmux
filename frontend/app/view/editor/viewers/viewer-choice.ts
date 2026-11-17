@@ -11,15 +11,16 @@
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import { AUDIO_EXTENSIONS, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
 
-export type ViewerId = "text" | "image" | "media" | "pdf" | "hex" | "info";
+export type ViewerId = "text" | "large" | "image" | "media" | "pdf" | "hex" | "info";
 
 /** readeditorfile's cap: a larger text file isn't loaded into CodeMirror. */
 export const TEXT_MAX_BYTES = 10_000_000;
 
-export const VIEWER_IDS: readonly ViewerId[] = ["text", "image", "media", "pdf", "hex", "info"];
+export const VIEWER_IDS: readonly ViewerId[] = ["text", "large", "image", "media", "pdf", "hex", "info"];
 
 export const VIEWER_LABELS: Record<ViewerId, { label: string; icon: string }> = {
     text: { label: "Text", icon: "file-lines" },
+    large: { label: "Large text", icon: "file-lines" },
     image: { label: "Image", icon: "image" },
     media: { label: "Audio and video", icon: "film" },
     pdf: { label: "PDF", icon: "file-pdf" },
@@ -35,9 +36,11 @@ export function isViewerId(v: unknown): v is ViewerId {
 export type FileProbe = FileProbeResult;
 
 /** The viewers that can show the file, the default first. Every file can
- *  be shown as hex: its bytes are read in parts, whatever its size. */
+ *  be shown as hex: its bytes are read in parts, whatever its size. A file
+ *  over the editor's cap is shown as text by the Large text viewer, which
+ *  reads it in parts too. */
 export function viewerOptions(probe: FileProbe): ViewerId[] {
-    const text: ViewerId[] = probe.size <= TEXT_MAX_BYTES ? ["text"] : [];
+    const text: ViewerId[] = [probe.size <= TEXT_MAX_BYTES ? "text" : "large"];
     switch (probe.kind) {
         case "text":
             return [...text, "info", "hex"];
