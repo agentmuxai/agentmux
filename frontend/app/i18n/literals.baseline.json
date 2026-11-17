@@ -109,7 +109,7 @@
     "frontend/app/view/agent/components/agent-container-limits-parts.tsx": 3,
     "frontend/app/view/agent/components/agent-footer-parts.tsx": 1,
     "frontend/app/view/agent/components/AgentBundlesTab.tsx": 6,
-    "frontend/app/view/agent/components/AgentComposerStrip.tsx": 12,
+    "frontend/app/view/agent/components/AgentComposerStrip.tsx": 11,
     "frontend/app/view/agent/components/AgentContainerLimitsPanel.tsx": 4,
     "frontend/app/view/agent/components/AgentCredentialsRevokedChip.tsx": 1,
     "frontend/app/view/agent/components/AgentDisconnectedBanner.tsx": 4,
