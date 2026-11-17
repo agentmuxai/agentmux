@@ -24,6 +24,9 @@ pub const SETTINGS_KEY: &str = "app:startatlogin";
 /// the tray shows the item disabled until then, rather than guess.
 static SEEN: Mutex<Option<Option<bool>>> = Mutex::new(None);
 
+/// The log said once that the login entry's file is gone.
+static TOLD_MISSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Serializes reconciles, so two quick toggles cannot interleave their writes.
 static RECONCILE: Mutex<()> = Mutex::new(());
 
@@ -72,9 +75,27 @@ fn reconcile_latest() {
     let target = crate::autostart::stable_target();
     let target_str = target.as_ref().ok().map(|t| t.display().to_string());
     let entry = crate::autostart::read_entry();
-    let plan = crate::autostart::plan(setting, entry.as_ref(), &channel, target_str.as_deref());
+    let moved_from = crate::autostart::moved_from();
+    let plan = crate::autostart::plan(setting, entry.as_ref(), &channel, target_str.as_deref(), moved_from.as_deref());
     let result = match plan {
-        crate::autostart::Plan::Nothing => return,
+        crate::autostart::Plan::Nothing => {
+            // Nothing to write, but an entry whose file is gone starts nothing at the next login, with no error
+            // anywhere: say so in the log, once per run.
+            if let Some(missing) = entry.as_ref().and_then(crate::autostart::missing_target) {
+                if !TOLD_MISSING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    crate::log(&format!(
+                        "start-at-login: the login entry runs {missing}, which isn't there, so it will start nothing at login (written by channel {:?}; this is channel {channel})",
+                        entry.as_ref().and_then(|e| e.channel.as_deref())
+                    ));
+                }
+            }
+            return;
+        }
+        crate::autostart::Plan::Repoint => match (&target, &entry) {
+            // Same install, new place: the channel that owns the entry keeps owning it.
+            (Ok(t), Some(e)) => crate::autostart::enable(t, e.channel.as_deref().unwrap_or(&channel)),
+            _ => Err("no target to point the login entry at".to_string()),
+        },
         crate::autostart::Plan::Write => match &target {
             Ok(t) => crate::autostart::enable(t, &channel),
             Err(e) => Err(format!("no target to register: {e}")),

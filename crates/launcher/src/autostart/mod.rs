@@ -264,12 +264,13 @@ pub fn xdg_desktop_entry(exe: &Path, channel: &str) -> String {
          Name=AgentMux\n\
          Comment=Starts AgentMux in the background at login\n\
          TryExec={try_exec}\n\
-         Exec=\"{exe}\" {flag}\n\
+         Exec={prefix}\"{exe}\" {flag}\n\
          Terminal=false\n\
          X-GNOME-Autostart-enabled=true\n\
          X-GNOME-Autostart-Delay=10\n\
          {channel_key}={channel}\n",
         try_exec = desktop_string_escape(&exe.display().to_string()),
+        prefix = exec_prefix(exe),
         exe = desktop_exec_escape(exe),
         flag = BACKGROUND_FLAG,
         channel_key = XDG_CHANNEL_KEY,
@@ -279,6 +280,25 @@ pub fn xdg_desktop_entry(exe: &Path, channel: &str) -> String {
 
 /// Owning channel, as a vendor key (`X-` keys are ignored by the session).
 const XDG_CHANNEL_KEY: &str = "X-AgentMux-Channel";
+
+/// What goes before the program in the login entry's `Exec` line. An AppImage is run with AppImageLauncher
+/// switched off, as the in-app upgrade's restart does: at login that tool stops a file it hasn't integrated
+/// behind an "Integrate or Run once" window, and AgentMux doesn't start until someone answers it (#47873).
+#[cfg(any(not(target_os = "windows"), test))]
+fn exec_prefix(exe: &Path) -> &'static str {
+    if is_appimage(exe) {
+        APPIMAGELAUNCHER_OFF_PREFIX
+    } else {
+        ""
+    }
+}
+
+/// How an AppImage's `Exec` line starts.
+const APPIMAGELAUNCHER_OFF_PREFIX: &str = "env APPIMAGELAUNCHER_DISABLE=1 ";
+
+fn is_appimage(exe: &Path) -> bool {
+    exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("appimage"))
+}
 
 /// Escape a plain desktop-entry string value (`TryExec`, vendor keys), per the
 /// Desktop Entry spec's `\\`, `\n`, `\t`, `\r` escapes. A raw newline would
@@ -625,6 +645,9 @@ pub struct Entry {
     /// Which channel wrote it. `None` for an entry from before ownership was
     /// recorded.
     pub channel: Option<String>,
+    /// Whether it is written the way this build writes it. `false` for an AppImage's entry from before it ran
+    /// with AppImageLauncher switched off: it is rewritten even when it already runs the right file.
+    pub current: bool,
 }
 
 /// Read the current entry back from the platform. `None` when there is none.
@@ -684,7 +707,7 @@ fn parse_task_xml(xml: &str) -> Entry {
     let channel = between(xml, "<Description>", "</Description>")
         .and_then(|d| between(d, TASK_CHANNEL_MARKER, "]"))
         .map(xml_unescape);
-    Entry { target, channel }
+    Entry { target, channel, current: true }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -694,7 +717,7 @@ fn parse_plist(text: &str) -> Entry {
         .map(xml_unescape);
     let channel = between(text, &format!("<key>{PLIST_CHANNEL_KEY}</key>"), "</string>")
         .and_then(|rest| rest.split_once("<string>").map(|(_, v)| xml_unescape(v)));
-    Entry { target, channel }
+    Entry { target, channel, current: true }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -706,7 +729,13 @@ fn parse_desktop_entry(text: &str) -> Entry {
     };
     // `TryExec` is the plain path; an entry from before it existed has none,
     // reads as "target unknown", and gets rewritten.
-    Entry { target: value("TryExec"), channel: value(XDG_CHANNEL_KEY) }
+    let target = value("TryExec");
+    // An AppImage's entry that doesn't start it with AppImageLauncher switched off is an older one.
+    let current = match (&target, value("Exec")) {
+        (Some(t), Some(exec)) if is_appimage(Path::new(t)) => exec.starts_with(APPIMAGELAUNCHER_OFF_PREFIX),
+        _ => true,
+    };
+    Entry { target, channel: value(XDG_CHANNEL_KEY), current }
 }
 
 /// What to do to bring the login entry in line with `app:startatlogin`
@@ -723,6 +752,51 @@ pub enum Plan {
     /// set: the user turned start-at-login on with the old toggle, so record
     /// that as `app:startatlogin = true` instead of removing it.
     Adopt,
+    /// The entry runs this very file from where it was before it was moved or
+    /// renamed (AppImageLauncher's Integrate): point it at where the file is
+    /// now, keeping the channel that owns it.
+    Repoint,
+}
+
+/// Where the AppImage this launcher runs from was before it was moved or renamed, when it was
+/// (`agentmux_common::appimage_record::reconcile`, at start).
+static MOVED_FROM: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Remember where this launcher's AppImage came from, once per run.
+pub fn set_moved_from(from: Option<String>) {
+    let _ = MOVED_FROM.set(from);
+}
+
+pub(crate) fn moved_from() -> Option<String> {
+    MOVED_FROM.get().cloned().flatten()
+}
+
+/// What the launcher does first, before anything reads either: takes `AGENTMUX_STABLE_EXE` out of the
+/// environment ([`take_stable_exe_env`]), and notes where an AppImage has been moved from ([`note_appimage_start`]).
+pub fn startup() {
+    take_stable_exe_env();
+    note_appimage_start();
+}
+
+/// At start, for an AppImage: put its channel record back beside it if a move or a rename left that behind, and
+/// keep where it is now (`agentmux_common::appimage_record`). Remembers where it was, for the login entry to follow.
+pub fn note_appimage_start() {
+    let moved = std::env::current_exe().ok().and_then(|exe| {
+        let appimage = agentmux_common::runtime_mode::running_appimage(&exe)?;
+        let record = agentmux_common::appimage_record::record_path()?;
+        let done = agentmux_common::appimage_record::reconcile(&record, &appimage);
+        if let Some(from) = &done.moved_from {
+            crate::log(&format!("appimage: moved or renamed since it last started (from {from}); channel {:?} kept", done.channel));
+        }
+        done.moved_from
+    });
+    set_moved_from(moved);
+}
+
+/// The file a login entry runs, when it isn't there: the session skips such an entry without a word
+/// (the desktop entry's `TryExec`), so AgentMux silently stops starting at login.
+pub fn missing_target(entry: &Entry) -> Option<&str> {
+    entry.target.as_deref().filter(|t| !t.is_empty() && !Path::new(t).exists())
 }
 
 /// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
@@ -736,13 +810,16 @@ pub enum Plan {
 /// - Off: remove only an entry this channel owns. Another build's entry, or
 ///   one from before ownership was recorded, is not this build's to remove.
 /// - Never set: off, except that an unowned (pre-setting) entry is adopted.
-pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: Option<&str>) -> Plan {
+pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: Option<&str>, moved_from: Option<&str>) -> Plan {
     let owned = |e: &Entry| e.channel.as_deref() == Some(channel);
     match (setting, entry) {
-        (Some(true), Some(e)) if owned(e) && target.is_some() && e.target.as_deref() == target => Plan::Nothing,
+        (Some(true), Some(e)) if owned(e) && e.current && target.is_some() && e.target.as_deref() == target => Plan::Nothing,
         (Some(true), _) => Plan::Write,
         (Some(false), Some(e)) if owned(e) => Plan::Remove,
         (None, Some(e)) if e.channel.is_none() => Plan::Adopt,
+        // An entry that runs this very file from where it was follows the file, whichever channel wrote it
+        // and whatever this channel's setting is: it is the same install, moved.
+        (_, Some(e)) if target.is_some() && e.target.is_some() && e.target.as_deref() == moved_from && e.target.as_deref() != target => Plan::Repoint,
         _ => Plan::Nothing,
     }
 }
@@ -790,6 +867,11 @@ mod autostart_tests {
 
     fn exe() -> PathBuf {
         PathBuf::from(r"C:\Program Files\AgentMux\agentmux.exe")
+    }
+
+    /// `plan` for a file that wasn't moved.
+    fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: Option<&str>) -> Plan {
+        super::plan(setting, entry, channel, target, None)
     }
 
     #[test]
@@ -979,7 +1061,7 @@ mod autostart_tests {
     }
 
     fn entry(target: &str, channel: Option<&str>) -> Entry {
-        Entry { target: Some(target.to_string()), channel: channel.map(str::to_string) }
+        Entry { target: Some(target.to_string()), channel: channel.map(str::to_string), current: true }
     }
 
     #[test]
@@ -1024,13 +1106,13 @@ mod autostart_tests {
     #[test]
     fn every_artifact_reads_back_its_own_target_and_channel() {
         let exe = Path::new("/home/u/My Apps/Agent&Mux.AppImage");
-        let want = Entry { target: Some(exe.display().to_string()), channel: Some("local-main-b28b7a".into()) };
+        let want = Entry { target: Some(exe.display().to_string()), channel: Some("local-main-b28b7a".into()), current: true };
         assert_eq!(parse_desktop_entry(&xdg_desktop_entry(exe, "local-main-b28b7a")), want);
         assert_eq!(parse_plist(&launch_agent_plist(exe, "local-main-b28b7a")), want);
         let win = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux & Co\agentmux.exe");
         assert_eq!(
             parse_task_xml(&scheduled_task_xml(win, "stable")),
-            Entry { target: Some(win.display().to_string()), channel: Some("stable".into()) }
+            Entry { target: Some(win.display().to_string()), channel: Some("stable".into()), current: true }
         );
     }
 
@@ -1038,7 +1120,7 @@ mod autostart_tests {
     #[test]
     fn a_pre_ownership_desktop_entry_reads_as_unowned_with_no_target() {
         let old = "[Desktop Entry]\nType=Application\nExec=\"/x/agentmux-launcher\" --background\n";
-        assert_eq!(parse_desktop_entry(old), Entry { target: None, channel: None });
+        assert_eq!(parse_desktop_entry(old), Entry { target: None, channel: None, current: true });
     }
 
     #[test]
@@ -1047,6 +1129,72 @@ mod autostart_tests {
         assert!(d.contains("\nTryExec=/opt/agentmux/agentmux\n"), "{d}");
         assert!(d.contains("\nX-GNOME-Autostart-Delay=10\n"), "{d}");
         assert!(d.contains("\nX-AgentMux-Channel=stable\n"), "{d}");
+    }
+
+    #[test]
+    fn a_login_entry_follows_its_file_when_the_file_is_moved_or_renamed_whichever_channel_wrote_it() {
+        let old = "/home/user/Desktop/AgentMux_0.60.29_amd64.AppImage";
+        let new = "/home/user/Applications/AgentMux_0.60.29_amd64_9f8e7d.AppImage";
+        let moved = |setting, entry: &Entry, channel| super::plan(setting, Some(entry), channel, Some(new), Some(old));
+        // The channel that wrote the entry runs the file: its own setting rewrites it (as before).
+        assert_eq!(moved(Some(true), &entry(old, Some("local-x")), "local-x"), Plan::Write);
+        // Another channel is running the moved file, or this channel's setting is off or never set: the entry
+        // still follows the file.
+        for setting in [Some(true), Some(false), None] {
+            assert_eq!(moved(setting, &entry(old, Some("local-x")), "stable"), if setting == Some(true) { Plan::Write } else { Plan::Repoint }, "{setting:?}");
+        }
+        // Only an entry that runs this very file's old path follows it.
+        assert_eq!(moved(Some(false), &entry("/opt/other/agentmux", Some("local-x")), "stable"), Plan::Nothing);
+        // Already pointing at the file: nothing to do. Nothing moved: nothing to follow.
+        assert_eq!(moved(Some(false), &entry(new, Some("local-x")), "stable"), Plan::Nothing);
+        assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", Some(new), None), Plan::Nothing);
+        // No target to point it at: no repoint.
+        assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", None, Some(old)), Plan::Nothing);
+    }
+
+    #[test]
+    fn a_login_entry_that_runs_a_file_that_is_gone_is_noticed() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("AgentMux.AppImage");
+        std::fs::write(&there, b"x").unwrap();
+        let gone = dir.path().join("Desktop").join("AgentMux.AppImage");
+        assert_eq!(missing_target(&entry(&there.display().to_string(), Some("stable"))), None);
+        let gone_text = gone.display().to_string();
+        assert_eq!(missing_target(&entry(&gone_text, Some("local-x"))), Some(gone_text.as_str()));
+        assert_eq!(missing_target(&Entry { target: None, channel: None, current: true }), None, "an entry with no target is rewritten, not reported");
+    }
+
+    #[test]
+    fn the_login_entry_runs_an_appimage_with_appimagelauncher_switched_off_and_nothing_else_that_way() {
+        let image = xdg_desktop_entry(Path::new("/home/user/Applications/AgentMux_0.60.29_amd64_9f8e7d.AppImage"), "stable");
+        assert!(
+            image.contains("\nExec=env APPIMAGELAUNCHER_DISABLE=1 \"/home/user/Applications/AgentMux_0.60.29_amd64_9f8e7d.AppImage\" --background\n"),
+            "{image}"
+        );
+        // The program the entry is read back from is still the file, not `env`.
+        assert_eq!(parse_desktop_entry(&image).target.as_deref(), Some("/home/user/Applications/AgentMux_0.60.29_amd64_9f8e7d.AppImage"));
+        // Another extension's case doesn't matter; a package install's wrapper is run directly.
+        assert!(xdg_desktop_entry(Path::new("/home/user/a.appimage"), "stable").contains("Exec=env APPIMAGELAUNCHER_DISABLE=1 "));
+        let wrapper = xdg_desktop_entry(Path::new("/usr/bin/agentmux"), "stable");
+        assert!(wrapper.contains("\nExec=\"/usr/bin/agentmux\" --background\n"), "{wrapper}");
+    }
+
+    #[test]
+    fn an_appimage_login_entry_from_before_the_bypass_is_rewritten_even_when_it_runs_the_right_file() {
+        let file = "/home/user/Applications/AgentMux_0.60.30_amd64.AppImage";
+        let old = format!(
+            "[Desktop Entry]\nType=Application\nTryExec={file}\nExec=\"{file}\" --background\nX-AgentMux-Channel=stable\n"
+        );
+        let read = parse_desktop_entry(&old);
+        assert_eq!(read.target.as_deref(), Some(file));
+        assert!(!read.current, "an AppImage entry that starts it with AppImageLauncher on");
+        assert_eq!(plan(Some(true), Some(&read), "stable", Some(file)), Plan::Write);
+        // What this build writes reads back as current and is left alone.
+        let new = parse_desktop_entry(&xdg_desktop_entry(Path::new(file), "stable"));
+        assert!(new.current);
+        assert_eq!(plan(Some(true), Some(&new), "stable", Some(file)), Plan::Nothing);
+        // A package install's wrapper never had the bypass and is current without it.
+        assert!(parse_desktop_entry(&xdg_desktop_entry(Path::new("/usr/bin/agentmux"), "stable")).current);
     }
 
     #[test]
