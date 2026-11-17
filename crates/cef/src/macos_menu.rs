@@ -193,23 +193,26 @@ unsafe fn string_of(s: Id) -> Option<String> {
 
 /// Puts each key of `keys` on the item of `menu` (and its submenus) whose command it is, and takes the key off an
 /// item whose command has none. Only items that run a command (they carry its id) are touched: the standard
-/// items and Quit keep their own keys. Main thread only.
-unsafe fn set_keys_in(menu: Id, keys: &[MenuKey]) {
+/// items and Quit keep their own keys. Returns how many items now show a key. Main thread only.
+unsafe fn set_keys_in(menu: Id, keys: &[MenuKey]) -> usize {
     let count_of: extern "C" fn(Id, Sel) -> usize = std::mem::transmute(objc_msgSend as *const c_void);
     let object_at: extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
     let set_mask: extern "C" fn(Id, Sel, u64) = std::mem::transmute(objc_msgSend as *const c_void);
     let items = msg(menu, sel(b"itemArray\0"));
+    let mut shown = 0;
     for i in 0..count_of(items, sel(b"count\0")) {
         let item = object_at(items, sel(b"objectAtIndex:\0"), i);
         let submenu = msg(item, sel(b"submenu\0"));
         if !submenu.is_null() {
-            set_keys_in(submenu, keys);
+            shown += set_keys_in(submenu, keys);
         }
         let Some(command) = string_of(msg(item, sel(b"representedObject\0"))) else { continue };
         let key = keys.iter().find(|k| k.command == command);
         msg_id(item, sel(b"setKeyEquivalent:\0"), nsstr(key.map_or("", |k| k.key.as_str())));
         set_mask(item, sel(b"setKeyEquivalentModifierMask:\0"), key.map_or(0, MenuKey::mask));
+        shown += usize::from(key.is_some());
     }
+    shown
 }
 
 /// `agentmuxMenuApplyKeys:` — runs on the main thread: shows the keys the app last pushed.
@@ -217,7 +220,8 @@ unsafe extern "C" fn menu_apply_keys(_self: Id, _cmd: Sel, _arg: Id) {
     let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
     let main = msg(app, sel(b"mainMenu\0"));
     if !main.is_null() {
-        set_keys_in(main, &menu_keys::current());
+        let keys = menu_keys::current();
+        tracing::info!(pushed = keys.len(), shown = set_keys_in(main, &keys), "macOS menu: keys applied");
     }
 }
 
@@ -547,7 +551,8 @@ unsafe fn install_inner(state: Arc<AppState>) {
     msg_id(app, sel(b"setWindowsMenu:\0"), window);
 
     // The keys the app pushed before the menu was there; from now on a push finds the target.
-    set_keys_in(main, &menu_keys::current());
+    let keys = menu_keys::current();
+    tracing::info!(pushed = keys.len(), shown = set_keys_in(main, &keys), "macOS menu: keys applied at install");
     MENU_TARGET.store(target as usize, Ordering::SeqCst);
 
     tracing::info!("macOS: installed native menu bar (SPEC menu-bar Phase 1)");
