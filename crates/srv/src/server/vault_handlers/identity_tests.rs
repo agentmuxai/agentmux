@@ -152,3 +152,31 @@ async fn c5_a_vault_open_to_a_named_agent_is_seen_by_its_token() {
     let (_, theirs) = call(&app, Some(&other), "/api/v1/vault/list", json!({ "auth": keyless("vid-other") })).await;
     assert!(!theirs.to_string().contains(&id), "another agent does not: {theirs}");
 }
+
+/// A container agent: its pane's meta says it runs in a container, as an agent block's does.
+fn container_agent(state: &crate::server::AppState, slug: &str) -> String {
+    let uid = format!("uid-{slug}");
+    let mut def = crate::backend::storage::agents::test_agent_def(&uid, slug, "claude", "agent", 1, "");
+    def.slug = slug.to_string();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    state.mstore.attach_token_index().unwrap();
+    let meta = [("agentMode", "container"), ("agentId", slug)].iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), meta, ..Default::default() };
+    state.mstore.insert(&mut block).unwrap();
+    state.reactive_handler.register_agent_full(slug, &block.oid, None, 0, None, Some(&uid), "test.vault_identity").unwrap();
+    state.mstore.agent_token_ensure(&uid).unwrap()
+}
+
+// A rotation runs its commands on the host: a container agent, proven by its token, is refused before anyone is asked.
+#[tokio::test]
+async fn c1_a_container_agents_rotation_is_refused_before_the_person_is_asked() {
+    let (app, state) = setup().await;
+    let token = container_agent(&state, "vid-box");
+    let id = login(&app).await;
+    let body = json!({ "id": id, "set": "echo set", "reason": "rotate the dashboard login", "auth": keyless("vid-box") });
+    let (s, out) = call(&app, Some(&token), "/api/v1/vault/rotate", body).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{out}");
+    assert!(out["error"].as_str().unwrap().contains("container agent can't"), "{out}");
+    assert!(vault::uses::uses().list().iter().all(|u| u.entry_id != id), "nobody was asked");
+    assert!(history_of(&state, &id).iter().all(|l| l.actor != "vid-box"));
+}
