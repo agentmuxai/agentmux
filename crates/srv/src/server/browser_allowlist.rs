@@ -404,6 +404,12 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
     }
 }
 
+/// The site each pane's frame notice is showing now, if it has one.
+fn frame_notices() -> &'static Mutex<HashMap<String, String>> {
+    static N: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    N.get_or_init(Default::default)
+}
+
 /// A snapshot found a frame from `origin`, a site off the pane's `list`
 /// (forms-in-frames spec §5.3): tell the person in the pane's banner, with
 /// Allow. It is a notice, not a question about a navigation, because nothing
@@ -412,14 +418,23 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
 /// takes a new snapshot after. Allow adds the site and loads nothing.
 fn ask_about_frame(state: &AppState, stopped: &Stopped, list: &[String], origin: &str) -> Settled {
     use crate::server::browser_attention::{self, Answer, AskError, Kind};
+    // One frame notice per pane at a time: a second site's would replace the
+    // first's, which the host then counts as asked and never raises again. Busy
+    // makes the host forget the second site until a later snapshot.
+    if let Some(up) = frame_notices().lock().unwrap_or_else(|p| p.into_inner()).get(&stopped.pane) {
+        return if up == origin { Settled::Notice("it is being shown already".to_string()) } else { Settled::Busy };
+    }
     let payload = json!({
         "url": origin, "origin": origin, "sites": list, "why": "", "allow": true, "frame": true, "popup": false, "window": null,
     });
     match browser_attention::raise(state, &stopped.pane, "", Kind::Notice, payload) {
         Ok(raised) => {
+            frame_notices().lock().unwrap_or_else(|p| p.into_inner()).insert(stopped.pane.clone(), origin.to_string());
             let (st, stopped, origin) = (state.clone(), stopped.clone(), origin.to_string());
             tokio::spawn(async move {
+                // Dismissed, replaced by another banner or the pane closed all read as Cancelled.
                 let (answer, waiting) = raised.answer(None).await;
+                frame_notices().lock().unwrap_or_else(|p| p.into_inner()).remove(&stopped.pane);
                 if matches!(answer, Answer::Yes | Answer::YesAlways | Answer::YesAsking) {
                     let outcome = allow_and_load(&st, &stopped, &origin).await;
                     tracing::info!(pane = %stopped.pane, origin = %origin, outcome = %outcome, "[browser-allowlist] a frame's site allowed from the banner");
