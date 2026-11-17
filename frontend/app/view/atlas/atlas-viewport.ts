@@ -22,8 +22,20 @@ export function zoomAt(view: Viewport, px: number, py: number, factor: number): 
 }
 
 /**
- * `view` zoomed by `factor` with the whole map centred in the `w` by `h` pane at the new scale: what the zoom
- * buttons do, so the content is always in the middle of the pane after a click, never left off to one side.
+ * Where a map `extent` long at scale `k` starts in a pane `pane` long, as a zoom button leaves it. A map that fills the
+ * pane is centred, so a click never leaves the content off to one side. A map that is smaller than the pane stays
+ * where it is (the fitted view puts it at the top left, where it stays as agents come and go), only kept inside the
+ * pane: centring it would slide it sideways on the first click from the fit.
+ */
+function zoomedOrigin(origin: number, extent: number, k: number, pane: number): number {
+    const scaled = extent * k;
+    if (scaled + FIT_MARGIN * 2 >= pane) return (pane - scaled) / 2;
+    return Math.min(pane - FIT_MARGIN - scaled, Math.max(FIT_MARGIN, origin));
+}
+
+/**
+ * `view` zoomed by `factor`, as the zoom buttons do: a map that fills the `w` by `h` pane is centred in it, and one
+ * that still fits stays in place (zoomedOrigin), so the content is never left off to one side.
  */
 export function zoomCentered(
     view: Viewport,
@@ -34,7 +46,7 @@ export function zoomCentered(
     h: number
 ): Viewport {
     const k = clampZoom(view.k * factor);
-    return { k, x: (w - width * k) / 2, y: (h - height * k) / 2 };
+    return { k, x: zoomedOrigin(view.x, width, k, w), y: zoomedOrigin(view.y, height, k, h) };
 }
 
 /**
