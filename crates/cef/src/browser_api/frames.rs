@@ -511,6 +511,23 @@ pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>
     Ok(())
 }
 
+/// The pane's frames for a snapshot (`read_frames`). A frame from a site off
+/// the pane's list is shown without references, and the person is told, in the
+/// pane's banner, so they can allow its site (spec §5.3).
+pub async fn read_frames_asking(
+    state: &std::sync::Arc<crate::state::AppState>,
+    block_id: &str,
+    cdp: &mut CdpSession,
+    describes_left: &mut usize,
+) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
+    let read = read_frames(cdp, describes_left, state.site_limits.list(block_id).as_deref()).await;
+    let blocked = blocked_sites(&read.0);
+    if !blocked.is_empty() {
+        crate::client::allowed_origins::report_frame_sites(state, block_id, &blocked);
+    }
+    read
+}
+
 /// How long one snapshot waits in all for frames still loading their document.
 const FRAME_LOAD_BUDGET: std::time::Duration = std::time::Duration::from_millis(3000);
 const FRAME_LOAD_POLL: std::time::Duration = std::time::Duration::from_millis(150);

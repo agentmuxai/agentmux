@@ -711,23 +711,6 @@ async fn page_nodes(cdp: &mut CdpSession, tree: &Value, include_hidden: bool) ->
     (nodes, cut)
 }
 
-/// The pane's frames for a snapshot. A frame from a site off the pane's list
-/// is shown without references, and the person is asked, in the pane's banner,
-/// whether to allow its site (spec §5.3).
-async fn read_frames_asking(
-    state: &Arc<AppState>,
-    block_id: &str,
-    cdp: &mut CdpSession,
-    describes_left: &mut usize,
-) -> (Vec<snapshot::FrameTree>, HashMap<usize, frames::FrameRef>) {
-    let read = frames::read_frames(cdp, describes_left, state.site_limits.list(block_id).as_deref()).await;
-    let blocked_sites = frames::blocked_sites(&read.0);
-    if !blocked_sites.is_empty() {
-        crate::client::allowed_origins::report_frame_sites(state, block_id, &blocked_sites);
-    }
-    read
-}
-
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
     State(state): State<Arc<AppState>>,
@@ -813,7 +796,7 @@ pub async fn snapshot_route(
     let mut describes_left = MAX_DESCRIBES.saturating_sub(facts.len());
     let (frame_trees, frame_refs) = match scope {
         Some(_) => (Vec::new(), HashMap::new()),
-        None => read_frames_asking(&state, &req.block_id, &mut cdp, &mut describes_left).await,
+        None => frames::read_frames_asking(&state, &req.block_id, &mut cdp, &mut describes_left).await,
     };
     let mut rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
     visibility::add_note(&mut rendered.text, cut);
