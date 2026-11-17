@@ -798,6 +798,12 @@ pub async fn snapshot_route(
         Some(_) => (Vec::new(), HashMap::new()),
         None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
     };
+    // A frame from a site off the pane's list is shown without references: the
+    // person is asked, in the pane's banner, whether to allow its site (spec §5.3).
+    let blocked_sites = frames::blocked_sites(&frame_trees);
+    if !blocked_sites.is_empty() {
+        crate::client::allowed_origins::report_frame_sites(&state, &req.block_id, &blocked_sites);
+    }
     let mut rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
     visibility::add_note(&mut rendered.text, cut);
     // A scoped snapshot adds its references to the full snapshot's table, so

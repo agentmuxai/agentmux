@@ -513,7 +513,7 @@ fn line_for(
                 if inner.blocked {
                     let add = if inner.origin.is_empty() { "its site".to_string() } else { inner.origin.clone() };
                     line.push_str(&format!(
-                        " [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; open the pane with {add} in allowed_origins, or ask the user to allow it]"
+                        " [blocked: this site isn't on the pane's allowed list, so nothing in it can be acted on; the user is asked to allow it in the pane's banner, so take a snapshot again after they answer, or open the pane with {add} in allowed_origins]"
                     ));
                 }
             }

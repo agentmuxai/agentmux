@@ -481,6 +481,20 @@ pub fn blocked_by_ancestry(list: &[String], all: &[RawFrame], id: &str) -> bool 
     false
 }
 
+/// The web sites of the blocked frames a snapshot shows, each once, in page
+/// order: what the person is asked to allow (spec §5.3). A frame with no
+/// site of its own (an opaque origin) has nothing to allow.
+pub fn blocked_sites(trees: &[FrameTree]) -> Vec<String> {
+    let mut sites: Vec<String> = Vec::new();
+    for t in trees.iter().filter(|t| t.blocked && t.note.is_none()) {
+        let web = t.origin.starts_with("https://") || t.origin.starts_with("http://");
+        if web && !sites.contains(&t.origin) {
+            sites.push(t.origin.clone());
+        }
+    }
+    sites
+}
+
 /// Refuses a frame reference whose frame, or one of the frames it is in, shows
 /// a site off the pane's current allowed list: the list may have been
 /// tightened since the snapshot, or a frame may have navigated within it.
@@ -616,6 +630,27 @@ mod tests {
             origin: origin.into(),
             session: session.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn the_sites_to_ask_about_are_the_blocked_web_frames_once_each() {
+        let frame = |origin: &str, blocked: bool, note: Option<&str>| FrameTree {
+            origin: origin.to_string(),
+            blocked,
+            note: note.map(str::to_string),
+            ..Default::default()
+        };
+        let trees = [
+            frame("https://forms.example.gov", true, None),
+            frame("https://forms.example.gov", true, None),
+            frame("https://ads.example", false, None),
+            frame("", true, None),
+            frame("null", true, None),
+            frame("https://late.example", true, Some("not shown: over the frame limit")),
+            frame("http://other.example:8080", true, None),
+        ];
+        assert_eq!(blocked_sites(&trees), ["https://forms.example.gov", "http://other.example:8080"]);
+        assert!(blocked_sites(&[]).is_empty());
     }
 
     #[test]

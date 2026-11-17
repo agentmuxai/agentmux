@@ -3056,6 +3056,88 @@ async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
     assert_ne!(s, StatusCode::CONFLICT, "{body}");
 }
 
+// SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md §5.3: a
+// snapshot that finds a frame from a site off the pane's list has the host
+// report the site (kind `frame`); the person is asked in the banner, and Allow
+// adds the site to the list without loading anything, while Block changes
+// nothing and shows no navigation notice.
+#[tokio::test]
+async fn a_frame_from_a_site_off_the_list_is_asked_about_and_allowing_it_loads_nothing() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_agent, auth) = signed_agent_on(&state, &own);
+    let fake = NavFakeHost::default();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+    let open = merged(&auth, serde_json::json!({ "url": "https://www.example.gov/", "allowed_origins": ["www.example.gov"] }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let report = |site: &str| serde_json::json!({ "pane": pane, "target": pane, "url": site, "kind": "frame" });
+    let answer = |id: &serde_json::Value, decision: &str| serde_json::json!({ "block_id": pane, "id": id, "decision": decision });
+
+    // Only the host reports one.
+    let forms = "https://forms.example.gov";
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(forms), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // The question is a navigation banner marked as a frame's.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(forms), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["settled"], "asking", "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    assert_eq!(q["frame"], true);
+    assert_eq!(q["origin"], forms);
+
+    // Allow: the site joins the list and nothing is loaded.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "approve"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
+    assert!(crate::server::browser_allowlist::list_for(&pane).unwrap().contains(&forms.to_string()));
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert!(fake.wait_for_loads(0).await.is_empty(), "allowing a frame's site loads no address");
+
+    // Reported again once allowed, it is settled without a question.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(forms), &host).await;
+    assert_eq!(body["data"]["settled"], "replayed", "{body}");
+    assert!(fake.wait_for_loads(0).await.is_empty());
+
+    // Block: no navigation notice, no change to the list, nothing loaded.
+    let ads = "https://ads.example.net";
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(ads), &host).await;
+    assert_eq!(body["data"]["settled"], "asking", "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
+    assert!(!crate::server::browser_allowlist::list_for(&pane).unwrap().contains(&ads.to_string()));
+    assert!(fake.wait_for_loads(0).await.is_empty());
+
+    // What isn't a web site is never asked about.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("null"), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
+}
+
 /// What a container agent's `OpenBrowser` really does: the request the MCP tool sends, with the container's
 /// token in the key header, opens a pane in a jar of its own (never the user's Personal profile) and says so.
 #[tokio::test]

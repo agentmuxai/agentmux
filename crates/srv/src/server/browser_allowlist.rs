@@ -346,12 +346,19 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
         push_then_replay(state, &stopped).await;
         return Settled::Replayed("it is on the pane's sites");
     }
+    let is_frame = stopped.kind == "frame";
     let Some(origin) = allowed_origins::target_origin(&stopped.url) else {
+        // A frame's site is a question about what the agent may act on; nothing
+        // was stopped, so there is no navigation notice to show.
+        if is_frame {
+            return Settled::Notice("it isn't a web address".to_string());
+        }
         return show_notice(state, &stopped, None, "It isn't a web address.");
     };
     let agent = crate::server::browser_owner::owner_of(&stopped.pane).unwrap_or_default();
     let payload = json!({
         "url": stopped.url, "origin": origin, "window": window_of(&stopped), "popup": stopped.kind == "popup",
+        "frame": is_frame,
     });
     // A hand-off or approval up doesn't stop this: the question goes over it.
     match browser_attention::raise(state, &stopped.pane, &agent, Kind::Navigation, payload) {
@@ -371,6 +378,10 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
                             "replayed: the pane isn't limited any more".to_string()
                         }
                     }
+                    // A frame's site that wasn't allowed: the page didn't go anywhere,
+                    // so the frame just stays unactable and the agent is told so.
+                    browser_attention::Answer::Cancelled if is_frame => "blocked by the user: the frame stays unactable".to_string(),
+                    browser_attention::Answer::TimedOut if is_frame => "nobody answered: the frame stays unactable".to_string(),
                     // Shown before the question comes down, so the banner goes
                     // straight to it.
                     browser_attention::Answer::Cancelled => notice_outcome(&st, &stopped, &origin, "You blocked it."),
