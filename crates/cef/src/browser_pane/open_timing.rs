@@ -194,6 +194,12 @@ impl Book {
     pub(crate) fn forget(&mut self, block: &str) {
         self.live.remove(block);
     }
+
+    /// Is an open or navigation of `block` still on its way to a loaded page? An entry older than [`STALE`] is
+    /// a load that never reported back, and says nothing.
+    pub(crate) fn in_flight(&self, block: &str, now: Instant) -> bool {
+        self.live.get(block).is_some_and(|l| now.saturating_duration_since(l.began) < STALE)
+    }
 }
 
 fn book() -> &'static Mutex<Book> {
@@ -214,6 +220,12 @@ pub(crate) fn begin_navigation(block: &str) {
 /// The open or navigation of `block` reached `phase`.
 pub(crate) fn mark(block: &str, phase: Phase) {
     book().lock().mark(block, phase, Instant::now());
+}
+
+/// Is `block` still opening, or going to a new page? Its document may then be the blank one it started with
+/// (or the previous page), complete as far as it goes, and not the page that was asked for.
+pub(crate) fn in_flight(block: &str) -> bool {
+    book().lock().in_flight(block, Instant::now())
 }
 
 /// The pane went away or was re-attached without a load: nothing more will come.
