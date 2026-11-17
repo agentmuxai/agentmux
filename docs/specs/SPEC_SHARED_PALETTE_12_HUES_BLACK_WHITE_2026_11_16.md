@@ -194,7 +194,7 @@ Indigo is the one case the hue alone does not settle: 273° is 17° from both Bl
 | `schema/color-palette.json` | 16 slots, version 1 | 14 slots, version 2, the `retired` table (§4) |
 | `frontend/app/theme/palette.ts`, `crates/srv-core/src/backend/palette.rs` | a slot always has a hue; snap by hue | a slot has a hue or is a neutral; the neutral test and the `retired` table; the pick functions skip neutrals |
 | `frontend/app/block/pane-color-scheme.ts` | `paneRoleColor` turns a hue into a tone | also returns the §3.2 tone for a neutral; `identityOklchHue` is no longer the only way in (a neutral has no hue) |
-| `frontend/app/components/palette-swatches.tsx`, `.scss` | two rows of 8 (9 and 8 with the "none" swatch) | **two rows of 7** (8 and 7 with "none"): the hues Rose to Jade, then Teal to Magenta, Black, White. A hairline on every swatch |
+| `frontend/app/components/palette-swatches.tsx`, `.scss` | two rows of 8 (9 and 8 with the "none" swatch) | **two rows of 7**, with "none" alone in its own column beside them (the cell under it empty): the hues Rose to Jade, then Teal to Magenta, Black, White. A hairline on every swatch |
 | `frontend/app/block/blockframe.tsx` (the Pane Color menu) | Default, then 16 names | Default, then 12 names, a separator, Black and White |
 | `frontend/app/backdrop/builtins.ts`, `BackdropPicker.tsx`, `picker-model.ts`, `meta.ts` | 16 built-ins in a 4 by 4 grid; a built-in is a hue | 14 built-ins; **7 by 2** in the same order as the pane picker; the two neutrals keep one surface in both app themes (§3.4); retired ids resolve |
 | `crates/srv-core/src/backend/agent_color.rs`, `browser_profiles_store.rs` | "no colour repeats until all 16 are in use" | 12; `is_valid_agent_color` accepts the 14 |
