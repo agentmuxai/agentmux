@@ -546,17 +546,18 @@ pub fn inventory(dir: &Path) -> Inventory {
     inv
 }
 
-/// The last `limit` lines taken from `from_ms` to `to_ms`, in time order.
-pub fn read_raw(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> Vec<Sample> {
+/// The last `limit` lines taken from `from_ms` to `to_ms`, in time order, and how many lines the window holds in all.
+pub fn read_raw(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> (usize, Vec<Sample>) {
     let mut lines: Vec<Sample> = raw_since(dir, Some(&day_of(from_ms))).into_iter().filter(|s| s.t >= from_ms && s.t <= to_ms).collect();
-    let cut = lines.len().saturating_sub(limit);
-    lines.drain(..cut);
-    lines
+    let total = lines.len();
+    lines.drain(..total.saturating_sub(limit));
+    (total, lines)
 }
 
-/// The last `limit` hourly rollups of the hours that start from `from_ms` to `to_ms`, in time order.
-pub fn read_rollups(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> Vec<Rollup> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+/// The last `limit` hourly rollups of the hours that start from `from_ms` to `to_ms`, in time order, and how many
+/// the window holds in all.
+pub fn read_rollups(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> (usize, Vec<Rollup>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return (0, Vec::new()) };
     let mut files: Vec<(chrono::NaiveDate, PathBuf)> =
         entries.flatten().filter_map(|e| Some((month_from_file(e.file_name().to_str()?)?, e.path()))).collect();
     files.sort();
@@ -566,9 +567,9 @@ pub fn read_rollups(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> Vec<R
         out.extend(text.lines().filter_map(|l| serde_json::from_str::<Rollup>(l).ok()).filter(|r| r.h >= from_ms && r.h <= to_ms));
     }
     out.sort_by_key(|r| r.h);
-    let cut = out.len().saturating_sub(limit);
-    out.drain(..cut);
-    out
+    let total = out.len();
+    out.drain(..total.saturating_sub(limit));
+    (total, out)
 }
 
 #[cfg(test)]
@@ -855,12 +856,15 @@ mod tests {
         for i in 0..=30 {
             record.note(&snapshot(NOON + i * EVERY_MS));
         }
-        let all = read_raw(&dir, 0, u64::MAX, 1_000);
-        assert_eq!(all.len(), 31);
-        // The newest lines of a window, in time order.
-        let last3 = read_raw(&dir, NOON + 10 * EVERY_MS, NOON + 20 * EVERY_MS, 3);
+        let (total, all) = read_raw(&dir, 0, u64::MAX, 1_000);
+        assert_eq!((total, all.len()), (31, 31));
+        // The newest lines of a window, in time order, and how many the window holds in all.
+        let (total, last3) = read_raw(&dir, NOON + 10 * EVERY_MS, NOON + 20 * EVERY_MS, 3);
+        assert_eq!(total, 11);
         assert_eq!(last3.iter().map(|s| s.t).collect::<Vec<_>>(), [NOON + 18 * EVERY_MS, NOON + 19 * EVERY_MS, NOON + 20 * EVERY_MS]);
-        let rolls = read_rollups(&dir, NOON + HOUR_MS, u64::MAX, 10);
+        let (total, rolls) = read_rollups(&dir, 0, u64::MAX, 1);
+        assert_eq!((total, rolls.iter().map(|r| r.h).collect::<Vec<_>>()), (2, vec![NOON + HOUR_MS]));
+        let (_, rolls) = read_rollups(&dir, NOON + HOUR_MS, u64::MAX, 10);
         assert_eq!(rolls.iter().map(|r| r.h).collect::<Vec<_>>(), [NOON + HOUR_MS]);
         let inv = inventory(&dir);
         assert_eq!((inv.raw_days, inv.rollup_months), (1, 1));
