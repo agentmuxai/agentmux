@@ -1,8 +1,9 @@
-# AgentMux
+---
+name: ui-confirm-panels
+description: Use when adding or changing a confirm, prompt, approval or "are you sure" in the AgentMux UI (a delete confirmation, a permission request, an install or upgrade approval). A confirm is a panel inside the element that asks, never a window modal.
+---
 
-Instructions for anyone, human or agent, changing this repository. Release steps are in `.claude/skills/release`, and how to run the app to check a change is in `.claude/skills/run`.
-
-## UI: no window modals
+# Confirms are panels, not window modals
 
 A confirm, a prompt or an approval is a panel inside the UI element that asks (the pane, popover, row, menu or card the person just acted in). It is never a modal over the window, the tab or the pane.
 
