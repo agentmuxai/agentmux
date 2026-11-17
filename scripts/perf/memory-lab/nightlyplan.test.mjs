@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown, rejectedRun } from "./lib/nightlyplan.mjs";
 
 const run = (id, sha, createdAt, portable = true) => ({ id, sha, createdAt, portable });
 
@@ -69,6 +69,19 @@ describe("a chosen run older than the lookback", () => {
         expect(missingRunIds(listed, ["12", 12, "29", null, undefined, ""])).toEqual(["12"]);
         expect(missingRunIds(listed, [30, 29])).toEqual([]);
         expect(missingRunIds(listed, ["7", "9"])).toEqual(["7", "9"]);
+    });
+
+    it("is accepted only as a nightly artifacts run on main that is not a pull-request run, whatever suffix its path has", () => {
+        const WF = "ci-nightly-artifacts.yml";
+        const ok = { path: `.github/workflows/${WF}`, head_branch: "main", event: "schedule" };
+        expect(rejectedRun(ok, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, path: `.github/workflows/${WF}@refs/heads/main` }, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, event: "workflow_dispatch" }, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, path: ".github/workflows/build.yml" }, WF)).toMatch(/build\.yml/);
+        expect(rejectedRun({ ...ok, path: `.github/workflows/not-${WF}` }, WF)).toMatch(/not-ci-nightly/);
+        expect(rejectedRun({ ...ok, head_branch: "feature" }, WF)).toMatch(/feature/);
+        expect(rejectedRun({ ...ok, event: "pull_request" }, WF)).toMatch(/pull-request/);
+        expect(rejectedRun({}, WF)).toMatch(/no workflow/);
     });
 
     it("is used as A once fetched, where before it was treated as gone and B was measured alone", () => {

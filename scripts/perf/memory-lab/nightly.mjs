@@ -21,7 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pinnedClaudeVersion } from "../../ui-screenshots/install-fake-claude.mjs";
-import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown, rejectedRun } from "./lib/nightlyplan.mjs";
 import { appendHistory, driftOnset, historyLine, isStandardWorkload, parseHistory, trendMarkdown } from "./lib/perfhistory.mjs";
 import { flaggedMeasures, PERF_LABEL, reportIssue, reportRunFailure } from "./lib/perfissue.mjs";
 
@@ -65,11 +65,13 @@ function fetchRuns(repo, wanted = []) {
     };
     const runs = list.workflow_runs.map(describe);
     // A run the person chose that is older than the lookback still has its artifact: fetch it by its id. One that is not a
-    // nightly artifacts run, or no longer exists, is left out, and the plan says it has no portable.
+    // nightly artifacts run on main, or no longer exists, is left out (and said so), and the plan says it has no portable.
     for (const id of missingRunIds(runs, wanted)) {
         try {
             const r = gh(["api", "--method", "GET", `repos/${repo}/actions/runs/${id}`]);
-            if (String(r.path ?? "").endsWith(WORKFLOW)) runs.push(describe(r));
+            const why = rejectedRun(r, WORKFLOW);
+            if (why) console.error(`Run ${id} is not used: ${why}`);
+            else runs.push(describe(r));
         } catch (e) {
             console.error(`Couldn't fetch run ${id} (${String(e.message ?? e).split("\n")[0]}): it is treated as having no portable`);
         }
