@@ -62,13 +62,15 @@ export interface OptionRow {
     color?: string;
     /** Shown but not selectable: the choice would be recorded and do nothing. */
     disabled?: boolean;
+    /** A row that opens and closes a list under it, not a choice itself. */
+    disclosure?: { expanded: boolean };
+    /** A row of such a list: set in from the rows above it. */
+    nested?: boolean;
 }
 
 export type Row =
     // `note`: why the section's options do not apply, on the header's line.
     | { kind: "header"; section: Section; note?: string }
-    // A heading inside a section: a model route's name, with the billing note that goes with it.
-    | { kind: "group"; section: Section; text: string; note?: string }
     // What the process runs, under the Model rows; `placeholder` until it is known.
     | { kind: "note"; section: Section; text: string; placeholder?: boolean }
     | (OptionRow & { kind: "option" });
