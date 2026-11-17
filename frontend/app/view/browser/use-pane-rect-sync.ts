@@ -12,6 +12,7 @@ import { focusManager } from "@/app/store/focusManager";
 import { takePaneOpenTiming } from "@/app/store/pane-open-marks";
 import type { BrowserViewModel } from "./browser-model";
 import { afterDiscard } from "./hibernation";
+import { paneLayoutBase } from "./pane-layout-base";
 import { paneRectBatcher } from "./pane-rect-batcher";
 import { observePaneElement } from "./pane-resize-observer";
 
@@ -276,7 +277,9 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         }
         lastSentRect = rect;
         if (rect.width > 0 && rect.height > 0) lastRealRect = rect;
-        rects.set(model.blockId, rect);
+        // The base is taken now, with the rect: the batch may be sent frames later, after the window
+        // has a newer size than this layout.
+        rects.set(model.blockId, rect, rect.width > 0 && rect.height > 0 ? paneLayoutBase(model.blockId) : undefined);
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
         const css = paneRectCss();

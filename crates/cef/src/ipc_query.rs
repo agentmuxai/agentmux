@@ -138,9 +138,9 @@ impl BrowserSideHandler for PaneRectsHandler {
         }
         match bounds::parse_set_rects_args(&args) {
             Ok((window_label, rects)) => {
-                let base = bounds::LayoutBase::parse(&args);
+                let bases = bounds::RectBases::parse(&args);
                 let order = bounds::RectsOrder::parse(&args);
-                bounds::queue(&self.state, &window_label, rects, base, order, Waiter::Query(callback));
+                bounds::queue(&self.state, &window_label, rects, bases, order, Waiter::Query(callback));
             }
             Err(e) => fail(&callback, BAD_REQUEST, &e),
         }

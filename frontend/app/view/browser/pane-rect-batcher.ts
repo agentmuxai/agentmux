@@ -24,7 +24,7 @@
  * that a newer batch has already replaced.
  */
 
-export type PaneRectUpdate = { blockId: string } & HostRect;
+export type PaneRectUpdate = { blockId: string; base?: PaneLayoutBase } & HostRect;
 
 /** Which batch this is, so the host can tell an older one that arrives late. */
 export interface RectsOrder {
@@ -38,8 +38,11 @@ export interface RectsOrder {
 export type SendRects = (updates: PaneRectUpdate[]) => Promise<unknown>;
 
 export interface PaneRectBatcher {
-    /** Record a pane's newest rect; it goes in the next batch. */
-    set(blockId: string, rect: HostRect): void;
+    /**
+     * Record a pane's newest rect; it goes in the next batch. `base` is what the rect was measured against
+     * (`paneLayoutBase`), taken when it was measured: the batch may go out frames later.
+     */
+    set(blockId: string, rect: HostRect, base?: PaneLayoutBase): void;
     /** Drop a pane's unsent rect, e.g. when its view unmounts. */
     forget(blockId: string): void;
     /** Send what is recorded now, from the caller's own task. */
@@ -77,7 +80,7 @@ export function createPaneRectBatcher(
     schedule: (cb: () => void) => void = nextTask,
     clock: BatcherClock = realClock,
 ): PaneRectBatcher {
-    const pending = new Map<string, HostRect>();
+    const pending = new Map<string, { rect: HostRect; base?: PaneLayoutBase }>();
     let scheduled = false;
     let inFlight = 0;
     let lastSentAt = -Infinity;
@@ -101,7 +104,7 @@ export function createPaneRectBatcher(
             }
         }
         const batch: PaneRectUpdate[] = [];
-        for (const [blockId, rect] of pending) batch.push({ blockId, ...rect });
+        for (const [blockId, { rect, base }] of pending) batch.push({ blockId, ...rect, ...(base ? { base } : {}) });
         pending.clear();
         inFlight++;
         lastSentAt = clock.now();
@@ -116,8 +119,8 @@ export function createPaneRectBatcher(
     };
 
     return {
-        set(blockId, rect) {
-            pending.set(blockId, { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+        set(blockId, rect, base) {
+            pending.set(blockId, { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, base });
             if (scheduled) return;
             scheduled = true;
             schedule(flush);
@@ -140,7 +143,7 @@ export function hostSendRects(api: BrowserPaneHostApi, windowLabel: string): Sen
     let batchUnsupported = false;
     let seq = 0;
     const perPane = (updates: PaneRectUpdate[]) =>
-        Promise.all(updates.map(({ blockId, ...rect }) => api.resize(blockId, rect).catch(() => {})));
+        Promise.all(updates.map(({ blockId, base: _base, ...rect }) => api.resize(blockId, rect).catch(() => {})));
     return async (updates) => {
         if (batchUnsupported) return perPane(updates);
         try {

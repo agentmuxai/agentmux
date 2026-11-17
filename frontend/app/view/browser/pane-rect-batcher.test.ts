@@ -34,6 +34,27 @@ describe("createPaneRectBatcher", () => {
         expect(sent).toEqual([[{ blockId: "a", ...r(1) }, { blockId: "b", ...r(2) }]]);
     });
 
+    it("sends a rect with the base it was measured against, not one read when the batch goes out", () => {
+        const { send, sent } = controlledSend();
+        let flush: (() => void) | null = null;
+        const b = createPaneRectBatcher(send, (cb) => (flush = cb));
+        const measured: PaneLayoutBase = { viewport: { width: 1590, height: 800 } };
+        b.set("a", r(1), measured);
+        b.set("b", r(2));
+        flush!();
+        expect(sent).toEqual([[{ blockId: "a", ...r(1), base: measured }, { blockId: "b", ...r(2) }]]);
+    });
+
+    it("replaces a pane's base with its newest rect's", () => {
+        const { send, sent } = controlledSend();
+        let flush: (() => void) | null = null;
+        const b = createPaneRectBatcher(send, (cb) => (flush = cb));
+        b.set("a", r(1), { viewport: { width: 1590, height: 800 } });
+        b.set("a", r(9), { viewport: { width: 2000, height: 800 } });
+        flush!();
+        expect(sent).toEqual([[{ blockId: "a", ...r(9), base: { viewport: { width: 2000, height: 800 } } }]]);
+    });
+
     it("keeps only a pane's newest rect", () => {
         const { send, sent } = controlledSend();
         let flush: (() => void) | null = null;
@@ -194,6 +215,13 @@ describe("hostSendRects", () => {
             ["b", r(2)],
             ["a", r(3)],
         ]);
+    });
+
+    it("does not send a base to the per-pane fallback", async () => {
+        const setRects = vi.fn(() => Promise.reject(new Error("Unknown command: browser_panes_set_rects")));
+        const { api: a, resize } = api(setRects);
+        await hostSendRects(a, "main")([{ blockId: "a", ...r(1), base: { viewport: { width: 1000, height: 800 } } }]);
+        expect(resize.mock.calls).toEqual([["a", r(1)]]);
     });
 
     it("passes other errors through without falling back", async () => {

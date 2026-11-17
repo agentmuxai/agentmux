@@ -8,26 +8,8 @@
 import { invokeBrowserApi, invokeCommand } from "@/app/platform/ipc";
 import { invokeFastCommand } from "@/app/platform/ipc-query";
 import { takePersonClose } from "@/app/view/browser/leave-prompt";
+import { paneLayoutBase } from "@/app/view/browser/pane-layout-base";
 
-/**
- * What a batch of pane rects was laid out against, in their physical pixels:
- * the page's size and the rect of the tile layout holding the panes. While a
- * window is being resized the macOS host stretches the rects by how much the
- * window has changed since, so a pane moves with the window instead of a
- * frame or two after the page (browser_panes/bounds.rs `LayoutBase`).
- */
-function paneLayoutBase(blockId: string | undefined) {
-    const dpr = window.devicePixelRatio || 1;
-    const px = (v: number) => Math.round(v * dpr);
-    const tiles = blockId ? document.querySelector(`[data-blockid="${blockId}"]`)?.closest(".tile-layout") : null;
-    const r = tiles?.getBoundingClientRect();
-    return {
-        viewport: { width: px(window.innerWidth), height: px(window.innerHeight) },
-        ...(r && r.width > 0 && r.height > 0
-            ? { layout: { x: px(r.x), y: px(r.y), width: px(r.width), height: px(r.height) } }
-            : {}),
-    };
-}
 
 /** `AppApi.browserPanes` on CEF: one host command per method. */
 export const cefBrowserPanes: BrowserPaneHostApi = {
@@ -49,8 +31,10 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
         await invokeFastCommand("browser_panes_set_rects", {
             window_label: windowLabel,
             ...(order ? { epoch: order.epoch, seq: order.seq } : {}),
-            rects: rects.map(({ blockId, x, y, width, height }) => ({ block_id: blockId, x, y, width, height })),
-            ...paneLayoutBase(rects[0]?.blockId),
+            // Each rect with the base it was measured against (`base`, view/browser/pane-layout-base.ts);
+            // the batch's own, read now, only for a rect that has none.
+            rects: rects.map(({ blockId, x, y, width, height, base }) => ({ block_id: blockId, x, y, width, height, ...base })),
+            ...(rects.every((r) => r.base) ? {} : paneLayoutBase(rects.find((r) => !r.base)?.blockId)),
         });
     },
     close: async (blockId, windowLabel) => {

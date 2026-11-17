@@ -236,6 +236,9 @@ declare global {
     /** A rectangle in CSS pixels. */
     type HostRect = { x: number; y: number; width: number; height: number };
 
+    /** What a pane's rect was laid out against, in physical pixels (view/browser/pane-layout-base.ts). */
+    type PaneLayoutBase = { viewport: { width: number; height: number }; layout?: HostRect };
+
     /**
      * Browser panes: native browsers the host draws over a placeholder in the
      * page. Only meaningful when `HostCaps.nativeBrowserPane` is true.
@@ -301,11 +304,12 @@ declare global {
         resize(blockId: string, rect: HostRect): Promise<void>;
         /**
          * Move several of this window's panes in one step; resolves once they have moved.
-         * `order` lets the host drop a pane's rect that a newer batch already replaced.
+         * `order` lets the host drop a pane's rect that a newer batch already replaced. A rect's `base` is
+         * what it was measured against; a rect without one is taken against the batch's, read when it is sent.
          */
         setRects(
             windowLabel: string,
-            rects: ({ blockId: string } & HostRect)[],
+            rects: ({ blockId: string; base?: PaneLayoutBase } & HostRect)[],
             order?: { epoch: number; seq: number },
         ): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;

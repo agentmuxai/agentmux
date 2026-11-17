@@ -575,9 +575,9 @@ async fn route_command(
             // One batch per window per frame from the page's pane-rect-batcher;
             // answers once the panes have moved (browser_panes::bounds).
             let (window_label, rects) = crate::browser_panes::bounds::parse_set_rects_args(args)?;
-            let base = crate::browser_panes::bounds::LayoutBase::parse(args);
+            let bases = crate::browser_panes::bounds::RectBases::parse(args);
             let order = crate::browser_panes::bounds::RectsOrder::parse(args);
-            state.browser_panes.set_rects(state, &window_label, rects, base, order).await;
+            state.browser_panes.set_rects(state, &window_label, rects, bases, order).await;
             Ok(serde_json::json!(true))
         }
         "browser_pane_hibernation_check" => {

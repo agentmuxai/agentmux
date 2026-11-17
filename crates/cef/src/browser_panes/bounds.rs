@@ -149,6 +149,47 @@ impl LayoutBase {
     }
 }
 
+/// What a batch's rects were laid out against: each pane's own, when the page
+/// sent one with the rect, else the batch's.
+///
+/// The page takes a pane's base when it measures the rect, not when the batch is
+/// sent. A busy page sends a rect some frames after it measured it, and by then
+/// its window may have a newer size: a base read at send time said "laid out for
+/// the window as it is now" about rects from the size before, so the host took
+/// them as current (`follow_rect`) and left the panes at the old layout, as far
+/// behind as the page's frames were apart.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct RectBases {
+    batch: Option<LayoutBase>,
+    by_pane: HashMap<String, LayoutBase>,
+}
+
+impl RectBases {
+    /// The batch's own base, and each rect's `{ viewport, layout? }` beside its `block_id`.
+    pub(crate) fn parse(args: &serde_json::Value) -> Self {
+        let by_pane = args
+            .get("rects")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|r| Some((r.get("block_id")?.as_str()?.to_string(), LayoutBase::parse(r)?)))
+            .collect();
+        Self { batch: LayoutBase::parse(args), by_pane }
+    }
+
+    /// What `block_id`'s rect was laid out against.
+    pub(crate) fn of(&self, block_id: &str) -> Option<LayoutBase> {
+        self.by_pane.get(block_id).copied().or(self.batch)
+    }
+}
+
+/// A batch with one base for every rect in it (a page that sends no per-pane ones).
+impl From<Option<LayoutBase>> for RectBases {
+    fn from(batch: Option<LayoutBase>) -> Self {
+        Self { batch, by_pane: HashMap::new() }
+    }
+}
+
 /// What each pane's latest rect was laid out against, by pane label. Kept
 /// per pane, not per window: a batch can carry only some of a window's panes
 /// (a display's scale changed and only some panes' timers have reported), and
@@ -499,9 +540,11 @@ struct PendingByWindow(HashMap<String, Pending>);
 impl PendingByWindow {
     /// Merge `rects` into `window`'s pending set, with who waits for them.
     /// Returns whether the caller must post a task.
-    fn enqueue(&mut self, window: &str, rects: Vec<PaneBounds>, base: Option<LayoutBase>, waiter: Waiter) -> bool {
+    fn enqueue(&mut self, window: &str, rects: Vec<PaneBounds>, bases: impl Into<RectBases>, waiter: Waiter) -> bool {
+        let bases = bases.into();
         let p = self.0.entry(window.to_string()).or_default();
         for r in rects {
+            let base = bases.of(&r.block_id);
             match p.rects.iter_mut().find(|(e, _)| e.block_id == r.block_id) {
                 Some(e) => *e = (r, base),
                 None => p.rects.push((r, base)),
@@ -528,7 +571,7 @@ pub(crate) fn queue(
     state: &Arc<AppState>,
     window_label: &str,
     rects: Vec<PaneBounds>,
-    base: Option<LayoutBase>,
+    bases: RectBases,
     order: Option<RectsOrder>,
     waiter: Waiter,
 ) {
@@ -543,7 +586,7 @@ pub(crate) fn queue(
             waiter.answer();
             return;
         }
-        pending.enqueue(window_label, rects, base, waiter)
+        pending.enqueue(window_label, rects, bases, waiter)
     };
     if post {
         let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
@@ -567,11 +610,11 @@ impl BrowserPaneManager {
         state: &Arc<AppState>,
         window_label: &str,
         rects: Vec<PaneBounds>,
-        base: Option<LayoutBase>,
+        bases: RectBases,
         order: Option<RectsOrder>,
     ) {
         let (tx, applied) = oneshot::channel();
-        queue(state, window_label, rects, base, order, Waiter::Channel(tx));
+        queue(state, window_label, rects, bases, order, Waiter::Channel(tx));
         let _ = tokio::time::timeout(APPLY_WAIT, applied).await;
     }
 }
@@ -899,6 +942,42 @@ mod tests {
         let r = Rect { x: 500, y: 0, width: 500, height: 800 };
         assert_eq!(t(b.predict(&r, 1200, 800)), (600, 0, 600, 800));
         assert!(LayoutBase::parse(&serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn a_rect_keeps_the_base_the_page_measured_it_against() {
+        // The page measured x and y against a 900 px window, then sent them after the window had grown to
+        // 1000: the batch's own base (read at send time) says 1000, the rects' say 900.
+        let measured = LayoutBase::parse(&serde_json::json!({ "viewport": { "width": 900, "height": 800 } })).unwrap();
+        let args = serde_json::json!({
+            "viewport": { "width": 1000, "height": 800 },
+            "rects": [
+                { "block_id": "x", "x": 0, "y": 0, "width": 450, "height": 800, "viewport": { "width": 900, "height": 800 } },
+                { "block_id": "y", "x": 450, "y": 0, "width": 450, "height": 800 },
+            ],
+        });
+        let bases = RectBases::parse(&args);
+        assert_eq!(bases.of("x"), Some(measured));
+        // A rect with no base of its own takes the batch's.
+        assert_eq!(bases.of("y"), Some(base_of_width(1000)));
+        let mut p = PendingByWindow::default();
+        p.enqueue("main", vec![b("x", 1), b("y", 2)], bases, w());
+        assert_eq!(p.take("main").rects, vec![(b("x", 1), Some(measured)), (b("y", 2), Some(base_of_width(1000)))]);
+    }
+
+    #[test]
+    fn a_stale_rect_with_its_own_base_is_stretched_to_the_window_it_is_in() {
+        // The window is 1000 wide now. A rect measured at 800 and sent with a base that said 1000 was
+        // taken as current and left at the old layout; with its own base it is stretched to 1000.
+        let r = Rect { x: 400, y: 0, width: 400, height: 800 };
+        let wrong = base_of_width(1000);
+        let own = base_of_width(800);
+        assert_eq!(t(follow_rect(&wrong, &r, (1000, 800), (0, 0))), t(Rect { x: 400, y: 0, width: 400, height: 800 }));
+        assert_eq!(t(follow_rect(&own, &r, (1000, 800), (0, 0))), (500, 0, 500, 800));
+    }
+
+    fn base_of_width(width: i32) -> LayoutBase {
+        LayoutBase::parse(&serde_json::json!({ "viewport": { "width": width, "height": 800 } })).unwrap()
     }
 
     #[test]
