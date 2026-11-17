@@ -96,6 +96,25 @@
     }
 }
 
+// "Saved", on a row's label line for the moment after its setting was written (settings-saved.ts). The live region
+// (`.setting-saved`) is always there and empty at rest; the flag fades over the linger the app gives a confirmation, and
+// its timer removes it. Under reduced motion it holds, then goes.
+.setting-saved {
+    flex: 0 0 auto;
+}
+
+.setting-saved-flag {
+    font-size: var(--text-xs);
+    color: var(--success-text-color);
+    white-space: nowrap;
+    // Up for the first 70% of the linger, fading over the rest.
+    animation: am-fade-out calc(var(--duration-linger) * 0.3) var(--ease-standard) calc(var(--duration-linger) * 0.7) forwards;
+
+    @include mixins.when-motion-reduced(feedback) {
+        animation: none;
+    }
+}
+
 // ── Control widths ────────────────────────────────────────────────────────────
 
 .setting-select {

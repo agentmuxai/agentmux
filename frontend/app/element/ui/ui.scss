@@ -363,6 +363,14 @@
     min-width: 0;
 }
 
+// A label with something after it on its line (Field's `adornment`).
+.ui-field-label-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
 .ui-field-label {
     font-size: var(--text-sm);
     font-weight: var(--font-weight-medium);

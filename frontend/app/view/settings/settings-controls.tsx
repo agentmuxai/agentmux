@@ -4,8 +4,10 @@
 import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button, CloseButton, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { reportSave, saveResult } from "./settings-saved";
 
 // Settings' controls, built on the shared line-style set in element/ui/
 // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §8, PR 2). The names
@@ -13,8 +15,29 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Write one setting. The result goes to settings-saved.ts, which the rows that name their setting show. */
 export function set(key: string, value: unknown): void {
-    void RpcApi.SetConfigCommand(TabRpcClient, { [key]: value } as any);
+    let write: Promise<unknown>;
+    try {
+        write = Promise.resolve(RpcApi.SetConfigCommand(TabRpcClient, { [key]: value } as any));
+    } catch (err) {
+        write = Promise.reject(err);
+    }
+    void write.then(
+        () => reportSave(key, true),
+        () => reportSave(key, false)
+    );
+}
+
+/** "Saved", on a row's label line, for the moment after its setting was written; announced politely, then gone. */
+function SavedFlag(p: { settingKey: string }): JSX.Element {
+    return (
+        <span class="setting-saved" role="status" aria-live="polite">
+            <Show when={saveResult(p.settingKey)} keyed>
+                {(result) => (result.kind === "saved" ? <span class="setting-saved-flag">{t("settings.saved")}</span> : null)}
+            </Show>
+        </span>
+    );
 }
 
 // ── SettingRow primitive ──────────────────────────────────────────────────────
@@ -23,10 +46,26 @@ export function set(key: string, value: unknown): void {
  * One setting: a `Field` (label, description, control) inside the row the
  * search scrolls to and highlights, by its `setting-<id>` id.
  */
-export function SettingRow(p: { id?: string; label: string; description?: string; control: JSX.Element; indent?: boolean; stacked?: boolean }): JSX.Element {
+export function SettingRow(p: {
+    id?: string;
+    label: string;
+    description?: string;
+    control: JSX.Element;
+    indent?: boolean;
+    stacked?: boolean;
+    /** The setting the control writes: the row then shows "Saved" after a write, or that it was not saved. */
+    settingKey?: string;
+}): JSX.Element {
+    const failed = () => (p.settingKey ? saveResult(p.settingKey)?.kind === "error" : false);
     return (
         <div id={p.id ? `setting-${p.id}` : undefined} class="setting-row" classList={{ "setting-row--indent": p.indent }}>
-            <Field label={p.label} description={p.description} layout={p.stacked ? "stacked" : "inline"}>
+            <Field
+                label={p.label}
+                description={p.description}
+                layout={p.stacked ? "stacked" : "inline"}
+                adornment={p.settingKey ? <SavedFlag settingKey={p.settingKey} /> : undefined}
+                error={failed() ? t("settings.saveFailed") : undefined}
+            >
                 {p.control}
             </Field>
         </div>
