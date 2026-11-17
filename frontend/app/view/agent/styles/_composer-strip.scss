@@ -266,6 +266,12 @@
         // The check icon lines up with the label, the first line.
         align-items: flex-start;
 
+        // The row the keys are on: the shared `.menu-item` styles only :hover, so without this a
+        // person using only the keyboard could not see where they are.
+        &.active {
+            background-color: var(--hover-bg-color);
+        }
+
         // A model route's row, the last of the panel: it opens its models in place. A line above it sets the
         // routes apart from the Effort rows, which stay with the harness's own models.
         &.is-disclosure {
