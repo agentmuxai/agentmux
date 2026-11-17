@@ -188,6 +188,12 @@ impl<'a> Layout<'a> {
     pub fn plain(carry: StartupCarry) -> Layout<'a> {
         Layout { carry, index: IndexPlan { files: &[], over_limit: &[], always: 0, tool_only: false }, tail: None }
     }
+
+    /// Whether there is a closing note to deliver. A note alone is a delivery: a Global entry too big to fit leaves
+    /// nothing else, and the agent still has to be told it was left out.
+    fn has_tail(&self) -> bool {
+        self.tail.is_some_and(|t| !t.trim().is_empty())
+    }
 }
 
 impl From<bool> for StartupCarry {
@@ -235,7 +241,7 @@ pub fn compose_items_tail(
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let summary = running_summary.filter(|s| !s.trim().is_empty() && reason == Reason::Compact);
     let has_personal = !personal.is_empty() || !layout.index.is_empty();
-    if global.is_empty() && !has_personal && summary.is_none() {
+    if global.is_empty() && !has_personal && summary.is_none() && !layout.has_tail() {
         return None;
     }
 
@@ -377,7 +383,7 @@ pub fn compose_fallback_layout(entries: &[Entry], reason: FallbackReason, layout
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let has_personal = !personal.is_empty() || !layout.index.is_empty();
-    if global.is_empty() && !has_personal {
+    if global.is_empty() && !has_personal && !layout.has_tail() {
         return None;
     }
     let mut b = Tracked { out: String::new(), chars: 0 };

@@ -497,6 +497,88 @@ async fn a4_a_container_agent_cannot_use_an_unshared_personal_login() {
 }
 
 #[tokio::test]
+async fn a7_removing_a_share_stops_a_card_waiting_on_it() {
+    let owner = format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple());
+    let owner = owner.as_str();
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, owner);
+    let (state, agent, id, who) = (s.state.clone(), s.auth.agent_id.clone(), entry.clone(), owner.to_string());
+    let remove = tokio::spawn(async move {
+        for _ in 0..200 {
+            if uses::uses().list().iter().any(|u| u.agent == agent) {
+                crate::backend::vault::shares::remove(&state.identity_store, &id, &who).unwrap();
+                share_removed(&state, &id, &who);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the sign-in was never asked about");
+    });
+    let (status, body) = signin(&s, None).await;
+    remove.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN, "the card was answered No: {body}");
+    assert!(typed(&s).is_none(), "nothing typed for a share that was removed");
+}
+
+#[tokio::test]
+async fn a7_removing_one_agents_share_leaves_an_ordinary_card_on_the_entry_waiting() {
+    let (owner, other) = (format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple()), format!("uid-share-other-{}", uuid::Uuid::new_v4().simple()));
+    let s = setup_as(Some(&own_profile(&owner)), Some(&owner)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, &other);
+    // A card from an ordinary sign-in on the same entry, from an agent it was never shared with.
+    let id = uuid::Uuid::new_v4().to_string();
+    let card = UseRequest { id: id.clone(), agent: format!("ordinary-{}", uuid::Uuid::new_v4().simple()), entry_id: entry.clone(), signin: true, shared: false, ..Default::default() };
+    let state = s.state.clone();
+    let asked = tokio::spawn(async move { crate::server::vault_ask::ask(&state, "", card, Duration::from_secs(30), "an ordinary sign-in").await.0 });
+    for _ in 0..200 {
+        if uses::uses().list().iter().any(|u| u.id == id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    // Another agent's share is removed: the ordinary card is neither answered nor recorded as denied.
+    crate::backend::vault::shares::remove(&s.state.identity_store, &entry, &other).unwrap();
+    share_removed(&s.state, &entry, &other);
+    assert!(uses::uses().list().iter().any(|u| u.id == id), "the ordinary card is still waiting");
+    uses::uses().answer(&id, UseAnswer::of(Decision::Once));
+    assert_eq!(asked.await.unwrap(), Ended::Once, "it ended by the person's own answer");
+}
+
+#[tokio::test]
+async fn a7_a_share_removed_and_made_again_while_asked_types_nothing_and_gives_no_always() {
+    let owner = format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple());
+    let owner = owner.as_str();
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, owner);
+    let (state, agent, id, who) = (s.state.clone(), s.auth.agent_id.clone(), entry.clone(), owner.to_string());
+    let ask = tokio::spawn(async move {
+        for _ in 0..200 {
+            if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+                // The person removes the share and makes it again while the card is up, then the old card is answered Always.
+                std::thread::sleep(Duration::from_millis(5));
+                crate::backend::vault::shares::remove(&state.identity_store, &id, &who).unwrap();
+                std::thread::sleep(Duration::from_millis(5));
+                crate::backend::vault::shares::add(&state.identity_store, &id, &who).unwrap();
+                uses::uses().answer(&u.id, UseAnswer::of(Decision::Always));
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("the sign-in was never asked about");
+    });
+    let (status, body) = signin(&s, None).await;
+    ask.await.unwrap();
+    assert_ne!(status, StatusCode::OK, "{body}");
+    assert!(body.to_string().contains("nothing was typed"), "{body}");
+    assert!(typed(&s).is_none(), "the old request typed nothing into the new share");
+    let grants = s.state.identity_store.vault_grants().unwrap().remove(&entry).unwrap_or_default();
+    assert!(grants.is_empty(), "the old answer gave no Always to the new share: {grants:?}");
+}
+
+#[tokio::test]
 async fn a3_every_agent_still_asks_on_first_use() {
     let owner = fresh_owner();
     let owner = owner.as_str();

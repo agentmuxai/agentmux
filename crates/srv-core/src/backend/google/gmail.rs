@@ -453,7 +453,8 @@ fn shape_message(m: &Value, budget: &mut usize, raw: Option<&mut usize>) -> Valu
     let room = BODY_CHARS.min(*budget);
     let shown = clip(&text, room);
     *budget = budget.saturating_sub(shown.chars().count());
-    if shown.chars().count() < text.chars().count() {
+    // `clip` adds an ellipsis, so a text one character over the room is as long as it was.
+    if text.chars().count() > room {
         out.insert("body_cut".into(), json!(true));
     }
     out.insert("body".into(), json!(shown));

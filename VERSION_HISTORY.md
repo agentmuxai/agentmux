@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.60.33 — 2026-11-17
+
+- Pane backdrops: a dialog about a pane with a backdrop, and a toast about it, are drawn in that pane's colours on its overlay surface
+- The memory record keeps each window's page figures (heap, elements, panes, rows) and the exact time of each hour's last line, so a restart between hours is read from real times
+- An Anthropic API key can now be used by container agents: the container never receives the key, only the gateway's address and a token for that agent and account that works from that container alone (on Linux; on macOS and Windows from this machine). Agent containers no longer have the raw-socket capability, so tools such as ping may stop working in them, and a container made before this is recreated once.
+- Worker-note throttle and sender failure notes: senders who only joined a turn (absorbed) are told of a retryable failure, and a note held by the one-a-minute worker throttle no longer silences the sender's own note
+- Vault: the person can share a login with an agent, which then signs in with it in its own browser profile once the person approves (the Share button in the Vault pane follows)
+- The Large text viewer reads a page with a gigantic line once, not once per line
+- The memory record keeps stalls of the window host's UI thread and of srv's runtime for a year, and App record lists them
+- The macOS menu bar's Settings… opens the Settings pane, and its items show their keys
+- A dev-build test instance can save a download without the Save As panel, into its own data home, so the download strip can be checked off screen
+- Browser pane: when a page has a frame from a site the agent's pane isn't limited to, the pane's banner asks the person to allow that site, so the agent can act in the frame (Allow loads nothing)
+- Deleting an agent's own browser profile also removes the logins shared with that agent and the Always it was given.
+- Editing the profile a shared login is saved for asks the person again before an agent signs in with it.
+- Browser pane: a second frame site no longer replaces the first's unanswered Allow notice; it is shown after the first is answered
+- Browser pane: two frame sites reported at the same moment can no longer replace each other's Allow notice
+- The colour picker with a "no colour" swatch: the colours are two rows of 7 with the swatch alone in its own column
+- The Personal Memory an agent gets after a compaction or in a new session is an index of its files, not their text, and Global Memory its startup file already carries is no longer sent again
+- A dev-mode wheel diagnostic for the agent pane: with dev mode on, a wheel event that moves nothing although something under the pointer could move logs one line saying what was under the pointer and what each scroller did (to find the dead-wheel spots no test reproduces)
+- The dev-mode wheel diagnostic starts a new run for each stuck gesture, after an idle gap or on another transcript, so a later reproduction still logs
+
 ## 0.60.32 — 2026-11-16
 
 - Agent pane: the wheel no longer goes dead where a preview slides under a resting pointer; a preview holds the wheel at its edge only after the wheel scrolled it there

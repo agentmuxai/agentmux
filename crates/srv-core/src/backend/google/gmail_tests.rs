@@ -142,6 +142,20 @@ fn a_thread_with_a_draft_in_it_says_how_many_are_unsent() {
 }
 
 #[test]
+fn a_body_one_character_over_the_room_says_it_was_cut() {
+    let one = |n: usize| {
+        let thread = json!({ "id": "t", "messages": [{ "id": "m", "payload": { "mimeType": "text/plain", "body": { "data": b64(&"x".repeat(n)) } } }] });
+        shape("get_thread", &thread)["messages"][0].clone()
+    };
+    let exact = one(BODY_CHARS);
+    assert!(exact.get("body_cut").is_none(), "exactly the room is not a cut");
+    // The ellipsis makes the shown text as long as the original, so its length can't tell.
+    let over = one(BODY_CHARS + 1);
+    assert_eq!(over["body_cut"], true);
+    assert_eq!(over["body"].as_str().unwrap().chars().count(), BODY_CHARS + 1);
+}
+
+#[test]
 fn labels_are_listed_by_id_name_and_type() {
     let out = shape("list_labels", &json!({ "labels": [{ "id": "INBOX", "name": "INBOX", "type": "system" }, { "id": "Label_1", "name": "Receipts", "type": "user", "messagesTotal": 9 }] }));
     assert_eq!(out["labels"][1], json!({ "id": "Label_1", "name": "Receipts", "type": "user" }));

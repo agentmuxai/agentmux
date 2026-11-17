@@ -367,6 +367,17 @@ impl Store {
         Ok(())
     }
 
+    /// [`Self::vault_grant_add`], only if the entry is also still as the person was shown it (`entry_updated_at`): one
+    /// edited meanwhile, a share removed and made again included, gets no grant from an answer given to the old question.
+    pub fn vault_grant_add_unchanged(&self, entry_id: &str, origin: &str, at_ms: i64, entry_created_at: i64, entry_updated_at: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1 AND created_at = ?4 AND updated_at = ?5)",
+            params![entry_id, origin, at_ms, entry_created_at, entry_updated_at],
+        )?;
+        Ok(())
+    }
+
     pub fn vault_grant_revoke(&self, entry_id: &str, origin: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1 AND origin = ?2", params![entry_id, origin])? > 0)

@@ -448,8 +448,7 @@ fn compose_fallback_delivery(
     let files = uid.as_deref().map(latest_startup_files).unwrap_or_default();
     let (newer, carry) = global_against_startup_files(&files, &global);
     let personal = uid.as_deref().map(personal_entries).unwrap_or_default();
-    let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((agentmux_common::time::now_ms() - m).max(0)) / 86_400_000);
-    let fitted = fit::fit(newer.iter().cloned().chain(personal).collect(), fit::NO_CAP, 0, false, &age_days);
+    let fitted = fit::fit(newer.iter().cloned().chain(personal).collect(), fit::NO_CAP, 0, false, &modified_ms_of, now);
     let entries = fitted.kept.clone();
     let tool_only = block_is_container(state, block_id);
     let layout = delivery::Layout {
@@ -703,9 +702,8 @@ fn compose_delivery(
         .flatten();
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
-    let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000);
     let tool_only = launch.is_some_and(|l| l.workspace_only) || block_is_container(state, block_id);
-    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, carry, tool_only, &age_days) {
+    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, carry, tool_only, &modified_ms_of, now) {
         Some((fitted, composed, parts, delivered_chars)) => {
             let mut delivered = delivery_items(&fitted.kept, &composed, delivered_chars);
             delivered.extend(indexed_items(&fitted, tool_only));
@@ -797,14 +795,15 @@ fn fit_and_compose(
     reason: Reason,
     carry: delivery::StartupCarry,
     tool_only: bool,
-    age_days: &dyn Fn(&Entry) -> Option<i64>,
+    modified_ms: &dyn Fn(&Entry) -> Option<i64>,
+    now_ms: i64,
 ) -> Option<(fit::Fitted, delivery::Composed, Vec<String>, usize)> {
     const STEP: usize = 2_000;
     const LAST: usize = 40_000;
     let reserve = summary.map_or(0, |s| s.chars().count());
     let mut slack = 0;
     loop {
-        let fitted = fit::fit(entries.clone(), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, reserve + slack, reason == Reason::Compact, age_days);
+        let fitted = fit::fit(entries.clone(), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, reserve + slack, reason == Reason::Compact, modified_ms, now_ms);
         let layout = delivery::Layout {
             carry,
             index: index::IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only },
@@ -839,7 +838,16 @@ fn indexed_items(fitted: &fit::Fitted, tool_only: bool) -> Vec<EntrySize> {
         .indexed
         .iter()
         .map(|e| {
-            let line = lines.iter().find(|(n, _)| *n == e.name).map_or("", |(_, l)| l.as_str());
+            let listed = lines.iter().find(|(n, _)| *n == e.name);
+            let line = listed.map_or("", |(_, l)| l.as_str());
+            // Past the index's budget a file has no line: the pane says so, and the delivery counted it.
+            let (delivered, reason) = match listed {
+                Some(_) => (
+                    delivery::Delivered::Indexed,
+                    fitted.over_limit.contains(&e.name).then(|| "marked always, over the limit of 5 files and 6,000 characters".to_string()),
+                ),
+                None => (delivery::Delivered::Omitted, Some("too many files for the index; list them with the Memory tool (action list, scope personal)".to_string())),
+            };
             EntrySize {
                 label: e.label.clone(),
                 source: e.tier.as_str(),
@@ -850,12 +858,12 @@ fn indexed_items(fitted: &fit::Fitted, tool_only: bool) -> Vec<EntrySize> {
                 tier: None,
                 bundle_id: e.bundle_id.clone(),
                 path: e.path.clone(),
-                delivered: delivery::Delivered::Indexed.as_str(),
+                delivered: delivered.as_str(),
                 source_size_bytes: e.text.len(),
                 source_tokens: estimate_tokens(&e.text) as usize,
                 startup: None,
                 via: None,
-                reason: fitted.over_limit.contains(&e.name).then(|| "marked always, over the limit of 5 files and 6,000 characters".to_string()),
+                reason,
             }
         })
         .collect()
