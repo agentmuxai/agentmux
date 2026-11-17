@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { attentionLook, chooserNoticeText, DIALOG_MESSAGE_MAX, dialogMessage, noticeText } from "./attention-kinds";
+import { attentionLook, chooserNoticeText, DIALOG_MESSAGE_MAX, dialogMessage, frameNoticeText, noticeText } from "./attention-kinds";
 
 const a = (over: Partial<BrowserAttention>): BrowserAttention => ({ id: "1", kind: "approval", ...over });
 
@@ -45,6 +45,19 @@ describe("attentionLook", () => {
         expect(withAllow).toMatchObject({ agent: false, back: true, yes: "Allow", answer: "approve", no: "Dismiss" });
         expect(attentionLook(a({ kind: "notice", allow: false })).yes).toBeUndefined();
         expect(attentionLook(a({ kind: "notice" })).icon).toBe("fa-circle-info");
+    });
+});
+
+describe("frameNoticeText", () => {
+    it("tells the person a frame is from a site the pane isn't limited to, with Allow and Dismiss and no Back", () => {
+        const n = a({ kind: "notice", frame: true, allow: true, origin: "https://forms.example.gov", url: "https://forms.example.gov" });
+        expect(frameNoticeText(n)).toBe(
+            "A frame on this page is from forms.example.gov, which this pane isn't limited to, so the agent can read it but can't act in it. Allow adds the site; nothing reloads.",
+        );
+        const look = attentionLook(n);
+        expect(look).toMatchObject({ agent: false, yes: "Allow", answer: "approve", no: "Dismiss", text: frameNoticeText(n) });
+        expect(look.back).toBeUndefined();
+        expect(look.showUrl).toBeUndefined();
     });
 });
 
