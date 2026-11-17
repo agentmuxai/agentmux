@@ -11,7 +11,7 @@ pub use crate::file_rename_types::FileRenameRequest;
 pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest, RouteAsk, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 pub use crate::browser_control_types::{
     UiBrowserHandoffStatusRequest, UiBrowserReleaseRequest, UiBrowserRequestRequest, UiBrowserRetakeRequest,
-    UiBrowserTakeControlRequest, UiBrowserZoomRequest,
+    UiBrowserTakeControlRequest, UiBrowserZoomRequest, UiBrowserLocateRequest,
 };
 use std::collections::HashMap;
 

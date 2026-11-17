@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The request types of the Browser actions that take back, take, give up and report on control of a pane (`retake`,
-//! `take_control`, `release`, `handoff_status`) and zoom a pane (`zoom`). Re-exported by `api_types`, where the rest of the browser requests are.
+//! `take_control`, `release`, `handoff_status`), zoom a pane (`zoom`) and find what is at a point of a screenshot (`locate`). Re-exported by `api_types`, where the rest of the browser requests are.
 
 use serde::{Deserialize, Serialize};
 
@@ -89,4 +89,23 @@ pub struct UiBrowserZoomRequest {
     pub fit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset: Option<bool>,
+}
+
+/// `POST /api/v1/ui/browser/locate` — backs Browser's `locate` and `click_at`: what a click at a point of
+/// a screenshot would land on, as a reference (forms-in-frames spec §4.6).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserLocateRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// The point, in pixels of the screenshot, from its top left corner.
+    pub x: f64,
+    pub y: f64,
+    /// The screenshot's width in pixels, which the host turns into the page's scale (absent: the point
+    /// is already in the page's own pixels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<f64>,
 }
