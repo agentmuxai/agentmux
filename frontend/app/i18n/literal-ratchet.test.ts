@@ -55,7 +55,9 @@ function expressionStrings(node: ts.Expression): number {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return HAS_LETTER.test(node.text) ? 1 : 0;
     if (ts.isTemplateExpression(node)) {
         const text = node.head.text + node.templateSpans.map((span) => span.literal.text).join(" ");
-        return HAS_LETTER.test(text) ? 1 : 0;
+        // A string chosen inside a `${...}` is visible text too: count it by the same rules as outside the template.
+        const inner = node.templateSpans.reduce((n, span) => n + expressionStrings(span.expression), 0);
+        return (HAS_LETTER.test(text) ? 1 : 0) + inner;
     }
     if (ts.isParenthesizedExpression(node)) return expressionStrings(node.expression);
     if (ts.isConditionalExpression(node)) return expressionStrings(node.whenTrue) + expressionStrings(node.whenFalse);
@@ -154,6 +156,19 @@ describe("countLiterals", () => {
         expect(countLiterals(source)).toBe(7);
     });
 
+    it("counts the strings chosen inside a template's ${...}, as it does outside the template", () => {
+        const source = `export const A = (p) => (
+            <div>
+                <p>{\`\${p.ok ? "Ready" : "Waiting"}\`}</p>
+                <i>{\`Saved \${p.n} \${p.big ? "files" : "file"}\`}</i>
+                <b>{\`\${p.n}\`}</b>
+                <u title={\`\${p.busy || t("x.y")}\`} />
+            </div>
+        );`;
+        // "Ready" and "Waiting"; the Saved text plus "files" and "file"; nothing in the third; nothing in a t() call.
+        expect(countLiterals(source)).toBe(5);
+    });
+
     it("does not count strings that only decide something", () => {
         const source = `export const A = (p) => (
             <div class={p.kind === "wide" ? "a" : "b"}>
@@ -174,7 +189,7 @@ describe("countLiterals", () => {
     });
 });
 
-describe("literal text in files that use the dictionary", () => {
+describe("literal text in the app", () => {
     const baseline: Record<string, number> = JSON.parse(readFileSync(baselinePath, "utf8"));
     const now = currentCounts();
 
