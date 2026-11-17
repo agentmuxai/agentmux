@@ -395,6 +395,8 @@ short of running the installer (used by its tests).
             [IO.Directory]::Delete($Path) # removes the link, not the folder it points to
         }
         New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+        # Read it back: a link that was not made must not be reported as installed.
+        if (-not (Test-LinkTo $Path $Target)) { Die "could not make the link $Path to $Target" }
     }
 
     # Add $Dir to the user's PATH once (any entry that expands to it counts), keeping the entries as they were written.
@@ -454,14 +456,32 @@ short of running the installer (used by its tests).
                 }
             } finally { $archive.Dispose() }
             [IO.Compression.ZipFile]::ExtractToDirectory($zip, $stage)
+            # The package is one top folder (agentmux-headless-<v>-windows-x64) holding bin\, web\ and VERSION; a zip with those at its
+            # root is taken as well. Whatever is inside is moved to its place as the version folder.
+            $pkg = $stage
+            if (-not (Test-Path -LiteralPath (Join-Path $stage "bin"))) {
+                $tops = @(Get-ChildItem -LiteralPath $stage -Force)
+                if ($tops.Count -eq 1 -and $tops[0].PSIsContainer) { $pkg = $tops[0].FullName }
+            }
             foreach ($want in @("bin\agentmux.exe", "bin\agentmux-srv.exe", "web\index.html")) {
-                if (-not (Test-Path -LiteralPath (Join-Path $stage $want))) { Die "$name is not an AgentMux Headless package (no $want)" }
+                if (-not (Test-Path -LiteralPath (Join-Path $pkg $want))) { Die "$name is not an AgentMux Headless package (no $want)" }
             }
+            # An existing folder of this version (-Force) is renamed aside, not deleted in place: a folder with a running program in it
+            # cannot be renamed, so the install that is there is left whole and the script stops; a delete would have removed what it
+            # could and left a broken install behind the link.
+            $aside = ""
             if (Test-Path -LiteralPath $target) {
-                try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop } catch { Die "could not replace $target (is AgentMux Headless running from it? run  agentmux stop  and try again)" }
+                $aside = Join-Path $root (".old-" + [Guid]::NewGuid().ToString("N"))
+                try { [IO.Directory]::Move($target, $aside) } catch { Die "could not replace $target (is AgentMux Headless running from it? run  agentmux stop  and try again); the install that is there is unchanged" }
             }
-            Move-Item -LiteralPath $stage -Destination $target
-            Set-CurrentJunction $current $target
+            try {
+                Move-Item -LiteralPath $pkg -Destination $target
+                Set-CurrentJunction $current $target
+            } catch {
+                if ($aside -and -not (Test-Path -LiteralPath $target)) { try { [IO.Directory]::Move($aside, $target); $aside = "" } catch { } }
+                throw
+            }
+            if ($aside) { Remove-Item -LiteralPath $aside -Recurse -Force -ErrorAction SilentlyContinue }
         } finally {
             Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
             if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
@@ -473,6 +493,7 @@ short of running the installer (used by its tests).
             try { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction Stop } catch { Say "could not remove the old folder $old (is AgentMux Headless running from it?): delete it once it has stopped" }
         }
         Say "installed AgentMux Headless ${Version}: $target"
+        Say "this package is not code-signed: Windows may ask before it lets the programs run the first time"
         Say "next: open a new PowerShell window (so your PATH is read), then run  agentmux setup  to choose a port, start AgentMux Headless and sign in"
     }
 

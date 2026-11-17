@@ -251,7 +251,10 @@ if (-not $canSign) {
             [IO.File]::WriteAllText((Join-Path $Dir "AgentMux-$hver-envelope.json.sig"), ("t1 " + [Convert]::ToBase64String([IO.File]::ReadAllBytes($sigBin)) + "`n"), $utf8)
         }
         $goodZip = Join-Path $work "good-headless.zip"
-        New-HeadlessZip $goodZip @("bin\agentmux.exe", "bin\agentmux-srv.exe", "bin\agentmux-bashwrap.exe", "web\index.html") ""
+        $topName = "agentmux-headless-$hver-windows-x64"
+        New-HeadlessZip $goodZip @("$topName\bin\agentmux.exe", "$topName\bin\agentmux-srv.exe", "$topName\bin\agentmux-bashwrap.exe", "$topName\web\index.html", "$topName\VERSION") ""
+        $flatZip = Join-Path $work "flat-headless.zip"
+        New-HeadlessZip $flatZip @("bin\agentmux.exe", "bin\agentmux-srv.exe", "web\index.html") ""
         $hrel = Join-Path $work "hrel-$sh"
         New-HeadlessRelease $hrel $goodZip ""
         $lad2 = Join-Path $work "lad-$sh"
@@ -263,9 +266,18 @@ if (-not $canSign) {
         }
         $hargs = @("-Headless", "-Version", $hver)
 
-        # What needs a junction runs on Windows only (a junction does not exist elsewhere).
-        if ($isWin) {
+        # What needs a link runs where a junction can be made (Windows, and PowerShell on Linux makes a link of its own).
+        $canLink = $false
+        try {
+            $probe = Join-Path $work ("probe-" + [Guid]::NewGuid().ToString("N")); New-Item -ItemType Directory -Path "$probe-t" -Force | Out-Null
+            New-Item -ItemType Junction -Path $probe -Target "$probe-t" -ErrorAction Stop | Out-Null; $canLink = (Test-Path -LiteralPath $probe)
+        } catch { $canLink = $false }
+        if ($canLink) {
             Expect "Headless: a good zip is installed" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hrel $lad2) $hargs
+            Expect "Headless: it says the package is not code-signed" 0 "not code-signed" $sh (HeadlessEnv $hrel (Join-Path $work "lad2b-$sh")) $hargs
+            if (-not (Test-Path (Join-Path $lad2 "AgentMux\Headless\$hver\VERSION"))) { Fail "Headless: the package's top folder is stripped (VERSION is in the version folder)" "VERSION missing" } else { Pass "Headless: the package's top folder is stripped (VERSION is in the version folder)" }
+            $hflat = Join-Path $work "hflat-$sh"; New-HeadlessRelease $hflat $flatZip ""
+            Expect "Headless: a zip with bin and web at its root is taken too" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hflat (Join-Path $work "lad2c-$sh")) $hargs
             $folder = Join-Path $lad2 "AgentMux\Headless"
             if ((Test-Path (Join-Path $folder "$hver\bin\agentmux.exe")) -and (Test-Path (Join-Path $folder "current\bin\agentmux-srv.exe")) -and (Test-Path (Join-Path $folder "$hver\web\index.html"))) { Pass "Headless: the programs are in the version folder and reached through current" } else { Fail "Headless: the programs are in the version folder and reached through current" "missing under $folder" }
             $cur = Get-Item -LiteralPath (Join-Path $folder "current") -Force
@@ -280,8 +292,25 @@ if (-not $canSign) {
             $lad3 = Join-Path $work "lad3-$sh"
             New-Item -ItemType Directory -Path (Join-Path $lad3 "AgentMux\Headless\current") -Force | Out-Null
             Expect "Headless: a current that is not a link is refused" 1 "not touching it" $sh (HeadlessEnv $hrel $lad3) $hargs
+            if ($isWin) {
+                # A version folder with a running program in it cannot be replaced: the install that is there stays whole.
+                $held = Join-Path $folder "$hver\bin\agentmux-srv.exe"
+                $fs = [IO.File]::Open($held, "Open", "Read", "None")
+                try {
+                    Expect "Headless: a folder in use is not replaced, and the script says so" 1 "unchanged" $sh (HeadlessEnv $hrel $lad2) ($hargs + "-Force")
+                } finally { $fs.Dispose() }
+                if ((Test-Path $held) -and (Test-Path (Join-Path $folder "current\bin\agentmux-srv.exe"))) { Pass "Headless: the install that was there is whole after a refused replace" } else { Fail "Headless: the install that was there is whole after a refused replace" "files are gone" }
+            }
         } else {
-            Write-Host "skip - Headless install steps that need a junction run on Windows only"
+            # No junction can be made here: the run must still unpack and check the package (top folder stripped, layout checked) and then say the link could not be made, never report an install.
+            foreach ($z in @(@("real package, one top folder", $hrel), @("flat zip", (Join-Path $work "hflat-$sh")))) {
+                if (-not (Test-Path $z[1])) { New-HeadlessRelease $z[1] $flatZip "" }
+                $ladN = Join-Path $work ("lad-nolink-" + [Guid]::NewGuid().ToString("N"))
+                $r = Invoke-Install $sh (HeadlessEnv $z[1] $ladN) $hargs
+                $hasProgram = Test-Path (Join-Path $ladN "AgentMux\Headless\$hver\bin\agentmux.exe")
+                if ($r.Code -ne 0 -and $r.Out.Contains("could not make the link") -and $hasProgram -and -not $r.Out.Contains("installed AgentMux Headless")) { Pass "Headless ($($z[0])): unpacked and checked; no link, so no 'installed'" } else { Fail "Headless ($($z[0])): unpacked and checked; no link, so no 'installed'" "code $($r.Code), program there: $hasProgram, $($r.Out)" }
+            }
+            Write-Host "skip - the install steps after the link run where a junction can be made"
         }
 
         $hbad = Join-Path $work "hbad-$sh"; Copy-Release $hrel $hbad
