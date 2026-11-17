@@ -1131,7 +1131,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1331,7 +1331,10 @@ jobs:
   # 2026-10-18 and nobody heard (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
   # §5 Phase 5). One issue per red streak, a comment per failing push. Found
   # by label, not search, which can lag behind a just-created issue. A
-  # cancelled run says nothing. Pushes to main run CI concurrently, so:
+  # cancelled run says nothing, and a job that was cancelled or timed out with
+  # nothing failing goes to the standing ci-stalled issue instead, wherever
+  # main's head is (scripts/ci-main-stalled.mjs). Pushes to main run CI
+  # concurrently, so:
   # - only a run whose commit is still main's head acts, so an older run
   #   finishing late can't close a newer failure's issue or reopen one after
   #   main went green (the newer push's run reports instead);
@@ -1346,13 +1349,38 @@ jobs:
     needs: [ci-required]
     if: ${{ always() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write
       actions: read
+      checks: read # a cancelled job's annotations say whether it timed out
     steps:
+      # A job that was cancelled or timed out, with nothing failing, says nothing about the
+      # commit, and the newer push's run neither repeats nor fixes it, so it is reported
+      # whether or not this push is still main's head: to the standing ci-stalled issue
+      # (scripts/ci-main-stalled.mjs), not as a red main. A failure, alone or beside a
+      # stalled job, stays with the step below.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci-main-stalled.mjs
+          sparse-checkout-cone-mode: false
+      - name: Report a stalled or cancelled job to the ci-stalled issue
+        id: stall
+        # A bug here must never silence the main-red report below.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.ci-required.result }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/ci-main-stalled.mjs
       - name: Open, update or close the main-red issue
+        if: ${{ always() && steps.stall.outputs.kind != 'stalled' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
