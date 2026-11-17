@@ -9,6 +9,7 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ROW_H } from "../hex/hex-layout";
 import { LargeTextViewer } from "./large-text-viewer";
@@ -176,12 +177,31 @@ describe("the Large text viewer", () => {
         expect(numbers()[0]).toBe(was);
     });
 
-    it("reads the file again when it changed on disk", async () => {
-        const view = await mount({ revision: 0 });
-        view.unmount();
+    it("reads the file again when it changed on disk, and stays at the line it was at", async () => {
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        fireEvent.input(lineBox(), { target: { value: "500" } });
+        fireEvent.keyDown(lineBox(), { key: "Enter" });
+        await settle();
+        const was = numbers()[0];
+        expect(was).toBeGreaterThan(400);
         indexLines.mockClear();
-        await mount({ revision: 1 });
+        // The log grew by a line.
+        serve(`${FILE}line 1001\n`);
+        setRevision(1);
+        await settle();
         expect(indexLines).toHaveBeenCalled();
+        expect(numbers()[0]).toBe(was);
+        expect(document.querySelector(`[data-line="${was}"] .large-text-text`)?.textContent).toBe(`line ${was}`);
+        expect(facts()[0]).toBe(`Line ${was} of 1,001`);
     });
 });
 

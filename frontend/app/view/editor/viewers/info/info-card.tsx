@@ -14,7 +14,7 @@ import { Button } from "@/app/element/ui";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { createSignal, Show, type JSX } from "solid-js";
 import { ViewerBar, type ViewerBarProps } from "../viewer-bar";
-import { isProgramPath, TEXT_MAX_BYTES, type FileProbe } from "../viewer-choice";
+import { isProgramPath, type FileProbe } from "../viewer-choice";
 
 /** What the info card says a probe's kind is. */
 export const KIND_LABELS: Record<string, string> = {
@@ -102,7 +102,7 @@ export function InfoCard(props: InfoCardProps): JSX.Element {
                             Open with the system's app
                         </Button>
                     </Show>
-                    <Show when={props.onOpenAsText && (size() ?? 0) <= TEXT_MAX_BYTES}>
+                    <Show when={props.onOpenAsText}>
                         <Button icon="file-lines" onClick={() => props.onOpenAsText!()}>
                             Open as text anyway
                         </Button>

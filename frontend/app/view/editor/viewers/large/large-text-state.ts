@@ -61,13 +61,16 @@ function createLineFeed(props: LargeTextProps) {
     const [loaded, setLoaded] = createSignal(0);
     const [error, setError] = createSignal("");
 
+    let was = "";
     createComputed(() => {
         void props.revision;
         const { path, blockId } = props;
         const encoding = props.probe?.text?.encoding;
         const index = (from: number, count: number) =>
             RpcApi.FileIndexLinesCommand(TabRpcClient, { path, encoding, from_line: from, count }, { timeout: INDEX_TIMEOUT_MS });
-        setTotal(-1);
+        // The same file changed in place: the lines it had stay until the new index says, so the reader keeps its place.
+        if (path !== was) setTotal(-1);
+        was = path;
         setError("");
         setSource(path ? new LineSource(index, rangeReaderOf(path, blockId), encoding) : null);
         setLoaded((v) => v + 1);

@@ -166,7 +166,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     onOpenAsHex={() => model.reopenWith(props.tabId, "hex")}
                     note={
                         probe()?.kind === "text" && (probe()?.size ?? 0) > TEXT_MAX_BYTES
-                            ? "This text file is larger than the editor opens (10 MB)."
+                            ? "This text file is larger than the editor opens (10 MB): open it as text to read it in parts."
                             : undefined
                     }
                     onOpenAsText={dropped() ? undefined : () => model.reopenWith(props.tabId, (probe()?.size ?? 0) > TEXT_MAX_BYTES ? "large" : "text")}
