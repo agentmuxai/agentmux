@@ -60,9 +60,12 @@ export function VaultList(props: { model: VaultViewModel; vault?: string }): JSX
     const soonOnly = () => soonAsked() && dated();
     const narrowing = () => isNarrowing(filter(), soonOnly());
     const found = createMemo(() => narrowedEntries(entries(), filter(), soonOnly()).length);
+    // An open Kept by AgentMux or Activity section can match the filter when no entry does.
+    const [keptMatched, setKeptMatched] = createSignal(false);
+    const [activityMatched, setActivityMatched] = createSignal(false);
     const note = () => {
         if (vaultEntries() === null) return vaultLoading() ? t("vault.list.loading") : null;
-        if (narrowing()) return found() === 0 ? t("vault.list.noMatch") : null;
+        if (narrowing()) return found() === 0 && !keptMatched() && !activityMatched() ? t("vault.list.noMatch") : null;
         return entries().length === 0 ? t("vault.list.empty") : null;
     };
     return (
@@ -82,8 +85,16 @@ export function VaultList(props: { model: VaultViewModel; vault?: string }): JSX
                         <VaultEntries section={s} vault={props.vault} filter={filter()} soonOnly={soonOnly()} open={folds.isOpen(s)} onToggle={() => folds.toggle(s)} />
                     )}
                 </For>
-                <VaultKept shown={props.model.shown()} open={folds.isOpen("kept")} onToggle={() => folds.toggle("kept")} filter={filter()} narrowing={narrowing()} soonOnly={soonOnly()} />
-                <VaultActivityLog shown={props.model.shown()} open={folds.isOpen("activity")} onToggle={() => folds.toggle("activity")} filter={filter()} narrowing={narrowing()} soonOnly={soonOnly()} />
+                <VaultKept shown={props.model.shown()} open={folds.isOpen("kept")} onToggle={() => folds.toggle("kept")} filter={filter()} narrowing={narrowing()} soonOnly={soonOnly()} onMatch={setKeptMatched} />
+                <VaultActivityLog
+                    shown={props.model.shown()}
+                    open={folds.isOpen("activity")}
+                    onToggle={() => folds.toggle("activity")}
+                    filter={filter()}
+                    narrowing={narrowing()}
+                    soonOnly={soonOnly()}
+                    onMatch={setActivityMatched}
+                />
             </div>
         </div>
     );

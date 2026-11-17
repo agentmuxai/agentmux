@@ -30,6 +30,8 @@ export interface VaultListSectionProps {
     narrowing: boolean;
     /** Only what expires soon is asked for, which nothing here does. */
     soonOnly: boolean;
+    /** Told whether the section shows a match of the narrowed list, so the list doesn't say nothing matches over it. */
+    onMatch?: (matched: boolean) => void;
 }
 
 function KeptTable(props: { rows: KeptSecret[] }): JSX.Element {
@@ -74,13 +76,15 @@ export function VaultKept(props: VaultListSectionProps): JSX.Element {
         })
     );
     const rows = createMemo(() => (kept() ?? []).filter((k) => keptMatches(k, props.filter)));
+    const matched = () => props.narrowing && props.open && !props.soonOnly && rows().length > 0;
+    createEffect(() => props.onMatch?.(matched()));
     const count = () => {
         const all = kept();
         if (all === null) return undefined;
         return props.narrowing ? t("vault.section.countOf", { shown: rows().length, total: all.length }) : String(all.length);
     };
     return (
-        <Show when={!props.narrowing || (props.open && !props.soonOnly && rows().length > 0)}>
+        <Show when={!props.narrowing || matched()}>
             <VaultSectionBox id="kept" count={count()} open={props.open} onToggle={props.onToggle}>
                 <p class="warden-manager-summary">{t("vault.kept.about")}</p>
                 <Show when={error()}>

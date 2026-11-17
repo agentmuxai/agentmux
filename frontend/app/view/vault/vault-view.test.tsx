@@ -395,6 +395,26 @@ describe("the Vault pane", () => {
         }
     });
 
+    it("doesn't say nothing matches over an open Kept by AgentMux section that does", async () => {
+        keptRows = [{ label: "wiki sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
+        try {
+            const { container } = renderVault();
+            await screen.findByText("Alex");
+            fireEvent.click(toggleOf("Kept by AgentMux"));
+            await screen.findByText("wiki sign-in");
+            const filter = screen.getByPlaceholderText("Filter the Vault");
+            fireEvent.input(filter, { target: { value: "wiki" } });
+            expect(sectionNames(container)).toEqual(["Kept by AgentMux"]);
+            expect(screen.queryByText("No entry matches.")).toBeNull();
+            // Nothing anywhere: the note is back.
+            fireEvent.input(filter, { target: { value: "no such thing" } });
+            expect(sectionNames(container)).toEqual([]);
+            expect(screen.getByText("No entry matches.")).toBeInTheDocument();
+        } finally {
+            keptRows = [];
+        }
+    });
+
     it("dismisses an agent's request through the host", async () => {
         requests = [{ id: "req-2", agent: "Agent1", kind: "ssn", label: "Their SSN", why: "", requested_ms: Date.now(), block_id: "pane-1", vault: "" }];
         renderVault();

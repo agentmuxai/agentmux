@@ -290,7 +290,7 @@ function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: 
                                 <EntryGrants entry={e} revoke={(grant) => s.revoke(e.id, grant)} />
                             </td>
                             <Show when={kinds()}>
-                                <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
+                                <td class="vault-kind">{vaultKind(e.kind)?.label ?? e.kind}</td>
                             </Show>
                             <td class="warden-manager-dim">
                                 <EntryDetails entry={e} showVault={props.showVault} onError={s.setError} />

@@ -122,13 +122,15 @@ export function VaultActivityLog(props: VaultListSectionProps): JSX.Element {
     );
     const all = createMemo(() => groupBatches(rows() ?? []));
     const groups = createMemo(() => all().filter((g) => activityMatches(g, props.filter)));
+    const matched = () => props.narrowing && props.open && !props.soonOnly && groups().length > 0;
+    createEffect(() => props.onMatch?.(matched()));
     const count = () => {
         if (rows() === null) return undefined;
         return props.narrowing ? t("vault.section.countOf", { shown: groups().length, total: all().length }) : String(all().length);
     };
     return (
         <>
-            <Show when={!props.narrowing || (props.open && !props.soonOnly && groups().length > 0)}>
+            <Show when={!props.narrowing || matched()}>
                 <VaultSectionBox id="activity" count={count()} open={props.open} onToggle={props.onToggle}>
                     <p class="warden-manager-summary">
                         {t("vault.activity.about")}{" "}
