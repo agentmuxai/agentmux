@@ -67,7 +67,7 @@ function createLineFeed(props: LargeTextProps) {
         const { path, blockId } = props;
         const encoding = props.probe?.text?.encoding;
         const index = (from: number, count: number) =>
-            RpcApi.FileIndexLinesCommand(TabRpcClient, { path, encoding, from_line: from, count }, { timeout: INDEX_TIMEOUT_MS });
+            RpcApi.FileIndexLinesCommand(TabRpcClient, { path, encoding, from_line: from, count, line_starts: true }, { timeout: INDEX_TIMEOUT_MS });
         // The same file changed in place: the lines it had stay until the new index says, so the reader keeps its place.
         if (path !== was) setTotal(-1);
         was = path;

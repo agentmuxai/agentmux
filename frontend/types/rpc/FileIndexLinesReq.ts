@@ -17,4 +17,8 @@ from_line: number,
 /**
  * How many lines, at most 100,000.
  */
-count: number, };
+count: number, 
+/**
+ * Also say where each of those lines starts (`starts` in the answer), found in the same pass that finds `end`.
+ */
+line_starts?: boolean, };
