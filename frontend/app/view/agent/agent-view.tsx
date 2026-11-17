@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { devModeOn } from "@/app/store/dev-mode";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import type { JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
@@ -16,9 +17,12 @@ import { useSending } from "./agent-view-sending";
 import { useTurnStreams } from "./agent-view-streams";
 import { useHistoryAndFeed, useShownDocument } from "./agent-view-transcript";
 import { useTurnAndLaunch } from "./agent-view-turn";
+import { installWheelDiag } from "./scroll/wheel-diag";
 
 // The palette's "Agent view" commands exist from the first agent pane on; they are available only while one is focused.
 registerAgentViewCommands();
+// The dev-mode wheel diagnostic (scroll/wheel-diag.ts): one listener per window, silent unless dev mode is on.
+installWheelDiag({ enabled: devModeOn });
 
 /**
  * One agent's pane. The setup is a run of hook groups, each in its own file (agent-view-*.ts), called in

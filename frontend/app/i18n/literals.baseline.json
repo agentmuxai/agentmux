@@ -137,7 +137,7 @@
     "frontend/app/view/agent/components/BundleListEditor.tsx": 8,
     "frontend/app/view/agent/components/ContainerLimitButton.tsx": 1,
     "frontend/app/view/agent/components/ContainerUpdateButton.tsx": 2,
-    "frontend/app/view/agent/components/ContextDeliveryCard.tsx": 5,
+    "frontend/app/view/agent/components/ContextDeliveryCard.tsx": 3,
     "frontend/app/view/agent/components/create-panel-install-view.tsx": 15,
     "frontend/app/view/agent/components/create-panel-tools-view.tsx": 9,
     "frontend/app/view/agent/components/create-panel-view.tsx": 5,

@@ -72,7 +72,8 @@ function toItem(x: RawFrame): ContextItem {
             tier ??= "workspace";
         }
     }
-    const delivered = x.delivered === "partial" || x.delivered === "omitted" ? x.delivered : undefined;
+    const delivered =
+        x.delivered === "partial" || x.delivered === "omitted" || x.delivered === "indexed" ? x.delivered : undefined;
 
     return {
         kind,
@@ -81,6 +82,7 @@ function toItem(x: RawFrame): ContextItem {
         ...(str(x.path) ? { path: str(x.path) } : {}),
         ...(str(x.bundle_id) ? { bundleId: str(x.bundle_id) } : {}),
         ...(delivered ? { delivered } : {}),
+        ...(str(x.reason) ? { reason: str(x.reason) } : {}),
         sizeBytes: num(x.size_bytes),
         tokens: num(x.tokens),
         ...(typeof x.source_tokens === "number" ? { sourceTokens: num(x.source_tokens) } : {}),
