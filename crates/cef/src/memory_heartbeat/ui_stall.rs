@@ -174,6 +174,7 @@ fn run(beat: Arc<Beat>, data_root: Option<std::path::PathBuf>) {
                     "[ui-stall] the UI thread ran again after {} s",
                     latency.as_secs()
                 );
+                record(latency, true);
             }
             Some(Event::Late { latency }) => {
                 tracing::warn!(
@@ -182,6 +183,7 @@ fn run(beat: Arc<Beat>, data_root: Option<std::path::PathBuf>) {
                     "[ui-stall] a ping took {} s to run; it was over before the probe looked, so there is no machine context",
                     latency.as_secs()
                 );
+                record(latency, false);
             }
             None => {}
         }
@@ -195,6 +197,17 @@ fn run(beat: Arc<Beat>, data_root: Option<std::path::PathBuf>) {
                 beat.acked.store(seq, Ordering::Release);
             }
         }
+    }
+}
+
+/// A stall that is over goes to the record (`agentmux_common::record_events`, next to srv's own), so one of a month
+/// ago can be found beside the memory it came with: how long the UI thread did not run, the host's size, whether
+/// the probe saw it while it lasted. Numbers only; a failure to write is never more than a debug line.
+fn record(latency: Duration, seen: bool) {
+    let Some(dir) = agentmux_common::record_events::record_dir() else { return };
+    let fields = serde_json::json!({ "ms": latency.as_millis() as u64, "host_mb": own_private_mb(), "seen": seen });
+    if let Err(e) = agentmux_common::record_events::append_event(&dir, agentmux_common::time::now_ms_u64(), "ui_stall", fields) {
+        tracing::debug!(target: "ui_stall", error = %e, "[ui-stall] the record could not take the event");
     }
 }
 

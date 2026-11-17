@@ -23,15 +23,32 @@ pub(super) async fn record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
             let from = (now_ms - 8 * DAY_MS).max(0).to_string();
             let rolls = get(cx, &[("kind", "rollup"), ("limit", "200"), ("from_ms", &from)]).await?;
             let raw = get(cx, &[("kind", "raw"), ("limit", "1")]).await?;
-            Ok(describe_summary(&rolls["inventory"], raw["lines"].get(0), rolls["lines"].as_array().map(Vec::as_slice).unwrap_or_default(), now_ms))
+            let events = get(cx, &[("kind", "events"), ("limit", "500"), ("from_ms", &from)]).await?;
+            let empty = Vec::new();
+            Ok(describe_summary(
+                &rolls["inventory"],
+                raw["lines"].get(0),
+                rolls["lines"].as_array().unwrap_or(&empty),
+                events["lines"].as_array().unwrap_or(&empty),
+                now_ms,
+            ))
         }
         "series" | "export" => {
-            let raw = str_arg(arguments, "kind").as_deref() == Some("raw");
+            let kind = str_arg(arguments, "kind").unwrap_or_else(|| "rollup".to_string());
+            if !matches!(kind.as_str(), "rollup" | "raw" | "events") {
+                anyhow::bail!("App record: kind is \"rollup\", \"raw\" or \"events\", not {kind:?}");
+            }
+            let raw = kind == "raw";
             let hours = arguments.get("hours").and_then(Value::as_u64).unwrap_or(24).clamp(1, MAX_HOURS);
-            let limit = if raw { (hours * 12).min(600) } else { hours }.to_string();
+            let limit = match kind.as_str() {
+                "raw" => (hours * 12).min(600),
+                "events" => 500,
+                _ => hours,
+            }
+            .to_string();
             let from = (now_ms - hours as i64 * 3_600_000).max(0).to_string();
             let day = str_arg(arguments, "day");
-            let mut query = vec![("kind", if raw { "raw" } else { "rollup" }), ("limit", limit.as_str())];
+            let mut query = vec![("kind", kind.as_str()), ("limit", limit.as_str())];
             match day.as_deref() {
                 Some(day) => query.push(("day", day)),
                 None => query.push(("from_ms", from.as_str())),
@@ -39,7 +56,11 @@ pub(super) async fn record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
             let body = get(cx, &query).await?;
             let lines = body["lines"].as_array().map(Vec::as_slice).unwrap_or_default();
             let matched = body["matched"].as_u64().map_or(lines.len(), |m| m as usize);
-            Ok(if view == "export" { describe_export(lines, matched) } else { describe_series(raw, lines, matched, now_ms) })
+            Ok(match (view.as_str(), kind.as_str()) {
+                ("export", _) => describe_export(lines, matched),
+                (_, "events") => describe_events(lines, matched, now_ms),
+                _ => describe_series(raw, lines, matched, now_ms),
+            })
         }
         other => anyhow::bail!("App record: view is \"summary\", \"series\" or \"export\", not {other:?}"),
     }
@@ -251,8 +272,54 @@ fn grown(then: &Value, now: &Value) -> String {
     out
 }
 
-/// `summary`: what the record holds, the newest line, and the trend.
-pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls: &[Value], now_ms: i64) -> String {
+/// The stalls of the UI thread and of srv's runtime in the window, by kind: how many, the longest, the last.
+fn stalls(events: &[Value], now_ms: i64) -> String {
+    let mut out = String::from("Stalls in that time:");
+    for (kind, what) in [("ui_stall", "the window host's UI thread did not run"), ("srv_stall", "srv's runtime stopped running tasks")] {
+        let mine: Vec<&Value> = events.iter().filter(|e| s(e, "kind") == kind).collect();
+        let Some(longest) = mine.iter().map(|e| e["ms"].as_u64().unwrap_or(0)).max() else {
+            out.push_str(&format!("
+- none where {what}."));
+            continue;
+        };
+        let last = mine.iter().filter_map(|e| e["t"].as_u64()).max().unwrap_or(0);
+        out.push_str(&format!("
+- {} where {what}; the longest {}, the last {} ago.", mine.len(), span(longest), ago(now_ms, &json!(last))));
+    }
+    out
+}
+
+/// `series`/`export` of kind events: each stall, oldest first.
+pub(super) fn describe_events(events: &[Value], matched: usize, now_ms: i64) -> String {
+    if events.is_empty() {
+        return "The record has no stall in that window.".to_string();
+    }
+    let mut out = String::from("Stalls, oldest first:");
+    for e in events {
+        let what = if s(e, "kind") == "ui_stall" {
+            let host = e["host_mb"].as_u64().map_or(String::new(), |mb| format!(" (host {mb} MB private)"));
+            format!("the window host's UI thread did not run for {}{host}", span(e["ms"].as_u64().unwrap_or(0)))
+        } else {
+            format!(
+                "srv's runtime stopped for {} (cause {}, worst {} late, {} merged)",
+                span(e["ms"].as_u64().unwrap_or(0)),
+                s(e, "cause"),
+                span(e["worst_ms"].as_u64().unwrap_or(0)),
+                e["n"]
+            )
+        };
+        out.push_str(&format!("
+- {} ago: {what}", ago(now_ms, &e["t"])));
+    }
+    if matched > events.len() {
+        out.push_str(&format!("
+This shows the newest {} of the {matched} in that window; ask for a shorter one to see the rest.", events.len()));
+    }
+    out
+}
+
+/// `summary`: what the record holds, the newest line, the trend, and the stalls.
+pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls: &[Value], events: &[Value], now_ms: i64) -> String {
     let mut out = stored(inventory);
     if let Some(line) = newest {
         out.push('\n');
@@ -260,6 +327,8 @@ pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls:
     }
     out.push('\n');
     out.push_str(&trend(rolls, now_ms));
+    out.push('\n');
+    out.push_str(&stalls(events, now_ms));
     out.push_str("\nView \"series\" lists the hours or lines, \"export\" returns them as stored, to attach to a bug.");
     out
 }
@@ -346,6 +415,20 @@ mod tests {
     }
 
     #[test]
+    fn each_stall_is_listed_with_how_long_it_lasted_and_what_was_seen() {
+        let now = 1_000 * H;
+        let events = vec![
+            json!({ "t": now - 5 * H, "kind": "ui_stall", "ms": 55_000, "host_mb": 310 }),
+            json!({ "t": now - H, "kind": "srv_stall", "ms": 5_300, "worst_ms": 5_200, "n": 2, "cause": "machine" }),
+        ];
+        let text = describe_events(&events, 2, now as i64);
+        assert!(text.contains("5 h 0 min ago: the window host's UI thread did not run for 55 s (host 310 MB private)"), "{text}");
+        assert!(text.contains("60 min ago: srv's runtime stopped for 5 s (cause machine, worst 5 s late, 2 merged)"), "{text}");
+        assert!(describe_events(&[], 0, 0).contains("no stall"));
+        assert!(describe_events(&events, 40, now as i64).contains("newest 2 of the 40"));
+    }
+
+    #[test]
     fn the_newest_line_says_what_each_windows_page_holds() {
         let newest = json!({ "t": 1_000, "v": "0.60.31", "up_s": 60, "am": { "total": 5, "procs": 1, "parts": [] },
             "pages": [
@@ -359,7 +442,7 @@ mod tests {
 
     #[test]
     fn an_empty_record_says_so_and_a_young_one_says_there_is_no_trend() {
-        let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], 1_000);
+        let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &[], 1_000);
         assert!(text.contains("is empty") && text.contains("No hour has been rolled up yet"), "{text}");
     }
 
@@ -374,7 +457,13 @@ mod tests {
         rolls[10]["restarts"] = json!(1);
         let inv = json!({ "raw_days": 3, "raw_bytes": 3_000_000, "raw_first_day": "2026-11-14", "rollup_months": 1, "rollup_bytes": 50_000, "rollup_first_month": "2026-11" });
         let newest = json!({ "t": now - 120_000, "v": "0.60.31", "up_s": 90_000, "am": { "total": 1_300_000_000u64, "procs": 41, "parts": [{ "k": "core", "mem": 600_000_000u64, "n": 3 }] }, "machine": { "mem": 12_000_000_000u64, "mem_total": 32_000_000_000u64, "disk": [200_000_000_000u64, 500_000_000_000u64] } });
-        let text = describe_summary(&inv, Some(&newest), &rolls, now as i64);
+        let events = vec![
+            json!({ "t": now - 3 * H, "kind": "ui_stall", "ms": 55_000, "host_mb": 310 }),
+            json!({ "t": now - H, "kind": "ui_stall", "ms": 8_000 }),
+        ];
+        let text = describe_summary(&inv, Some(&newest), &rolls, &events, now as i64);
+        assert!(text.contains("- 2 where the window host's UI thread did not run; the longest 55 s, the last 60 min ago."), "{text}");
+        assert!(text.contains("- none where srv's runtime stopped running tasks."), "{text}");
         assert!(text.contains("five-minute lines for 3 day(s) since 2026-11-14") && text.contains("hourly rollups for 1 month(s)"), "{text}");
         assert!(text.contains("Newest line, 2 min ago (srv 0.60.31, up 25 h 0 min): AgentMux 1239.8 MB in 41 processes"), "{text}");
         assert!(text.contains("Over 24 h 0 min: +228.9 MB (+22.9%)"), "{text}");
