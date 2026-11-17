@@ -9,7 +9,7 @@ import { createMemo, createResource, createSignal, For, Show, type JSX } from "s
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button, CloseButton, Field, Select, type SelectOption } from "@/app/element/ui";
+import { Button, CloseButton, Field, IconButton, Select, type SelectOption } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { formatWhen } from "./vault-format";
 import { loadShares, shareLogin, unshareLogin } from "./vault-store";
@@ -94,6 +94,19 @@ export function VaultShareDialog(props: { entry: VaultEntryInfo; onClose: () => 
     );
 }
 
+/** The row's Share button, which opens its own dialog. */
+export function ShareButton(props: { entry: VaultEntryInfo }): JSX.Element {
+    const [open, setOpen] = createSignal(false);
+    return (
+        <>
+            <IconButton icon="share" label="Share with an agent" density="compact" onClick={() => setOpen(true)} />
+            <Show when={open()}>
+                <VaultShareDialog entry={props.entry} onClose={() => setOpen(false)} />
+            </Show>
+        </>
+    );
+}
+
 /** How a share has been used: the number of sign-ins and the last one. */
 function usedLine(uses: number, last: number): string {
     if (uses === 0) return "not used yet";
@@ -101,7 +114,8 @@ function usedLine(uses: number, last: number): string {
 }
 
 /** A login's shares under its label: each agent it is shared with, how it was used, and a button to stop. */
-export function EntryShares(props: { entry: VaultEntryInfo; onError: (message: string | null) => void }): JSX.Element {
+export function EntryShares(props: { entry: VaultEntryInfo }): JSX.Element {
+    const [problem, setProblem] = createSignal<string | null>(null);
     // Read again when the login changes (a share is a change to it) and when it is used.
     const [data, { refetch }] = createResource(
         () => (isShared(props.entry) ? `${props.entry.id}|${props.entry.updated_at}|${props.entry.last_used_at}` : false),
@@ -110,10 +124,10 @@ export function EntryShares(props: { entry: VaultEntryInfo; onError: (message: s
     const stop = async (agent: string) => {
         try {
             await unshareLogin(props.entry.id, agent);
-            props.onError(null);
+            setProblem(null);
             void refetch();
         } catch (e) {
-            props.onError(e instanceof Error ? e.message : String(e));
+            setProblem(e instanceof Error ? e.message : String(e));
         }
     };
     return (
@@ -128,6 +142,11 @@ export function EntryShares(props: { entry: VaultEntryInfo; onError: (message: s
                         </span>
                     )}
                 </For>
+                <Show when={problem()}>
+                    <span class="warden-manager-error" role="alert">
+                        {problem()}
+                    </span>
+                </Show>
             </div>
         </Show>
     );
