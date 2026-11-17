@@ -486,11 +486,11 @@ pub(crate) async fn handle_vault_history(State(state): State<AppState>, caller: 
 /// value.
 pub(crate) async fn handle_vault_generate(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<GenerateBody>) -> Response {
     let Some(auth) = body.auth.as_ref() else {
-        return error(StatusCode::FORBIDDEN, "generate needs the agent's signed identity: the Vault records who made each entry");
+        return error(StatusCode::FORBIDDEN, "generate needs to know which agent asks (its token or its signed identity): the Vault records who made each entry");
     };
     let agent: String = match super::ui_handlers::verified_block_id(&state, caller.as_deref(), auth) {
         Ok(_) => auth.agent_id.chars().take(64).collect(),
-        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs the agent's signed identity: {e}")),
+        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs to know which agent asks (its token or its signed identity): {e}")),
     };
     let store = state.identity_store.clone();
     let request = body.request;

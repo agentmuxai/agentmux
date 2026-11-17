@@ -60,7 +60,7 @@ pub(super) fn asker(
     what: &str,
     records: &str,
 ) -> Result<Who, Response> {
-    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs the agent's signed identity: {why}"));
+    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs to know which agent asks (its token or its signed identity): {why}"));
     let Some(auth) = auth else { return Err(refuse(format!("the Vault records {records}"))) };
     let pane = super::ui_handlers::verified_block_id(state, caller, auth).map_err(refuse)?;
     let agent: String = auth.agent_id.chars().take(64).collect();

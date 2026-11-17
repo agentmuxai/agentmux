@@ -1,6 +1,9 @@
 # Spec: an agent can have a Vault credential entered wherever one is asked for, and never sees it
 
-Date 2026-11-16. Author Agent2-6@narko. Tasks #47888 (this spec) and #47889 (its build). Status: written, waiting for the security read.
+**Status:** active. The spec task (#47888) is complete and the build (#47889) is under way: part C is built by the PR that adds "As built (C)" when it is written; parts A and B follow.
+**Task:** #47888 (the build is #47889). **Author:** Agent2-6 (Vault). **Date:** 2026-11-16.
+**Asked by the operator (2026-11-16):** a container agent signs in to a site with a login the person shared with it, and, more widely, agents can have a Vault credential entered wherever one is asked for, and never see it.
+**Public repository.** This spec and its tests use invented names (`example.com`) only.
 
 This spec states requirements and the tests that prove them. It says nothing of how an attacker might try to get round them, and lists no gaps: those go to the security lead privately.
 
@@ -36,7 +39,7 @@ Each is a requirement with a test in every place that has a build in this spec (
 - **G2 Only where the entry is saved for.** An entry names the site, host or program it is for. A value goes only to a target AgentMux itself identifies as that one (its own record of the page's origin, the process, the host), never to one the agent says is that one. Anything else is refused with a reason that says what to do, and nothing is typed.
 - **G3 The person approves, sees it and can stop it.** Every use is asked once (Allow once, or Deny) unless the person granted "Always" for that agent and that place. A use under "Always" shows a notice naming the agent and the place for 5 seconds with a Stop. Only the person can answer or stop: no `UI`, `Browser` or `Desktop` call by an agent reaches the card or the Stop, and neither does input that an agent's program or a `Desktop` call injects at AgentMux's own windows, wherever the platform marks injected input. The card's facts (agent, entry, target, command) are drawn by AgentMux from its own records. The agent's reason is shown as the agent's words: one plain line, no markup and no line breaks, and it cannot occupy the place of the facts or imitate them.
 - **G4 Hidden afterwards.** What the agent can read back after a use shows the value as hidden: page snapshots, `find`, `eval` and screenshots of a pane, command output and the pane's log, a desktop screenshot of the window. This covers a password and a one-time code. A login's user name is masked in Vault answers and in `signin`'s messages (B4); the spec promises nothing about a page that shows it. The existing masking rules apply; this spec adds no way round them.
-  - **Web, closed before step 1 ships.** From the moment a value is typed into a field until that document is gone, no agent script runs in it and no agent call returns the field's value, by any `Browser` action (`eval`, `snapshot`, `find`, a read-back) or any pane screenshot. This includes a field whose type the page switches from password to text. If today's guard does not hold, it is fixed in step 1, before the share ships.
+  - **Web.** From the moment a value is typed into a field until that document is gone, no agent script runs in it and no agent call returns the field's value, by any `Browser` action (`eval`, `snapshot`, `find`, a read-back) or any pane screenshot. This includes a field whose type the page switches from password to text. It holds from step 1 on.
 - **G5 Recorded.** Each use, each refusal and each stop is a line in the entry's history: when, which agent (its verified identity), the place (origin, host or program), the outcome, the agent's reason. No value, tail, length or hash.
 - **G6 Never by another route.** Every other route that could put a login's password or one-time code into a field the agent chooses stays refused (`Browser` `fill` with `vault`, `fill` with `text` for a Vault value, `Terminal` `run` writing a login's password anywhere the agent names other than the means in section 9, `Desktop` `type`), and its refusal names the route that works.
 - **G7 Identity is verified.** Every call that asks the person on an agent's behalf, and every use above, verifies which agent asks by the same means for a native and a container agent (section 7). A call whose identity can't be verified is refused and nothing is asked or typed.
@@ -74,7 +77,7 @@ Tests: `b1_two_keys_one_approval_one_entry`, `b2_username_field_set_and_password
 
 ## 7. Part C: a container agent's calls are its own (place 1d)
 
-Cause, from the code: the Vault's routes and the Terminal secret options check an agent's identity with the signature alone, while `Browser` also accepts the container agent's token. A container agent has no signature those checks accept, so it is "not a verified agent".
+A container agent holds a token and no signing key, and is proven by its token, as `Browser` proves it.
 
 - **C1** One function verifies an agent's identity for every call that records or asks on an agent's behalf (Vault `update`, `request`, `generate`, `rotate`, `import`, `import_batch`, `check`, `history`, `share`; `Terminal` `run` with `secrets`, `stdin_secret`, `secret_files`, `capture` and prompt answers), and it accepts exactly what `Browser`'s accepts: the caller's token for a container agent, the signature for a native one. A container agent's token is accepted only for the agent it was issued to, and only while that agent's container is the caller AgentMux expects (the same peer check its other brokered routes use). The token of a stopped, recreated or deleted agent is refused.
 - **C2** A container agent's `update` of an entry's non-secret fields (its label, tags, notes and the other fields C6 does not name) is therefore recorded under its identity, in the entry's history, as a native agent's is. It is not refused.
@@ -145,7 +148,7 @@ One narrow task worth its own ticket: a Vault key store that stays locked after 
 
 ## 12. Build order (#47889)
 
-1. **Pulp's case:** sections 7 (C, including C6), 5 (A, including A10) and 6 (B), and the web read-back guarantee of G4 (closed here, before the share ships) with the Vault pane's share list, the import card's line and `Vault` `share`. A container agent signs in on a site with a shared login.
+1. **Pulp's case:** sections 7 (C, including C6), 5 (A, including A10) and 6 (B), and the web read-back guarantee of G4, with the Vault pane's share list, the import card's line and `Vault` `share`. A container agent signs in on a site with a shared login.
 2. **Browser gaps:** D1, D2, D5, then D4, then D3.
 3. **Terminal prompts:** E, local first.
 4. **Desktop:** F, Windows first.

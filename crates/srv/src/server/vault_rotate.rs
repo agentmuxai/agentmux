@@ -117,11 +117,11 @@ fn rotation_request(agent: &str, row: &crate::backend::storage::vault::VaultRow,
 /// `POST /api/v1/vault/rotate`.
 pub(crate) async fn handle_vault_rotate(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<RotateBody>) -> Response {
     let Some(auth) = body.auth.clone() else {
-        return error(StatusCode::FORBIDDEN, "rotate needs the agent's signed identity");
+        return error(StatusCode::FORBIDDEN, "rotate needs to know which agent asks (its token or its signed identity)");
     };
     let block_id = match super::ui_handlers::verified_block_id(&state, caller.as_deref(), &auth) {
         Ok(b) => b,
-        Err(e) => return error(StatusCode::FORBIDDEN, format!("rotate needs the agent's signed identity: {e}")),
+        Err(e) => return error(StatusCode::FORBIDDEN, format!("rotate needs to know which agent asks (its token or its signed identity): {e}")),
     };
     let agent: String = auth.agent_id.chars().take(64).collect();
     let reason = match vault::history::require_reason(body.reason.as_deref()) {

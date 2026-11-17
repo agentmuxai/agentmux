@@ -157,7 +157,7 @@ fn agent_of(
     needs: &str,
 ) -> Result<String, Refusal> {
     let agent = super::app_api::connections::verified_agent_as(state, caller, agent_block_id, auth)
-        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("{needs} needs the agent's signed identity: {}", e.replace("an SSH connection needs", "this needs"))))?;
+        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("{needs} needs to know which agent asks (its token or its signed identity): {}", e.replace("an SSH connection needs", "this needs"))))?;
     Ok(agent.chars().take(64).collect())
 }
 
