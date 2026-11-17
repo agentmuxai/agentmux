@@ -1,17 +1,29 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Two rows of 7: the hues Rose to Jade, then Teal to Magenta, Black and White.
+// Two rows of 7: the hues Rose to Jade, then Teal to Magenta, Black and White. `--palette-cols` counts the columns
+// of the whole picker; the colours' grid is inside, so the "none" swatch can sit beside it.
 .palette-swatches {
     --palette-cols: 7;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+}
+
+.palette-swatches__colours {
     display: grid;
     grid-template-columns: repeat(var(--palette-cols, 7), 18px);
     gap: var(--space-1);
 }
 
-// The "none" swatch leads the first row: 8 and 7.
+// The "none" swatch is alone in the first column, the cell under it empty, and the colours are two rows of 7 beside
+// it, each in the column of the one above.
 .palette-swatches--with-none {
     --palette-cols: 8;
+
+    .palette-swatches__colours {
+        grid-template-columns: repeat(calc(var(--palette-cols, 8) - 1), 18px);
+    }
 }
 
 .palette-swatch-anchor {
