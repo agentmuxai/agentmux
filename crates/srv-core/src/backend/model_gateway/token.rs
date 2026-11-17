@@ -33,6 +33,9 @@ pub struct Grant {
 struct Registry {
     by_digest: HashMap<[u8; 32], Grant>,
     by_agent: HashMap<(String, String), String>,
+    /// A key-route token that [`renew_for_account`] replaced, and whose agent and route it was for: only so a turn that was
+    /// set up with it can still say whose turn it is ([`current_grant_of_replaced`]). It authorizes nothing.
+    replaced: HashMap<[u8; 32], (String, String)>,
 }
 
 fn registry() -> &'static Mutex<Registry> {
@@ -82,11 +85,21 @@ pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, 
         }
         reg.by_agent.remove(&key);
         reg.by_digest.remove(&digest(&old));
+        reg.replaced.insert(digest(&old), key.clone());
     }
     let token = mint();
     reg.by_agent.insert(key, token.clone());
     reg.by_digest.insert(digest(&token), grant);
     token
+}
+
+/// The agent's current grant for a token that [`renew_for_account`] replaced, while the agent still holds one for that route:
+/// a message queued during a container agent's first turn was set up with the token that turn then replaced. The replaced
+/// token itself is never accepted ([`grant_for`] says none); this only names whose turn it is. Gone with the agent's token.
+pub fn current_grant_of_replaced(token: &str) -> Option<Grant> {
+    let reg = registry().lock().unwrap();
+    let key = reg.replaced.get(&digest(token))?;
+    reg.by_digest.get(&digest(reg.by_agent.get(key)?)).cloned()
 }
 
 pub fn grant_for(token: &str) -> Option<Grant> {
@@ -99,9 +112,11 @@ pub fn grant_for(token: &str) -> Option<Grant> {
 /// Ends the agent's access to `route` without touching its environment: the next request is refused.
 pub fn revoke(def_id: &str, route: &str) {
     let mut reg = registry().lock().unwrap();
-    if let Some(token) = reg.by_agent.remove(&(def_id.to_string(), route.to_string())) {
+    let key = (def_id.to_string(), route.to_string());
+    if let Some(token) = reg.by_agent.remove(&key) {
         reg.by_digest.remove(&digest(&token));
     }
+    reg.replaced.retain(|_, k| *k != key);
 }
 
 /// Ends every token for `route` that was made for the agent `name` names: its definition id or its routing id (slug). A
@@ -118,6 +133,7 @@ pub fn revoke_agent(name: &str, route: &str) {
         if let Some(token) = reg.by_agent.remove(&key) {
             reg.by_digest.remove(&digest(&token));
         }
+        reg.replaced.retain(|_, k| *k != key);
     }
 }
 
@@ -168,6 +184,24 @@ mod tests {
         assert_ne!(switched, moved);
         assert_eq!(grant_for(&moved), None);
         revoke("ov-def", "anthropic");
+    }
+
+    #[test]
+    fn a_replaced_token_names_the_agents_current_grant_only_while_the_agent_holds_one() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let spawned = token_for_account("rp-agent", "rp-def", "anthropic", "acct");
+        let bound = renew_for_account("rp-agent", "rp-def", "anthropic", "acct", Some(ip));
+        assert_eq!(grant_for(&spawned), None, "the replaced token is never accepted");
+        assert_eq!(current_grant_of_replaced(&spawned), grant_for(&bound));
+        assert_eq!(current_grant_of_replaced(&bound), None, "a live token is not a replaced one");
+        assert_eq!(current_grant_of_replaced("amxg_never-made"), None);
+        revoke_agent("rp-def", "anthropic");
+        assert_eq!(current_grant_of_replaced(&spawned), None, "it ends with the agent's token");
+        // The same after a revoke by id.
+        let spawned = token_for_account("rp-agent", "rp-def", "anthropic", "acct");
+        renew_for_account("rp-agent", "rp-def", "anthropic", "acct", Some(ip));
+        revoke("rp-def", "anthropic");
+        assert_eq!(current_grant_of_replaced(&spawned), None);
     }
 
     #[test]

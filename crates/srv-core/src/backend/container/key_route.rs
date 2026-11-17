@@ -64,7 +64,13 @@ pub(crate) fn claim(env: &[(String, String)]) -> Result<Option<Claim>, Container
     if !is_key_route_env(env) {
         return Ok(None);
     }
-    let grant = env.iter().find(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN").and_then(|(_, t)| token::grant_for(t)).filter(|g| g.route == KEY_ROUTE_ID);
+    // A message queued during the agent's first turn was set up with the token that turn then replaced: it names the agent's
+    // current one while the agent still holds one.
+    let grant = env
+        .iter()
+        .find(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN")
+        .and_then(|(_, t)| token::grant_for(t).or_else(|| token::current_grant_of_replaced(t)))
+        .filter(|g| g.route == KEY_ROUTE_ID);
     match grant {
         Some(g) => Ok(Some(Claim { agent: g.agent, def_id: g.def_id, account: g.account })),
         None => Err(ContainerError::KeyRoute(GONE.to_string())),
@@ -151,6 +157,22 @@ mod tests {
         assert!(claim(&[]).unwrap().is_none());
         let err = claim(&env_for(KEY_ROUTE_ID)).err().expect("no live token");
         assert!(matches!(&err, ContainerError::KeyRoute(why) if why == GONE), "{err}");
+    }
+
+    #[test]
+    fn a_message_queued_behind_the_first_turn_is_still_that_agents_when_the_turn_replaced_its_token() {
+        let at: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let queued_with = token::renew_for_account("kq-slug", "kq-def", KEY_ROUTE_ID, "kq-acct", None);
+        let mut env = env_for(KEY_ROUTE_ID);
+        env[1].1 = queued_with.clone();
+        // The running turn binds the token to the container's address, which replaces the one the message holds.
+        token::renew_for_account("kq-slug", "kq-def", KEY_ROUTE_ID, "kq-acct", Some(at));
+        assert_eq!(token::grant_for(&queued_with), None);
+        let taken = claim(&env).unwrap().expect("still a key-route turn of that agent");
+        assert_eq!((taken.agent.as_str(), taken.def_id.as_str(), taken.account.as_str()), ("kq-slug", "kq-def", "kq-acct"));
+        // Once the agent's token ends (the container was stopped, or the agent left the key) the message is refused.
+        revoke_container_tokens("agentmux-kq-def");
+        assert!(matches!(claim(&env), Err(ContainerError::KeyRoute(why)) if why == GONE));
     }
 
     /// The part that depends on the platform: where there is no address to bind the token is made fresh for this
