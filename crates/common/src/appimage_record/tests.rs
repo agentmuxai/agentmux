@@ -165,9 +165,8 @@ fn a_record_written_by_a_newer_build_is_neither_read_nor_overwritten() {
     let dir = tempfile::tempdir().unwrap();
     let record = dir.path().join(RECORD_FILE);
     let file = appimage(dir.path(), "AgentMux.AppImage", 100, 1_000);
-    let id = file_id(&file).unwrap();
-    let theirs = Stored { version: VERSION + 1, records: vec![Record { path: text(&file), channel: "newer".into(), id }] };
-    let bytes = serde_json::to_vec(&theirs).unwrap();
+    // A newer layout may have renamed what follows the version, so it can't be read as ours.
+    let bytes = serde_json::to_vec(&serde_json::json!({ "version": VERSION + 1, "files": [{ "where": text(&file), "channel": "newer" }] })).unwrap();
     std::fs::write(&record, &bytes).unwrap();
     assert_eq!(lookup(&record, &file), None);
     remember(&record, &file, "mine").unwrap();

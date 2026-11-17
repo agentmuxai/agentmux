@@ -286,11 +286,18 @@ const XDG_CHANNEL_KEY: &str = "X-AgentMux-Channel";
 /// behind an "Integrate or Run once" window, and AgentMux doesn't start until someone answers it (#47873).
 #[cfg(any(not(target_os = "windows"), test))]
 fn exec_prefix(exe: &Path) -> &'static str {
-    if exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("appimage")) {
-        "env APPIMAGELAUNCHER_DISABLE=1 "
+    if is_appimage(exe) {
+        APPIMAGELAUNCHER_OFF_PREFIX
     } else {
         ""
     }
+}
+
+/// How an AppImage's `Exec` line starts.
+const APPIMAGELAUNCHER_OFF_PREFIX: &str = "env APPIMAGELAUNCHER_DISABLE=1 ";
+
+fn is_appimage(exe: &Path) -> bool {
+    exe.extension().is_some_and(|e| e.eq_ignore_ascii_case("appimage"))
 }
 
 /// Escape a plain desktop-entry string value (`TryExec`, vendor keys), per the
@@ -638,6 +645,9 @@ pub struct Entry {
     /// Which channel wrote it. `None` for an entry from before ownership was
     /// recorded.
     pub channel: Option<String>,
+    /// Whether it is written the way this build writes it. `false` for an AppImage's entry from before it ran
+    /// with AppImageLauncher switched off: it is rewritten even when it already runs the right file.
+    pub current: bool,
 }
 
 /// Read the current entry back from the platform. `None` when there is none.
@@ -697,7 +707,7 @@ fn parse_task_xml(xml: &str) -> Entry {
     let channel = between(xml, "<Description>", "</Description>")
         .and_then(|d| between(d, TASK_CHANNEL_MARKER, "]"))
         .map(xml_unescape);
-    Entry { target, channel }
+    Entry { target, channel, current: true }
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -707,7 +717,7 @@ fn parse_plist(text: &str) -> Entry {
         .map(xml_unescape);
     let channel = between(text, &format!("<key>{PLIST_CHANNEL_KEY}</key>"), "</string>")
         .and_then(|rest| rest.split_once("<string>").map(|(_, v)| xml_unescape(v)));
-    Entry { target, channel }
+    Entry { target, channel, current: true }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -719,7 +729,13 @@ fn parse_desktop_entry(text: &str) -> Entry {
     };
     // `TryExec` is the plain path; an entry from before it existed has none,
     // reads as "target unknown", and gets rewritten.
-    Entry { target: value("TryExec"), channel: value(XDG_CHANNEL_KEY) }
+    let target = value("TryExec");
+    // An AppImage's entry that doesn't start it with AppImageLauncher switched off is an older one.
+    let current = match (&target, value("Exec")) {
+        (Some(t), Some(exec)) if is_appimage(Path::new(t)) => exec.starts_with(APPIMAGELAUNCHER_OFF_PREFIX),
+        _ => true,
+    };
+    Entry { target, channel: value(XDG_CHANNEL_KEY), current }
 }
 
 /// What to do to bring the login entry in line with `app:startatlogin`
@@ -797,7 +813,7 @@ pub fn missing_target(entry: &Entry) -> Option<&str> {
 pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target: Option<&str>, moved_from: Option<&str>) -> Plan {
     let owned = |e: &Entry| e.channel.as_deref() == Some(channel);
     match (setting, entry) {
-        (Some(true), Some(e)) if owned(e) && target.is_some() && e.target.as_deref() == target => Plan::Nothing,
+        (Some(true), Some(e)) if owned(e) && e.current && target.is_some() && e.target.as_deref() == target => Plan::Nothing,
         (Some(true), _) => Plan::Write,
         (Some(false), Some(e)) if owned(e) => Plan::Remove,
         (None, Some(e)) if e.channel.is_none() => Plan::Adopt,
@@ -1045,7 +1061,7 @@ mod autostart_tests {
     }
 
     fn entry(target: &str, channel: Option<&str>) -> Entry {
-        Entry { target: Some(target.to_string()), channel: channel.map(str::to_string) }
+        Entry { target: Some(target.to_string()), channel: channel.map(str::to_string), current: true }
     }
 
     #[test]
@@ -1090,13 +1106,13 @@ mod autostart_tests {
     #[test]
     fn every_artifact_reads_back_its_own_target_and_channel() {
         let exe = Path::new("/home/u/My Apps/Agent&Mux.AppImage");
-        let want = Entry { target: Some(exe.display().to_string()), channel: Some("local-main-b28b7a".into()) };
+        let want = Entry { target: Some(exe.display().to_string()), channel: Some("local-main-b28b7a".into()), current: true };
         assert_eq!(parse_desktop_entry(&xdg_desktop_entry(exe, "local-main-b28b7a")), want);
         assert_eq!(parse_plist(&launch_agent_plist(exe, "local-main-b28b7a")), want);
         let win = Path::new(r"C:\Users\u\AppData\Local\Programs\AgentMux & Co\agentmux.exe");
         assert_eq!(
             parse_task_xml(&scheduled_task_xml(win, "stable")),
-            Entry { target: Some(win.display().to_string()), channel: Some("stable".into()) }
+            Entry { target: Some(win.display().to_string()), channel: Some("stable".into()), current: true }
         );
     }
 
@@ -1104,7 +1120,7 @@ mod autostart_tests {
     #[test]
     fn a_pre_ownership_desktop_entry_reads_as_unowned_with_no_target() {
         let old = "[Desktop Entry]\nType=Application\nExec=\"/x/agentmux-launcher\" --background\n";
-        assert_eq!(parse_desktop_entry(old), Entry { target: None, channel: None });
+        assert_eq!(parse_desktop_entry(old), Entry { target: None, channel: None, current: true });
     }
 
     #[test]
@@ -1145,7 +1161,7 @@ mod autostart_tests {
         assert_eq!(missing_target(&entry(&there.display().to_string(), Some("stable"))), None);
         let gone_text = gone.display().to_string();
         assert_eq!(missing_target(&entry(&gone_text, Some("local-x"))), Some(gone_text.as_str()));
-        assert_eq!(missing_target(&Entry { target: None, channel: None }), None, "an entry with no target is rewritten, not reported");
+        assert_eq!(missing_target(&Entry { target: None, channel: None, current: true }), None, "an entry with no target is rewritten, not reported");
     }
 
     #[test]
@@ -1161,6 +1177,24 @@ mod autostart_tests {
         assert!(xdg_desktop_entry(Path::new("/home/user/a.appimage"), "stable").contains("Exec=env APPIMAGELAUNCHER_DISABLE=1 "));
         let wrapper = xdg_desktop_entry(Path::new("/usr/bin/agentmux"), "stable");
         assert!(wrapper.contains("\nExec=\"/usr/bin/agentmux\" --background\n"), "{wrapper}");
+    }
+
+    #[test]
+    fn an_appimage_login_entry_from_before_the_bypass_is_rewritten_even_when_it_runs_the_right_file() {
+        let file = "/home/user/Applications/AgentMux_0.60.30_amd64.AppImage";
+        let old = format!(
+            "[Desktop Entry]\nType=Application\nTryExec={file}\nExec=\"{file}\" --background\nX-AgentMux-Channel=stable\n"
+        );
+        let read = parse_desktop_entry(&old);
+        assert_eq!(read.target.as_deref(), Some(file));
+        assert!(!read.current, "an AppImage entry that starts it with AppImageLauncher on");
+        assert_eq!(plan(Some(true), Some(&read), "stable", Some(file)), Plan::Write);
+        // What this build writes reads back as current and is left alone.
+        let new = parse_desktop_entry(&xdg_desktop_entry(Path::new(file), "stable"));
+        assert!(new.current);
+        assert_eq!(plan(Some(true), Some(&new), "stable", Some(file)), Plan::Nothing);
+        // A package install's wrapper never had the bypass and is current without it.
+        assert!(parse_desktop_entry(&xdg_desktop_entry(Path::new("/usr/bin/agentmux"), "stable")).current);
     }
 
     #[test]

@@ -95,11 +95,16 @@ struct Stored {
 /// What the record file holds, and whether this build may rewrite it (it may not when a newer build wrote it).
 fn load(record: &Path) -> (Vec<Record>, bool) {
     let Ok(text) = std::fs::read_to_string(record) else { return (Vec::new(), true) };
-    match serde_json::from_str::<Stored>(&text) {
-        Ok(stored) if stored.version > VERSION => (Vec::new(), false),
-        Ok(stored) => (stored.records, true),
+    // The version first, on its own: a newer build may have changed what follows it.
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { return (Vec::new(), true) };
+    match value.get("version").and_then(serde_json::Value::as_u64) {
+        Some(v) if v > u64::from(VERSION) => (Vec::new(), false),
+        Some(_) => match serde_json::from_value::<Stored>(value) {
+            Ok(stored) => (stored.records, true),
+            Err(_) => (Vec::new(), true),
+        },
         // Not ours, or damaged: nothing to keep, and a new one replaces it.
-        Err(_) => (Vec::new(), true),
+        None => (Vec::new(), true),
     }
 }
 
