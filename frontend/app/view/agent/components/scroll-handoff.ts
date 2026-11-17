@@ -140,6 +140,9 @@ function wheelNotches(e: WheelEvent): number | null {
     return null;
 }
 
+/** What the last box did with a wheel event (`timeStamp` to match it), for the dev-mode wheel diagnostic (scroll/wheel-diag.ts). */
+export const lastHandoff: { at: number; action: "native" | "absorb" | "forward" } = { at: 0, action: "native" };
+
 /** The wheel events this file made to tell a pane about a gesture it relayed: the pane's own skid reset ignores them. */
 const relayed = new WeakSet<Event>();
 
@@ -238,6 +241,8 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
             timeStamp: e.timeStamp,
         });
         skids.set(pane, state);
+        lastHandoff.at = e.timeStamp;
+        lastHandoff.action = action.kind;
         if (action.kind === "absorb") {
             // `contain` keeps an overflowing box's edge from relaying, so nothing
             // moves. A box that fits now (its content shrank after the wheel
