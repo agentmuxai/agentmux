@@ -280,27 +280,36 @@ short of running the installer (used by its tests).
         }
         $allowed = Join-Path $Work "allowed_signers"
         [IO.File]::WriteAllText($allowed, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
-        # The envelope goes to ssh-keygen's standard input as its exact bytes (a redirect that adds a line ending would fail a good release).
+        # The envelope goes to ssh-keygen's standard input as its exact bytes. On Windows the shell does it: cmd.exe hands the file to the
+        # program as its input, with no .NET text layer between (Windows PowerShell and PowerShell 7 treat a process's input differently).
+        # Where there is no cmd.exe (the script's tests on another system) the raw stream is written instead.
         $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = $exe
-        $psi.Arguments = '-Y verify -f "' + $allowed + '" -I ' + $SshsigNamespace + ' -n ' + $SshsigNamespace + ' -s "' + $sshsig + '"'
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
-        $psi.RedirectStandardInput = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
+        $verifyArgs = '-Y verify -f "' + $allowed + '" -I ' + $SshsigNamespace + ' -n ' + $SshsigNamespace + ' -s "' + $sshsig + '"'
+        $useCmd = $env:ComSpec -and (Test-Path -LiteralPath $env:ComSpec)
+        if ($useCmd) {
+            $psi.FileName = $env:ComSpec
+            $psi.Arguments = '/d /s /c ""' + $exe + '" ' + $verifyArgs + ' < "' + $Envelope + '""'
+        } else {
+            $psi.FileName = $exe
+            $psi.Arguments = $verifyArgs
+            $psi.RedirectStandardInput = $true
+        }
         $proc = [Diagnostics.Process]::Start($psi)
-        $bytes = [IO.File]::ReadAllBytes($Envelope)
-        # Only the raw stream is written and closed, never the StandardInput writer: Windows PowerShell's closing of that writer can put a
-        # byte order mark in front of the envelope (when the console code page is UTF-8), and the signature is of the exact bytes.
-        try { $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length); $proc.StandardInput.BaseStream.Flush(); $proc.StandardInput.BaseStream.Dispose() } catch { }
+        if (-not $useCmd) {
+            $bytes = [IO.File]::ReadAllBytes($Envelope)
+            try { $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length); $proc.StandardInput.BaseStream.Flush(); $proc.StandardInput.BaseStream.Dispose() } catch { }
+        }
         $outText = $proc.StandardOutput.ReadToEnd()
         $errText = $proc.StandardError.ReadToEnd()
         $proc.WaitForExit()
         if ($proc.ExitCode -eq 0) { return 0 }
-        foreach ($text in @($outText, $errText)) {
-            if (-not $ssh.Out -and $text) { $ssh.Out = ("" + ($text -split "`r?`n" | Select-Object -First 1)).Trim() }
-        }
+        # What ssh-keygen said, all of it (it says why on one line and "Could not verify signature." on the next).
+        $said = @(($outText + "`n" + $errText) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join " | "
+        $ssh.Out = $said
         return 1
     }
 
