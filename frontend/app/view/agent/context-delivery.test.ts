@@ -10,6 +10,7 @@ import {
     contextDeliveryTitle,
     EMPTY_COMMAND_OUTPUT,
     isTextCard,
+    rowBadge,
 } from "./context-delivery";
 import { supersededCard } from "./memory-injected";
 import { parseHistoryLines } from "./parseHistoryLines";
@@ -160,7 +161,7 @@ describe("contextDeliveryTitle", () => {
         expect(contextDeliveryTitle(summaryNode("auto"))).toBe("Agent given a summary of the conversation (auto-compact)");
     });
 
-    const memoryNode = (reason: "startup" | "clear" | "compaction", delivered?: "partial" | "omitted") => ({
+    const memoryNode = (reason: "startup" | "clear" | "compaction", delivered?: "partial" | "omitted" | "indexed") => ({
         ...summaryNode("manual"),
         reason,
         items: [
@@ -178,8 +179,15 @@ describe("contextDeliveryTitle", () => {
         expect(contextDeliveryTitle(memoryNode("compaction"))).toBe("Memory re-delivered after compaction · 2 items");
     });
 
-    it("counts items the part cap cut", () => {
-        expect(contextDeliveryTitle(memoryNode("startup", "omitted"))).toBe("Given to the agent · new session · 2 items · 1 cut");
+    it("counts what was left out and what was cut, each in its own words", () => {
+        expect(contextDeliveryTitle(memoryNode("startup", "omitted"))).toBe("Given to the agent · new session · 2 items · 1 left out");
+        expect(contextDeliveryTitle(memoryNode("startup", "partial"))).toBe("Given to the agent · new session · 2 items · 1 cut");
+    });
+
+    it("says how many went in full and how many are listed in the index, never 'not sent'", () => {
+        const title = contextDeliveryTitle(memoryNode("compaction", "indexed"));
+        expect(title).toBe("Memory re-delivered after compaction · 2 items · 1 in full · 1 in index");
+        expect(title).not.toMatch(/not sent|cut/);
     });
 });
 
@@ -274,5 +282,16 @@ describe("commandOutputNode", () => {
         const output = commandOutputNode(frame(COMMAND_OUTPUT, { uuid: "c-2" }), 0) as ContextDeliveryNode;
         expect(supersededCard([startup("a"), output], startup("b"))).toBeUndefined();
         expect(supersededCard([startup("a")], startup("b"))?.id).toBe("a");
+    });
+});
+
+describe("rowBadge", () => {
+    it("names each state in its own words, never 'not sent'", () => {
+        expect(rowBadge({})).toBeNull();
+        expect(rowBadge({ delivered: "full" })).toBeNull();
+        expect(rowBadge({ delivered: "indexed" })).toMatchObject({ label: "in index", tone: "index" });
+        expect(rowBadge({ delivered: "indexed", reason: "over the limit" })?.title).toContain("over the limit");
+        expect(rowBadge({ delivered: "omitted", reason: "the delivery was full" })).toMatchObject({ label: "left out", tone: "cut" });
+        expect(rowBadge({ delivered: "partial" })).toMatchObject({ label: "cut", tone: "cut" });
     });
 });

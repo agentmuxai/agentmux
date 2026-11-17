@@ -9,14 +9,16 @@
 //! every later file, including the one the index marks "read first", showed as not sent.
 //!
 //! - Order: newest first (the file's `modified` frontmatter, else its mtime), done where the files are read.
-//! - Cap: a file over [`FILE_CAP_CHARS`] goes in cut, with a line saying how much is left and where.
-//! - Fit: files that still don't fit are left out whole and listed by name and description, so the agent
-//!   knows to read them.
+//! - Index: Personal Memory goes in as an index (`index.rs`), one line per file, always complete. Only files marked
+//!   `deliver: always` (up to [`ALWAYS_MAX_FILES`] files and [`ALWAYS_MAX_CHARS`] characters) go in full.
+//! - Fit: Global Memory entries that still don't fit are left out whole and listed by name with the way to read
+//!   them, never cut at the end of the text.
 //! - Hygiene: on a compaction, one note when Personal Memory is over [`PERSONAL_BUDGET_CHARS`], a file is
 //!   over the cap, or a project file hasn't been touched for [`STALE_DAYS`]. AgentMux never deletes memory:
 //!   it can't tell a stale snapshot from a durable rule, so the agent trims its own.
 
-use super::delivery::{Entry, Tier, HOOK_PARTS, MAX_PART_CHARS};
+use super::delivery::{Entry, Tier};
+use super::index::{self, IndexPlan, ALWAYS_MAX_CHARS, ALWAYS_MAX_FILES};
 
 /// The most characters one Personal Memory file contributes.
 pub const FILE_CAP_CHARS: usize = 8_000;
@@ -24,30 +26,31 @@ pub const FILE_CAP_CHARS: usize = 8_000;
 pub const PERSONAL_BUDGET_CHARS: usize = 40_000;
 /// A `project` file untouched for this many days is called stale.
 pub const STALE_DAYS: i64 = 7;
+/// A capacity for a delivery that has no part cap (the fallback's one message).
+pub const NO_CAP: usize = usize::MAX / 4;
 /// The characters kept back for the header, the section headings and the part labels.
 const OVERHEAD_CHARS: usize = 1_500;
-/// The most names the not-sent list and the hygiene note spell out.
+/// The most names the hygiene note spells out.
 const MAX_LISTED: usize = 25;
-/// The most characters of a description in either list.
-const MAX_DESCRIPTION_CHARS: usize = 110;
+/// The most Global Memory entries the left-out note names; a name is about 60 characters, so the note stays small.
+const MAX_LEFT_OUT_LISTED: usize = 100;
 
 /// What the model gets to read: everything that fit, and a note about the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fitted {
+    /// Sent in full: the Global Memory that fit, then the Personal files marked always.
     pub kept: Vec<Entry>,
+    /// Personal files listed in the index, not sent in full.
+    pub indexed: Vec<Entry>,
+    /// Names of files marked always that went over the limit and are in the index with the reason.
+    pub over_limit: Vec<String>,
+    /// How many Personal files went in full because they are marked always.
+    pub always: usize,
+    /// Global Memory entries left out whole because the delivery is full, named in the tail.
     pub skipped: Vec<Entry>,
     /// The kept files that went in cut at the cap, with what they were before it.
-    pub capped: Vec<Capped>,
     /// The not-sent list and the hygiene note, joined; `None` when there is nothing to say.
     pub tail: Option<String>,
-}
-
-/// A kept file the cap cut: its size before.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Capped {
-    pub name: String,
-    pub source_chars: usize,
-    pub source_bytes: usize,
 }
 
 /// The value of `key` in the frontmatter block at the top of `text` (`---` … `---`), at any indent so a
@@ -68,56 +71,23 @@ pub fn frontmatter_value(text: &str, key: &str) -> Option<String> {
     None
 }
 
-/// `entry` cut to [`FILE_CAP_CHARS`], at a line end when one falls in the last fifth, with the line saying how
-/// much was left out. A Global Memory entry is never cut: it is the startup file's text, byte for byte.
-pub fn cap_entry(mut entry: Entry) -> Entry {
-    if entry.tier != Tier::Personal {
-        return entry;
-    }
-    let total = entry.text.chars().count();
-    if total <= FILE_CAP_CHARS {
-        return entry;
-    }
-    let cut_at = entry.text.char_indices().nth(FILE_CAP_CHARS).map_or(entry.text.len(), |(i, _)| i);
-    let head = &entry.text[..cut_at];
-    let end = head.rfind('\n').filter(|&i| head[..i].chars().count() >= FILE_CAP_CHARS * 4 / 5).unwrap_or(head.len());
-    let left = total - entry.text[..end].chars().count();
-    let at = entry.path.as_deref().map(|p| format!(": {p}")).unwrap_or_default();
-    let note = format!("\n[cut: {} KB more, read the file{at}]", left.div_ceil(1024));
-    entry.text.truncate(end);
-    entry.text.push_str(&note);
-    entry
-}
-
-/// One name per line with its description, at most [`MAX_LISTED`] of them.
-fn name_list<'a>(entries: impl Iterator<Item = &'a Entry>) -> String {
-    let all: Vec<&Entry> = entries.collect();
-    let mut out = String::new();
-    for e in all.iter().take(MAX_LISTED) {
-        out.push_str(&format!("- {}", e.name));
-        if let Some(d) = frontmatter_value(&e.text, "description") {
-            let d: String = d.chars().take(MAX_DESCRIPTION_CHARS).collect();
-            out.push_str(&format!(" — {d}"));
-        }
-        out.push('\n');
-    }
-    if all.len() > MAX_LISTED {
-        out.push_str(&format!("- … and {} more\n", all.len() - MAX_LISTED));
-    }
-    out
-}
-
-/// The note naming what was left out of the delivery.
+/// The note naming the Global Memory entries left out of the delivery, with how to read each.
 pub fn skipped_note(skipped: &[Entry]) -> Option<String> {
     if skipped.is_empty() {
         return None;
     }
-    let noun = if skipped.len() == 1 { "file was" } else { "files were" };
-    Some(format!(
-        "[AgentMux] {} Personal Memory {noun} not sent here (the delivery is full). Read what is relevant from your memory folder:\n{}",
-        skipped.len(),
-        name_list(skipped.iter())
-    ))
+    let noun = if skipped.len() == 1 { "entry was" } else { "entries were" };
+    let mut out = format!(
+        "[AgentMux] {} Global Memory {noun} left out here (the delivery is full). Read each with the Memory tool (action read, scope global, id <id>):\n",
+        skipped.len()
+    );
+    for e in skipped.iter().take(MAX_LEFT_OUT_LISTED) {
+        out.push_str(&format!("- {} ({})\n", e.name, e.bundle_id.as_deref().unwrap_or("no id")));
+    }
+    if skipped.len() > MAX_LEFT_OUT_LISTED {
+        out.push_str(&format!("- … and {} more: list them with the Memory tool (action list, scope global)\n", skipped.len() - MAX_LEFT_OUT_LISTED));
+    }
+    Some(out)
 }
 
 /// What a Personal Memory file looks like to the hygiene check.
@@ -148,7 +118,7 @@ pub fn hygiene_note(files: &[Seen]) -> Option<String> {
     )];
     let list = |v: &[&Seen], how: &dyn Fn(&Seen) -> String| v.iter().take(MAX_LISTED).map(|f| format!("{} ({})", f.name, how(f))).collect::<Vec<_>>().join(", ");
     if !big.is_empty() {
-        lines.push(format!("Over the {} KB per-file cap, so only the start is sent: {}.", FILE_CAP_CHARS / 1000, list(&big, &|f| format!("{} KB", f.chars.div_ceil(1024)))));
+        lines.push(format!("Over {} KB each, so their index line is all you see until you read them; worth splitting: {}.", FILE_CAP_CHARS / 1000, list(&big, &|f| format!("{} KB", f.chars.div_ceil(1024)))));
     }
     if !stale.is_empty() {
         lines.push(format!("Project files not touched for {STALE_DAYS}+ days: {}.", list(&stale, &|f| format!("{} days", f.age_days.unwrap_or(0)))));
@@ -158,39 +128,57 @@ pub fn hygiene_note(files: &[Seen]) -> Option<String> {
 }
 
 /// Caps the Personal files and keeps, in the order given (the caller put the newest first), as many as fit in
-/// one delivery after `reserve_chars` (the running summary and anything else that rides along). Global
-/// Memory always stays whole. The tail is the not-sent list, and the hygiene note when `hygiene` is set.
-pub fn fit(entries: Vec<Entry>, reserve_chars: usize, hygiene: bool, age_days: &dyn Fn(&Entry) -> Option<i64>) -> Fitted {
+/// one delivery after `reserve_chars` (the running summary and anything else that rides along). Global Memory
+/// goes in whole entries only; Personal Memory goes in the index, and the few files marked `deliver: always`
+/// in full within their limit. The tail is the left-out note, and the hygiene note when `hygiene` is set.
+pub fn fit(entries: Vec<Entry>, capacity_chars: usize, reserve_chars: usize, hygiene: bool, age_days: &dyn Fn(&Entry) -> Option<i64>) -> Fitted {
     let seen: Vec<Seen> = entries
         .iter()
         .filter(|e| e.tier == Tier::Personal)
         .map(|e| Seen { name: e.name.clone(), chars: e.text.chars().count(), kind: frontmatter_value(&e.text, "type"), age_days: age_days(e) })
         .collect();
-    // Each file is judged at its capped size, but a file left out is handed back as it was, so the card shows its real size.
-    let capped: Vec<(Entry, Entry)> = entries.into_iter().map(|e| (cap_entry(e.clone()), e)).collect();
-    // Leave room for the two notes before counting: each skipped name costs a line.
-    let notes_room = 1_200 + MAX_LISTED * (MAX_DESCRIPTION_CHARS + 40);
-    let budget = (HOOK_PARTS * MAX_PART_CHARS).saturating_sub(OVERHEAD_CHARS + reserve_chars + notes_room);
-    let mut used = 0usize;
-    let (mut kept, mut skipped, mut cut) = (Vec::new(), Vec::new(), Vec::new());
-    for (e, original) in capped {
+    let (global, personal): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| e.tier == Tier::Global);
+
+    // Marked files, oldest marking first, until a limit is reached; the rest of them go in the index with the reason.
+    let mut marked: Vec<&Entry> = personal.iter().filter(|e| index::is_always(&e.text)).collect();
+    marked.sort_by_key(|e| std::cmp::Reverse(age_days(e).unwrap_or(0)));
+    let (mut always, mut over_limit, mut always_chars) = (Vec::<Entry>::new(), Vec::<String>::new(), 0usize);
+    for e in marked {
         let n = e.text.chars().count() + 5;
-        if e.tier == Tier::Global || used + n <= budget {
-            used += n;
-            if e.text != original.text {
-                cut.push(Capped { name: e.name.clone(), source_chars: original.text.chars().count(), source_bytes: original.text.len() });
-            }
-            kept.push(e);
+        if always.len() < ALWAYS_MAX_FILES && always_chars + n <= ALWAYS_MAX_CHARS {
+            always_chars += n;
+            always.push(e.clone());
         } else {
-            skipped.push(original);
+            over_limit.push(e.name.clone());
         }
     }
+    let indexed: Vec<Entry> = personal.into_iter().filter(|e| !always.iter().any(|o| o.name == e.name)).collect();
+    let index_chars = index::render(&IndexPlan { files: &indexed, over_limit: &over_limit, always: always.len(), tool_only: false })
+        .map_or(0, |t| t.chars().count());
+
+    // Leave room for the notes before counting.
+    let notes_room = 1_200 + MAX_LEFT_OUT_LISTED * 80;
+    let budget = capacity_chars.saturating_sub(OVERHEAD_CHARS + reserve_chars + notes_room + index_chars + always_chars);
+    let mut used = 0usize;
+    let (mut kept, mut skipped) = (Vec::new(), Vec::new());
+    for e in global {
+        let n = e.text.chars().count() + 5;
+        if used + n <= budget {
+            used += n;
+            kept.push(e);
+        } else {
+            skipped.push(e);
+        }
+    }
+    let always_count = always.len();
+    kept.extend(always);
+
     let mut tail: Vec<String> = Vec::new();
     tail.extend(skipped_note(&skipped));
     if hygiene {
         tail.extend(hygiene_note(&seen));
     }
-    Fitted { kept, skipped, capped: cut, tail: (!tail.is_empty()).then(|| tail.join("\n")) }
+    Fitted { kept, indexed, over_limit, always: always_count, skipped, tail: (!tail.is_empty()).then(|| tail.join("\n")) }
 }
 
 #[cfg(test)]

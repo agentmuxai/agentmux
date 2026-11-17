@@ -71,8 +71,16 @@ export function contextDeliveryTitle(node: ContextDeliveryNode): string {
     if (isTextCard(node)) return node.items[0].name;
     const n = node.items.length;
     const count = `${n} ${n === 1 ? "item" : "items"}`;
-    const cut = node.items.filter((i) => i.delivered === "partial" || i.delivered === "omitted").length;
-    const tail = cut > 0 ? `${count} · ${cut} cut` : count;
+    const indexed = node.items.filter((i) => i.delivered === "indexed").length;
+    const leftOut = node.items.filter((i) => i.delivered === "omitted").length;
+    const cut = node.items.filter((i) => i.delivered === "partial").length;
+    // A delivery with an index says how many items went in full and how many are listed; what was cut or left out
+    // is counted on its own, never as "not sent".
+    const parts = [count];
+    if (indexed > 0) parts.push(`${n - indexed - leftOut - cut} in full`, `${indexed} in index`);
+    if (leftOut > 0) parts.push(`${leftOut} left out`);
+    if (cut > 0) parts.push(`${cut} cut`);
+    const tail = parts.join(" · ");
     // "Re-delivered" only after a compaction: a new session or /clear is a
     // first delivery, not a repeat.
     if (node.reason === "compaction" && node.items.every((i) => MEMORY_KINDS.has(i.kind))) {
@@ -233,5 +241,30 @@ export class CompactionSummaryTracker {
                 },
             ],
         };
+    }
+}
+
+
+/** The mark on a memory row that is not in full: what to call it and what it means, in plain words. */
+export function rowBadge(item: { delivered?: string; reason?: string }): { label: string; title: string; tone: "index" | "cut" } | null {
+    switch (item.delivered) {
+        case "indexed":
+            return {
+                label: "in index",
+                title: item.reason
+                    ? `Listed in the index, not in full: ${item.reason}`
+                    : "Listed by name and description. The agent reads the file when it is relevant.",
+                tone: "index",
+            };
+        case "omitted":
+            return { label: "left out", title: `Not given: ${item.reason ?? "the delivery was full"}`, tone: "cut" };
+        case "partial":
+            return {
+                label: "cut",
+                title: "Cut: only part of this fit in the delivery. The delivery says how much is left and where to read it.",
+                tone: "cut",
+            };
+        default:
+            return null;
     }
 }
