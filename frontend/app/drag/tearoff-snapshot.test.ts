@@ -459,6 +459,28 @@ describe("paneDragCandidate", () => {
         const root = build(`<div data-blockid="b1"><div id="t">content</div></div>`);
         expect(paneDragCandidate(root.querySelector("#t"))).toBeNull();
     });
+
+    it("a press on a header button (close, minimise) is not a pane drag, so it takes no picture", () => {
+        const root = build(
+            `<div data-blockid="b1"><div draggable="true"><button id="x" aria-label="Close"><svg id="icon"></svg></button><span id="t">title</span></div></div>`
+        );
+        expect(paneDragCandidate(root.querySelector("#x"))).toBeNull();
+        expect(paneDragCandidate(root.querySelector("#icon"))).toBeNull();
+        expect(paneDragCandidate(root.querySelector("#t"))).toBe("b1");
+    });
+
+    it("a press on a pane tab's own close button is not a drag, one on the pill is", () => {
+        const root = build(
+            `<div data-blockid="b1"><div class="pane-tab" data-tab-id="a" draggable="true"><span id="label">a</span><button id="x" class="pane-tab-close"></button></div></div>`
+        );
+        expect(paneDragCandidate(root.querySelector("#x"))).toBeNull();
+        expect(paneDragCandidate(root.querySelector("#label"))).toBe("b1");
+    });
+
+    it("a press on the pane grip, a role=button that is a drag handle first, still is a pane drag", () => {
+        const root = build(`<div data-blockid="b1"><div draggable="true"><div id="g" class="pane-grip" role="button"></div></div></div>`);
+        expect(paneDragCandidate(root.querySelector("#g"))).toBe("b1");
+    });
 });
 
 describe("which of a pane's tabs its picture shows", () => {
