@@ -76,13 +76,14 @@ impl SubprocessController {
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
         if !self.take_run_lock_for_turn() {
             // Turn in progress — queue the message for after it exits.
-            let mut inner = self.inner.lock().unwrap();
-            tracing::info!(
-                block_id = %self.block_id,
-                queue_depth = inner.pending_messages.len() + 1,
-                "subprocess busy — message queued"
-            );
-            inner.pending_messages.push_back(config);
+            let ahead = {
+                let mut inner = self.inner.lock().unwrap();
+                let ahead = inner.pending_messages.len();
+                tracing::info!(block_id = %self.block_id, queue_depth = ahead + 1, "subprocess busy — message queued");
+                inner.pending_messages.push_back(config.clone());
+                ahead
+            };
+            self.emit_message_queued(&config, ahead);
             return Ok(());
         }
 

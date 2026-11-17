@@ -164,6 +164,22 @@ describe("agent-pane-state reducer", () => {
             expect(r2.events).toEqual([]);
         });
 
+        it("PendingMessageWaiting records how many messages are ahead of the one srv queued behind the live process", () => {
+            const s0 = update(mk(), { type: "PendingMessageQueued", enqueuedWhileBusy: true, id: "m1", text: "hi", at: 150 }).state;
+            const r = update(s0, { type: "PendingMessageWaiting", id: "m1", ahead: 2 });
+            expect(r.state.pending[0].waiting).toEqual({ ahead: 2 });
+            expect(r.events[0]).toMatchObject({ type: "pending-waiting", id: "m1", ahead: 2 });
+        });
+
+        it("PendingMessageWaiting for an unknown id, or the same count again, is a same-ref no-op", () => {
+            const s0 = update(mk(), { type: "PendingMessageQueued", enqueuedWhileBusy: true, id: "m1", text: "hi", at: 150 }).state;
+            expect(update(s0, { type: "PendingMessageWaiting", id: "ghost", ahead: 1 }).state).toBe(s0);
+            const s1 = update(s0, { type: "PendingMessageWaiting", id: "m1", ahead: 1 }).state;
+            const again = update(s1, { type: "PendingMessageWaiting", id: "m1", ahead: 1 });
+            expect(again.state).toBe(s1);
+            expect(again.events).toEqual([]);
+        });
+
         it("TurnEnd does NOT mark pending entries flushing — that's PendingMessageFlushStarted's job now", () => {
             const s0 = update(streaming(100), {
                 type: "PendingMessageQueued",

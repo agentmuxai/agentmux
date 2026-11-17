@@ -51,6 +51,9 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     const stillQueuedCount = createMemo(
         () => queuedMessages().filter((m) => !m.flushing).length,
     );
+    // srv has the message but holds it behind the agent's live process (`agent-message-queued`): "reaching the
+    // agent any moment" is not true then. The first such message is the one that goes next.
+    const waiting = createMemo(() => queuedMessages().find((m) => m.flushing && m.waiting)?.waiting);
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
@@ -60,11 +63,25 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                         <Show
                             when={stillQueuedCount() > 0}
                             fallback={
-                                <>
-                                    Sending — reaching the agent any moment (
-                                    {queuedMessages().length}
-                                    {queuedMessages().length === 1 ? " message" : " messages"})
-                                </>
+                                <Show
+                                    when={waiting()}
+                                    fallback={
+                                        <>
+                                            Sending — reaching the agent any moment (
+                                            {queuedMessages().length}
+                                            {queuedMessages().length === 1 ? " message" : " messages"})
+                                        </>
+                                    }
+                                >
+                                    {(held) => (
+                                        <>
+                                            Waiting — the agent's command is still running
+                                            {held().ahead > 0 ? `, ${held().ahead} ahead` : ""} (
+                                            {queuedMessages().length}
+                                            {queuedMessages().length === 1 ? " message" : " messages"})
+                                        </>
+                                    )}
+                                </Show>
                             }
                         >
                             Queued — sends at the agent's next step; ↑ to edit, Esc to send now (

@@ -59,6 +59,7 @@ import type { LspMessageEvent } from "@/types/rpc/LspMessageEvent";
 import type { MergeFlowEvent } from "@/types/rpc/MergeFlowEvent";
 import type { MessageAcceptedEvent } from "@/types/rpc/MessageAcceptedEvent";
 import type { MessageFlowEvent } from "@/types/rpc/MessageFlowEvent";
+import type { MessageQueuedEvent } from "@/types/rpc/MessageQueuedEvent";
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 import type { MuxObjBatch } from "@/types/rpc/MuxObjBatch";
 import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
@@ -116,6 +117,7 @@ export type MuxEventPayloads = {
   accountavailability: AccountAvailabilityEvent;
   "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
+  "agent-message-queued": MessageQueuedEvent;
   "agent-resume-retry": ResumeRetryEvent;
   "agent:endpoint-notice": EndpointNoticeEvent;
   "agent:grants": GrantsEvent;
@@ -253,6 +255,7 @@ export const TYPED_MUX_EVENTS = [
   "accountavailability",
   "agent-api-retry",
   "agent-message-accepted",
+  "agent-message-queued",
   "agent-resume-retry",
   "agent:endpoint-notice",
   "agent:grants",

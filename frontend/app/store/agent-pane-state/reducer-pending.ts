@@ -32,6 +32,19 @@ export function onPendingMessageFlushStarted(state: AgentPaneState, command: Ext
     };
 }
 
+/** `PendingMessageWaiting`: srv queued the message behind the agent's live process. No-op for an unknown id. */
+export function onPendingMessageWaiting(state: AgentPaneState, command: Extract<AgentPaneCommand, { type: "PendingMessageWaiting" }>): ReducerResult {
+    const entry = state.pending.find((m) => m.id === command.id);
+    if (!entry || entry.waiting?.ahead === command.ahead) return { state, events: [] };
+    return {
+        state: {
+            ...state,
+            pending: state.pending.map((m) => (m.id === command.id ? { ...m, waiting: { ahead: command.ahead } } : m)),
+        },
+        events: [{ type: "pending-waiting", id: command.id, ahead: command.ahead }],
+    };
+}
+
 /** `PendingMessageQueued`. */
 export function onPendingMessageQueued(state: AgentPaneState, command: Extract<AgentPaneCommand, { type: "PendingMessageQueued" }>): ReducerResult {
     return {

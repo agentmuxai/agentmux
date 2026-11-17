@@ -39,7 +39,7 @@ import { onReconcileContextFromHistory, onContextWindowsReported, onContextRepor
 import { onTurnStart, onTurnEnd, onStreamSessionStarted, onTurnReset, onTurnObserved, onTurnStartFailed } from "./reducer-turn";
 import { onToolStart, onToolEnd, onTokensIn, onModelEndedTurn, onTokensOut, onToolProgress, onToolOutput, onThinkingHeadline, onOutputStreamed } from "./reducer-tools";
 import { onRequestStarted, onRequestStop, onStopFailed, onInterruptTimeoutElapsed, onSubmitTimeoutElapsed } from "./reducer-stop";
-import { onPendingMessageFlushStarted, onPendingMessageQueued, onPendingMessageAccepted, onPendingMessageRejected, onPendingMessageExpired, onProviderWaiting } from "./reducer-pending";
+import { onPendingMessageFlushStarted, onPendingMessageWaiting, onPendingMessageQueued, onPendingMessageAccepted, onPendingMessageRejected, onPendingMessageExpired, onProviderWaiting } from "./reducer-pending";
 import { onFailureObserved, onFailureCleared, onCompactionStarted, onCompactionBoundary } from "./reducer-failure";
 import { onDetailsToggle, onDetailsExpand, onDetailsCollapse, onAttachedTaskObserved, onAttachedTaskCleared, onRegistryAttachedTaskObserved, onRegistryAttachedTaskCleared, onResumeRetryStarted, onResumeRetryResolved } from "./reducer-axes";
 
@@ -84,6 +84,7 @@ const HANDLERS: Handlers = {
     InterruptTimeoutElapsed: onInterruptTimeoutElapsed,
     SubmitTimeoutElapsed: onSubmitTimeoutElapsed,
     PendingMessageFlushStarted: onPendingMessageFlushStarted,
+    PendingMessageWaiting: onPendingMessageWaiting,
     PendingMessageQueued: onPendingMessageQueued,
     PendingMessageAccepted: onPendingMessageAccepted,
     PendingMessageRejected: onPendingMessageRejected,
