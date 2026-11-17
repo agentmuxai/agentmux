@@ -204,6 +204,13 @@ describe("the Vault pane", () => {
             // Asked for again later (from the Audit, a pin): it scrolls again.
             setBlockMeta((m) => ({ ...m, "vault:section": "cards" }));
             await waitFor(() => expect(scrolled).toEqual(["activity", "cards"]));
+            // The default section is a request like any other: opened again after the person folded it.
+            fireEvent.click(toggleOf("Personal data"));
+            expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("false");
+            setBlockMeta((m) => ({ ...m, "vault:section": "personal" }));
+            await waitFor(() => expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("true"));
+            await waitFor(() => expect(scrolled).toEqual(["activity", "cards", "personal"]));
+            expect(blockMeta()["vault:section"]).toBeNull();
         } finally {
             Element.prototype.scrollIntoView = scrollIntoView;
         }

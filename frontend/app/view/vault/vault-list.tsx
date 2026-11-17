@@ -15,7 +15,7 @@ import { VaultActivityLog } from "./vault-activity";
 import { isNarrowing, narrowedEntries, VaultEntries } from "./vault-entries";
 import { expiryOf } from "./vault-format";
 import { VaultKept } from "./vault-kept";
-import { VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
+import type { VaultPaneSection } from "./vault-kinds";
 import type { VaultViewModel } from "./vault-model";
 import { vaultEntries, vaultLoading } from "./vault-store";
 
@@ -27,22 +27,13 @@ function createSectionFolds(model: VaultViewModel, scroller: () => HTMLElement |
     const [folded, setFolded] = createSignal<VaultPaneSection[]>(["kept", "activity"]);
     const isOpen = (id: VaultPaneSection) => !folded().includes(id);
     const toggle = (id: VaultPaneSection) => setFolded((was) => (was.includes(id) ? was.filter((s) => s !== id) : [...was, id]));
-    // Clearing the request (so the same section can be asked for again) changes the section too: that one is not a request.
-    let cleared = false;
+    // The request is taken off the pane once shown, so the same section can be asked for again (the default one too).
     createEffect(
-        on(model.sectionAtom, (id, before) => {
-            if (cleared) {
-                cleared = false;
-                return;
-            }
-            // Opened with no section named: the list starts at its top.
-            if (before === undefined && id === VAULT_SECTIONS.default) return;
+        on(model.sectionAsked, (id) => {
+            if (id === undefined) return;
             setFolded((was) => was.filter((s) => s !== id));
             queueMicrotask(() => scroller()?.querySelector<HTMLElement>(`[data-section="${id}"]`)?.scrollIntoView?.({ block: "start" }));
-            if (id !== VAULT_SECTIONS.default) {
-                cleared = true;
-                model.setMeta({ "vault:section": null });
-            }
+            model.setMeta({ "vault:section": null });
         })
     );
     return { isOpen, toggle };

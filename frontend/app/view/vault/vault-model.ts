@@ -5,7 +5,7 @@ import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { readZoom } from "@/app/store/zoom-factor";
-import { sectionOf } from "@/app/store/pane-sections";
+import { hasSection } from "@/app/store/pane-sections";
 import { VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
 
 /**
@@ -20,8 +20,9 @@ export class VaultViewModel {
     blockId: string;
     setMeta: (patch: Record<string, unknown>) => void;
     zoomAtom: Accessor<number>;
-    /** The section the pane was asked to open and scroll to (vault-list.tsx), from the meta. */
-    sectionAtom: Accessor<VaultPaneSection>;
+    /** The section the pane was asked to open and scroll to (vault-list.tsx): the meta's own value, not the pane's default
+     *  when it names none, so asking for the default section is a request like any other. */
+    sectionAsked: Accessor<VaultPaneSection | undefined>;
     /** The Vault the lists are narrowed to (its id), meta-backed; empty for all of them. */
     vaultAtom: Accessor<string>;
     /** An agent's request to fill in, set when the request's prompt opens the Vault. */
@@ -46,7 +47,10 @@ export class VaultViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<VaultPaneSection>(() => sectionOf(VAULT_SECTIONS, "vault", meta()));
+        this.sectionAsked = createMemo<VaultPaneSection | undefined>(() => {
+            const s = meta()?.["vault:section"];
+            return hasSection(VAULT_SECTIONS, s) ? s : undefined;
+        });
         this.vaultAtom = createMemo<string>(() => {
             const v = meta()?.["vault:vault"];
             return typeof v === "string" ? v : "";
