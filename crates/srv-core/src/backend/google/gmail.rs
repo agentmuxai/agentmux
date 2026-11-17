@@ -477,6 +477,11 @@ pub fn shape_thread(body: &Value, raw: bool) -> Value {
     let shown: Vec<Value> = all.iter().take(MESSAGES).map(|m| shape_message(m, &mut budget, raw.then_some(&mut raw_budget))).collect();
     out.insert("id".into(), json!(s(body, "/id")));
     out.insert("messages".into(), json!(shown));
+    // A draft sitting in the thread (saved, not sent) is said first, so a summary of the thread can't skip it.
+    let drafts = all.iter().filter(|m| label_ids(m).contains(&"DRAFT")).count();
+    if drafts > 0 {
+        out.insert("unsent_drafts".into(), json!(drafts));
+    }
     if all.len() > MESSAGES {
         out.insert("messages_not_shown".into(), json!(all.len() - MESSAGES));
     }

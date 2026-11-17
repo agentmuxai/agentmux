@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::gmail::{attachments, body_text, get, header, html_alternative, id_arg, line, s, tidy, url_of, GmailArgs};
+use super::gmail_thread::ThreadNote;
 use super::{clip, GoogleRequest};
 
 /// The write actions, in the order the tool lists them.
@@ -312,6 +313,9 @@ pub struct DraftView {
     pub html: String,
     /// The files attached, as `name (size)`.
     pub attachments: Vec<String>,
+    /// The thread the draft replies into, empty for a mail that starts a new one. Not in the digest:
+    /// the window only says who is in it (see [`super::gmail_thread`]).
+    pub thread_id: String,
     /// The stored message's id (Gmail makes a new one whenever a draft is saved) and a hash of its
     /// whole payload without the attachment ids, which are not stable between reads.
     version: String,
@@ -347,7 +351,7 @@ impl DraftView {
         let mut hash = Sha256::new();
         hash.update(without_attachment_ids(p).to_string().as_bytes());
         let version = format!("{}:{}", s(msg, "/id"), hash.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>());
-        DraftView { id: s(draft, "/id").to_string(), to: h("To"), cc: h("Cc"), bcc: h("Bcc"), subject: h("Subject"), body, html, attachments, version }
+        DraftView { id: s(draft, "/id").to_string(), to: h("To"), cc: h("Cc"), bcc: h("Bcc"), subject: h("Subject"), body, html, attachments, thread_id: s(msg, "/threadId").to_string(), version }
     }
 
     /// A fingerprint of everything that would be sent, not only of what the person is shown, so a
@@ -369,6 +373,12 @@ impl DraftView {
 
 /// The title and text of the window that asks the person to send `view`.
 pub fn send_question(agent: &str, account: &str, view: &DraftView) -> (String, String) {
+    send_question_in(agent, account, view, &ThreadNote::default())
+}
+
+/// [`send_question`] for a draft that replies into a thread: the warning first, the thread after
+/// the recipients.
+pub fn send_question_in(agent: &str, account: &str, view: &DraftView, note: &ThreadNote) -> (String, String) {
     // With an HTML version that reads differently, both are shown, half the room each.
     let room = if view.html.is_empty() { SHOWN_BODY_CHARS } else { SHOWN_BODY_CHARS / 2 };
     let field = |name: &str, v: &str| if v.is_empty() { String::new() } else { format!("{name}: {v}\n") };
@@ -378,8 +388,10 @@ pub fn send_question(agent: &str, account: &str, view: &DraftView) -> (String, S
     } else {
         format!("\n\nThis mail also has an HTML version, which most people's mail programs show instead of the text above. It reads:\n\n{}", clip(&view.html, room))
     };
+    let warning = note.warning.as_ref().map(|w| format!("{w}\n\n")).unwrap_or_default();
+    let thread = note.line.as_ref().map(|l| format!("{l}\n")).unwrap_or_default();
     let message = format!(
-        "{agent} wants to send this email from {account}. It can't be taken back once it is sent.\n\n{}{}{}{files}Subject: {}\n\n{}{html}",
+        "{warning}{agent} wants to send this email from {account}. It can't be taken back once it is sent.\n\n{}{}{}{thread}{files}Subject: {}\n\n{}{html}",
         field("To", &view.to),
         field("Cc", &view.cc),
         field("Bcc", &view.bcc),

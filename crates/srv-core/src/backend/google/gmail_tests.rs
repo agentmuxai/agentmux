@@ -133,6 +133,15 @@ fn a_long_message_and_a_long_thread_are_cut() {
 }
 
 #[test]
+fn a_thread_with_a_draft_in_it_says_how_many_are_unsent() {
+    let mail = |id: &str, labels: &[&str]| json!({ "id": id, "labelIds": labels, "payload": { "mimeType": "text/plain", "body": { "data": b64("hi") } } });
+    let out = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"]), mail("b", &["DRAFT"]), mail("c", &["DRAFT", "SENT"])] }));
+    assert_eq!(out["unsent_drafts"], 2);
+    let none = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"])] }));
+    assert!(none.get("unsent_drafts").is_none());
+}
+
+#[test]
 fn a_body_one_character_over_the_room_says_it_was_cut() {
     let one = |n: usize| {
         let thread = json!({ "id": "t", "messages": [{ "id": "m", "payload": { "mimeType": "text/plain", "body": { "data": b64(&"x".repeat(n)) } } }] });
