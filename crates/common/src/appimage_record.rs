@@ -82,17 +82,33 @@ fn is_this_file(record: &Record, path: &str, now: &FileId) -> bool {
     record.path == path || (has_object && old.dev == now.dev && old.ino == now.ino) || !Path::new(&record.path).is_file()
 }
 
-fn load(record: &Path) -> Vec<Record> {
-    let Ok(text) = std::fs::read_to_string(record) else { return Vec::new() };
-    serde_json::from_str(&text).unwrap_or_default()
+/// The record's layout version. A build reads and rewrites only a record of this version or none: a newer
+/// build's file is left alone (it is neither read nor overwritten), as every file in `shared` is.
+const VERSION: u32 = 1;
+
+#[derive(Serialize, Deserialize)]
+struct Stored {
+    version: u32,
+    records: Vec<Record>,
 }
 
-fn save(record: &Path, records: &[Record]) -> std::io::Result<()> {
+/// What the record file holds, and whether this build may rewrite it (it may not when a newer build wrote it).
+fn load(record: &Path) -> (Vec<Record>, bool) {
+    let Ok(text) = std::fs::read_to_string(record) else { return (Vec::new(), true) };
+    match serde_json::from_str::<Stored>(&text) {
+        Ok(stored) if stored.version > VERSION => (Vec::new(), false),
+        Ok(stored) => (stored.records, true),
+        // Not ours, or damaged: nothing to keep, and a new one replaces it.
+        Err(_) => (Vec::new(), true),
+    }
+}
+
+fn save(record: &Path, records: Vec<Record>) -> std::io::Result<()> {
     if let Some(dir) = record.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = record.with_extension(format!("tmp{}", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec_pretty(records).map_err(std::io::Error::other)?)?;
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&Stored { version: VERSION, records }).map_err(std::io::Error::other)?)?;
     std::fs::rename(&tmp, record).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
@@ -110,6 +126,7 @@ pub fn lookup(record: &Path, appimage: &Path) -> Option<Found> {
     let now = file_id(appimage)?;
     let path = appimage.to_string_lossy();
     load(record)
+        .0
         .into_iter()
         .rev()
         .filter(|r| plain_channel(&r.channel))
@@ -124,7 +141,10 @@ pub fn remember(record: &Path, appimage: &Path, channel: &str) -> std::io::Resul
     }
     let Some(id) = file_id(appimage) else { return Ok(()) };
     let path = appimage.to_string_lossy().into_owned();
-    let mut records = load(record);
+    let (mut records, writable) = load(record);
+    if !writable {
+        return Ok(());
+    }
     // This path, and this file wherever it was, are replaced by this one.
     records.retain(|r| r.path != path && !is_this_file(r, &path, &id));
     records.push(Record { path, channel: channel.to_string(), id });
@@ -132,7 +152,7 @@ pub fn remember(record: &Path, appimage: &Path, channel: &str) -> std::io::Resul
         let extra = records.len() - MAX_RECORDS;
         records.drain(..extra);
     }
-    save(record, &records)
+    save(record, records)
 }
 
 /// What a start found out about the AppImage it runs from.

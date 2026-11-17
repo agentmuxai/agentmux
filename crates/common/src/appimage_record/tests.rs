@@ -119,7 +119,7 @@ fn the_record_beside_the_file_wins_and_is_what_is_remembered() {
     let r = reconcile(&record, &file);
     assert_eq!(r.channel.as_deref(), Some("second"));
     assert_eq!(lookup(&record, &file).map(|f| f.channel).as_deref(), Some("second"));
-    assert_eq!(load(&record).len(), 1, "one record per file");
+    assert_eq!(load(&record).0.len(), 1, "one record per file");
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn a_record_that_is_not_a_channel_name_or_cannot_be_read_is_ignored() {
     let too_long = "c".repeat(65);
     for bad in ["../evil", "a b", "", "x/y", too_long.as_str()] {
         let records = vec![Record { path: text(&dir.path().join("gone.AppImage")), channel: bad.into(), id: id.clone() }];
-        std::fs::write(&record, serde_json::to_vec(&records).unwrap()).unwrap();
+        std::fs::write(&record, serde_json::to_vec(&Stored { version: VERSION, records }).unwrap()).unwrap();
         assert_eq!(lookup(&record, &file), None, "{bad:?}");
     }
     // Not even JSON: nothing is found, and a start can still record over it.
@@ -155,7 +155,33 @@ fn only_the_most_recent_files_are_remembered() {
         remember(&record, &file, "chan").unwrap();
         files.push(file);
     }
-    assert_eq!(load(&record).len(), MAX_RECORDS);
+    assert_eq!(load(&record).0.len(), MAX_RECORDS);
     assert_eq!(lookup(&record, &files[0]), None, "the oldest was dropped");
     assert!(lookup(&record, files.last().unwrap()).is_some());
+}
+
+#[test]
+fn a_record_written_by_a_newer_build_is_neither_read_nor_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join(RECORD_FILE);
+    let file = appimage(dir.path(), "AgentMux.AppImage", 100, 1_000);
+    let id = file_id(&file).unwrap();
+    let theirs = Stored { version: VERSION + 1, records: vec![Record { path: text(&file), channel: "newer".into(), id }] };
+    let bytes = serde_json::to_vec(&theirs).unwrap();
+    std::fs::write(&record, &bytes).unwrap();
+    assert_eq!(lookup(&record, &file), None);
+    remember(&record, &file, "mine").unwrap();
+    sidecar(&file, "mine");
+    assert_eq!(reconcile(&record, &file).channel.as_deref(), Some("mine"));
+    assert_eq!(std::fs::read(&record).unwrap(), bytes, "left as the newer build wrote it");
+}
+
+#[test]
+fn the_record_carries_its_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join(RECORD_FILE);
+    let file = appimage(dir.path(), "AgentMux.AppImage", 100, 1_000);
+    remember(&record, &file, "chan").unwrap();
+    let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    assert_eq!(stored["version"], VERSION);
 }
