@@ -43,12 +43,15 @@ export function timedOut(annotations) {
 }
 
 /**
- * "stalled" when something did not pass and every such job was cancelled or timed out,
- * "real" when any job failed (alone or mixed with a stalled one), "none" when nothing did not pass.
+ * "stalled" when something did not pass and every such job was cancelled or timed out with no step failed,
+ * "real" when any job or step failed (alone or mixed with a stalled one), "none" when nothing did not pass.
  */
 export function kindOf(jobs) {
     const finished = jobs.filter((j) => j.status === "completed" && !OWN_JOBS.has(j.name));
-    if (finished.some((j) => FAILED.has(j.conclusion))) return "real";
+    // A job cancelled or timed out after one of its steps failed is a failure too: the job's own conclusion keeps
+    // only the cancel, e.g. the frontend build cancelled after vitest failed.
+    const failedStep = (j) => (j.steps ?? []).some((x) => x.conclusion === "failure");
+    if (finished.some((j) => FAILED.has(j.conclusion) || failedStep(j))) return "real";
     return finished.some((j) => STALLED.has(j.conclusion)) ? "stalled" : "none";
 }
 

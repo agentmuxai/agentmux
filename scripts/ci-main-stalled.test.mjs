@@ -30,6 +30,16 @@ describe("kindOf", () => {
         expect(kindOf([job("a", "cancelled"), job("b", "failure")])).toBe("real");
     });
 
+    it("is real when a job was cancelled after one of its steps failed", () => {
+        const steps = [{ name: "vitest", status: "completed", conclusion: "failure" }, { name: "build", status: "completed", conclusion: "cancelled" }];
+        expect(kindOf([job("frontend", "cancelled", { steps }), job("CI required", "failure")])).toBe("real");
+    });
+
+    it("is stalled when a cancelled job's steps only passed, were skipped or were cancelled", () => {
+        const steps = [{ name: "a", status: "completed", conclusion: "success" }, { name: "b", status: "completed", conclusion: "cancelled" }, { name: "c", status: "completed", conclusion: "skipped" }];
+        expect(kindOf([job("ubuntu", "cancelled", { steps })])).toBe("stalled");
+    });
+
     it("is real for a job that never started", () => {
         expect(kindOf([job("a", "startup_failure")])).toBe("real");
     });
