@@ -16,6 +16,7 @@ import { ProviderLoginPanel } from "@/app/view/accounts/ProviderLoginPanel";
 import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { AgentIdentityLinksState } from "./agent-identity-links-state";
 
 type Part = { t: AgentIdentityLinksState };
@@ -24,10 +25,9 @@ type Part = { t: AgentIdentityLinksState };
 export function NoAgent(): JSX.Element {
     return (
         <div class="identity-pane-empty">
-            <p>This pane isn't attached to a specific agent.</p>
+            <p>{t("agentLinks.noAgent")}</p>
             <p class="identity-pane-empty-hint">
-                Open the Identity tab from an agent's own pane to see the accounts
-                that agent launches with.
+                {t("agentLinks.noAgentHint")}
             </p>
         </div>
     );
@@ -35,7 +35,7 @@ export function NoAgent(): JSX.Element {
 
 /** One linked account: its provider, the account, its status, and Connect or Re-login for a Claude row. */
 function LinkRow(props: Part & { row: AgentIdentityRow }): JSX.Element {
-    const { t, row } = props;
+    const { t: links, row } = props;
     const badge = createMemo(() => statusBadge(row.account?.status));
     return (
         <tr>
@@ -54,7 +54,7 @@ function LinkRow(props: Part & { row: AgentIdentityRow }): JSX.Element {
                       // brand label instead of leaking that
                       // internal name (codex P2 on PR #2806).
                       (brandForProvider(row.provider) === "anthropic"
-                          ? "Anthropic"
+                          ? PROVIDER_LABELS.anthropic
                           : row.account.name)
                     : "—"}
             </td>
@@ -90,9 +90,9 @@ function LinkRow(props: Part & { row: AgentIdentityRow }): JSX.Element {
                         // stale-cache click, minting a brand-new Claude
                         // account instead of refreshing the one the link
                         // row already points at.
-                        onClick={() => t.openClaudeLogin(row.accountId, row.provider)}
+                        onClick={() => links.openClaudeLogin(row.accountId, row.provider)}
                     >
-                        {row.account ? "Re-login" : "Connect"}
+                        {row.account ? t("agentLinks.reLogin") : t("agentLinks.connect")}
                     </Button>
                 </Show>
             </td>
@@ -102,10 +102,10 @@ function LinkRow(props: Part & { row: AgentIdentityRow }): JSX.Element {
 
 /** The table of this agent's linked accounts, or the hint that there are none (once the links have loaded). */
 export function LinkedAccounts(props: Part): JSX.Element {
-    const t = props.t;
+    const links = props.t;
     return (
         <Show
-            when={t.rows().length > 0}
+            when={links.rows().length > 0}
             fallback={
                 // reagent P2 on PR #2414 (round 3): gated on
                 // linksLoaded() && !error() — without this,
@@ -113,9 +113,9 @@ export function LinkedAccounts(props: Part): JSX.Element {
                 // "still loading", "load failed" (the panel's error
                 // banner already covers that), and a
                 // genuinely empty agent.
-                <Show when={t.linksLoaded() && !t.error()}>
+                <Show when={links.linksLoaded() && !links.error()}>
                     <div class="identity-pane-empty-hint">
-                        <p>This agent has no linked accounts yet. Link one from its launch dialog.</p>
+                        <p>{t("agentLinks.none")}</p>
                     </div>
                 </Show>
             }
@@ -123,14 +123,14 @@ export function LinkedAccounts(props: Part): JSX.Element {
             <table class="identity-pane-bindings">
                 <thead>
                     <tr>
-                        <th>Provider</th>
-                        <th>Account</th>
-                        <th>Status</th>
+                        <th>{t("agentLinks.col.provider")}</th>
+                        <th>{t("agentLinks.col.account")}</th>
+                        <th>{t("agentLinks.col.status")}</th>
                         <th />
                     </tr>
                 </thead>
                 <tbody>
-                    <For each={t.rows()}>{(row) => <LinkRow t={t} row={row} />}</For>
+                    <For each={links.rows()}>{(row) => <LinkRow t={links} row={row} />}</For>
                 </tbody>
             </table>
         </Show>
@@ -139,7 +139,7 @@ export function LinkedAccounts(props: Part): JSX.Element {
 
 /** Connect Anthropic account, for a Claude agent with no Claude link of its own. */
 export function ConnectAnthropic(props: Part): JSX.Element {
-    const t = props.t;
+    const links = props.t;
     // reagent P1 on PR #2414 (round 6): standalone, NOT
     // nested inside LinkedAccounts' no-rows fallback — a
     // Claude-provider agent with other-provider links
@@ -155,19 +155,19 @@ export function ConnectAnthropic(props: Part): JSX.Element {
     return (
         <Show
             when={
-                t.linksLoaded() &&
-                !t.error() &&
-                !t.hasClaudeLink() &&
-                canonicalProviderId(t.effectiveAgentProviderId()) === "claude"
+                links.linksLoaded() &&
+                !links.error() &&
+                !links.hasClaudeLink() &&
+                canonicalProviderId(links.effectiveAgentProviderId()) === "claude"
             }
         >
             <div class="identity-pane-empty-hint">
                 <Button
                     tone="accent"
                     class="identity-btn identity-btn-primary"
-                    onClick={() => t.openClaudeLogin(undefined)}
+                    onClick={() => links.openClaudeLogin(undefined)}
                 >
-                    Connect Anthropic account
+                    {t("agentLinks.connectAnthropic")}
                 </Button>
             </div>
         </Show>
@@ -176,18 +176,18 @@ export function ConnectAnthropic(props: Part): JSX.Element {
 
 /** The Claude login, over the panel while it is open. */
 export function ClaudeLogin(props: Part & { agentId: string | undefined }): JSX.Element {
-    const t = props.t;
+    const links = props.t;
     return (
-        <Show when={t.claudePanelOpen()}>
+        <Show when={links.claudePanelOpen()}>
             {/* This panel can be hosted inside a pane's ModalLayer
                 scope="pane" — "pane" here stacks this dialog correctly
                 over that modal instead of both competing for the same
                 window-level backdrop. */}
             <ProviderLoginPanel
-                onClose={() => t.setClaudePanelOpen(false)}
-                existingAccountId={t.claudeRefreshAccountId()}
+                onClose={() => links.setClaudePanelOpen(false)}
+                existingAccountId={links.claudeRefreshAccountId()}
                 linkTarget={props.agentId ? { agentDefinitionId: props.agentId } : undefined}
-                staleAliasProvider={t.claudeStaleAliasProvider()}
+                staleAliasProvider={links.claudeStaleAliasProvider()}
                 scope="pane"
             />
         </Show>

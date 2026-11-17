@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { t } from "@/app/i18n/i18n";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { tip } from "@/app/element/tip";
 import { Button, CloseButton, openMenuAt, Tag } from "@/app/element/ui";
@@ -65,9 +66,9 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
                         when={model.accountsAtom().length > 0}
                         fallback={
                             <div class="identity-empty">
-                                <p>No accounts configured.</p>
+                                <p>{t("accountsTab.empty")}</p>
                                 <Button tone="accent" class="identity-empty-add" onClick={() => model.openAddForm()}>
-                                    + Add your first account
+                                    {t("accountsTab.addFirst")}
                                 </Button>
                             </div>
                         }
@@ -133,7 +134,7 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                         <span class="identity-delete-notice-text">{notice()}</span>
                         <CloseButton
                             size="sm"
-                            label="Dismiss"
+                            label={t("accountsTab.dismiss")}
                             onClick={() => model.dismissDeleteNotice()}
                         />
                     </div>
@@ -165,7 +166,7 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                                 disabled={!!busy()}
                                 onClick={() => void run("retry")}
                             >
-                                Try again
+                                {t("accountsTab.tryAgain")}
                             </Button>
                             <Button
                                 density="compact"
@@ -174,11 +175,11 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                                 disabled={!!busy()}
                                 onClick={() => void run("remove")}
                             >
-                                Remove anyway
+                                {t("accountsTab.removeAnyway")}
                             </Button>
                             <CloseButton
                                 size="sm"
-                                label="Dismiss"
+                                label={t("accountsTab.dismiss")}
                                 onClick={() => model.dismissRevokeFailure()}
                             />
                         </div>
@@ -334,7 +335,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
             <OAuthAccountSection account={account} />
             <CliSignInSection account={account} />
             <UsedBy s={s} />
-            <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
+            <DetailField label={t("accountsTab.field.created")} value={new Date(account.created_at).toLocaleString()} />
             <PanelActions s={s} />
         </div>
     );
@@ -369,14 +370,17 @@ function ProviderFields({ s }: { s: PanelState }) {
                 implementation detail this surface deliberately doesn't expose;
                 "Anthropic" (the actual account/brand) is shown alone instead. */}
             <DetailField
-                label="Provider"
-                value={`${PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider}${
+                label={t("accountsTab.field.provider")}
+                value={
                     isCliOAuthProvider(account.provider) && brandForProvider(account.provider) !== "anthropic"
-                        ? ` (via ${account.provider} CLI)`
-                        : ""
-                }`}
+                        ? t("accountsTab.providerViaCli", {
+                              provider: PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider,
+                              cli: account.provider,
+                          })
+                        : (PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider)
+                }
             />
-            <DetailField label="Kind" value={githubKindLabel(account) ?? KIND_LABELS[account.kind]} />
+            <DetailField label={t("accountsTab.field.kind")} value={githubKindLabel(account) ?? KIND_LABELS[account.kind]} />
             <Show when={githubActsAs(account)}>{(line) => <div class="identity-detail-hint">{line()}</div>}</Show>
         </>
     );
@@ -386,32 +390,32 @@ function SecretFields({ s }: { s: PanelState }) {
     const { account } = s;
     return (
         <>
-            <div class="identity-detail-section">Secret</div>
+            <div class="identity-detail-section">{t("accountsTab.section.secret")}</div>
             {/* `?.` guards throughout: an account whose secret_ref shape the
                 frontend doesn't know yet must degrade to "unknown", not crash
                 the pane (live repro 2026-07-14: OAuth accounts crashed here
                 before `oauth_config_dir` was mapped). */}
-            <DetailField label="Backend" value={account.secret_ref?.backend ?? "unknown"} />
+            <DetailField label={t("accountsTab.field.backend")} value={account.secret_ref?.backend ?? t("accountsTab.unknown")} />
             <Show when={account.secret_ref?.env_var}>
-                <DetailField label="Env var" value={account.secret_ref?.env_var ?? ""} />
+                <DetailField label={t("accountsTab.field.envVar")} value={account.secret_ref?.env_var ?? ""} />
             </Show>
             <Show when={account.secret_ref?.sm_path}>
                 <DetailField
-                    label="Secrets Manager"
+                    label={t("accountsTab.field.secretsManager")}
                     value={`${account.secret_ref?.sm_path ?? ""}${account.secret_ref?.sm_json_path ? ` → ${account.secret_ref.sm_json_path}` : ""}`}
                 />
             </Show>
             <Show when={account.secret_ref?.backend === "plaintext_dev"}>
-                <DetailField label="Value" value="••••••••••••" />
+                <DetailField label={t("accountsTab.field.value")} value="••••••••••••" />
             </Show>
             <Show when={account.secret_ref?.backend === "keychain"}>
-                <DetailField label="Stored in" value="OS keychain" />
-                <DetailField label="Key" value={account.context.masked_tail ?? "••••••••"} />
+                <DetailField label={t("accountsTab.field.storedIn")} value={t("accountsTab.osKeychain")} />
+                <DetailField label={t("accountsTab.field.key")} value={account.context.masked_tail ?? "••••••••"} />
             </Show>
             <Show when={account.secret_ref?.backend === "oauth_config_dir"}>
-                <DetailField label="Stored in" value="Provider CLI config dir (tokens owned by the CLI)" />
+                <DetailField label={t("accountsTab.field.storedIn")} value={t("accountsTab.cliConfigDir")} />
                 <Show when={account.secret_ref?.dir}>
-                    <DetailField label="Config dir" value={account.secret_ref?.dir ?? ""} />
+                    <DetailField label={t("accountsTab.field.configDir")} value={account.secret_ref?.dir ?? ""} />
                 </Show>
             </Show>
         </>
@@ -423,30 +427,30 @@ function ContextFields({ s }: { s: PanelState }) {
     return (
         <>
             <Show when={account.context.github_username}>
-                <div class="identity-detail-section">GitHub</div>
-                <DetailField label="Username" value={account.context.github_username!} />
+                <div class="identity-detail-section">{PROVIDER_LABELS.github}</div>
+                <DetailField label={t("accountsTab.field.username")} value={account.context.github_username!} />
                 <Show when={(account.context.github_scopes ?? []).length > 0}>
-                    <DetailField label="Scopes" value={account.context.github_scopes!.join(", ")} />
+                    <DetailField label={t("accountsTab.field.scopes")} value={account.context.github_scopes!.join(", ")} />
                 </Show>
             </Show>
             <Show when={account.context.aws_profile || account.context.aws_role_arn}>
-                <div class="identity-detail-section">AWS</div>
+                <div class="identity-detail-section">{PROVIDER_LABELS.aws}</div>
                 <Show when={account.context.aws_profile}>
-                    <DetailField label="Profile" value={account.context.aws_profile!} />
+                    <DetailField label={t("accountsTab.field.profile")} value={account.context.aws_profile!} />
                 </Show>
                 <Show when={account.context.aws_role_arn}>
-                    <DetailField label="Role ARN" value={account.context.aws_role_arn!} />
+                    <DetailField label={t("accountsTab.field.roleArn")} value={account.context.aws_role_arn!} />
                 </Show>
                 <Show when={account.context.aws_region}>
-                    <DetailField label="Region" value={account.context.aws_region!} />
+                    <DetailField label={t("accountsTab.field.region")} value={account.context.aws_region!} />
                 </Show>
             </Show>
             <Show when={account.context.anthropic_model}>
-                <div class="identity-detail-section">Anthropic</div>
-                <DetailField label="Model" value={account.context.anthropic_model!} />
+                <div class="identity-detail-section">{PROVIDER_LABELS.anthropic}</div>
+                <DetailField label={t("accountsTab.field.model")} value={account.context.anthropic_model!} />
             </Show>
             <Show when={account.context.description}>
-                <DetailField label="Notes" value={account.context.description!} />
+                <DetailField label={t("accountsTab.field.notes")} value={account.context.description!} />
             </Show>
         </>
     );
@@ -455,9 +459,9 @@ function ContextFields({ s }: { s: PanelState }) {
 function UsedBy({ s }: { s: PanelState }) {
     return (
         <>
-            <div class="identity-detail-section">Used by</div>
-            <Show when={s.usedBy().length > 0} fallback={<span class="identity-detail-empty">No agents</span>}>
-                <ul class="identity-agent-chips" aria-label="Agents using this account">
+            <div class="identity-detail-section">{t("accountsTab.usedBy.title")}</div>
+            <Show when={s.usedBy().length > 0} fallback={<span class="identity-detail-empty">{t("accountsTab.usedBy.none")}</span>}>
+                <ul class="identity-agent-chips" aria-label={t("accountsTab.usedBy.aria")}>
                     <For each={s.usedBy()}>
                         {(agent) => (
                             <li class="identity-agent-use">
@@ -481,7 +485,7 @@ function PanelActions({ s }: { s: PanelState }) {
                     class="identity-btn identity-btn-primary"
                     onClick={() => model.openEditForm(account)}
                 >
-                    Reauth
+                    {t("accountsTab.action.reauth")}
                 </Button>
             </Show>
             <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
@@ -490,14 +494,14 @@ function PanelActions({ s }: { s: PanelState }) {
                     class="identity-btn identity-btn-primary"
                     onClick={() => model.openEditForm(account)}
                 >
-                    Validate…
+                    {t("accountsTab.action.validate")}
                 </Button>
             </Show>
             <Button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
-                Edit
+                {t("accountsTab.action.edit")}
             </Button>
             <Button tone="danger" class="identity-btn identity-btn-danger" onClick={() => model.requestDelete(account)}>
-                Delete account…
+                {t("accountsTab.action.delete")}
             </Button>
         </div>
     );
@@ -531,35 +535,31 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
         <ConfirmModal
             open={true}
             scope="pane"
-            title={`Delete ${accountLabel(account, model.accountsAtom())}?`}
-            confirmLabel="Delete account"
+            title={t("accountsTab.delete.title", { account: accountLabel(account, model.accountsAtom()) })}
+            confirmLabel={t("accountsTab.delete.confirm")}
             destructive
             onConfirm={() => model.confirmDelete()}
             onCancel={() => model.cancelDelete()}
         >
             <div class="identity-delete-confirm">
-                <p>AgentMux forgets this account and removes its saved login from this computer.</p>
+                <p>{t("accountsTab.delete.forgets")}</p>
                 <Show when={usedBy().length > 0}>
-                    <p>
-                        Used by {usedBy().length === 1 ? "1 agent" : `${usedBy().length} agents`}: {usedBy().join(", ")}
-                        . They will need another account: the login email in an agent's composer switches it. Any that
-                        are running keep working until they restart.
-                    </p>
+                    <p>{t("accountsTab.delete.usedBy", { count: usedBy().length, agents: usedBy().join(", ") })}</p>
                 </Show>
                 <Show when={keepsHistory}>
-                    <p>Its conversation history is not deleted.</p>
+                    <p>{t("accountsTab.delete.historyKept")}</p>
                 </Show>
                 <Show when={isKey}>
-                    <p>The key itself still works. To revoke it, do that at {providerName}.</p>
+                    <p>{t("accountsTab.delete.keyStillWorks", { provider: providerName })}</p>
                 </Show>
                 <Show when={signsOut}>
-                    <p>It signs out of {providerName} first, so AgentMux's access ends there too.</p>
+                    <p>{t("accountsTab.delete.signsOut", { provider: providerName })}</p>
                 </Show>
                 <Show when={grantStays}>
-                    <p>Its access stays authorized at {providerName}. To end it, revoke it there.</p>
+                    <p>{t("accountsTab.delete.grantStays", { provider: providerName })}</p>
                 </Show>
                 <Show when={editing()}>
-                    <p>Unsaved changes to this account will be lost.</p>
+                    <p>{t("accountsTab.delete.unsaved")}</p>
                 </Show>
             </div>
         </ConfirmModal>
