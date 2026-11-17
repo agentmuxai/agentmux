@@ -105,8 +105,8 @@ export class AgentViewModel {
     /** Why the last launch aborted, for the picker to show (identity M4b-3). */
     launchError: string | null = null;
 
-    // Opens a modal in the pane's own layer, for the right-click menu's Seat…
-    // and Bundles…; wired by AgentPresentationView on mount.
+    // Opens a modal in the pane's own layer, for the right-click menu's Seat…;
+    // wired by AgentPresentationView on mount.
     _openModal: ((req: ModalLayerRequest) => void) | null = null;
 
     // Voice-input target ref. AgentFooter populates this on mount with a

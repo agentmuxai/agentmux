@@ -5,7 +5,7 @@
 
 import { Show, type Accessor, type ComponentProps, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
-import { viewChipLabel, type createAgentViewControls } from "../agent-view-controls";
+import type { createAgentViewControls } from "../agent-view-controls";
 import type { useAgentCommands } from "../hooks/useAgentCommands";
 import type { useOfflineInput } from "../offline/useOfflineInput";
 import { AgentDocumentView } from "./AgentDocumentView";
