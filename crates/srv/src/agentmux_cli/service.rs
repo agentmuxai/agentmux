@@ -325,6 +325,15 @@ pub fn render_plist(exe: &Path, channel: &str, log: &Path, path_env: &str, home:
     )
 }
 
+/// The ways a service definition may spell `path`: as it is, as the plist and the task XML write it (`&`, `<`, `>` and `"`
+/// escaped), and as a unit writes it (`%` doubled, and the quoted word's own escapes).
+pub fn spellings(path: &str) -> Vec<String> {
+    let quoted = systemd_quote(path);
+    let mut all = vec![path.to_string(), xml_escape(path), path.replace('%', "%%"), quoted[1..quoted.len() - 1].to_string()];
+    all.dedup();
+    all
+}
+
 /// Does the unit or agent's file name this command's own program? (The install may have moved.)
 pub fn file_names_exe(text: &str, exe: &Path) -> bool {
     let named = |exe: &Path| {
