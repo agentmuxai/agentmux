@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, Show, type Accessor, type JSX, type Setter } from "solid-js";
+import { createSignal, For, Show, type Accessor, type JSX, type Setter } from "solid-js";
 import type {
     Account,
     AccountContext,
@@ -21,6 +21,8 @@ import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 import { Button, CloseButton, TextInput } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
 // the Validate button so the user sees exactly where their key is sent before
@@ -44,6 +46,9 @@ function defaultKindFor(provider: AccountProvider): AccountKind {
     if (provider === "aws") return "role";
     return "api_key"; // openai, anthropic, custom
 }
+
+// The provider choices, in the order the Provider select lists them; each shows its brand name.
+const PROVIDER_CHOICES: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
 
 type AddPreset = ReturnType<IdentityViewModel["addPresetAtom"]>;
 
@@ -193,7 +198,7 @@ function buildAccount(ctx: FormCtx): Omit<Account, "id" | "status" | "created_at
     const { model, editing, f } = ctx;
     const n = f.name().trim();
     if (!n) {
-        model["setFormError"]("Name is required");
+        model["setFormError"](t("accountForm.nameRequired"));
         return null;
     }
 
@@ -247,11 +252,11 @@ async function submitKey(ctx: FormCtx, validate: boolean): Promise<void> {
     const { model, editing, isEdit, f, key } = ctx;
     const n = f.name().trim();
     if (!n) {
-        key.setKeyError("Name is required");
+        key.setKeyError(t("accountForm.nameRequired"));
         return;
     }
     if (!key.keychainKey().trim()) {
-        key.setKeyError("Enter a key first");
+        key.setKeyError(t("accountForm.keyRequired"));
         return;
     }
     key.setKeyBusy(true);
@@ -272,7 +277,7 @@ async function submitKey(ctx: FormCtx, validate: boolean): Promise<void> {
         // Drop the plaintext from the form immediately.
         key.setKeychainKey("");
         if (!res.valid && validate) {
-            key.setKeyError(res.error ?? "Validation failed");
+            key.setKeyError(res.error ?? t("accountForm.validationFailed"));
             return;
         }
         await refreshAccountCache();
@@ -303,7 +308,7 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
     const form = (
         <div class={inline ? "identity-form identity-form--inline" : "identity-form"}>
             <div class="identity-form-header">
-                <span>{isEdit() ? "Edit Account" : "Add Account"}</span>
+                <span>{isEdit() ? t("accountForm.editAccount") : t("accountForm.addAccount")}</span>
                 <CloseButton tooltip={false} onClick={() => model.cancelForm()} />
             </div>
 
@@ -316,7 +321,7 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
                 <ProviderField f={f} />
                 <KindField f={f} />
 
-                <FormField label="Display name">
+                <FormField label={t("accountForm.label.displayName")}>
                     <TextInput
                         class="identity-input"
                         type="text"
@@ -343,17 +348,17 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
 
 /** What the Name field suggests: the provider's own name, which follows the Provider select. */
 export function namePlaceholder(provider: AccountProvider): string {
-    return provider === "custom" ? "Name this account" : PROVIDER_LABELS[provider];
+    return provider === "custom" ? t("accountForm.placeholder.nameCustom") : PROVIDER_LABELS[provider];
 }
 
 /** What the Display name field suggests: a GitHub login for GitHub, otherwise how the account is shown. */
 export function displayNamePlaceholder(provider: AccountProvider): string {
-    return provider === "github" ? "your GitHub login" : "optional";
+    return provider === "github" ? t("accountForm.placeholder.githubLogin") : t("accountForm.placeholder.optional");
 }
 
 function NameField({ f }: { f: FormFields }): JSX.Element {
     return (
-        <FormField label="Name *">
+        <FormField label={t("accountForm.label.name")}>
             <TextInput
                 class="identity-input"
                 type="text"
@@ -368,7 +373,7 @@ function NameField({ f }: { f: FormFields }): JSX.Element {
 
 function ProviderField({ f }: { f: FormFields }): JSX.Element {
     return (
-        <FormField label="Provider">
+        <FormField label={t("accountForm.label.provider")}>
             <select
                 class="identity-select"
                 value={f.provider()}
@@ -381,14 +386,7 @@ function ProviderField({ f }: { f: FormFields }): JSX.Element {
                     f.setKind(defaultKindFor(p));
                 }}
             >
-                <option value="github">GitHub</option>
-                <option value="google">Google</option>
-                <option value="aws">AWS</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="slack">Slack</option>
-                <option value="custom">Custom</option>
-                <option value="agentmux">AgentMux</option>
+                <For each={PROVIDER_CHOICES}>{(p) => <option value={p}>{PROVIDER_LABELS[p]}</option>}</For>
             </select>
         </FormField>
     );
@@ -396,7 +394,7 @@ function ProviderField({ f }: { f: FormFields }): JSX.Element {
 
 function KindField({ f }: { f: FormFields }): JSX.Element {
     return (
-        <FormField label="Kind">
+        <FormField label={t("accountForm.label.kind")}>
             <select
                 class="identity-select"
                 value={f.provider() === "github" && f.kind() === "api_key" ? "pat" : f.kind()}
@@ -405,7 +403,7 @@ function KindField({ f }: { f: FormFields }): JSX.Element {
                 {/* Browser-login path for OAuth-capable providers. */}
                 <Show when={supportsOAuth(f.provider())}>
                     <option value="oauth">
-                        {f.provider() === "github" ? GITHUB_APP_KIND_LABEL : "Connect with OAuth (browser login)"}
+                        {f.provider() === "github" ? GITHUB_APP_KIND_LABEL : t("accountForm.kind.oauth")}
                     </option>
                 </Show>
                 {/* GitHub has no API key apart from a token: an account saved as one shows as the token. */}
@@ -413,22 +411,22 @@ function KindField({ f }: { f: FormFields }): JSX.Element {
                     <option value="pat">{GITHUB_TOKEN_KIND_LABEL}</option>
                 </Show>
                 <Show when={f.provider() === "aws"}>
-                    <option value="role">IAM Role</option>
-                    <option value="env_ref">Env Reference</option>
+                    <option value="role">{t("accountForm.kind.iamRole")}</option>
+                    <option value="env_ref">{t("accountForm.kind.envReference")}</option>
                 </Show>
                 <Show when={f.provider() === "openai"}>
-                    <option value="api_key">API Key</option>
+                    <option value="api_key">{t("accountForm.kind.apiKey")}</option>
                 </Show>
                 <Show when={f.provider() === "anthropic"}>
-                    <option value="api_key">API Key</option>
+                    <option value="api_key">{t("accountForm.kind.apiKey")}</option>
                 </Show>
                 <Show when={f.provider() === "custom"}>
-                    <option value="api_key">API Key</option>
-                    <option value="env_ref">Env Reference</option>
-                    <option value="pat">Token</option>
+                    <option value="api_key">{t("accountForm.kind.apiKey")}</option>
+                    <option value="env_ref">{t("accountForm.kind.envReference")}</option>
+                    <option value="pat">{t("accountForm.kind.token")}</option>
                 </Show>
                 <Show when={f.provider() === "agentmux"}>
-                    <option value="api_key">API Key</option>
+                    <option value="api_key">{t("accountForm.kind.apiKey")}</option>
                 </Show>
             </select>
         </FormField>
@@ -470,12 +468,12 @@ function SecretAndContextSections({ ctx }: { ctx: FormCtx }): JSX.Element {
     return (
         <Show when={f.kind() !== "oauth"}>
             {/* Secret storage */}
-            <FormField label="Secret backend">
+            <FormField label={t("accountForm.label.secretBackend")}>
                 <select class="identity-select" value={f.secretBackend()} onChange={(e) => f.setSecretBackend(e.currentTarget.value as SecretRef["backend"])}>
-                    <option value="keychain">OS Keychain (validated) — recommended</option>
-                    <option value="env">Environment variable</option>
-                    <option value="secrets_manager">AWS Secrets Manager</option>
-                    <option value="plaintext_dev">Plaintext (dev only ⚠)</option>
+                    <option value="keychain">{t("accountForm.backend.keychain")}</option>
+                    <option value="env">{t("accountForm.backend.env")}</option>
+                    <option value="secrets_manager">{t("accountForm.backend.secretsManager")}</option>
+                    <option value="plaintext_dev">{t("accountForm.backend.plaintext")}</option>
                 </select>
             </FormField>
 
@@ -487,8 +485,8 @@ function SecretAndContextSections({ ctx }: { ctx: FormCtx }): JSX.Element {
             <SecretBackendFields f={f} />
             <ProviderContextFields f={f} />
 
-            <FormField label="Notes">
-                <TextInput class="identity-input" type="text" value={f.description()} onInput={(e) => f.setDescription(e.currentTarget.value)} placeholder="Optional description" />
+            <FormField label={t("accountForm.label.notes")}>
+                <TextInput class="identity-input" type="text" value={f.description()} onInput={(e) => f.setDescription(e.currentTarget.value)} placeholder={t("accountForm.placeholder.notes")} />
             </FormField>
         </Show>
     );
@@ -505,13 +503,13 @@ function KeychainKeySection({ ctx }: { ctx: FormCtx }): JSX.Element {
                         {editing()?.context.masked_tail ?? "••••••••"}
                     </span>
                     <span class="identity-key-locked-note">
-                        Stored in the OS keychain · not recoverable
+                        {t("accountForm.keyLockedNote")}
                     </span>
                     <Button
                         class="identity-btn identity-btn-secondary"
                         onClick={() => key.setKeyReplacing(true)}
                     >
-                        Replace key
+                        {t("accountForm.replaceKey")}
                     </Button>
                 </div>
             }
@@ -526,7 +524,7 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
     const validationEndpoint = (): string | undefined => KEY_VALIDATION_ENDPOINT[f.provider()];
     return (
         <>
-            <FormField label="Key / token">
+            <FormField label={t("accountForm.label.keyToken")}>
                 <TextInput
                     class="identity-input"
                     type="password"
@@ -534,7 +532,7 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
                     spellcheck={false}
                     value={key.keychainKey()}
                     onInput={(e) => key.setKeychainKey(e.currentTarget.value)}
-                    placeholder="paste key — never stored in plaintext"
+                    placeholder={t("accountForm.placeholder.key")}
                 />
             </FormField>
             {/* §5.1 egress transparency — placed at the point of action */}
@@ -542,19 +540,18 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
                 when={validationEndpoint()}
                 fallback={
                     <div class="identity-key-egress-note">
-                        ⓘ No validator for {PROVIDER_LABELS[f.provider()]} yet — use
-                        “Save without validating”. The key goes straight to your OS
-                        keychain; nothing is sent anywhere.
+                        {t("accountForm.egress.noValidator", {
+                            provider: PROVIDER_LABELS[f.provider()],
+                            button: t("accountForm.saveWithoutValidating"),
+                        })}
                     </div>
                 }
             >
                 <div class="identity-key-egress-note">
-                    ⓘ Clicking <strong>Validate &amp; Save</strong> sends this key once,
-                    over HTTPS, from the AgentMux backend on your machine directly to{" "}
-                    <code>{validationEndpoint()}</code> to confirm it works and read its
-                    details. The key is never stored in plaintext, never logged, and not
-                    sent anywhere else. After saving it lives in your OS keychain and
-                    can’t be viewed again.
+                    <Rich
+                        k="accountForm.egress.validator"
+                        params={{ button: t("accountForm.validateSave"), endpoint: validationEndpoint() ?? "" }}
+                    />
                 </div>
             </Show>
             <Show when={key.keyError()}>
@@ -568,16 +565,16 @@ function KeyEntry({ ctx }: { ctx: FormCtx }): JSX.Element {
                         disabled={key.keyBusy()}
                         onClick={() => void submitKey(ctx, true)}
                     >
-                        {key.keyBusy() ? "Validating…" : "Validate & Save"}
+                        {key.keyBusy() ? t("accountForm.validating") : t("accountForm.validateSave")}
                     </Button>
                 </Show>
                 <Button
                     class="identity-btn identity-btn-secondary"
                     disabled={key.keyBusy()}
                     onClick={() => void submitKey(ctx, false)}
-                    title="Store the key without contacting the service"
+                    title={t("accountForm.saveWithoutValidatingTitle")}
                 >
-                    Save without validating
+                    {t("accountForm.saveWithoutValidating")}
                 </Button>
             </div>
         </>
@@ -588,7 +585,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
     return (
         <>
             <Show when={f.secretBackend() === "env"}>
-                <FormField label="Env var name">
+                <FormField label={t("accountForm.label.envVar")}>
                     <TextInput
                         class="identity-input"
                         type="text"
@@ -600,7 +597,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
             </Show>
 
             <Show when={f.secretBackend() === "secrets_manager"}>
-                <FormField label="Secret path">
+                <FormField label={t("accountForm.label.secretPath")}>
                     <TextInput
                         class="identity-input"
                         type="text"
@@ -609,7 +606,7 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
                         placeholder="my-app/credentials"
                     />
                 </FormField>
-                <FormField label="JSON path (optional)">
+                <FormField label={t("accountForm.label.jsonPath")}>
                     <TextInput
                         class="identity-input"
                         type="text"
@@ -621,14 +618,14 @@ function SecretBackendFields({ f }: { f: FormFields }): JSX.Element {
             </Show>
 
             <Show when={f.secretBackend() === "plaintext_dev"}>
-                <div class="identity-form-warning">⚠ Stored in localStorage — for dev/testing only</div>
-                <FormField label="Value">
+                <div class="identity-form-warning">{t("accountForm.plaintextWarning")}</div>
+                <FormField label={t("accountForm.label.value")}>
                     <TextInput
                         class="identity-input"
                         type="password"
                         value={f.secretValue()}
                         onInput={(e) => f.setSecretValue(e.currentTarget.value)}
-                        placeholder="secret value"
+                        placeholder={t("accountForm.placeholder.secretValue")}
                     />
                 </FormField>
             </Show>
@@ -641,28 +638,28 @@ function ProviderContextFields({ f }: { f: FormFields }): JSX.Element {
     return (
         <>
             <Show when={f.provider() === "github"}>
-                <FormField label="GitHub username">
-                    <TextInput class="identity-input" type="text" value={f.ghUsername()} onInput={(e) => f.setGhUsername(e.currentTarget.value)} placeholder="your GitHub login" />
+                <FormField label={t("accountForm.label.githubUsername")}>
+                    <TextInput class="identity-input" type="text" value={f.ghUsername()} onInput={(e) => f.setGhUsername(e.currentTarget.value)} placeholder={t("accountForm.placeholder.githubLogin")} />
                 </FormField>
-                <FormField label="Scopes (comma-separated)">
+                <FormField label={t("accountForm.label.scopes")}>
                     <TextInput class="identity-input" type="text" value={f.ghScopes()} onInput={(e) => f.setGhScopes(e.currentTarget.value)} placeholder="repo, workflow, read:org" />
                 </FormField>
             </Show>
 
             <Show when={f.provider() === "aws"}>
-                <FormField label="AWS profile">
+                <FormField label={t("accountForm.label.awsProfile")}>
                     <TextInput class="identity-input" type="text" value={f.awsProfile()} onInput={(e) => f.setAwsProfile(e.currentTarget.value)} placeholder="dev" />
                 </FormField>
-                <FormField label="Role ARN (optional)">
+                <FormField label={t("accountForm.label.roleArn")}>
                     <TextInput class="identity-input" type="text" value={f.awsRoleArn()} onInput={(e) => f.setAwsRoleArn(e.currentTarget.value)} placeholder="arn:aws:iam::123:role/dev-role" />
                 </FormField>
-                <FormField label="Region">
+                <FormField label={t("accountForm.label.region")}>
                     <TextInput class="identity-input" type="text" value={f.awsRegion()} onInput={(e) => f.setAwsRegion(e.currentTarget.value)} placeholder="us-east-1" />
                 </FormField>
             </Show>
 
             <Show when={f.provider() === "anthropic"}>
-                <FormField label="Default model">
+                <FormField label={t("accountForm.label.defaultModel")}>
                     <TextInput class="identity-input" type="text" value={f.anthropicModel()} onInput={(e) => f.setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
                 </FormField>
             </Show>
@@ -675,7 +672,7 @@ function FormFooter({ ctx }: { ctx: FormCtx }): JSX.Element {
     return (
         <div class="identity-form-footer">
             <Button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
-                Cancel
+                {t("accountForm.cancel")}
             </Button>
             {/* OAuth connects via its own panel; the keychain *entry* path
                 has its own Validate/Save buttons — hide the generic upsert
@@ -684,7 +681,7 @@ function FormFooter({ ctx }: { ctx: FormCtx }): JSX.Element {
                 buildAccount preserves the keychain pointer + context. */}
             <Show when={f.kind() !== "oauth" && (f.secretBackend() !== "keychain" || (isEdit() && !key.keyReplacing()))}>
                 <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => handleSubmit(ctx)}>
-                    {isEdit() ? "Save" : "Add Account"}
+                    {isEdit() ? t("accountForm.save") : t("accountForm.addAccount")}
                 </Button>
             </Show>
         </div>
