@@ -301,7 +301,7 @@
     "settings.advanced.routeSpendCap.label": "Model route daily cap",
     "settings.advanced.routeSpendCap.description": "Dollars a day that all agents together may use through the OpenRouter model route. When it is used, every agent on the route stops until you raise it here or the UTC day ends. 0 is no cap",
     "settings.advanced.previewSkidNotches.label": "Preview scroll skid",
-    "settings.advanced.previewSkidNotches.description": "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes",
+    "settings.advanced.previewSkidNotches.description": "Wheel notches a tool preview absorbs at its top or bottom edge, once the wheel has scrolled it there, before the scroll passes to the pane, so its end is not overshot. A preview the wheel only passes over never holds it. 0 passes it on at once. Applies to open panes",
     "settings.advanced.containerMemory.label": "Container agents' memory",
     "settings.advanced.containerMemory.description": "Megabytes of memory each container agent may use, unless the agent has its own limit. auto is half of what Docker has (at least 2 GB). 0 is no limit. Reaches running containers without restarting them",
     "settings.advanced.containerCpus.label": "Container agents' CPUs",
