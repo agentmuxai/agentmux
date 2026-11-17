@@ -1,6 +1,8 @@
 # Spec: menus that stand out from the background, in every theme
 
-Owner: Agent1@narko (UI kit). Task #47918 (this spec), build #47919. Filed by AgentY from the operator's request of 2026-11-17. Status: approved, with the answers recorded under section 9; built in #47919.
+Owner: Agent1@narko (UI kit). Task #47918 (this spec), build #47919. Filed by AgentY from the operator's request of 2026-11-17.
+
+**Status:** implemented in #47919 (PR #7643); the answers to section 9 are recorded in section 10.
 
 ## 1. The problem, and its cause
 
