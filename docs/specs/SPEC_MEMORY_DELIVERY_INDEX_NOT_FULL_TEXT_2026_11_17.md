@@ -1,6 +1,8 @@
 # Spec: Memory after a compaction or a rebuilt session: an index of Personal Memory, nothing sent twice, nothing cut silently
 
-Task #47923 (spec), #47924 (build). Author: Loap-3@narko, 2026-11-17. Status: written, not committed; it ships in the build's PR.
+Task #47923 (spec), #47924 (build). Author: Loap-3@narko, 2026-11-17.
+
+**Status:** active (the first PR of the build carries this document; the startup-file refresh in section 3.1 follows in a second PR).
 
 Measured on narko, AgentMux 0.60.32, from the srv logs, the operator's screenshot and this agent's own session start. No private memory text is quoted; fixtures in the build use made-up entries.
 
