@@ -45,14 +45,30 @@ fn address_plan(linux: bool, listener_up: bool, address: Option<&str>) -> Result
     address.and_then(|a| a.trim().parse().ok()).map(Some).ok_or(NO_ADDRESS)
 }
 
-/// Makes the turn's key-route token fresh and bound, in place in `env`. A turn that is not on the key route is left alone.
-/// Called once the container is up (the listener is bound by then) and before the exec starts.
-pub(crate) async fn bind(cm: &ContainerManager, container_name: &str, env: &mut [(String, String)]) -> Result<(), ContainerError> {
+/// Whose key-route token a turn is for, taken before the container is made ready: readying it can recreate the container,
+/// which ends the token the spawn made, and the turn's own token is made after.
+pub(crate) struct Claim {
+    agent: String,
+    def_id: String,
+    account: String,
+}
+
+/// The agent and account of a turn on the key route, or `None` for any other turn. A key-route turn whose token is already gone
+/// is refused.
+pub(crate) fn claim(env: &[(String, String)]) -> Result<Option<Claim>, ContainerError> {
     if !is_key_route_env(env) {
-        return Ok(());
+        return Ok(None);
     }
     let grant = env.iter().find(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN").and_then(|(_, t)| token::grant_for(t)).filter(|g| g.route == KEY_ROUTE_ID);
-    let Some(grant) = grant else { return Err(ContainerError::KeyRoute(GONE.to_string())) };
+    match grant {
+        Some(g) => Ok(Some(Claim { agent: g.agent, def_id: g.def_id, account: g.account })),
+        None => Err(ContainerError::KeyRoute(GONE.to_string())),
+    }
+}
+
+/// Makes the turn's key-route token fresh and bound, in place in `env`. Called once the container is up (the listener is bound
+/// by then) and before the exec starts.
+pub(crate) async fn bind(cm: &ContainerManager, container_name: &str, env: &mut [(String, String)], claim: &Claim) -> Result<(), ContainerError> {
     let linux = cfg!(target_os = "linux");
     // A fresh look at the container at every turn start, never one kept from when it was made.
     let address = if linux { cm.agent_network_ip(container_name).await } else { None };
@@ -60,11 +76,11 @@ pub(crate) async fn bind(cm: &ContainerManager, container_name: &str, env: &mut 
         Ok(peer) => peer,
         Err(why) => {
             // The turn does not run, so nothing is to hold the token the spawn made for it.
-            token::revoke(&grant.def_id, KEY_ROUTE_ID);
+            token::revoke(&claim.def_id, KEY_ROUTE_ID);
             return Err(ContainerError::KeyRoute(why.to_string()));
         }
     };
-    let fresh = token::renew_for_account(&grant.agent, &grant.def_id, KEY_ROUTE_ID, &grant.account, peer);
+    let fresh = token::renew_for_account(&claim.agent, &claim.def_id, KEY_ROUTE_ID, &claim.account, peer);
     if let Some(slot) = env.iter_mut().find(|(k, _)| k == "ANTHROPIC_AUTH_TOKEN") {
         slot.1 = fresh;
     }
@@ -124,37 +140,34 @@ mod tests {
         ContainerManager::with_docker(docker, None)
     }
 
-    #[tokio::test]
-    async fn a_turn_not_on_the_key_route_is_left_as_it_is() {
-        let mut env = env_for("openrouter");
-        let before = env.clone();
-        bind(&manager(), "agentmux-kb-none", &mut env).await.unwrap();
-        assert_eq!(env, before);
-    }
-
-    #[tokio::test]
-    async fn a_key_route_turn_with_no_live_token_is_refused_with_a_plain_reason() {
-        let mut env = env_for(KEY_ROUTE_ID);
-        let err = bind(&manager(), "agentmux-kb-gone", &mut env).await.unwrap_err();
+    #[test]
+    fn a_turn_not_on_the_key_route_has_no_claim_and_one_with_no_live_token_is_refused_with_a_plain_reason() {
+        assert!(claim(&env_for("openrouter")).unwrap().is_none());
+        assert!(claim(&[]).unwrap().is_none());
+        let err = claim(&env_for(KEY_ROUTE_ID)).err().expect("no live token");
         assert!(matches!(&err, ContainerError::KeyRoute(why) if why == GONE), "{err}");
     }
 
     /// The part that depends on the platform: where there is no address to bind the token is made fresh for this
-    /// machine; on Linux with no listener (as in a test) the turn is refused with the way out.
+    /// machine; on Linux with no listener (as in a test) the turn is refused with the way out. Either way the claim,
+    /// taken before the container was readied, holds when readying it ended the spawn's token.
     #[tokio::test]
-    async fn a_key_route_turn_gets_a_fresh_token_or_the_way_out() {
+    async fn a_key_route_turn_gets_a_fresh_token_or_the_way_out_even_when_readying_the_container_ended_the_spawns() {
         let first = token::renew_for_account("kb-slug", "kb-def", KEY_ROUTE_ID, "kb-acct", None);
         let mut env = env_for(KEY_ROUTE_ID);
         env[1].1 = first.clone();
-        let result = bind(&manager(), "agentmux-kb-def", &mut env).await;
+        let taken = claim(&env).unwrap().expect("a key-route turn");
+        // The container is recreated while it is readied: that ends the token the spawn made.
+        revoke_container_tokens("agentmux-kb-def");
+        assert_eq!(token::grant_for(&first), None);
+        let result = bind(&manager(), "agentmux-kb-def", &mut env, &taken).await;
         if cfg!(target_os = "linux") {
             assert!(matches!(&result, Err(ContainerError::KeyRoute(why)) if why == NO_PATH), "{result:?}");
             assert_eq!(env[1].1, first, "a refused turn is given no new token");
-            assert_eq!(token::grant_for(&first), None, "and the one the spawn made for it ends, with nothing to hold it");
+            assert_eq!(token::grant_for(&first), None);
         } else {
             result.unwrap();
             assert_ne!(env[1].1, first, "each turn has a token of its own");
-            assert_eq!(token::grant_for(&first), None, "the earlier one has ended");
             let grant = token::grant_for(&env[1].1).unwrap();
             assert_eq!((grant.agent.as_str(), grant.def_id.as_str(), grant.account.as_str(), grant.peer), ("kb-slug", "kb-def", "kb-acct", None));
         }
