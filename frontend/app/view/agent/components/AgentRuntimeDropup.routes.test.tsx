@@ -76,7 +76,12 @@ const openPanel = async () => {
     await flush();
 };
 const option = (re: RegExp) => screen.getAllByRole("option").find((o) => re.test(o.querySelector(".label")?.textContent ?? ""))!;
-const groups = () => Array.from(document.querySelectorAll(".agent-runtime-dropup-group")).map((g) => g.textContent);
+const routeRow = () => option(/^OpenRouter$/);
+const openRoute = async () => {
+    fireEvent.click(routeRow());
+    await flush();
+};
+const optionLabels = () => screen.getAllByRole("option").map((o) => o.querySelector(".label")?.textContent ?? "");
 
 beforeEach(() => {
     panelCommand.mockReset();
@@ -96,21 +101,43 @@ describe("the model panel's routes", () => {
         expect(trigger().textContent).not.toContain("Sonnet");
     });
 
-    it("groups the harness's own models and each route's, with who pays", async () => {
+    it("lists a route as one closed row at the very bottom, with who pays, and opens its models in place", async () => {
         panelCommand.mockResolvedValue(panelOf());
         mount(plain);
         await openPanel();
-        expect(groups()).toEqual(["Your planthe harness's own sign-in", "OpenRouterbilled to your key in the Vault"]);
+        expect(optionLabels().at(-1)).toBe("OpenRouter");
+        expect(routeRow().textContent).toContain("billed to your key in the Vault");
+        expect(routeRow().getAttribute("aria-expanded")).toBe("false");
+        expect(screen.queryByText("DeepSeek V4 Pro")).toBeNull();
+        await openRoute();
+        expect(routeRow().getAttribute("aria-expanded")).toBe("true");
+        expect(optionLabels().slice(-3)).toEqual(["OpenRouter", "DeepSeek V4.1 Flash", "DeepSeek V4 Pro"]);
         expect(option(/DeepSeek V4 Pro/).textContent).toContain("1M context");
         expect(option(/DeepSeek V4 Pro/).textContent).toContain("$0.15 in / $0.60 out per million");
         expect(option(/Sonnet/).getAttribute("aria-selected")).toBe("true");
         expect(panelCommand).toHaveBeenCalledWith({}, { blockid: "block-1", conversation_tokens: null, images: null });
+        expect(switchCommand).not.toHaveBeenCalled();
+    });
+
+    it("keeps the harness's models and Effort together, and the routes after them", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        const labels = optionLabels();
+        expect(labels.findLastIndex((l) => /^Opus/.test(l))).toBeLessThan(labels.indexOf("low"));
+        expect(labels.indexOf("max")).toBeLessThan(labels.indexOf("OpenRouter"));
+        expect(labels.at(-1)).toBe("OpenRouter");
     });
 
     it("marks the route model current and none of the harness's own, and says what runs", async () => {
         panelCommand.mockResolvedValue(panelOf({ current: { route: "openrouter", model: FLASH, label: "DeepSeek V4.1 Flash" } }, [model(FLASH, "DeepSeek V4.1 Flash", { current: true }), model(PRO, "DeepSeek V4 Pro")]));
         mount(onRoute);
         await openPanel();
+        // Closed, the route's row says which of its models the agent is on.
+        expect(routeRow().getAttribute("aria-selected")).toBe("true");
+        expect(routeRow().textContent).toContain("DeepSeek V4.1 Flash");
+        await openRoute();
+        expect(routeRow().getAttribute("aria-selected")).toBe("false");
         expect(option(/DeepSeek V4.1 Flash/).getAttribute("aria-selected")).toBe("true");
         expect(option(/Sonnet/).getAttribute("aria-selected")).toBe("false");
         expect(screen.getByText("Running: DeepSeek V4.1 Flash on OpenRouter")).toBeTruthy();
@@ -122,6 +149,7 @@ describe("the model panel's routes", () => {
         );
         mount(plain);
         await openPanel();
+        await openRoute();
         const pro = option(/DeepSeek V4 Pro/);
         expect(pro.getAttribute("aria-disabled")).toBe("true");
         expect(pro.textContent).toContain("can't read images (3 in this conversation)");
@@ -134,6 +162,7 @@ describe("the model panel's routes", () => {
         panelCommand.mockResolvedValue(panelOf());
         mount(plain);
         await openPanel();
+        await openRoute();
         fireEvent.click(option(/DeepSeek V4 Pro/));
         await flush();
         expect(switchCommand).toHaveBeenCalledWith({}, { blockid: "block-1", route: "openrouter", model: PRO, restart: true }, { timeout: 120000 });
@@ -201,6 +230,7 @@ describe("the model panel's routes", () => {
         switchCommand.mockRejectedValue(new Error("KEY_MISSING: route openrouter needs a Vault api-key entry"));
         mount(plain);
         await openPanel();
+        await openRoute();
         fireEvent.click(option(/DeepSeek V4 Pro/));
         await flush();
         expect(trigger().title).toContain("KEY_MISSING");
@@ -229,6 +259,7 @@ describe("the model panel's routes", () => {
         switchCommand.mockResolvedValue({ changed: true, restarted: 0, failed: ["block-1: the pane is gone"] });
         mount(plain);
         await openPanel();
+        await openRoute();
         fireEvent.click(option(/DeepSeek V4 Pro/));
         await flush();
         expect(trigger().title).toContain("did not switch");
@@ -239,7 +270,7 @@ describe("the model panel's routes", () => {
         panelCommand.mockRejectedValue(new Error("unknown command"));
         mount(plain);
         await openPanel();
-        expect(groups()).toEqual([]);
+        expect(optionLabels()).not.toContain("OpenRouter");
         expect(screen.getAllByRole("option").length).toBeGreaterThan(5);
     });
 
@@ -269,8 +300,75 @@ describe("the model panel's routes", () => {
         await flush();
         await openPanel();
         expect(document.body.textContent).not.toContain("couldn't be read");
-        expect(groups().some((g) => g?.startsWith("OpenRouter"))).toBe(true);
+        expect(optionLabels()).toContain("OpenRouter");
         warn.mockRestore();
+    });
+});
+
+describe("a route's list at the bottom of the panel", () => {
+    const many = (n: number, currentAt = -1) =>
+        Array.from({ length: n }, (_, i) => model(i === 0 ? FLASH : `vendor/model-${i}`, `Model ${i}`, { current: i === currentAt }));
+
+    it("shows the route's first twelve models in the order srv lists them", async () => {
+        panelCommand.mockResolvedValue(panelOf({}, many(15)));
+        mount(plain);
+        await openPanel();
+        await openRoute();
+        const labels = optionLabels();
+        expect(labels.slice(labels.indexOf("OpenRouter") + 1)).toEqual(Array.from({ length: 12 }, (_, i) => `Model ${i}`));
+    });
+
+    it("still shows the model the agent is on when it is not among the twelve", async () => {
+        panelCommand.mockResolvedValue(panelOf({ current: { route: "openrouter", model: "vendor/model-14", label: "Model 14" } }, many(15, 14)));
+        mount({
+            "agent:runtime": { model: "sonnet", permissionMode: "default", effort: "high" },
+            "agent:route_model": { route: "openrouter", route_label: "OpenRouter", model: "vendor/model-14", label: "Model 14" },
+        });
+        await openPanel();
+        expect(routeRow().textContent).toContain("Model 14");
+        await openRoute();
+        const labels = optionLabels();
+        expect(labels.at(-1)).toBe("Model 14");
+        expect(labels).not.toContain("Model 12");
+        expect(option(/^Model 14$/).getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("opens and closes with Enter on its row, and with Right and Left on the row or one of its models", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        (document.querySelector(".agent-runtime-dropup-trigger") as HTMLElement).focus();
+        const key = async (k: string) => {
+            fireEvent.keyDown(document, { key: k });
+            await flush();
+        };
+        // Walk to the route's row, the last one: the keys stop on every row that can be picked.
+        for (let i = 0; i < optionLabels().length && !routeRow().classList.contains("active"); i++) await key("ArrowDown");
+        expect(routeRow().classList.contains("active")).toBe(true);
+        await key("Enter");
+        expect(routeRow().getAttribute("aria-expanded")).toBe("true");
+        await key("Enter");
+        expect(routeRow().getAttribute("aria-expanded")).toBe("false");
+        await key("ArrowRight");
+        expect(routeRow().getAttribute("aria-expanded")).toBe("true");
+        await key("ArrowDown");
+        expect(option(/DeepSeek V4.1 Flash/).classList.contains("active")).toBe(true);
+        await key("ArrowLeft");
+        expect(routeRow().getAttribute("aria-expanded")).toBe("false");
+        expect(routeRow().classList.contains("active")).toBe(true);
+        expect(switchCommand).not.toHaveBeenCalled();
+    });
+
+    it("starts closed each time the panel opens", async () => {
+        panelCommand.mockResolvedValue(panelOf());
+        mount(plain);
+        await openPanel();
+        await openRoute();
+        expect(routeRow().getAttribute("aria-expanded")).toBe("true");
+        fireEvent.click(trigger());
+        await flush();
+        await openPanel();
+        expect(routeRow().getAttribute("aria-expanded")).toBe("false");
     });
 });
 

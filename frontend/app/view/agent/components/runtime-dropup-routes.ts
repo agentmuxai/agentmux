@@ -12,6 +12,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentModelPanel } from "@/types/rpc/AgentModelPanel";
 import type { AgentModelPanelModel } from "@/types/rpc/AgentModelPanelModel";
+import type { AgentModelPanelRoute } from "@/types/rpc/AgentModelPanelRoute";
 import type { AgentModelSwitchResult } from "@/types/rpc/AgentModelSwitchResult";
 import { createSignal } from "solid-js";
 import type { AgentRuntimeDropupProps, OptionRow } from "./runtime-dropup-options";
@@ -34,6 +35,18 @@ export function countImages(nodes: ReadonlyArray<{ type: string; attachments?: R
 export const BACK_VALUE = "back";
 const ROUTE_PREFIX = "route:";
 const COMPACT_PREFIX = "compact:";
+const MORE_PREFIX = "more:";
+
+/** How many of a route's models its list in the panel shows: the first ones in the order srv lists them (the route's curated order, its default first). */
+export const TOP_ROUTE_MODELS = 12;
+
+/** The row value of a route's own row at the bottom of the panel, which opens and closes its list. */
+export const disclosureValue = (route: string) => `${MORE_PREFIX}${route}`;
+
+/** The route a disclosure row value names, or null for any other row. */
+export function parseDisclosureValue(value: string): string | null {
+    return value.startsWith(MORE_PREFIX) && value.length > MORE_PREFIX.length ? value.slice(MORE_PREFIX.length) : null;
+}
 
 export interface PaneRouteModel {
     route: string;
@@ -87,11 +100,32 @@ export function routeModelNote(m: AgentModelPanelModel, conversationTokens: numb
         : line;
 }
 
-/** The option rows of one route, as the Model section shows them. */
+/** The models a route's list shows: the first `TOP_ROUTE_MODELS` in the route's order, and the model the agent is on even when it lies further down. */
+export function topRouteModels(models: ReadonlyArray<AgentModelPanelModel>): AgentModelPanelModel[] {
+    const top = models.slice(0, TOP_ROUTE_MODELS);
+    const current = models.find((m) => m.current);
+    return current && !top.includes(current) ? [...top, current] : top;
+}
+
+/** The route's own row at the bottom of the panel: it names the route and who pays, and says which of its models the agent is on while the list is closed. */
+export function disclosureRow(route: AgentModelPanelRoute, expanded: boolean): OptionRow {
+    const current = route.models.find((m) => m.current);
+    const billing = route.key_present ? "billed to your key in the Vault" : "key missing";
+    return {
+        section: "model",
+        value: disclosureValue(route.id),
+        label: route.label,
+        description: current && !expanded ? `${current.label} · ${billing}` : billing,
+        current: current != null && !expanded,
+        disclosure: { expanded },
+    };
+}
+
+/** The option rows of one route, as its list shows them. */
 export function routeRows(panel: AgentModelPanel, conversationTokens: number | null | undefined) {
     return panel.routes.map((route) => ({
         route,
-        rows: route.models.map(
+        rows: topRouteModels(route.models).map(
             (m): OptionRow => ({
                 section: "model",
                 value: m.compact_first ? compactValue(route.id, m.id) : routeValue(route.id, m.id),
@@ -100,6 +134,7 @@ export function routeRows(panel: AgentModelPanel, conversationTokens: number | n
                 detail: m.unavailable ?? undefined,
                 current: m.current,
                 disabled: m.unavailable != null,
+                nested: true,
             })
         ),
     }));
@@ -167,5 +202,19 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
     /** Whether srv has the agent on a route: the saved choice, which a running pane only adopts at its next launch. */
     const onSavedRoute = () => panel()?.routes.some((r) => r.models.some((m) => m.current)) ?? false;
 
-    return { panel, failure, refresh, moveTo, onSavedRoute };
+    // Which routes' lists are open. Every route starts closed each time the panel opens: the route's row says
+    // where the agent is, and the Model and Effort rows above keep their place.
+    const [openRoutes, setOpenRoutes] = createSignal<ReadonlySet<string>>(new Set());
+    const isExpanded = (route: string) => openRoutes().has(route);
+    const setExpanded = (route: string, expanded: boolean) =>
+        setOpenRoutes((cur) => {
+            if (cur.has(route) === expanded) return cur;
+            const next = new Set(cur);
+            if (expanded) next.add(route);
+            else next.delete(route);
+            return next;
+        });
+    const collapseAll = () => setOpenRoutes(new Set<string>());
+
+    return { panel, failure, refresh, moveTo, onSavedRoute, isExpanded, setExpanded, collapseAll };
 }

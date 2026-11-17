@@ -18,7 +18,17 @@ import {
 } from "../runtime-capabilities";
 import type { EffortLevel, PermissionMode } from "../../../agent-model/types";
 import type { DropupAgreement } from "./runtime-dropup-agreement";
-import { backRow, BACK_VALUE, parseCompactValue, parseRouteValue, readFailureNote, routeRows } from "./runtime-dropup-routes";
+import {
+    backRow,
+    BACK_VALUE,
+    disclosureRow,
+    disclosureValue,
+    parseCompactValue,
+    parseDisclosureValue,
+    parseRouteValue,
+    readFailureNote,
+    routeRows,
+} from "./runtime-dropup-routes";
 import {
     EFFORT_OPTIONS,
     MODE_OPTIONS,
@@ -66,32 +76,44 @@ function runningModelRow(s: DropupState, a: DropupAgreement): Row {
         : { kind: "note", section: "model", text: "Running model: shown after the first reply", placeholder: true };
 }
 
+/** A row of the panel: drawn, and walked by the keys unless srv says it cannot be picked. */
+const adder = (rows: Row[], options: OptionRow[]) => (row: OptionRow) => {
+    rows.push({ kind: "option", ...row });
+    if (!row.disabled) options.push(row);
+};
+
 /**
- * The Model section: the harness's own models and, when srv offers routes for this harness, a Back row and a group
- * per route. A row srv says cannot be picked is greyed with its reason and kept out of keyboard navigation.
+ * The Model section: a Back row (when srv has one) and the harness's own models. The model routes are not here: they
+ * are the last rows of the panel (`addRoutesSection`), so the models and Effort stay one run.
  */
 function addModelSection(s: DropupState, rows: Row[], options: OptionRow[], selected: string) {
     const panel = s.routes.panel();
     const onRoute = s.routeModel() !== null || s.routes.onSavedRoute();
     rows.push({ kind: "header", section: "model" });
-    const add = (row: OptionRow) => {
-        rows.push({ kind: "option", ...row });
-        if (!row.disabled) options.push(row);
-    };
+    const add = adder(rows, options);
     const back = panel ? backRow(panel) : null;
     if (back) add(back);
-    if (panel && panel.routes.length > 0) rows.push({ kind: "group", section: "model", text: "Your plan", note: "the harness's own sign-in" });
     for (const o of s.modelOptions()) {
         add({ section: "model", value: o.value, label: o.label, description: o.description, current: !onRoute && selected === o.value });
     }
     if (!panel) {
         const why = s.routes.failure();
         if (why) rows.push({ kind: "note", section: "model", text: readFailureNote(why) });
-        return;
     }
+}
+
+/**
+ * The last rows of the panel, below Effort: one row per model route serving the harness, which opens the route's
+ * models in place. A model srv says cannot be picked is greyed with its reason and kept out of keyboard navigation.
+ */
+function addRoutesSection(s: DropupState, rows: Row[], options: OptionRow[]) {
+    const panel = s.routes.panel();
+    if (!panel) return;
+    const add = adder(rows, options);
     for (const { route, rows: routeModels } of routeRows(panel, s.props.contextTokens)) {
-        rows.push({ kind: "group", section: "model", text: route.label, note: route.key_present ? "billed to your key in the Vault" : "key missing" });
-        routeModels.forEach(add);
+        const expanded = s.routes.isExpanded(route.id);
+        add(disclosureRow(route, expanded));
+        if (expanded) routeModels.forEach(add);
     }
 }
 
@@ -137,12 +159,36 @@ export function buildRows(s: DropupState, a: DropupAgreement): { rows: Row[]; op
         ? effortLevels("codex", s.runningModel()).map((v) => ({ value: v, label: v }))
         : EFFORT_OPTIONS;
     addSection("effort", effortRows, s.runningEffort(), false, notUsed === null ? undefined : `Not applied — ${notUsed}`);
+    addRoutesSection(s, rows, options);
     return { rows, options };
+}
+
+/** Opening and closing a model route's models: from its row, or with the arrow keys. */
+function createRouteOpening(s: DropupState, build: () => { options: OptionRow[] }) {
+    // The keys stay on the route's row: its models come and go below it.
+    const setRouteOpen = (route: string, expanded: boolean) => {
+        s.routes.setExpanded(route, expanded);
+        const at = build().options.findIndex((o) => o.value === disclosureValue(route));
+        if (at >= 0) s.setSelectedOptIndex(at);
+    };
+
+    // Right opens the models of the route the keys are on (its row, or one of its models), Left closes them and
+    // goes back to its row. True when the key was used here.
+    const expandActive = (expand: boolean): boolean => {
+        const choice = build().options[s.selectedOptIndex()];
+        const route = choice && (parseDisclosureValue(choice.value) ?? parseRouteValue(choice.value)?.route ?? parseCompactValue(choice.value)?.route);
+        if (!route || s.routes.isExpanded(route) === expand) return !!route;
+        setRouteOpen(route, expand);
+        return true;
+    };
+
+    return { setRouteOpen, expandActive };
 }
 
 /** Moving the active row, applying it, and opening the panel. */
 export function createDropupActions(s: DropupState, a: DropupAgreement) {
     const build = () => buildRows(s, a);
+    const { setRouteOpen, expandActive } = createRouteOpening(s, build);
 
     const move = (delta: number) => {
         const { options } = build();
@@ -194,6 +240,12 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         const { options } = build();
         const choice = options[idx];
         if (!choice) return;
+        // A route's row opens or closes its models; it picks nothing, so no model changes.
+        const route = parseDisclosureValue(choice.value);
+        if (route) {
+            setRouteOpen(route, !s.routes.isExpanded(route));
+            return;
+        }
         if (choice.section === "mode") await s.updateRuntime({ permissionMode: choice.value as PermissionMode });
         else if (choice.section === "model") await pickModel(choice.value);
         else await s.updateRuntime({ effort: choice.value as EffortLevel });
@@ -204,6 +256,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
             s.setOpen(false);
             return;
         }
+        s.routes.collapseAll();
         const { options } = build();
         const idx = options.findIndex((o) => o.section === "mode" && o.current);
         s.setSelectedOptIndex(idx >= 0 ? idx : 0);
@@ -216,7 +269,7 @@ export function createDropupActions(s: DropupState, a: DropupAgreement) {
         s.setOpen(true);
     };
 
-    return { build, move, applySelection, toggleOpen };
+    return { build, move, applySelection, toggleOpen, expandActive };
 }
 
 export type DropupActions = ReturnType<typeof createDropupActions>;
