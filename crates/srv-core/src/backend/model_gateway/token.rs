@@ -67,18 +67,25 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     token
 }
 
-/// A new token for the key route, for a container turn: the agent's earlier one stops working at once, and the new one is
-/// accepted only from `peer` when there is one. A container's token is made at the start of each turn and ends with the
-/// container ([`revoke_agent`]).
+/// The key route's token for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
+/// working at once unless it already holds exactly this grant (the same agent, account and address): two panes of one
+/// container agent run turns that overlap, and the second must not end the token the first is running on. A container's
+/// token ends with the container ([`revoke_agent`]), so a recreated container, a new address or another account is always
+/// given a new one.
 pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, peer: Option<IpAddr>) -> String {
     let mut reg = registry().lock().unwrap();
     let key = (def_id.to_string(), route.to_string());
-    if let Some(old) = reg.by_agent.remove(&key) {
+    let grant = Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string(), peer };
+    if let Some(old) = reg.by_agent.get(&key).cloned() {
+        if reg.by_digest.get(&digest(&old)) == Some(&grant) {
+            return old;
+        }
+        reg.by_agent.remove(&key);
         reg.by_digest.remove(&digest(&old));
     }
     let token = mint();
     reg.by_agent.insert(key, token.clone());
-    reg.by_digest.insert(digest(&token), Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string(), peer });
+    reg.by_digest.insert(digest(&token), grant);
     token
 }
 
@@ -143,6 +150,24 @@ mod tests {
         assert_eq!(token_for_account("tk-agent", "tk-def", "anthropic", "acct"), second);
         assert_eq!(grant_for(&second).unwrap().peer, Some(ip));
         revoke("tk-def", "anthropic");
+    }
+
+    #[test]
+    fn a_turn_that_overlaps_another_on_the_same_grant_keeps_its_token_and_any_change_ends_it() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let other: IpAddr = "172_30_0_10".replace('_', ".").parse().unwrap();
+        let first = renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(ip));
+        // A second pane's turn on the same container: the first turn's token keeps working.
+        assert_eq!(renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(ip)), first);
+        assert!(grant_for(&first).is_some());
+        // A new address (the container was made again) or another account is given a new token and the old one ends.
+        let moved = renew_for_account("ov-agent", "ov-def", "anthropic", "acct", Some(other));
+        assert_ne!(moved, first);
+        assert_eq!(grant_for(&first), None);
+        let switched = renew_for_account("ov-agent", "ov-def", "anthropic", "acct-2", Some(other));
+        assert_ne!(switched, moved);
+        assert_eq!(grant_for(&moved), None);
+        revoke("ov-def", "anthropic");
     }
 
     #[test]

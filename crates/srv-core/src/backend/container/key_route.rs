@@ -3,8 +3,9 @@
 
 //! A container turn on an API-key account (`model_gateway::catalog::KEY_ROUTE_ID`). The key stays in the keychain and the
 //! container is given only the gateway's address and a token for that one agent and account. At the start of each turn
-//! this module makes that token fresh (the earlier one ends) and, on Linux, binds it to the container's own address on
-//! the agents network, so the container listener accepts it from that container and no other
+//! this module makes that token current (a changed address or account, or a container made again, gets a new one and the
+//! earlier ends; a turn that overlaps another on the same grant shares its token) and, on Linux, binds it to the
+//! container's own address on the agents network, so the container listener accepts it from that container and no other
 //! ([`listener::check_gateway`](super::listener::check_gateway)). Where the container reaches srv through Docker's own
 //! forwarding (Docker Desktop on macOS and Windows) there is no address to bind: the token holds for this machine.
 
@@ -66,7 +67,7 @@ pub(crate) fn claim(env: &[(String, String)]) -> Result<Option<Claim>, Container
     }
 }
 
-/// Makes the turn's key-route token fresh and bound, in place in `env`. Called once the container is up (the listener is bound
+/// Makes the turn's key-route token current and bound, in place in `env`. Called once the container is up (the listener is bound
 /// by then) and before the exec starts.
 pub(crate) async fn bind(cm: &ContainerManager, container_name: &str, env: &mut [(String, String)], claim: &Claim) -> Result<(), ContainerError> {
     let linux = cfg!(target_os = "linux");
@@ -153,14 +154,14 @@ mod tests {
     /// taken before the container was readied, holds when readying it ended the spawn's token.
     #[tokio::test]
     async fn a_key_route_turn_gets_a_fresh_token_or_the_way_out_even_when_readying_the_container_ended_the_spawns() {
-        let first = token::renew_for_account("kb-slug", "kb-def", KEY_ROUTE_ID, "kb-acct", None);
+        let first = token::renew_for_account("kr-slug", "kr-def", KEY_ROUTE_ID, "kr-acct", None);
         let mut env = env_for(KEY_ROUTE_ID);
         env[1].1 = first.clone();
         let taken = claim(&env).unwrap().expect("a key-route turn");
         // The container is recreated while it is readied: that ends the token the spawn made.
-        revoke_container_tokens("agentmux-kb-def");
+        revoke_container_tokens("agentmux-kr-def");
         assert_eq!(token::grant_for(&first), None);
-        let result = bind(&manager(), "agentmux-kb-def", &mut env, &taken).await;
+        let result = bind(&manager(), "agentmux-kr-def", &mut env, &taken).await;
         if cfg!(target_os = "linux") {
             assert!(matches!(&result, Err(ContainerError::KeyRoute(why)) if why == NO_PATH), "{result:?}");
             assert_eq!(env[1].1, first, "a refused turn is given no new token");
@@ -169,8 +170,8 @@ mod tests {
             result.unwrap();
             assert_ne!(env[1].1, first, "each turn has a token of its own");
             let grant = token::grant_for(&env[1].1).unwrap();
-            assert_eq!((grant.agent.as_str(), grant.def_id.as_str(), grant.account.as_str(), grant.peer), ("kb-slug", "kb-def", "kb-acct", None));
+            assert_eq!((grant.agent.as_str(), grant.def_id.as_str(), grant.account.as_str(), grant.peer), ("kr-slug", "kr-def", "kr-acct", None));
         }
-        token::revoke("kb-def", KEY_ROUTE_ID);
+        token::revoke("kr-def", KEY_ROUTE_ID);
     }
 }
