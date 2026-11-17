@@ -170,12 +170,14 @@ $browser-nav-stack-below: 388px;
 }
 
 // A profile's badge (18px) is wider than the menu's 14px icon slot: give it
-// its own width so it doesn't run into the name.
+// its own width so it doesn't run into the name. The slot mutes a glyph icon to 70%; a badge is the
+// profile's own colour and is drawn at full strength, as in Settings.
 .menu-item-icon:has(> .browser-profile-badge) {
     width: auto;
     min-width: 14px;
     display: flex;
     align-items: center;
+    opacity: 1;
 }
 
 .browser-profile-sub {
