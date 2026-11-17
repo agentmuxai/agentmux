@@ -50,6 +50,7 @@ import { workingFromPhase, type CompactionState, type TurnPhase } from "@/app/st
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createPaneFlushQueue } from "./stream-flush-rate";
+import { createRekeyAccepted } from "./rekey-accepted";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
@@ -278,20 +279,17 @@ export function useAgentStream({
             addNodeId,
         });
 
-        // Promotes accepted pending messages into user_message document nodes. A sent message's row
-        // shows at once under a client id; when its record is placed, the row takes the id history
-        // gives that record, so a reload finds the same row (collapsed state, a scroll anchor).
-        // Retried a few frames while the row still waits in the flush queue.
-        const rekeyAccepted = (id: string, record: string, at: { gen: string; line: number }, tries = 0): void => {
-            const replayed = parseHistoryLines([record], outputFormat, agentName, undefined, { idFirstLine: at.line, idGen: at.gen })
-                .nodes.find((n) => n.type === "user_message");
-            if (!replayed || replayed.id === id) return;
-            const events = batch(() => model.dispatchDoc({ type: "RekeyNode", from: id, to: replayed.id }));
-            if (events.length > 0) addNodeId(replayed.id);
-            else if (tries < 5 && queue.pendingNewNodes().some((n) => n.id === id)) {
-                requestAnimationFrame(() => rekeyAccepted(id, record, at, tries + 1));
-            }
-        };
+        // Promotes accepted pending messages into user_message document nodes (rekey-accepted.ts).
+        const rekeyAccepted = createRekeyAccepted({
+            recordId: (record, at) =>
+                parseHistoryLines([record], outputFormat, agentName, undefined, { idFirstLine: at.line, idGen: at.gen })
+                    .nodes.find((n) => n.type === "user_message")?.id,
+            rekey: (from, to) => batch(() => model.dispatchDoc({ type: "RekeyNode", from, to })).length > 0,
+            isQueued: (id) => queue.pendingNewNodes().some((n) => n.id === id),
+            onRekeyed: addNodeId,
+            nextFrame: (run) => requestAnimationFrame(run),
+            now: () => Date.now(),
+        });
         const echoLedger = new EchoLedger(rekeyAccepted);
         usePendingMessageAcceptance({
             blockId,
