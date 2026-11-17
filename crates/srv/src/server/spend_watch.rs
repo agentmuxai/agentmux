@@ -114,7 +114,7 @@ pub(super) fn spends_through_gateway(state: &AppState, def_id: &str) -> bool {
 
 /// A Claude agent linked to an Anthropic key: the gateway carries its requests. An agent of another provider that holds
 /// such a link sends its own requests to the vendor, where nothing is counted or capped.
-fn on_a_key(mstore: &crate::backend::storage::store::Store, identity_store: &crate::backend::storage::store::Store, def_id: &str) -> bool {
+pub(crate) fn on_a_key(mstore: &crate::backend::storage::store::Store, identity_store: &crate::backend::storage::store::Store, def_id: &str) -> bool {
     let claude = mstore.agent_def_get(def_id).ok().flatten().is_some_and(|d| crate::backend::providers::resolve_provider_alias(&mstore.resolve_effective_provider_id(&d)) == "claude");
     claude && identity_store.agent_identity_list_for_agent(def_id).is_ok_and(|links| links.iter().any(|l| l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)))
 }
