@@ -18,6 +18,16 @@ export interface OpenPosition {
     page?: number;
 }
 
+/** A new pane's meta: where its initial `file` opens (pane.open's `offset`, `page`), cleared once used. */
+export const META_OFFSET = "editor:offset";
+export const META_PAGE = "editor:page";
+export const POSITION_META_CLEARED = { [META_OFFSET]: null, [META_PAGE]: null };
+
+/** The offset and page a new pane's meta asks its initial file to open at. */
+export function readPositionMeta(meta: Record<string, unknown> | undefined): OpenPosition {
+    return { offset: whole(meta?.[META_OFFSET], 0), page: whole(meta?.[META_PAGE], 1) };
+}
+
 /** How long a request waits for its viewer. */
 export const OPEN_POSITION_TTL_MS = 60_000;
 

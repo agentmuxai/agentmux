@@ -353,6 +353,9 @@ export class CodeMirrorSession {
                 ],
             });
             setLiveDoc(saved.doc.toString()); // seed preview from restored doc
+            // Opened at a line while it sat in the background (pane.open's `line`): the saved caret yields, once.
+            const openAt = model.takeOpenAtLine(path);
+            if (openAt) cm.view.dispatch(cursorAtLine(cm.view.state, openAt));
             // Renamed while it was in the background: its saved state has the old language.
             void this.applyLanguage(activeId, lang);
             // Re-wire LSP for the now-active file's content.

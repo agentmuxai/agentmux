@@ -364,6 +364,18 @@ function toolbarKeyHandler(o: { focusOffsetBox: () => void; openFind: () => void
     };
 }
 
+/** Opened at a byte (pane.open's `offset`): once the file's size is known, the cursor goes there and it is scrolled into
+ *  view. Runs again for a request that arrives while this viewer already shows the file. */
+function useOpenOffset(props: HexViewerProps, size: Accessor<number>, sel: HexSelection): void {
+    createEffect(() => {
+        watchOpenPosition();
+        const total = size();
+        if (!total || !props.blockId || !props.path) return;
+        const at = takeOpenPosition(props.blockId, props.path, "offset");
+        if (at !== undefined) untrack(() => sel.goTo(Math.min(at, total - 1)));
+    });
+}
+
 export function createHexViewer(props: HexViewerProps) {
     const was = remembered.get(props.memoryKey);
     const source = createHexSource(props);
@@ -388,15 +400,7 @@ export function createHexViewer(props: HexViewerProps) {
     onMount(() => {
         if (was && size() > 0) scroll.showRow(was.first);
     });
-    // Opened at a byte (pane.open's `offset`): once the file's size is known, the cursor goes there and it is scrolled
-    // into view. Runs again for a request that arrives while this viewer already shows the file. After the restore above.
-    createEffect(() => {
-        watchOpenPosition();
-        const total = size();
-        if (!total || !props.blockId || !props.path) return;
-        const at = takeOpenPosition(props.blockId, props.path, "offset");
-        if (at !== undefined) untrack(() => sel.goTo(Math.min(at, total - 1)));
-    });
+    useOpenOffset(props, size, sel); // after the restore above
     onCleanup(() =>
         remember(props.memoryKey, {
             first: scroll.first(),
