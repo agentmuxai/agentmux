@@ -56,6 +56,7 @@ mod model_gateway_handlers;
 mod model_gateway_key;
 pub(crate) mod compact_backstop;
 pub(crate) mod spend_watch;
+pub(crate) mod startup_refresh;
 mod container_tool_chunk;
 mod container_compaction_started;
 pub(crate) mod jekt_held;

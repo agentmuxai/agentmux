@@ -507,7 +507,7 @@ fn a_big_personal_memory_is_listed_newest_first_and_every_file_is_in_the_index()
         write(&format!("m{i}.md"), &format!("2026-10-1{i}T00:00:00.000Z"), 8_000);
     }
     write("zzz-newest.md", "2026-10-28T00:00:00.000Z", 2_000);
-    let fitted = fit::fit(personal_entries_in(dir.path()), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, 0, true, &|_| Some(3));
+    let fitted = fit::fit(personal_entries_in(dir.path()), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, 0, true, &|_| Some(NOW - 3 * DAY), NOW);
     assert!(fitted.kept.is_empty() && fitted.skipped.is_empty(), "no bodies ride: the index carries them all");
     assert_eq!(fitted.indexed.len(), 12, "every file is listed");
     assert_eq!(fitted.indexed[0].name, "zzz-newest.md", "sorted by modified, not by name");
@@ -518,6 +518,30 @@ fn a_big_personal_memory_is_listed_newest_first_and_every_file_is_in_the_index()
     assert_eq!((big.delivered, big.kind), ("indexed", "personal_memory"));
     assert!(big.size_bytes > 0 && big.size_bytes < 400, "sized by its index line, not 0 B and not its body: {}", big.size_bytes);
     assert!(big.source_size_bytes > 50_000, "the whole file's size survives, for the size band");
+}
+
+const DAY: i64 = 86_400_000;
+
+#[test]
+fn a_file_with_no_line_in_an_overflowing_index_is_shown_as_not_listed_and_never_as_indexed() {
+    let entries: Vec<Entry> = (0..1_000)
+        .map(|i| Entry {
+            label: format!("{i:04}"),
+            tier: Tier::Personal,
+            text: "---\ndescription: d\nmetadata:\n  type: project\n---\nx".to_string(),
+            name: format!("{}-{i:04}.md", "n".repeat(77)),
+            system: false,
+            bundle_id: None,
+            path: None,
+        })
+        .collect();
+    let fitted = fit::fit(entries, delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, 0, false, &|_| None, NOW);
+    let rows = indexed_items(&fitted, false);
+    assert_eq!(rows.len(), 1_000, "every file has a row");
+    let (listed, unlisted): (Vec<_>, Vec<_>) = rows.iter().partition(|r| r.delivered == "indexed");
+    assert!(!listed.is_empty() && !unlisted.is_empty(), "{} listed, {} not", listed.len(), unlisted.len());
+    assert!(unlisted.iter().all(|r| r.delivered == "omitted" && r.reason.as_deref().is_some_and(|w| w.contains("action list, scope personal"))));
+    assert!(listed.iter().all(|r| r.size_bytes > 0), "a listed file is sized by its line");
 }
 
 #[test]
@@ -533,7 +557,7 @@ fn the_notes_at_the_end_never_push_the_reserved_summary_out_of_the_parts() {
     entries.push(Entry { label: "big.md".into(), tier: Tier::Personal, text: format!("---\nmetadata:\n  type: project\n---\n{}", "x".repeat(20_000)), name: "big.md".into(), system: false, bundle_id: None, path: None });
     let summary = "S".repeat(1_000);
     let (fitted, composed, parts, delivered_chars) =
-        fit_and_compose(entries, Some(&summary), Reason::Compact, delivery::StartupCarry::None, false, &|_| Some(30)).unwrap();
+        fit_and_compose(entries, Some(&summary), Reason::Compact, delivery::StartupCarry::None, false, &|_| Some(NOW - 30 * DAY), NOW).unwrap();
     assert_eq!(delivered_chars, composed.text.chars().count(), "nothing is cut");
     assert!(parts.join("").contains(&summary), "the summary is in the parts");
     assert!(composed.text.contains("Your Personal Memory is"), "the nudge rides along");

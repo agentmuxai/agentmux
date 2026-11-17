@@ -266,6 +266,40 @@ fn raw_headers_say_cut_when_a_header_a_name_or_a_value_went_missing() {
     assert_eq!(raw_headers(&msg(&[(&"N".repeat(RAW_NAME_CHARS + 1), "v")]), &mut budget)["cut"], true, "a name cut short");
 }
 
+/// Sixteen headers whose text (lines joined, the last line break dropped) is `total` characters.
+fn headers_of_text_length(total: usize) -> Value {
+    let mut pairs: Vec<(String, String)> = (0..15).map(|i| (format!("X-{i:02}"), "v".repeat(1_000))).collect();
+    // The 15 lines are 15 * 1007 characters with their breaks; the last line is "X-15: " and its value.
+    pairs.push(("X-15".to_string(), "v".repeat(total - 15 * 1_007 - 6)));
+    let refs: Vec<(&str, &str)> = pairs.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect();
+    msg(&refs)
+}
+
+#[test]
+fn raw_headers_say_cut_when_the_text_is_exactly_one_character_over_the_room() {
+    let exact = headers_of_text_length(RAW_HEADER_CHARS);
+    let mut budget = RAW_THREAD_CHARS;
+    let raw = raw_headers(&exact, &mut budget);
+    assert_eq!(raw["cut"], false, "exactly the room is not a cut");
+    assert_eq!(raw["text"].as_str().unwrap().chars().count(), RAW_HEADER_CHARS);
+
+    // One over: the ellipsis makes the shown text as long as the original, so its length can't tell.
+    let over = headers_of_text_length(RAW_HEADER_CHARS + 1);
+    let mut budget = RAW_THREAD_CHARS;
+    let raw = raw_headers(&over, &mut budget);
+    assert_eq!(raw["cut"], true, "one character over the room is a cut");
+    assert_eq!(raw["text"].as_str().unwrap().chars().count(), RAW_HEADER_CHARS + 1);
+    assert!(raw["text"].as_str().unwrap().ends_with('…'));
+
+    // The same when the thread's budget, not the per-message room, is what is nearly spent.
+    let mut left = RAW_HEADER_CHARS;
+    assert_eq!(raw_headers(&exact, &mut left)["cut"], false);
+    let mut left = RAW_HEADER_CHARS;
+    assert_eq!(raw_headers(&over, &mut left)["cut"], true);
+    let mut left = RAW_HEADER_CHARS - 1;
+    assert_eq!(raw_headers(&exact, &mut left)["cut"], true, "one character over a budget of room - 1");
+}
+
 #[test]
 fn raw_headers_are_cut_per_message_and_per_thread() {
     let many: Vec<(String, String)> = (0..200).map(|i| (format!("X-{i}"), "v".repeat(500))).collect();

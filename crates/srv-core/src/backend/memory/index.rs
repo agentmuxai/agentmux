@@ -4,10 +4,11 @@
 //! Personal Memory as an index: one line per file, so the agent knows what it has and opens a file when it
 //! applies (docs/specs/SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md §3.2, §3.3).
 //!
-//! The index is complete by construction: every file appears once, in the index or, when marked `deliver:
-//! always` and within the limit, in full. A long index shortens its descriptions, then drops them; it never
-//! drops a file. It goes first in a delivery and stays under [`INDEX_BUDGET_CHARS`], so it sits whole in
-//! the first part whatever order the parts arrive in.
+//! Every file appears once, in the index or, when marked `deliver: always` and within the limit, in full. A long
+//! index shortens its descriptions, then drops them. Past about a thousand files even the names do not fit: the index
+//! then lists as many as fit and says how many more there are and how to list them, and the pane shows those files as
+//! not listed. It goes first in a delivery and stays under [`INDEX_BUDGET_CHARS`], so it sits whole in the first
+//! part whatever order the parts arrive in.
 
 use super::delivery::Entry;
 use super::fit::frontmatter_value;
@@ -76,17 +77,52 @@ fn line(e: &Entry, over_limit: bool, desc_chars: usize) -> String {
     out
 }
 
-/// The index's lines at the longest description that fits [`INDEX_BUDGET_CHARS`], as `(entry name, line)`.
-pub fn lines(plan: &IndexPlan) -> Vec<(String, String)> {
+/// What the index shows of its files.
+pub struct Listing {
+    /// `(entry name, line)` for each file listed, in the order given.
+    pub lines: Vec<(String, String)>,
+    /// How many files came after the last one that fit, with no line of their own.
+    pub unlisted: usize,
+}
+
+fn lines_len(lines: &[(String, String)]) -> usize {
+    lines.iter().map(|(_, l)| l.chars().count() + 1).sum()
+}
+
+/// The note that stands for the files that did not fit.
+fn unlisted_line(n: usize) -> String {
+    let noun = if n == 1 { "file is" } else { "files are" };
+    format!("- … {n} more {noun} not listed here (too many for the index). List them with the Memory tool (action list, scope personal).")
+}
+
+/// The index's lines at the longest description that fits [`INDEX_BUDGET_CHARS`]. When even the names do not fit
+/// (about a thousand files), as many files as fit are listed, in the order given, and the rest are counted in a line
+/// that says how to list them; the delivery and the pane both say so, so no file reads as listed that was not.
+pub fn listing(plan: &IndexPlan) -> Listing {
+    let mut lines = Vec::new();
     for chars in DESCRIPTION_CHARS {
-        let lines: Vec<(String, String)> =
-            plan.files.iter().map(|e| (e.name.clone(), line(e, plan.over_limit.contains(&e.name), chars))).collect();
-        let total: usize = lines.iter().map(|(_, l)| l.chars().count() + 1).sum();
-        if total <= INDEX_BUDGET_CHARS || chars == 0 {
-            return lines;
+        lines = plan.files.iter().map(|e| (e.name.clone(), line(e, plan.over_limit.contains(&e.name), chars))).collect();
+        if lines_len(&lines) <= INDEX_BUDGET_CHARS {
+            return Listing { lines, unlisted: 0 };
         }
     }
-    Vec::new()
+    let room = INDEX_BUDGET_CHARS - unlisted_line(plan.files.len()).chars().count() - 1;
+    let mut used = 0;
+    let fits = lines
+        .iter()
+        .take_while(|(_, l)| {
+            used += l.chars().count() + 1;
+            used <= room
+        })
+        .count();
+    let unlisted = lines.len() - fits;
+    lines.truncate(fits);
+    Listing { lines, unlisted }
+}
+
+/// [`listing`]'s lines.
+pub fn lines(plan: &IndexPlan) -> Vec<(String, String)> {
+    listing(plan).lines
 }
 
 /// The folder the index files live in, when they share one.
@@ -120,8 +156,13 @@ pub fn render(plan: &IndexPlan) -> Option<String> {
         let noun = if plan.always == 1 { "file is" } else { "files are" };
         out.push_str(&format!("{} more {noun} marked always and follow in full.\n", plan.always));
     }
-    for (_, l) in lines(plan) {
-        out.push_str(&l);
+    let listing = listing(plan);
+    for (_, l) in &listing.lines {
+        out.push_str(l);
+        out.push('\n');
+    }
+    if listing.unlisted > 0 {
+        out.push_str(&unlisted_line(listing.unlisted));
         out.push('\n');
     }
     Some(out)
@@ -174,14 +215,38 @@ mod tests {
                 assert_eq!(n, 0);
                 continue;
             };
-            for f in &files {
-                assert_eq!(text.matches(&format!("- {} ", f.name)).count(), 1, "{} listed once at n={n}", f.name);
+            let listing = listing(&plan);
+            assert_eq!(listing.lines.len() + listing.unlisted, n, "every file is listed or counted at n={n}");
+            for (name, _) in &listing.lines {
+                assert_eq!(text.matches(&format!("- {name} ")).count(), 1, "{name} listed once at n={n}");
             }
-            let body: usize = lines(&plan).iter().map(|(_, l)| l.chars().count() + 1).sum();
+            assert!(lines_len(&listing.lines) <= INDEX_BUDGET_CHARS, "n={n}");
             if n <= 120 {
-                assert!(body <= INDEX_BUDGET_CHARS, "n={n}: {body}");
+                assert_eq!(listing.unlisted, 0, "n={n}");
             }
         }
+    }
+
+    #[test]
+    fn a_thousand_long_names_are_cut_at_the_budget_and_the_rest_is_counted() {
+        let files: Vec<Entry> = (0..1_000).map(|i| file(&format!("{}-{i:04}.md", "n".repeat(77)), &doc("x", "project", "d"))).collect();
+        assert!(files[0].name.chars().count() >= 83);
+        let plan = IndexPlan { files: &files, over_limit: &[], always: 0, tool_only: false };
+        let listing = listing(&plan);
+        assert!(listing.unlisted > 0 && listing.lines.len() + listing.unlisted == 1_000, "{} listed, {} not", listing.lines.len(), listing.unlisted);
+        assert_eq!(listing.lines[0].0, files[0].name, "the files given first are the ones listed");
+        let text = render(&plan).unwrap();
+        let body = text.split_once("\n- ").map_or(0, |(_, rest)| rest.chars().count());
+        assert!(body <= INDEX_BUDGET_CHARS, "the lines stay inside the budget: {body}");
+        assert!(text.contains(&format!("{} more files are not listed here", listing.unlisted)), "{}", &text[text.len().saturating_sub(300)..]);
+        assert!(text.contains("action list, scope personal"));
+    }
+
+    #[test]
+    fn an_index_that_fits_lists_every_file_and_counts_none_as_unlisted() {
+        let files: Vec<Entry> = (0..150).map(|i| file(&format!("memory-file-number-{i:03}.md"), &doc("x", "project", &"words ".repeat(30)))).collect();
+        let listing = listing(&IndexPlan { files: &files, over_limit: &[], always: 0, tool_only: false });
+        assert_eq!((listing.lines.len(), listing.unlisted), (150, 0));
     }
 
     #[test]
