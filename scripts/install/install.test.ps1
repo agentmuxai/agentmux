@@ -250,9 +250,10 @@ if (-not $canSign) {
             & openssl pkeyutl -sign -inkey $priv -rawin -in $envPath -out $sigBin 2>$null
             [IO.File]::WriteAllText((Join-Path $Dir "AgentMux-$hver-envelope.json.sig"), ("t1 " + [Convert]::ToBase64String([IO.File]::ReadAllBytes($sigBin)) + "`n"), $utf8)
         }
-        $goodZip = Join-Path $work "good-headless.zip"
+        # The production package: made by scripts/package-server.sh and scripts/zip-deterministic.mjs (one top folder with explicit folder
+        # entries, bin\ with the five programs, web\ with assets, VERSION), as the release carries it.
+        $goodZip = Join-Path $here "fixtures\agentmux-headless-$hver-windows-x64.zip"
         $topName = "agentmux-headless-$hver-windows-x64"
-        New-HeadlessZip $goodZip @("$topName\bin\agentmux.exe", "$topName\bin\agentmux-srv.exe", "$topName\bin\agentmux-bashwrap.exe", "$topName\web\index.html", "$topName\VERSION") ""
         $flatZip = Join-Path $work "flat-headless.zip"
         New-HeadlessZip $flatZip @("bin\agentmux.exe", "bin\agentmux-srv.exe", "web\index.html") ""
         $hrel = Join-Path $work "hrel-$sh"
@@ -369,17 +370,37 @@ if (-not $canSign) {
             } else { Write-Host "skip - ssh-keygen here could not make a key; the SSH signature checks are not run" }
         } else { Write-Host "skip - no ssh-keygen on this system; the SSH signature checks are not run" }
 
-        # No OpenSSL 3: the SSH signature, or the plain refusal below the floor
+        # No OpenSSL 3 and no usable ssh-keygen: Headless is never installed from hashes alone, and says what to do.
         $noSsl = HeadlessEnv $hrel (Join-Path $work "lad8-$sh"); $noSsl["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $noSsl["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen")
-        # Said before anything is linked, so it can be read on any platform whatever happens after the download.
-        $r = Invoke-Install $sh $noSsl $hargs
-        if ($r.Out.Contains("signature NOT checked") -and $r.Out.Contains("what is checked instead")) { Pass "no OpenSSL and no ssh-keygen: the hashes only, said plainly" } else { Fail "no OpenSSL and no ssh-keygen: the hashes only, said plainly" $r.Out }
-        Expect "no OpenSSL and no ssh-keygen: -RequireSignature refuses" 1 "cannot be checked here" $sh $noSsl ($hargs + "-RequireSignature")
-        $belowFloor = $noSsl.Clone(); $belowFloor["AGENTMUX_INSTALL_SSHSIG_FLOOR"] = "99.0.0"
-        $fakeKeygen = Join-Path $work "fake-ssh-keygen.cmd"
-        [IO.File]::WriteAllText($fakeKeygen, "@echo off`r`nexit /b 0`r`n")
-        $belowFloor["AGENTMUX_INSTALL_SSH_KEYGEN"] = $fakeKeygen
-        if ($isWin) { Expect "a release below the SSH signature floor says so" 1 "is older than" $sh $belowFloor ($hargs + "-RequireSignature") }
+        Expect "no OpenSSL and no ssh-keygen: Headless is refused, never installed from hashes alone" 1 "not installed from hashes alone" $sh $noSsl $hargs
+        Expect "that says what to do: the OpenSSH client or OpenSSL 3" 1 "OpenSSH client" $sh $noSsl $hargs
+        if (-not (Test-Path (Join-Path $work "lad8-$sh\AgentMux\Headless\$hver"))) { Pass "no OpenSSL and no ssh-keygen: nothing was unpacked" } else { Fail "no OpenSSL and no ssh-keygen: nothing was unpacked" "a version folder exists" }
+        # The desktop installer path keeps its hashes-only fallback, said plainly (and -RequireSignature still refuses it).
+        $noSslDesktop = Run-Release $sh $good $testKeys; $noSslDesktop["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $noSslDesktop["AGENTMUX_INSTALL_SSH_KEYGEN"] = (Join-Path $work "no-such-ssh-keygen")
+        $r = Invoke-Install $sh $noSslDesktop $dl
+        if ($r.Code -eq 0 -and $r.Out.Contains("signature NOT checked") -and $r.Out.Contains("what is checked instead")) { Pass "desktop installer, no OpenSSL and no ssh-keygen: the hashes only, said plainly" } else { Fail "desktop installer, no OpenSSL and no ssh-keygen: the hashes only, said plainly" $r.Out }
+        Expect "desktop installer: -RequireSignature refuses when nothing can check" 1 "cannot be checked here" $sh $noSslDesktop ($dl + "-RequireSignature")
+
+        # Headless below the floor: nothing to install, with a dry run too
+        $floorEnv = HeadlessEnv $hrel (Join-Path $work "lad13-$sh")
+        Expect "Headless below the floor: refused" 1 "is in releases from 0.60.31 on" $sh $floorEnv @("-Headless", "-Version", "0.60.30")
+        Expect "Headless below the floor: refused in a dry run too" 1 "is in releases from 0.60.31 on" $sh $floorEnv @("-Headless", "-Version", "0.60.30", "-DryRun")
+        Expect "Headless at the floor: goes ahead (dry run)" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $floorEnv @("-Headless", "-Version", "0.60.31", "-DryRun")
+
+        # A "latest" below the floor is not the latest: refused, on both paths; at or above, it is used
+        $latestOld = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; AGENTMUX_INSTALL_LATEST = "0.60.30"; LOCALAPPDATA = (Join-Path $work "lad14-$sh") }
+        Expect "latest below the floor: the desktop path is refused" 1 "is older than 0.60.31" $sh $latestOld @("-Method", "download", "-DryRun")
+        Expect "latest below the floor: Headless is refused" 1 "is older than 0.60.31" $sh $latestOld @("-Headless", "-DryRun")
+        $latestOk = $latestOld.Clone(); $latestOk["AGENTMUX_INSTALL_LATEST"] = "0.60.31"
+        Expect "latest at the floor: the desktop path uses it" 0 "AgentMux-0.60.31-x64-setup.exe" $sh $latestOk @("-Method", "download", "-DryRun")
+        Expect "latest at the floor: Headless uses it" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $latestOk @("-Headless", "-DryRun")
+        Expect "an older release is still installable with -Version (the desktop path)" 0 "AgentMux-0.60.14-x64-setup.exe" $sh $latestOld @("-Method", "download", "-DryRun", "-Version", "0.60.14")
+
+        # A setting that changes what is checked is named before anything is downloaded (its name, never its value)
+        $named = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; AGENTMUX_INSTALL_TEST_KEYS = "t1:SECRETVALUE123"; AGENTMUX_INSTALL_SSHSIG_FLOOR = "0.0.1"; LOCALAPPDATA = (Join-Path $work "lad15-$sh") }
+        Expect "overrides are named in one line" 0 "warning: AGENTMUX_INSTALL_TEST_KEYS, AGENTMUX_INSTALL_SSHSIG_FLOOR change" $sh $named @("-Headless", "-DryRun", "-Version", "0.60.31")
+        Expect-Absent "an override's value is never printed" "SECRETVALUE123" $sh $named @("-Headless", "-DryRun", "-Version", "0.60.31")
+        Expect-Absent "no override, no warning" "warning:" $sh @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; LOCALAPPDATA = (Join-Path $work "lad16-$sh") } @("-Headless", "-DryRun", "-Version", "0.60.31")
     }
 }
 

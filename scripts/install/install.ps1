@@ -74,7 +74,7 @@ Usage: install.ps1 [options]
   -Help                 this text
 
 Environment: AGENTMUX_INSTALL_INSTALLED, AGENTMUX_INSTALL_WINGET, AGENTMUX_INSTALL_TEST_KEYS and
-AGENTMUX_INSTALL_RELEASE_BASE, AGENTMUX_INSTALL_SSH_KEYGEN, AGENTMUX_INSTALL_SSHSIG_FLOOR, AGENTMUX_INSTALL_NO_OPENSSL, AGENTMUX_INSTALL_NO_PATH and AGENTMUX_INSTALL_WINGET_EXE replace what it looks at or runs, and AGENTMUX_INSTALL_NO_RUN_SETUP stops
+AGENTMUX_INSTALL_RELEASE_BASE, AGENTMUX_INSTALL_SSH_KEYGEN, AGENTMUX_INSTALL_SSHSIG_FLOOR, AGENTMUX_INSTALL_NO_OPENSSL, AGENTMUX_INSTALL_LATEST, AGENTMUX_INSTALL_NO_PATH and AGENTMUX_INSTALL_WINGET_EXE replace what it looks at or runs, and AGENTMUX_INSTALL_NO_RUN_SETUP stops
 short of running the installer (used by its tests).
 "@
         return
@@ -92,6 +92,11 @@ short of running the installer (used by its tests).
     if ($DryRun) { $modeText = ", dry run" }
     Say "agentmux-install $ScriptVersion`: windows $arch$modeText"
     if ($arch -eq "ARM64") { Say "note: there is no native arm64 build; the x64 build runs under Windows' emulation" }
+
+    # A setting that replaces the keys, the floor, the place a release is downloaded from, the tool that checks a signature or the latest version
+    # is for tests: when one is set, it is said before anything is downloaded (its name, never its value).
+    $overridden = @("AGENTMUX_INSTALL_TEST_KEYS", "AGENTMUX_INSTALL_SSHSIG_FLOOR", "AGENTMUX_INSTALL_RELEASE_BASE", "AGENTMUX_INSTALL_SSH_KEYGEN", "AGENTMUX_INSTALL_NO_OPENSSL", "AGENTMUX_INSTALL_LATEST") | Where-Object { [Environment]::GetEnvironmentVariable($_) }
+    if ($overridden) { Say "warning: $($overridden -join ', ') changes what this script checks or where it downloads from (a setting for tests). Unset it to install as released" }
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
 
@@ -149,18 +154,25 @@ short of running the installer (used by its tests).
         return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     }
 
-    # The latest release's version, from where /releases/latest redirects to.
+    # The latest release's version, from where /releases/latest redirects to. This script ships with a release at or above the SSH
+    # signature floor, so a "latest" below it is not the latest: it is refused, on both paths. An older release is given with -Version.
     function Get-LatestVersion {
-        try {
-            $req = [Net.HttpWebRequest]::Create("$Releases/latest")
-            $req.AllowAutoRedirect = $false
-            $req.Method = "HEAD"
-            $resp = $req.GetResponse()
-            $loc = $resp.Headers["Location"]
-            $resp.Close()
-        } catch { Die "could not look up the latest release" }
-        $v = "$loc" -replace '^.*/v', ''
-        if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "the latest release's address ($loc) is not a version" }
+        if ($env:AGENTMUX_INSTALL_LATEST) { $v = $env:AGENTMUX_INSTALL_LATEST }
+        else {
+            try {
+                $req = [Net.HttpWebRequest]::Create("$Releases/latest")
+                $req.AllowAutoRedirect = $false
+                $req.Method = "HEAD"
+                $resp = $req.GetResponse()
+                $loc = $resp.Headers["Location"]
+                $resp.Close()
+            } catch { Die "could not look up the latest release" }
+            $v = "$loc" -replace '^.*/v', ''
+            if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "the latest release's address ($loc) is not a version" }
+        }
+        if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$') { Die "the latest version ($v) is not a version" }
+        $floor = Get-SshsigFloorVersion
+        if (-not (Test-VersionAtLeast $v $floor)) { Die "the latest release the network gives ($v) is older than $floor, which this script ships with, so it is not the latest: not installing. If you mean an older release, give it with -Version" }
         return $v
     }
 
@@ -220,6 +232,11 @@ short of running the installer (used by its tests).
         return $true
     }
 
+    function Get-SshsigFloorVersion {
+        if ($env:AGENTMUX_INSTALL_SSHSIG_FLOOR) { return $env:AGENTMUX_INSTALL_SSHSIG_FLOOR }
+        return $SshsigFloor
+    }
+
     function Get-SshKeygen {
         if ($env:AGENTMUX_INSTALL_SSH_KEYGEN) { return $env:AGENTMUX_INSTALL_SSH_KEYGEN }
         $c = Get-Command ssh-keygen -ErrorAction SilentlyContinue
@@ -244,8 +261,7 @@ short of running the installer (used by its tests).
         $ssh.Out = ""
         $exe = Get-SshKeygen
         if (-not (Test-CanCheckSshsig $exe)) { $ssh.Why = "tool"; return 2 }
-        $floor = $SshsigFloor
-        if ($env:AGENTMUX_INSTALL_SSHSIG_FLOOR) { $floor = $env:AGENTMUX_INSTALL_SSHSIG_FLOOR }
+        $floor = Get-SshsigFloorVersion
         if (-not (Test-VersionAtLeast $Version $floor)) { $ssh.Why = "floor"; return 2 }
         $sshsig = Join-Path $Work "envelope.sshsig"
         try { Get-Url "$Base/AgentMux-$Version-envelope.json.sshsig" $sshsig } catch {
@@ -287,7 +303,7 @@ short of running the installer (used by its tests).
     }
 
     # Download a release file and check it against the signed manifest. Returns the path of the file.
-    function Get-VerifiedFile([string]$Name, [string]$Work) {
+    function Get-VerifiedFile([string]$Name, [string]$Work, [switch]$MustCheck) {
         $base = $env:AGENTMUX_INSTALL_RELEASE_BASE
         if (-not $base) { $base = "$Releases/download/v$Version" }
         $manifestFile = Join-Path $Work "manifest.json"
@@ -309,6 +325,7 @@ short of running the installer (used by its tests).
         } else {
             $why = "there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SshsigFloor on carry"
             if ($ssh.Why -eq "floor") { $why = "this release ($Version) is older than $SshsigFloor, the first with an SSH signature" }
+            if ($MustCheck) { Die "the release's signature cannot be checked here (no OpenSSL 3 on the path, and $why). AgentMux Headless is not installed from hashes alone: install the Windows OpenSSH client (Settings, Apps, Optional features) or OpenSSL 3, and run this again" }
             if ($RequireSignature) { Die "the release's signature cannot be checked here (no OpenSSL 3 on the path, and $why) and -RequireSignature was given" }
             Say "signature NOT checked: this system has no OpenSSL 3, and $why"
             Say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
@@ -421,6 +438,8 @@ short of running the installer (used by its tests).
     function Install-Headless {
         if (-not $env:LOCALAPPDATA) { Die "LOCALAPPDATA is not set: there is no profile folder to install into" }
         if (-not $Version) { $Version = Get-LatestVersion }
+        $floor = Get-SshsigFloorVersion
+        if (-not (Test-VersionAtLeast $Version $floor)) { Die "AgentMux Headless for Windows is in releases from $floor on, and $Version is older: there is nothing to install" }
         $root = Join-Path $env:LOCALAPPDATA "AgentMux\Headless"
         $target = Join-Path $root $Version
         $current = Join-Path $root "current"
@@ -447,7 +466,7 @@ short of running the installer (used by its tests).
         # Unpacked beside its final place (the same drive), then moved: a download or unpack that fails leaves nothing half-installed.
         $stage = Join-Path $root (".stage-" + [Guid]::NewGuid().ToString("N"))
         try {
-            $zip = Get-VerifiedFile $name $work
+            $zip = Get-VerifiedFile $name $work -MustCheck
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $archive = [IO.Compression.ZipFile]::OpenRead($zip)
             try {
