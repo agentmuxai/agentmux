@@ -59,6 +59,14 @@ function handlePointerMove(e: PointerEvent): void {
     noticeMissedRelease(e);
 }
 
+/**
+ * The wheel moves the page under a pointer that stays where it is. What comes under the pointer then was
+ * brought there by the person, so it is a hover like any other: the press is forgotten.
+ */
+function handleWheel(): void {
+    pressPoint = null;
+}
+
 function handlePointerRelease(e: PointerEvent): void {
     if (e.button !== 0) return;
     released();
@@ -89,6 +97,7 @@ if (typeof window !== "undefined") {
     window.addEventListener("pointermove", handlePointerMove, { capture: true, passive: true });
     // An element's enter comes before the move that caused it, and hover panels decide on the enter.
     window.addEventListener("pointerover", noticeMissedRelease, { capture: true, passive: true });
+    window.addEventListener("wheel", handleWheel, { capture: true, passive: true });
     window.addEventListener("pointerup", handlePointerRelease, { capture: true });
     window.addEventListener("pointercancel", handlePointerRelease, { capture: true });
     window.addEventListener("blur", handleWindowBlur);
@@ -103,7 +112,7 @@ export function isPrimaryButtonDown(): boolean {
  * pointer is resting on what it clicked. Such a hover is not the person pointing at something. The page
  * changed under the pointer (the click redrew the control, or put another in its place) and the browser
  * reports the new element as entered. Hover panels stay shut for it, as they do for the element that
- * was clicked, until the pointer leaves and comes back.
+ * was clicked, until the pointer leaves and comes back. Turning the wheel ends it: see `handleWheel`.
  *
  * It takes the event's own position because the browser sends an element's enter before the move that
  * caused it: a fast move from the press to another control must still count as a move.

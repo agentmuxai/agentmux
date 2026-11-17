@@ -124,6 +124,106 @@ describe("useNodePeek", () => {
         });
     });
 
+    // A menu that closes on a click uncovers the row behind it, and the browser reports that row as entered
+    // although the pointer never moved onto it (seen with the window-tab colour menu over a transcript).
+    describe("a row that came under a pointer still resting where it pressed", () => {
+        const HERE = { clientX: 100, clientY: 20 };
+        const row = () => document.createElement("div");
+        const move = (el: HTMLElement, clientX: number, clientY: number) =>
+            el.dispatchEvent(new PointerEvent("pointermove", { clientX, clientY, bubbles: true }));
+        // The pointer rests at HERE until told otherwise, as pointer-drag-state.ts would report it.
+        const resting = (isResting = true) =>
+            vi.spyOn(pointerDragState, "isRestingAtPress").mockImplementation((e) => isResting && e.clientX === HERE.clientX && e.clientY === HERE.clientY);
+
+        it("does not open the peek", () => {
+            resting();
+            createRoot((dispose) => {
+                const peek = useNodePeek(50);
+                peek.setRowEl(row());
+                peek.handlePeekEnter(HERE);
+                vi.advanceTimersByTime(500);
+                expect(peek.isPeeking()).toBe(false);
+                dispose();
+            });
+        });
+
+        it("opens it, after the usual delay, once the pointer moves on the row", () => {
+            resting();
+            createRoot((dispose) => {
+                const peek = useNodePeek(50);
+                const el = row();
+                peek.setRowEl(el);
+                peek.handlePeekEnter(HERE);
+                // A hand does not hold the mouse dead still: drift that is still resting opens nothing.
+                move(el, HERE.clientX, HERE.clientY);
+                vi.advanceTimersByTime(500);
+                expect(peek.isPeeking()).toBe(false);
+                move(el, 140, 24);
+                vi.advanceTimersByTime(49);
+                expect(peek.isPeeking()).toBe(false);
+                vi.advanceTimersByTime(1);
+                expect(peek.isPeeking()).toBe(true);
+                dispose();
+            });
+        });
+
+        it("stays shut when the button that uncovered it is released over it", () => {
+            resting();
+            const releases: (() => void)[] = [];
+            vi.spyOn(pointerDragState, "onPrimaryButtonRelease").mockImplementation((cb) => {
+                releases.push(cb);
+                return () => {};
+            });
+            createRoot((dispose) => {
+                const peek = useNodePeek(50);
+                const el = row();
+                vi.spyOn(el, "matches").mockReturnValue(true);
+                peek.setRowEl(el);
+                peek.handlePeekEnter(HERE);
+                for (const cb of releases) cb();
+                vi.advanceTimersByTime(500);
+                expect(peek.isPeeking()).toBe(false);
+                dispose();
+            });
+        });
+
+        it("forgets the wait when the pointer leaves, and opens normally when it comes back", () => {
+            const rest = resting();
+            createRoot((dispose) => {
+                const peek = useNodePeek(50);
+                const el = row();
+                peek.setRowEl(el);
+                peek.handlePeekEnter(HERE);
+                peek.handlePeekLeave();
+                // A move over the row after the leave (a late event) opens nothing: it no longer listens.
+                move(el, 140, 24);
+                vi.advanceTimersByTime(500);
+                expect(peek.isPeeking()).toBe(false);
+                rest.mockReturnValue(false);
+                peek.handlePeekEnter({ clientX: 140, clientY: 24 });
+                vi.advanceTimersByTime(50);
+                expect(peek.isPeeking()).toBe(true);
+                dispose();
+            });
+        });
+
+        it("opens as before for an enter somewhere else, and for a caller that passes no event", () => {
+            resting();
+            createRoot((dispose) => {
+                const peek = useNodePeek(50);
+                peek.setRowEl(row());
+                peek.handlePeekEnter({ clientX: 300, clientY: 200 });
+                vi.advanceTimersByTime(50);
+                expect(peek.isPeeking()).toBe(true);
+                peek.handlePeekLeave();
+                peek.handlePeekEnter();
+                vi.advanceTimersByTime(50);
+                expect(peek.isPeeking()).toBe(true);
+                dispose();
+            });
+        });
+    });
+
     it("setRowEl/rowEl round-trip the hovered element", () => {
         createRoot((dispose) => {
             const peek = useNodePeek(50);
