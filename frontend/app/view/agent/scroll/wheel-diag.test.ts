@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lastHandoff } from "../components/scroll-handoff";
+import { recordHandoff } from "../components/scroll-handoff";
 import { canMove, createWheelDiag, describeChain, logsRunEvent, scrollersAt, WHEEL_DIAG_RING, WHEEL_DIAG_TAG } from "./wheel-diag";
 
 /** A transcript with a capped box in it; jsdom has no layout, so the sizes are stated. */
@@ -40,7 +40,6 @@ function harness(enabled = true) {
 
 afterEach(() => {
     document.body.innerHTML = "";
-    lastHandoff.at = 0;
 });
 
 describe("wheel diagnostic", () => {
@@ -55,9 +54,9 @@ describe("wheel diagnostic", () => {
     it("says what was under the pointer and where each scroller was when a wheel moved nothing", () => {
         const { txt } = build(100);
         const h = harness();
-        lastHandoff.at = 1000;
-        lastHandoff.action = "absorb";
-        h.onWheel(wheel(txt, -100));
+        const e = wheel(txt, -100);
+        recordHandoff(e, "absorb"); // the box's own listener runs after the diagnostic's, before the settle
+        h.onWheel(e);
         h.settle(); // nothing scrolled between the event and the settle: dead
         expect(h.lines).toHaveLength(1);
         expect(h.lines[0]![0]).toBe(WHEEL_DIAG_TAG);
@@ -126,6 +125,19 @@ describe("wheel diagnostic", () => {
         expect(logsRunEvent(1) && logsRunEvent(3) && logsRunEvent(10) && logsRunEvent(100)).toBe(true);
         expect(logsRunEvent(2) || logsRunEvent(11) || logsRunEvent(49)).toBe(false);
         expect(WHEEL_DIAG_RING).toBeGreaterThan(0);
+    });
+
+    it("keeps each event's own hand-off result when the events come closer together than the settle delay", () => {
+        const { txt } = build(100);
+        const h = harness();
+        const actions = ["absorb", "absorb", "forward"] as const;
+        actions.forEach((a, i) => {
+            const e = wheel(txt, -100, 100 + i);
+            recordHandoff(e, a);
+            h.onWheel(e); // all three arrive before any settles
+        });
+        h.settle();
+        expect(h.lines.map((l) => JSON.parse(String(l[1])).hand)).toEqual(["absorb", "forward"]); // runs 1 and 3
     });
 
     it("starts a new run after the wheel moves something", () => {

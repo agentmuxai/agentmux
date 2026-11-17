@@ -15,7 +15,7 @@
  * few lines. The first of a run also carries the 12 events before it.
  */
 
-import { lastHandoff } from "../components/scroll-handoff";
+import { handoffOf } from "../components/scroll-handoff";
 
 export const WHEEL_DIAG_TAG = "[wheel-diag]";
 /** Events kept to show what led up to a dead one. */
@@ -113,7 +113,7 @@ export function createWheelDiag(deps: WheelDiagDeps): (e: WheelEvent) => void {
             panel: inPanel ? "panel" : null,
         };
         deps.later(() => {
-            rec.hand = lastHandoff.at === e.timeStamp ? lastHandoff.action : null;
+            rec.hand = handoffOf(e);
             const after = scrollersAt(document.elementFromPoint(e.clientX, e.clientY));
             const moved = signature(after) !== signature(before) || e.defaultPrevented;
             ring.push(rec);
