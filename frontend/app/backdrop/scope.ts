@@ -94,6 +94,19 @@ export function scopeVars(derived: DerivedBackdrop, ansi?: AnsiColours): ScopeVa
     return vars;
 }
 
+/**
+ * A pane's properties for a panel it opens outside itself (a menu, a popover, a tooltip; spec §7.4): the same ink, on
+ * the overlay layer. Every token that is the pane's own surface inside the pane is the overlay surface here, so the
+ * panel is a step above the pane it lies over and never the same colour as it.
+ */
+export function overlayScopeVars(vars: ScopeVars): ScopeVars {
+    const out: ScopeVars = { ...vars };
+    for (const [token, value] of Object.entries(SURFACE_TOKEN_MAP)) {
+        if (value.includes("var(--surface)")) out[token] = value.replaceAll("var(--surface)", "var(--surface-overlay)");
+    }
+    return out;
+}
+
 // ── The registry: one signal per block ──────────────────────────────────────
 
 const scopes = new Map<string, ReturnType<typeof createSignal<ScopeVars | undefined>>>();

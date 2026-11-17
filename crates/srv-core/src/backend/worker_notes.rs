@@ -207,6 +207,18 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
     Some(Worker { def_id, name: def.name, slug: def.slug, leader_def_id })
 }
 
+/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: it is a
+/// worker whose registered leader is `sender`, and that leader has an open pane to be told in. `sender_failure_note`
+/// skips telling the same agent again, less richly, about the same exit (#2627).
+pub(crate) fn already_tells_its_leader(mstore: &Store, block_id: &str, sender: &str) -> bool {
+    let Some(worker) = worker_of_block(mstore, block_id) else { return false };
+    let Ok(defs) = mstore.agent_def_list() else { return false };
+    let Some(sender_id) = defs.iter().find(|d| d.slug == sender || d.id == sender).map(|d| d.id.clone()) else { return false };
+    // The same check `note_for` makes: a worker's own leader is told only through its live pane, by the ad-hoc
+    // `agent:worker_of` relationship (not the formal Seats table `leader_pane_of` reads for a general seat lead).
+    sender_id == worker.leader_def_id && !live_panes_of(mstore, &worker.leader_def_id).is_empty()
+}
+
 /// The open panes (in a tab) of definition `def_id`.
 pub fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
     let Ok(tabs) = mstore.get_all::<Tab>() else {

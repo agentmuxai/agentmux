@@ -6,7 +6,8 @@
  * `ContextMenuItem[]` the JS context menu (`ContextMenuModel.showContextMenu`) takes, so a site changes one
  * call and its item builders stay as they are. One menu is open at a time: opening another closes the
  * first. Like the JS menu, it opens downward from the pointer (the kit's own menus open upward) and hands
- * focus back to what had it, so a menu that closes without a pick leaves the caret where it was.
+ * focus back to what had it, so a menu that closes without a pick leaves the caret where it was. A menu opened on a
+ * pane with a backdrop takes that pane's colours: the pane is the one the event's target is in.
  */
 
 import { closeMenuAt, setOpenMenuAt } from "@/app/util/menu-at-open";
@@ -35,12 +36,13 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
 }
 
 /** Show `items` as a kit `Menu` at the pointer of `ev` (a right-click's `contextmenu` event); the arguments of `showContextMenu`, so a site swaps one call. */
-export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): void; clientX?: number; clientY?: number }): void {
+export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): void; clientX?: number; clientY?: number; target?: EventTarget | null }): void {
     ev.stopPropagation();
     closeMenuAt();
     const entries = menuEntriesFrom(items);
     if (entries.length === 0) return;
     const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+    const scope = ev.target instanceof Element ? ev.target : undefined;
     const host = document.createElement("div");
     let dispose: (() => void) | null = null;
     let closed = false;
@@ -61,7 +63,7 @@ export function openMenuAt(items: ContextMenuItem[], ev: { stopPropagation(): vo
     setOpenMenuAt(close);
     document.body.appendChild(host);
     dispose = render(
-        () => <Menu anchor={{ x: Math.round(ev.clientX ?? 0), y: Math.round(ev.clientY ?? 0) }} items={entries} alignIcons placement="bottom-start" onClose={close} />,
+        () => <Menu anchor={{ x: Math.round(ev.clientX ?? 0), y: Math.round(ev.clientY ?? 0) }} items={entries} scope={scope} alignIcons placement="bottom-start" onClose={close} />,
         host,
     );
 }

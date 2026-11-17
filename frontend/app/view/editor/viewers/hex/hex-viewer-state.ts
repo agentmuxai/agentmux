@@ -148,13 +148,18 @@ function createHexScroll(size: Accessor<number>, width: Accessor<RowWidth>) {
         own = null;
         setFirst(firstRowAt(at, rows(), viewPx()));
     };
+    // The part of a row a wheel event moved that hasn't added up to one yet: a trackpad sends many small ones.
+    let carry = 0;
     const onWheel = (e: WheelEvent): void => {
         // Ctrl+wheel stays pane zoom; a file that scrolls by pixels scrolls natively.
         // Sideways (a trackpad's horizontal swipe) is the browser's, for a narrow pane's other columns.
         if (e.ctrlKey || e.metaKey || !isScaled(rows()) || e.deltaY === 0) return;
         e.preventDefault();
-        const lines = e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * rowsInView(viewPx()) : e.deltaY / ROW_H;
-        if (lines) showRow(first() + Math.sign(lines) * Math.max(1, Math.round(Math.abs(lines))));
+        carry += e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * rowsInView(viewPx()) : e.deltaY / ROW_H;
+        const whole = Math.trunc(carry);
+        if (!whole) return;
+        carry -= whole;
+        showRow(first() + whole);
     };
     /** The scroller's `ref`. The header row inside it takes one row of its height. */
     const bind = (node: HTMLDivElement): void => {

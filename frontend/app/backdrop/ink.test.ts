@@ -222,6 +222,29 @@ describe("any colour", () => {
         expect(oklchOfHex(pale.surfaces.raised)!.l).toBeLessThan(oklchOfHex(pale.surfaces.surface)!.l);
     });
 
+    it("keeps a layer a step the eye can see from the surface, at the dark end too (black, and colours near it)", () => {
+        // On black an OKLCH step of 0.06 is one part in 255 of sRGB: a menu was the colour of the pane under it.
+        const greys = Array.from({ length: 52 }, (_, i) => `#${(i * 5).toString(16).padStart(2, "0").repeat(3)}`);
+        for (const hex of [...greys, "#000010", "#100000", "#001000", "#ffffff"]) {
+            const { surfaces, unmet } = deriveInk(hex);
+            expect(contrastRatio(surfaces.raised, surfaces.surface), `raised on ${hex}`).toBeGreaterThanOrEqual(1.05);
+            expect(contrastRatio(surfaces.overlay, surfaces.surface), `overlay on ${hex}`).toBeGreaterThanOrEqual(1.1);
+            expect(contrastRatio(surfaces.overlay, surfaces.surface), `overlay past raised on ${hex}`).toBeGreaterThan(contrastRatio(surfaces.raised, surfaces.surface));
+            expect(unmet, `ink on ${hex}`).toEqual([]);
+        }
+        // Black stays black: only its layers are lifted.
+        expect(deriveInk("#000000").surfaces.surface).toBe("#000000");
+    });
+
+    it("leaves the layers of a colour that already has a visible step at the plain step", () => {
+        const dark = deriveInk("#202830");
+        const l = (hex: string) => oklchOfHex(hex)!.l;
+        expect(l(dark.surfaces.raised) - l(dark.surfaces.surface)).toBeCloseTo(0.03, 2);
+        expect(l(dark.surfaces.overlay) - l(dark.surfaces.surface)).toBeCloseTo(0.06, 2);
+        const pale = deriveInk("#eef2f6");
+        expect(l(pale.surfaces.surface) - l(pale.surfaces.overlay)).toBeCloseTo(0.04, 2);
+    });
+
     it("falls back to a colour for something that is not one", () => {
         expect(deriveInk("not a colour").unmet).toEqual([]);
     });
