@@ -9,7 +9,9 @@ use crate::backend::obj::*;
 use crate::backend::service::{self, CloseTabRtnType, WebCallType, WebReturnType};
 
 use super::super::AppState;
-use super::reducer_helpers::{compensate_via_reducer, dispatch_to_reducer, publish_events};
+use super::reducer_helpers::{
+    compensate_via_reducer, dispatch_to_reducer, dispatch_to_reducer_timed, publish_events, ReducerTiming,
+};
 
 // Phase E.2c.3b — CreateTab dispatches through the reducer.
 // The `pinned` argument from older clients is ignored:
@@ -150,6 +152,38 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     }
 }
 
+/// A SetActiveTab that took longer than this is logged with where the time went.
+const SLOW_SET_ACTIVE_TAB: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Whether a SetActiveTab of this total length is logged (#47767).
+fn is_slow_set_active_tab(total: std::time::Duration) -> bool {
+    total > SLOW_SET_ACTIVE_TAB
+}
+
+/// One warn line when SetActiveTab was slow: the total, then the wait for the
+/// reducer mutex, the reducer, and the SQLite persist, so a slow tab click in
+/// the renderer log can be matched to the backend's share of it (#47767).
+fn log_slow_set_active_tab(
+    ws_id: &str,
+    tab_id: &str,
+    total: std::time::Duration,
+    timing: &ReducerTiming,
+    persist: std::time::Duration,
+) {
+    if !is_slow_set_active_tab(total) {
+        return;
+    }
+    tracing::warn!(
+        ws_id = %ws_id,
+        tab_id = %tab_id,
+        total_ms = total.as_millis() as u64,
+        queue_wait_ms = timing.lock_wait.as_millis() as u64,
+        reducer_ms = timing.reducer.as_millis() as u64,
+        persist_ms = persist.as_millis() as u64,
+        "[tab-switch:srv] SetActiveTab was slow"
+    );
+}
+
 // Phase E.2c.3 — SetActiveTab routes through the reducer.
 // Read-through reads (e.g., GetWorkspace) still hit mstore
 // during the migration window, so the synchronous
@@ -170,7 +204,8 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
     // straight through the reducer. Bootstrap merges any
     // legacy `pinnedtabids` into the reducer's `tab_ids` so
     // tabs from older databases are reachable as normal tabs.
-    let events = dispatch_to_reducer(
+    let call_start = std::time::Instant::now();
+    let (events, timing) = dispatch_to_reducer_timed(
         state,
         agentmux_common::ipc::Command::SetActiveTab {
             workspace_id: ws_id.clone(),
@@ -186,6 +221,7 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
     }) {
         return WebReturnType::error(err_msg);
     }
+    let persist_start = std::time::Instant::now();
     // Apply synchronously. SetActiveTab is reversible at the
     // reducer level (just write back the previous active id),
     // but we don't track the previous id here; if SQLite
@@ -199,10 +235,12 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
             break;
         }
     }
+    let persist = persist_start.elapsed();
     if let Some(err) = apply_err {
         return WebReturnType::error(format!("SetActiveTab: SQLite write failed: {}", err));
     }
     publish_events(state, &events);
+    log_slow_set_active_tab(&ws_id, &tab_id, call_start.elapsed(), &timing, persist);
     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
         let update = MuxObjUpdate {
             updatetype: "update".into(),
@@ -387,5 +425,19 @@ pub(crate) async fn handle_reorder_tab(state: &AppState, call: &WebCallType) -> 
         WebReturnType::success_with_updates(vec![update])
     } else {
         WebReturnType::success_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn set_active_tab_is_logged_only_past_the_threshold() {
+        assert!(!is_slow_set_active_tab(Duration::from_millis(0)));
+        assert!(!is_slow_set_active_tab(Duration::from_millis(200)));
+        assert!(is_slow_set_active_tab(Duration::from_millis(201)));
+        assert!(is_slow_set_active_tab(Duration::from_secs(3)));
     }
 }
