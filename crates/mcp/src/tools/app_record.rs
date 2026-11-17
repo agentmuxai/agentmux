@@ -175,6 +175,8 @@ fn restarts_since(rolls: &[Value], then_h: u64) -> u64 {
     let between = rolls
         .windows(2)
         .filter(|w| w[0]["h"].as_u64().unwrap_or(0) >= then_h)
+        // A restart inside the later hour is already counted by that hour, and it is also why its uptime fell short.
+        .filter(|w| w[1]["restarts"].as_u64().unwrap_or(0) == 0)
         .filter(|w| {
             let gap_s = w[1]["h"].as_u64().unwrap_or(0).saturating_sub(w[0]["h"].as_u64().unwrap_or(0)) / 1000;
             w[1]["up_s"].as_u64().unwrap_or(0) + 900 < w[0]["up_s"].as_u64().unwrap_or(0) + gap_s
@@ -357,10 +359,14 @@ mod tests {
         // srv restarted after hour 1's last line: hour 2's last line is 50 min up, where 4 h was expected.
         let restarted = vec![at(0, 6_900), at(1, 10_200), at(2, 3_000)];
         assert_eq!(restarts_since(&restarted, 0), 1);
-        // ...and one inside an hour that the hour counted itself adds to it.
-        let mut both = restarted.clone();
-        both[1]["restarts"] = json!(1);
-        assert_eq!(restarts_since(&both, 0), 2);
+        // One inside an hour is counted once, by the hour: its last line is low too, and that is not a second restart.
+        let mut inside = vec![at(0, 6_900), at(1, 10_200), at(2, 1_200)];
+        inside[2]["restarts"] = json!(1);
+        assert_eq!(restarts_since(&inside, 0), 1);
+        // ...and a restart between hours next to one inside another hour are two.
+        let mut two = vec![at(0, 6_900), at(1, 2_000), at(2, 5_600), at(3, 1_200)];
+        two[3]["restarts"] = json!(1);
+        assert_eq!(restarts_since(&two, 0), 2);
         // Before `then` nothing counts.
         assert_eq!(restarts_since(&restarted, 2 * H), 0);
     }
