@@ -190,6 +190,9 @@ impl AgentMuxHandler {
             stopped.insert(target.clone(), url.to_string());
         }
         report_off_list(&self.state, &pane, &target, url, "navigate");
+        // A navigation that was cancelled never reaches a load end: it is not a page on its way, and a `wait`
+        // must not take the page left in place for one (its timing entry would stand until it went stale).
+        crate::browser_pane::open_timing::forget(&target);
         true
     }
 
