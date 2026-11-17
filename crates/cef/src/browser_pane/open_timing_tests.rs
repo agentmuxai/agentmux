@@ -144,3 +144,20 @@ fn marks_for_a_pane_with_nothing_in_flight_are_ignored() {
     book.mark("nobody", Phase::Committed, Instant::now());
     assert!(book.finish("nobody", Instant::now()).is_none());
 }
+
+#[test]
+fn a_pane_is_on_its_way_from_its_open_or_navigation_until_it_loads_or_goes_stale() {
+    let t0 = Instant::now();
+    let mut book = Book::default();
+    assert!(!book.in_flight("a", t0), "nothing was asked");
+    book.begin(Kind::Open, "a", t0);
+    assert!(book.in_flight("a", t0 + ms(25_000)), "a slow first load is still on its way");
+    assert!(!book.in_flight("b", t0), "another pane's load is not this one's");
+    assert!(!book.in_flight("a", t0 + STALE + ms(1)), "a load that never reported back says nothing");
+    book.finish("a", t0 + ms(900));
+    assert!(!book.in_flight("a", t0 + ms(901)), "loaded");
+    book.begin(Kind::Navigate, "a", t0 + ms(2_000));
+    assert!(book.in_flight("a", t0 + ms(2_100)), "a navigation is on its way too");
+    book.forget("a");
+    assert!(!book.in_flight("a", t0 + ms(2_200)), "a pane that went away has nothing coming");
+}

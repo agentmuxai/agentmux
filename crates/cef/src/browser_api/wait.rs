@@ -154,6 +154,16 @@ async fn find_text(root: &mut CdpSession, text: &str, worlds: &mut Worlds) -> Op
     None
 }
 
+/// What a wait that ran out of time says. A page still on its way is named as such, so the agent does not
+/// take the blank page it is looking at for the answer.
+fn still_waiting(secs: f64, url: &str, loading: bool) -> String {
+    if loading {
+        format!("still waiting after {secs:.1} s: the page is still loading (the pane shows {url} until it arrives); wait again, or take a snapshot to see where it is")
+    } else {
+        format!("still waiting after {secs:.1} s (page now {url}); take a snapshot to see where it is")
+    }
+}
+
 /// `POST /agentmux/browser/wait_for`.
 pub async fn wait_for_route(
     State(state): State<Arc<AppState>>,
@@ -203,7 +213,14 @@ pub async fn wait_for_route(
         let url = page_url(&mut cdp).await;
         let (met, frame) = if let Some(s) = settle {
             let now = probe(&mut cdp).await;
+            // A pane still opening, or going to a new page, has a complete document too: the blank one it
+            // started with (or the last page). That is not the page that was asked for.
+            let on_its_way = crate::browser_pane::open_timing::in_flight(&req.block_id);
             let met = match &now {
+                Some(_) if on_its_way => {
+                    quiet_looks = 0;
+                    false
+                }
                 Some(p) => settled(s == "idle", last.as_ref(), p, &mut quiet_looks),
                 None => {
                     quiet_looks = 0;
@@ -233,10 +250,7 @@ pub async fn wait_for_route(
         }
         if started.elapsed() >= timeout {
             let _ = cdp.close().await;
-            return fail(format!(
-                "still waiting after {:.1} s (page now {url}); take a snapshot to see where it is",
-                timeout.as_secs_f64()
-            ));
+            return fail(still_waiting(timeout.as_secs_f64(), &url, crate::browser_pane::open_timing::in_flight(&req.block_id)));
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
@@ -259,6 +273,14 @@ mod tests {
         let expression = has_text_expression("x");
         assert!(expression.starts_with("(// Copyright") && expression.contains("getClientRects"), "{expression}");
         assert_eq!(HAS_TEXT.trim_end().matches("((t) =>").count(), 1);
+    }
+
+    #[test]
+    fn a_wait_that_ran_out_says_when_the_page_is_still_loading() {
+        let loading = still_waiting(10.0, "about:blank", true);
+        assert!(loading.contains("still loading") && loading.contains("about:blank"), "{loading}");
+        let settled = still_waiting(10.0, "https://a.test/", false);
+        assert!(settled.contains("page now https://a.test/") && !settled.contains("still loading"), "{settled}");
     }
 
     fn probe_of(ready: &str, url: &str, size: i64) -> Probe {

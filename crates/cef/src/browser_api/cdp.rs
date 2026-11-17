@@ -589,6 +589,14 @@ impl CdpSession {
             Ok(Err(_)) => Err(format!("CDP {method}: reply channel dropped")),
             Err(_) => {
                 PENDING.lock().forget(id);
+                // The page did not answer: a pane whose first page has not arrived has nothing to ask (#47890).
+                // The agent only ever sees the 502 of the slower call it was part of, so the host says which one.
+                tracing::warn!(
+                    label = %self.label,
+                    method,
+                    waited_s = CALL_TIMEOUT.as_secs(),
+                    "[browser-api] a DevTools call got no reply; the page may still be loading"
+                );
                 Err(format!("CDP timeout waiting for reply to {method}"))
             }
         }
