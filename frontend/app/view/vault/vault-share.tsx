@@ -10,6 +10,8 @@ import { createMemo, createResource, createSignal, For, Show, type JSX } from "s
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
 import { Button, CloseButton, Field, IconButton, Select, type SelectOption } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
+import { Rich } from "@/app/i18n/rich";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { formatWhen } from "./vault-format";
 import { loadShares, shareLogin, unshareLogin } from "./vault-store";
@@ -33,8 +35,7 @@ export function isShared(e: VaultEntryInfo): boolean {
 function ShareNote(props: { entry: VaultEntryInfo; every: boolean }): JSX.Element {
     return (
         <p class="warden-manager-dim">
-            {props.every ? "Any agent" : "The agent"} will be able to ask to sign in to <strong>{siteOf(props.entry.fields.site ?? "")}</strong> with this login, from its own browser profile. It never sees the user name or the password, and
-            you are asked the first time it signs in{props.every ? ", for each agent" : ""}. You can stop sharing from the login's row.
+            <Rich k={props.every ? "vault.share.anyAgentNote" : "vault.share.agentNote"} params={{ site: siteOf(props.entry.fields.site ?? "") }} />
         </p>
     );
 }
@@ -49,8 +50,8 @@ export function VaultShareDialog(props: { entry: VaultEntryInfo; onClose: () => 
         const list = data()?.agents ?? [];
         const everyone = (data()?.shares ?? []).some((s) => s.agent === EVERY_AGENT);
         return [
-            { value: "", label: "Choose an agent…", disabled: true },
-            ...(everyone ? [] : [{ value: EVERY_AGENT, label: "Every agent" }]),
+            { value: "", label: t("vault.share.choose"), disabled: true },
+            ...(everyone ? [] : [{ value: EVERY_AGENT, label: t("vault.share.every") }]),
             ...list.map((a) => ({ value: a.uid, label: a.name })),
         ];
     });
@@ -66,10 +67,10 @@ export function VaultShareDialog(props: { entry: VaultEntryInfo; onClose: () => 
     };
     return (
         <Modal open={true} scope="pane" onClose={props.onClose} size="md" panelClass="vault-form">
-            <ModalHeader title={`Share ${props.entry.label}`} description="Let an agent sign in to this site with this login, from its own browser profile." />
+            <ModalHeader title={t("vault.share.title", { label: props.entry.label })} description={t("vault.share.description")} />
             <ModalBody>
-                <Field label="Share with" layout="stacked">
-                    <Select value={pick()} onChange={setPick} options={options()} ariaLabel="Share with" disabled={busy() || data.loading} />
+                <Field label={t("vault.share.with")} layout="stacked">
+                    <Select value={pick()} onChange={setPick} options={options()} ariaLabel={t("vault.share.with")} disabled={busy() || data.loading} />
                 </Field>
                 <Show when={pick()}>
                     <ShareNote entry={props.entry} every={pick() === EVERY_AGENT} />
@@ -84,10 +85,10 @@ export function VaultShareDialog(props: { entry: VaultEntryInfo; onClose: () => 
             </ModalBody>
             <ModalFooter>
                 <Button data-modal-dismiss onClick={props.onClose} disabled={busy()}>
-                    Cancel
+                    {t("vault.share.cancel")}
                 </Button>
                 <Button tone="accent" busy={busy()} disabled={!pick()} onClick={() => void share()}>
-                    Share
+                    {t("vault.share.confirm")}
                 </Button>
             </ModalFooter>
         </Modal>
@@ -99,7 +100,7 @@ export function ShareButton(props: { entry: VaultEntryInfo }): JSX.Element {
     const [open, setOpen] = createSignal(false);
     return (
         <>
-            <IconButton icon="share" label="Share with an agent" density="compact" onClick={() => setOpen(true)} />
+            <IconButton icon="share" label={t("vault.share.button")} density="compact" onClick={() => setOpen(true)} />
             <Show when={open()}>
                 <VaultShareDialog entry={props.entry} onClose={() => setOpen(false)} />
             </Show>
@@ -109,8 +110,8 @@ export function ShareButton(props: { entry: VaultEntryInfo }): JSX.Element {
 
 /** How a share has been used: the number of sign-ins and the last one. */
 function usedLine(uses: number, last: number): string {
-    if (uses === 0) return "not used yet";
-    return `${uses} sign-in${uses === 1 ? "" : "s"}, last ${formatWhen(last)}`;
+    if (uses === 0) return t("vault.share.notUsed");
+    return t("vault.share.used", { count: uses, when: formatWhen(last) });
 }
 
 /** A login's shares under its label: each agent it is shared with, how it was used, and a button to stop. */
@@ -132,13 +133,13 @@ export function EntryShares(props: { entry: VaultEntryInfo }): JSX.Element {
     };
     return (
         <Show when={isShared(props.entry) && (data()?.shares.length ?? 0) > 0}>
-            <div class="vault-grants" aria-label={`Agents ${props.entry.label} is shared with`}>
-                <span class="warden-manager-dim">Shared with </span>
+            <div class="vault-grants" aria-label={t("vault.share.listLabel", { label: props.entry.label })}>
+                <span class="warden-manager-dim">{t("vault.share.sharedWith")} </span>
                 <For each={data()?.shares ?? []}>
                     {(s) => (
                         <span class="vault-grant" data-agent={s.agent}>
                             {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms)})</span>
-                            <CloseButton size="sm" label={`Stop sharing ${props.entry.label} with ${s.name}`} onClick={() => void stop(s.agent)} />
+                            <CloseButton size="sm" label={t("vault.share.stop", { label: props.entry.label, name: s.name })} onClick={() => void stop(s.agent)} />
                         </span>
                     )}
                 </For>
