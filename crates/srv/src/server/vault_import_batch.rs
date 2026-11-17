@@ -224,8 +224,8 @@ async fn run(state: &AppState, plan: &BatchPlan, approved: &Approved, who: &Who)
 }
 
 /// `POST /api/v1/vault/import_batch`
-pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, Json(body): Json<BatchBody>) -> Response {
-    let who = match asker(&state, body.auth.as_ref(), "import_batch", "who copied each secret") {
+pub(crate) async fn handle_vault_import_batch(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<BatchBody>) -> Response {
+    let who = match asker(&state, caller.as_deref(), body.auth.as_ref(), "import_batch", "who copied each secret") {
         Ok(who) => who,
         Err(refusal) => return refusal,
     };

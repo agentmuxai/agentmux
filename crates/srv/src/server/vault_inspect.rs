@@ -34,8 +34,8 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
 }
 
 /// The agent whose signed identity verified, else none (which sees only the Vaults open to every agent).
-fn who(state: &AppState, auth: &Auth) -> Option<String> {
-    let (agent, pane) = asking_agent(state, auth.as_ref());
+fn who(state: &AppState, caller: Option<&super::caller::Caller>, auth: &Auth) -> Option<String> {
+    let (agent, pane) = asking_agent(state, caller, auth.as_ref());
     pane.map(|_| agent)
 }
 
@@ -72,23 +72,23 @@ pub(crate) struct IdBody {
 }
 
 /// `POST /api/v1/vault/show`
-pub(crate) async fn handle_vault_show(State(state): State<AppState>, Json(body): Json<IdBody>) -> Response {
-    let agent = who(&state, &body.auth);
+pub(crate) async fn handle_vault_show(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<IdBody>) -> Response {
+    let agent = who(&state, caller.as_deref(), &body.auth);
     let Some(id) = body.id.filter(|i| !i.trim().is_empty()) else { return error(StatusCode::BAD_REQUEST, "show needs an id: the entry to look at (list shows them)") };
     let (store, key) = (state.identity_store.clone(), key().await);
     answer(move || inspect::show(&store, &id, agent.as_deref(), &key, crate::backend::vault::expiry::today())).await
 }
 
 /// `POST /api/v1/vault/verify`
-pub(crate) async fn handle_vault_verify(State(state): State<AppState>, Json(body): Json<IdBody>) -> Response {
-    let agent = who(&state, &body.auth);
+pub(crate) async fn handle_vault_verify(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<IdBody>) -> Response {
+    let agent = who(&state, caller.as_deref(), &body.auth);
     let (store, key) = (state.identity_store.clone(), key().await);
     answer(move || inspect::verify(&store, body.id.as_deref(), agent.as_deref(), &key, crate::backend::vault::expiry::today())).await
 }
 
 /// `POST /api/v1/vault/health`
-pub(crate) async fn handle_vault_health(State(state): State<AppState>, Json(body): Json<IdBody>) -> Response {
-    let agent = who(&state, &body.auth);
+pub(crate) async fn handle_vault_health(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<IdBody>) -> Response {
+    let agent = who(&state, caller.as_deref(), &body.auth);
     let (store, key) = (state.identity_store.clone(), key().await);
     let backend = crate::identity::secret_store::backend_name();
     answer(move || inspect::health(&store, agent.as_deref(), &key, backend, crate::backend::vault::expiry::today())).await
@@ -158,10 +158,10 @@ async fn allow_link_change(state: &AppState, change: &LinkChange, agent: &str, p
 }
 
 /// `POST /api/v1/vault/update`
-pub(crate) async fn handle_vault_update(State(state): State<AppState>, Json(body): Json<UpdateBody>) -> Response {
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<UpdateBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let Some(pane) = pane else {
-        return error(StatusCode::FORBIDDEN, "update needs the agent's signed identity: the Vault records who changed each entry");
+        return error(StatusCode::FORBIDDEN, "update needs to know which agent asks (its token or its signed identity, neither of which verified): the Vault records who changed each entry; respawn the agent if it has neither");
     };
     let request = body.request;
     let (store, asked, by) = (state.identity_store.clone(), request.clone(), agent.clone());
