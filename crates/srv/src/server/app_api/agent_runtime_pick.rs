@@ -79,6 +79,21 @@ fn check_model(model: &str) -> Result<(), Refusal> {
     Err(bad(format!("{model} is not a Claude model: use sonnet, opus, haiku or a model id such as claude-fable-5-2 (a model on a model route needs the agent on that route, which the person approves)")))
 }
 
+const OWN_SERVER: &str =
+    "the agent is pointed at a model server of its own, which it asks for the model ANTHROPIC_MODEL names: change that with Agents env_set";
+
+/// Whether the definition itself points the agent at a server of its own, with a pane open or not: its saved
+/// environment and its structured model vendor URL are what the next launch builds from.
+fn definition_points_at_own_server(state: &AppState, agent: &AgentDefinition) -> Result<bool, Refusal> {
+    let text = state
+        .mstore
+        .agent_content_get(&agent.id, crate::backend::agent_env::CONTENT_TYPE)
+        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}")))?
+        .map(|c| c.content)
+        .unwrap_or_default();
+    Ok(crate::backend::agent_env::points_at_own_server_with(&text, &agent.model_vendor_base_url))
+}
+
 const PINNED: &str = "the agent's definition carries its own --model or --effort in its provider flags: the operator changes it in My Agents";
 
 /// Why this pane cannot take the pick, or none.
@@ -91,7 +106,7 @@ fn pane_refusal(meta: &MetaMapType, model: Option<&str>, effort: Option<&str>) -
         return Some(PINNED.to_string());
     }
     if model.is_some() && agent_runtime::endpoint_model(meta).is_some() {
-        return Some("the agent is pointed at a model server of its own, which it asks for the model ANTHROPIC_MODEL names: change that with Agents env_set".to_string());
+        return Some(OWN_SERVER.to_string());
     }
     None
 }
@@ -122,6 +137,9 @@ pub(super) fn pick(state: &AppState, agent: &AgentDefinition, model: Option<&str
     let (pins_model, pins_effort) = agent_runtime::flags_pin(&agent.provider_flags);
     if (model.is_some() && pins_model) || (effort.is_some() && pins_effort) {
         return Err(bad(PINNED));
+    }
+    if model.is_some() && definition_points_at_own_server(state, agent)? {
+        return Err(bad(OWN_SERVER));
     }
     let panes = crate::server::account_episodes::panes_of(state, &agent.id);
     if let Some(why) = panes.iter().find_map(|b| pane_refusal(&b.meta, model, effort)) {
