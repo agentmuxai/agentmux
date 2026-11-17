@@ -8,4 +8,16 @@ cap_usd: number | null,
 /**
  * What it has used today.
  */
-spent_usd: number, };
+spent_usd: number, 
+/**
+ * Whether a cap applies to the agent at all: it is on a model route or an API key. An agent on a login has plan limits.
+ */
+applies: boolean, 
+/**
+ * Whether the cap is the agent's own, and not the default every agent without one has.
+ */
+own_cap: boolean, 
+/**
+ * The default cap (Settings > Advanced); absent when the default is no cap.
+ */
+default_cap_usd: number | null, };

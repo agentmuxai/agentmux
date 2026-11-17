@@ -568,7 +568,7 @@ pub(crate) const AGENTS_TOOL: &str = r#"{
       "auto_start":       { "type": "boolean", "description": "update: start it when AgentMux starts" },
       "restart_on_crash": { "type": "boolean", "description": "update: start it again when it crashes" },
       "idle_timeout_minutes": { "type": "integer", "description": "update: stop it after this many idle minutes (0: never; at most 10080)" },
-      "spend_cap_usd":    { "type": ["number", "string"], "description": "update: the most the agent may use through its model route in a UTC day, in dollars (default 20); 0 or \"none\" for no cap. Its leader sets it; an agent may only lower its own" },
+      "spend_cap_usd":    { "type": ["number", "string"], "description": "update: the most the agent may use through its model route in a UTC day, in dollars (default 50, set in Settings); 0 or \"none\" for no cap. Its leader sets it; an agent may only lower its own" },
       "reset_spend_today": { "type": "boolean", "description": "update: zero the spend counted for the agent today, for a figure that was wrong (its leader only)" },
       "runtime":          { "type": "string", "enum": ["native", "container"], "description": "spawn, create: where it runs: native (on the host) or container. Left out, a Claude Code agent runs in a container when Docker answers (the user's agents:defaultruntime setting can say native), and as you or its template run otherwise; say native when it must read or write host files, run host programs or build on the host. A container needs Docker" },
       "container_image":  { "type": "string", "description": "spawn, create, update_container: a container agent's image: ghcr.io/agentmuxai/agent-base:developer (the developer image) or ghcr.io/agentmuxai/agent-base:latest" },

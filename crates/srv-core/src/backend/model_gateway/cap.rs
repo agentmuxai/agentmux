@@ -5,10 +5,12 @@
 //! through the gateway in a UTC day, and how much a route may. The gateway reads them at each request, so a
 //! cap raised mid-turn lets the next request through.
 //!
-//! - **Per agent:** the agent definition's content `agent:spend_cap_usd`. Absent is [`DEFAULT_AGENT_CAP_USD`];
-//!   `none` or `0` is no cap.
+//! - **Per agent:** the agent definition's content `agent:spend_cap_usd`. Absent is the app setting
+//!   `model:agent_spend_cap_usd` (the default for every agent without a cap of its own), and absent that
+//!   [`DEFAULT_AGENT_CAP_USD`]; `none` or `0` is no cap.
 //! - **Per route:** the app setting `model:spend_cap_usd:<route id>`. Absent is [`DEFAULT_ROUTE_CAP_USD`];
-//!   `none` or `0` is no cap.
+//!   `none` or `0` is no cap. A route is the OpenRouter route or the Anthropic API-key route
+//!   ([`super::catalog::KEY_ROUTE_ID`]); an agent on a login has plan limits and no cap.
 
 use super::spend;
 use super::token::Grant;
@@ -20,8 +22,12 @@ use std::collections::HashMap;
 pub const AGENT_CAP_TYPE: &str = "agent:spend_cap_usd";
 /// The prefix of the app setting a route's cap is kept under; the route id follows.
 pub const ROUTE_CAP_SETTING: &str = "model:spend_cap_usd:";
-pub const DEFAULT_AGENT_CAP_USD: f64 = 20.0;
-pub const DEFAULT_ROUTE_CAP_USD: f64 = 100.0;
+/// The app setting the default per-agent cap is kept under.
+pub const DEFAULT_AGENT_CAP_SETTING: &str = "model:agent_spend_cap_usd";
+/// What an agent without a cap of its own may use in a day when the setting is not set.
+pub const DEFAULT_AGENT_CAP_USD: f64 = 50.0;
+/// What a route may be used for in a day when its setting is not set.
+pub const DEFAULT_ROUTE_CAP_USD: f64 = 500.0;
 /// The least a cap may be set to: a smaller one is not a cap anyone meant.
 pub const MIN_CAP_USD: f64 = 0.01;
 
@@ -54,12 +60,20 @@ fn parse(value: &serde_json::Value) -> Option<Option<f64>> {
     }
 }
 
+/// The cap an agent has when it has none of its own: the setting, or [`DEFAULT_AGENT_CAP_USD`]. `None` is no cap.
+pub fn default_agent_cap(settings: &HashMap<String, serde_json::Value>) -> Option<f64> {
+    match settings.get(DEFAULT_AGENT_CAP_SETTING).and_then(parse) {
+        Some(cap) => cap,
+        None => Some(DEFAULT_AGENT_CAP_USD),
+    }
+}
+
 /// The agent's cap in dollars a day, or `None` when it has none.
-pub fn agent_cap(mstore: &Store, def_id: &str) -> Option<f64> {
+pub fn agent_cap(mstore: &Store, settings: &HashMap<String, serde_json::Value>, def_id: &str) -> Option<f64> {
     let stored = mstore.agent_content_get(def_id, AGENT_CAP_TYPE).ok().flatten();
     match stored.and_then(|c| parse(&serde_json::Value::String(c.content))) {
         Some(cap) => cap,
-        None => Some(DEFAULT_AGENT_CAP_USD),
+        None => default_agent_cap(settings),
     }
 }
 
@@ -74,6 +88,17 @@ pub fn set_agent_cap(mstore: &Store, def_id: &str, cap: Option<f64>) -> Result<(
             updated_at: agentmux_common::time::now_ms(),
         })
         .map_err(|e| e.to_string())
+}
+
+/// Takes the agent's own cap away, so it has the default again.
+pub fn clear_agent_cap(mstore: &Store, def_id: &str) -> Result<(), String> {
+    mstore.agent_content_delete(def_id, AGENT_CAP_TYPE).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Whether the agent has a cap of its own (a number or `none`), and not the default.
+pub fn has_own_cap(mstore: &Store, def_id: &str) -> bool {
+    let stored = mstore.agent_content_get(def_id, AGENT_CAP_TYPE).ok().flatten();
+    stored.and_then(|c| parse(&serde_json::Value::String(c.content))).is_some()
 }
 
 /// What `Agents update spend_cap_usd` takes: a positive number of dollars, `0` or `"none"` for no cap.
@@ -95,7 +120,7 @@ pub fn route_cap(settings: &HashMap<String, serde_json::Value>, route: &str) -> 
 
 /// The cap the agent's use today has reached, if any. The agent's own is checked first.
 pub fn reached(mstore: &Store, settings: &HashMap<String, serde_json::Value>, grant: &Grant, now_ms: i64) -> Option<Hit> {
-    if let Some(cap) = agent_cap(mstore, &grant.def_id) {
+    if let Some(cap) = agent_cap(mstore, settings, &grant.def_id) {
         let spent = spend::today(&grant.agent, now_ms).cost_usd;
         if spent >= cap {
             return Some(Hit { scope: Scope::Agent, cap, spent });
@@ -117,9 +142,9 @@ pub fn level(spent: f64, cap: f64) -> u8 {
 }
 
 /// The alert level the agent's day is at under its own cap; 0 when it has none.
-pub fn agent_level(mstore: &Store, grant: &Grant, now_ms: i64) -> (u8, Option<f64>, f64) {
+pub fn agent_level(mstore: &Store, settings: &HashMap<String, serde_json::Value>, grant: &Grant, now_ms: i64) -> (u8, Option<f64>, f64) {
     let spent = spend::today(&grant.agent, now_ms).cost_usd;
-    match agent_cap(mstore, &grant.def_id) {
+    match agent_cap(mstore, settings, &grant.def_id) {
         Some(cap) => (level(spent, cap), Some(cap), spent),
         None => (0, None, spent),
     }
@@ -133,7 +158,7 @@ pub fn refusal_text(hit: &Hit) -> String {
             hit.spent, hit.cap
         ),
         Scope::Route => format!(
-            "spend cap: this model route's cap of ${:.2} for today (UTC) is used (${:.2}). A person can raise it in Settings.",
+            "spend cap: the daily cap of ${:.2} for this agent's model route or API key is used by all agents together (${:.2}). A person can raise it in Settings.",
             hit.cap, hit.spent
         ),
     }
@@ -175,13 +200,49 @@ mod tests {
     #[test]
     fn an_agent_has_the_default_cap_until_one_is_set_and_none_means_no_cap() {
         let store = store_with("cap-def");
-        assert_eq!(agent_cap(&store, "cap-def"), Some(DEFAULT_AGENT_CAP_USD));
+        let settings = HashMap::new();
+        assert_eq!(agent_cap(&store, &settings, "cap-def"), Some(DEFAULT_AGENT_CAP_USD));
         set_agent_cap(&store, "cap-def", Some(40.0)).unwrap();
-        assert_eq!(agent_cap(&store, "cap-def"), Some(40.0));
+        assert_eq!(agent_cap(&store, &settings, "cap-def"), Some(40.0));
         set_agent_cap(&store, "cap-def", Some(0.013)).unwrap();
-        assert_eq!(agent_cap(&store, "cap-def"), Some(0.013), "kept as given, not rounded to a cent");
+        assert_eq!(agent_cap(&store, &settings, "cap-def"), Some(0.013), "kept as given, not rounded to a cent");
         set_agent_cap(&store, "cap-def", None).unwrap();
-        assert_eq!(agent_cap(&store, "cap-def"), None);
+        assert_eq!(agent_cap(&store, &settings, "cap-def"), None);
+    }
+
+    #[test]
+    fn clearing_an_agents_own_cap_gives_it_the_default_again() {
+        let store = store_with("clr-def");
+        let settings = HashMap::new();
+        assert!(!has_own_cap(&store, "clr-def"));
+        set_agent_cap(&store, "clr-def", None).unwrap();
+        assert!(has_own_cap(&store, "clr-def"), "none is a cap of its own");
+        assert_eq!(agent_cap(&store, &settings, "clr-def"), None);
+        set_agent_cap(&store, "clr-def", Some(30.0)).unwrap();
+        assert!(has_own_cap(&store, "clr-def"));
+        clear_agent_cap(&store, "clr-def").unwrap();
+        assert!(!has_own_cap(&store, "clr-def"));
+        assert_eq!(agent_cap(&store, &settings, "clr-def"), Some(DEFAULT_AGENT_CAP_USD));
+        clear_agent_cap(&store, "clr-def").unwrap();
+    }
+
+    #[test]
+    fn the_default_cap_is_read_from_the_settings_each_time_and_an_agents_own_cap_wins() {
+        let store = store_with("dflt-def");
+        let mut settings = HashMap::new();
+        assert_eq!((DEFAULT_AGENT_CAP_USD, DEFAULT_ROUTE_CAP_USD), (50.0, 500.0), "the shipped defaults");
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), Some(50.0));
+        settings.insert(DEFAULT_AGENT_CAP_SETTING.to_string(), json!(75));
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), Some(75.0), "the next request sees a changed setting");
+        settings.insert(DEFAULT_AGENT_CAP_SETTING.to_string(), json!("none"));
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), None, "none is no cap for agents without their own");
+        settings.insert(DEFAULT_AGENT_CAP_SETTING.to_string(), json!("lots"));
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), Some(50.0), "an unreadable setting falls back to the shipped default");
+        settings.insert(DEFAULT_AGENT_CAP_SETTING.to_string(), json!(75));
+        set_agent_cap(&store, "dflt-def", Some(10.0)).unwrap();
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), Some(10.0), "an agent's own cap wins over the default");
+        set_agent_cap(&store, "dflt-def", None).unwrap();
+        assert_eq!(agent_cap(&store, &settings, "dflt-def"), None, "its own none wins too");
     }
 
     #[test]
@@ -202,22 +263,24 @@ mod tests {
         let used = TokenCounts { input: 1, ..Default::default() };
         let grant = Grant { agent: "reach-agent".into(), def_id: "reach-def".into(), route: "reach-route".into(), account: String::new(), peer: None };
         let now = agentmux_common::time::now_ms();
-        let settings = HashMap::new();
+        let mut settings = HashMap::new();
+        settings.insert(DEFAULT_AGENT_CAP_SETTING.to_string(), json!(20));
         spend::record("reach-agent", "reach-route", model, &used, Some(19.0), now);
         assert_eq!(reached(&store, &settings, &grant, now), None);
-        assert_eq!(agent_level(&store, &grant, now).0, 80);
+        assert_eq!(agent_level(&store, &settings, &grant, now).0, 80);
         spend::record("reach-agent", "reach-route", model, &used, Some(1.0), now);
         let hit = reached(&store, &settings, &grant, now).expect("the agent's $20 is used");
         assert_eq!((hit.scope, hit.cap), (Scope::Agent, 20.0));
         assert!(refusal_text(&hit).starts_with("spend cap: this agent has used $20.00 of its $20.00"));
 
-        // No cap of its own, but other agents have used the route's $100: the route's cap stops it.
+        // No cap of its own, but other agents have used the route's cap: the route's cap stops it.
         set_agent_cap(&store, "reach-def", None).unwrap();
+        settings.insert(format!("{ROUTE_CAP_SETTING}reach-route"), json!(100));
         assert_eq!(reached(&store, &settings, &grant, now), None);
         spend::record("reach-other", "reach-route", model, &used, Some(80.0), now);
         let hit = reached(&store, &settings, &grant, now).expect("the route's $100 is used");
         assert_eq!((hit.scope, hit.cap), (Scope::Route, 100.0));
-        assert!(refusal_text(&hit).contains("route's cap of $100.00"));
+        assert!(refusal_text(&hit).contains("cap of $100.00 for this agent's model route or API key"));
         // The next UTC day starts again.
         assert_eq!(reached(&store, &settings, &grant, now + 86_400_000), None);
     }

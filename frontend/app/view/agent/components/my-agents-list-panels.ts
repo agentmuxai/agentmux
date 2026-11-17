@@ -5,6 +5,7 @@
 // states, opening / switching / attaching / forking, and the delete (with the sweep of the agent's panes).
 // Split out of MyAgentsList.tsx (#13044 S6); MyAgentsRowPanel.tsx draws it.
 
+import { t } from "@/app/i18n/i18n";
 import { errorDetail } from "@/app/notification/toast-debug";
 import { windowResizing } from "@/app/platform/window-resize";
 import { rowEnd } from "@/app/element/ui/CardGrid";
@@ -30,7 +31,7 @@ type ForkState =
     // name input expanded; `edited`: the user changed the suggested name, so a click outside no longer dismisses it
     | { kind: "naming"; label: string; loading: boolean; error: string | null; edited?: boolean };
 
-export type SubView = "seat" | "bundles" | "env" | "delete";
+export type SubView = "seat" | "bundles" | "env" | "spend" | "delete";
 
 export interface RenameState {
     label: string;
@@ -462,6 +463,12 @@ function rowActions(s: RowPanelsState, row: RecentSessionRow, withDuplicate: boo
             icon: "terminal",
             testId: "agent-my-agents-env",
             onSelect: () => openSubView(s, row, "env"),
+        },
+        {
+            label: t("agentSpend.action"),
+            icon: "dollar-sign",
+            testId: "agent-my-agents-spend",
+            onSelect: () => openSubView(s, row, "spend"),
         },
     ];
     const blockId = shutdownBlock(s, row);
