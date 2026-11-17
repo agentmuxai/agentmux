@@ -3128,10 +3128,30 @@ async fn a_frame_from_a_site_off_the_list_is_asked_about_and_allowing_it_loads_n
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(ads), &host).await;
     assert_eq!(body["data"]["settled"], "notice", "{body}");
     let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+
+    // A second site while the first's notice is up doesn't replace it: srv says
+    // busy, so the host asks about it at a later snapshot. The same site again
+    // is already on show.
+    let other = "https://other.example.org";
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(other), &host).await;
+    assert_eq!(body["data"]["settled"], "busy", "{body}");
+    assert_eq!(wait_for_banner(&state, &pane).await["id"], q["id"], "the first site's notice stays");
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(ads), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    assert_eq!(wait_for_banner(&state, &pane).await["id"], q["id"]);
+
+    // Dismissed: nothing is allowed, and the second site can be shown now.
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
     assert_eq!(s, StatusCode::OK);
     wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
     assert!(!crate::server::browser_allowlist::list_for(&pane).unwrap().contains(&ads.to_string()));
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(other), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(q["origin"], other);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
     assert!(fake.wait_for_loads(0).await.is_empty());
 
     // What isn't a web site is never asked about.
