@@ -60,7 +60,7 @@ import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FilePro
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
-import { seedTreeZoom, treeZoomOf } from "./editor-zoom-parts";
+import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeZoomOf } from "./editor-zoom-parts";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
@@ -98,9 +98,6 @@ export interface OpenFileOpts {
     page?: number;
 }
 const META_SCRATCH = "editor:scratch";
-const TREE_WIDTH_DEFAULT = 240;
-const TREE_WIDTH_MIN = 150;
-const TREE_WIDTH_MAX = 600;
 const PREVIEW_HEIGHT_DEFAULT = 300;
 const PREVIEW_HEIGHT_MIN = 80;
 const PREVIEW_HEIGHT_MAX = 1200;
@@ -492,7 +489,7 @@ export class EditorViewModel {
         }
         const persistedWidth = meta?.[META_TREE_WIDTH];
         if (typeof persistedWidth === "number") {
-            this._treeWidth[1](clampTreeWidth(persistedWidth));
+            this._treeWidth[1](clampTreeWidth(persistedWidth, Number.POSITIVE_INFINITY));
         }
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
@@ -1360,8 +1357,9 @@ export class EditorViewModel {
         return openRemoteFile(this, host, path);
     }
 
-    setTreeWidth(width: number): void {
-        this._treeWidth[1](clampTreeWidth(width));
+    /** `width` is the tree's at 100%; `zoom` is the tree's level while it is dragged: the column is drawn at least TREE_WIDTH_MIN wide. */
+    setTreeWidth(width: number, zoom = 1): void {
+        this._treeWidth[1](clampTreeWidth(width, zoom));
     }
 
     async commitTreeWidth(): Promise<void> {
@@ -1484,11 +1482,6 @@ export class EditorViewModel {
         this._encodingByTab.clear();
         unregisterEditorPane(this.blockId);
     }
-}
-
-function clampTreeWidth(w: number): number {
-    if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
-    return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
 }
 
 function clampPreviewHeight(h: number): number {

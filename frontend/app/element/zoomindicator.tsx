@@ -9,8 +9,9 @@ import {
     zoomIndicatorTextAtom,
     zoomIndicatorVisibleAtom,
 } from "@/app/store/zoom";
+import { splitSubject } from "@/app/store/zoom-parts";
 import { createEffect, JSX, on, onMount, Show } from "solid-js";
-import { zoomIndicatorCenter, zoomTargetBox } from "./zoom-indicator-position";
+import { paneBodyBox, zoomIndicatorCenter, zoomTargetBox } from "./zoom-indicator-position";
 import "./zoomindicator.scss";
 
 /** The amount with the name of the part it belongs to, when the pane has parts on screen: "File tree 130%". */
@@ -43,7 +44,8 @@ function ZoomIndicatorBox(): JSX.Element {
         const centre = zoomIndicatorCenter(
             target == null ? null : zoomTargetBox(target),
             { width: box.offsetWidth, height: box.offsetHeight },
-            { width: window.innerWidth, height: window.innerHeight }
+            { width: window.innerWidth, height: window.innerHeight },
+            target == null ? null : paneBodyBox(splitSubject(target).blockId)
         );
         if (centre == null) {
             box.style.removeProperty("left");

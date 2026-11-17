@@ -30,6 +30,8 @@
     border-radius: 0;
     font-size: 48px;
     font-weight: 600;
+    // One line: a fixed box at the window's right side would otherwise wrap the name of a part ("File tree 50%").
+    white-space: nowrap;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 

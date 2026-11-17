@@ -94,7 +94,7 @@ export function treeResizeHandler(model: EditorViewModel, treeZoom: () => number
         const startWidth = renderedTreeWidth(e.currentTarget as Element | null, model.treeWidthAtom(), treeZoom());
         // document mousemove coords are in viewport CSS pixels; divide by the tree's zoom so the saved
         // width keeps its meaning (the width at 100%) whatever the level is when it is dragged.
-        dragUntilRelease(e, "col-resize", (ev) => model.setTreeWidth(startWidth + (ev.clientX - startX) / treeZoom()), () => void model.commitTreeWidth());
+        dragUntilRelease(e, "col-resize", (ev) => model.setTreeWidth(startWidth + (ev.clientX - startX) / treeZoom(), treeZoom()), () => void model.commitTreeWidth());
     };
 }
 
