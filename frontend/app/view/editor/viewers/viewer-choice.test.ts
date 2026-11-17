@@ -35,9 +35,10 @@ describe("chooseViewer", () => {
         expect(chooseViewer(probe("other"))).toBe("hex");
     });
 
-    it("never loads a text file over the editor's cap into CodeMirror", () => {
-        expect(chooseViewer(probe("text", TEXT_MAX_BYTES + 1))).toBe("info");
-        expect(chooseViewer(probe("text", TEXT_MAX_BYTES + 1), "text")).toBe("info");
+    it("never loads a text file over the editor's cap into CodeMirror: the Large text viewer reads it in parts", () => {
+        expect(chooseViewer(probe("text", TEXT_MAX_BYTES + 1))).toBe("large");
+        expect(chooseViewer(probe("text", TEXT_MAX_BYTES + 1), "text")).toBe("large");
+        expect(chooseViewer(probe("text", TEXT_MAX_BYTES), "large")).toBe("text");
         // Hex reads it in parts, whatever its size.
         expect(chooseViewer(probe("text", TEXT_MAX_BYTES + 1), "hex")).toBe("hex");
         expect(chooseViewer(probe("other", 5_000_000_000))).toBe("hex");
@@ -65,9 +66,9 @@ describe("viewerOptions", () => {
         expect(viewerOptions(probe("pdf"))).toEqual(["pdf", "info", "text", "hex"]);
         expect(viewerOptions(probe("archive"))).toEqual(["info", "text", "hex"]);
         expect(viewerOptions(probe("other"))).toEqual(["hex", "info", "text"]);
-        // Too large for the editor: no text option.
-        expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["hex", "info"]);
-        expect(viewerOptions(probe("text", TEXT_MAX_BYTES + 1))).toEqual(["info", "hex"]);
+        // Too large for the editor: the Large text viewer in place of the text editor.
+        expect(viewerOptions(probe("other", TEXT_MAX_BYTES + 1))).toEqual(["hex", "info", "large"]);
+        expect(viewerOptions(probe("text", TEXT_MAX_BYTES + 1))).toEqual(["large", "info", "hex"]);
     });
 });
 

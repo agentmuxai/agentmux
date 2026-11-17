@@ -1,0 +1,96 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Editor's Large text viewer (large-text-viewer.tsx): numbered lines in
+// the editor's monospace font. A line's height is --large-line-h, which the
+// viewer's arithmetic shares (hex-layout.ts ROW_H). Theme variables only.
+
+@use "../../../../mixins.scss";
+
+.large-text-body {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--main-bg-color);
+}
+
+.large-text-error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    color: var(--error-text-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.large-text-line-input {
+    width: 7em;
+    padding: 1px var(--space-1);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--main-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+
+    &[aria-invalid="true"] {
+        border-color: var(--error-color);
+    }
+}
+
+.large-text-grid {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--large-line-h);
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring-inset;
+    }
+}
+
+// As tall as the file's lines. The lines on screen sit in it by a top margin
+// (the viewer sets it); they never make it taller than the file's lines.
+.large-text-spacer {
+    overflow: hidden;
+    width: max-content;
+    min-width: 100%;
+}
+
+.large-text-line {
+    display: flex;
+    gap: 2ch;
+    height: var(--large-line-h);
+    padding: 0 var(--space-2);
+    white-space: pre;
+}
+
+.large-text-number {
+    flex: 0 0 auto;
+    width: calc(var(--large-digits, 3) * 1ch);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-text-color);
+    user-select: none;
+}
+
+.large-text-text {
+    flex: 1 0 auto;
+}
+
+.large-text-hidden {
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
+
+.large-text-marked {
+    background: var(--accent-bg-heavy);
+}
