@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.60.32 — 2026-11-16
+
+- Agent pane: the wheel no longer goes dead where a preview slides under a resting pointer; a preview holds the wheel at its edge only after the wheel scrolled it there
+- The Editor opens a text file over 10 MB in a new Large text viewer: numbered lines read a page at a time, go to a line (Ctrl+G), long lines cut short
+- Browser: wait for a page still loading no longer says it loaded, and a call that ran out of time says the page may still be loading
+- App record says when a window was cut, no longer shows a row new to the top six as growth, and finds a restart between two hours
+- Linux: a click in a browser pane's page closes the saved sign-ins list and other menus, and selects the pane, as on Windows and macOS
+- Pane backdrops: a menu, popover, tooltip, find bar or hover panel opened from a pane with a backdrop takes that pane's colours, and a Black backdrop's menus and cards can be told from the pane
+- A container agent's Vault and Terminal-secret calls are proven by its token, as Browser's are, so its Vault update and the rest are recorded under its own identity
+- Whoever sent a message is told if its turn died of a retryable error (rate limit, overload, network) with nothing to redeliver it
+- The hex viewer's wheel moves a file of over 400,000 rows by the distance a trackpad moved, not a row for every small move
+- The Large text viewer shows a file in a Windows or East Asian code page (Windows-1251, Shift_JIS...) with its real encoding instead of Windows-1252
+
 ## 0.60.31 — 2026-11-16
 
 - release and install: each release carries a second signature of its envelope in SSH signature form, made by the same key, so a stock Mac's ssh-keygen can check the release when its openssl cannot; install.sh uses it and refuses a release from the first one that carries it that lacks it
