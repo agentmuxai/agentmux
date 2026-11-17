@@ -1256,6 +1256,10 @@
             "method": "FileProbeCommand"
         },
         {
+            "command": "fileindexlines",
+            "method": "FileIndexLinesCommand"
+        },
+        {
             "command": "filesearchbytes",
             "method": "FileSearchBytesCommand"
         },
