@@ -625,6 +625,9 @@ pub const COMMAND_TOWER_SAMPLE: &str = "tower.sample";
 pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
 pub const COMMAND_TOWER_PAIR: &str = "tower.pair";
 pub const COMMAND_TOWER_FORGET: &str = "tower.forget";
+// A window's page tells the record what it holds (backend::record), every five minutes. The window's,
+// not an agent API.
+pub const COMMAND_RECORD_PAGE: &str = "record.page";
 
 // A terminal's stats badge tooltip (backend::blockstats_detail). The window's,
 // not an agent API.

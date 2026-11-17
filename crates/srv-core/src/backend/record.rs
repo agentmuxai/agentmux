@@ -36,13 +36,18 @@ const HOUR_MS: u64 = 3_600_000;
 /// Raw days kept.
 pub const KEEP_DAYS: i64 = 14;
 /// The record's own budget: past it, the oldest days go first (never today's).
-pub const MAX_BYTES: u64 = 30 * 1024 * 1024;
+pub const MAX_BYTES: u64 = 28 * 1024 * 1024;
 /// Hourly rollups kept: a year, and a month's file goes whole.
 pub const ROLLUP_KEEP_DAYS: i64 = 366;
-/// The rollups' own budget (a year is about 9 MB), so the record as a whole stays under 40 MB.
-pub const ROLLUP_MAX_BYTES: u64 = 9 * 1024 * 1024;
+/// The rollups' own budget (a year is about 10 MB), so the record as a whole stays under 40 MB.
+pub const ROLLUP_MAX_BYTES: u64 = 12 * 1024 * 1024;
 /// The rows an hour's rollup names, by their largest figure.
 const ROLLUP_ROWS: usize = 6;
+/// The windows an hour's rollup names, by their largest heap.
+const ROLLUP_PAGES: usize = 3;
+/// Windows a line names; a page that has not reported for this long has closed.
+const MAX_PAGES: usize = 8;
+const PAGE_FRESH_MS: u64 = 3 * EVERY_MS;
 const ROLLUP_PREFIX: &str = "rollup-";
 const MONTH_FORMAT: &str = "%Y-%m";
 /// The largest rows one line names; a runaway of differently named processes cannot grow a line.
@@ -87,6 +92,55 @@ pub struct AgentMuxLine {
     pub rows: Vec<PartLine>,
 }
 
+/// What one window's page held when it last reported (`record.page`, every five minutes): numbers and the
+/// window's own label (`main`, `window-3`), never a title or a path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PageLine {
+    /// The window's label.
+    pub w: String,
+    /// The JS heap in use and its limit, MB; absent where the engine does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heap: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heap_limit: Option<u32>,
+    /// Elements in the page.
+    pub dom: u32,
+    /// Agent panes mounted, their rows in all and in the largest, and how many have a find bar open.
+    pub panes: u32,
+    pub rows: u32,
+    pub max_rows: u32,
+    pub searches: u32,
+    /// What holds a recycle back, as a count.
+    pub blocked: u32,
+    /// Minutes since the page loaded.
+    pub up_min: u32,
+}
+
+fn pages_store() -> &'static Mutex<std::collections::BTreeMap<String, (u64, PageLine)>> {
+    static PAGES: Mutex<std::collections::BTreeMap<String, (u64, PageLine)>> = Mutex::new(std::collections::BTreeMap::new());
+    &PAGES
+}
+
+/// A window's page reported: kept until it reports again, and written into the next line of the record.
+/// A label is cut to what an id holds; a window that reports more than [`MAX_PAGES`] windows' worth is ignored.
+pub fn note_page(mut page: PageLine, now_ms: u64) {
+    page.w = page.w.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')).take(40).collect();
+    if page.w.is_empty() {
+        return;
+    }
+    let mut pages = pages_store().lock().unwrap_or_else(|e| e.into_inner());
+    pages.retain(|_, (t, _)| now_ms.saturating_sub(*t) <= PAGE_FRESH_MS);
+    if pages.len() < MAX_PAGES || pages.contains_key(&page.w) {
+        pages.insert(page.w.clone(), (now_ms, page));
+    }
+}
+
+/// The pages that reported in the last [`PAGE_FRESH_MS`], by label.
+pub fn pages_at(now_ms: u64) -> Vec<PageLine> {
+    let pages = pages_store().lock().unwrap_or_else(|e| e.into_inner());
+    pages.values().filter(|(t, _)| now_ms.saturating_sub(*t) <= PAGE_FRESH_MS).map(|(_, p)| p.clone()).collect()
+}
+
 /// One line of a day's file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
@@ -101,6 +155,9 @@ pub struct Sample {
     pub machine: Option<MachineLine>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub am: Option<AgentMuxLine>,
+    /// The windows' pages, as they last reported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<PageLine>,
 }
 
 fn part_key(part: &impl Serialize) -> String {
@@ -159,6 +216,7 @@ pub fn compact(snap: &TowerSnapshot, version: &str, up_s: u64, disk: Option<(u64
             disk,
         }),
         am: snap.memory.as_ref().map(agentmux_line),
+        pages: Vec::new(),
     }
 }
 
@@ -216,6 +274,9 @@ pub struct Rollup {
     pub up_s: u64,
     /// Times srv started again inside the hour (its uptime went back).
     pub restarts: u32,
+    /// When the hour's last line was taken (0 in a rollup from before this was written).
+    #[serde(default)]
+    pub last_t: u64,
     /// All processes' CPU, thousandths of a core.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu: Option<Stat>,
@@ -229,6 +290,19 @@ pub struct Rollup {
     pub parts: Vec<(String, Stat)>,
     /// The [`ROLLUP_ROWS`] rows with the largest peak. A row missing from a line counts as 0 there.
     pub rows: Vec<(String, Stat)>,
+    /// The [`ROLLUP_PAGES`] windows with the largest heap peak, over the lines that named them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<PageRoll>,
+}
+
+/// One window's page over an hour: JS heap (MB), elements and mounted rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PageRoll {
+    pub w: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heap: Option<Stat>,
+    pub dom: Stat,
+    pub rows: Stat,
 }
 
 fn stat(mut v: Vec<u64>) -> Option<Stat> {
@@ -272,6 +346,8 @@ pub fn rollup(hour: u64, samples: &[Sample]) -> Option<Rollup> {
     rows.sort_by(|a, b| b.1 .3.cmp(&a.1 .3).then_with(|| a.0.cmp(&b.0)));
     rows.truncate(ROLLUP_ROWS);
     Some(Rollup {
+        last_t: last.t,
+        pages: page_rolls(samples),
         h: hour,
         n: samples.len() as u32,
         v: last.v.clone(),
@@ -284,6 +360,29 @@ pub fn rollup(hour: u64, samples: &[Sample]) -> Option<Rollup> {
         parts: stats_of(series(samples, |a| &a.parts)),
         rows,
     })
+}
+
+/// Each window's page over the hour, the [`ROLLUP_PAGES`] with the largest heap (then elements) first.
+fn page_rolls(samples: &[Sample]) -> Vec<PageRoll> {
+    let mut labels: Vec<&str> = samples.iter().flat_map(|s| s.pages.iter().map(|p| p.w.as_str())).collect();
+    labels.sort_unstable();
+    labels.dedup();
+    let mut out: Vec<PageRoll> = labels
+        .into_iter()
+        .filter_map(|w| {
+            let seen = || samples.iter().flat_map(|s| s.pages.iter()).filter(move |p| p.w == w);
+            Some(PageRoll {
+                w: w.to_string(),
+                heap: stat(seen().filter_map(|p| p.heap).map(u64::from).collect()),
+                dom: stat(seen().map(|p| u64::from(p.dom)).collect())?,
+                rows: stat(seen().map(|p| u64::from(p.rows)).collect())?,
+            })
+        })
+        .collect();
+    let peak = |p: &PageRoll| (p.heap.map_or(0, |h| h.3), p.dom.3);
+    out.sort_by(|a, b| peak(b).cmp(&peak(a)).then_with(|| a.w.cmp(&b.w)));
+    out.truncate(ROLLUP_PAGES);
+    out
 }
 
 fn rollup_file_name(hour: u64) -> String {
@@ -428,7 +527,8 @@ impl Record {
             gate.last_t = Some(snap.ts_ms);
         }
         let disk = agentmux_common::disk_space::volume_free_total_bytes(&self.dir_for_disk());
-        let sample = compact(snap, &self.version, self.started.elapsed().as_secs(), disk);
+        let mut sample = compact(snap, &self.version, self.started.elapsed().as_secs(), disk);
+        sample.pages = pages_at(snap.ts_ms);
         if let Err(e) = self.append(&sample) {
             tracing::warn!(error = %e, "[record] a line could not be written");
             return;
@@ -822,9 +922,55 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count(), 4);
     }
 
+    fn page(w: &str, heap: u32, dom: u32, rows: u32) -> PageLine {
+        PageLine { w: w.into(), heap: Some(heap), heap_limit: Some(4096), dom, panes: 3, rows, max_rows: rows / 2, searches: 1, blocked: 0, up_min: 90 }
+    }
+
+    #[test]
+    fn a_page_that_reported_is_in_the_next_line_until_it_stops_reporting() {
+        // An era of its own: the pages are the process's, and other tests write lines at NOON.
+        let t = 5_000_000_000_000u64;
+        note_page(page("window-9", 310, 18_000, 4_100), t);
+        note_page(page("Main <b>!</b>", 120, 5_000, 0), t + 1_000);
+        let tmp = tempfile::tempdir().unwrap();
+        let record = Record::new(tmp.path().join("record"), "0.60.30");
+        record.note(&snapshot(t + 2_000));
+        let text = std::fs::read_to_string(tmp.path().join(format!("record/{}.jsonl", day_of(t)))).unwrap();
+        let line: Sample = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        // A label is cut to what an id holds.
+        assert_eq!(line.pages.iter().map(|p| p.w.as_str()).collect::<Vec<_>>(), ["Mainbb", "window-9"]);
+        assert_eq!(line.pages[1].dom, 18_000);
+        // Fifteen minutes on, a page that never reported again has closed.
+        assert!(pages_at(t + PAGE_FRESH_MS + 5_000).is_empty());
+        // No page, no key in the line.
+        let bare = serde_json::to_string(&compact(&snapshot(NOON), "0.60.30", 1, None)).unwrap();
+        assert!(!bare.contains("pages"), "{bare}");
+    }
+
+    #[test]
+    fn an_hour_keeps_the_biggest_windows_pages_and_when_its_last_line_was() {
+        let mut samples: Vec<Sample> = (0..12).map(|i| line(NOON + i * EVERY_MS, 1_000, 1, 1)).collect();
+        for (i, s) in samples.iter_mut().enumerate() {
+            let i = i as u32;
+            s.pages = vec![page("main", 300 + i * 10, 10_000 + i * 100, 100 + i), page("a", 50, 100, 1), page("b", 60, 100, 1), page("c", 70, 100, 1)];
+        }
+        samples[11].pages.pop(); // c missed the last report
+        let r = rollup(NOON, &samples).unwrap();
+        assert_eq!(r.last_t, NOON + 11 * EVERY_MS);
+        assert_eq!(r.pages.iter().map(|p| p.w.as_str()).collect::<Vec<_>>(), ["main", "c", "b"]);
+        assert_eq!(r.pages[0].heap, Some(Stat(300, 350, 410, 410)));
+        assert_eq!(r.pages[0].dom, Stat(10_000, 10_500, 11_100, 11_100));
+        // An older rollup, from before any of it, still reads.
+        let old: Rollup = serde_json::from_str(r#"{"h":1,"n":1,"v":"0.60.31","up_s":5,"restarts":0,"parts":[],"rows":[]}"#).unwrap();
+        assert_eq!((old.last_t, old.pages.len()), (0, 0));
+    }
+
     #[test]
     fn a_rollup_is_a_small_line() {
-        let samples: Vec<Sample> = (0..12).map(|i| line(NOON + i * EVERY_MS, 3_000_000_000, 1_500_000_000, 1_000_000)).collect();
+        let mut samples: Vec<Sample> = (0..12).map(|i| line(NOON + i * EVERY_MS, 3_000_000_000, 1_500_000_000, 1_000_000)).collect();
+        for s in samples.iter_mut() {
+            s.pages = vec![page("main", 3_000, 200_000, 90_000), page("window-12", 2_000, 100_000, 5_000), page("window-13", 1_000, 90_000, 4_000)];
+        }
         let json = serde_json::to_string(&rollup(NOON, &samples).unwrap()).unwrap();
         // A year of hours has to fit ROLLUP_MAX_BYTES with room to spare.
         assert!(json.len() as u64 * 24 * 366 < ROLLUP_MAX_BYTES, "{} bytes: {json}", json.len());

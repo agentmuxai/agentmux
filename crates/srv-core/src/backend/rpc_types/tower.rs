@@ -542,3 +542,26 @@ pub struct TowerPairReq {
 pub struct TowerForgetReq {
     pub connection: String,
 }
+
+/// `record.page`: what one window's page holds, sent by the page every five minutes so the record
+/// (`backend::record`) can follow it for weeks. Numbers and the window's own label only.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct RecordPageReq {
+    /// The window's label (`main`, `window-3`).
+    pub window: String,
+    /// The JS heap in use and its limit, MB, where the engine says.
+    pub heap_mb: Option<u32>,
+    pub heap_limit_mb: Option<u32>,
+    /// Elements in the page.
+    pub dom: u32,
+    /// Agent panes mounted, their rows in all and in the largest, and find bars open.
+    pub panes: u32,
+    pub rows: u32,
+    pub max_rows: u32,
+    pub searches: u32,
+    /// What holds a recycle back, as a count.
+    pub blocked: u32,
+    /// Minutes since the page loaded.
+    pub up_min: u32,
+}

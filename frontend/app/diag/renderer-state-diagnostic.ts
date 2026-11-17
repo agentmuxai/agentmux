@@ -10,12 +10,19 @@
  * limit, when it last fell, the page's elements, the mounted agent panes with
  * their rows and find bars, and what is holding a recycle back and for how long.
  *
+ * The same figures also go to srv (`record.page`), which writes them into the
+ * record it keeps on this computer (docs/specs/SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16.md
+ * §6), so a window's growth over weeks can be read without the log.
+ *
  * Cost: a few property reads, one element count and one pass over the mounted
- * panes, every five minutes; nothing per row, per frame or per event. Counts
- * and ids only: no text, titles or paths.
+ * panes, every five minutes, and one small call to srv; nothing per row, per
+ * frame or per event. Counts and ids only: no text, titles or paths.
  */
 
 import { msSinceLastInput } from "@/app/store/last-input";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
+import type { RecordPageReq } from "@/types/rpc/RecordPageReq";
 import { recycleBlockerHolds } from "@/app/store/recycle-blockers";
 import { collectPaneStats, paneTotals, type PaneStats } from "./pane-stats";
 import { domNodes, heapMb, windowLabel, type HeapMb } from "./renderer-sample";
@@ -90,6 +97,33 @@ export function logRendererState(): void {
     console.log("[renderer-state]", JSON.stringify(collectRendererState()));
 }
 
+/** What srv's record keeps of this window: the line's counts, rounded, and how many things hold a recycle back. */
+export function recordPageOf(state: RendererState): RecordPageReq {
+    return {
+        window: state.w,
+        heap_mb: state.heap ? Math.round(state.heap.used) : null,
+        heap_limit_mb: state.heap ? Math.round(state.heap.limit) : null,
+        dom: state.dom,
+        panes: state.panes.n,
+        rows: state.panes.rows,
+        max_rows: state.panes.maxRows,
+        searches: state.panes.searches,
+        blocked: state.blocked.length,
+        up_min: state.upMin,
+    };
+}
+
+/** The log line, and the same state to srv's record; a failed call costs nothing but that report. */
+function report(): void {
+    const state = collectRendererState();
+    console.log("[renderer-state]", JSON.stringify(state));
+    try {
+        RpcApi.RecordPageCommand(TabRpcClient, recordPageOf(state)).catch(() => {});
+    } catch {
+        // No connection to srv yet: the next report tries again.
+    }
+}
+
 let started = false;
 
 /** Start the five-minute line; the first one comes a minute after load, so a recycled window shows its new size. */
@@ -97,7 +131,7 @@ export function startRendererStateReports(): void {
     if (started) return;
     started = true;
     setTimeout(() => {
-        logRendererState();
-        setInterval(logRendererState, REPORT_INTERVAL_MS);
+        report();
+        setInterval(report, REPORT_INTERVAL_MS);
     }, FIRST_REPORT_MS);
 }

@@ -124,7 +124,32 @@ fn latest(line: &Value, now_ms: i64) -> String {
         }
         out.push('.');
     }
+    for page in line["pages"].as_array().into_iter().flatten() {
+        out.push('\n');
+        out.push_str(&page_text(page));
+    }
     out
+}
+
+/// One window's page, from the page's own report.
+fn page_text(p: &Value) -> String {
+    let heap = match (p["heap"].as_u64(), p["heap_limit"].as_u64()) {
+        (Some(used), Some(limit)) => format!("JS heap {used} of {limit} MB, "),
+        (Some(used), None) => format!("JS heap {used} MB, "),
+        _ => String::new(),
+    };
+    let finds = p["searches"].as_u64().unwrap_or(0);
+    format!(
+        "Window {} (page up {} min): {heap}{} elements, {} agent pane(s) with {} rows (largest {}){}{}.",
+        s(p, "w"),
+        p["up_min"],
+        p["dom"],
+        p["panes"],
+        p["rows"],
+        p["max_rows"],
+        if finds > 0 { format!(", {finds} find bar(s) open") } else { String::new() },
+        if p["blocked"].as_u64().unwrap_or(0) > 0 { format!(", {} thing(s) holding a recycle back", p["blocked"]) } else { String::new() }
+    )
 }
 
 /// The rollup nearest `target_ms`.
@@ -167,9 +192,18 @@ fn trend(rolls: &[Value], now_ms: i64) -> String {
     out
 }
 
+/// When a rollup's last line was taken: its own time where it has one, else the start of its hour.
+fn last_time(r: &Value) -> (u64, bool) {
+    match r["last_t"].as_u64().filter(|t| *t > 0) {
+        Some(t) => (t, true),
+        None => (r["h"].as_u64().unwrap_or(0), false),
+    }
+}
+
 /// How many times srv started again in the hours after `then_h`: those each rollup counted inside its hour, and
 /// those between two hours, where the uptime of the later hour's last line is less than the earlier one's plus the
-/// time between them (allowing 15 minutes for where in its hour each last line fell).
+/// time between the two lines. Both lines' own times are used where the rollups have them (2 minutes of room); an
+/// older rollup has only its hour's start, which can be an hour from its last line, and gets 15 minutes.
 fn restarts_since(rolls: &[Value], then_h: u64) -> u64 {
     let inside: u64 = rolls.iter().filter(|r| r["h"].as_u64().unwrap_or(0) > then_h).map(|r| r["restarts"].as_u64().unwrap_or(0)).sum();
     let between = rolls
@@ -178,8 +212,10 @@ fn restarts_since(rolls: &[Value], then_h: u64) -> u64 {
         // A restart inside the later hour is already counted by that hour, and it is also why its uptime fell short.
         .filter(|w| w[1]["restarts"].as_u64().unwrap_or(0) == 0)
         .filter(|w| {
-            let gap_s = w[1]["h"].as_u64().unwrap_or(0).saturating_sub(w[0]["h"].as_u64().unwrap_or(0)) / 1000;
-            w[1]["up_s"].as_u64().unwrap_or(0) + 900 < w[0]["up_s"].as_u64().unwrap_or(0) + gap_s
+            let ((later, exact_later), (earlier, exact_earlier)) = (last_time(&w[1]), last_time(&w[0]));
+            let gap_s = later.saturating_sub(earlier) / 1000;
+            let room = if exact_later && exact_earlier { 120 } else { 900 };
+            w[1]["up_s"].as_u64().unwrap_or(0) + room < w[0]["up_s"].as_u64().unwrap_or(0) + gap_s
         })
         .count() as u64;
     inside + between
@@ -310,6 +346,18 @@ mod tests {
     }
 
     #[test]
+    fn the_newest_line_says_what_each_windows_page_holds() {
+        let newest = json!({ "t": 1_000, "v": "0.60.31", "up_s": 60, "am": { "total": 5, "procs": 1, "parts": [] },
+            "pages": [
+                { "w": "main", "heap": 310, "heap_limit": 4096, "dom": 18_200, "panes": 3, "rows": 4_100, "max_rows": 2_050, "searches": 1, "blocked": 2, "up_min": 90 },
+                { "w": "window-3", "dom": 900, "panes": 0, "rows": 0, "max_rows": 0, "searches": 0, "blocked": 0, "up_min": 5 }
+            ] });
+        let text = latest(&newest, 2_000);
+        assert!(text.contains("Window main (page up 90 min): JS heap 310 of 4096 MB, 18200 elements, 3 agent pane(s) with 4100 rows (largest 2050), 1 find bar(s) open, 2 thing(s) holding a recycle back."), "{text}");
+        assert!(text.contains("Window window-3 (page up 5 min): 900 elements, 0 agent pane(s) with 0 rows (largest 0)."), "{text}");
+    }
+
+    #[test]
     fn an_empty_record_says_so_and_a_young_one_says_there_is_no_trend() {
         let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], 1_000);
         assert!(text.contains("is empty") && text.contains("No hour has been rolled up yet"), "{text}");
@@ -348,25 +396,36 @@ mod tests {
 
     #[test]
     fn a_restart_between_two_hours_is_found_by_the_uptime_that_did_not_keep_up() {
+        // Each hour's last line is taken 55 minutes into it.
         let at = |h: u64, up_s: u64| {
             let mut r = roll(h * H, 1_000_000_000, 400_000_000, 0);
             r["up_s"] = json!(up_s);
+            r["last_t"] = json!(h * H + 55 * 60_000);
             r
         };
-        // Up 1 h 55 min at the end of hour 0; hour 1's last line says 2 h 50 min, as it should: no restart.
-        let steady = vec![at(0, 6_900), at(1, 10_200), at(2, 13_700)];
+        // Up 1 h 55 min at the end of hour 0; an hour later 2 h 55 min, as it should be: no restart.
+        let steady = vec![at(0, 6_900), at(1, 10_500), at(2, 14_100)];
         assert_eq!(restarts_since(&steady, 0), 0);
         // srv restarted after hour 1's last line: hour 2's last line is 50 min up, where 4 h was expected.
-        let restarted = vec![at(0, 6_900), at(1, 10_200), at(2, 3_000)];
+        let restarted = vec![at(0, 6_900), at(1, 10_500), at(2, 3_000)];
         assert_eq!(restarts_since(&restarted, 0), 1);
         // One inside an hour is counted once, by the hour: its last line is low too, and that is not a second restart.
-        let mut inside = vec![at(0, 6_900), at(1, 10_200), at(2, 1_200)];
+        let mut inside = vec![at(0, 6_900), at(1, 10_500), at(2, 1_200)];
         inside[2]["restarts"] = json!(1);
         assert_eq!(restarts_since(&inside, 0), 1);
         // ...and a restart between hours next to one inside another hour are two.
         let mut two = vec![at(0, 6_900), at(1, 2_000), at(2, 5_600), at(3, 1_200)];
         two[3]["restarts"] = json!(1);
         assert_eq!(restarts_since(&two, 0), 2);
+        // Sparse hours (the machine slept): the last lines were only ten minutes apart, so 600 s of uptime growth is
+        // no restart, though the hours' starts are an hour apart.
+        let mut sparse = vec![at(0, 6_900), at(1, 7_500)];
+        sparse[1]["last_t"] = json!(55 * 60_000 + 10 * 60_000);
+        assert_eq!(restarts_since(&sparse, 0), 0);
+        // A rollup from before last_t was kept falls back to its hour's start, with 15 minutes of room.
+        let old = |h: u64, up_s: u64| json!({ "h": h * H, "up_s": up_s, "restarts": 0 });
+        assert_eq!(restarts_since(&[old(0, 6_900), old(1, 10_500)], 0), 0);
+        assert_eq!(restarts_since(&[old(0, 6_900), old(1, 2_000)], 0), 1);
         // Before `then` nothing counts.
         assert_eq!(restarts_since(&restarted, 2 * H), 0);
     }

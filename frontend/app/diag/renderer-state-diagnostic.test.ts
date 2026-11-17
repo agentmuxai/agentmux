@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLastInputForTests } from "@/app/store/last-input";
 import { registerRecycleBlocker, reasonWithHold, recycleBlockerHolds } from "@/app/store/recycle-blockers";
 import { collectPaneStats, paneTotals, registerPaneStats, searchState } from "./pane-stats";
-import { collectRendererState, logRendererState, resetRendererStateForTests } from "./renderer-state-diagnostic";
+import { collectRendererState, logRendererState, recordPageOf, resetRendererStateForTests } from "./renderer-state-diagnostic";
 
 const MB = 1024 * 1024;
 const MIN = 60_000;
@@ -88,6 +88,30 @@ describe("the renderer state line", () => {
         expect(collectRendererState(t0 + 10 * MIN).drop).toEqual({ mb: 680, agoMin: 0 });
         heapIs(320);
         expect(collectRendererState(t0 + 25 * MIN).drop).toEqual({ mb: 680, agoMin: 15 });
+    });
+
+    it("sends srv's record the counts only, rounded, with no ids of panes", () => {
+        heapIs(900.6);
+        const off = [
+            registerPaneStats("cccccccc-3333-4444", () => ({ rows: 1200, search: 2 })),
+            registerPaneStats("dddddddd-5555-6666", () => ({ rows: 300, search: 0 })),
+            registerRecycleBlocker(() => "a message is waiting to be sent"),
+        ];
+        const req = recordPageOf(collectRendererState());
+        expect(req).toMatchObject({
+            window: "main",
+            heap_mb: 901,
+            heap_limit_mb: 4096,
+            panes: 2,
+            rows: 1500,
+            max_rows: 1200,
+            searches: 1,
+            blocked: 1,
+        });
+        expect(JSON.stringify(req)).not.toMatch(/cccccccc|message is waiting/);
+        off.forEach((f) => f());
+        delete (performance as unknown as { memory?: unknown }).memory;
+        expect(recordPageOf(collectRendererState())).toMatchObject({ heap_mb: null, heap_limit_mb: null });
     });
 
     it("says null for the heap where the engine does not report it", () => {
