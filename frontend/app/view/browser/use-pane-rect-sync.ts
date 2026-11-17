@@ -35,6 +35,12 @@ export function insetForSizeBadge(rect: PaneRect, dpr: number): PaneRect {
     return { ...rect, height: Math.max(1, rect.height - Math.round(SIZE_BADGE_STRIP_CSS * dpr)) };
 }
 
+/** Hands the batcher a pane's rect with the base it is measured against now: the batch may be sent frames
+ *  later, after the window has a newer size than this layout. */
+function recordRect(rects: ReturnType<typeof paneRectBatcher>, blockId: string, rect: PaneRect): void {
+    rects.set(blockId, rect, rect.width > 0 && rect.height > 0 ? paneLayoutBase(blockId) : undefined);
+}
+
 /** After a splitter drag ends, ask for every pane's final rect to be sent again, a few times.
  *  The sync below sends a rect once and then skips it as unchanged; the host can miss an update
  *  that lands while a pane is mid-resize, and the pane then stays at its old size until another
@@ -277,9 +283,7 @@ export function usePaneRectSync(params: PaneRectSyncParams): PaneRectSync {
         }
         lastSentRect = rect;
         if (rect.width > 0 && rect.height > 0) lastRealRect = rect;
-        // The base is taken now, with the rect: the batch may be sent frames later, after the window
-        // has a newer size than this layout.
-        rects.set(model.blockId, rect, rect.width > 0 && rect.height > 0 ? paneLayoutBase(model.blockId) : undefined);
+        recordRect(rects, model.blockId, rect);
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
         const css = paneRectCss();

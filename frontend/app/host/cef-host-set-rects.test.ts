@@ -1,14 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+// @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cefBrowserPanes } from "./cef-host-commands";
 
-const invokeFastCommand = vi.fn(async () => true);
+
+const invokeFastCommand = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("@/app/platform/ipc", () => ({ invokeBrowserApi: vi.fn(), invokeCommand: vi.fn() }));
 vi.mock("@/app/platform/ipc-query", () => ({ invokeFastCommand }));
 vi.mock("@/app/view/browser/leave-prompt", () => ({ takePersonClose: vi.fn() }));
 
-const { cefBrowserPanes } = await import("./cef-host-commands");
 
 const rect = (x: number) => ({ x, y: 0, width: 100, height: 50 });
 
