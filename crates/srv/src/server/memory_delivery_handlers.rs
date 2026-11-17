@@ -704,7 +704,7 @@ fn compose_delivery(
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
     let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000);
-    let tool_only = launch.is_some_and(|l| l.workspace_only);
+    let tool_only = launch.is_some_and(|l| l.workspace_only) || block_is_container(state, block_id);
     let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, carry, tool_only, &age_days) {
         Some((fitted, composed, parts, delivered_chars)) => {
             let mut delivered = delivery_items(&fitted.kept, &composed, delivered_chars);

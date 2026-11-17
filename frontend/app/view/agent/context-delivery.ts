@@ -77,7 +77,13 @@ export function contextDeliveryTitle(node: ContextDeliveryNode): string {
     // A delivery with an index says how many items went in full and how many are listed; what was cut or left out
     // is counted on its own, never as "not sent".
     const parts = [count];
-    if (indexed > 0) parts.push(`${n - indexed - leftOut - cut} in full`, `${indexed} in index`);
+    if (indexed > 0) {
+        // Only memory rows count as given in full: a startup file, and the Global entries it carried, were not sent here.
+        const inFull = node.items.filter(
+            (i) => MEMORY_KINDS.has(i.kind) && !i.via && (i.delivered === undefined || i.delivered === "full")
+        ).length;
+        parts.push(`${inFull} in full`, `${indexed} in index`);
+    }
     if (leftOut > 0) parts.push(`${leftOut} left out`);
     if (cut > 0) parts.push(`${cut} cut`);
     const tail = parts.join(" · ");

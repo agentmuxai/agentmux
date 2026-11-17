@@ -36,19 +36,13 @@ The two memory systems are one folder for Claude agents: AgentMux's `Memory` too
 
 ## 2. Measured sizes
 
-Three agents on that host (anonymised), one day.
+Measured on one development host (AgentMux 0.60.x), from its srv logs and the pane's own "Given to the agent" lists. Only ratios and orders of magnitude are given here.
 
-| Agent | Event | Startup file | Global in the hook | Personal | Result |
-|---|---|---|---|---|---|
-| A (Claude Code, host) | new session | about 62 KB, last written 13 days earlier | all sections: 72,000 chars arrived, about 11,000 more cut (about 83,000 in all, 37 entries) | 9 files, about 13 KB, not sent; no list of names arrived | Global Memory twice (once in the stale file); no Personal Memory; no names |
-| B (Claude Code, host) | compaction | reloaded by the CLI | arrived again in the 8 parts | none | about 34,000 chars cut; parts arrived out of order (1, 2, 5, 3, 4, 7, 6, 8) |
-| C (from a screenshot of the pane list) | rebuilt session | about 62 KB `CLAUDE.md` "+ Global Memory", about 16k tok | about 30 Global entries again; about 35k tok in all | 11 files "not sent, 0 B" | 5 workspace entries "not sent", 1 "cut", 17 cut in all |
-
-Across every srv log still on disk on that host (versions 0.60.x): 325 of 325 compaction deliveries and 78 of 88 new-session deliveries used all 8 parts. A delivery of 8 parts is at or near the cap; this is a lower bound on how often a delivery is cut, not a count of cuts. The 10 that did not are probably sessions where the startup file matched (inferred from the part count, not checked per delivery), which is the case R1 makes the rule.
-
-Cost of one delivery today: up to 72,000 characters, about 18,000 tokens (srv's own estimate is one token per four characters), on every compaction and most new sessions, of which about all is a copy of what the CLI already holds.
-
-After the change, for this agent: an index of its 9 Personal files is about 1.8 KB (about 450 tokens: name, a description of 110 to 170 characters, type, one short line each) against the 12.7 KB of bodies, and the Global copy is gone. Estimated 2 to 8 KB per delivery, a 90% cut or more.
+- **What arrived.** Global Memory is about 80 KB (37 entries) and the startup file holds a copy of it. In a new session whose file was a fortnight old, the hook sent all of it again and filled the 72,000 characters; Personal Memory (9 files, about 13 KB) did not arrive and no list of names did. After a compaction the hook sent Global Memory again too, in 8 parts that arrived out of order.
+- **How often.** Every compaction delivery in the logs on disk used all 8 parts, and about nine in ten new-session deliveries did. A delivery of 8 parts is at or near the cap, so this is a lower bound on how often a delivery is cut, not a count of cuts. The rest are probably sessions where the startup file matched (inferred from the part count, not checked per delivery).
+- **A rebuilt session's list** shows the same shape: Global Memory counted twice (once through the file, once through the hook), the newest workspace entries "not sent", and every Personal file "not sent, 0 B".
+- **Cost of one delivery today:** up to 72,000 characters, about 18,000 tokens (srv's own estimate is one token per four characters), on every compaction and most new sessions, almost all of it a copy of what the CLI already holds.
+- **After the change**, for an agent with 9 Personal files: the index is about 2 KB (about 450 tokens: file name, type and a description of 110 to 170 characters, one line each) against about 13 KB of bodies, and the Global copy is gone. Estimated 2 to 8 KB per delivery, a cut of 90% or more.
 
 ## 3. Design
 
@@ -114,9 +108,9 @@ Each row is in exactly one state, in plain words:
 | Cut | "cut" (warning) | "Only part fit. The delivery says how much is left and where to read it." |
 | Left out | "left out" (error) | "Not given: <reason>. Its name and how to read it were in the delivery." |
 
-"not sent" goes away. The title becomes `Given to the agent · new session · 53 items · 3 in full · 11 in index` and adds `· N left out` or `· N cut` only when above zero. The size column for an index row shows the size of its index line, not "0 B". Backend: `EntrySize.delivered` gains `indexed` and `startup`; `omitted` keeps its meaning of left out and now always carries a `reason`. A client older than this change reads an unknown `delivered` value as a full row, which is the right side to err on: it never says "not sent" for a file that was listed.
+"not sent" goes away. The title becomes `Given to the agent · new session · 12 items · 1 in full · 11 in index` and adds `· N left out` or `· N cut` only when above zero. The size column for an index row shows the size of its index line, not "0 B". Backend: `EntrySize.delivered` gains `indexed` and `startup`; `omitted` keeps its meaning of left out and now always carries a `reason`. A client older than this change reads an unknown `delivered` value as a full row, which is the right side to err on: it never says "not sent" for a file that was listed.
 
-Screenshots: before is the operator's screenshot of a rebuilt session's list (53 items, 17 cut, 11 Personal files "not sent"). After is taken in the build from my own task dev, with a made-up agent, the same list, and added to the PR. macOS and Linux look checks follow the visual-change rule (Clare, Maricon).
+Screenshots: before is the operator's screenshot of the list after a rebuilt session. After is taken in the build from my own task dev, with a made-up agent, the same list, and added to the PR. macOS and Linux look checks follow the visual-change rule (Clare, Maricon).
 
 ### 3.5 R5: nothing is dropped by position
 
@@ -158,7 +152,7 @@ An index helps only if the agent opens a file when it matters. Three measures:
   - **Floor:** nothing delivered (shows the agent cannot guess the fact).
 - Measure per run: whether the right file was opened before the answer, whether the answer is right, tokens of the delivery.
 - Pass: treatment correct at least 90% and within 10 points of control; sensitivity at least 30 points below treatment; floor near 0.
-- Cost: 40 runs of a short task, about an hour on narko or Area54, no real mouse or screen use, no network. I will ask AgentY for the operator's yes before running it, as the rules require; the build does not wait for it, because the delivery path is covered by tests and the operator checks a real compaction before anyone calls it fixed.
+- Cost: 40 runs of a short task, about an hour on a development machine, no real mouse or screen use, no network. I will ask AgentY for the operator's yes before running it, as the rules require; the build does not wait for it, because the delivery path is covered by tests and the operator checks a real compaction before anyone calls it fixed.
 
 **Operator check.** The operator watches one real compaction in the release that carries this, as AgentY asked.
 
@@ -206,4 +200,4 @@ Each has a recommendation; the build follows them unless AgentY says otherwise.
 
 - That Claude Code rereads `CLAUDE.md` after a compaction before the `SessionStart` hook runs (a compaction observed to deliver Global Memory twice shows it rereads it; the order is not documented). The refresh at `PreCompact` precedes either order.
 - That `MEMORY.md` is reloaded after a compaction.
-- The 325 and 88 delivery counts are from the srv logs still on one host, not from every host.
+- The delivery-frequency ratios are from the srv logs still on one host, not from every host.

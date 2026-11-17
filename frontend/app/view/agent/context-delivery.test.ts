@@ -189,6 +189,19 @@ describe("contextDeliveryTitle", () => {
         expect(title).toBe("Memory re-delivered after compaction · 2 items · 1 in full · 1 in index");
         expect(title).not.toMatch(/not sent|cut/);
     });
+
+    it("counts as in full only what was sent here, not a startup file or the Global entries it carried", () => {
+        const node = {
+            ...memoryNode("startup", "indexed"),
+            items: [
+                { kind: "startup_file" as const, name: "CLAUDE.md", sizeBytes: 100, tokens: 25 },
+                { kind: "global_memory" as const, name: "Rules", sizeBytes: 0, tokens: 0, via: "startup_file" as const },
+                { kind: "personal_memory" as const, name: "a.md", sizeBytes: 10, tokens: 3, delivered: "indexed" as const },
+                { kind: "personal_memory" as const, name: "rule.md", sizeBytes: 10, tokens: 3 },
+            ],
+        };
+        expect(contextDeliveryTitle(node)).toBe("Given to the agent · new session · 4 items · 1 in full · 1 in index");
+    });
 });
 
 describe("compactionSummaryNodeId", () => {
