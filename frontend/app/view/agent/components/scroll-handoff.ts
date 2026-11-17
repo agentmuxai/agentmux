@@ -140,6 +140,16 @@ function wheelNotches(e: WheelEvent): number | null {
     return null;
 }
 
+/** What a box did with each wheel event it saw, for the dev-mode wheel diagnostic (scroll/wheel-diag.ts). Per event, so
+ *  a gesture of events closer together than the diagnostic's settle delay keeps each one's own result. */
+const handoffs = new WeakMap<object, "native" | "absorb" | "forward">();
+export function recordHandoff(e: object, action: "native" | "absorb" | "forward"): void {
+    handoffs.set(e, action);
+}
+export function handoffOf(e: object): "native" | "absorb" | "forward" | null {
+    return handoffs.get(e) ?? null;
+}
+
 /** The wheel events this file made to tell a pane about a gesture it relayed: the pane's own skid reset ignores them. */
 const relayed = new WeakSet<Event>();
 
@@ -238,6 +248,7 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
             timeStamp: e.timeStamp,
         });
         skids.set(pane, state);
+        recordHandoff(e, action.kind);
         if (action.kind === "absorb") {
             // `contain` keeps an overflowing box's edge from relaying, so nothing
             // moves. A box that fits now (its content shrank after the wheel

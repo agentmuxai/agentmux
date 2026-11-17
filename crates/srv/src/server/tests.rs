@@ -7972,6 +7972,75 @@ async fn memory_session_start_skips_global_memory_the_startup_file_carries() {
     assert_eq!(rules["size_bytes"], 0, "the file's row counts it");
 }
 
+/// The 11-17 incident: after a compaction (and /clear) the CLI reloads its startup file, but the hook only looked at
+/// that file for a new session, so it sent all the Global Memory a second time.
+#[tokio::test]
+async fn memory_session_start_after_a_compaction_does_not_repeat_the_startup_files_global_memory() {
+    let (state, token) = m4c1_state();
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md
+").unwrap();
+    std::fs::write(ws.path().join(".claude/AGENTMUX_MEMORY.md"), "# Memory
+# [Workspace] Rules
+
+workspace rules
+").unwrap();
+    let cwd = ws.path().to_string_lossy().into_owned();
+    for source in ["compact", "clear"] {
+        let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+        let req = serde_json::json!({"block_id": block_id, "session_id": format!("s-{source}"), "source": source, "part": 1, "cwd": cwd});
+        let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert!(v["text"].is_null() && v["of"] == 0, "{source}: the file carries it, so there is nothing to send: {v}");
+    }
+}
+
+/// A startup file written before a Global entry changed: only that entry is sent, whole, and the one the file holds
+/// current is not repeated.
+#[tokio::test]
+async fn memory_session_start_sends_only_the_global_sections_newer_than_the_startup_file() {
+    let (state, token) = m4c1_state();
+    for (id, name, text) in [("g-rules", "Rules", "workspace rules v2"), ("g-other", "Other", "other rules")] {
+        let bundle: crate::backend::storage::store::Bundle =
+            serde_json::from_value(serde_json::json!({"id": id, "name": name, "is_global": true, "instructions": text})).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
+    }
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md
+").unwrap();
+    std::fs::write(
+        ws.path().join(".claude/AGENTMUX_MEMORY.md"),
+        "# Memory
+# [Workspace] Rules
+
+workspace rules v1
+
+---
+
+# [Workspace] Other
+
+other rules
+",
+    )
+    .unwrap();
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let cwd = ws.path().to_string_lossy().into_owned();
+    let req = serde_json::json!({"block_id": block_id, "session_id": "s-stale", "source": "compact", "part": 1, "cwd": cwd});
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["text"].as_str().expect("the newer section is sent");
+    assert!(text.contains("workspace rules v2"), "{text}");
+    assert!(text.contains("newer than your startup copy"), "{text}");
+    assert!(!text.contains("other rules"), "the current section is not repeated: {text}");
+}
+
 // ---- Container-agent credential (backend/container/credential.rs) ----
 
 async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {

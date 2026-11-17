@@ -12,6 +12,7 @@ pub mod fit;
 pub mod fleet;
 pub mod global_record;
 pub mod history_import;
+pub mod index;
 pub mod native_drift;
 pub mod native_files;
 pub mod native_retention;

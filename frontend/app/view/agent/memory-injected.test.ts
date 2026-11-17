@@ -253,3 +253,22 @@ describe("a session restarted before its first turn", () => {
         expect(nodes.filter((n) => n.type === "context_delivery")).toHaveLength(2);
     });
 });
+
+describe("buildMemoryInjectedNode — the Personal Memory index", () => {
+    it("keeps delivered: indexed and the reason a row is not in full", () => {
+        const frame = {
+            type: "system",
+            subtype: "agentmux_memory_injected",
+            id: "memory-injected-s2-compact-1",
+            reason: "compact",
+            entries: [
+                { label: "a.md", source: "personal", kind: "personal_memory", name: "a.md", delivered: "indexed", size_bytes: 120, tokens: 30, reason: "marked always, over the limit" },
+                { label: "b.md", source: "personal", kind: "personal_memory", name: "b.md", delivered: "indexed", size_bytes: 90, tokens: 22 },
+            ],
+            timestamp: "2026-11-17T12:00:00+00:00",
+        };
+        const node = buildMemoryInjectedNode(frame, { now: 0 });
+        expect(node?.items[0]).toMatchObject({ delivered: "indexed", reason: "marked always, over the limit", sizeBytes: 120 });
+        expect(node?.items[1].reason).toBeUndefined();
+    });
+});
