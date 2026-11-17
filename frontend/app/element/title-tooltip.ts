@@ -11,6 +11,7 @@
 // tooltip, StatusBarTip.tsx, and is left alone.)
 
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { isPrimaryButtonDown, isRestingAtPress } from "@/app/util/pointer-drag-state";
 import { claimOpen, HIDE_DELAY_MS, isWarm, releaseOpen, SHOW_DELAY_MS, type OpenTip } from "./tooltip-timing";
 import "./anchored-popover.scss";
@@ -118,6 +119,8 @@ interface TipState {
     showTimer: ReturnType<typeof setTimeout> | null;
     hideTimer: ReturnType<typeof setTimeout> | null;
     stopAutoUpdate: (() => void) | null;
+    /** Takes the pane's colours off the shell again (a tooltip for an element in a pane with a backdrop). */
+    stopScope: (() => void) | null;
     // After a click, a key or a wheel turn the tooltip goes but the pointer is still on the element:
     // its title stays taken (so the browser's slow tooltip does not follow) until the pointer leaves it.
     held: HTMLElement | null;
@@ -135,6 +138,7 @@ function createTipState(doc: Document): TipState {
         showTimer: null,
         hideTimer: null,
         stopAutoUpdate: null,
+        stopScope: null,
         held: null,
         self: { close: () => closeNow(t) },
     };
@@ -178,6 +182,8 @@ function closeNow(t: TipState, keepTitle = false): void {
     t.current = null;
     t.visible = false;
     t.positioned = false;
+    t.stopScope?.();
+    t.stopScope = null;
     t.shell?.remove();
 }
 
@@ -194,6 +200,8 @@ function openFor(t: TipState, el: HTMLElement, text: string): void {
     if (!t.panel || !t.shell) ({ shell: t.shell, panel: t.panel } = createPanel(t.doc));
     t.panel.textContent = text;
     t.panel.style.opacity = "0";
+    t.stopScope?.();
+    t.stopScope = carryPaneScope(t.shell, el) ?? null;
     t.doc.body.append(t.shell);
     t.stopAutoUpdate = autoUpdate(el, t.shell, () => void place(t));
     void place(t);

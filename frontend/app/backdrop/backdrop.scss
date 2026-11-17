@@ -104,6 +104,30 @@
     initial-value: transparent;
 }
 
+// The Tailwind token sync, as in every theme file (themes/*.scss): the `--color-*` tokens behind the utility classes
+// (`text-foreground`, `bg-modalbg`, `border-border`) are set on `:root`, so they hold the window's colours wherever
+// they are read. Set again here, they resolve against the pane: a tooltip or a kit control drawn with those classes
+// follows the pane's backdrop like one drawn with the tokens themselves (tailwind-sync.test.ts keeps the two lists
+// the same).
+[data-backdrop] {
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-hoverbg: var(--hover-bg-color);
+    --color-highlightbg: var(--highlight-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}
+
 // The scope's element takes no part in layout: it only carries properties down.
 .pane-scope {
     display: contents;

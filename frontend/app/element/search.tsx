@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignalAtom } from "@/util/util";
-import { JSX, Show } from "solid-js";
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
+import { JSX, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { SearchBar } from "./search-parts";
 import { createSearch, type SearchProps } from "./search-state";
@@ -13,7 +14,14 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
     const s = createSearch(props);
     return (
         <Show when={s.isOpen()}>
-            <Portal>
+            {/* The bar takes the colours of the pane it searches (a pane with a backdrop). They go on the portal's own
+                element: the bar's style is rewritten whole each time it is placed. */}
+            <Portal
+                ref={(mount) => {
+                    const stop = carryPaneScope(mount, props.anchorRef?.current);
+                    if (stop) onCleanup(stop);
+                }}
+            >
                 <SearchBar s={s} />
             </Portal>
         </Show>

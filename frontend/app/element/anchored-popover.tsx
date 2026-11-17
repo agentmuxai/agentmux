@@ -20,6 +20,8 @@
  *     fixed, now fixed once for all).
  *   - The airspace cut over native browser panes (`usePaneOverlay` plus
  *     `data-pane-overlay`), on every platform.
+ *   - The colours of the pane it was opened from, when that pane has a backdrop (`carryPaneScope`): the shell
+ *     carries the pane's scope for the overlay layer. The pane is the one the anchor is in, or `scope`.
  *   - Dismiss, when `onDismiss` is given: a mousedown outside the panel and
  *     its anchor, or Esc (not while typing in a field inside the panel).
  *   - Entrance and exit, when `motion` is given: the panel stays hidden until
@@ -31,6 +33,7 @@
  * the panel's.
  */
 
+import { carryPaneScope, type ScopeSource } from "@/app/backdrop/overlay-scope";
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import type { EnterKind } from "@/app/motion/primitives";
 import { useMotion } from "@/app/motion/solid";
@@ -54,6 +57,8 @@ export interface AnchoredPopoverProps {
     /** Read once, when the panel's first frame runs. */
     anchor: PopoverAnchor;
     placement?: Placement;
+    /** The pane whose backdrop the panel takes: an element in it, or its block id. Default: the anchor, when it is an element. */
+    scope?: ScopeSource;
     /** The gap to the anchor, in real pixels. Default 8. */
     gutter?: number;
     /** How the panel comes in and goes out (`enter`/`exit` kind). Omit for none. */
@@ -160,15 +165,22 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;
     let disposed = false;
+    let stopScope: (() => void) | undefined;
+    // Asked when the shell mounts, so its first paint is the pane's, and again at its first frame, for an anchor set after mount.
+    const scopeShell = (el: HTMLElement) => {
+        stopScope ??= carryPaneScope(el, untrack(() => props.scope) ?? untrack(() => props.anchor));
+    };
 
     // A dismissible popover takes Escape; a passive one (a tooltip) does not.
     usePaneOverlay(() => shell, { keys: props.overlayKeys ?? !!props.onDismiss });
 
     const registerShell = (el: HTMLDivElement) => {
         shell = el;
+        scopeShell(el);
         if (frame !== undefined) cancelAnimationFrame(frame);
         frame = requestAnimationFrame(() => {
             frame = undefined;
+            scopeShell(el);
             const anchor = untrack(() => props.anchor);
             if (!anchor || !(el instanceof Element)) {
                 // Nothing to place against: show it where it is.
@@ -215,6 +227,8 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
         disposed = true;
         const kind = untrack(() => props.motion);
         if (kind && shell && entered) fadeOutCopy(shell, kind);
+        // After the copy is made: the copy that fades out keeps the pane's colours.
+        stopScope?.();
         if (frame !== undefined) cancelAnimationFrame(frame);
         frame = undefined;
         stopAutoUpdate?.();
