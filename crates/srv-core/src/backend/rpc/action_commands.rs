@@ -74,7 +74,7 @@ pub const UNLESS_OPERATOR: &[&str] = &[
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
     "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
-    "presence.publish-now", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
+    "presence.publish-now", "record.page", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
     "watcheditorfile", "watchmediadir", "widgets.endsession",
 ];
 

@@ -18,6 +18,7 @@ use crate::backend::tower::sampler::{block_label, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_peers(engine, state);
+    register_record_page(engine);
     let auth_key = state.auth_key.clone();
     let lan = state.lan_discovery.clone();
     let local = state.clone();
@@ -165,6 +166,27 @@ fn spawn_record_timer(state: &AppState) {
 
 /// `tower.peers`, `tower.pair` and `tower.forget`: the AgentMux computers this
 /// one is paired with (`backend::tower::peers`).
+/// `record.page`: the page's own figures, kept for the next line of the record.
+fn register_record_page(engine: &Arc<WshRpcEngine>) {
+    engine.register_typed(COMMAND_RECORD_PAGE, |req: RecordPageReq, ctx| async move {
+        not_an_agent_api(&ctx)?;
+        let page = crate::backend::record::PageLine {
+            w: req.window,
+            heap: req.heap_mb,
+            heap_limit: req.heap_limit_mb,
+            dom: req.dom,
+            panes: req.panes,
+            rows: req.rows,
+            max_rows: req.max_rows,
+            searches: req.searches,
+            blocked: req.blocked,
+            up_min: req.up_min,
+        };
+        crate::backend::record::note_page(page, agentmux_common::time::now_ms_u64());
+        Ok(())
+    });
+}
+
 fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_PEERS, |_req: Option<NoArgsReq>, ctx| async move {
         not_an_agent_api(&ctx)?;
