@@ -346,9 +346,18 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
         push_then_replay(state, &stopped).await;
         return Settled::Replayed("it is on the pane's sites");
     }
+    let is_frame = stopped.kind == "frame";
     let Some(origin) = allowed_origins::target_origin(&stopped.url) else {
+        // A frame's site is a question about what the agent may act on; nothing
+        // was stopped, so there is no navigation notice to show.
+        if is_frame {
+            return Settled::Notice("it isn't a web address".to_string());
+        }
         return show_notice(state, &stopped, None, "It isn't a web address.");
     };
+    if is_frame {
+        return ask_about_frame(state, &stopped, &list, &origin);
+    }
     let agent = crate::server::browser_owner::owner_of(&stopped.pane).unwrap_or_default();
     let payload = json!({
         "url": stopped.url, "origin": origin, "window": window_of(&stopped), "popup": stopped.kind == "popup",
@@ -391,6 +400,89 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
         Err(e @ AskError::NotShown(_)) => {
             tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't ask");
             show_notice(state, &stopped, Some(&origin), "AgentMux couldn't ask you about it.")
+        }
+    }
+}
+
+/// The site each pane's frame notice is showing now, if it has one.
+fn frame_notices() -> &'static Mutex<HashMap<String, String>> {
+    static N: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    N.get_or_init(Default::default)
+}
+
+/// What taking a pane's frame-notice slot came to.
+#[derive(Debug, PartialEq, Eq)]
+enum FrameSlot {
+    /// The slot was free and now holds this site.
+    Reserved,
+    /// This site's notice is up already.
+    Showing,
+    /// Another site's notice is up.
+    Busy,
+}
+
+/// Take `pane`'s slot for `origin`, in the same step as the check.
+fn reserve_frame_slot(map: &mut HashMap<String, String>, pane: &str, origin: &str) -> FrameSlot {
+    match map.get(pane) {
+        Some(up) if up == origin => FrameSlot::Showing,
+        Some(_) => FrameSlot::Busy,
+        None => {
+            map.insert(pane.to_string(), origin.to_string());
+            FrameSlot::Reserved
+        }
+    }
+}
+
+/// Free `pane`'s slot, only if it still holds `origin`: a notice that was
+/// replaced mustn't free the slot of the one that replaced it.
+fn release_frame_slot(map: &mut HashMap<String, String>, pane: &str, origin: &str) {
+    if map.get(pane).is_some_and(|up| up == origin) {
+        map.remove(pane);
+    }
+}
+
+/// A snapshot found a frame from `origin`, a site off the pane's `list`
+/// (forms-in-frames spec §5.3): tell the person in the pane's banner, with
+/// Allow. It is a notice, not a question about a navigation, because nothing
+/// is stopped and the agent's tools on the pane must not pause for an
+/// incidental frame; the frame stays unactable until Allow, and the agent
+/// takes a new snapshot after. Allow adds the site and loads nothing.
+fn ask_about_frame(state: &AppState, stopped: &Stopped, list: &[String], origin: &str) -> Settled {
+    use crate::server::browser_attention::{self, Answer, AskError, Kind};
+    // One frame notice per pane at a time: a second site's would replace the
+    // first's, which the host then counts as asked and never raises again. Busy
+    // makes the host forget the second site until a later snapshot. The slot is
+    // taken before the notice is raised, so two reports at once can't both pass.
+    match reserve_frame_slot(&mut frame_notices().lock().unwrap_or_else(|p| p.into_inner()), &stopped.pane, origin) {
+        FrameSlot::Reserved => {}
+        FrameSlot::Showing => return Settled::Notice("it is being shown already".to_string()),
+        FrameSlot::Busy => return Settled::Busy,
+    }
+    let payload = json!({
+        "url": origin, "origin": origin, "sites": list, "why": "", "allow": true, "frame": true, "popup": false, "window": null,
+    });
+    match browser_attention::raise(state, &stopped.pane, "", Kind::Notice, payload) {
+        Ok(raised) => {
+            let (st, stopped, origin) = (state.clone(), stopped.clone(), origin.to_string());
+            tokio::spawn(async move {
+                // Dismissed, replaced by another banner or the pane closed all read as Cancelled.
+                let (answer, waiting) = raised.answer(None).await;
+                release_frame_slot(&mut frame_notices().lock().unwrap_or_else(|p| p.into_inner()), &stopped.pane, &origin);
+                if matches!(answer, Answer::Yes | Answer::YesAlways | Answer::YesAsking) {
+                    let outcome = allow_and_load(&st, &stopped, &origin).await;
+                    tracing::info!(pane = %stopped.pane, origin = %origin, outcome = %outcome, "[browser-allowlist] a frame's site allowed from the banner");
+                }
+                drop(waiting);
+            });
+            Settled::Notice("the person is told about the frame's site; the agent isn't paused".to_string())
+        }
+        Err(e) => {
+            release_frame_slot(&mut frame_notices().lock().unwrap_or_else(|p| p.into_inner()), &stopped.pane, origin);
+            if matches!(e, AskError::Busy { .. }) {
+                return Settled::Busy;
+            }
+            tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't tell the person about a frame's site");
+            Settled::Unshown(e.to_string())
         }
     }
 }
@@ -598,6 +690,22 @@ mod tests {
         assert!(drop_pane("al-popup2") && drop_pane("al-popup3"));
         assert!(!snapshot().keys().any(|k| k.starts_with("al-")));
         assert!(!lock().lists.contains_key("al-root"));
+    }
+
+    #[test]
+    fn a_frame_notice_slot_is_taken_with_the_check_and_freed_only_by_its_owner() {
+        let mut map = HashMap::new();
+        assert_eq!(reserve_frame_slot(&mut map, "p", "https://a.example"), FrameSlot::Reserved);
+        assert_eq!(reserve_frame_slot(&mut map, "p", "https://a.example"), FrameSlot::Showing);
+        assert_eq!(reserve_frame_slot(&mut map, "p", "https://b.example"), FrameSlot::Busy, "a second site finds the slot taken");
+        assert_eq!(reserve_frame_slot(&mut map, "q", "https://b.example"), FrameSlot::Reserved, "another pane has its own slot");
+        // A notice that was replaced frees nothing of the one that took over.
+        release_frame_slot(&mut map, "p", "https://b.example");
+        assert_eq!(map.get("p").map(String::as_str), Some("https://a.example"));
+        release_frame_slot(&mut map, "p", "https://a.example");
+        assert!(!map.contains_key("p"));
+        assert_eq!(reserve_frame_slot(&mut map, "p", "https://b.example"), FrameSlot::Reserved, "free again");
+        release_frame_slot(&mut map, "never", "https://a.example");
     }
 
     #[test]

@@ -391,7 +391,11 @@ async fn a_sign_in_whose_site_is_edited_while_the_person_is_asked_is_not_typed()
 
 // ---- A login the person shared with an agent's own browser profile (spec section 5) ----
 
-const OWNER: &str = "uid-share-owner-0001";
+/// A permanent uid of this test's own: agents are registered by uid in a table the tests share, so tests that ran with one
+/// uid at the same time took each other's registration.
+fn fresh_owner() -> String {
+    format!("uid-share-owner-{}", uuid::Uuid::new_v4().simple())
+}
 
 fn own_profile(uid: &str) -> String {
     format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(uid))
@@ -403,7 +407,9 @@ fn share(s: &Setup, entry: &str, who: &str) {
 
 #[tokio::test]
 async fn a4_an_agent_signs_in_with_a_login_shared_with_it_in_its_own_profile() {
-    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    let owner = fresh_owner();
+    let owner = owner.as_str();
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
     let entry = save(&s, "alex@example.com");
     // Not shared: nothing is offered, and the agent is told how to ask.
     let (status, body) = signin(&s, Some(&entry)).await;
@@ -411,7 +417,7 @@ async fn a4_an_agent_signs_in_with_a_login_shared_with_it_in_its_own_profile() {
     assert!(body["error"].as_str().unwrap().contains("Vault share"), "{body}");
     assert!(typed(&s).is_none());
     // Shared: it asks as a sign-in does, and Always is kept for this entry, the uid, the profile and the site.
-    share(&s, &entry, OWNER);
+    share(&s, &entry, owner);
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
     let (status, body) = signin(&s, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -420,26 +426,58 @@ async fn a4_an_agent_signs_in_with_a_login_shared_with_it_in_its_own_profile() {
     let sent = typed(&s).expect("typed into the agent's own tab");
     assert_eq!((sent["origin"].as_str(), sent["password"].as_str()), (Some(s.site.as_str()), Some("correct horse")));
     assert!(!body.to_string().contains("correct horse") && !body.to_string().contains("alex@example.com"), "{body}");
-    let held = |agent: &str, profile: &str, site: &str| s.state.identity_store.vault_grant_check(&entry, &grant_key(agent, profile, site)).unwrap();
-    assert!(held(OWNER, &own_profile(OWNER), &s.site), "named by its uid");
-    assert!(!held(&s.auth.agent_id, &own_profile(OWNER), &s.site), "not by a name");
-    assert!(!held(OWNER, &own_profile(OWNER), "https://elsewhere.example.com"), "for the site approved only");
+    // The key names the profile the login is saved for as well (Personal's here).
+    let held = |agent: &str, profile: &str, site: &str| s.state.identity_store.vault_grant_check(&entry, &shared_grant_key(agent, profile, site, PERSONAL)).unwrap();
+    assert!(held(owner, &own_profile(owner), &s.site), "named by its uid");
+    assert!(!held(&s.auth.agent_id, &own_profile(owner), &s.site), "not by a name");
+    assert!(!held(owner, &own_profile(owner), "https://elsewhere.example.com"), "for the site approved only");
     // A granted use shows its notice and asks nobody; removing the share ends it.
-    crate::backend::vault::shares::remove(&s.state.identity_store, &entry, OWNER).unwrap();
-    assert!(!held(OWNER, &own_profile(OWNER), &s.site), "the Always went with the share");
+    crate::backend::vault::shares::remove(&s.state.identity_store, &entry, owner).unwrap();
+    assert!(!held(owner, &own_profile(owner), &s.site), "the Always went with the share");
     let (status, _) = signin(&s, Some(&entry)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "no longer shared");
 }
 
 #[tokio::test]
+async fn a6_editing_the_entrys_profile_asks_again() {
+    let owner = fresh_owner();
+    let owner = owner.as_str();
+    use crate::backend::vault::{update, EntryChange};
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
+    let entry = save(&s, "alex");
+    share(&s, &entry, owner);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
+    let (status, body) = signin(&s, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    ask.await.unwrap();
+    // The Always is kept for the profile the login is saved for.
+    let held = |profile: &str| s.state.identity_store.vault_grant_check(&entry, &shared_grant_key(owner, &own_profile(owner), &s.site, profile)).unwrap();
+    assert!(held(PERSONAL));
+    // The person edits which profile the login is saved for (the share and the grant are kept by an edit).
+    let row = s.state.identity_store.vault_get(&entry).unwrap().unwrap();
+    let mut fields = signins::fields_of(&row);
+    fields.insert(signins::PROFILE.to_string(), "profile:p-0123456789ab".to_string());
+    update(&s.state.identity_store, EntryChange { id: entry.clone(), label: row.label.clone(), fields, tags: vec![], parts: Default::default(), clear: vec![] }).unwrap();
+    assert!(crate::backend::vault::shares::names(&signins::fields_of(&s.state.identity_store.vault_get(&entry).unwrap().unwrap()), owner), "the share stays");
+    // The Always was for the old profile: the person is asked again.
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, _) = signin(&s, Some(&entry)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(ask.await.unwrap().signin, "the person was asked");
+    assert!(!held("profile:p-0123456789ab"), "nothing was granted for the new profile");
+}
+
+#[tokio::test]
 async fn a4_not_in_another_agents_tab_another_profile_or_incognito() {
+    let owner = fresh_owner();
+    let owner = owner.as_str();
     let work = "profile:p-0123456789ab";
     // A login of the Work profile, shared with the agent: offered in the agent's own profile's tab only.
     for (identity, what) in [(None, "Personal's tab"), (Some("profile:p-aaaaaaaaaaaa"), "another profile's tab"), (Some("incognito:aaaaaaaa-1111"), "an Incognito tab"), (Some(own_profile("uid-someone-else").as_str()), "another agent's profile")] {
-        let s = setup_as(identity, Some(OWNER)).await;
+        let s = setup_as(identity, Some(owner)).await;
         let space = Space { profile: work.into(), origin: s.site.clone(), realm: String::new(), proxy: false };
         let entry = signins::save(&s.state.identity_store, &space, "alex", "correct horse").unwrap();
-        share(&s, &entry, OWNER);
+        share(&s, &entry, owner);
         let (status, body) = signin(&s, Some(&entry)).await;
         assert_ne!(status, StatusCode::OK, "{what}: {body}");
         assert!(typed(&s).is_none(), "{what}: nothing typed");
@@ -449,7 +487,9 @@ async fn a4_not_in_another_agents_tab_another_profile_or_incognito() {
 
 #[tokio::test]
 async fn a4_a_container_agent_cannot_use_an_unshared_personal_login() {
-    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    let owner = fresh_owner();
+    let owner = owner.as_str();
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
     save(&s, "alex");
     let (status, body) = signin(&s, None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -458,7 +498,9 @@ async fn a4_a_container_agent_cannot_use_an_unshared_personal_login() {
 
 #[tokio::test]
 async fn a3_every_agent_still_asks_on_first_use() {
-    let s = setup_as(Some(&own_profile(OWNER)), Some(OWNER)).await;
+    let owner = fresh_owner();
+    let owner = owner.as_str();
+    let s = setup_as(Some(&own_profile(owner)), Some(owner)).await;
     let entry = save(&s, "alex");
     share(&s, &entry, crate::backend::vault::shares::EVERY_AGENT);
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));

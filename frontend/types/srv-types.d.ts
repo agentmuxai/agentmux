@@ -578,6 +578,9 @@ declare global {
         origin?: string;
         /** Navigation: it was a popup, which isn't reopened on Allow. */
         popup?: boolean;
+        /** Notice: a frame on the page is from this site (`origin`), which the agent can't act in until
+         *  it is allowed; Allow loads nothing and the agent's tools aren't paused. */
+        frame?: boolean;
         /** Bypass: the sites it would cover, and for how long. */
         origins?: string[];
         minutes?: number;
