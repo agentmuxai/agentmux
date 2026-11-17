@@ -312,6 +312,36 @@ fn a_fleet_action_is_an_action_row_with_no_byte_count_or_token_estimate() {
 }
 
 #[test]
+fn a_failed_action_row_says_why_in_one_short_line() {
+    let failing = |ts: u64, msg: Option<&str>| {
+        let mut e = action(ts, "you", "agent.spend", "Opaz");
+        e.success = false;
+        e.error_message = msg.map(str::to_string);
+        // A recorded call's note stays where it was: in `reason`, not in the summary.
+        e.reason = Some("raised the cap to 50".to_string());
+        e
+    };
+    let long = format!("refused: {}", "x".repeat(300));
+    let world = World::new(&[
+        failing(100, Some("the spend cap is set by the person")),
+        failing(200, Some("\n  first line\nsecond line holds a stack trace")),
+        failing(300, Some(&long)),
+        failing(400, None),
+        failing(500, Some("  ")),
+    ]);
+    let got = world.all(AuditQueryReq::default());
+    let by_ts = |ts: u64| got.iter().find(|e| e.ts_ms == ts).unwrap();
+    assert_eq!(by_ts(100).summary, "you agent.spend on opaz (failed: the spend cap is set by the person)");
+    assert_eq!(by_ts(200).summary, "you agent.spend on opaz (failed: first line)");
+    let cut = &by_ts(300).summary;
+    assert!(cut.starts_with("you agent.spend on opaz (failed: refused: xxx") && cut.ends_with("…)"), "{cut}");
+    assert!(cut.chars().count() < 220, "{cut}");
+    assert_eq!(by_ts(400).summary, "you agent.spend on opaz (failed)");
+    assert_eq!(by_ts(500).summary, "you agent.spend on opaz (failed)");
+    assert!(got.iter().all(|e| e.reason.as_deref() == Some("raised the cap to 50")), "the caller's note is kept: {got:?}");
+}
+
+#[test]
 fn a_file_out_of_time_order_neither_repeats_nor_loses_entries_across_pages() {
     // The newest line of the file is not the newest entry: a later write carries an earlier time.
     let world = World::new(&[audit_entry(110, "Korp", "Opaz"), audit_entry(100, "Korp", "Opaz"), audit_entry(90, "Korp", "Opaz")]);
