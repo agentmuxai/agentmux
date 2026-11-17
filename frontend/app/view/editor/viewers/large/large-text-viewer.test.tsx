@@ -135,6 +135,19 @@ describe("the Large text viewer", () => {
         expect(numbers()[0]).toBe(1);
     });
 
+    it("moves a file of more than 400,000 lines by the distance the wheel moved, small events and all", async () => {
+        indexLines.mockImplementation(async () => ({ total_lines: 500_000, size: 10_000_000, mtime: 1, start: 0, end: 0 }));
+        await mount();
+        // A trackpad: sixty events of a quarter line each are fifteen lines, not sixty.
+        for (let i = 0; i < 60; i++) fireEvent.wheel(grid(), { deltaY: ROW_H / 4, deltaMode: 0 });
+        expect(numbers()[0]).toBe(16);
+        // One notch of a wheel: six lines.
+        fireEvent.wheel(grid(), { deltaY: ROW_H * 6, deltaMode: 0 });
+        expect(numbers()[0]).toBe(22);
+        fireEvent.wheel(grid(), { deltaY: -ROW_H * 2, deltaMode: 0 });
+        expect(numbers()[0]).toBe(20);
+    });
+
     it("leaves a modified key to the app", async () => {
         await mount();
         const e = new KeyboardEvent("keydown", { key: "w", ctrlKey: true, bubbles: true, cancelable: true });

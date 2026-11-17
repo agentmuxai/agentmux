@@ -36,12 +36,17 @@ export function createLineScroll(lines: Accessor<number>, initial = 0) {
         own = null;
         setFirst(firstRowAt(at, lines(), viewPx()));
     };
+    // The part of a line a wheel event moved that hasn't added up to one yet: a trackpad sends many small ones.
+    let carry = 0;
     const onWheel = (e: WheelEvent): void => {
         // Ctrl+wheel stays pane zoom; a file that scrolls by pixels scrolls natively.
         if (e.ctrlKey || e.metaKey || !isScaled(lines()) || e.deltaY === 0) return;
         e.preventDefault();
-        const rows = e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * rowsInView(viewPx()) : e.deltaY / ROW_H;
-        if (rows) showLine(first() + Math.sign(rows) * Math.max(1, Math.round(Math.abs(rows))));
+        carry += e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * rowsInView(viewPx()) : e.deltaY / ROW_H;
+        const whole = Math.trunc(carry);
+        if (!whole) return;
+        carry -= whole;
+        showLine(first() + whole);
     };
     /** The scroller's `ref`. */
     const bind = (node: HTMLDivElement): void => {
