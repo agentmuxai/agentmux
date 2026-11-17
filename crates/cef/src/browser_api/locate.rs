@@ -119,6 +119,11 @@ fn frame_ref(layout: &[FrameLayout], frame_id: &str) -> Option<FrameRef> {
     Some(FrameRef { frame_id: l.raw.id.clone(), session: l.raw.session.clone(), origin: l.origin.clone(), url: l.raw.url.clone(), chain: l.chain.clone() })
 }
 
+/// The page's point `(x, y)` as the frame sees it, for a frame whose top left corner is `offset` from the page's.
+fn point_in_frame(x: f64, y: f64, offset: (f64, f64)) -> (f64, f64) {
+    (x - offset.0, y - offset.1)
+}
+
 /// What is under `(x, y)`: the node, the frame it is in and the session that reaches it. A point over an
 /// `<iframe>` whose page runs in another process is looked up again in that process, at the point
 /// relative to the frame.
@@ -146,8 +151,9 @@ async fn hit_test(root: &mut CdpSession, layout: &[FrameLayout], x: f64, y: f64)
             Some(l) => {
                 let (ox, oy) = frames::chain_offset(root, &l.chain).await?;
                 session = l.raw.session.clone();
-                px -= ox;
-                py -= oy;
+                // The offset is the frame's whole distance from the page's top left (its chain runs from the top
+                // frame), so it is taken from the page's point each time, never from the one the last hop left.
+                (px, py) = point_in_frame(x, y, (ox, oy));
             }
             None => return Ok((backend, frame_id, session)),
         }
@@ -238,6 +244,17 @@ mod tests {
         assert_eq!(css_point(100.0, 40.0, Some(800.0), 1600.0).unwrap(), (200.0, 80.0));
         // No width: the point is the page's own.
         assert_eq!(css_point(12.0, 34.0, None, 0.0).unwrap(), (12.0, 34.0));
+    }
+
+    #[test]
+    fn a_point_in_a_nested_frame_is_taken_from_the_page_point_not_from_the_outer_frames() {
+        // An outer frame at (100, 50) holding an inner one whose whole offset from the page is (140, 90).
+        let page = (200.0, 150.0);
+        let outer = point_in_frame(page.0, page.1, (100.0, 50.0));
+        assert_eq!(outer, (100.0, 100.0));
+        // The inner frame's offset already includes the outer's: from the page point, not from `outer`.
+        assert_eq!(point_in_frame(page.0, page.1, (140.0, 90.0)), (60.0, 60.0));
+        assert_ne!(point_in_frame(outer.0, outer.1, (140.0, 90.0)), (60.0, 60.0), "taking it from the last hop's point subtracts the outer offset twice");
     }
 
     #[test]
