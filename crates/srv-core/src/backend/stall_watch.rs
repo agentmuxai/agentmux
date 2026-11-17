@@ -207,9 +207,29 @@ pub fn watch(runtime: tokio::runtime::Handle, cfg: Config, on_event: impl Fn(Eve
     }
 }
 
-/// Start the watch on the current runtime, writing its lines to the log.
+/// The record's line for a stall that ended: how long it lasted, its worst lateness, how many stalls were merged
+/// into it, and whether the machine (not the runtime) was the cause. Numbers and a name only.
+pub fn record_fields(lasted_ms: u64, worst_late_ms: u64, stalls: u32, machine: bool) -> serde_json::Value {
+    serde_json::json!({ "ms": lasted_ms, "worst_ms": worst_late_ms, "n": stalls, "cause": if machine { "machine" } else { "runtime" } })
+}
+
+/// Start the watch on the current runtime, writing its lines to the log and each stall that ended to the record
+/// (`agentmux_common::record_events`: a stall of a month ago is as findable as one of a minute ago).
 pub fn start() {
-    watch(tokio::runtime::Handle::current(), Config::default(), |ev| tracing::warn!("{}", ev.line()));
+    let machine = AtomicBool::new(false);
+    watch(tokio::runtime::Handle::current(), Config::default(), move |ev| {
+        tracing::warn!("{}", ev.line());
+        match ev {
+            Event::Start { machine: m, .. } => machine.store(m, Ordering::Relaxed),
+            Event::End { lasted_ms, worst_late_ms, stalls } => {
+                let Some(dir) = agentmux_common::record_events::record_dir() else { return };
+                let fields = record_fields(lasted_ms, worst_late_ms, stalls, machine.load(Ordering::Relaxed));
+                if let Err(e) = agentmux_common::record_events::append_event(&dir, agentmux_common::time::now_ms_u64(), "srv_stall", fields) {
+                    tracing::debug!("{PREFIX} the record could not take the event: {e}");
+                }
+            }
+        }
+    });
 }
 
 #[cfg(unix)]
@@ -246,6 +266,12 @@ mod tests {
             now += 250;
         }
         out
+    }
+
+    #[test]
+    fn the_record_keeps_numbers_and_the_cause_of_a_stall() {
+        assert_eq!(record_fields(5_300, 5_200, 2, false), serde_json::json!({ "ms": 5_300, "worst_ms": 5_200, "n": 2, "cause": "runtime" }));
+        assert_eq!(record_fields(60_000, 59_000, 1, true)["cause"], "machine");
     }
 
     #[test]

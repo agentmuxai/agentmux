@@ -20,7 +20,7 @@ export interface DecisionViewProps {
 }
 
 // Tiny child that calls usePaneOverlay against the panel root ref.
-// Same pattern as `<Modal>`'s `ModalPaneOverlayClip` — mounted only
+// Same pattern as `<Modal>`'s `ModalRootBindings` — mounted only
 // when the panel is visible, so `onMount` runs while `rootRef` is
 // already attached to the live DOM element. Calling usePaneOverlay
 // from the outer component would register undefined on first mount
