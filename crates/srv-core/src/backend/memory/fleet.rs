@@ -23,7 +23,12 @@
 //! exist per machine, `sort_order` is a position on one machine's list, and
 //! `mcp_servers` is always empty. AgentMux's own entries (system tier, `seed-`
 //! ids) and the blank bundle never leave or enter. A write for an entry that is
-//! `machine` scope here is skipped, so a machine keeps what its owner kept.
+//! `machine` scope here is skipped, so a machine keeps what its owner kept. The
+//! exception is an entry whose `machine` row is only the default the scope table
+//! gave what existed when it was made (`storage::bundle_scope`): a newer write
+//! replaces that one, the entry follows the fleet from then on, and the old text
+//! stays in its history. The write is answered `adopted` so the sender, and this
+//! machine's sync state, can say which entries changed.
 //!
 //! **No echo.** A write applied from another machine is recorded with source
 //! [`FLEET_SOURCE`]; the push on change (a later PR) does not push those back.
@@ -39,6 +44,9 @@ use crate::backend::storage::store::{Bundle, Store};
 
 /// The `db_bundle_versions.source` of a write that came from another machine.
 pub const FLEET_SOURCE: &str = "fleet";
+
+/// The `source` of the version that keeps the text a fleet write is about to replace.
+const BASELINE_SOURCE: &str = "fleet-baseline";
 
 /// Same bound as `globalmemory.write`: every agent's launch parses and injects this.
 const MAX_INSTRUCTIONS: usize = 1024 * 1024;
@@ -126,6 +134,9 @@ pub enum Applied {
     Updated,
     /// The entry had been removed here; the newer write brought it back.
     Restored,
+    /// The entry was `machine` here only by default; it now follows the fleet, and the newer
+    /// write replaced its text (the old text is in its history).
+    Adopted,
     Removed,
 }
 
@@ -161,6 +172,7 @@ impl Outcome {
                 Applied::Created => "created",
                 Applied::Updated => "updated",
                 Applied::Restored => "restored",
+                Applied::Adopted => "adopted",
                 Applied::Removed => "removed",
             } }),
             Outcome::Skipped(s) => serde_json::json!({ "outcome": "skipped", "reason": match s {
@@ -339,16 +351,25 @@ pub fn apply_put(store: &Store, entry: &FleetEntry, actor: Actor<'_>) -> Result<
             return Ok(Outcome::Skipped(Skipped::Protected));
         }
     }
+    // `machine` here: kept, unless the row is only the default the scope table gave it.
+    let mut lifts_default = false;
     if store.bundle_scope_get(&entry.id)? != crate::backend::storage::bundle_scope::SCOPE_FLEET {
-        return Ok(Outcome::Skipped(Skipped::MachineScope));
+        if !store.bundle_scope_is_default_machine(&entry.id)? {
+            return Ok(Outcome::Skipped(Skipped::MachineScope));
+        }
+        lifts_default = true;
     }
 
     let incoming_hash = entry.hash();
-    let (applied, mut bundle) = match local {
+    let (mut applied, mut bundle) = match local {
         None => (Applied::Created, new_bundle(entry)),
         Some(b) if b.is_global => {
             let local_hash = bundle_hash(&b);
             if local_hash == incoming_hash {
+                if lifts_default {
+                    store.bundle_scope_follow_fleet(&entry.id)?;
+                    return Ok(Outcome::Applied(Applied::Adopted));
+                }
                 return Ok(Outcome::Skipped(Skipped::Same));
             }
             if !wins(entry.updated_at, &incoming_hash, b.updated_at, &local_hash) {
@@ -364,6 +385,9 @@ pub fn apply_put(store: &Store, entry: &FleetEntry, actor: Actor<'_>) -> Result<
         }
         Some(_) => return Ok(Outcome::Skipped(Skipped::NotMemory)),
     };
+    if lifts_default && applied == Applied::Updated {
+        keep_current_text(store, &bundle)?;
+    }
     bundle.name = entry.name.trim().to_string();
     bundle.description = entry.description.clone();
     bundle.instructions = entry.instructions.clone();
@@ -371,8 +395,14 @@ pub fn apply_put(store: &Store, entry: &FleetEntry, actor: Actor<'_>) -> Result<
     bundle.context_files = entry.context_files.clone();
     bundle.is_global = true;
     bundle.updated_at = entry.updated_at;
-    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, FLEET_SOURCE, &source_detail(actor, &entry.edited_by))?;
-    if applied != Applied::Updated {
+    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, FLEET_SOURCE, &source_detail(actor, &entry.edited_by, lifts_default))?;
+    if lifts_default {
+        store.bundle_scope_follow_fleet(&bundle.id)?;
+        if applied == Applied::Updated {
+            applied = Applied::Adopted;
+        }
+    }
+    if !matches!(applied, Applied::Updated | Applied::Adopted) {
         append_to_order(store, &bundle.id);
     }
     Ok(Outcome::Applied(applied))
@@ -405,12 +435,30 @@ pub fn apply_remove(store: &Store, removal: &FleetRemoval, actor: Actor<'_>) -> 
     }
     bundle.is_global = false;
     bundle.updated_at = removal.removed_at;
-    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, REMOVE_SOURCE, &source_detail(actor, &removal.edited_by))?;
+    store.bundle_upsert_with_version(&bundle, actor.label, actor.uid, REMOVE_SOURCE, &source_detail(actor, &removal.edited_by, false))?;
     Ok(Outcome::Applied(Applied::Removed))
 }
 
-fn source_detail(actor: Actor<'_>, edited_by: &str) -> String {
-    serde_json::json!({ "fleet_from": actor.label, "edited_by": edited_by }).to_string()
+/// Make sure the text an entry holds now is in its history before a fleet write replaces it: an
+/// entry that was copied by hand may have no version at all, and a revert needs one.
+fn keep_current_text(store: &Store, current: &Bundle) -> Result<(), StoreError> {
+    let held = crate::backend::storage::bundle_versions::content_hash(&current.name, &current.instructions);
+    if store.bundle_version_latest(&current.id)?.is_some_and(|v| v.content_hash == held) {
+        return Ok(());
+    }
+    let detail = serde_json::json!({ "why": "the text before a newer fleet write replaced it" }).to_string();
+    store.bundle_upsert_with_version(current, "agentmux", "", BASELINE_SOURCE, &detail)?;
+    Ok(())
+}
+
+/// The version's `source_detail`. `lifted_machine_default` says the write replaced an entry that was
+/// `machine` here only by default, so history shows why this entry changed on its own.
+fn source_detail(actor: Actor<'_>, edited_by: &str, lifted_machine_default: bool) -> String {
+    let mut detail = serde_json::json!({ "fleet_from": actor.label, "edited_by": edited_by });
+    if lifted_machine_default {
+        detail["lifted_machine_default"] = serde_json::Value::Bool(true);
+    }
+    detail.to_string()
 }
 
 fn new_bundle(entry: &FleetEntry) -> Bundle {
