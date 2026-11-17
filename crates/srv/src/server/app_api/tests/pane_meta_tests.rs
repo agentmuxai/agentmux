@@ -75,7 +75,7 @@ fn an_editor_with_everything_set_writes_each_key_once() {
 fn an_editor_open_names_any_viewer_and_where_in_the_file() {
     let mut c = cmd("editor");
     c.file = Some("/work/a.bin".into());
-    for viewer in ["text", "image", "media", "pdf", "hex", "info"] {
+    for viewer in ["text", "large", "image", "media", "pdf", "hex", "info"] {
         c.viewer = Some(viewer.into());
         assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!(viewer));
     }

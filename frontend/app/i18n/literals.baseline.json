@@ -245,6 +245,7 @@
     "frontend/app/view/editor/viewers/hex/hex-viewer.tsx": 13,
     "frontend/app/view/editor/viewers/image/image-viewer-parts.tsx": 10,
     "frontend/app/view/editor/viewers/info/info-card.tsx": 13,
+    "frontend/app/view/editor/viewers/large/large-text-viewer.tsx": 5,
     "frontend/app/view/editor/viewers/media/av-viewer.tsx": 8,
     "frontend/app/view/editor/viewers/pdf/pdf-viewer-body.tsx": 7,
     "frontend/app/view/editor/viewers/pdf/pdf-viewer.tsx": 18,
