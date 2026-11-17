@@ -265,9 +265,9 @@ fn run_as(state: &AppState, actor: Actor, req: AgentEnvRequest) -> Result<Value,
             }
             // A name that changes nothing is refused, not accepted: ANTHROPIC_MODEL is read only for an agent pointed
             // at a server of its own, and the launch passes the pane's own `--model` to every other.
-            if change.sets_model_name() && !agent_env::points_at_own_server(&new) {
+            if change.sets_model_name() && !agent_env::points_at_own_server_with(&new, &target.model_vendor_base_url) {
                 let message = format!(
-                    "ANTHROPIC_MODEL has no effect on {}: it runs on Anthropic's own service with the model its pane's picker chose, which the launch passes as --model. Use Agents update with model (and effort) to change it; ANTHROPIC_MODEL is read only for an agent pointed at a server of its own (ANTHROPIC_BASE_URL in the same call)",
+                    "ANTHROPIC_MODEL has no effect on {}: it runs on Anthropic's own service with the model its pane's picker chose, which the launch passes as --model. Use Agents update with model (and effort) to change it; ANTHROPIC_MODEL is read only for an agent pointed at a server of its own (ANTHROPIC_BASE_URL in the same call, or the definition's model vendor URL)",
                     target.name
                 );
                 audit(state, &actor, &target, false, Some(&message), "refused (ANTHROPIC_MODEL has no effect)");

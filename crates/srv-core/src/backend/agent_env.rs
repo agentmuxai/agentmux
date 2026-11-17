@@ -543,6 +543,15 @@ pub fn points_at_own_server(text: &str) -> bool {
     effective(text).iter().any(|(k, v)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") && !v.trim().is_empty() && !is_anthropic_url(v.trim()))
 }
 
+/// [`points_at_own_server`] for an agent with a definition: the launch puts its structured `model_vendor_base_url`
+/// into the environment first, and it wins over an `ANTHROPIC_BASE_URL` line of the text, so a set one decides alone.
+pub fn points_at_own_server_with(text: &str, structured_base_url: &str) -> bool {
+    match structured_base_url.trim() {
+        "" => points_at_own_server(text),
+        url => !is_anthropic_url(url),
+    }
+}
+
 /// `text` as an agent is shown it: the values of names it may not set hidden,
 /// a comment that may hold a secret and a skipped line as `# [hidden]`, every
 /// other line as written.
