@@ -74,6 +74,23 @@ fn route(name: &str) -> String {
     crate::backend::reactive::sanitize::route_name(name).unwrap_or_default().to_lowercase()
 }
 
+/// How long an action row's error text may be in its summary line.
+const FAILURE_NOTE_MAX: usize = 160;
+
+/// What an action row says after a failure: nothing when it worked, else why, as the first line of the error
+/// message cut to [`FAILURE_NOTE_MAX`] characters (`(failed)` alone when the call gave no message).
+fn failure_note(e: &AuditLogEntry) -> String {
+    if e.success {
+        return String::new();
+    }
+    let line = e.error_message.as_deref().and_then(|m| m.lines().map(str::trim).find(|l| !l.is_empty())).unwrap_or("");
+    match line.chars().count() {
+        0 => " (failed)".to_string(),
+        n if n <= FAILURE_NOTE_MAX => format!(" (failed: {line})"),
+        _ => format!(" (failed: {}…)", line.chars().take(FAILURE_NOTE_MAX).collect::<String>().trim_end()),
+    }
+}
+
 /// Whether two names are the same agent's route name.
 pub(crate) fn same_agent(a: &str, b: &str) -> bool {
     let (a, b) = (route(a), route(b));
@@ -309,7 +326,7 @@ fn from_audit_in(prefix: char, at: u64, e: &AuditLogEntry, ctx: &Ctx) -> AuditEn
                     "{name} {}{}{}",
                     e.outcome.as_deref().unwrap_or("acted"),
                     target.map(|t| format!(" on {t}")).unwrap_or_default(),
-                    if e.success { "" } else { " (failed)" }
+                    failure_note(e)
                 ),
                 agent_id: actor,
                 ..blank
