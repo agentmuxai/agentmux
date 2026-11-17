@@ -412,9 +412,18 @@ if (-not $canSign) {
         Expect "Headless below the floor: refused in a dry run too" 1 "is in releases from 0.60.31 on" $sh $floorEnv @("-Headless", "-Version", "0.60.30", "-DryRun")
         Expect "Headless at the floor: goes ahead (dry run)" 0 "agentmux-headless-0.60.31-windows-x64.zip" $sh $floorEnv @("-Headless", "-Version", "0.60.31", "-DryRun")
 
-        # A "latest" below the floor is not the latest for Headless (this script ships with a release from the floor on): refused. The desktop path keeps working with the hash and Ed25519 checks, as install.sh does.
+        # A "latest" below the floor is not what this script ships with. Headless refuses it. The desktop path installs it only when its Ed25519
+        # signature is really checked (OpenSSL 3); with no way to check, it stops before anything is downloaded or run. An explicit -Version below
+        # the floor keeps the hashes-only fallback, said plainly.
         $latestOld = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; AGENTMUX_INSTALL_LATEST = "0.60.30"; LOCALAPPDATA = (Join-Path $work "lad14-$sh") }
-        Expect "latest below the floor: the desktop path still installs it (hashes and Ed25519 only)" 0 "AgentMux-0.60.30-x64-setup.exe" $sh $latestOld @("-Method", "download", "-DryRun")
+        Expect "latest below the floor, OpenSSL 3 present: the desktop path uses it" 0 "AgentMux-0.60.30-x64-setup.exe" $sh $latestOld @("-Method", "download", "-DryRun")
+        $latestNoSsl = $latestOld.Clone(); $latestNoSsl["AGENTMUX_INSTALL_NO_OPENSSL"] = "1"; $latestNoSsl["AGENTMUX_INSTALL_RELEASE_BASE"] = (Join-Path $work "no-such-release"); $latestNoSsl["AGENTMUX_INSTALL_NO_RUN_SETUP"] = "1"
+        Expect "latest below the floor, no OpenSSL 3: the desktop path is refused" 1 "its signature cannot be checked here" $sh $latestNoSsl @("-Method", "download", "-NoLaunch")
+        Expect "latest below the floor, no OpenSSL 3: refused in a dry run too" 1 "install OpenSSL 3" $sh $latestNoSsl @("-Method", "download", "-DryRun")
+        Expect-Absent "latest below the floor, no OpenSSL 3: nothing was started" "installing 0.60.30" $sh $latestNoSsl @("-Method", "download", "-NoLaunch")
+        Expect "the same release given with -Version installs as before (hashes only, a dry run)" 0 "AgentMux-0.60.30-x64-setup.exe" $sh $latestNoSsl @("-Method", "download", "-DryRun", "-Version", "0.60.30")
+        $floorNoSsl = $latestNoSsl.Clone(); $floorNoSsl["AGENTMUX_INSTALL_LATEST"] = "0.60.31"
+        Expect "latest at the floor, no OpenSSL 3: unchanged" 0 "AgentMux-0.60.31-x64-setup.exe" $sh $floorNoSsl @("-Method", "download", "-DryRun")
         Expect "latest below the floor: Headless is refused" 1 "is older than 0.60.31" $sh $latestOld @("-Headless", "-DryRun")
         $latestOk = $latestOld.Clone(); $latestOk["AGENTMUX_INSTALL_LATEST"] = "0.60.31"
         Expect "latest at the floor: the desktop path uses it" 0 "AgentMux-0.60.31-x64-setup.exe" $sh $latestOk @("-Method", "download", "-DryRun")

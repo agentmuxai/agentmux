@@ -312,7 +312,7 @@ short of running the installer (used by its tests).
     }
 
     # Download a release file and check it against the signed manifest. Returns the path of the file.
-    function Get-VerifiedFile([string]$Name, [string]$Work, [switch]$MustCheck) {
+    function Get-VerifiedFile([string]$Name, [string]$Work, [switch]$MustCheck, [switch]$StaleLatest) {
         $base = $env:AGENTMUX_INSTALL_RELEASE_BASE
         if (-not $base) { $base = "$Releases/download/v$Version" }
         $manifestFile = Join-Path $Work "manifest.json"
@@ -334,6 +334,7 @@ short of running the installer (used by its tests).
         } else {
             $why = "there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SshsigFloor on carry"
             if ($ssh.Why -eq "floor") { $why = "this release ($Version) is older than $SshsigFloor, the first with an SSH signature" }
+            if ($StaleLatest) { Die (Get-StaleLatestMessage) }
             if ($MustCheck) { Die "the release's signature cannot be checked here (no OpenSSL 3 on the path, and $why). AgentMux Headless is not installed from hashes alone: install the Windows OpenSSH client (Settings, Apps, Optional features) or OpenSSL 3, and run this again" }
             if ($RequireSignature) { Die "the release's signature cannot be checked here (no OpenSSL 3 on the path, and $why) and -RequireSignature was given" }
             Say "signature NOT checked: this system has no OpenSSL 3, and $why"
@@ -377,8 +378,19 @@ short of running the installer (used by its tests).
         return ($LASTEXITCODE -eq 0)
     }
 
+    function Get-StaleLatestMessage {
+        return "the latest release the network gives ($Version) is older than $(Get-SshsigFloorVersion), which this script ships with, and its signature cannot be checked here (there is no OpenSSL 3 on the path): not installing. Give the version with -Version to install an older release on purpose, or install OpenSSL 3 and run this again"
+    }
+
     function Install-Download {
-        if (-not $Version) { $Version = Get-LatestVersion }
+        $staleLatest = $false
+        if (-not $Version) {
+            $Version = Get-LatestVersion
+            # A "latest" below the floor is not what this script ships with. It is installed only if its Ed25519 signature is really checked:
+            # nothing the network says on its own moves an install to a release that can only be checked by its hashes.
+            $staleLatest = -not (Test-VersionAtLeast $Version (Get-SshsigFloorVersion))
+            if ($staleLatest -and -not (Test-CanCheckSignature)) { Die (Get-StaleLatestMessage) }
+        }
         $name = "AgentMux-$Version-x64-setup.exe"
         Say "installing $Version with the installer, silently, for this user"
         if ($DryRun) {
@@ -389,7 +401,7 @@ short of running the installer (used by its tests).
         $work = Join-Path ([IO.Path]::GetTempPath()) ("agentmux-install-" + [Guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Path $work | Out-Null
         try {
-            $file = Get-VerifiedFile $name $work
+            $file = Get-VerifiedFile $name $work -StaleLatest:$staleLatest
             if ($env:AGENTMUX_INSTALL_NO_RUN_SETUP) { Say "test mode: the installer was checked and not run"; return }
             Show "$name /VERYSILENT /NORESTART /SUPPRESSMSGBOXES /SP-"
             $p = Start-Process -FilePath $file -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/SP-" -Wait -PassThru
