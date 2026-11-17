@@ -291,7 +291,9 @@ short of running the installer (used by its tests).
         $psi.RedirectStandardError = $true
         $proc = [Diagnostics.Process]::Start($psi)
         $bytes = [IO.File]::ReadAllBytes($Envelope)
-        try { $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length); $proc.StandardInput.Close() } catch { }
+        # Only the raw stream is written and closed, never the StandardInput writer: Windows PowerShell's closing of that writer can put a
+        # byte order mark in front of the envelope (when the console code page is UTF-8), and the signature is of the exact bytes.
+        try { $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length); $proc.StandardInput.BaseStream.Flush(); $proc.StandardInput.BaseStream.Dispose() } catch { }
         $outText = $proc.StandardOutput.ReadToEnd()
         $errText = $proc.StandardError.ReadToEnd()
         $proc.WaitForExit()
