@@ -315,7 +315,13 @@ pub fn spawn_state_services(state: &AppState) {
     );
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
     backend::old_versions_service::install(Arc::clone(&state.config_watcher));
-    // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
+    install_turn_outcome_notes(state);
+}
+
+/// Tells whoever needs to know when a turn's outcome wasn't otherwise reported: a worker's leader
+/// (`worker_notes`, SPEC_AGENT_WORKERS_2026_10_15.md §3.3), and, since #2627, whoever sent the message that
+/// started a turn which then died of a retryable failure (`sender_failure_note`).
+fn install_turn_outcome_notes(state: &AppState) {
     backend::worker_notes::install(
         Arc::clone(&state.broker),
         state.srv_events_tx.subscribe(),
@@ -323,6 +329,7 @@ pub fn spawn_state_services(state: &AppState) {
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );
+    backend::sender_failure_note::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
 }
 
 /// Starts what is read from the data folder once the stores and watchers exist: widget
