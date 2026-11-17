@@ -159,7 +159,7 @@
 162 crates/srv-core/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
 145 crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
-211 crates/srv-core/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
+205 crates/srv-core/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv-core/src/backend/bundle_export.rs::export_bundle
 130 crates/srv-core/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
 115 crates/srv-core/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner

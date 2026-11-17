@@ -233,14 +233,7 @@ impl SubprocessController {
         // controller to run the queue with (replace.rs).
         self.remember_container_context(&cm, &container_name, &base_cmd);
         if !self.take_run_lock_for_turn() {
-            let ahead = {
-                let mut inner = self.inner.lock().unwrap();
-                let ahead = inner.pending_messages.len();
-                tracing::info!(block_id = %self.block_id, queue_depth = ahead + 1, "container exec busy — message queued");
-                inner.pending_messages.push_back(config.clone());
-                ahead
-            };
-            self.emit_message_queued(&config, ahead);
+            self.queue_behind_running_process(config, "container exec busy");
             return Ok(());
         }
 
