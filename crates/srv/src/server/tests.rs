@@ -1459,6 +1459,26 @@ async fn reactive_transcript_unknown_agent_is_404() {
 }
 
 #[tokio::test]
+async fn reactive_transcript_of_a_known_agent_with_no_pane_says_so_and_points_to_watch() {
+    // A container agent between restarts has a definition and no open pane: not a bare "agent not found".
+    let state = test_state();
+    token_for(&state, "pulse-like-agent");
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/agentmux/reactive/transcript?agent=pulse-like-agent")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let error = json["error"].as_str().unwrap();
+    assert!(error.starts_with("agent not found"), "the forwarding code keys on this prefix: {error}");
+    assert!(error.contains("no open pane") && error.contains("Agents watch"), "{error}");
+}
+
+#[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()

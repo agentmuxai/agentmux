@@ -262,6 +262,16 @@
     --modal-bg-color: #232323;
     --modal-header-bottom-border-color: rgba(241, 246, 243, 0.15);
     --modal-border-color: rgba(255, 255, 255, 0.12); /* toggle colors */
+    // The menu surface (element/menu-frame.scss, `menu-surface`): one look for every menu, popover and list
+    // opened from a control. `--menu-bg-color` and `--menu-edge-color` are opaque per-theme literals (themes/*.scss;
+    // the default dark pair is below) and never follow `--window-opacity`; themes/menu-surface.test.ts pins their
+    // contrast. A theme that sets neither gets `--modal-bg-color` and `--border-color` from the mixin's fallback.
+    --menu-ring-color: rgba(0, 0, 0, 0.55); // a 1px ring outside the edge, for a light or mid-grey backdrop
+    --menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
+    // A destructive row: the error text pulled toward the text colour, because the lifted surface leaves the plain
+    // error text under 4.5:1 on a hovered row in eight themes.
+    --menu-danger-text-color: color-mix(in srgb, var(--error-text-color) 65%, var(--main-text-color));
+    --menu-separator-color: color-mix(in srgb, var(--menu-edge-color, var(--border-color)) 55%, var(--menu-bg-color, var(--modal-bg-color)));
     --modal-border-radius: 0; /* SPEC_HARD_CORNERS_2026_05_26 */
     --toggle-bg-color: var(--border-color);
     --modal-shadow-color: rgba(0, 0, 0, 0.8);
@@ -711,7 +721,7 @@
     --z-modal:              9000;
     --z-flyout-menu:        9500;
     --z-capture-indicator:  9998;  // the media-capture indicator
-    --z-transient:          9999;  // the floating pane's drop preview, the "copied" note, the context menus and the tab colour panel
+    --z-transient:          9999;  // the floating pane's drop preview and the "copied" note (menus sit at --z-flyout-menu)
     --z-top:                10000; // the delete confirmation and the zoom level
     --z-tooltip:            10001; // a tooltip, over every dialog, popover and menu it can be hovering inside
 
@@ -783,6 +793,8 @@
 // The default theme (no `data-theme`): its terminal blue is 2.68:1 on its
 // surface, too faint for an icon, and its brighter cyan sits further from it.
 :root:not([data-theme]) {
+    --menu-bg-color: #353535;
+    --menu-edge-color: #6d6d6d;
     --process-kind-agentmux: var(--term-bright-cyan);
     --process-kind-runtimes: var(--term-bright-blue);
 }
@@ -791,6 +803,8 @@
 // window-controls.win32.scss already uses for dark/light chrome decisions.
 [data-theme-polarity="light"] {
     color-scheme: light;
+    // A light page takes a lighter shadow, as VS Code's widget shadow does.
+    --menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.18);
     // The attention magenta, deep enough to read on a light page (5.5:1
     // against white), with white text on it.
     --attention-color: rgb(196, 0, 155);

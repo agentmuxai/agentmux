@@ -191,8 +191,11 @@ describe.skipIf(!BROWSER)("a panel opened from a pane with a backdrop", () => {
     it.each(cases)("$id: a colour built on a token is built on the pane's (the menu's divider)", ({ id, builtin, scheme }) => {
         const d = deriveBuiltin(builtin, scheme)!;
         const m = r[id];
-        // The divider is a tint of the text colour: the pane's text, not the window's.
-        expectTintOf(m.divider, d.ink.text, "the divider");
+        // The divider is the menu's edge mixed 55% into its surface (menu-surface): the pane's, not the window's.
+        const edge = bytes(d.ink.border);
+        const surface = bytes(d.surfaces.overlay);
+        const mixed = edge.map((c, i) => Math.round(c * 0.55 + surface[i] * 0.45));
+        expectColour(m.divider, "#" + mixed.slice(0, 3).map((c) => c.toString(16).padStart(2, "0")).join(""), "the divider");
     });
 
     it.each(cases)("$id: a tooltip drawn with Tailwind's classes follows the pane too", ({ id, builtin, scheme }) => {

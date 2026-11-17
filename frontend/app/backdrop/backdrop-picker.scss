@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The backdrop picker (BackdropPicker.tsx): an inline panel over the pane's body, drawn from the pane's own tokens, so
-// it reads like the pane it is changing.
+// The backdrop picker (BackdropPicker.tsx): an inline panel over the pane's body, standing on the menu surface so it
+// reads as a layer above the pane it is changing.
+
+@use "../element/menu-frame";
 
 .backdrop-picker {
     position: absolute;
@@ -17,9 +19,7 @@
     max-height: calc(100% - var(--space-10));
     overflow-y: auto;
     padding: var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--elevated-bg-color);
+    @include menu-frame.menu-surface;
     color: var(--main-text-color);
 }
 

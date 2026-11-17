@@ -118,6 +118,25 @@ async fn tab(state: &CoreParts) -> String {
         .unwrap()
 }
 
+#[test]
+fn the_note_quotes_only_the_turn_that_ended() {
+    // The turn's own message is quoted.
+    assert_eq!(ended_turn_text("[user] go\n[assistant] Opened the page.\n[tool] Browser"), "Opened the page.");
+    // A turn that was only tool calls has no words: the older turn's message is not quoted in its place.
+    assert_eq!(ended_turn_text("[user] first\n[assistant] The pane is still blank.\n[user] test run done\n[tool] Bash\n[tool] Bash"), "");
+    // After a compaction or restart the digest may open with an assistant message and no user entry: it still counts.
+    assert_eq!(ended_turn_text("[assistant] Resumed.\n[tool] Bash"), "Resumed.");
+    // The newest of several messages in the turn.
+    assert_eq!(ended_turn_text("[user] go\n[assistant] Starting.\n[tool] Bash\n[assistant] Done, merged."), "Done, merged.");
+    assert_eq!(ended_turn_text(""), "");
+}
+
+#[test]
+fn a_tools_only_turn_repeats_no_old_words_in_its_note() {
+    let words = LastWords { text: ended_turn_text("[user] one\n[assistant] Old words.\n[user] two\n[tool] Bash"), asked: false };
+    assert_eq!(turn_end_body("Pulp", words), "Your worker Pulp finished a turn without reporting to you.");
+}
+
 fn mark_worker(state: &CoreParts, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
     state
         .mstore

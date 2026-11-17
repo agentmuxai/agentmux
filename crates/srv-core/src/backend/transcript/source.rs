@@ -20,6 +20,21 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::transcript::damage;
 use crate::backend::storage::store::Store;
 
+/// How much newer (ms) the block's own copy must be than the agent's zone to be read instead of it. Both are
+/// written for every line, one after the other, so their times differ by milliseconds in a healthy session;
+/// a copy that is seconds ahead is the one still being written.
+pub const OWN_NEWER_SLACK_MS: i64 = 5_000;
+
+/// Whether the block's own copy of the transcript is the live one and the agent's zone is behind it: the own copy
+/// has content and was modified more than `slack_ms` after the zone. A container agent's turns that never
+/// reached the zone left every reader quoting the zone's last line, hours old. Each is `(size, modts)`.
+pub fn own_is_newer(own: Option<(i64, i64)>, zone: Option<(i64, i64)>, slack_ms: i64) -> bool {
+    match (own, zone) {
+        (Some((own_size, own_at)), Some((_, zone_at))) => own_size > 0 && own_at > zone_at.saturating_add(slack_ms),
+        _ => false,
+    }
+}
+
 /// The store and zone a block's transcript is read from.
 pub struct TranscriptSource<'a> {
     pub fs: &'a FileStore,
@@ -56,6 +71,11 @@ impl<'a> TranscriptSource<'a> {
 
     /// [`Self::resolve`] with the global store given (tests install none).
     pub fn resolve_with(block_fs: &'a FileStore, global: Option<&'a FileStore>, mstore: &Store, block_id: &str) -> Self {
+        Self::resolve_with_slack(block_fs, global, mstore, block_id, OWN_NEWER_SLACK_MS)
+    }
+
+    /// [`Self::resolve_with`] with how much newer the block's own copy must be to win (tests pass 0).
+    fn resolve_with_slack(block_fs: &'a FileStore, global: Option<&'a FileStore>, mstore: &Store, block_id: &str, slack_ms: i64) -> Self {
         let own = || Self::own(block_fs, block_id);
         let Some(gfs) = global else { return own() };
         let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return own() };
@@ -80,14 +100,15 @@ impl<'a> TranscriptSource<'a> {
         if damage::is_damaged(&zone) {
             return own();
         }
-        let has_content = match gfs.read_snapshot(|r| Ok(r.file(&zone, OUTPUT_FILE)?.map(|f| f.size))) {
-            Ok(size) => size.unwrap_or(0) > 0,
+        let zone_file = match gfs.read_snapshot(|r| Ok(r.file(&zone, OUTPUT_FILE)?.map(|f| (f.size, f.modts)))) {
+            Ok(file) => file,
             Err(e) => {
                 damage::note_corrupt(&zone, "tail read", &e);
-                false
+                None
             }
         };
-        if has_content {
+        let own_file = block_fs.read_snapshot(|r| Ok(r.file(block_id, OUTPUT_FILE)?.map(|f| (f.size, f.modts)))).ok().flatten();
+        if zone_file.is_some_and(|z| z.0 > 0) && !own_is_newer(own_file, zone_file, slack_ms) {
             TranscriptSource { fs: gfs, zone, global: true, own: Some((block_fs, block_id.to_string())) }
         } else {
             own()
@@ -241,6 +262,41 @@ mod tests {
         let s = TranscriptSource::resolve_with(&own, Some(&global), &mstore, BLOCK);
         assert!(!s.global, "a provider-key zone is not one conversation");
         assert_eq!(s.read_all().unwrap(), b"{\"copy\":\"block\"}\n");
+    }
+
+    #[test]
+    fn the_own_copy_wins_only_when_it_has_content_and_is_clearly_newer() {
+        let zone = Some((100, 1_000_000));
+        assert!(own_is_newer(Some((5, 1_010_000)), zone, OWN_NEWER_SLACK_MS), "ten seconds ahead");
+        assert!(!own_is_newer(Some((5, 1_004_000)), zone, OWN_NEWER_SLACK_MS), "within the slack: both are written per line");
+        assert!(!own_is_newer(Some((5, 999_000)), zone, OWN_NEWER_SLACK_MS), "older than the zone");
+        assert!(!own_is_newer(Some((0, 2_000_000)), zone, OWN_NEWER_SLACK_MS), "an empty own copy never wins");
+        assert!(!own_is_newer(None, zone, OWN_NEWER_SLACK_MS) && !own_is_newer(Some((5, 2_000_000)), None, OWN_NEWER_SLACK_MS));
+    }
+
+    #[test]
+    fn a_zone_that_stopped_growing_is_not_read_while_the_block_keeps_writing() {
+        // A container agent's later turns reached the block's own copy but not the zone: every reader quoted the zone's last line.
+        let (own, global, mstore) = stores();
+        block(&mstore, Some(DEF), false);
+        put(&global, &zone(), "{\"copy\":\"stale zone\"}\n");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        put(&own, BLOCK, "{\"copy\":\"live block\"}\n");
+        let s = TranscriptSource::resolve_with_slack(&own, Some(&global), &mstore, BLOCK, 0);
+        assert!(!s.global, "the newer own copy is read");
+        assert_eq!(s.read_all().unwrap(), b"{\"copy\":\"live block\"}\n");
+        // With the default slack the two are one session written together, and the zone (the full record) is read.
+        assert!(TranscriptSource::resolve_with(&own, Some(&global), &mstore, BLOCK).global);
+    }
+
+    #[test]
+    fn a_zone_written_after_the_own_copy_is_still_read() {
+        let (own, global, mstore) = stores();
+        block(&mstore, Some(DEF), false);
+        put(&own, BLOCK, "{\"copy\":\"block\"}\n");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        put(&global, &zone(), "{\"copy\":\"zone\"}\n");
+        assert!(TranscriptSource::resolve_with_slack(&own, Some(&global), &mstore, BLOCK, 0).global);
     }
 
     #[test]
