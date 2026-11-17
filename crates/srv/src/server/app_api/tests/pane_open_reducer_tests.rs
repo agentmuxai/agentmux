@@ -3059,8 +3059,8 @@ async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
 // SPEC_BROWSER_PANE_FORMS_IN_FRAMES_AND_VISUAL_FALLBACK_2026_10_16.md §5.3: a
 // snapshot that finds a frame from a site off the pane's list has the host
 // report the site (kind `frame`); the person is asked in the banner, and Allow
-// adds the site to the list without loading anything, while Block changes
-// nothing and shows no navigation notice.
+// adds the site to the list without loading anything, while Dismiss changes
+// nothing. It is a notice, so the agent's tools on the pane are never paused.
 #[tokio::test]
 async fn a_frame_from_a_site_off_the_list_is_asked_about_and_allowing_it_loads_nothing() {
     use axum::http::StatusCode;
@@ -3103,10 +3103,12 @@ async fn a_frame_from_a_site_off_the_list_is_asked_about_and_allowing_it_loads_n
     // The question is a navigation banner marked as a frame's.
     let (s, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(forms), &host).await;
     assert_eq!(s, StatusCode::OK, "{body}");
-    assert_eq!(body["data"]["settled"], "asking", "{body}");
-    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
     assert_eq!(q["frame"], true);
     assert_eq!(q["origin"], forms);
+    assert_eq!(q["allow"], true);
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None, "an incidental frame doesn't pause the agent's tools");
 
     // Allow: the site joins the list and nothing is loaded.
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "approve"), &host).await;
@@ -3124,8 +3126,8 @@ async fn a_frame_from_a_site_off_the_list_is_asked_about_and_allowing_it_loads_n
     // Block: no navigation notice, no change to the list, nothing loaded.
     let ads = "https://ads.example.net";
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(ads), &host).await;
-    assert_eq!(body["data"]["settled"], "asking", "{body}");
-    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
     let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
     assert_eq!(s, StatusCode::OK);
     wait_for_banner_where(&state, &pane, |b| b.is_null()).await;

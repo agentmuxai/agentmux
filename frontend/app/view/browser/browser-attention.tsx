@@ -64,12 +64,6 @@ function AttentionHead(props: Part): JSX.Element {
                         {a().reason ? <> ({a().reason})</> : null}
                     </span>
                 </Match>
-                <Match when={a().kind === "navigation" && a().frame}>
-                    <span>
-                        This pane is limited to the sites it was opened for. A frame on the page is from{" "}
-                        <b>{a().origin}</b>, so the agent can read it but can't act in it.
-                    </span>
-                </Match>
                 <Match when={a().kind === "navigation"}>
                     <span>
                         This pane is limited to the sites it was opened for. The page wants to{" "}
@@ -132,11 +126,9 @@ function AttentionDetails(props: Part & LineView): JSX.Element {
             </Show>
             <Show when={a().kind === "navigation"}>
                 <div class="browser-attention-target">
-                    {a().frame
-                        ? "Allow adds this site to the pane's list, so the agent can fill and click in that frame. Nothing reloads."
-                        : a().popup
-                          ? "Allow adds this site to the pane's list; then click again to open the window."
-                          : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
+                    {a().popup
+                        ? "Allow adds this site to the pane's list; then click again to open the window."
+                        : "Allow adds this site to the pane's list and goes there. A form's data isn't sent again."}
                 </div>
             </Show>
             <Show when={a().kind === "bypass"}>
