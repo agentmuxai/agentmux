@@ -700,9 +700,9 @@
     // Off: suggestions come only from this computer (history, typed addresses).
     // "browser:searchsuggestions": true,
 
-    // A download in a browser pane opens the system Save As dialog, so you choose where it goes.
-    // On by default. Off: a download saves into your Downloads folder, under a name that doesn't
-    // replace a file, and the strip under the address bar shows it.
+    // A download in a browser pane opens the system Save As dialog, so you choose where it
+    // goes. On by default. Off: a download saves into your Downloads folder, under a name that
+    // doesn't replace a file, and the strip under the address bar shows it.
     // "browser:askdownloadlocation": true,
 
     // -- Jobs --
