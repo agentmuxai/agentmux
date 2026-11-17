@@ -49,7 +49,7 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { workingFromPhase, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createStreamFlushQueue } from "./stream-flush-queue";
+import { createPaneFlushQueue } from "./stream-flush-rate";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
@@ -198,7 +198,7 @@ export function useAgentStream({
     // createHidingStreamFlushQueue BEFORE anything below sees it: `memoryReinjectionController.isHiding`
     // then gates every push uniformly, for every producer, with no change to any of them
     // (SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3).
-    const rawQueue = createStreamFlushQueue(model);
+    const rawQueue = createPaneFlushQueue(model, blockId);
 
     // The pane's context window for memory sizing: the meter's own reading when it has one; the
     // last-seen model's table entry next; FALLBACK_CONTEXT_WINDOW (shared with memory-reinjection.ts's
