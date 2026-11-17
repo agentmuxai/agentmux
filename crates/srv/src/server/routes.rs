@@ -130,8 +130,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         Some(dir) => with_frontend(full, dir),
         None => full,
     };
-    let full = full.layer(version_header).layer(cors).with_state(state);
-    let container = crate::backend::container::listener::layer(full.clone(), crate::backend::container::listener::current_subnet);
+    let full = full.layer(version_header).layer(cors).with_state(state.clone());
+    let container = crate::backend::container::listener::layer_reporting(full.clone(), crate::backend::container::listener::current_subnet, super::model_gateway_key::foreign_use_reporter(state));
 
     SrvRouters { full, lan, container }
 }

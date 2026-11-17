@@ -91,3 +91,26 @@ pub(super) async fn named_error(response: reqwest::Response, name: &str) -> Resu
     *out.headers_mut() = headers;
     Err(out)
 }
+
+/// What the container listener tells when a key account's token is shown by a peer other than its container.
+pub(super) fn foreign_use_reporter(state: AppState) -> crate::backend::container::listener::ForeignUse {
+    std::sync::Arc::new(move |grant, peer| audit_foreign_use(&state, grant, peer))
+}
+
+/// A key account's token was shown by a peer other than the container it was made for: one Audit row, naming the agent
+/// and the account's display name and never the token. The token has already ended (`container::listener`).
+pub(super) fn audit_foreign_use(state: &AppState, grant: &Grant, peer: std::net::IpAddr) {
+    let (state, grant) = (state.clone(), grant.clone());
+    let write = move || {
+        let name = crate::identity::resolver::inject::resolve_account_for_spawn(&state.id_store, &grant.account).ok().flatten().map(|(a, _)| label_of(&a)).unwrap_or_default();
+        let reason = format!("a request on the API key account \"{name}\" came from {peer}, which is not the container its token was made for; refused, and the token is ended");
+        state.reactive_handler.log_fleet_action_audit(None, &grant.agent, "", "gateway.key_use_refused", false, Some("refused"), &uuid::Uuid::new_v4().to_string(), Some(&reason));
+    };
+    // From the listener's middleware: off the async runtime, as the key lookup is.
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => {
+            runtime.spawn_blocking(write);
+        }
+        Err(_) => write(),
+    }
+}

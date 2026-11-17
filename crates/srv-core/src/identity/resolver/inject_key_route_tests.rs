@@ -117,7 +117,9 @@ fn an_agent_on_its_own_endpoint_does_not_use_the_key_route() {
 }
 
 #[test]
-fn a_container_agent_with_a_key_link_is_refused_and_given_neither_the_key_nor_the_gateway() {
+fn a_container_agent_with_a_key_link_is_given_the_gateway_and_a_token_and_never_the_key() {
+    let key = made_up_key();
+    std::env::set_var("AMX_TEST_KEY_ROUTE_acct-key-7", &key);
     let _serial = serial();
     let store = make_store();
     agent_on(&store, &key_account("acct-key-7", "api_key"), "block-key-7");
@@ -127,8 +129,17 @@ fn a_container_agent_with_a_key_link_is_refused_and_given_neither_the_key_nor_th
 
     let (res, env) = spawn(&store, "block-key-7", false);
 
-    assert_eq!(res, Err(SpawnGateError::MissingCredentials { provider: "claude".to_string(), linked: false }));
-    assert!(env.is_empty(), "nothing of the key or the gateway reaches a container: {env:?}");
+    assert_eq!(res, Ok(()), "the key link satisfies a container agent's account gate as a host agent's");
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4000/api/v1/model/anthropic", "the container's turn rewrites the address to one it reaches");
+    assert_eq!(token::grant_for(&env["ANTHROPIC_AUTH_TOKEN"]).unwrap().account, "acct-key-7");
+    assert_eq!(env["ANTHROPIC_API_KEY"], "");
+    assert!(!env.values().any(|v| v.contains(&key) || v.contains("MADEUPMADEUP")), "the key reaches a container no more than a host agent: {env:?}");
+    // What the container is then given of that environment (`agent_env_scope`): the gateway and its token, no host folder.
+    let given: HashMap<String, String> = crate::backend::container::credential::container_exec_env("block-key-7", &env).into_iter().collect();
+    assert!(given["ANTHROPIC_BASE_URL"].ends_with("/api/v1/model/anthropic"));
+    assert_eq!(given["ANTHROPIC_AUTH_TOKEN"], env["ANTHROPIC_AUTH_TOKEN"]);
+    assert!(!given.contains_key("CLAUDE_CONFIG_DIR"), "the host's folder is not the container's");
+    assert!(!given.values().any(|v| v.contains(&key) || v.contains("MADEUPMADEUP")), "{given:?}");
 }
 
 #[test]

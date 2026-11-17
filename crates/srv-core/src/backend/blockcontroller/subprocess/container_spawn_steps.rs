@@ -84,6 +84,13 @@ pub(super) async fn run_turn(mut turn: Turn, update_guard: tokio::sync::OwnedRwL
     let startup_failed = turn.ready_container(&mut kill_rx).await;
     // Starting the container is what binds the listener on a first turn.
     crate::backend::container::listener::point_env_at_listener(&mut turn.container_env);
+    // A key account's token is made fresh for this turn and tied to this container (or the turn says why it can't be).
+    if !startup_failed {
+        if let Err(e) = crate::backend::container::key_route::bind(&turn.cm, &turn.container_name, &mut turn.container_env).await {
+            turn.fail_exec(Some(e)).await;
+            return;
+        }
+    }
     // What the kernel has killed for memory in this container so far: a rise by the end of the turn says why
     // something in it died (SPEC_CONTAINER_AGENT_RESOURCE_LIMITS_2026_10_29.md §5).
     let oom_before = if startup_failed { None } else { turn.cm.oom_kill_count(&turn.container_name).await };

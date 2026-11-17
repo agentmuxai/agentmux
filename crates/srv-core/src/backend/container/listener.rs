@@ -18,6 +18,10 @@
 //!    ([`routes`](crate::backend::container::routes)): the operator RPCs, `/ws` and what runs
 //!    or writes on the host.
 //! 3. **Only from the agents subnet.** The peer address must be inside the network's subnet.
+//! 4. **A key account's token only from its own container.** The gateway token of an API-key account
+//!    (`model_gateway::catalog::KEY_ROUTE_ID`) is bound to the container's address on the network at the start of each
+//!    turn ([`bind_key_route`](crate::backend::container::key_route)); any other peer showing it is refused, the use is
+//!    reported ([`ForeignUse`]) and the token ends at once.
 //!
 //! The container's `AGENTMUX_LOCAL_URL` becomes `http://<gateway>:<port>`
 //! ([`url`], applied in `credential::container_exec_env`).
@@ -79,8 +83,18 @@ pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &
     Ok(())
 }
 
+/// A live key-route token shown by a peer that is not the container it was made for.
+pub fn foreign_key_use(peer: IpAddr, headers: &axum::http::HeaderMap) -> Option<crate::backend::model_gateway::token::Grant> {
+    let grant = crate::backend::model_gateway::request::bearer_token(headers).and_then(|t| crate::backend::model_gateway::token::grant_for(&t))?;
+    (grant.route == crate::backend::model_gateway::catalog::KEY_ROUTE_ID && grant.peer != Some(peer)).then_some(grant)
+}
+
+/// What a refused use of a key account's token says: the same whatever was wrong, naming nothing.
+const FOREIGN_USE: &str = "this token is not for this container";
+
 /// [`check`] for the model gateway's paths, where the harness sends its gateway token as a bearer
-/// credential rather than the container token in `X-AuthKey`. The same network rule applies.
+/// credential rather than the container token in `X-AuthKey`. The same network rule applies, and a key account's token
+/// is accepted only from the one address it was bound to.
 pub fn check_gateway(peer: IpAddr, subnet: Option<&Subnet>, headers: &axum::http::HeaderMap) -> Result<(), (StatusCode, String)> {
     let Some(subnet) = subnet else {
         return Err((StatusCode::SERVICE_UNAVAILABLE, "the container listener is not set up".to_string()));
@@ -88,19 +102,41 @@ pub fn check_gateway(peer: IpAddr, subnet: Option<&Subnet>, headers: &axum::http
     if !subnet.contains(peer) {
         return Err((StatusCode::FORBIDDEN, "not from the agents network".to_string()));
     }
+    if foreign_key_use(peer, headers).is_some() {
+        return Err((StatusCode::FORBIDDEN, FOREIGN_USE.to_string()));
+    }
     let granted = crate::backend::model_gateway::request::bearer_token(headers).is_some_and(|t| crate::backend::model_gateway::token::grant_for(&t).is_some());
     if granted { Ok(()) } else { Err((StatusCode::UNAUTHORIZED, "unauthorized".to_string())) }
 }
 
-/// `router` as the container listener serves it: every request is [`check`]ed first, against the
-/// subnet `subnet()` gives at that moment.
+/// Told when a key account's token is shown by a peer other than its container: the grant (never the token) and who showed it.
+pub type ForeignUse = std::sync::Arc<dyn Fn(&crate::backend::model_gateway::token::Grant, IpAddr) + Send + Sync>;
+
+/// [`layer_reporting`] that reports nothing.
 pub fn layer(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send + Sync + 'static) -> Router {
+    layer_reporting(router, subnet, std::sync::Arc::new(|_, _| {}))
+}
+
+/// `router` as the container listener serves it: every request is [`check`]ed first, against the
+/// subnet `subnet()` gives at that moment. A key account's token shown by another peer is refused, its token ends, and
+/// `foreign` is told.
+pub fn layer_reporting(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send + Sync + 'static, foreign: ForeignUse) -> Router {
     router.layer(axum::middleware::from_fn(move |req: Request, next: Next| {
         let subnet = subnet.clone();
+        let foreign = foreign.clone();
         async move {
             let peer = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip());
             let token = req.headers().get(agentmux_common::AUTH_KEY_HEADER).and_then(|v| v.to_str().ok());
             let gateway = req.uri().path().starts_with(crate::backend::model_gateway::PATH_PREFIX);
+            if let (true, Some(peer)) = (gateway, peer) {
+                if let Some(grant) = foreign_key_use(peer, req.headers()) {
+                    // The token ends before anything else is said: it was shown to someone it is not for.
+                    crate::backend::model_gateway::token::revoke(&grant.def_id, &grant.route);
+                    foreign(&grant, peer);
+                    tracing::warn!(path = %req.uri().path(), peer = ?peer, "container listener refused a key account's token from another peer; the token is ended");
+                    return (StatusCode::FORBIDDEN, Json(json!({ "error": FOREIGN_USE }))).into_response();
+                }
+            }
             let verdict = match peer {
                 Some(peer) if gateway => check_gateway(peer, subnet().as_ref(), req.headers()),
                 Some(peer) => check(peer, subnet().as_ref(), token, req.uri().path()),
@@ -154,6 +190,8 @@ pub fn point_env_at_listener(env: &mut [(String, String)]) {
         if let Some(slot) = env.iter_mut().find(|(k, _)| k == "AGENTMUX_LOCAL_URL") {
             slot.1 = url;
         }
+        // The gateway address a model-route or key-route agent was given follows it.
+        crate::backend::container::credential::point_gateway_at_srv(env);
     }
 }
 
@@ -365,6 +403,60 @@ mod tests {
         let mut other = vec![("OTHER".to_string(), "x".to_string())];
         point_env_at_listener(&mut other);
         assert_eq!(other, vec![("OTHER".to_string(), "x".to_string())], "no URL slot is added");
+    }
+
+    fn bearer_of(token: &str) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert("authorization", axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap());
+        h
+    }
+
+    #[test]
+    fn a_key_accounts_token_is_accepted_only_from_the_address_it_is_bound_to() {
+        use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+        let s = subnet();
+        let own = ip(d("172_30_0_7"));
+        let bound = token::renew_for_account("kb-agent", "kb-def", KEY_ROUTE_ID, "kb-acct", Some(own));
+        assert!(check_gateway(own, Some(&s), &bearer_of(&bound)).is_ok());
+        // Another container on the same network, the right network from another address, and the host.
+        for other in [d("172_30_0_8"), d("172_30_9_1"), "127.0.0.1".to_string()] {
+            assert_eq!(check_gateway(ip(&other), Some(&s), &bearer_of(&bound)).map_err(|e| e.0), Err(StatusCode::FORBIDDEN), "{other}");
+        }
+        // A token made for no address (a host agent's) is not one a container may show.
+        let unbound = token::renew_for_account("kb-agent", "kb-def", KEY_ROUTE_ID, "kb-acct", None);
+        assert_eq!(check_gateway(own, Some(&s), &bearer_of(&unbound)).map_err(|e| e.0), Err(StatusCode::FORBIDDEN));
+        token::revoke("kb-def", KEY_ROUTE_ID);
+        // A model route's token is not bound to an address.
+        let model = token::token_for("kb-model-agent", "kb-model-def", "openrouter");
+        assert!(check_gateway(ip(d("172_30_0_8")), Some(&s), &bearer_of(&model)).is_ok());
+        token::revoke("kb-model-def", "openrouter");
+    }
+
+    #[tokio::test]
+    async fn a_key_accounts_token_from_another_peer_is_refused_reported_and_ended_at_once() {
+        use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+        let inner = Router::new().route("/api/v1/model/anthropic/v1/messages", get(|| async { "upstream" }));
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = told.clone();
+        let foreign: ForeignUse = std::sync::Arc::new(move |grant, peer| sink.lock().unwrap().push((grant.agent.clone(), grant.account.clone(), peer)));
+        let router = layer_reporting(inner, || Some(subnet()), foreign);
+        let own = ip(d("172_30_0_7"));
+        let bound = token::renew_for_account("kf-agent", "kf-def", KEY_ROUTE_ID, "kf-acct", Some(own));
+        let ask = |peer: String| {
+            let router = router.clone();
+            let bound = bound.clone();
+            async move {
+                let mut req = Request::builder().uri("/api/v1/model/anthropic/v1/messages").header("authorization", format!("Bearer {bound}")).body(Body::empty()).unwrap();
+                req.extensions_mut().insert(ConnectInfo(SocketAddr::new(ip(peer), 40000)));
+                router.oneshot(req).await.unwrap().status()
+            }
+        };
+        assert_eq!(ask(d("172_30_0_7")).await, StatusCode::OK, "from its own container");
+        assert_eq!(ask(d("172_30_0_8")).await, StatusCode::FORBIDDEN, "from another container");
+        assert_eq!(*told.lock().unwrap(), vec![("kf-agent".to_string(), "kf-acct".to_string(), ip(d("172_30_0_8")))]);
+        assert_eq!(token::grant_for(&bound), None, "the token ended with the first foreign use");
+        assert_eq!(ask(d("172_30_0_7")).await, StatusCode::UNAUTHORIZED, "so its own container needs the next turn's token");
+        assert_eq!(told.lock().unwrap().len(), 1, "an ended token is not a second foreign use");
     }
 
     #[tokio::test]
