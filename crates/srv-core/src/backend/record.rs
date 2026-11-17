@@ -10,10 +10,15 @@
 //! the ledger is also written here as one JSON line in a file for its day, with
 //! the machine's totals, AgentMux's parts and its largest rows. Raw days are
 //! kept for [`KEEP_DAYS`], oldest first out, and the whole record has a size
-//! budget ([`MAX_BYTES`]).
+//! budget ([`MAX_BYTES`]). Each finished hour is also folded into one rollup
+//! line (min, median, p95 and max of each figure) in a file for its month,
+//! kept for a year ([`ROLLUP_KEEP_DAYS`]) within its own budget
+//! ([`ROLLUP_MAX_BYTES`]): slow growth over months is read from those.
 //!
 //! Nothing leaves the computer, and a line holds numbers and stable keys only
-//! (`core`, `agent:<block>`, `np:claude.exe`): no text, titles or paths.
+//! (`core`, `agent:<block>`, `np:claude.exe`, `renderer:window:<hash>`): no
+//! text, titles or paths. A renderer's own key is made of its window's or
+//! page's name, so a line keeps its kind and a hash of it instead.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -24,10 +29,22 @@ use crate::backend::rpc_types::{TowerMemory, TowerSnapshot};
 
 /// The gap between lines.
 pub const EVERY_MS: u64 = 5 * 60_000;
+/// How much early a sample still counts as the next line: a sample that ran long, or one Tower served from its
+/// 900 ms cache, must not make the following one look too soon and leave a ten-minute gap.
+const JITTER_MS: u64 = 30_000;
+const HOUR_MS: u64 = 3_600_000;
 /// Raw days kept.
 pub const KEEP_DAYS: i64 = 14;
 /// The record's own budget: past it, the oldest days go first (never today's).
 pub const MAX_BYTES: u64 = 30 * 1024 * 1024;
+/// Hourly rollups kept: a year, and a month's file goes whole.
+pub const ROLLUP_KEEP_DAYS: i64 = 366;
+/// The rollups' own budget (a year is about 9 MB), so the record as a whole stays under 40 MB.
+pub const ROLLUP_MAX_BYTES: u64 = 9 * 1024 * 1024;
+/// The rows an hour's rollup names, by their largest figure.
+const ROLLUP_ROWS: usize = 6;
+const ROLLUP_PREFIX: &str = "rollup-";
+const MONTH_FORMAT: &str = "%Y-%m";
 /// The largest rows one line names; a runaway of differently named processes cannot grow a line.
 const MAX_ROWS: usize = 40;
 const DAY_FORMAT: &str = "%Y-%m-%d";
@@ -90,10 +107,32 @@ fn part_key(part: &impl Serialize) -> String {
     serde_json::to_value(part).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
 }
 
+/// FNV-1a: the same hash on every run and platform (`DefaultHasher` makes no such promise).
+fn fnv(s: &str) -> u32 {
+    s.bytes().fold(0x811c_9dc5, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
+}
+
+/// A row's key as the record keeps it. A renderer's key is the slug of what it serves (a workspace's name, a page's
+/// host), so it is cut to its kind and a hash of itself: the same figure can be followed from line to line, and
+/// no name is written.
+fn persisted_key(key: &str) -> String {
+    let Some(rest) = key.strip_prefix("renderer:") else { return key.to_string() };
+    let kind = if rest.contains("pool-window") {
+        "pool"
+    } else if rest.contains("browser-pane") {
+        "browser"
+    } else if rest.contains("window") {
+        "window"
+    } else {
+        "other"
+    };
+    format!("renderer:{kind}:{:08x}", fnv(rest))
+}
+
 fn agentmux_line(m: &TowerMemory) -> AgentMuxLine {
     let parts = m.parts.iter().map(|p| PartLine { k: part_key(&p.part), mem: p.mem, n: p.processes }).collect();
     let mut rows: Vec<PartLine> =
-        m.parts.iter().flat_map(|p| p.rows.iter()).map(|r| PartLine { k: r.key.clone(), mem: r.mem, n: r.processes }).collect();
+        m.parts.iter().flat_map(|p| p.rows.iter()).map(|r| PartLine { k: persisted_key(&r.key), mem: r.mem, n: r.processes }).collect();
     rows.sort_by(|a, b| b.mem.cmp(&a.mem).then_with(|| a.k.cmp(&b.k)));
     rows.truncate(MAX_ROWS);
     AgentMuxLine { total: m.total, procs: m.processes, unreadable: m.unreadable, parts, rows }
@@ -155,8 +194,185 @@ pub fn files_to_remove(files: &[(String, u64)], today: &str, keep_days: i64, max
     remove
 }
 
+/// min, median, p95 and max of a figure over an hour.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Stat(pub u64, pub u64, pub u64, pub u64);
+
+/// One finished hour of lines folded into one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rollup {
+    /// The hour's start, ms since the epoch.
+    pub h: u64,
+    /// Lines in the hour.
+    pub n: u32,
+    /// The version and the uptime (seconds) of the hour's last line.
+    pub v: String,
+    pub up_s: u64,
+    /// Times srv started again inside the hour (its uptime went back).
+    pub restarts: u32,
+    /// All processes' CPU, thousandths of a core.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<Stat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem: Option<Stat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_free: Option<Stat>,
+    /// AgentMux's total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub am: Option<Stat>,
+    pub parts: Vec<(String, Stat)>,
+    /// The [`ROLLUP_ROWS`] rows with the largest peak. A row missing from a line counts as 0 there.
+    pub rows: Vec<(String, Stat)>,
+}
+
+fn stat(mut v: Vec<u64>) -> Option<Stat> {
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_unstable();
+    let at = |p: f64| v[((p * v.len() as f64).ceil() as usize).clamp(1, v.len()) - 1];
+    Some(Stat(v[0], at(0.5), at(0.95), v[v.len() - 1]))
+}
+
+/// Each key's figure over the lines, by key, in the order first seen; a line without the key gives 0.
+fn series(samples: &[Sample], pick: impl Fn(&AgentMuxLine) -> &[PartLine]) -> Vec<(String, Vec<u64>)> {
+    let mut out: Vec<(String, Vec<u64>)> = Vec::new();
+    for (i, s) in samples.iter().enumerate() {
+        for row in s.am.as_ref().map(&pick).unwrap_or_default() {
+            let at = match out.iter().position(|(k, _)| *k == row.k) {
+                Some(at) => at,
+                None => {
+                    out.push((row.k.clone(), vec![0; samples.len()]));
+                    out.len() - 1
+                }
+            };
+            out[at].1[i] = row.mem;
+        }
+    }
+    out
+}
+
+fn stats_of(series: Vec<(String, Vec<u64>)>) -> Vec<(String, Stat)> {
+    series.into_iter().filter_map(|(k, v)| stat(v).map(|s| (k, s))).collect()
+}
+
+/// The hour starting at `hour` as one line, from its lines (in time order). None for no lines.
+pub fn rollup(hour: u64, samples: &[Sample]) -> Option<Rollup> {
+    let last = samples.last()?;
+    let machine = || samples.iter().filter_map(|s| s.machine.as_ref());
+    let mut rows = stats_of(series(samples, |a| &a.rows));
+    rows.sort_by(|a, b| b.1 .3.cmp(&a.1 .3).then_with(|| a.0.cmp(&b.0)));
+    rows.truncate(ROLLUP_ROWS);
+    Some(Rollup {
+        h: hour,
+        n: samples.len() as u32,
+        v: last.v.clone(),
+        up_s: last.up_s,
+        restarts: samples.windows(2).filter(|w| w[1].up_s < w[0].up_s).count() as u32,
+        cpu: stat(machine().filter_map(|m| m.cpu).map(|c| (c * 1000.0).round() as u64).collect()),
+        mem: stat(machine().map(|m| m.mem).collect()),
+        disk_free: stat(machine().filter_map(|m| m.disk).map(|d| d.0).collect()),
+        am: stat(samples.iter().filter_map(|s| s.am.as_ref()).map(|a| a.total).collect()),
+        parts: stats_of(series(samples, |a| &a.parts)),
+        rows,
+    })
+}
+
+fn rollup_file_name(hour: u64) -> String {
+    let month = chrono::DateTime::from_timestamp_millis(hour as i64).map(|d| d.format(MONTH_FORMAT).to_string());
+    format!("{ROLLUP_PREFIX}{}.{EXT}", month.unwrap_or_else(|| "1970-01".to_string()))
+}
+
+fn month_from_file(name: &str) -> Option<chrono::NaiveDate> {
+    let month = name.strip_prefix(ROLLUP_PREFIX)?.strip_suffix(&format!(".{EXT}"))?;
+    chrono::NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").ok()
+}
+
+/// The rollup files to delete: a month that ended more than `keep_days` before `today`, then the oldest of what is
+/// left while the total is over `max_bytes`. The month of `today` is never listed.
+pub fn rollups_to_remove(files: &[(String, u64)], today: &str, keep_days: i64, max_bytes: u64) -> Vec<String> {
+    let Ok(today_date) = chrono::NaiveDate::parse_from_str(today, DAY_FORMAT) else { return Vec::new() };
+    let mut months: Vec<(chrono::NaiveDate, &String, u64)> =
+        files.iter().filter_map(|(name, size)| month_from_file(name).map(|d| (d, name, *size))).collect();
+    months.sort_by_key(|(d, _, _)| *d);
+    let mut total: u64 = months.iter().map(|(_, _, s)| *s).sum();
+    let mut remove = Vec::new();
+    for (start, name, size) in &months {
+        let end = start.checked_add_months(chrono::Months::new(1)).unwrap_or(*start);
+        if end > today_date {
+            continue;
+        }
+        if (today_date - end).num_days() > keep_days || total > max_bytes {
+            remove.push((*name).clone());
+            total = total.saturating_sub(*size);
+        }
+    }
+    remove
+}
+
+/// The hour of the last rollup written, from the newest month's file.
+fn last_rollup_hour(dir: &Path) -> Option<u64> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| month_from_file(n).is_some())
+        .collect();
+    names.sort();
+    let text = std::fs::read_to_string(dir.join(names.last()?)).ok()?;
+    text.lines().rev().find_map(|l| serde_json::from_str::<Rollup>(l).ok()).map(|r| r.h)
+}
+
+/// The raw lines of the days from `from_day` on, in time order.
+fn raw_since(dir: &Path, from_day: Option<&str>) -> Vec<Sample> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let from = from_day.and_then(|d| chrono::NaiveDate::parse_from_str(d, DAY_FORMAT).ok());
+    let mut days: Vec<(chrono::NaiveDate, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| Some((day_from_file(e.file_name().to_str()?)?, e.path())))
+        .filter(|(d, _)| from.is_none_or(|f| *d >= f))
+        .collect();
+    days.sort();
+    let mut out: Vec<Sample> = Vec::new();
+    for (_, path) in days {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        out.extend(text.lines().filter_map(|l| serde_json::from_str::<Sample>(l).ok()));
+    }
+    out.sort_by_key(|s| s.t);
+    out
+}
+
+/// Fold every finished hour (before the one `now_ms` is in) that has no rollup yet into one, oldest first.
+fn roll_up(dir: &Path, now_ms: u64) {
+    use std::io::Write;
+    let current = now_ms / HOUR_MS * HOUR_MS;
+    let last = last_rollup_hour(dir);
+    let from_day = last.map(|h| day_of(h + HOUR_MS));
+    let mut hours: std::collections::BTreeMap<u64, Vec<Sample>> = std::collections::BTreeMap::new();
+    for s in raw_since(dir, from_day.as_deref()) {
+        let h = s.t / HOUR_MS * HOUR_MS;
+        if h < current && last.is_none_or(|l| h > l) {
+            hours.entry(h).or_default().push(s);
+        }
+    }
+    for (hour, samples) in hours {
+        let Some(line) = rollup(hour, &samples).and_then(|r| serde_json::to_string(&r).ok()) else { continue };
+        let written = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(rollup_file_name(hour)))
+            .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
+        if let Err(e) = written {
+            tracing::warn!(error = %e, "[record] an hour could not be rolled up");
+            return;
+        }
+    }
+}
+
 struct Gate {
     last_t: Option<u64>,
+    /// The hour rolled up last: once an hour is enough, and once at the first line.
+    rolled_hour: Option<u64>,
     /// The day pruned last: once a day is enough, and once at the first line.
     pruned_day: Option<String>,
 }
@@ -174,7 +390,7 @@ impl Record {
         Self {
             dir,
             version: version.to_string(),
-            gate: Mutex::new(Gate { last_t: None, pruned_day: None }),
+            gate: Mutex::new(Gate { last_t: None, rolled_hour: None, pruned_day: None }),
             started: std::time::Instant::now(),
         }
     }
@@ -185,7 +401,8 @@ impl Record {
         GLOBAL.get_or_init(|| dir().map(|d| Record::new(d, version))).as_ref()
     }
 
-    /// Offer a sample Tower took: written when [`EVERY_MS`] have passed since the last line. BLOCKING (a file
+    /// Offer a sample Tower took: written when [`EVERY_MS`] (less [`JITTER_MS`]) have passed since the last line,
+    /// and the hours finished since the last rollup are folded when a new hour begins. BLOCKING (a file
     /// append); call it where the sample is taken, off the async workers. A failure is logged and never
     /// returned: the record is never a reason for a sample to fail.
     pub fn note(&self, snap: &TowerSnapshot) {
@@ -194,7 +411,7 @@ impl Record {
         }
         {
             let mut gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
-            if gate.last_t.is_some_and(|last| snap.ts_ms.saturating_sub(last) < EVERY_MS) {
+            if gate.last_t.is_some_and(|last| snap.ts_ms.saturating_sub(last) < EVERY_MS - JITTER_MS) {
                 return;
             }
             gate.last_t = Some(snap.ts_ms);
@@ -205,7 +422,20 @@ impl Record {
             tracing::warn!(error = %e, "[record] a line could not be written");
             return;
         }
+        self.roll_up_once_an_hour(snap.ts_ms);
         self.prune_once_a_day(&day_of(snap.ts_ms));
+    }
+
+    fn roll_up_once_an_hour(&self, now_ms: u64) {
+        let hour = now_ms / HOUR_MS;
+        {
+            let mut gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+            if gate.rolled_hour == Some(hour) {
+                return;
+            }
+            gate.rolled_hour = Some(hour);
+        }
+        roll_up(&self.dir, now_ms);
     }
 
     /// The nearest folder that exists, for the drive's free space (the record's own folder may not exist yet).
@@ -249,7 +479,10 @@ fn prune(dir: &Path, today: &str) {
         .flatten()
         .filter_map(|e| Some((e.file_name().to_str()?.to_string(), e.metadata().ok()?.len())))
         .collect();
-    for name in files_to_remove(&files, today, KEEP_DAYS, MAX_BYTES) {
+    let doomed = files_to_remove(&files, today, KEEP_DAYS, MAX_BYTES)
+        .into_iter()
+        .chain(rollups_to_remove(&files, today, ROLLUP_KEEP_DAYS, ROLLUP_MAX_BYTES));
+    for name in doomed {
         if let Err(e) = std::fs::remove_file(dir.join(&name)) {
             tracing::warn!(error = %e, file = %name, "[record] an old day could not be removed");
         }
@@ -372,6 +605,42 @@ mod tests {
     }
 
     #[test]
+    fn a_renderer_key_keeps_its_kind_and_a_hash_but_never_the_name() {
+        let mut m = memory();
+        m.parts[1].rows = vec![
+            row("renderer:renderer-window-acme-payroll-q3", 900),
+            row("renderer:renderer-browser-pane-secret-bank-example", 800),
+            row("renderer:renderer-pool-window-idle", 700),
+            row("renderer:renderer", 600),
+            row("terminal:t1", 500),
+        ];
+        let am = agentmux_line(&m);
+        let keys: Vec<&str> = am.rows.iter().map(|r| r.k.as_str()).collect();
+        let json = serde_json::to_string(&am).unwrap();
+        for word in ["acme", "payroll", "secret", "bank", "example"] {
+            assert!(!json.contains(word), "{word} in {json}");
+        }
+        let has = |prefix: &str| keys.iter().filter(|k| k.starts_with(prefix)).count();
+        assert_eq!((has("renderer:window:"), has("renderer:browser:"), has("renderer:pool:"), has("renderer:other:")), (1, 1, 1, 1), "{keys:?}");
+        assert!(keys.contains(&"terminal:t1"), "{keys:?}");
+        assert_eq!(keys[0].len(), "renderer:window:".len() + 8, "{keys:?}");
+        // The same renderer gives the same key on the next line, and another one a different key.
+        assert_eq!(persisted_key("renderer:renderer-window-a"), persisted_key("renderer:renderer-window-a"));
+        assert_ne!(persisted_key("renderer:renderer-window-a"), persisted_key("renderer:renderer-window-b"));
+    }
+
+    #[test]
+    fn a_sample_a_little_early_is_not_dropped_but_a_fast_sampler_still_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let record = Record::new(tmp.path().join("record"), "0.60.30");
+        record.note(&snapshot(NOON));
+        record.note(&snapshot(NOON + EVERY_MS - 1)); // the previous one ran long: still the next line
+        record.note(&snapshot(NOON + EVERY_MS - 1 + 60_000)); // not yet five minutes after the last
+        let today = std::fs::read_to_string(tmp.path().join("record/2026-11-16.jsonl")).unwrap();
+        assert_eq!(today.lines().count(), 2);
+    }
+
+    #[test]
     fn a_sample_with_nothing_in_it_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let record = Record::new(tmp.path().join("record"), "0.60.30");
@@ -394,5 +663,85 @@ mod tests {
         assert!(!dir.join("2026-09-01.jsonl").exists());
         assert!(dir.join("keep.txt").exists());
         assert!(dir.join("2026-11-16.jsonl").exists());
+    }
+
+    /// A line at `t` with AgentMux at `total` bytes, its renderer row at `win` and srv up for `up_s`.
+    fn line(t: u64, total: u64, win: u64, up_s: u64) -> Sample {
+        let mut snap = snapshot(t);
+        let m = snap.memory.as_mut().unwrap();
+        m.total = total;
+        m.parts[1].rows = vec![row("pane:window:main", win)];
+        compact(&snap, "0.60.30", up_s, Some((500, 1_000)))
+    }
+
+    #[test]
+    fn an_hour_is_min_median_p95_and_max() {
+        let samples: Vec<Sample> = (1..=12).map(|i| line(NOON + i * EVERY_MS, i * 100, i * 10, i * 300)).collect();
+        let r = rollup(NOON, &samples).unwrap();
+        assert_eq!((r.n, r.restarts, r.up_s), (12, 0, 3_600));
+        assert_eq!(r.am, Some(Stat(100, 600, 1_200, 1_200)));
+        assert_eq!(r.rows.iter().find(|(k, _)| k == "pane:window:main").unwrap().1, Stat(10, 60, 120, 120));
+        assert_eq!(r.disk_free, Some(Stat(500, 500, 500, 500)));
+        assert_eq!(r.cpu, Some(Stat(500, 500, 500, 500)));
+        assert_eq!(rollup(NOON, &[]), None);
+    }
+
+    #[test]
+    fn a_row_missing_from_some_lines_counts_as_zero_there_and_the_largest_rows_are_kept() {
+        let mut a = line(NOON, 1, 100, 10);
+        a.am.as_mut().unwrap().rows = (0..10).map(|i| PartLine { k: format!("np:p{i}"), mem: i + 1, n: 1 }).collect();
+        let mut b = line(NOON + EVERY_MS, 1, 100, 20);
+        b.am.as_mut().unwrap().rows = vec![PartLine { k: "np:p9".into(), mem: 50, n: 1 }];
+        let r = rollup(NOON, &[a, b]).unwrap();
+        assert_eq!(r.rows.len(), ROLLUP_ROWS);
+        assert_eq!(r.rows[0], ("np:p9".to_string(), Stat(10, 10, 50, 50)));
+        assert_eq!(r.rows[1].0, "np:p8");
+        assert_eq!(r.rows[1].1, Stat(0, 0, 9, 9));
+    }
+
+    #[test]
+    fn a_restart_inside_an_hour_is_counted_by_the_uptime_going_back() {
+        let samples = vec![line(NOON, 1, 1, 900), line(NOON + EVERY_MS, 1, 1, 1_200), line(NOON + 2 * EVERY_MS, 1, 1, 40)];
+        assert_eq!(rollup(NOON, &samples).unwrap().restarts, 1);
+    }
+
+    #[test]
+    fn finished_hours_are_rolled_up_once_each_and_the_current_hour_is_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("record");
+        let record = Record::new(dir.clone(), "0.60.30");
+        // 12:00 to 14:59 in five-minute lines, then the first line of 15:00.
+        for i in 0..=36 {
+            record.note(&snapshot(NOON + i * EVERY_MS));
+        }
+        let text = std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap();
+        let rolls: Vec<Rollup> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(rolls.iter().map(|r| (r.h - NOON) / HOUR_MS).collect::<Vec<_>>(), [0, 1, 2]);
+        assert!(rolls.iter().all(|r| r.n == 12));
+        // A new process (srv restarted) finds where it left off and writes nothing twice.
+        let again = Record::new(dir.clone(), "0.60.30");
+        again.note(&snapshot(NOON + 37 * EVERY_MS));
+        assert_eq!(std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count(), 3);
+        // An hour later the 15:00 hour is rolled up.
+        again.note(&snapshot(NOON + 49 * EVERY_MS));
+        assert_eq!(std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count(), 4);
+    }
+
+    #[test]
+    fn a_rollup_is_a_small_line() {
+        let samples: Vec<Sample> = (0..12).map(|i| line(NOON + i * EVERY_MS, 3_000_000_000, 1_500_000_000, 1_000_000)).collect();
+        let json = serde_json::to_string(&rollup(NOON, &samples).unwrap()).unwrap();
+        // A year of hours has to fit ROLLUP_MAX_BYTES with room to spare.
+        assert!(json.len() as u64 * 24 * 366 < ROLLUP_MAX_BYTES, "{} bytes: {json}", json.len());
+    }
+
+    #[test]
+    fn rollup_months_go_after_a_year_or_over_budget_but_never_this_months() {
+        let f = |m: &str, size: u64| (format!("rollup-{m}.jsonl"), size);
+        let files = vec![f("2025-09", 10), f("2025-12", 10), f("2026-10", 10), f("2026-11", 10), ("2026-11-15.jsonl".into(), 10)];
+        // A month that ended more than 366 days before the 16th of November 2026: September 2025 only.
+        assert_eq!(rollups_to_remove(&files, "2026-11-16", 366, 1_000), ["rollup-2025-09.jsonl"]);
+        assert_eq!(rollups_to_remove(&files, "2026-11-16", 366, 15), ["rollup-2025-09.jsonl", "rollup-2025-12.jsonl", "rollup-2026-10.jsonl"]);
+        assert_eq!(rollups_to_remove(&[f("2026-11", 9_999)], "2026-11-16", 366, 1), Vec::<String>::new());
     }
 }
