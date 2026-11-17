@@ -38,7 +38,8 @@ pub(super) async fn record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
             }
             let body = get(cx, &query).await?;
             let lines = body["lines"].as_array().map(Vec::as_slice).unwrap_or_default();
-            Ok(if view == "export" { describe_export(lines) } else { describe_series(raw, lines, now_ms) })
+            let matched = body["matched"].as_u64().map_or(lines.len(), |m| m as usize);
+            Ok(if view == "export" { describe_export(lines, matched) } else { describe_series(raw, lines, matched, now_ms) })
         }
         other => anyhow::bail!("App record: view is \"summary\", \"series\" or \"export\", not {other:?}"),
     }
@@ -150,7 +151,7 @@ fn trend(rolls: &[Value], now_ms: i64) -> String {
         return out;
     };
     let then_h = then["h"].as_u64().unwrap_or(0);
-    let restarts: u64 = rolls.iter().filter(|r| r["h"].as_u64().unwrap_or(0) > then_h).map(|r| r["restarts"].as_u64().unwrap_or(0)).sum();
+    let restarts = restarts_since(rolls, then_h);
     if let (Some(a), Some(b)) = (stat(&then["am"]), stat(&last["am"])) {
         let delta = b[1] as i64 - a[1] as i64;
         out.push_str(&format!(
@@ -166,23 +167,50 @@ fn trend(rolls: &[Value], now_ms: i64) -> String {
     out
 }
 
-/// The rows (and parts) whose median grew most between two hours.
+/// How many times srv started again in the hours after `then_h`: those each rollup counted inside its hour, and
+/// those between two hours, where the uptime of the later hour's last line is less than the earlier one's plus the
+/// time between them (allowing 15 minutes for where in its hour each last line fell).
+fn restarts_since(rolls: &[Value], then_h: u64) -> u64 {
+    let inside: u64 = rolls.iter().filter(|r| r["h"].as_u64().unwrap_or(0) > then_h).map(|r| r["restarts"].as_u64().unwrap_or(0)).sum();
+    let between = rolls
+        .windows(2)
+        .filter(|w| w[0]["h"].as_u64().unwrap_or(0) >= then_h)
+        .filter(|w| {
+            let gap_s = w[1]["h"].as_u64().unwrap_or(0).saturating_sub(w[0]["h"].as_u64().unwrap_or(0)) / 1000;
+            w[1]["up_s"].as_u64().unwrap_or(0) + 900 < w[0]["up_s"].as_u64().unwrap_or(0) + gap_s
+        })
+        .count() as u64;
+    inside + between
+}
+
+/// The parts and rows whose median grew most between two hours. A row is compared only when both hours name it:
+/// a rollup keeps six rows, so one missing from the earlier hour may only have ranked lower, and is listed apart
+/// as having no known earlier size.
 fn grown(then: &Value, now: &Value) -> String {
     let mut moves: Vec<(String, i64)> = Vec::new();
+    let mut entered: Vec<String> = Vec::new();
     for list in ["parts", "rows"] {
         for p in now[list].as_array().into_iter().flatten() {
             let (Some(key), Some(b)) = (p[0].as_str(), stat(&p[1])) else { continue };
-            let a = keyed(then, list, key).map_or(0, |s| s[1]);
-            moves.push((key.to_string(), b[1] as i64 - a as i64));
+            match keyed(then, list, key) {
+                Some(a) => moves.push((key.to_string(), b[1] as i64 - a[1] as i64)),
+                None if list == "rows" => entered.push(key.to_string()),
+                None => moves.push((key.to_string(), b[1] as i64)),
+            }
         }
     }
     moves.retain(|(_, d)| *d > 0);
     moves.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    if moves.is_empty() {
-        return "\nNo part or row of the largest six grew.".to_string();
+    let mut out = if moves.is_empty() {
+        "\nNo part or row that was in the largest six both times grew.".to_string()
+    } else {
+        let list: Vec<String> = moves.iter().take(4).map(|(k, d)| format!("{k} +{}", mb(*d as u64))).collect();
+        format!("\nGrew most (median, same two hours): {}.", list.join(", "))
+    };
+    if !entered.is_empty() {
+        out.push_str(&format!(" Newly among the largest six, with no earlier size known: {}.", entered.join(", ")));
     }
-    let list: Vec<String> = moves.iter().take(4).map(|(k, d)| format!("{k} +{}", mb(*d as u64))).collect();
-    format!("\nGrew most (median, same two hours): {}.", list.join(", "))
+    out
 }
 
 /// `summary`: what the record holds, the newest line, and the trend.
@@ -199,7 +227,7 @@ pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls:
 }
 
 /// `series`: one line per hour (or per five minutes with kind raw), oldest first.
-pub(super) fn describe_series(raw: bool, lines: &[Value], now_ms: i64) -> String {
+pub(super) fn describe_series(raw: bool, lines: &[Value], matched: usize, now_ms: i64) -> String {
     if lines.is_empty() {
         return "The record has nothing in that window yet.".to_string();
     }
@@ -229,11 +257,14 @@ pub(super) fn describe_series(raw: bool, lines: &[Value], now_ms: i64) -> String
             ));
         }
     }
+    if matched > lines.len() {
+        out.push_str(&format!("\nThis shows the newest {} of the {matched} lines in that window (one answer holds a limited number); ask for a shorter window (hours or day) to see the rest.", lines.len()));
+    }
     out
 }
 
 /// `export`: the lines as stored, one JSON object per line, cut to [`EXPORT_BYTES`] (the newest are kept).
-pub(super) fn describe_export(lines: &[Value]) -> String {
+pub(super) fn describe_export(lines: &[Value], matched: usize) -> String {
     if lines.is_empty() {
         return "The record has nothing in that window yet.".to_string();
     }
@@ -248,7 +279,16 @@ pub(super) fn describe_export(lines: &[Value]) -> String {
         kept += 1;
     }
     let cut = texts.len() - kept;
-    let note = if cut > 0 { format!("{cut} older line(s) left out to fit {} KB; ask for a shorter window (hours or day) to get them. ", EXPORT_BYTES / 1000) } else { String::new() };
+    let mut note = String::new();
+    if matched > texts.len() {
+        note.push_str(&format!("The window holds {matched} lines and one answer holds {}: the older {} are not here. ", texts.len(), matched - texts.len()));
+    }
+    if cut > 0 {
+        note.push_str(&format!("{cut} older line(s) left out to fit {} KB. ", EXPORT_BYTES / 1000));
+    }
+    if !note.is_empty() {
+        note.push_str("Ask for a shorter window (hours or day) to get them.\n");
+    }
     format!("{note}{kept} line(s), one JSON object each (numbers and stable keys only):\n{}", texts[cut..].join("\n"))
 }
 
@@ -277,6 +317,10 @@ mod tests {
     fn growth_over_a_day_is_named_with_the_rows_that_grew_and_a_restart_is_said() {
         let now = 1_000 * H;
         let mut rolls: Vec<Value> = (0..30).map(|i| roll(now - (31 - i) * H, 1_000_000_000 + i * 10_000_000, 400_000_000 + i * 8_000_000, 0)).collect();
+        // srv has been up all along: each hour's last line is an hour later in its uptime.
+        for (i, r) in rolls.iter_mut().enumerate() {
+            r["up_s"] = json!(100_000 + i as u64 * 3_600);
+        }
         rolls[10]["restarts"] = json!(1);
         let inv = json!({ "raw_days": 3, "raw_bytes": 3_000_000, "raw_first_day": "2026-11-14", "rollup_months": 1, "rollup_bytes": 50_000, "rollup_first_month": "2026-11" });
         let newest = json!({ "t": now - 120_000, "v": "0.60.31", "up_s": 90_000, "am": { "total": 1_300_000_000u64, "procs": 41, "parts": [{ "k": "core", "mem": 600_000_000u64, "n": 3 }] }, "machine": { "mem": 12_000_000_000u64, "mem_total": 32_000_000_000u64, "disk": [200_000_000_000u64, 500_000_000_000u64] } });
@@ -289,16 +333,56 @@ mod tests {
     }
 
     #[test]
+    fn a_row_new_to_the_top_six_has_an_unknown_earlier_size_not_a_growth_from_zero() {
+        let mut then = roll(0, 1_000_000_000, 400_000_000, 0);
+        let mut now = roll(24 * H, 1_000_000_000, 400_000_000, 0);
+        then["rows"] = json!([["agent:b1", [100, 100, 100, 100]]]);
+        now["rows"] = json!([["agent:b1", [150, 150, 150, 150]], ["np:node-exe", [9_000_000, 9_000_000, 9_000_000, 9_000_000]]]);
+        let text = grown(&then, &now);
+        assert!(text.contains("agent:b1 +50 bytes") || text.contains("agent:b1 +0.0 MB"), "{text}");
+        assert!(text.contains("no earlier size known: np:node-exe"), "{text}");
+        assert!(!text.contains("np:node-exe +"), "{text}");
+    }
+
+    #[test]
+    fn a_restart_between_two_hours_is_found_by_the_uptime_that_did_not_keep_up() {
+        let at = |h: u64, up_s: u64| {
+            let mut r = roll(h * H, 1_000_000_000, 400_000_000, 0);
+            r["up_s"] = json!(up_s);
+            r
+        };
+        // Up 1 h 55 min at the end of hour 0; hour 1's last line says 2 h 50 min, as it should: no restart.
+        let steady = vec![at(0, 6_900), at(1, 10_200), at(2, 13_700)];
+        assert_eq!(restarts_since(&steady, 0), 0);
+        // srv restarted after hour 1's last line: hour 2's last line is 50 min up, where 4 h was expected.
+        let restarted = vec![at(0, 6_900), at(1, 10_200), at(2, 3_000)];
+        assert_eq!(restarts_since(&restarted, 0), 1);
+        // ...and one inside an hour that the hour counted itself adds to it.
+        let mut both = restarted.clone();
+        both[1]["restarts"] = json!(1);
+        assert_eq!(restarts_since(&both, 0), 2);
+        // Before `then` nothing counts.
+        assert_eq!(restarts_since(&restarted, 2 * H), 0);
+    }
+
+    #[test]
     fn a_series_lists_each_hour_with_its_parts_and_an_export_keeps_the_newest_lines_that_fit() {
         let now = 100 * H;
         let rolls = vec![roll(now - 2 * H, 1_000_000_000, 400_000_000, 0), roll(now - H, 1_010_000_000, 410_000_000, 2)];
-        let text = describe_series(false, &rolls, now as i64);
+        let text = describe_series(false, &rolls, 2, now as i64);
+        assert!(!text.contains("of the 2 lines"), "{text}");
         assert!(text.contains("2 h 0 min ago") && text.contains("core 381.5 MB") && text.contains("restarted 2x"), "{text}");
-        assert_eq!(describe_series(true, &[], 0), "The record has nothing in that window yet.");
+        assert_eq!(describe_series(true, &[], 0, 0), "The record has nothing in that window yet.");
+        // A window the route cut says how many lines it holds.
+        let cut = describe_series(false, &rolls, 400, now as i64);
+        assert!(cut.contains("newest 2 of the 400 lines in that window"), "{cut}");
 
         let big: Vec<Value> = (0..400).map(|i| json!({ "h": i, "pad": "x".repeat(1_000) })).collect();
-        let text = describe_export(&big);
+        let text = describe_export(&big, 400);
         assert!(text.contains("older line(s) left out to fit 200 KB"), "{}", &text[..120]);
+        assert!(!text.contains("The window holds"), "the route cut nothing");
+        let cut_by_route = describe_export(&big[..3], 900);
+        assert!(cut_by_route.starts_with("The window holds 900 lines and one answer holds 3: the older 897 are not here."), "{cut_by_route}");
         assert!(text.len() < EXPORT_BYTES + 400, "{}", text.len());
         assert!(text.contains("\"h\":399") && !text.contains("\"h\":0,"), "the newest lines are kept");
     }

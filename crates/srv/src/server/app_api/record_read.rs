@@ -57,13 +57,16 @@ pub(crate) fn parse_ask(query: &HashMap<String, String>) -> Result<Ask, String> 
     Ok(Ask { raw, from_ms, to_ms, limit })
 }
 
-/// The answer for `ask` read from `dir`: what the record holds, and the lines.
+/// The answer for `ask` read from `dir`: what the record holds, the lines, and `matched`: how many lines the window
+/// holds in all (more than `lines` when the limit cut it).
 pub(crate) fn answer(dir: &std::path::Path, ask: &Ask) -> serde_json::Value {
     let inventory = record::inventory(dir);
     if ask.raw {
-        json!({ "kind": "raw", "inventory": inventory, "lines": record::read_raw(dir, ask.from_ms, ask.to_ms, ask.limit) })
+        let (matched, lines) = record::read_raw(dir, ask.from_ms, ask.to_ms, ask.limit);
+        json!({ "kind": "raw", "inventory": inventory, "matched": matched, "lines": lines })
     } else {
-        json!({ "kind": "rollup", "inventory": inventory, "lines": record::read_rollups(dir, ask.from_ms, ask.to_ms, ask.limit) })
+        let (matched, lines) = record::read_rollups(dir, ask.from_ms, ask.to_ms, ask.limit);
+        json!({ "kind": "rollup", "inventory": inventory, "matched": matched, "lines": lines })
     }
 }
 
@@ -108,7 +111,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let body = answer(&tmp.path().join("none"), &parse_ask(&q(&[])).unwrap());
         assert_eq!(body["kind"], "rollup");
-        assert_eq!(body["lines"], json!([]));
+        assert_eq!((body["lines"].clone(), body["matched"].clone()), (json!([]), json!(0)));
         assert_eq!(body["inventory"]["raw_days"], 0);
     }
 }
