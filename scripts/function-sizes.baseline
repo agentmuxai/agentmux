@@ -317,7 +317,7 @@
 119 frontend/app/drag/CrossWindowDropOverlay.tsx::CrossWindowDropOverlay
 132 frontend/app/element/ModalLayer.tsx::ModalLayer
 122 frontend/app/element/ProviderLogo.tsx::ProviderLogo
-112 frontend/app/element/anchored-popover.tsx::AnchoredPopover
+111 frontend/app/element/anchored-popover.tsx::AnchoredPopover
 126 frontend/app/element/flyoutmenu.tsx::FlyoutMenu
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint

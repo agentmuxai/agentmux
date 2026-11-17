@@ -20,6 +20,8 @@
  *     fixed, now fixed once for all).
  *   - The airspace cut over native browser panes (`usePaneOverlay` plus
  *     `data-pane-overlay`), on every platform.
+ *   - The colours of the pane it was opened from, when that pane has a backdrop (`carryPaneScope`): the shell
+ *     carries the pane's scope for the overlay layer. The pane is the one the anchor is in, or `scope`.
  *   - Dismiss, when `onDismiss` is given: a mousedown outside the panel and
  *     its anchor, or Esc (not while typing in a field inside the panel).
  *   - Entrance and exit, when `motion` is given: the panel stays hidden until
@@ -31,6 +33,7 @@
  * the panel's.
  */
 
+import { carryPaneScope, type ScopeSource } from "@/app/backdrop/overlay-scope";
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import type { EnterKind } from "@/app/motion/primitives";
 import { useMotion } from "@/app/motion/solid";
@@ -54,6 +57,8 @@ export interface AnchoredPopoverProps {
     /** Read once, when the panel's first frame runs. */
     anchor: PopoverAnchor;
     placement?: Placement;
+    /** The pane whose backdrop the panel takes: an element in it, or its block id. Default: the anchor, when it is an element. */
+    scope?: ScopeSource;
     /** The gap to the anchor, in real pixels. Default 8. */
     gutter?: number;
     /** How the panel comes in and goes out (`enter`/`exit` kind). Omit for none. */
@@ -138,6 +143,20 @@ function listenForDismiss(props: AnchoredPopoverProps, shell: () => HTMLElement 
     });
 }
 
+/**
+ * Keeps the shell carrying the scope of the pane the panel was opened from: `scope`, or the pane its anchor is in.
+ * Asked once the panel is mounted, which is before its first paint and after the owner's own refs are set. Returns
+ * the function that takes the scope off again.
+ */
+function usePaneScope(props: AnchoredPopoverProps, shell: () => HTMLElement | undefined): () => void {
+    let stop: (() => void) | undefined;
+    onMount(() => {
+        const el = shell();
+        if (el) stop = carryPaneScope(el, untrack(() => props.scope) ?? untrack(() => props.anchor));
+    });
+    return () => stop?.();
+}
+
 export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
     const hiddenTab = useHiddenTabMarker();
@@ -146,9 +165,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let body: HTMLDivElement | undefined;
     let entered = false;
     const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
-    const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(
-        untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE,
-    );
+    const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE);
     /** The first time the panel is shown, in place: play its entrance. */
     const shown = () => {
         if (entered) return;
@@ -160,7 +177,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;
     let disposed = false;
-
+    const stopScope = usePaneScope(props, () => shell);
     // A dismissible popover takes Escape; a passive one (a tooltip) does not.
     usePaneOverlay(() => shell, { keys: props.overlayKeys ?? !!props.onDismiss });
 
@@ -215,6 +232,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
         disposed = true;
         const kind = untrack(() => props.motion);
         if (kind && shell && entered) fadeOutCopy(shell, kind);
+        stopScope(); // after the copy is made: the copy that fades out keeps the pane's colours
         if (frame !== undefined) cancelAnimationFrame(frame);
         frame = undefined;
         stopAutoUpdate?.();

@@ -86,8 +86,9 @@
  * `right:` offset would need the opposite correction.
  */
 
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import clsx from "clsx";
-import { Show, type JSX } from "solid-js";
+import { onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { createPeekBridge, usePeekLinger } from "./peek-overlay-bridge";
 import { createPeekMeasure } from "./peek-overlay-measure";
@@ -108,7 +109,13 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
 
     return (
         <Show when={s.open()}>
-            <Portal>
+            {/* The panel takes the colours of the pane its row is in (a pane with a backdrop): on the portal's own element. */}
+            <Portal
+                ref={(mount) => {
+                    const stop = carryPaneScope(mount, props.rowEl());
+                    if (stop) onCleanup(stop);
+                }}
+            >
                 <div
                     ref={registerFloating}
                     class={clsx("agent-node-peek-overlay", props.class)}

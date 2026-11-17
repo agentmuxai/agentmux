@@ -10,6 +10,7 @@
  * another level beside it: the same panel, anchored to the row.
  */
 
+import type { ScopeSource } from "@/app/backdrop/overlay-scope";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { menuIconClass } from "@/app/util/menu-icons";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
@@ -53,6 +54,8 @@ export type MenuAnchor = Element | DOMRect | { x: number; y: number };
 
 export interface MenuProps {
     anchor: MenuAnchor | null | undefined;
+    /** The pane whose backdrop the menu takes, for a menu at a point: an element in it, or its block id. A menu hung from an element finds it. */
+    scope?: ScopeSource;
     items: MenuEntry[];
     /** A line above the rows that says what the menu is about; not a row. */
     header?: JSX.Element;
@@ -84,6 +87,7 @@ const asAnchor = (a: MenuAnchor | null | undefined): Element | DOMRect | undefin
 interface MenuPanelProps {
     items: MenuEntry[];
     anchor: Element | DOMRect | undefined;
+    scope?: ScopeSource;
     placement: Placement;
     header?: JSX.Element;
     alignIcons?: boolean;
@@ -296,7 +300,7 @@ function MenuPanel(props: MenuPanelProps): JSX.Element {
     return (
         <>
             <AnchoredPopover
-                anchor={props.anchor}
+                anchor={props.anchor} scope={props.scope}
                 placement={props.placement}
                 motion="fadeScale"
                 onShown={nav.focusBody}
@@ -403,6 +407,7 @@ export const Menu = (props: MenuProps): JSX.Element => (
     <MenuPanel
         items={props.items}
         anchor={asAnchor(props.anchor)}
+        scope={props.scope}
         placement={props.placement ?? "top-start"}
         header={props.header}
         alignIcons={props.alignIcons}
