@@ -109,11 +109,14 @@ fn refresh_chips(state: &AppState) {
 
 /// Whether the agent's requests go through the gateway and are counted there: it is on a model route, or on an API key.
 pub(super) fn spends_through_gateway(state: &AppState, def_id: &str) -> bool {
-    on_a_key(&state.identity_store, def_id) || launch::choice_of(&state.mstore, def_id).is_some()
+    on_a_key(&state.mstore, &state.identity_store, def_id) || launch::choice_of(&state.mstore, def_id).is_some()
 }
 
-fn on_a_key(identity_store: &crate::backend::storage::store::Store, def_id: &str) -> bool {
-    identity_store.agent_identity_list_for_agent(def_id).is_ok_and(|links| links.iter().any(|l| l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)))
+/// A Claude agent linked to an Anthropic key: the gateway carries its requests. An agent of another provider that holds
+/// such a link sends its own requests to the vendor, where nothing is counted or capped.
+fn on_a_key(mstore: &crate::backend::storage::store::Store, identity_store: &crate::backend::storage::store::Store, def_id: &str) -> bool {
+    let claude = mstore.agent_def_get(def_id).ok().flatten().is_some_and(|d| crate::backend::providers::resolve_provider_alias(&mstore.resolve_effective_provider_id(&d)) == "claude");
+    claude && identity_store.agent_identity_list_for_agent(def_id).is_ok_and(|links| links.iter().any(|l| l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)))
 }
 
 /// The spend keys on a pane's `meta` that no longer hold. An agent that is not on a model route has no cap and no day of
@@ -288,7 +291,7 @@ pub(crate) fn view(mstore: &crate::backend::storage::store::Store, identity_stor
     if defs.iter().any(|d| d.id == def_id && d.provider == "dsh") {
         return Some(json!({ "measured": false, "why": "this harness bills the vendor account directly and reports no cost or tokens per call, so AgentMux counts nothing and a daily cap cannot apply; its ceiling is the account's balance" }));
     }
-    if launch::choice_of(mstore, def_id).is_none() && !on_a_key(identity_store, def_id) {
+    if launch::choice_of(mstore, def_id).is_none() && !on_a_key(mstore, identity_store, def_id) {
         return None;
     }
     let slug = &defs.iter().find(|d| d.id == def_id)?.slug;

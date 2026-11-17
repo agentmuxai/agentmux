@@ -150,7 +150,11 @@ struct Metered {
 impl Metered {
     fn settle(&mut self) {
         let Some(tap) = self.tap.take() else { return };
-        let (tokens, answered, actual) = tap.finish();
+        let (tokens, answered, mut actual, split) = tap.finish_with_split();
+        if actual.is_none() && self.grant.route == catalog::KEY_ROUTE_ID {
+            // No provider charge on this route: count it at the real cache-write rates, never under.
+            actual = Some(catalog::key_route_cost(self.model, &tokens, split));
+        }
         if tokens.input + tokens.output + tokens.cache_read + tokens.cache_creation == 0 {
             return;
         }

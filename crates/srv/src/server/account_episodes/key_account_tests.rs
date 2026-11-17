@@ -59,6 +59,11 @@ async fn a_claude_agent_moves_onto_a_key_and_back_with_exactly_one_payer_each_ti
     assert_eq!(r.status, switch::AccountSwitchStatus::Switched);
     assert_eq!(links(&state), [("claude".to_string(), "plan2".to_string())], "the key link went with the move back");
     assert!(!crate::server::spend_watch::spends_through_gateway(&state, "ag"));
+    // An agent of another provider that holds an Anthropic link sends its own requests: nothing is capped for it.
+    let mut other = crate::backend::storage::agents::test_agent_def("muxc", "Muxc", "muxcode", "host", 1, "");
+    state.mstore.agent_def_insert(&mut other).unwrap();
+    state.identity_store.agent_identity_link("muxc", "key1", "anthropic").unwrap();
+    assert!(!crate::server::spend_watch::spends_through_gateway(&state, "muxc"), "only a Claude agent's key goes through the gateway");
     assert!(crate::server::spend_watch::on_a_route(&state, "ag").is_err(), "a plan has no spend cap");
     cleanup(&[&block]);
 }
