@@ -907,3 +907,18 @@ describe("AccountForm: OAuth", () => {
         expect(h.panelProps?.accountId).toBeUndefined();
     });
 });
+
+describe("AccountForm: language", () => {
+    it("re-translates its field labels when the app's language changes while the form is open", async () => {
+        const { bindAppLocaleSetting } = await import("@/app/i18n/i18n");
+        const [setting, setSetting] = createRoot(() => createSignal<unknown>("system"));
+        bindAppLocaleSetting(setting, () => true);
+        renderForm();
+        expect(hasField("Provider")).toBe(true);
+        setSetting("en-XA");
+        await waitFor(() => expect(hasField("Provider")).toBe(false));
+        expect(document.querySelectorAll("label.identity-form-label").length).toBeGreaterThan(0);
+        setSetting("system");
+        await waitFor(() => expect(hasField("Provider")).toBe(true));
+    });
+});

@@ -688,11 +688,13 @@ function FormFooter({ ctx }: { ctx: FormCtx }): JSX.Element {
     );
 }
 
-function FormField({ label, children }: { label: string; children: JSX.Element }): JSX.Element {
+// The props stay together (not destructured): a destructured `label` would be read once, so a translated label
+// would keep its language when the app's language changes while the form is open.
+function FormField(props: { label: string; children: JSX.Element }): JSX.Element {
     return (
         <div class="identity-form-field">
-            <label class="identity-form-label">{label}</label>
-            {children}
+            <label class="identity-form-label">{props.label}</label>
+            {props.children}
         </div>
     );
 }
