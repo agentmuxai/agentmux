@@ -602,6 +602,26 @@ async fn an_undo_after_the_environment_was_edited_again_is_refused() {
 
 // Agents env_set must not say "accepted" for a name that changes nothing: ANTHROPIC_MODEL is read only for an agent
 // pointed at a server of its own; every other launch passes the pane's own --model.
+// The definition's own model vendor URL is a server of its own too: the launch injects it into the environment, so
+// ANTHROPIC_MODEL is effective there and is not refused (#2626). It wins over an ANTHROPIC_BASE_URL line, as at launch.
+#[tokio::test]
+async fn anthropic_model_is_taken_for_a_definition_whose_model_vendor_url_is_a_server_of_its_own() {
+    let state = test_state();
+    let me = agent(&state, "host", false);
+    let mut served = agent(&state, "host", false);
+    served.model_vendor_base_url = SERVER.to_string();
+    state.mstore.agent_def_update(&mut served).unwrap();
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": served.id, "set": { "ANTHROPIC_MODEL": "flint:40b-a2b" } })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored(&state, &served).as_deref(), Some("ANTHROPIC_MODEL=flint:40b-a2b\n"));
+    // Anthropic's own URL in the structured field is not a server of its own, and it wins over a line naming one.
+    let mut own = agent(&state, "host", false);
+    own.model_vendor_base_url = "https://api.anthropic.com".to_string();
+    state.mstore.agent_def_update(&mut own).unwrap();
+    let (status, body) = call(&state, Some(&me), json!({ "action": "set", "agent": own.id, "set": { "ANTHROPIC_BASE_URL": SERVER, "ANTHROPIC_MODEL": "x" } })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
 #[tokio::test]
 async fn anthropic_model_is_refused_where_it_has_no_effect_and_taken_with_a_server_of_its_own() {
     let state = test_state();

@@ -88,6 +88,14 @@ fn text_field(name: &str, value: &str) -> Result<String, Refusal> {
     Ok(value.to_string())
 }
 
+/// `value` trimmed, `None` when the caller left it out; an empty or blank one is refused, naming `field`.
+fn named_or_absent<'a>(field: &str, value: &'a Option<String>) -> Result<Option<&'a str>, Refusal> {
+    match value.as_deref().map(str::trim) {
+        Some("") => Err(bad(format!("{field} is empty; name one, or leave {field} out"))),
+        other => Ok(other),
+    }
+}
+
 fn publish_changed(state: &AppState) {
     state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 }
@@ -251,13 +259,11 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Upda
     if req.effort.is_some() && on_route {
         return Err(bad("the agent is on a model route, which sets its model and thinking: its effort is set in the pane's model panel"));
     }
-    if !on_route && req.route.is_none() && (req.model.is_some() || req.effort.is_some()) {
-        let picked = super::agent_runtime_pick::pick(
-            state,
-            &agent,
-            req.model.as_deref().map(str::trim).filter(|m| !m.is_empty()),
-            req.effort.as_deref().map(str::trim).filter(|e| !e.is_empty()),
-        )?;
+    // An empty model or effort names nothing: refused by name here, before a pick rewrites any pane.
+    let model = named_or_absent("model", &req.model)?;
+    let effort = named_or_absent("effort", &req.effort)?;
+    if !on_route && req.route.is_none() && (model.is_some() || effort.is_some()) {
+        let picked = super::agent_runtime_pick::pick(state, &agent, model, effort)?;
         changed.extend(["model", "effort"].into_iter().filter(|f| if *f == "model" { picked.model.is_some() } else { picked.effort.is_some() }));
         applied = Some(picked.to_json());
     } else if req.route.is_some() || req.model.is_some() {

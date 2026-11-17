@@ -379,6 +379,60 @@ mod runtime_pick {
         assert!(body["error"].as_str().unwrap().contains("picker"), "{body}");
     }
 
+    // An empty model or effort names nothing: refused by name before any pane is rewritten or restarted, not
+    // after a pick that changed nothing and then "nothing to change" (#2626).
+    #[tokio::test]
+    async fn an_empty_model_or_effort_is_refused_by_name_before_anything_is_written() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Asker"), agent(&state, "Blank"));
+        let block = pane_of(&state, &target, json!({})).await;
+        let before = block_meta(&state, &block);
+        for (req, wants) in [
+            (json!({ "model": "" }), "model is empty"),
+            (json!({ "model": "   " }), "model is empty"),
+            (json!({ "effort": " " }), "effort is empty"),
+            (json!({ "model": "opus", "effort": "" }), "effort is empty"),
+        ] {
+            let mut req = req;
+            req["agent"] = json!(target.slug);
+            let (status, body) = update_call(&state, Some(&me), req).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body["error"].as_str().unwrap().contains(wants), "{body}");
+        }
+        assert_eq!(block_meta(&state, &block), before, "no pane was rewritten");
+        assert!(state.mstore.agent_last_runtime_get(&target.id).unwrap().is_empty());
+    }
+
+    // A custom server in the definition (its saved environment or its model vendor URL) is what the next open
+    // restores, with no pane open as well as with one: the pick would be saved and then ignored (#2626).
+    #[tokio::test]
+    async fn a_model_pick_is_refused_for_a_definition_pointed_at_a_server_of_its_own() {
+        let state = test_state();
+        let me = agent(&state, "Asker");
+        let in_env = agent(&state, "EnvServed");
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::store::AgentContent {
+                agent_id: in_env.id.clone(),
+                content_type: crate::backend::agent_env::CONTENT_TYPE.to_string(),
+                content: "ANTHROPIC_BASE_URL=http://192.0.2.68:11434\nANTHROPIC_MODEL=flint:40b-a2b\n".to_string(),
+                updated_at: 1,
+            })
+            .unwrap();
+        let mut structured = test_agent_def(&uuid::Uuid::new_v4().to_string(), "UrlServed", "claude", "host", 1, "");
+        structured.model_vendor_base_url = "http://192.0.2.68:11434".to_string();
+        state.mstore.agent_def_insert(&mut structured).unwrap();
+        for target in [&in_env, &structured] {
+            let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "sonnet" })).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body["error"].as_str().unwrap().contains("env_set"), "{body}");
+            assert!(state.mstore.agent_last_runtime_get(&target.id).unwrap().is_empty(), "nothing was remembered");
+            // Its effort is not the server's to decide.
+            let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "effort": "low" })).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+        }
+    }
+
     #[tokio::test]
     async fn the_definitions_own_flags_are_checked_when_no_pane_is_open() {
         let state = test_state();
