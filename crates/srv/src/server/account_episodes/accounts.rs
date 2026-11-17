@@ -188,7 +188,8 @@ pub(super) fn pick<'a>(
         // The signed-in ones before the unchecked, then the oldest: a stable choice.
         return accounts
             .iter()
-            .filter(|a| has_quota(a, &blocked) && !skip.contains(&a.id))
+            // Never a key: moving onto one is a person's choice of who pays, not what `any` stands for.
+            .filter(|a| has_quota(a, &blocked) && !skip.contains(&a.id) && !super::key_account::is_key(a))
             .min_by_key(|a| (!signed_in(&a.status), a.created_at, a.id.clone()))
             .ok_or_else(|| format!("NO_ACCOUNT_WITH_QUOTA: no {provider} account has quota now; the accounts are: {}", list(false)));
     }

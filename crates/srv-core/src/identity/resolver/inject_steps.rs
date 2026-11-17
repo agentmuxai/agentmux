@@ -160,6 +160,10 @@ pub(super) struct BindingInjector<'a> {
     pub(super) instance: &'a AgentInstance,
     /// Canonical ids of the oauth providers a binding injected.
     pub(super) injected_oauth: HashSet<String>,
+    pub(super) mstore: &'a Store,
+    /// The agent definition's own provider, and whether it runs on a model server of its own.
+    pub(super) def_provider: Option<&'a str>,
+    pub(super) own_endpoint: bool,
 }
 
 impl BindingInjector<'_> {
@@ -176,6 +180,18 @@ impl BindingInjector<'_> {
     // and skipped — other bindings still inject. Oauth-class failures go
     // through the layer-3 gate, which always blocks.
     pub(super) fn inject(&mut self, binding: &IdentityBinding, env_vars: &mut HashMap<String, String>) -> Result<(), SpawnGateError> {
+        let key_route = is_key_route_binding(binding, self.def_provider);
+        // The Claude account is discarded for an agent on its own endpoint: not injected, not required.
+        if self.own_endpoint && (key_route || resolve_provider_alias(&binding.provider) == "claude") {
+            return Ok(());
+        }
+        // An Anthropic API key on a Claude agent goes through the gateway: the agent never holds it.
+        if key_route {
+            if inject_key_route(self.mstore, self.id_store, self.identity_store, self.instance, binding, env_vars) {
+                self.injected_oauth.insert("claude".to_string());
+            }
+            return Ok(());
+        }
         let class = match provider_class(&binding.provider) {
             Some(c) => c,
             None => {
@@ -509,6 +525,68 @@ impl BindingInjector<'_> {
             }
         }
     }
+}
+
+/// Whether `binding` is an Anthropic API key linked to a Claude agent. Such a key is never put in the agent's
+/// environment: the agent is pointed at the gateway's key route instead ([`inject_key_route`]).
+pub(super) fn is_key_route_binding(binding: &IdentityBinding, def_provider: Option<&str>) -> bool {
+    def_provider == Some("claude") && binding.provider.eq_ignore_ascii_case(crate::backend::model_gateway::catalog::KEY_ROUTE_ID)
+}
+
+/// The folder an agent on an API key runs in (the provider's default one, whatever plan it was on before), for the
+/// readers that look where the spawn put it: the subagent watcher and the registration handler.
+pub(super) fn key_route_dir(bindings: &[IdentityBinding], provider: &str) -> Option<std::path::PathBuf> {
+    if !bindings.iter().any(|b| is_key_route_binding(b, Some(provider))) {
+        return None;
+    }
+    let config = crate::backend::providers::get_provider(provider)?;
+    crate::backend::providers::default_auth_dir(config).ok().map(std::path::PathBuf::from)
+}
+
+/// Point a Claude agent at the gateway's key route for the API-key account `binding` names: the gateway's address and
+/// the agent's token, and nothing of the key, which stays in the keychain and is read by the gateway for each request.
+/// `Ok(true)` when the agent is set up; `Ok(false)` when it cannot be (no account, not a key, no srv address): the
+/// unbound-provider gate then refuses the spawn, as for any Claude agent with no usable account.
+pub(super) fn inject_key_route(
+    mstore: &Store,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    instance: &AgentInstance,
+    binding: &IdentityBinding,
+    env_vars: &mut HashMap<String, String>,
+) -> bool {
+    use crate::backend::model_gateway::{catalog, launch, token};
+    let account = match resolve_account_for_spawn(id_store, &binding.account_id) {
+        Ok(Some((a, _))) if a.kind == "api_key" => a,
+        other => {
+            tracing::warn!(target: "identity", account_id = %binding.account_id, found = other.as_ref().map_or(false, |o| o.is_some()), "the API-key account for the agent can't be used; the spawn gate decides");
+            return false;
+        }
+    };
+    // A container agent is never given a key account, nor the gateway in its place (it can't reach srv's loopback address).
+    if mstore.get::<crate::backend::obj::Block>(&instance.block_id).ok().flatten().is_some_and(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container()) {
+        tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is not given to a container agent");
+        return false;
+    }
+    let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return false };
+    // The gateway checks the agent's own link on every request, so a key link inherited from a template is not carried.
+    let own = identity_store.agent_identity_list_for_agent(&def.id).unwrap_or_default();
+    if !own.iter().any(|l| l.account_id == binding.account_id && l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)) {
+        tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is carried only for an agent linked to it itself");
+        return false;
+    }
+    let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") else {
+        tracing::warn!(target: "identity", "srv's own address is not known; the API-key account can't be used for this spawn");
+        return false;
+    };
+    let token = token::token_for_account(&def.slug, &def.id, catalog::KEY_ROUTE_ID, &account.id);
+    env_vars.extend(launch::env_for_key_route(&token, &local_url));
+    // Not the folder of a plan account the agent was on: the key route has no sign-in of its own.
+    if let Some(dir) = crate::backend::providers::get_provider("claude").and_then(|p| crate::backend::providers::default_auth_dir(p).ok()) {
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), dir);
+    }
+    tracing::info!(target: "identity", account_id = %account.id, "pointed the agent at the gateway's key route");
+    true
 }
 
 /// Step 5: the agent's own oauth-class provider needs a bound account even when no binding row exists.

@@ -172,6 +172,20 @@ describe("middleTruncate", () => {
         expect(middleTruncate("Not logged in", 9)).toBe("Not logg…");
     });
 
+    it("keeps a key account's mark whole at every budget, cutting only the name", () => {
+        const long = "Research team shared evaluation key · API";
+        expect(middleTruncate(long, 15)).toBe("Research… · API");
+        expect(middleTruncate(long, 12)).toBe("Resea… · API");
+        expect(middleTruncate("Work key · API", 12)).toBe("Work… · API");
+        expect(middleTruncate("Work key · API", 7)).toBe("W · API");
+        expect(middleTruncate("Work key · API", 14)).toBe("Work key · API");
+        for (const budget of ACCOUNT_BUDGETS) {
+            const cut = middleTruncate(long, budget);
+            expect(cut.endsWith("API")).toBe(true);
+            expect(cut.length).toBeLessThanOrEqual(budget);
+        }
+    });
+
     it("never returns more than the budget", () => {
         for (const budget of ACCOUNT_BUDGETS) {
             expect(middleTruncate("someone.long.name@example.org", budget).length).toBeLessThanOrEqual(budget);

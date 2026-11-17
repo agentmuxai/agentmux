@@ -25,7 +25,8 @@ pub fn note_run_account(mstore: &Store, identity_store: &Store, block_id: &str) 
     let account = crate::identity::resolver::effective_identity_links(mstore, identity_store, &def)
         .unwrap_or_default()
         .into_iter()
-        .find(|l| resolve_provider_alias(&l.provider) == provider)
+        // A Claude agent's account is its plan or, when it is moved onto one, its Anthropic API key.
+        .find(|l| resolve_provider_alias(&l.provider) == provider || (provider == "claude" && l.provider.eq_ignore_ascii_case("anthropic")))
         .map(|l| json!(l.account_id))
         .unwrap_or(serde_json::Value::Null);
     if block.meta.get(RUN_ACCOUNT_META_KEY).unwrap_or(&serde_json::Value::Null) == &account {

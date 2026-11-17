@@ -200,7 +200,7 @@ mod tests {
         let store = store_with("reach-def");
         let model = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
         let used = TokenCounts { input: 1, ..Default::default() };
-        let grant = Grant { agent: "reach-agent".into(), def_id: "reach-def".into(), route: "reach-route".into() };
+        let grant = Grant { agent: "reach-agent".into(), def_id: "reach-def".into(), route: "reach-route".into(), account: String::new() };
         let now = agentmux_common::time::now_ms();
         let settings = HashMap::new();
         spend::record("reach-agent", "reach-route", model, &used, Some(19.0), now);

@@ -36,9 +36,26 @@ fn gateway_client() -> &'static reqwest::Client {
 }
 
 /// An error in the shape the harness already parses.
-fn refuse(status: StatusCode, kind: &str, message: &str) -> Response {
+pub(super) fn refuse(status: StatusCode, kind: &str, message: &str) -> Response {
     let body = json!({ "type": "error", "error": { "type": kind, "message": message } });
     (status, Json(body)).into_response()
+}
+
+/// The route's key from the Vault, or the answer that says it has none.
+async fn route_key(state: &AppState, route: &'static catalog::Route, grant: &token::Grant) -> Result<zeroize::Zeroizing<String>, Response> {
+    let (store, agent, label, id) = (state.identity_store.clone(), grant.agent.clone(), route.key_label, route.id);
+    match tokio::task::spawn_blocking(move || crate::backend::vault::route_key::for_route(&store, label, &agent, id)).await {
+        Ok(Ok(key)) => Ok(key.value),
+        Ok(Err(why)) => Err(refuse(StatusCode::SERVICE_UNAVAILABLE, "api_error", &format!("{} has no usable key: {why}", route.label))),
+        Err(_) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "the key lookup failed")),
+    }
+}
+
+/// A header value marked sensitive, so no log of the request prints it.
+fn sensitive(key: &str) -> header::HeaderValue {
+    let mut value = header::HeaderValue::from_str(key).unwrap_or_else(|_| header::HeaderValue::from_static(""));
+    value.set_sensitive(true);
+    value
 }
 
 pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((route_id, tail)): Path<(String, String)>, req: Request) -> Response {
@@ -46,15 +63,18 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
     let Some(grant) = gw::bearer_token(&parts.headers).and_then(|t| token::grant_for(&t)) else {
         return refuse(StatusCode::UNAUTHORIZED, "authentication_error", "the model gateway needs the agent's gateway token");
     };
-    let Some(route) = catalog::route(&route_id).filter(|r| r.id == grant.route) else {
+    let Some(route) = catalog::gateway_route(&route_id).filter(|r| r.id == grant.route) else {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this token is not for that model route");
     };
     if !gw::path_allowed(route.harness, &tail) {
         return refuse(StatusCode::NOT_FOUND, "not_found_error", "the gateway forwards only the harness's own model paths");
     }
-    let Some(model) = launch::model_on_route(&state.mstore, &grant.def_id, route) else {
+    // The key route has no chosen model: the agent asks for the models it always does.
+    let key_route = route.id == catalog::KEY_ROUTE_ID;
+    let chosen = launch::model_on_route(&state.mstore, &grant.def_id, route);
+    if chosen.is_none() && !key_route {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
-    };
+    }
     // A cap used today (the agent's, or the route's) ends the request here, where it cannot be bypassed. 402 is the status
     // the provider's own out-of-credit answer has, after which the harness ends the turn rather than retrying.
     let settings = state.config_watcher.get_settings().extra;
@@ -62,27 +82,36 @@ pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((ro
         crate::server::spend_watch::refused(&grant, hit.clone());
         return refuse(StatusCode::PAYMENT_REQUIRED, "billing_error", &cap::refusal_text(&hit));
     }
-    let key = {
-        let (store, agent, label, id) = (state.identity_store.clone(), grant.agent.clone(), route.key_label, route.id);
-        tokio::task::spawn_blocking(move || crate::backend::vault::route_key::for_route(&store, label, &agent, id)).await
-    };
-    let key = match key {
-        Ok(Ok(key)) => key,
-        Ok(Err(why)) => return refuse(StatusCode::SERVICE_UNAVAILABLE, "api_error", &format!("{} has no usable key: {why}", route.label)),
-        Err(_) => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "the key lookup failed"),
+    let (key, account_name) = match &chosen {
+        Some(_) => match route_key(&state, route, &grant).await {
+            Ok(key) => (key, String::new()),
+            Err(refused) => return refused,
+        },
+        None => match super::model_gateway_key::key_of(&state, &grant).await {
+            Ok(k) => (k.key, k.name),
+            Err(refused) => return refused,
+        },
     };
     let Ok(bytes) = axum::body::to_bytes(body, MAX_REQUEST).await else {
         return refuse(StatusCode::PAYLOAD_TOO_LARGE, "request_too_large", "the request is too large");
     };
-    let bytes = gw::with_served_model(&bytes, model.id, |m| route.model(m).is_some());
-    let upstream = gateway_client()
-        .request(parts.method, gw::upstream_url(route, &tail, parts.uri.query()))
-        .headers(gw::forwarded_headers(&parts.headers))
-        .bearer_auth(key.value.as_str())
-        .body(bytes)
-        .send()
-        .await;
+    // A model route maps the harness's model to the agent's; the key route sends the body as it is (prompt caching included)
+    // and counts the answer at the price of the model the request names.
+    let (bytes, model) = match chosen {
+        Some(m) => (gw::with_served_model(&bytes, m.id, |named| route.model(named).is_some()), m),
+        None => {
+            let model = catalog::key_route_price(&super::model_gateway_key::requested_model(&bytes));
+            (bytes.to_vec(), model)
+        }
+    };
+    let request = gateway_client().request(parts.method, gw::upstream_url(route, &tail, parts.uri.query())).headers(gw::forwarded_headers(&parts.headers));
+    let request = if key_route { request.header("x-api-key", sensitive(&key)) } else { request.bearer_auth(key.as_str()) };
+    let upstream = request.body(bytes).send().await;
     match upstream {
+        Ok(response) if key_route => match super::model_gateway_key::named_error(response, &account_name).await {
+            Ok(response) => relay(response, &grant, model),
+            Err(answer) => answer,
+        },
         Ok(response) => relay(response, &grant, model),
         Err(e) => {
             tracing::warn!(agent = %grant.agent, route = route.id, error = %e.without_url(), "model gateway: upstream unreachable");
@@ -121,7 +150,11 @@ struct Metered {
 impl Metered {
     fn settle(&mut self) {
         let Some(tap) = self.tap.take() else { return };
-        let (tokens, answered, actual) = tap.finish();
+        let (tokens, answered, mut actual, split) = tap.finish_with_split();
+        if actual.is_none() && self.grant.route == catalog::KEY_ROUTE_ID {
+            // No provider charge on this route: count it at the real cache-write rates, never under.
+            actual = Some(catalog::key_route_cost(self.model, &tokens, split));
+        }
         if tokens.input + tokens.output + tokens.cache_read + tokens.cache_creation == 0 {
             return;
         }

@@ -10,7 +10,9 @@
     position: absolute;
     z-index: var(--z-flyout-menu);
     display: flex;
-    max-width: 400px;
+    // Never wider than the window (a long row, such as an API key's display name, must not push the menu off it); the
+    // body is zoomed by the chrome zoom, so the window's width is divided by it.
+    max-width: min(400px, calc((100vw - 16px) / var(--zoomfactor)));
     min-width: 125px;
     flex-direction: column;
     justify-content: flex-end;
@@ -156,6 +158,11 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
     pointer-events: none;
+}
+
+.menu-item-sublabel--mark {
+    flex-shrink: 0;
+    max-width: none;
 }
 
 // VSCode-style keyboard shortcut hint — right-aligned, muted, mono.

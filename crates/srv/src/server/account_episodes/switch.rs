@@ -20,6 +20,7 @@ use crate::server::app_api::agent_spawn::account_label_in;
 use crate::server::AppState;
 
 use super::accounts::pick;
+use super::key_account::{can_take_a_key, is_key, is_link_of, serves};
 use super::moves::{busy, can_receive, relink, restart, signed_in};
 use super::{agent_name, canonical, tab_blocks};
 
@@ -131,7 +132,7 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
     let interrupted = if actor == super::failover::ACTOR_EXPIRED { super::login_expiry::interrupted(blocks) } else { Vec::new() };
     let label = account_label_in(to, all);
     let mut result = AgentAccountSwitchResult { status: AccountSwitchStatus::Switched, account_id: to.id.clone(), account_label: label.clone(), restarted: 0, failed: Vec::new() };
-    let linked = relink(state, def_id, &to.id, provider);
+    let linked = relink(state, def_id, to, provider);
     let signed_out = linked.clone().unwrap_or_default();
     let mut restarted_ok: Vec<&str> = Vec::new();
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -267,19 +268,11 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         return Err("agent.account.switch: say which agent".to_string());
     }
     let def_id = resolve_named(&state.mstore, named).map_err(|e| format!("agent.account.switch: {e}"))?;
-    let provider = state
-        .mstore
-        .agent_def_list()
-        .map_err(|e| format!("agent.account.switch: {e}"))?
-        .into_iter()
-        .find(|d| d.id == def_id)
-        // The provider its launch uses: its own, or its bundle's when it has none.
-        .map(|d| canonical(&state.mstore.resolve_effective_provider_id(&d)))
-        .ok_or("agent.account.switch: no such agent")?;
+    let provider = agent_provider(state, &def_id).ok_or("agent.account.switch: no such agent")?;
     let accounts: Vec<IdentityAccount> = super::fresh::identity_list(state)
         .map_err(|e| format!("agent.account.switch: accounts: {e}"))?
         .into_iter()
-        .filter(|a| canonical(&a.provider) == provider)
+        .filter(|a| serves(&provider, a))
         .collect();
     // `any with quota` doesn't pick the account the agent is on already.
     let on: Vec<String> = state
@@ -287,12 +280,16 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         .agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("agent.account.switch: {e}"))?
         .into_iter()
-        .filter(|l| canonical(&l.provider) == provider)
+        .filter(|l| is_link_of(&provider, &l.provider))
         .map(|l| l.account_id)
         .collect();
     let to = pick(state, &accounts, req.account.trim(), &on, &provider)?;
-    if !signed_in(&to.status) {
+    if is_key(to) {
+        can_take_a_key(state, &def_id)?;
+    }
+    if !(signed_in(&to.status) || (is_key(to) && can_receive(&to.status))) {
         let why = match to.status.as_str() {
+            _ if is_key(to) => "its key was rejected; replace it in Connectors > Accounts",
             "expired" => "its access token has lapsed and AgentMux cannot tell that it will renew; sign in to it again",
             _ => "it is not signed in; sign in to it first",
         };
@@ -306,6 +303,9 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
 /// provider's, for the labels): at once, or queued while a pane of it is in a turn. Also the door
 /// for the account strip's move of a whole episode (`moves::move_agents`).
 pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, provider: &str, accounts: &[IdentityAccount], when: AccountSwitchWhen) -> Result<AgentAccountSwitchResult, String> {
+    if is_key(to) && provider != "claude" {
+        return Err("agent.account.switch: an API key is chosen from a Claude agent's own account menu".to_string());
+    }
     let blocks = open_panes(state, def_id);
     // Every link stored for the provider, an alias row (`claude-code`) included. Only when all of
     // them are the target is there nothing to do: a stale alias row to another account would
@@ -315,7 +315,7 @@ pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &Identi
         .agent_identity_list_for_agent(def_id)
         .map_err(|e| format!("agent.account.switch: {e}"))?
         .into_iter()
-        .filter(|l| canonical(&l.provider) == provider)
+        .filter(|l| is_link_of(provider, &l.provider))
         .map(|l| l.account_id)
         .collect();
     let label = account_label_in(to, accounts);
@@ -372,7 +372,7 @@ fn prep_of(state: &AppState, actor: &str, def_id: &str, blocks: &[Block], to: &I
 fn settle(state: &AppState, actor: &str, def_id: &str, account_id: &str, now: bool) {
     let blocks = open_panes(state, def_id);
     // The account is read again: it may have signed out or gone in the window.
-    let Some((to, provider, accounts)) = receiving(state, account_id) else {
+    let Some((to, provider, accounts)) = receiving(state, def_id, account_id) else {
         tracing::info!(def_id = %def_id, "agent.account.switch: a prepared switch was dropped, its account is gone or signed out");
         set_pending(state, &blocks, None);
         return;
@@ -386,12 +386,22 @@ fn settle(state: &AppState, actor: &str, def_id: &str, account_id: &str, now: bo
 }
 
 /// The account `account_id` as it is now, when it can take an agent: it, its provider and the provider's accounts.
-fn receiving(state: &AppState, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
+pub(super) fn receiving(state: &AppState, def_id: &str, account_id: &str) -> Option<(IdentityAccount, String, Vec<IdentityAccount>)> {
+    let provider = agent_provider(state, def_id)?;
     let all: Vec<IdentityAccount> = super::fresh::identity_list(state).unwrap_or_default();
-    let to = all.iter().find(|a| a.id == account_id && can_receive(&a.status))?.clone();
-    let provider = canonical(&to.provider);
-    let same_provider = all.into_iter().filter(|a| canonical(&a.provider) == provider).collect();
+    let to = all.iter().find(|a| a.id == account_id && can_receive(&a.status) && serves(&provider, a))?.clone();
+    // A switch that waited for a turn or a window to end meets the rules of a key again: the agent may have moved since.
+    if super::key_account::is_key(&to) && super::key_account::can_take_a_key(state, def_id).is_err() {
+        return None;
+    }
+    let same_provider = all.into_iter().filter(|a| serves(&provider, a)).collect();
     Some((to, provider, same_provider))
+}
+
+/// The provider the agent `def_id` launches on: its own, or its bundle's when it has none.
+fn agent_provider(state: &AppState, def_id: &str) -> Option<String> {
+    let defs = state.mstore.agent_def_list().ok()?;
+    defs.into_iter().find(|d| d.id == def_id).map(|d| canonical(&state.mstore.resolve_effective_provider_id(&d)))
 }
 
 /// Clear the chip's countdown from panes whose window is gone: srv restarted in it, so the choice it
@@ -422,7 +432,7 @@ pub(super) fn apply_pending(state: &AppState) {
         if blocks.iter().any(|b| busy(state, &b.oid)) {
             continue;
         }
-        let Some((to, provider, accounts)) = receiving(state, &account_id) else {
+        let Some((to, provider, accounts)) = receiving(state, &def_id, &account_id) else {
             tracing::info!(def_id = %def_id, "agent.account.switch: a queued switch was dropped, its account is gone or signed out");
             set_pending(state, &blocks, None);
             continue;
