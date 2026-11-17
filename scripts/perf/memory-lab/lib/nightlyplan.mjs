@@ -31,6 +31,19 @@ export function pickBuilds(runs, { bRunId = null, aRunId = null } = {}) {
     return { b, a, reason };
 }
 
+/**
+ * The chosen run ids (`--b-run`, `--a-run`) that the lookback list does not hold, as strings and without repeats. The list
+ * only reaches back a fixed number of runs, and a chosen run older than that still has its artifact: it has to be fetched by
+ * its id, not treated as gone.
+ *
+ * @param {{id: number}[]} runs
+ * @param {(number|string|null|undefined)[]} wanted
+ */
+export function missingRunIds(runs, wanted) {
+    const have = new Set(runs.map((r) => String(r.id)));
+    return [...new Set(wanted.filter((id) => id !== null && id !== undefined && String(id) !== "").map(String))].filter((id) => !have.has(id));
+}
+
 import { unrunnableSides } from "./abplan.mjs";
 
 const MAX_MERGES = 40;

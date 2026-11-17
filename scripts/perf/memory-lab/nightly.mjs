@@ -21,7 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { pinnedClaudeVersion } from "../../ui-screenshots/install-fake-claude.mjs";
-import { mergesOf, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
 import { appendHistory, driftOnset, historyLine, isStandardWorkload, parseHistory, trendMarkdown } from "./lib/perfhistory.mjs";
 import { flaggedMeasures, PERF_LABEL, reportIssue, reportRunFailure } from "./lib/perfissue.mjs";
 
@@ -54,23 +54,35 @@ function claudePinAt(repo, sha) {
 }
 
 /** The last runs of the nightly artifacts workflow, each with whether its windows portable can still be downloaded. */
-function fetchRuns(repo) {
+function fetchRuns(repo, wanted = []) {
     const list = gh(["api", "--method", "GET", `repos/${repo}/actions/workflows/${WORKFLOW}/runs`, "-F", `per_page=${LOOKBACK}`, "-F", "branch=main", "-F", "exclude_pull_requests=true"]);
     // Neither the run's status nor its conclusion is looked at: a red macOS leg, or a rerun of it in progress, leaves the
     // Windows portable as good as it was (2026-10-19: the run was in progress again after a macOS DNS flake).
-    return list.workflow_runs
-        .map((r) => {
-            const arts = gh(["api", "--method", "GET", `repos/${repo}/actions/runs/${r.id}/artifacts`, "-F", "per_page=100"]);
-            const portable = arts.artifacts.some((a) => a.name === ARTIFACT && !a.expired);
-            return { id: r.id, sha: r.head_sha, createdAt: r.created_at, portable };
-        });
+    const describe = (r) => {
+        const arts = gh(["api", "--method", "GET", `repos/${repo}/actions/runs/${r.id}/artifacts`, "-F", "per_page=100"]);
+        const portable = arts.artifacts.some((a) => a.name === ARTIFACT && !a.expired);
+        return { id: r.id, sha: r.head_sha, createdAt: r.created_at, portable };
+    };
+    const runs = list.workflow_runs.map(describe);
+    // A run the person chose that is older than the lookback still has its artifact: fetch it by its id. One that is not a
+    // nightly artifacts run, or no longer exists, is left out, and the plan says it has no portable.
+    for (const id of missingRunIds(runs, wanted)) {
+        try {
+            const r = gh(["api", "--method", "GET", `repos/${repo}/actions/runs/${id}`]);
+            if (String(r.path ?? "").endsWith(WORKFLOW)) runs.push(describe(r));
+        } catch (e) {
+            console.error(`Couldn't fetch run ${id} (${String(e.message ?? e).split("\n")[0]}): it is treated as having no portable`);
+        }
+    }
+    return runs;
 }
 
 function plan(argv) {
     const repo = process.env.GITHUB_REPOSITORY;
     if (!repo) throw new Error("GITHUB_REPOSITORY is not set");
     const out = flag(argv, "--out") ?? "plan.json";
-    const picked = pickBuilds(fetchRuns(repo), { bRunId: flag(argv, "--b-run"), aRunId: flag(argv, "--a-run") });
+    const [bRunId, aRunId] = [flag(argv, "--b-run"), flag(argv, "--a-run")];
+    const picked = pickBuilds(fetchRuns(repo, [bRunId, aRunId]), { bRunId, aRunId });
     if (!picked.b) throw new Error(picked.reason);
     const merges = picked.a ? mergesOf(gh(["api", "--method", "GET", `repos/${repo}/compare/${picked.a.sha}...${picked.b.sha}`])) : null;
     const aClaude = picked.a ? claudePinAt(repo, picked.a.sha) : null;
