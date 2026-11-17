@@ -26,6 +26,7 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 import type { PendingMessage } from "../../../agent-model/state";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
@@ -73,14 +74,11 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                                         </>
                                     }
                                 >
-                                    {(held) => (
-                                        <>
-                                            Waiting — the agent's command is still running
-                                            {held().ahead > 0 ? `, ${held().ahead} ahead` : ""} (
-                                            {queuedMessages().length}
-                                            {queuedMessages().length === 1 ? " message" : " messages"})
-                                        </>
-                                    )}
+                                    {(held) =>
+                                        held().ahead > 0
+                                            ? t("pendingPanel.waitingAhead", { count: queuedMessages().length, ahead: held().ahead })
+                                            : t("pendingPanel.waiting", { count: queuedMessages().length })
+                                    }
                                 </Show>
                             }
                         >
