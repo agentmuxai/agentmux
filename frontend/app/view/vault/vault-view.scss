@@ -1,9 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Vault pane. Its sections reuse section-pane.scss's
-// `.bundle-manager-section` / `-pane` rules, as Warden does, and Warden's
-// shared manager chrome for bodies and tables.
+// The Vault pane: one list of coloured sections under one filter (vault-list.tsx). A section's box, head and
+// dotted name are the shared coloured section the Kanban's columns use (element/ui/_color-section.scss);
+// its tables are Warden's shared manager chrome.
+
+@use "../../mixins.scss";
+@use "../../element/ui/color-section";
 
 .vault-container {
     width: 100%;
@@ -18,11 +21,177 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
+    // One surface from the pane's top to its bottom: the requests, the Vaults row and the list.
+    background: var(--main-bg-color);
 
-    > .bundle-manager-section,
+    // One colour per type of entry, the name carrying the meaning. Aliases of the process kinds, which every
+    // theme keeps apart and readable on its own surface (view/tower/process-kind-colours.test.ts); what is
+    // not a type of entry (Kept by AgentMux, Activity) has the quiet text colour.
+    --vault-type-personal: var(--process-kind-agentmux);
+    --vault-type-cards: var(--process-kind-builds);
+    --vault-type-api-keys: var(--process-kind-agents);
+    --vault-type-logins: var(--process-kind-runtimes);
+    --vault-type-notes: var(--process-kind-shells);
+    --vault-type-other: var(--secondary-text-color);
+
+    > .vault-list,
     > :last-child {
         flex: 1 1 auto;
         min-height: 0;
+    }
+}
+
+// The list: the filter stays put, the sections scroll under it.
+.vault-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) 0;
+    color: var(--main-text-color);
+    background: var(--main-bg-color);
+    font-size: var(--text-base);
+}
+
+.vault-list__bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.vault-list__filter {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vault-list__sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 1 auto;
+    min-height: 0;
+    padding-bottom: var(--space-3);
+    overflow-y: auto;
+    // Its own stacking context: the sticky heads are ordered against the rows here, not against the rest of the pane.
+    isolation: isolate;
+}
+
+.vault-section {
+    @include color-section.box(var(--vault-type, var(--border-color)));
+
+    // In the list a section is as tall as its rows; the list scrolls, not the section.
+    flex: 0 0 auto;
+}
+
+.vault-section--personal {
+    --vault-type: var(--vault-type-personal);
+}
+
+.vault-section--cards {
+    --vault-type: var(--vault-type-cards);
+}
+
+.vault-section--api-keys {
+    --vault-type: var(--vault-type-api-keys);
+}
+
+.vault-section--logins {
+    --vault-type: var(--vault-type-logins);
+}
+
+.vault-section--notes {
+    --vault-type: var(--vault-type-notes);
+}
+
+.vault-section--kept,
+.vault-section--activity {
+    --vault-type: var(--vault-type-other);
+}
+
+// The head stays at the top of the list while its section's rows scroll under it.
+.vault-section__head {
+    @include color-section.head;
+    @include color-section.sticky-head;
+
+    align-items: center;
+}
+
+// Folded, or with nothing in it, a section is its head alone.
+.vault-section--folded .vault-section__head,
+.vault-section--empty .vault-section__head {
+    border-bottom: 0;
+}
+
+// The name and the count fold and unfold the section; the head's own buttons sit after them.
+.vault-section__toggle {
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+    text-align: left;
+}
+
+.vault-section__label {
+    @include color-section.label(var(--vault-type, var(--border-color)));
+
+    color: var(--main-text-color);
+}
+
+.vault-section__count {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.vault-section__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-1) var(--space-2);
+
+    &[hidden] {
+        display: none;
+    }
+}
+
+// The box closes the list: the last row needs no line of its own under it.
+.vault-section__body .vault-table tr:last-child {
+    border-bottom: 0;
+
+    td {
+        border-bottom: 0;
+    }
+}
+
+// The columns' names are for a screen reader: every section would repeat them, and a row reads without them.
+.vault-entry-columns {
+    @include mixins.sr-only;
+}
+
+// In a wide pane the columns have the same widths in every section, so the sections read as one list. Between
+// this and the stacked rows of a narrow pane each section sizes its own columns.
+@container vault (min-width: 900px) {
+    .vault-entry-table {
+        table-layout: fixed;
+    }
+
+    .vault-col-label {
+        width: 28%;
+    }
+
+    .vault-col-kind {
+        width: 14%;
+    }
+
+    .vault-col-value {
+        width: 13em;
+    }
+
+    .vault-col-when {
+        width: 8em;
+    }
+
+    .vault-col-actions {
+        width: 11em;
     }
 }
 
@@ -128,20 +297,6 @@
     padding-top: var(--space-1);
 }
 
-.vault-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-
-    > :first-child:not(:last-child) {
-        flex: 1 1 auto;
-    }
-
-    > :last-child {
-        margin-left: auto;
-    }
-}
-
 .vault-id {
     margin-left: var(--space-2);
     // An id or a label with no spaces (an environment variable's name) breaks rather than widening the list.
@@ -172,7 +327,8 @@
 @mixin stacked-rows {
     display: block;
 
-    thead {
+    thead,
+    colgroup {
         display: none;
     }
 
@@ -540,75 +696,65 @@
     color: var(--warning-text-color);
 }
 
-// The Vault picker: narrows the lists to one Vault, and opens the Vaults dialog.
+// The Vaults row, at the top of the pane: the dropdown that narrows the list to one Vault, who that Vault is for,
+// Change and Delete for it, and New Vault.
 .vault-picker {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
-    // The bottom space keeps a wrapped second line off the section tabs.
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-3) 0;
     min-width: 0;
-
-    > :last-child {
-        margin-left: auto;
-        flex: 0 0 auto;
-    }
 }
 
-.vault-picker-choices {
-    flex: 1 1 auto;
+// A long Vault's name shortens in the dropdown rather than making the row scroll sideways.
+.vault-picker-select {
+    flex: 0 1 auto;
     min-width: 0;
-
-    // A long Vault's name wraps inside its choice rather than making the row scroll sideways.
-    .ui-segmented-option {
-        max-width: 100%;
-        white-space: normal;
-        overflow-wrap: anywhere;
-        text-align: left;
-    }
+    max-width: 20em;
+    text-overflow: ellipsis;
 }
 
-// Import, Export and the note, here instead of in a header too narrow for them (vault-narrow-actions.tsx).
+// Which agents the chosen Vault is for: at the size of the controls beside it.
+.vault-picker-agents {
+    font-size: var(--text-sm);
+}
+
+// Import, Export and the note, here instead of in a header too narrow for them (vault-narrow-actions.tsx): at the
+// row's end.
 .vault-narrow-actions {
     display: flex;
     gap: var(--space-1);
+    margin-left: auto;
+}
+
+// A new Vault's form, or the chosen Vault's: in the pane, under the Vaults row.
+.vault-manage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: var(--space-2) var(--space-3) 0;
+    padding: var(--space-2);
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-sm);
+    // The form keeps its own height, so the list under it can't squeeze Save out of view. A short pane keeps
+    // the list in view: there the form scrolls inside its own box.
+    flex: none;
+    max-height: 60%;
+    overflow-y: auto;
+
+    p {
+        margin: 0;
+        font-size: var(--text-sm);
+    }
+}
+
+.vault-manage-title {
+    margin: 0;
 }
 
 .vault-in-vault {
     opacity: 0.8;
-}
-
-.vault-vault-list {
-    display: flex;
-    flex-direction: column;
-    margin: 0 0 var(--space-2);
-    padding: 0;
-    list-style: none;
-}
-
-.vault-vault-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-1) 0;
-    border-bottom: 1px solid var(--border-color);
-}
-
-// A long name wraps in its own space rather than squeezing the summary.
-.vault-vault-name {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    font-weight: 600;
-}
-
-.vault-vault-agents {
-    flex: 1 1 12em;
-    min-width: 0;
-    overflow-wrap: anywhere;
 }
 
 .vault-editor-actions {

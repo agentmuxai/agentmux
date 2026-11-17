@@ -6,6 +6,7 @@
  *  asks. Every place named here is invented. */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -148,10 +149,12 @@ describe("an entry's machine copy in the list", () => {
         entries = [entry(), entry({ id: "api-key-plain", label: "Plain key", fields: { service: "Example" } })];
         await refreshVault();
         checkRefusal = "Staging database has no machine copy recorded";
-        render(() => <VaultEntries section="api-keys" />);
+        // The list's one filter (vault-list.tsx) reaches a section as a prop.
+        const [filter, setFilter] = createSignal("");
+        render(() => <VaultEntries section="api-keys" filter={filter()} />);
         fireEvent.click(screen.getByRole("button", { name: "Check the machine copy" }));
         expect((await screen.findByRole("alert")).textContent).toContain("has no machine copy recorded");
-        fireEvent.input(screen.getByPlaceholderText("Filter api keys"), { target: { value: "staging/app" } });
+        setFilter("staging/app");
         await waitFor(() => expect(row("api-key-plain")).toBeNull());
         expect(row("api-key-staging")).not.toBeNull();
     });

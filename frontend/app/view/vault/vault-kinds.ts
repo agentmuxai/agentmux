@@ -137,22 +137,11 @@ export const SECTION_LABELS: Record<VaultPaneSection, string> = {
     activity: "Activity",
 };
 
-/** The names that fit a pane header with its tab's own controls beside them, in a narrow pane. */
-export const SECTION_SHORT_LABELS: Record<VaultPaneSection, string> = {
-    personal: "Personal",
-    cards: "Cards",
-    "api-keys": "Keys",
-    logins: "Logins",
-    notes: "Notes",
-    kept: "Kept",
-    activity: "Activity",
-};
-
 export function isVaultPaneSection(v: unknown): v is VaultPaneSection {
     return typeof v === "string" && Object.prototype.hasOwnProperty.call(SECTION_LABELS, v);
 }
 
-/** The Vault's sections, in rail order, as its manifest declares them (pane-sections.ts). */
+/** The sections of the Vault's list, in its order, as its manifest declares them (pane-sections.ts). */
 export const VAULT_SECTIONS: PaneSections<VaultPaneSection> = {
     default: "personal",
     items: [
