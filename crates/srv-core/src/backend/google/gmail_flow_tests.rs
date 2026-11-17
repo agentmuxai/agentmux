@@ -267,10 +267,11 @@ fn stored_reply(to: &str, body: &str) -> Value {
     d
 }
 
-/// Google's metadata answer for a thread of two mails between me and Dana.
-fn vendor_thread() -> Value {
-    let m = |from: &str, to: &str| json!({ "id": "m", "payload": { "headers": [{ "name": "From", "value": from }, { "name": "To", "value": to }, { "name": "Subject", "value": "Invoice 42" }] } });
-    json!({ "id": "t1", "messages": [m("Dana <dana@vendor.com>", "me@example.com"), m("me@example.com", "dana@vendor.com")] })
+/// Google's metadata answer for a thread of two mails between me and Dana, and the draft being sent
+/// (to `draft_to`), which Google lists in its thread with the DRAFT label.
+fn vendor_thread(draft_to: &str) -> Value {
+    let m = |labels: &[&str], from: &str, to: &str| json!({ "id": "m", "labelIds": labels, "payload": { "headers": [{ "name": "From", "value": from }, { "name": "To", "value": to }, { "name": "Subject", "value": "Invoice 42" }] } });
+    json!({ "id": "t1", "messages": [m(&["INBOX"], "Dana <dana@vendor.com>", "me@example.com"), m(&["SENT"], "me@example.com", "dana@vendor.com"), m(&["DRAFT"], "me@example.com", draft_to)] })
 }
 
 #[tokio::test]
@@ -278,7 +279,7 @@ async fn a_draft_in_a_thread_names_it_and_warns_only_when_no_recipient_is_in_it(
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
     let google = StubGoogle::new(vec![
         (200, stored_reply("dana@vendor.com", "Paid")),
-        (200, vendor_thread()),
+        (200, vendor_thread("dana@vendor.com")),
         (200, json!({ "id": "r-1", "message": { "id": "m1", "threadId": "t1", "raw": "UkFX" } })),
         (200, stored_reply("dana@vendor.com", "Paid")),
         (200, json!({ "id": "m9", "threadId": "t1" })),
@@ -295,7 +296,8 @@ async fn a_draft_in_a_thread_names_it_and_warns_only_when_no_recipient_is_in_it(
 #[tokio::test]
 async fn a_draft_for_a_stranger_in_a_thread_is_warned_first_and_the_refusal_repeats_it() {
     let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
-    let google = StubGoogle::new(vec![(200, stored_reply("bob@example.net", "Paid")), (200, vendor_thread())]);
+    // The draft itself sits in the thread, addressed to the stranger: it does not make them a participant.
+    let google = StubGoogle::new(vec![(200, stored_reply("bob@example.net", "Paid")), (200, vendor_thread("bob@example.net"))]);
     let person = Person::says(Answer::No);
     let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
     let text = person.asked()[0].1.clone();
@@ -303,6 +305,17 @@ async fn a_draft_for_a_stranger_in_a_thread_is_warned_first_and_the_refusal_repe
     assert!(text.contains("Replies in the thread: Invoice 42"), "{text}");
     assert!(e.contains("said no") && e.contains("None of these recipients has taken part in that thread."), "{e}");
     assert_eq!(google.seen().len(), 2, "nothing was sent");
+}
+
+#[tokio::test]
+async fn only_a_no_repeats_the_warning_not_an_unanswered_window_or_a_failed_one() {
+    for answer in [Ok(Answer::Unanswered), Err("no AgentMux window is connected to ask the user in".to_string())] {
+        let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+        let google = StubGoogle::new(vec![(200, stored_reply("bob@example.net", "Paid")), (200, vendor_thread("bob@example.net"))]);
+        let person = Person { answer, asked: Mutex::new(Vec::new()) };
+        let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+        assert!(!e.contains("taken part"), "{e}");
+    }
 }
 
 #[tokio::test]

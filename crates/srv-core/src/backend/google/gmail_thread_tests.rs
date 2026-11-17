@@ -43,6 +43,16 @@ fn a_thread_lists_everyone_who_wrote_or_received_in_it_once() {
 }
 
 #[test]
+fn drafts_in_the_thread_are_neither_counted_nor_their_recipients_taken_as_participants() {
+    let mut draft = message("me@example.com", "stranger@example.net", "");
+    draft["labelIds"] = json!(["DRAFT"]);
+    let t = context_of(&json!({ "messages": [message("Dana <dana@vendor.com>", "me@example.com", ""), draft] }));
+    assert_eq!(t.messages, 1);
+    assert_eq!(t.people, ["dana@vendor.com", "me@example.com"]);
+    assert!(ThreadNote::of(&view("stranger@example.net", ""), &t, "me@example.com").strangers);
+}
+
+#[test]
 fn a_recipient_in_the_thread_gets_no_warning_and_the_thread_is_named() {
     let note = ThreadNote::of(&view("Dana <dana@vendor.com>", ""), &thread(), "me@example.com");
     assert_eq!((note.warning, note.strangers), (None, false));

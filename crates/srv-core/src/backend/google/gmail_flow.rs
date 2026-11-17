@@ -221,10 +221,10 @@ fn reserve(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecret
     Ok(Asking(Some(key)))
 }
 
-async fn ask<A: Approver>(approver: &A, def: &AgentDefinition, (title, message): (String, String), yes: &str, no: &str, what: &str) -> Result<(), String> {
+async fn ask<A: Approver>(approver: &A, def: &AgentDefinition, (title, message): (String, String), yes: &str, no: &str, what: &str, if_no: &str) -> Result<(), String> {
     match approver.ask(def, title, message, yes, no).await? {
         Answer::Yes => Ok(()),
-        Answer::No => Err(format!("the person said no, so {what} was not done")),
+        Answer::No => Err(format!("the person said no, so {what} was not done{if_no}")),
         Answer::Unanswered => Err(format!("the person didn't answer, so {what} was not done. Don't ask again straight away; tell them in your reply what you wanted to do")),
     }
 }
@@ -244,10 +244,9 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     }
     let note = thread_note(deps, access, &view).await;
     let question = write::send_question_in(&def.name, &access.email(), &view, &note);
-    // A refusal repeats the warning, so the agent learns why the person may have said no.
-    ask(approver, def, question, "Send", "Don't send", "sending")
-        .await
-        .map_err(|e| if note.strangers { format!("{e}. {} Check the recipients and the thread_id.", thread::NO_PARTICIPANT) } else { e })?;
+    // A no repeats the warning, so the agent learns why the person may have said it.
+    let if_no = if note.strangers { format!(". {} Check the recipients and the thread_id.", thread::NO_PARTICIPANT) } else { String::new() };
+    ask(approver, def, question, "Send", "Don't send", "sending", &if_no).await?;
     // What the person said yes to is what goes: read the draft again and compare. A window was shown,
     // so whatever ends the call from here is logged as an answered question (it counts toward the
     // hourly limit, as a no does).
@@ -313,7 +312,7 @@ async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>
     let summary = gmail::summary_plan(args.thread_id.as_deref().unwrap_or(""))?;
     let headers = send(deps, access, &summary).await?.body;
     let question = write::trash_question(&def.name, &access.email(), &headers);
-    ask(approver, def, question, "Move to trash", "Keep it", "trashing").await?;
+    ask(approver, def, question, "Move to trash", "Keep it", "trashing", "").await?;
     let reply = send(deps, access, &trash).await.map_err(|e| format!("{ANSWERED_YES}{e}"))?;
     Ok(json!({ "thread_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""), "trashed": true }))
 }

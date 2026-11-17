@@ -41,9 +41,12 @@ pub struct ThreadContext {
 
 /// From Google's `threads.get` answer (format metadata).
 pub fn context_of(thread: &Value) -> ThreadContext {
-    let all = thread.get("messages").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    // Drafts are left out: Google lists the draft being sent (and anyone's other unsent drafts) in
+    // its thread, and their recipients have taken part in nothing.
+    let sent = |m: &&Value| !m.get("labelIds").and_then(Value::as_array).is_some_and(|l| l.iter().any(|x| x.as_str() == Some("DRAFT")));
+    let all: Vec<&Value> = thread.get("messages").and_then(Value::as_array).map(|a| a.iter().filter(sent).collect()).unwrap_or_default();
     let mut people: Vec<String> = Vec::new();
-    for m in all {
+    for m in &all {
         let p = m.get("payload").unwrap_or(&Value::Null);
         for name in ["From", "To", "Cc", "Bcc"] {
             for a in addresses_in(header(p, name)) {
