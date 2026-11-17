@@ -22,6 +22,7 @@ use crate::identity::oauth_tokens::{access_token_for, HttpReply, OAuthHttp, Toke
 use super::access::{access_for, Access};
 use super::calls::{load_external_text, log_call, CallDeps};
 use super::gmail::{self, GmailArgs};
+use super::gmail_thread::{self as thread, ThreadNote};
 use super::gmail_write::{self as write, DraftView};
 use super::{google_error, GoogleHttp, Service};
 
@@ -241,8 +242,12 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     if !view.has_recipient() {
         return Err("the draft has no recipient: update_draft it with to first".to_string());
     }
-    let question = write::send_question(&def.name, &access.email(), &view);
-    ask(approver, def, question, "Send", "Don't send", "sending").await?;
+    let note = thread_note(deps, access, &view).await;
+    let question = write::send_question_in(&def.name, &access.email(), &view, &note);
+    // A refusal repeats the warning, so the agent learns why the person may have said no.
+    ask(approver, def, question, "Send", "Don't send", "sending")
+        .await
+        .map_err(|e| if note.strangers { format!("{e}. {} Check the recipients and the thread_id.", thread::NO_PARTICIPANT) } else { e })?;
     // What the person said yes to is what goes: read the draft again and compare. A window was shown,
     // so whatever ends the call from here is logged as an answered question (it counts toward the
     // hourly limit, as a no does).
@@ -263,6 +268,19 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
         }))
     };
     after_yes.await.map_err(|e: String| format!("{ANSWERED_YES}{e}"))
+}
+
+/// What the window says about the thread a draft replies into: one metadata read of the thread. A
+/// thread that can't be read does not stop the send; the person is told it was not checked.
+async fn thread_note<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(deps: &CallDeps<'_, G, O, S>, access: &Access, view: &DraftView) -> ThreadNote {
+    if view.thread_id.is_empty() {
+        return ThreadNote::default();
+    }
+    let read = async { send(deps, access, &thread::context_plan(&view.thread_id)?).await.map(|r| thread::context_of(&r.body)) };
+    match read.await {
+        Ok(ctx) => ThreadNote::of(view, &ctx, &access.email()),
+        Err(_) => ThreadNote::unchecked(),
+    }
 }
 
 /// The draft as it is stored now, whole: text Gmail keeps outside the message is loaded first, and a

@@ -260,6 +260,74 @@ async fn a_draft_with_no_recipient_is_not_put_to_the_person() {
     assert!(person.asked().is_empty());
 }
 
+/// The draft `stored_draft` makes, replying into the thread `t1`.
+fn stored_reply(to: &str, body: &str) -> Value {
+    let mut d = stored_draft(to, body);
+    d["message"]["threadId"] = json!("t1");
+    d
+}
+
+/// Google's metadata answer for a thread of two mails between me and Dana.
+fn vendor_thread() -> Value {
+    let m = |from: &str, to: &str| json!({ "id": "m", "payload": { "headers": [{ "name": "From", "value": from }, { "name": "To", "value": to }, { "name": "Subject", "value": "Invoice 42" }] } });
+    json!({ "id": "t1", "messages": [m("Dana <dana@vendor.com>", "me@example.com"), m("me@example.com", "dana@vendor.com")] })
+}
+
+#[tokio::test]
+async fn a_draft_in_a_thread_names_it_and_warns_only_when_no_recipient_is_in_it() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let google = StubGoogle::new(vec![
+        (200, stored_reply("dana@vendor.com", "Paid")),
+        (200, vendor_thread()),
+        (200, json!({ "id": "r-1", "message": { "id": "m1", "threadId": "t1", "raw": "UkFX" } })),
+        (200, stored_reply("dana@vendor.com", "Paid")),
+        (200, json!({ "id": "m9", "threadId": "t1" })),
+    ]);
+    let person = Person::says(Answer::Yes);
+    run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap();
+    let text = person.asked()[0].1.clone();
+    assert!(text.starts_with("Naki wants to send") && text.contains("Replies in the thread: Invoice 42 (2 messages, with dana@vendor.com)"), "{text}");
+    let seen = google.seen();
+    assert!(seen[1].0.url.ends_with("/threads/t1") && seen[1].0.query.contains(&("format", "metadata".to_string())), "one metadata read of the thread");
+    assert_eq!(seen.len(), 5);
+}
+
+#[tokio::test]
+async fn a_draft_for_a_stranger_in_a_thread_is_warned_first_and_the_refusal_repeats_it() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let google = StubGoogle::new(vec![(200, stored_reply("bob@example.net", "Paid")), (200, vendor_thread())]);
+    let person = Person::says(Answer::No);
+    let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    let text = person.asked()[0].1.clone();
+    assert!(text.starts_with("None of these recipients has taken part in that thread."), "{text}");
+    assert!(text.contains("Replies in the thread: Invoice 42"), "{text}");
+    assert!(e.contains("said no") && e.contains("None of these recipients has taken part in that thread."), "{e}");
+    assert_eq!(google.seen().len(), 2, "nothing was sent");
+}
+
+#[tokio::test]
+async fn a_thread_that_cannot_be_read_is_said_so_and_the_person_decides() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let google = StubGoogle::new(vec![(200, stored_reply("dana@vendor.com", "Paid")), (404, json!({ "error": { "message": "not found" } }))]);
+    let person = Person::says(Answer::No);
+    let e = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await.unwrap_err();
+    let text = person.asked()[0].1.clone();
+    assert!(text.starts_with("This draft replies into a thread, but the thread could not be read"), "{text}");
+    assert!(!text.contains("Replies in the thread:"), "{text}");
+    assert!(e.contains("said no") && !e.contains("taken part"), "an unread thread is not called a stranger: {e}");
+}
+
+#[tokio::test]
+async fn a_draft_with_no_thread_reads_no_thread() {
+    let w = world(WRITE_SCOPES, Some(GrantLevel::Write));
+    let google = StubGoogle::new(vec![(200, stored_draft("bob@example.com", "x"))]);
+    let person = Person::says(Answer::No);
+    let _ = run(&w, &google, &person, "send_draft", json!({ "draft_id": "r-1" })).await;
+    let text = person.asked()[0].1.clone();
+    assert!(!text.contains("thread") && text.starts_with("Naki wants to send"), "{text}");
+    assert_eq!(google.seen().len(), 1);
+}
+
 #[tokio::test]
 async fn twenty_sends_a_day_and_ten_questions_an_hour_are_the_most() {
     let google = StubGoogle::new(vec![]);

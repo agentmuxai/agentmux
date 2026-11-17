@@ -24,6 +24,7 @@ pub mod drive;
 pub mod gmail;
 pub mod gmail_flow;
 pub mod gmail_sender;
+pub mod gmail_thread;
 pub mod gmail_write;
 
 const SCOPE_PREFIX: &str = "https://www.googleapis.com/auth/";

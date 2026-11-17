@@ -133,6 +133,15 @@ fn a_long_message_and_a_long_thread_are_cut() {
 }
 
 #[test]
+fn a_thread_with_a_draft_in_it_says_how_many_are_unsent() {
+    let mail = |id: &str, labels: &[&str]| json!({ "id": id, "labelIds": labels, "payload": { "mimeType": "text/plain", "body": { "data": b64("hi") } } });
+    let out = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"]), mail("b", &["DRAFT"]), mail("c", &["DRAFT", "SENT"])] }));
+    assert_eq!(out["unsent_drafts"], 2);
+    let none = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"])] }));
+    assert!(none.get("unsent_drafts").is_none());
+}
+
+#[test]
 fn labels_are_listed_by_id_name_and_type() {
     let out = shape("list_labels", &json!({ "labels": [{ "id": "INBOX", "name": "INBOX", "type": "system" }, { "id": "Label_1", "name": "Receipts", "type": "user", "messagesTotal": 9 }] }));
     assert_eq!(out["labels"][1], json!({ "id": "Label_1", "name": "Receipts", "type": "user" }));
