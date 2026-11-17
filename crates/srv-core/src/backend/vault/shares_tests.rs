@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::backend::storage::vault::VaultRow;
 use crate::backend::vault::vaults::{self, VaultAgents};
 use crate::backend::vault::{create_in, seal, signins, NewEntry, Parts};
 
@@ -374,4 +375,44 @@ fn a7_a_share_can_be_removed_whatever_the_login_has_become() {
     }
     assert_eq!(listed(&fields(&s, &two)), [OTHER], "another agent's share stays");
     assert!(!s.vault_grant_check(&four, &always_key(PULP)).unwrap());
+}
+
+#[test]
+fn a7_a_stale_share_write_is_refused_so_a_removed_share_stays_removed() {
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    // One change reads the entry; before it writes, another removes PULP and a third adds OTHER.
+    let stale = s.vault_get(&id).unwrap().unwrap();
+    assert!(remove(&s, &id, PULP).unwrap());
+    assert!(add(&s, &id, OTHER).unwrap());
+    let mut f = fields_of(&stale);
+    f.insert(SHARED.into(), format!("{PULP},{OTHER}"));
+    let wrote = s.vault_set_fields_if(&stale.id, stale.created_at, &stale.sealed, &stale.fields, &serde_json::to_string(&f).unwrap(), now_ms()).unwrap();
+    assert!(!wrote, "the write that read the old fields does not land");
+    assert_eq!(listed(&fields(&s, &id)), [OTHER], "the removed share did not come back");
+    // It writes only the fields: the label and the tags stay as another edit left them.
+    let now = s.vault_get(&id).unwrap().unwrap();
+    assert!(s.vault_set_fields_if(&now.id, now.created_at, &now.sealed, &now.fields, &now.fields, now_ms()).unwrap());
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().label, now.label);
+}
+
+#[test]
+fn a7_overlapping_share_changes_all_land() {
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    for round in 0..20 {
+        let other = format!("uid-extra-{round:04}");
+        std::thread::scope(|t| {
+            let (a, b) = (t.spawn(|| remove(&s, &id, PULP)), t.spawn(|| add(&s, &id, &other)));
+            a.join().unwrap().unwrap();
+            b.join().unwrap().unwrap();
+        });
+        let list = listed(&fields(&s, &id));
+        assert!(!list.contains(&PULP.to_string()), "round {round}: the removed share stayed removed: {list:?}");
+        assert!(list.contains(&other), "round {round}: the added share is there: {list:?}");
+        add(&s, &id, PULP).unwrap();
+        remove(&s, &id, &other).unwrap();
+    }
 }

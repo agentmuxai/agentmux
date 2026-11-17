@@ -17,7 +17,6 @@ use agentmux_common::time::now_ms;
 use super::signins::{fields_of, REALM, SITE};
 use super::{record, PERSON};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::vault::VaultRow;
 
 /// The login field that lists the agents (by uid) an entry is shared with.
 pub const SHARED: &str = "shared";
@@ -108,8 +107,10 @@ fn change(store: &Store, id: &str, who: &str, action: &str, eligible: bool, edit
         } else {
             fields.insert(SHARED.to_string(), joined(&list));
         }
-        let changed = VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
-        if store.vault_update_kept(&changed, &row.sealed, None).map_err(|e| e.to_string())? {
+        // Written only if the fields are still as read, so two overlapping share changes can't each succeed on what the
+        // other has undone (one removing an agent while another adds one must not bring the removed share back).
+        let new_fields = serde_json::to_string(&fields).map_err(|e| e.to_string())?;
+        if store.vault_set_fields_if(&row.id, row.created_at, &row.sealed, &row.fields, &new_fields, now_ms()).map_err(|e| e.to_string())? {
             // The line names no agent: an agent may read an entry's history, and who a login is shared with is not
             // for it (A8). The entry's card lists each share for the person.
             record(store, &row.id, &row.label, PERSON, action, if who == EVERY_AGENT { "every agent" } else { "an agent" }, "done");
