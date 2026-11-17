@@ -15,13 +15,18 @@
  * does the relay by hand. Bubbling doesn't help: `contain` isn't an
  * event-propagation setting.
  *
- * The skid: when the wheel arrives at a box's edge, the first few notches
+ * The skid: when the wheel has scrolled a box to its edge, the next few notches
  * (the setting) are absorbed (nothing moves, a line shows on that edge), and only
- * the next one scrolls the pane — so a preview that slides under the pointer
- * can't be scrolled past by notches meant for it. A trackpad or
+ * the one after scrolls the pane — so the end of a preview is felt, and the
+ * notches meant for it don't run on into the pane. A trackpad or
  * high-resolution wheel is absorbed until its gesture pauses. This is the
  * browsers' own wheel-latching rule, done by hand because `contain` takes the
  * browser's out of the loop.
+ *
+ * Only a box the wheel scrolled holds it. A box the wheel passes over (its
+ * content fits, or it was already at that edge) hands every notch straight on,
+ * so a pane scrolled with the pointer at rest has no dead spots where previews
+ * slide under it (amended 2026-11-16, §9 of the skid spec).
  */
 
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -62,17 +67,24 @@ export interface WheelSkid {
     absorbed: number;
     /** `timeStamp` of the last wheel event over `box`. */
     lastAt: number;
+    /** The wheel has scrolled `box` itself since it came over it. Only then does the box's edge hold the
+     *  wheel: a box the wheel merely passes over, with nothing to scroll that way, hands it straight on. */
+    scrolled: boolean;
+    /** Where `box` was scrolled to when the last wheel event was left to it, or null when that event was
+     *  absorbed or handed on. A box found somewhere else at the next event was scrolled by the wheel. Leaving
+     *  an event to the box does not prove it: the browser may still be giving the gesture to the pane it
+     *  started over, and a log that follows its output moves with no wheel at all. */
+    leftAt: number | null;
 }
 
-export const SKID_IDLE: WheelSkid = { box: null, dir: 0, phase: "armed", absorbed: 0, lastAt: 0 };
+export const SKID_IDLE: WheelSkid = { box: null, dir: 0, phase: "armed", absorbed: 0, lastAt: 0, scrolled: false, leftAt: null };
 
 export interface SkidInput {
     box: object;
     dir: -1 | 1;
     deltaY: number;
-    /** The box takes part in the skid: it has content to scroll, or it opted in
-     *  with `skidWhenFits`. Otherwise it hands every notch straight on. */
-    canSkid: boolean;
+    /** The box's `scrollTop` now. */
+    scrollTop: number;
     /** The box can't scroll further in `dir`. */
     atEdge: boolean;
     /** Notches of a notched wheel the edge absorbs; 0 hands every notch straight on. */
@@ -88,16 +100,17 @@ export type SkidAction = { kind: "native" } | { kind: "absorb" } | { kind: "forw
 
 /** One wheel event over a box: what happens to it, and the next state. Pure. */
 export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid; action: SkidAction } {
-    const arrival = prev.box !== input.box || prev.dir !== input.dir;
-    const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
-    // Stay armed: a box that starts overflowing later (a preview whose output
-    // grew) must still skid on the next notch in the same direction.
-    if (!input.canSkid) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    // What the wheel did over another box says nothing about this one.
+    const sameBox = prev.box === input.box;
+    const scrolled = sameBox && (prev.scrolled || (prev.leftAt !== null && Math.abs(input.scrollTop - prev.leftAt) >= 1));
+    const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp, scrolled, leftAt: null };
     // A box with room left scrolls itself, whatever the limit: 0 only removes the absorbing at the edge.
-    if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
-    if (input.limit <= 0) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0, leftAt: input.scrollTop }, action: { kind: "native" } };
+    // At an edge the wheel did not scroll it to (it fits, or it was already there), the wheel is passing over.
+    if (input.limit <= 0 || !scrolled) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
 
-    const phase = arrival ? "armed" : prev.phase;
+    // Turning the wheel round starts the hold over.
+    const phase = prev.dir === input.dir ? prev.phase : "armed";
     const already = phase === "skidding" ? prev.absorbed : 0;
     if (phase === "spent") return { state: { ...base, phase, absorbed: already }, action: { kind: "forward", deltaY: input.deltaY } };
 
@@ -148,7 +161,8 @@ const boxes = new WeakSet<Element>();
 const watchedPanes = new WeakSet<HTMLElement>();
 
 /** A wheel over the pane but outside every box resets the skid, so coming
- *  back to the same box is an arrival again. Passive: it never cancels. */
+ *  back to the same box starts over: it holds the wheel again only once the
+ *  wheel has scrolled it again. Passive: it never cancels. */
 function watchPane(pane: HTMLElement): void {
     if (watchedPanes.has(pane)) return;
     watchedPanes.add(pane);
@@ -166,9 +180,6 @@ function watchPane(pane: HTMLElement): void {
 }
 
 export interface ScrollHandoffOptions {
-    /** Skid even when the content fits, so the box has no scrollbar. A box that
-     *  fits is at both edges at once, so every arrival over it skids. */
-    skidWhenFits?: boolean;
     /** The transcript the box hands scroll to, for a box that is not inside it: the hover panel is rendered at the
      *  document body, so its wheel never chains to the pane it sits over. Absent: the box's own `.agent-document`. */
     pane?: () => HTMLElement | null | undefined;
@@ -177,15 +188,14 @@ export interface ScrollHandoffOptions {
 /**
  * The ref callback for a capped transcript preview box: a tool's log, a jekt's
  * body or raw payload, a context delivery's text. It hands scroll to the pane at
- * the box's edges and skids there, also when the content fits, so every preview
- * holds the wheel the same way
- * (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.3). The box takes the
+ * the box's edges, and skids at an edge the wheel scrolled the box to, so every
+ * preview holds the wheel the same way. The box takes the
  * `transcript-preview-box` mixin (_document-nodes.scss) for its cap and
  * `overscroll-behavior: contain`. Call it in a component, so the hand-off is
  * removed with it.
  */
 export function previewBox(opts: ScrollHandoffOptions = {}): (el: HTMLElement) => void {
-    return (el) => onCleanup(attachScrollHandoff(el, { skidWhenFits: true, ...opts }));
+    return (el) => onCleanup(attachScrollHandoff(el, opts));
 }
 
 /** Returns the cleanup. The box must carry `overscroll-behavior: contain`. */
@@ -215,13 +225,12 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         // 1 px slack: fractional layout at non-100% zoom leaves a true bottom
         // a hair short of scrollHeight.
         const overflows = el.scrollHeight - el.clientHeight > 1;
-        const canSkid = opts.skidWhenFits === true || overflows;
         const atEdge = dir < 0 ? el.scrollTop <= 0 : el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
         const { state, action } = nextSkid(skids.get(pane) ?? SKID_IDLE, {
             box: el,
             dir,
             deltaY: e.deltaY,
-            canSkid,
+            scrollTop: el.scrollTop,
             atEdge,
             // Read at each wheel event, so a change applies to panes already open.
             limit: resolveSkidNotches(getSettingsKeyAtom(SKID_NOTCHES_SETTING)()),
@@ -231,8 +240,9 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         skids.set(pane, state);
         if (action.kind === "absorb") {
             // `contain` keeps an overflowing box's edge from relaying, so nothing
-            // moves. A box that fits has nothing for `contain` to act on, so
-            // cancel the event there rather than trust the browser not to chain.
+            // moves. A box that fits now (its content shrank after the wheel
+            // scrolled it) has nothing for `contain` to act on, so cancel the
+            // event there rather than trust the browser not to chain.
             if (!overflows) e.preventDefault();
             flash(dir);
         } else if (action.kind === "forward") {
