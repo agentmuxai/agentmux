@@ -152,6 +152,20 @@ fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) ->
     Ok((json!({ "result": vault::transfer::commit_for(store, token, duplicates, &vault, profile)? }), true))
 }
 
+/// A share names an agent this computer has, and a Vault the agent may use: a login in a Vault closed to it would
+/// not be offered, so the person is told to open the Vault first (A5).
+fn check_share_target(state: &AppState, id: &str, agent: &str) -> Result<(), String> {
+    if agent == vault::shares::EVERY_AGENT {
+        return Ok(());
+    }
+    let def = state.mstore.agent_def_get(agent).ok().flatten().ok_or_else(|| format!("no agent {agent} on this computer"))?;
+    let store = &state.identity_store;
+    if vault::vaults::entry_usable(store, id, Some(&def.slug))? || vault::vaults::entry_usable(store, id, Some(&def.id))? {
+        return Ok(());
+    }
+    Err(format!("the Vault this login is in isn't open to {}: open the Vault to it first (in the Vault pane, the Vault's agents), then share the login", def.name))
+}
+
 /// The host ops on Vaults and on an entry's earlier values.
 fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), String> {
     let store: &crate::backend::storage::store::Store = &state.identity_store;
@@ -172,6 +186,13 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             vault::vaults::move_entry(store, &s("id"), &s("vault_id"))?;
             Ok((json!({}), true))
         }
+        // The person shares a login with an agent's own browser profile, or stops (spec section 5). The agent is
+        // named by its permanent uid, `*` for every agent.
+        "share_add" => {
+            check_share_target(state, &s("id"), &s("agent"))?;
+            Ok((json!({ "changed": vault::shares::add(store, &s("id"), &s("agent"))? }), true))
+        }
+        "share_remove" => Ok((json!({ "changed": vault::shares::remove(store, &s("id"), &s("agent"))? }), true)),
         // The Vault a browser profile saves its sign-ins to and offers them from.
         "signin_vault" => {
             vault::vaults::set_signin_vault(store, &s("profile"), &s("vault_id"))?;
@@ -262,7 +283,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -433,8 +454,9 @@ pub(crate) struct ListBody {
 pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ListBody>) -> Response {
     let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let proven = pane.is_some();
+    let uid = proven.then(|| state.reactive_handler.get_agent(&agent).and_then(|a| a.uid)).flatten();
     let store = state.identity_store.clone();
-    match tokio::task::spawn_blocking(move || vault::list_for_agent(&store, proven.then_some(agent.as_str()))).await {
+    match tokio::task::spawn_blocking(move || vault::list_for_agent_as(&store, proven.then_some(agent.as_str()), uid.as_deref())).await {
         Ok(Ok(entries)) => Json(json!({ "entries": entries })).into_response(),
         Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -664,3 +686,5 @@ mod tests;
 
 #[cfg(test)]
 mod identity_tests;
+#[cfg(test)]
+mod share_tests;

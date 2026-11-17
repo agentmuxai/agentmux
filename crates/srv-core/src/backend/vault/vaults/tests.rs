@@ -193,7 +193,7 @@ fn an_agents_browser_sign_in_chooses_only_from_vaults_it_may_use() {
     // Personal's tabs keep their sign-ins in Work, which only `builder` may use.
     set_signin_vault(&s, "personal", &work.id).unwrap();
     let origins = [site.to_string()];
-    let ids = |agent: &str| signins::offered_for_agent(&s, "personal", &origins, agent).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>();
+    let ids = |agent: &str| signins::offered_for_agent(&s, "personal", &origins, agent, None).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>();
     assert_eq!(ids("builder"), [id.clone()]);
     assert!(ids("other").is_empty(), "a sign-in in a Vault it may not use is not there");
     assert_eq!(signins::offered_for(&s, "personal", &origins).unwrap().len(), 1, "the key button the person presses lists it");
