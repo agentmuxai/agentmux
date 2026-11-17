@@ -256,13 +256,13 @@ fn deleting_a_profile_keeps_its_sign_ins_reachable_and_forgets_its_vault() {
     let id = signins::save(&s, &space, "sam", "pw").unwrap();
     assert_eq!(s.vault_get(&id).unwrap().unwrap().vault_id, work.id);
 
-    assert_eq!(signins::profile_deleted(&s, "p-0123456789ab", "Work profile", true).unwrap(), 1);
+    assert_eq!(signins::profile_deleted(&s, "p-0123456789ab", "Work profile", true, None).unwrap(), 1);
     assert_eq!(s.vault_get(&id).unwrap().unwrap().vault_id, "personal", "it goes where Personal's tabs look");
     assert_eq!(signins::offered_for(&s, "personal", std::slice::from_ref(&site)).unwrap().into_iter().map(|f| f.0).collect::<Vec<_>>(), [id]);
     assert!(signin_vaults(&s).unwrap().is_empty(), "the profile's row is gone with it");
 
     // Deleting the sign-ins with the profile forgets the choice too.
     set_signin_vault(&s, "profile:p-ffff", &work.id).unwrap();
-    signins::profile_deleted(&s, "p-ffff", "Old", false).unwrap();
+    signins::profile_deleted(&s, "p-ffff", "Old", false, None).unwrap();
     assert!(signin_vaults(&s).unwrap().is_empty());
 }

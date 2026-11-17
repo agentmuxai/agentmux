@@ -416,3 +416,26 @@ fn a7_overlapping_share_changes_all_land() {
         remove(&s, &id, &other).unwrap();
     }
 }
+
+#[test]
+fn a9_deleting_the_agents_own_browser_profile_removes_its_shares_and_always() {
+    let s = store();
+    let (one, two) = (login(&s), login_in(&s, "personal", &[("site", "https://second.example.com")]));
+    add(&s, &one, PULP).unwrap();
+    add(&s, &one, OTHER).unwrap();
+    add(&s, &two, PULP).unwrap();
+    grant(&s, &one, &always_key(PULP));
+    grant(&s, &two, &always_key(PULP));
+    // The person's own profile going leaves every share as it is.
+    signins::profile_deleted(&s, "p-0123456789ab", "Work", true, None).unwrap();
+    assert_eq!(listed(&fields(&s, &one)), [PULP, OTHER]);
+    assert!(s.vault_grant_check(&one, &always_key(PULP)).unwrap());
+    // The agent's own profile going takes its shares and its Always, and nobody else's.
+    signins::profile_deleted(&s, "agent-pulp-0123abcd", "pulp", true, Some(PULP)).unwrap();
+    assert_eq!(listed(&fields(&s, &one)), [OTHER], "another agent's share stays");
+    assert!(listed(&fields(&s, &two)).is_empty());
+    assert!(!s.vault_grant_check(&one, &always_key(PULP)).unwrap());
+    assert!(!s.vault_grant_check(&two, &always_key(PULP)).unwrap());
+    // The profile made for it next starts with nothing shared.
+    assert!(offered(&s, PULP, Some(PULP)).is_empty());
+}
