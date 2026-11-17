@@ -71,7 +71,7 @@ describe("PendingMessagesPanel — flushing copy split", () => {
     it("says the agent's command is still running, not 'any moment', once srv queued it behind the process", () => {
         const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true, waiting: { ahead: 0 } })]);
         render(() => <PendingMessagesPanel pendingMessages={pending} />);
-        expect(screen.getByText(/Waiting — the agent's command is still running \(1 message\)/)).toBeTruthy();
+        expect(screen.getByText(/Waiting \(1 message\) — the agent's command is still running/)).toBeTruthy();
         expect(screen.queryByText(/reaching the agent any moment/)).toBeNull();
     });
 
@@ -81,7 +81,7 @@ describe("PendingMessagesPanel — flushing copy split", () => {
             msg({ id: "b", flushing: true, waiting: { ahead: 3 } }),
         ]);
         render(() => <PendingMessagesPanel pendingMessages={pending} />);
-        expect(screen.getByText(/Waiting — the agent's command is still running, 2 ahead \(2 messages\)/)).toBeTruthy();
+        expect(screen.getByText(/Waiting \(2 messages, 2 ahead\) — the agent's command is still running/)).toBeTruthy();
     });
 
     it("keeps 'any moment' for a flushing message srv did not report as waiting", () => {
