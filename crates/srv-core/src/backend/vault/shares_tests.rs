@@ -338,3 +338,40 @@ fn a2_restoring_an_earlier_value_leaves_who_it_is_shared_with_as_it_is() {
     versions::restore(&s, &id, earlier).unwrap();
     assert_eq!(listed(&fields(&s, &id)), [PULP]);
 }
+
+/// Gives entry `id` a realm, as the person's edit of it can: it is then no login a share can be made of.
+fn with_realm(s: &Store, id: &str) {
+    let row = s.vault_get(id).unwrap().unwrap();
+    let mut f = fields_of(&row);
+    f.insert("realm".into(), "Admin".into());
+    let changed = VaultRow { fields: serde_json::to_string(&f).unwrap(), ..row.clone() };
+    assert!(s.vault_update_kept(&changed, &row.sealed, None).unwrap());
+}
+
+#[test]
+fn a7_a_share_can_be_removed_whatever_the_login_has_become() {
+    let s = store();
+    let (one, two) = (login(&s), login_in(&s, "personal", &[("site", "https://second.example.com")]));
+    add(&s, &one, PULP).unwrap();
+    add(&s, &two, PULP).unwrap();
+    grant(&s, &one, &always_key(PULP));
+    grant(&s, &two, &always_key(PULP));
+    with_realm(&s, &one);
+    assert!(add(&s, &one, OTHER).is_err(), "no new share of it");
+    // The share it has is still removed, and its Always goes with it.
+    assert!(remove(&s, &one, PULP).unwrap());
+    assert!(!s.vault_grant_check(&one, &always_key(PULP)).unwrap());
+    // A deleted agent: the entry that can't be shared any more does not stop the others.
+    add(&s, &two, OTHER).unwrap();
+    with_realm(&s, &two);
+    let (three, four) = (login_in(&s, "personal", &[("site", "https://third.example.com")]), login_in(&s, "personal", &[("site", "https://fourth.example.com")]));
+    add(&s, &three, PULP).unwrap();
+    add(&s, &four, PULP).unwrap();
+    grant(&s, &four, &always_key(PULP));
+    assert_eq!(forget_agent(&s, PULP).unwrap(), 3);
+    for id in [&two, &three, &four] {
+        assert!(!listed(&fields(&s, id)).contains(&PULP.to_string()), "{id}");
+    }
+    assert_eq!(listed(&fields(&s, &two)), [OTHER], "another agent's share stays");
+    assert!(!s.vault_grant_check(&four, &always_key(PULP)).unwrap());
+}

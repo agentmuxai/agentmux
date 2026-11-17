@@ -65,7 +65,7 @@ pub fn add(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     // A new share starts by asking: an "Always" this agent holds for the entry from before, or one answered while an
     // earlier share was being removed, goes first.
     revoke_always(store, id, who, None)?;
-    change(store, id, who, "shared", |list| {
+    change(store, id, who, "shared", true, |list| {
         if list.iter().any(|w| w == who) {
             return Ok(false);
         }
@@ -79,7 +79,8 @@ pub fn add(store: &Store, id: &str, who: &str) -> Result<bool, String> {
 
 /// Stop sharing entry `id` with `who`. Ends the "Always" the agent holds for it and returns whether a share was removed.
 pub fn remove(store: &Store, id: &str, who: &str) -> Result<bool, String> {
-    let removed = change(store, id, who, "unshared", |list| {
+    // A removal needs no eligibility: a login that has since lost its site, or gained a realm, can still be unshared.
+    let removed = change(store, id, who, "unshared", false, |list| {
         let before = list.len();
         list.retain(|w| w != who);
         Ok(list.len() != before)
@@ -88,14 +89,14 @@ pub fn remove(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-fn change(store: &Store, id: &str, who: &str, action: &str, edit: impl Fn(&mut Vec<String>) -> Result<bool, String>) -> Result<bool, String> {
+fn change(store: &Store, id: &str, who: &str, action: &str, eligible: bool, edit: impl Fn(&mut Vec<String>) -> Result<bool, String>) -> Result<bool, String> {
     for _ in 0..3 {
         let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
         let mut fields = fields_of(&row);
-        if row.kind != "login" || !fields.contains_key(SITE) {
+        if eligible && (row.kind != "login" || !fields.contains_key(SITE)) {
             return Err("only a login saved for a site can be shared".into());
         }
-        if fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY) {
+        if eligible && (fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY)) {
             return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared".into());
         }
         let mut list = listed(&fields);
@@ -151,15 +152,22 @@ pub fn forget_agent(store: &Store, uid: &str) -> Result<usize, String> {
     }
     let mut removed = 0;
     for row in store.vault_list().map_err(|e| e.to_string())? {
-        if row.kind == "login" && listed(&fields_of(&row)).iter().any(|w| w == uid) && remove(store, &row.id, uid)? {
-            removed += 1;
+        if listed(&fields_of(&row)).iter().any(|w| w == uid) {
+            // One entry that can't be changed now does not leave the others shared: the rest still go.
+            match remove(store, &row.id, uid) {
+                Ok(true) => removed += 1,
+                Ok(false) => {}
+                Err(e) => tracing::warn!(entry = %row.id, error = %e, "vault: couldn't remove a deleted agent's share"),
+            }
         }
     }
     // Always held for it by an entry it was no longer named on.
     let prefix = grant_prefix(uid);
     for (entry, keys) in store.vault_grants().map_err(|e| e.to_string())? {
         for key in keys.into_iter().filter(|k| k.starts_with(&prefix)) {
-            store.vault_grant_revoke(&entry, &key).map_err(|e| e.to_string())?;
+            if let Err(e) = store.vault_grant_revoke(&entry, &key) {
+                tracing::warn!(entry = %entry, error = %e, "vault: couldn't end a deleted agent's Always");
+            }
         }
     }
     Ok(removed)
