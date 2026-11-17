@@ -44,12 +44,15 @@ pub fn is_under(path: &Path, base: &Path) -> bool {
 }
 
 /// Does `text` (a service definition) name a path inside `base`? Found by the base followed by a separator, so a folder
-/// that only starts with the same letters does not match; case-insensitive on Windows.
+/// that only starts with the same letters does not match; case-insensitive on Windows. The base is also looked for as the
+/// definition's own writer spells it (`%` doubled in a unit, `&` as `&amp;` in a plist or task), so an install path that
+/// holds such a character is still found.
 pub fn text_names_under(text: &str, base: &Path) -> bool {
     let fold = |s: &str| if cfg!(windows) { s.to_lowercase() } else { s.to_string() };
-    let (text, base) = (fold(text), fold(&base.to_string_lossy()));
+    let text = fold(text);
+    let base = fold(&base.to_string_lossy());
     let base = base.trim_end_matches(['/', '\\']);
-    !base.is_empty() && ['/', '\\'].iter().any(|sep| text.contains(&format!("{base}{sep}")))
+    !base.is_empty() && super::service::spellings(base).iter().any(|b| ['/', '\\'].iter().any(|sep| text.contains(&format!("{b}{sep}"))))
 }
 
 /// The folder the install script made (`~/.agentmux/headless`, or `~/.agentmux/server` from before the rename; on Windows
@@ -215,6 +218,22 @@ mod tests {
         assert!(!text_names_under(elsewhere, base), "a folder that only starts with the same name is another folder");
         assert!(!text_names_under(unpacked, base));
         assert!(!text_names_under("", base) && !text_names_under(inside, Path::new("")));
+    }
+
+    #[test]
+    fn an_install_path_is_found_in_a_definition_as_its_writer_spells_it() {
+        use super::super::service::{render_plist, render_task_xml, render_unit};
+        let (log, home) = (Path::new("/l/x.log"), Path::new("/home/a"));
+        let percent = Path::new("/home/a%b/.agentmux/headless");
+        let unit = render_unit(&percent.join("current/bin/agentmux"), "stable", log, "/usr/bin", home);
+        assert!(text_names_under(&unit, percent), "{unit}");
+        let ampersand = Path::new("/Users/a&b/.agentmux/headless");
+        let plist = render_plist(&ampersand.join("current/bin/agentmux"), "stable", log, "/usr/bin", home);
+        assert!(text_names_under(&plist, ampersand), "{plist}");
+        let task_base = Path::new(r"C:\Users\a&b\AppData\Local\AgentMux\Headless");
+        let xml = render_task_xml(&task_base.join(r"current\bin\agentmux.exe"), "stable", None);
+        assert!(text_names_under(&xml, task_base), "{xml}");
+        assert!(!text_names_under(&unit, ampersand), "another install's path is still not this one");
     }
 
     #[test]
