@@ -263,7 +263,8 @@ function appendSwatchAndLabels(row: HTMLElement, item: NativeContextMenuItem) {
     // accepted and forwarded here but never drawn.
     if (item.sublabel) {
         const sub = document.createElement("span");
-        sub.className = "menu-item-sublabel";
+        // A short mark ("API") is what the row is for: it keeps its width and the label gives way.
+        sub.className = item.sublabel.length <= 8 ? "menu-item-sublabel menu-item-sublabel--mark" : "menu-item-sublabel";
         sub.textContent = item.sublabel;
         row.appendChild(sub);
     }

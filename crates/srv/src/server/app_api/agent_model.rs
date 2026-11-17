@@ -296,13 +296,17 @@ fn refuse_unreadable(harness: &str, route: &str, model: &str, images: u32) -> Re
     }
 }
 
-fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentModelSwitchResult, String> {
+pub(crate) fn switch_model(state: &AppState, req: &AgentModelSwitchReq) -> Result<AgentModelSwitchResult, String> {
     let def = agent_of_block(state, &req.blockid)?;
     let harness = state.id_store.resolve_effective_provider_id(&def);
     let route = req.route.trim();
     let target = if route.is_empty() { Target::OwnLogin } else { Target::Route { route, model: req.model.trim() } };
     if let Target::Route { route, model } = target {
         refuse_unreadable(&harness, route, model, images_in_conversation(&def))?;
+        // One payer: an agent on an API key is not also put on a model route, which would bill the route and leave the key linked.
+        if crate::server::spend_watch::on_a_key(&state.mstore, &state.identity_store, &def.id) {
+            return Err("ACCOUNT_CANT_RUN: this agent is on an API key, which is billed to the key; move it back to a plan account first".to_string());
+        }
     }
     let moved = switch::move_to(&state.mstore, &def.id, &harness, target, |r| route_key::present(&state.identity_store, r.key_label))?;
     if !moved.changed() || !req.restart {

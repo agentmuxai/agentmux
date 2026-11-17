@@ -82,6 +82,17 @@ pub fn env_for(route: &Route, model: &Model, token: &str, local_url: &str) -> Ve
     env
 }
 
+/// The variables that point Claude Code at the gateway's key route: its address and the agent's token. No model is
+/// named (the harness asks for the models it always does and the key's account answers), and `ANTHROPIC_API_KEY` is
+/// emptied so no other key is used. The key is not among them: it stays in the keychain.
+pub fn env_for_key_route(token: &str, local_url: &str) -> Vec<(String, String)> {
+    vec![
+        ("ANTHROPIC_BASE_URL".to_string(), format!("{}{PATH_PREFIX}{}", local_url.trim_end_matches('/'), catalog::KEY_ROUTE_ID)),
+        ("ANTHROPIC_AUTH_TOKEN".to_string(), token.to_string()),
+        ("ANTHROPIC_API_KEY".to_string(), String::new()),
+    ]
+}
+
 /// The block meta key the pane, its footer and its header read for the model the agent really runs: the route's
 /// and the model's names, or absent on the harness's own sign-in. Without it they show the harness's nominal model
 /// (the alias the pane was configured with), which on a route is not what answers.

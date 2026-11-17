@@ -52,7 +52,11 @@ pub(crate) struct UpdateRequest {
     /// `""` takes the agent off its model route (its token stops working at once); the route it is on, or only
     /// `model`, changes its model on that route.
     route: Option<String>,
+    /// On a model route: the model on that route. Otherwise (a Claude or Codex agent on its own login): its model, as
+    /// the pane's picker sets it (`agent_runtime_pick`).
     model: Option<String>,
+    /// The agent's effort, as the pane's picker sets it; Claude agents not on a route.
+    effort: Option<String>,
     /// Dollars a day through the model gateway: a number, or 0 / "none" for no cap.
     spend_cap_usd: Option<Value>,
     /// Zero the agent's spend counted for today.
@@ -173,7 +177,7 @@ fn spend_plan(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateR
         plan.reset = true;
     }
     if (plan.cap.is_some() || plan.reset) && crate::server::spend_watch::on_a_route(state, target_uid).is_err() {
-        return Err(bad("the agent is not on a model route, so it has no spend cap (an agent on its own login has plan limits instead)"));
+        return Err(bad("the agent is not on a model route or an API key, so it has no spend cap (an agent on its own login has plan limits instead)"));
     }
     Ok(plan)
 }
@@ -194,9 +198,18 @@ fn spend_apply(state: &AppState, target_uid: &str, plan: &SpendPlan) -> Result<V
     Ok(done)
 }
 
+/// What `update` did: the agent, the definition fields changed, what the spend change did, and what a model or effort
+/// pick did.
+struct Updated {
+    agent_id: String,
+    changed: Vec<&'static str>,
+    spend_done: Vec<String>,
+    applied: Option<serde_json::Value>,
+}
+
 /// Apply the fields `req` gives to the agent's stored definition. Returns the names of the fields changed, and what
 /// the audit row says beyond them.
-fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(String, Vec<&'static str>, Vec<String>), Refusal> {
+fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<Updated, Refusal> {
     let target = target_of(state, &req.agent)?;
     // Before anything is applied: a refused spend change must not leave a model change behind it.
     let plan = spend_plan(state, actor_uid, &target.agent_id, req)?;
@@ -233,12 +246,26 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(Str
         agent.idle_timeout_minutes = minutes;
         changed.push("idle_timeout_minutes");
     }
-    if req.route.is_some() || req.model.is_some() {
+    let mut applied = None;
+    let on_route = crate::backend::model_gateway::launch::choice_of(&state.mstore, &agent.id).is_some();
+    if req.effort.is_some() && on_route {
+        return Err(bad("the agent is on a model route, which sets its model and thinking: its effort is set in the pane's model panel"));
+    }
+    if !on_route && req.route.is_none() && (req.model.is_some() || req.effort.is_some()) {
+        let picked = super::agent_runtime_pick::pick(
+            state,
+            &agent,
+            req.model.as_deref().map(str::trim).filter(|m| !m.is_empty()),
+            req.effort.as_deref().map(str::trim).filter(|e| !e.is_empty()),
+        )?;
+        changed.extend(["model", "effort"].into_iter().filter(|f| if *f == "model" { picked.model.is_some() } else { picked.effort.is_some() }));
+        applied = Some(picked.to_json());
+    } else if req.route.is_some() || req.model.is_some() {
         changed.extend(route_change(state, &agent, req)?);
     }
     let spend_done = spend_apply(state, &target.agent_id, &plan)?;
     if changed.is_empty() && spend_done.is_empty() {
-        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model, spend_cap_usd, reset_spend_today (name: rename; environment: env_set)"));
+        return Err(bad("nothing to change; give at least one of description, icon, auto_start, restart_on_crash, idle_timeout_minutes, route, model, effort, spend_cap_usd, reset_spend_today (name: rename; environment: env_set)"));
     }
     // A request that only changes the spend cap leaves the definition as it is.
     if !changed.is_empty() {
@@ -247,7 +274,7 @@ fn update(state: &AppState, actor_uid: &str, req: &UpdateRequest) -> Result<(Str
         }
         publish_changed(state);
     }
-    Ok((target.agent_id, changed, spend_done))
+    Ok(Updated { agent_id: target.agent_id, changed, spend_done, applied })
 }
 
 fn bundles(state: &AppState, req: &BundlesRequest) -> Result<Value, Refusal> {
@@ -316,22 +343,53 @@ where
     }
 }
 
+/// `Agents update`: the change, and what the answer and the audit row say about it.
+fn update_response(s: &AppState, actor: &str, req: &UpdateRequest) -> Result<(Value, String), Refusal> {
+    let Updated { agent_id, changed, spend_done, applied } = update(s, actor, req)?;
+    let mut parts: Vec<String> = Vec::new();
+    if !changed.is_empty() {
+        parts.push(format!("changed {} of {agent_id}", changed.join(", ")));
+    }
+    parts.extend(spend_done.iter().map(|d| format!("{d} of {agent_id}")));
+    let note = parts.join("; ");
+    let mut changed: Vec<String> = changed.iter().map(|c| c.to_string()).collect();
+    changed.extend(spend_done.iter().map(|_| "spend".to_string()));
+    let shown = match &applied {
+        Some(a) => a["when"].as_str().unwrap_or_default().to_string(),
+        None => "a running agent keeps what it launched with until it is launched again; a spend cap applies at its next request".to_string(),
+    };
+    let mut body = json!({ "agent_id": agent_id, "changed": changed, "note": shown });
+    if let Some(applied) = applied {
+        body["applied"] = applied;
+    }
+    Ok((body, note))
+}
+
 pub(crate) async fn handle_agent_update(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<UpdateRequest>) -> Response {
     let caller = caller.map(|Extension(c)| c);
     let named = req.agent.trim().to_string();
-    run(&state, caller.as_ref(), "update", named, move |s, actor| {
-        let (agent_id, changed, spend_done) = update(s, actor, &req)?;
-        let mut parts: Vec<String> = Vec::new();
-        if !changed.is_empty() {
-            parts.push(format!("changed {} of {agent_id}", changed.join(", ")));
+    run(&state, caller.as_ref(), "update", named, move |s, actor| update_response(s, actor, &req)).await
+}
+
+/// `update` for an agent on another machine (`remote_ops::agent_ops`): the same checks and change a local call has,
+/// recorded under `who` (`slug@machine`). A caller from another machine is nobody's leader, so it cannot raise a spend cap.
+pub(crate) async fn run_remote(state: &AppState, who: &str, req: UpdateRequest) -> Result<Value, (StatusCode, String)> {
+    let actor = Actor::remote(who);
+    let named = req.agent.trim().to_string();
+    let (blocking, uid) = (state.clone(), actor.uid().to_string());
+    let outcome = tokio::task::spawn_blocking(move || update_response(&blocking, &uid, &req))
+        .await
+        .unwrap_or_else(|e| Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("Agents update: {e}"))));
+    match outcome {
+        Ok((mut body, note)) => {
+            body["audit_id"] = json!(audit(state, &actor, "agent.update", &named, "", true, None, &note));
+            Ok(body)
         }
-        parts.extend(spend_done.iter().map(|d| format!("{d} of {agent_id}")));
-        let note = parts.join("; ");
-        let mut changed: Vec<String> = changed.iter().map(|c| c.to_string()).collect();
-        changed.extend(spend_done.iter().map(|_| "spend".to_string()));
-        Ok((json!({ "agent_id": agent_id, "changed": changed, "note": "a running agent keeps what it launched with until it is launched again; a spend cap applies at its next request" }), note))
-    })
-    .await
+        Err(r) => {
+            audit(state, &actor, "agent.update", &named, "", false, Some(&r.message), "refused");
+            Err((r.status, r.message))
+        }
+    }
 }
 
 pub(crate) async fn handle_agent_bundles(State(state): State<AppState>, caller: Option<Extension<Caller>>, Json(req): Json<BundlesRequest>) -> Response {

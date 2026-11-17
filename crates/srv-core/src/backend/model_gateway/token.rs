@@ -20,6 +20,8 @@ pub struct Grant {
     /// The agent definition's id, whose route and model the gateway reads.
     pub def_id: String,
     pub route: String,
+    /// The API-key account the token spends, for the key route (`catalog::KEY_ROUTE_ID`); empty on a model route.
+    pub account: String,
 }
 
 #[derive(Default)]
@@ -44,11 +46,17 @@ fn mint() -> String {
 /// The agent's token for `route`: minted on first use and reused after, so a relaunch of the same
 /// agent keeps the token a running child still holds.
 pub fn token_for(agent: &str, def_id: &str, route: &str) -> String {
+    token_for_account(agent, def_id, route, "")
+}
+
+/// [`token_for`] for the key route: the token also names the account it spends, which the gateway checks against the
+/// agent's link at every request. Asked again with another account, the same token now spends that one.
+pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) -> String {
     let mut reg = registry().lock().unwrap();
     let key = (def_id.to_string(), route.to_string());
     let token = reg.by_agent.get(&key).cloned().unwrap_or_else(mint);
     reg.by_agent.insert(key, token.clone());
-    reg.by_digest.insert(digest(&token), Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string() });
+    reg.by_digest.insert(digest(&token), Grant { agent: agent.to_string(), def_id: def_id.to_string(), route: route.to_string(), account: account.to_string() });
     token
 }
 

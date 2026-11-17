@@ -1268,3 +1268,6 @@ async fn an_idle_agent_and_a_failover_are_never_asked() {
     assert!(!crate::server::prep::is_open("failing") && sink::notes("Failing").is_empty());
     cleanup(&[&resting, &failing]);
 }
+
+#[path = "key_account_tests.rs"]
+mod key_account_tests;

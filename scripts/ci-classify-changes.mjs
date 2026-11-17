@@ -71,7 +71,7 @@ const DOCS_INDEX_PATTERNS = [
     // The other tests that step runs, and what they import (scripts/lib is shared by them). A test of ci-classify-changes
     // reads the step's list and fails when a file it covers is missing here: the job runs on Windows, and a failure
     // only there must show on the PR, not on main.
-    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-sshsig)\./,
+    /^scripts\/(check-rust-pin|check-shared-paths|check-test-support-off|release-gate|release-manifest|release-sshsig|ci-main-stalled)\./,
     /^scripts\/lib\//,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^package(-lock)?\.json$/,

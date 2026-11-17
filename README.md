@@ -475,8 +475,8 @@ Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. 
 | Linux x64 (Debian/Ubuntu) | `AgentMux_*_amd64.deb` |
 | Linux x64 (Fedora/RHEL) | `AgentMux-*-1.x86_64.rpm` |
 | Linux x64 (portable) | `AgentMux_*_amd64-portable.tar.xz` |
-| AgentMux Headless (Linux x64, Linux arm64, macOS Apple Silicon) | `agentmux-headless-*-linux-x64.tar.gz`, `agentmux-headless-*-linux-arm64.tar.gz`, `agentmux-headless-*-macos-arm64.tar.gz` |
-| AgentMux Headless (Windows x64) | `agentmux-headless-*-windows-x64.zip` |
+| Headless, no desktop (Linux x64, Linux arm64, macOS Apple Silicon) | `agentmux-headless-*-linux-x64.tar.gz`, `agentmux-headless-*-linux-arm64.tar.gz`, `agentmux-headless-*-macos-arm64.tar.gz` |
+| Headless, no desktop (Windows x64) | `agentmux-headless-*-windows-x64.zip` |
 | Install scripts | `install.sh` (macOS and Linux), `install.ps1` (Windows) |
 | Signed manifest | `AgentMux-*-manifest.json`, `AgentMux-*-envelope.json` and `AgentMux-*-envelope.json.sig`: the size and SHA-256 of every file, signed; the install scripts check downloads against them |
 

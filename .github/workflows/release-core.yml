@@ -423,9 +423,9 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
-  # The server package (no desktop app): one tarball per Linux and macOS platform, a .zip for Windows x64. It is built from the release commit like the desktop
+  # The Headless package (no desktop app): one tarball per Linux and macOS platform, a .zip for Windows x64. It is built from the release commit like the desktop
   # builds and reaches the release through the same two file selections below, so the signed manifest lists it and
-  # `install.sh --server` can check it
+  # `install.sh --headless` can check it
   # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
   #
   # `legs: release`: Linux x64, Linux arm64, macOS arm64 and Windows x64, on kinds of runner a release already waits for (the desktop
@@ -433,13 +433,13 @@ jobs:
   # kind). `sign-release` and `publish` wait for this job, so it never asks for a kind they do not already wait for: a leg
   # queued for a scarce runner (macOS x64) would hold the whole release for as long as GitHub keeps it queued, and one leg
   # of a run cannot be cancelled. That platform is not in a release's package set: the manifest is signed once, from the
-  # files the release has when `sign-release` runs, and `install.sh --server` installs nothing the manifest does not
+  # files the release has when `sign-release` runs, and `install.sh --headless` installs nothing the manifest does not
   # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
   # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
   #
   # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on four legs
   # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
-  # signed; a platform that did not is absent from the manifest, and `install.sh --server` says that version has no server
+  # signed; a platform that did not is absent from the manifest, and `install.sh --headless` says that version has no Headless
   # package for it. It becomes required after the first release in which all four legs are green.
   build-server-package:
     name: Build — server package

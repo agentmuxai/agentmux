@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getBlockMetaKeyAtom } from "@/app/store/global";
+import { isContainerAgentMode } from "@/util/runtime-kind";
 import type { Accessor } from "solid-js";
 import type { Account } from "@/app/view/identity/identity-model";
 import type { PrepMeta } from "./prep-window";
@@ -31,5 +32,6 @@ export function useAgentAccountBinding(opts: {
         agentName: meta("agentName"),
         signedOut: opts.signedOut,
         onLogin: opts.onLogin,
+        isContainer: () => isContainerAgentMode(getBlockMetaKeyAtom(opts.blockId, "agentMode")()),
     });
 }

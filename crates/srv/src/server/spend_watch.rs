@@ -97,7 +97,7 @@ fn refresh_chips(state: &AppState) {
     let Ok(defs) = state.mstore.agent_def_list() else { return };
     let spending = spend::agents_today(now);
     for def in &defs {
-        let on_route = launch::choice_of(&state.mstore, &def.id).is_some();
+        let on_route = spends_through_gateway(state, &def.id);
         drop_stale(state, &def.id, on_route, now);
         forget_alert_off_route(&def.slug, on_route, now);
         if on_route && spending.contains(&def.slug) {
@@ -105,6 +105,18 @@ fn refresh_chips(state: &AppState) {
             publish_today(state, &def.id, &def.slug, cap::agent_cap(&state.mstore, &def.id), spent, now, true);
         }
     }
+}
+
+/// Whether the agent's requests go through the gateway and are counted there: it is on a model route, or on an API key.
+pub(super) fn spends_through_gateway(state: &AppState, def_id: &str) -> bool {
+    on_a_key(&state.mstore, &state.identity_store, def_id) || launch::choice_of(&state.mstore, def_id).is_some()
+}
+
+/// A Claude agent linked to an Anthropic key: the gateway carries its requests. An agent of another provider that holds
+/// such a link sends its own requests to the vendor, where nothing is counted or capped.
+pub(crate) fn on_a_key(mstore: &crate::backend::storage::store::Store, identity_store: &crate::backend::storage::store::Store, def_id: &str) -> bool {
+    let claude = mstore.agent_def_get(def_id).ok().flatten().is_some_and(|d| crate::backend::providers::resolve_provider_alias(&mstore.resolve_effective_provider_id(&d)) == "claude");
+    claude && identity_store.agent_identity_list_for_agent(def_id).is_ok_and(|links| links.iter().any(|l| l.provider.eq_ignore_ascii_case(catalog::KEY_ROUTE_ID)))
 }
 
 /// The spend keys on a pane's `meta` that no longer hold. An agent that is not on a model route has no cap and no day of
@@ -204,7 +216,7 @@ fn on_settled(state: &AppState, grant: &Grant, now: i64) {
 
 /// "OpenRouter (DeepSeek V4.1 Flash)": where the agent's spend goes.
 fn place_of(state: &AppState, grant: &Grant) -> String {
-    let Some(route) = catalog::route(&grant.route) else { return grant.route.clone() };
+    let Some(route) = catalog::gateway_route(&grant.route) else { return grant.route.clone() };
     match launch::model_on_route(&state.mstore, &grant.def_id, route) {
         Some(model) => format!("{} ({})", route.label, model.label),
         None => route.label.to_string(),
@@ -275,11 +287,13 @@ fn stop(state: &AppState, grant: &Grant, hit: &Hit, now: i64) {
 
 /// What `Agents list` shows for an agent on a model route: what it has used today and its cap. For an agent on the
 /// DeepSeek Harness, which uses its own key and reports no spend, that nothing is measured. `None` for any other.
-pub(crate) fn view(mstore: &crate::backend::storage::store::Store, defs: &[crate::backend::storage::AgentDefinition], def_id: &str) -> Option<Value> {
+pub(crate) fn view(mstore: &crate::backend::storage::store::Store, identity_store: &crate::backend::storage::store::Store, defs: &[crate::backend::storage::AgentDefinition], def_id: &str) -> Option<Value> {
     if defs.iter().any(|d| d.id == def_id && d.provider == "dsh") {
         return Some(json!({ "measured": false, "why": "this harness bills the vendor account directly and reports no cost or tokens per call, so AgentMux counts nothing and a daily cap cannot apply; its ceiling is the account's balance" }));
     }
-    launch::choice_of(mstore, def_id)?;
+    if launch::choice_of(mstore, def_id).is_none() && !on_a_key(mstore, identity_store, def_id) {
+        return None;
+    }
     let slug = &defs.iter().find(|d| d.id == def_id)?.slug;
     let spent = spend::today(slug, agentmux_common::time::now_ms()).cost_usd;
     let cap = cap::agent_cap(mstore, def_id);
@@ -292,9 +306,9 @@ pub(crate) struct CapChange {
     pub to: Option<f64>,
 }
 
-/// A cap, and a day of spend, belong to an agent on a model route: a login agent has plan limits instead.
+/// A cap, and a day of spend, belong to an agent on a model route or an API key: a login agent has plan limits instead.
 pub(crate) fn on_a_route(state: &AppState, def_id: &str) -> Result<(), String> {
-    launch::choice_of(&state.mstore, def_id).map(|_| ()).ok_or_else(|| "the agent is not on a model route, so it has no spend cap".to_string())
+    if spends_through_gateway(state, def_id) { Ok(()) } else { Err("the agent is not on a model route or an API key, so it has no spend cap".to_string()) }
 }
 
 /// Sets the agent's daily cap (`None`: no cap). The alert level goes back to where the day now stands, and a stop the
@@ -349,7 +363,7 @@ mod tests {
         def.slug = "dsh-agent".to_string();
         store.agent_def_insert(&mut def).unwrap();
         let defs = store.agent_def_list().unwrap();
-        let shown = view(&store, &defs, "dsh-def").expect("a line saying so");
+        let shown = view(&store, &store, &defs, "dsh-def").expect("a line saying so");
         assert_eq!(shown["measured"], json!(false));
         assert!(shown.get("spent_usd").is_none() && shown.get("cap_usd").is_none(), "no figure is made up");
     }
@@ -412,10 +426,10 @@ mod tests {
         let now = agentmux_common::time::now_ms();
         spend::record("view-agent", "openrouter", model, &used, Some(4.5), now);
         let defs = store.agent_def_list().unwrap();
-        let shown = view(&store, &defs, "view-def").expect("an agent on a route");
+        let shown = view(&store, &store, &defs, "view-def").expect("an agent on a route");
         assert_eq!((shown["spent_usd"].as_f64(), shown["cap_usd"].as_f64(), shown["stopped"].as_bool()), (Some(4.5), Some(20.0), Some(false)));
-        assert!(view(&store, &defs, "plain-def").is_none(), "a login agent has no spend line");
+        assert!(view(&store, &store, &defs, "plain-def").is_none(), "a login agent has no spend line");
         spend::record("view-agent", "openrouter", model, &used, Some(15.5), now);
-        assert_eq!(view(&store, &defs, "view-def").unwrap()["stopped"], json!(true));
+        assert_eq!(view(&store, &store, &defs, "view-def").unwrap()["stopped"], json!(true));
     }
 }

@@ -161,11 +161,13 @@ async fn the_model_changes_on_the_route_the_agent_is_on_and_the_agent_can_leave_
 async fn an_update_does_not_put_an_agent_on_a_route_because_that_spends_the_persons_key() {
     let state = test_state();
     let (me, target) = (agent(&state, "Editor"), agent(&state, "Plain"));
-    for req in [json!({ "agent": target.slug, "route": "openrouter" }), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })] {
-        let (status, body) = update_call(&state, Some(&me), req).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-        assert!(body["error"].as_str().unwrap().contains("not on a model route"), "{body}");
-    }
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "openrouter" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("not on a model route"), "{body}");
+    // A model that is not Claude's is no pick for a Claude agent on its own login, and no way onto a route.
+    let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "deepseek/deepseek-v4-pro-0813" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("not a Claude model"), "{body}");
     assert!(crate::backend::model_gateway::launch::choice_of(&state.mstore, &target.id).is_none());
     let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "route": "" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -264,4 +266,133 @@ async fn a_refused_spend_change_leaves_the_rest_of_the_request_unapplied() {
     assert_eq!(after.description, target.description, "the description was not applied");
     let (status, _) = update_call(&state, Some(&stranger), json!({ "agent": stranger.slug, "spend_cap_usd": 0.004 })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "a cap under a cent is refused, not read back as none");
+}
+
+// Agents update model / effort for an agent on its own login: the choice the pane's picker makes.
+mod runtime_pick {
+    use super::*;
+    use crate::sagas::park_agents_tests::{seed_block, seed_workspace};
+
+    async fn pane_of(state: &AppState, agent: &AgentDefinition, extra: Value) -> String {
+        let (_ws, tabs) = seed_workspace(state, 1).await;
+        let mut meta = json!({
+            "view": "agent",
+            "agentId": agent.id,
+            "agentProvider": "claude",
+            "cmd:args": ["-p", "--model", "sonnet", "--effort", "high", "--verbose"],
+            "agent:runtime": { "model": "sonnet", "effort": "high", "permissionMode": "plan" },
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            meta[k] = v.clone();
+        }
+        seed_block(state, &tabs[0], meta).await
+    }
+
+    fn block_meta(state: &AppState, block: &str) -> crate::backend::obj::MetaMapType {
+        state.mstore.must_get::<crate::backend::obj::Block>(block).unwrap().meta
+    }
+
+    #[tokio::test]
+    async fn a_model_pick_sets_what_the_panes_picker_sets_and_the_next_launch_runs_on_it() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Asker"), agent(&state, "Maop"));
+        let block = pane_of(&state, &target, json!({})).await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "model": "claude-fable-5-2" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["changed"], json!(["model"]));
+        assert_eq!(body["applied"]["panes"], 1);
+        assert_eq!(body["applied"]["model"], "claude-fable-5-2");
+        let meta = block_meta(&state, &block);
+        assert_eq!(meta["agent:runtime"], json!({ "model": "claude-fable-5-2", "effort": "high", "permissionMode": "plan" }), "the rest of the runtime stays");
+        let args: Vec<String> = meta["cmd:args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_string()).collect();
+        assert_eq!(args, ["-p", "--verbose"], "the stored argv no longer carries its own model or effort");
+        // What the next launch is given: the new model, and the effort the runtime says.
+        let launched = crate::backend::agent_runtime::with_runtime_flags(&meta, args);
+        assert_eq!(launched, ["-p", "--verbose", "--model", "claude-fable-5-2", "--effort", "high"]);
+        // A closed agent opens on it too.
+        assert!(state.mstore.agent_last_runtime_get(&target.id).unwrap().contains("claude-fable-5-2"));
+        let log = audited(&me);
+        assert!(log.iter().any(|e| e.success && e.reason.as_deref().is_some_and(|r| r.contains("changed model of"))), "{log:?}");
+    }
+
+    #[tokio::test]
+    async fn an_effort_pick_changes_only_the_effort() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Asker"), agent(&state, "Lowly"));
+        let block = pane_of(&state, &target, json!({})).await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": target.slug, "effort": "max" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["changed"], json!(["effort"]));
+        assert_eq!(block_meta(&state, &block)["agent:runtime"]["model"], "sonnet");
+        assert_eq!(block_meta(&state, &block)["agent:runtime"]["effort"], "max");
+    }
+
+    #[tokio::test]
+    async fn what_cannot_be_picked_is_refused_by_name_and_changes_nothing() {
+        let state = test_state();
+        let (me, target) = (agent(&state, "Asker"), agent(&state, "Fixed"));
+        let block = pane_of(&state, &target, json!({})).await;
+        let before = block_meta(&state, &block);
+        for (req, wants) in [
+            (json!({ "model": "gpt-9" }), "not a Claude model"),
+            (json!({ "model": "claude opus" }), "not a Claude model"),
+            (json!({ "effort": "ultra" }), "not an effort"),
+        ] {
+            let mut req = req;
+            req["agent"] = json!(target.slug);
+            let (status, body) = update_call(&state, Some(&me), req).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body["error"].as_str().unwrap().contains(wants), "{body}");
+        }
+        assert_eq!(block_meta(&state, &block), before);
+        assert!(state.mstore.agent_last_runtime_get(&target.id).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_model_the_definition_fixes_or_a_model_server_of_its_own_is_not_overridden() {
+        let state = test_state();
+        let me = agent(&state, "Asker");
+        let pinned = agent(&state, "Pinned");
+        pane_of(&state, &pinned, json!({ "agent:provider_flags": "--model opus" })).await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": pinned.slug, "model": "sonnet" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("provider flags"), "{body}");
+        // Its effort is still the agent's to change.
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": pinned.slug, "effort": "low" })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let served = agent(&state, "Served");
+        pane_of(&state, &served, json!({ "cmd:env": { "ANTHROPIC_BASE_URL": "http://192.0.2.68:11434", "ANTHROPIC_MODEL": "flint:40b-a2b" } })).await;
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": served.slug, "model": "sonnet" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("env_set"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn another_harness_than_claude_is_refused_with_where_its_model_is_set() {
+        let state = test_state();
+        let me = agent(&state, "Asker");
+        let mut def = test_agent_def(&uuid::Uuid::new_v4().to_string(), "Gem", "gemini", "host", 1, "");
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let (status, body) = update_call(&state, Some(&me), json!({ "agent": def.slug, "model": "sonnet" })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body["error"].as_str().unwrap().contains("picker"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn the_definitions_own_flags_are_checked_when_no_pane_is_open() {
+        let state = test_state();
+        let me = agent(&state, "Asker");
+        let mut def = test_agent_def(&uuid::Uuid::new_v4().to_string(), "Fixed Flags", "claude", "host", 1, "");
+        def.provider_flags = "--model opus --effort high".to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        for req in [json!({ "model": "sonnet" }), json!({ "effort": "low" })] {
+            let mut req = req;
+            req["agent"] = json!(def.slug);
+            let (status, body) = update_call(&state, Some(&me), req).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body["error"].as_str().unwrap().contains("provider flags"), "{body}");
+        }
+        assert!(state.mstore.agent_last_runtime_get(&def.id).unwrap().is_empty(), "nothing was remembered over the operator's flag");
+    }
 }

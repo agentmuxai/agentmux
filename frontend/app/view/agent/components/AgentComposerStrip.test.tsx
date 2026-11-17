@@ -378,6 +378,19 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
         expect(chip(container).getAttribute("data-hover-tip")).toBe("Signed in to this agent's provider");
     });
 
+    it("shows an API key account by its name and the API mark, whole when it fits", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="Work key · API" />);
+        expect(chip(container)).toHaveTextContent("Work key · API");
+        expect(chip(container)).not.toHaveTextContent("Logged in");
+    });
+
+    it("names the key and its mark for a switch waiting on the turn", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="a@x.com" canSwitchAccount={true} onSwitchAccount={() => {}} pendingAccountLabel="Work key · API" />
+        ));
+        expect(chip(container)).toHaveTextContent("a@x.com → Work key · API");
+    });
+
     it("never shows an email while signed out", () => {
         const { container } = render(() => (
             <AgentComposerStrip {...baseProps} authStatus="unauthenticated" authEmail="alice@example.com" />
