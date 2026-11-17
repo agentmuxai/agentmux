@@ -327,8 +327,11 @@ fn last_rollup_hour(dir: &Path) -> Option<u64> {
         .filter(|n| month_from_file(n).is_some())
         .collect();
     names.sort();
-    let text = std::fs::read_to_string(dir.join(names.last()?)).ok()?;
-    text.lines().rev().find_map(|l| serde_json::from_str::<Rollup>(l).ok()).map(|r| r.h)
+    // Newest month first, until one has a whole line: a month whose first append failed is empty.
+    names.iter().rev().find_map(|name| {
+        let text = std::fs::read_to_string(dir.join(name)).ok()?;
+        text.lines().rev().find_map(|l| serde_json::from_str::<Rollup>(l).ok()).map(|r| r.h)
+    })
 }
 
 /// The raw lines of the days from `from_day` on, in time order.
@@ -495,6 +498,77 @@ fn prune(dir: &Path, today: &str) {
             tracing::warn!(error = %e, file = %name, "[record] an old day could not be removed");
         }
     }
+}
+
+/// Where this machine keeps its record: the `record` folder of the data directory.
+pub fn default_dir() -> Option<PathBuf> {
+    agentmux_common::data_paths::DataPaths::from_env().map(|p| p.data_dir.join("record"))
+}
+
+/// What the record holds on disk.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Inventory {
+    pub raw_days: u32,
+    pub raw_bytes: u64,
+    /// The oldest day kept, `2026-11-02`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_first_day: Option<String>,
+    pub rollup_months: u32,
+    pub rollup_bytes: u64,
+    /// The oldest month kept, `2026-01`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollup_first_month: Option<String>,
+}
+
+/// The files of `dir`, counted and sized.
+pub fn inventory(dir: &Path) -> Inventory {
+    let mut inv = Inventory::default();
+    let Ok(entries) = std::fs::read_dir(dir) else { return inv };
+    let mut days: Vec<String> = Vec::new();
+    let mut months: Vec<String> = Vec::new();
+    for e in entries.flatten() {
+        let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+        let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+        if day_from_file(&name).is_some() {
+            inv.raw_bytes += size;
+            days.push(name.trim_end_matches(&format!(".{EXT}")).to_string());
+        } else if month_from_file(&name).is_some() {
+            inv.rollup_bytes += size;
+            months.push(name.trim_start_matches(ROLLUP_PREFIX).trim_end_matches(&format!(".{EXT}")).to_string());
+        }
+    }
+    days.sort();
+    months.sort();
+    inv.raw_days = days.len() as u32;
+    inv.rollup_months = months.len() as u32;
+    inv.raw_first_day = days.into_iter().next();
+    inv.rollup_first_month = months.into_iter().next();
+    inv
+}
+
+/// The last `limit` lines taken from `from_ms` to `to_ms`, in time order.
+pub fn read_raw(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> Vec<Sample> {
+    let mut lines: Vec<Sample> = raw_since(dir, Some(&day_of(from_ms))).into_iter().filter(|s| s.t >= from_ms && s.t <= to_ms).collect();
+    let cut = lines.len().saturating_sub(limit);
+    lines.drain(..cut);
+    lines
+}
+
+/// The last `limit` hourly rollups of the hours that start from `from_ms` to `to_ms`, in time order.
+pub fn read_rollups(dir: &Path, from_ms: u64, to_ms: u64, limit: usize) -> Vec<Rollup> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<(chrono::NaiveDate, PathBuf)> =
+        entries.flatten().filter_map(|e| Some((month_from_file(e.file_name().to_str()?)?, e.path()))).collect();
+    files.sort();
+    let mut out: Vec<Rollup> = Vec::new();
+    for (_, path) in files {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        out.extend(text.lines().filter_map(|l| serde_json::from_str::<Rollup>(l).ok()).filter(|r| r.h >= from_ms && r.h <= to_ms));
+    }
+    out.sort_by_key(|r| r.h);
+    let cut = out.len().saturating_sub(limit);
+    out.drain(..cut);
+    out
 }
 
 #[cfg(test)]
@@ -753,6 +827,46 @@ mod tests {
         let json = serde_json::to_string(&rollup(NOON, &samples).unwrap()).unwrap();
         // A year of hours has to fit ROLLUP_MAX_BYTES with room to spare.
         assert!(json.len() as u64 * 24 * 366 < ROLLUP_MAX_BYTES, "{} bytes: {json}", json.len());
+    }
+
+    #[test]
+    fn an_empty_newest_month_does_not_reset_the_checkpoint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("record");
+        let record = Record::new(dir.clone(), "0.60.30");
+        for i in 0..=24 {
+            record.note(&snapshot(NOON + i * EVERY_MS)); // 12:00 to 14:00: the 12:00 and 13:00 hours are rolled
+        }
+        let full = std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count();
+        assert_eq!(full, 2);
+        // The next month's file exists but holds no whole line (a failed first append).
+        std::fs::write(dir.join("rollup-2026-12.jsonl"), "{\"h\":").unwrap();
+        assert_eq!(last_rollup_hour(&dir), Some(NOON + HOUR_MS));
+        let again = Record::new(dir.clone(), "0.60.30");
+        again.note(&snapshot(NOON + 25 * EVERY_MS));
+        assert_eq!(std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count(), full);
+    }
+
+    #[test]
+    fn the_record_is_read_back_by_window_and_counted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("record");
+        let record = Record::new(dir.clone(), "0.60.30");
+        for i in 0..=30 {
+            record.note(&snapshot(NOON + i * EVERY_MS));
+        }
+        let all = read_raw(&dir, 0, u64::MAX, 1_000);
+        assert_eq!(all.len(), 31);
+        // The newest lines of a window, in time order.
+        let last3 = read_raw(&dir, NOON + 10 * EVERY_MS, NOON + 20 * EVERY_MS, 3);
+        assert_eq!(last3.iter().map(|s| s.t).collect::<Vec<_>>(), [NOON + 18 * EVERY_MS, NOON + 19 * EVERY_MS, NOON + 20 * EVERY_MS]);
+        let rolls = read_rollups(&dir, NOON + HOUR_MS, u64::MAX, 10);
+        assert_eq!(rolls.iter().map(|r| r.h).collect::<Vec<_>>(), [NOON + HOUR_MS]);
+        let inv = inventory(&dir);
+        assert_eq!((inv.raw_days, inv.rollup_months), (1, 1));
+        assert_eq!((inv.raw_first_day.as_deref(), inv.rollup_first_month.as_deref()), (Some("2026-11-16"), Some("2026-11")));
+        assert!(inv.raw_bytes > 0 && inv.rollup_bytes > 0);
+        assert_eq!(inventory(&tmp.path().join("nothing")), Inventory::default());
     }
 
     #[test]
