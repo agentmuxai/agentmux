@@ -1,10 +1,10 @@
 name: build-server-package
 
-# The AgentMux server package: the server, the `agentmux` command, the two helper programs agents run, and the built
+# The AgentMux Headless package: the server, the `agentmux` command, the two helper programs agents run, and the built
 # web UI, as one tarball per platform (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
 # Linux x64 and arm64, macOS arm64 and x64, and Windows x64 (a .zip: docs/specs/SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md 5.1).
 # release-core.yml calls this and publishes the tarballs with the release;
-# `scripts/install/install.sh --server` installs one after checking it against the release's signed manifest.
+# `scripts/install/install.sh --headless` installs one after checking it against the release's signed manifest.
 #
 # Each leg builds natively, packs with scripts/package-server.sh, then unpacks the tarball it made and runs it: the
 # command answers, and a server started from the package serves /health and the web UI. Linux legs build on the
@@ -16,8 +16,8 @@ name: build-server-package
 # scarce runner (macos-15-intel) would hold the release for as long as GitHub keeps it queued (up to 24 hours) and nobody
 # can cancel one leg of a run. `all` (the default, and what a pull request that changes this file runs) adds that one, so
 # a workflow_dispatch can still build it; a release does not publish it, because the signed manifest is made once from
-# the files the release has when `sign-release` runs and `install.sh --server` accepts nothing the manifest does not list.
-# A release without it says so in its summary, and `install.sh --server` says that version has no server package for the
+# the files the release has when `sign-release` runs and `install.sh --headless` accepts nothing the manifest does not list.
+# A release without it says so in its summary, and `install.sh --headless` says that version has no Headless package for the
 # platform.
 #
 # `sign` (only a release asks for it, once the repository variable SERVER_PACKAGE_MACOS_SIGNING is 'true'; release-core.yml):
