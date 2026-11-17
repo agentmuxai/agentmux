@@ -54,7 +54,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             not_for_agents(&ctx)?;
             let path = path()?;
-            let Some(name) = store::read_profiles(&path)?.into_iter().find(|p| p.id == req.id).map(|p| p.name) else {
+            let Some((name, owner)) = store::read_profiles(&path)?.into_iter().find(|p| p.id == req.id).map(|p| (p.name, p.owner_agent)) else {
                 return Err(format!("no profile {:?}", req.id));
             };
             // Its tabs close first: they must not go on browsing in a jar
@@ -63,7 +63,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             // Its saved sign-ins move to Personal, or go with it (Vault spec §9.4),
             // before the profile does: if that fails, nothing is lost.
             let (vault, id, keep) = (state.identity_store.clone(), req.id.clone(), !req.delete_signins.unwrap_or(false));
-            tokio::task::spawn_blocking(move || crate::backend::vault::signins::profile_deleted(&vault, &id, &name, keep))
+            tokio::task::spawn_blocking(move || crate::backend::vault::signins::profile_deleted(&vault, &id, &name, keep, owner.as_deref()))
                 .await
                 .map_err(|e| e.to_string())??;
             crate::server::vault_handlers::publish(&state);

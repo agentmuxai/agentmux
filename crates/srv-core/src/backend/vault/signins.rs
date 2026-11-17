@@ -334,8 +334,9 @@ pub fn counts(store: &Store) -> Result<BTreeMap<String, u32>, String> {
 
 /// Profile `id` (named `name`) is being deleted: its sign-ins move to Personal,
 /// tagged with where they came from, or are deleted with it (§9.4). Returns how
-/// many there were.
-pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Result<usize, String> {
+/// many there were. `owner` is the agent (by permanent uid) whose own profile it is: the logins shared with that
+/// agent, and the "Always" it holds, end with the profile, so the profile made for it next starts with none (A9).
+pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool, owner: Option<&str>) -> Result<usize, String> {
     let profile = format!("profile:{id}");
     let rows: Vec<VaultRow> =
         store.vault_list().map_err(|e| e.to_string())?.into_iter().filter(|r| fields_of(r).get(PROFILE) == Some(&profile)).collect();
@@ -348,6 +349,9 @@ pub fn profile_deleted(store: &Store, id: &str, name: &str, keep: bool) -> Resul
     }
     // The profile is going: it keeps no sign-in Vault of its own (reached only when every sign-in was dealt with).
     store.signin_vault_set(&profile, PERSONAL_VAULT).map_err(|e| e.to_string())?;
+    if let Some(uid) = owner {
+        super::shares::forget_agent(store, uid)?;
+    }
     Ok(rows.len())
 }
 
