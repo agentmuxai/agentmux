@@ -25,7 +25,6 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel } from "./open-history-tab";
 import { agentBodyMenuItems } from "./agent-body-menu";
 import { requestShutdown } from "./shutdown/shut-down-agent";
-import { agentViewControls } from "./agent-view-controls";
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "../../agent-model/composer-focus";
@@ -606,7 +605,6 @@ export class AgentViewModel {
             hasDefinition: agentId != null && this.agentDefinitions().some((a) => a.id === agentId),
             openModal: this._openModal,
             quickFork: () => void quickForkAgent(this),
-            openView: () => agentViewControls(this.blockId)?.setPopoverOpen(true),
             shutDown: () => void requestShutdown(this.blockId, (meta?.["agentName"] as string | undefined) || agentId || "this agent"),
         });
     }

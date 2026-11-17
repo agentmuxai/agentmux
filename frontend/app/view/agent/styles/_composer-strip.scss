@@ -368,6 +368,18 @@
     opacity: 0.8;
 }
 
+// The View eye, on every agent pane: quiet while the pane shows everything, tinted for a view other than the plain
+// Full one, so the strip says the pane is not showing everything without a word of text.
+.agent-composer-strip-view {
+    --ui-fg: var(--secondary-text-color);
+    --ui-fg-hover: var(--main-text-color);
+
+    &.is-changed {
+        --ui-fg: var(--accent-fg-color);
+        --ui-fg-hover: var(--accent-fg-color);
+    }
+}
+
 // Shell toggle: the kit's accent Button (compact density, pressed while the shell is open). Accent at
 // rest, not just when open, so it reads as the strip's one always-reachable action beside the
 // neutral Mode/Model/Effort pills. Kept as a class for the edge-priority ordering below.
