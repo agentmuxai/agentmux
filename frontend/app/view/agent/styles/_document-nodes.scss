@@ -1096,6 +1096,13 @@ $tool-name-colors: (
             white-space: nowrap;
         }
 
+        // An item listed in the Personal Memory index: informational, so muted rather than a warning.
+        .agent-context-delivery-item-index {
+            font-size: var(--text-xs);
+            color: var(--secondary-text-color);
+            white-space: nowrap;
+        }
+
         .delivered-omitted .agent-context-delivery-item-name {
             opacity: 0.6;
             text-decoration: line-through;

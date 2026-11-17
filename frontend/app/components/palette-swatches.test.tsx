@@ -52,7 +52,7 @@ describe("PaletteSwatches", () => {
         expect(new Set(all.map(paint)).size).toBe(14);
     });
 
-    it("leaves the columns to its styles (two rows of 7, or 8 and 7 with the none swatch) unless asked", () => {
+    it("leaves the columns to its styles (two rows of 7, with the none swatch in a column of its own) unless asked", () => {
         const grid = (c: HTMLElement) => c.querySelector(".palette-swatches") as HTMLElement;
         const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
         expect(grid(plain.container).style.getPropertyValue("--palette-cols")).toBe("");

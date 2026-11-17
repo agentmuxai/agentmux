@@ -26,6 +26,7 @@ fn delivery(parts: usize) -> Delivery {
             source_tokens: 2,
             startup: None,
             via: None,
+            reason: None,
         }],
         summary_bytes: 0,
         acked: vec![false; parts],
@@ -361,10 +362,10 @@ fn startup_items_carry_role_owner_and_what_the_file_contains() {
     assert_eq!((mcp["count"].as_u64(), mcp["size_bytes"].as_u64()), (Some(1), Some(0)));
 }
 
-/// Only an AgentMux-written startup file holding every current section
-/// counts as delivering the Global Memory (Codex on #4131).
+/// A section an AgentMux-written startup file holds byte for byte is not sent again; one it lacks, or holds in an
+/// older form, is sent whole. A foreign file counts for nothing (#4131).
 #[test]
-fn global_memory_counts_as_in_the_file_only_when_every_current_section_is() {
+fn only_the_global_sections_newer_than_the_startup_file_are_sent() {
     use crate::backend::startup_files::{Owner, StartupFile};
     let entry = |name: &str, text: &str| Entry {
         label: name.into(),
@@ -386,12 +387,18 @@ fn global_memory_counts_as_in_the_file_only_when_every_current_section_is() {
     };
     let global = [entry("A", "# [AgentMux System] A\n\nnew a"), entry("B", "# [Workspace] B\n\nb")];
     let both = "# Memory\n# [AgentMux System] A\n\nnew a\n\n---\n\n# [Workspace] B\n\nb\n";
-    assert!(global_memory_in_startup_files(&[file(Owner::Agentmux, both)], &global));
-    assert!(!global_memory_in_startup_files(&[file(Owner::User, both)], &global), "not AgentMux's");
+    let carry = |files: &[StartupFile], global: &[Entry]| {
+        let (newer, carry) = global_against_startup_files(files, global);
+        (newer.iter().map(|e| e.name.clone()).collect::<Vec<_>>(), carry)
+    };
+    assert_eq!(carry(&[file(Owner::Agentmux, both)], &global), (vec![], delivery::StartupCarry::All));
+    assert_eq!(carry(&[file(Owner::User, both)], &global).1, delivery::StartupCarry::None, "not AgentMux's");
+    // A stale file: only the section it holds in an older form is sent, whole; the other is not repeated.
     let stale = "# Memory\n# [AgentMux System] A\n\nold a\n\n---\n\n# [Workspace] B\n\nb\n";
-    assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, stale)], &global), "an old section");
-    assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, "# [Workspace] B\n\nb")], &global), "one missing");
-    assert!(!global_memory_in_startup_files(&[file(Owner::Agentmux, both)], &[]), "nothing to deliver");
+    assert_eq!(carry(&[file(Owner::Agentmux, stale)], &global), (vec!["A".to_string()], delivery::StartupCarry::Partly));
+    assert_eq!(carry(&[file(Owner::Agentmux, "# [Workspace] B\n\nb")], &global), (vec!["A".to_string()], delivery::StartupCarry::Partly), "one missing");
+    assert_eq!(carry(&[file(Owner::Agentmux, "# unrelated\n")], &global).1, delivery::StartupCarry::None, "a file that carries none: everything is sent");
+    assert_eq!(carry(&[file(Owner::Agentmux, both)], &[]).1, delivery::StartupCarry::None, "nothing to deliver");
 }
 
 #[test]
@@ -486,59 +493,51 @@ body
 }
 
 #[test]
-fn a_cut_delivery_names_the_files_it_left_out_and_still_carries_the_newest() {
+fn a_big_personal_memory_is_listed_newest_first_and_every_file_is_in_the_index() {
     let dir = tempfile::tempdir().unwrap();
     let write = |name: &str, when: &str, body: usize| {
-        std::fs::write(dir.path().join(name), format!("---
-description: about {name}
-metadata:
-  type: project
-  modified: {when}
----
-{}", "x".repeat(body))).unwrap();
+        std::fs::write(
+            dir.path().join(name),
+            format!("---\ndescription: about {name}\nmetadata:\n  type: project\n  modified: {when}\n---\n{}", "x".repeat(body)),
+        )
+        .unwrap();
     };
     write("aaa-oldest-big.md", "2026-10-01T00:00:00.000Z", 50_000);
     for i in 0..10 {
         write(&format!("m{i}.md"), &format!("2026-10-1{i}T00:00:00.000Z"), 8_000);
     }
     write("zzz-newest.md", "2026-10-28T00:00:00.000Z", 2_000);
-    let fitted = fit::fit(personal_entries_in(dir.path()), 0, true, &|_| Some(3));
-    assert_eq!(fitted.kept[0].name, "zzz-newest.md", "sorted by modified, not by name");
-    assert!(!fitted.skipped.is_empty());
-    assert!(fitted.skipped.iter().any(|e| e.name == "aaa-oldest-big.md"), "the oldest is what a full delivery drops");
-    assert!(fitted.skipped.iter().all(|e| e.name != "zzz-newest.md"));
-    assert!(fitted.tail.unwrap().contains("aaa-oldest-big.md — about aaa-oldest-big.md"));
-    let row = not_sent_item(&fitted.skipped[0]);
-    assert_eq!((row.delivered, row.size_bytes, row.kind), ("omitted", 0, "personal_memory"));
+    let fitted = fit::fit(personal_entries_in(dir.path()), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, 0, true, &|_| Some(3));
+    assert!(fitted.kept.is_empty() && fitted.skipped.is_empty(), "no bodies ride: the index carries them all");
+    assert_eq!(fitted.indexed.len(), 12, "every file is listed");
+    assert_eq!(fitted.indexed[0].name, "zzz-newest.md", "sorted by modified, not by name");
+    assert!(fitted.tail.as_deref().unwrap().contains("Your Personal Memory is"), "the pruning nudge still rides");
+    let rows = indexed_items(&fitted, false);
+    assert_eq!(rows.len(), 12);
+    let big = rows.iter().find(|r| r.name == "aaa-oldest-big.md").unwrap();
+    assert_eq!((big.delivered, big.kind), ("indexed", "personal_memory"));
+    assert!(big.size_bytes > 0 && big.size_bytes < 400, "sized by its index line, not 0 B and not its body: {}", big.size_bytes);
+    assert!(big.source_size_bytes > 50_000, "the whole file's size survives, for the size band");
 }
 
 #[test]
 fn the_notes_at_the_end_never_push_the_reserved_summary_out_of_the_parts() {
-    // Eight 7,900-character files of 100-character lines and a 1,000-character summary: the character count fits,
-    // but the parts break at line ends and the pruning note used to tip the summary into a ninth, dropped part.
+    // Eight 7,900-character Global entries of 100-character lines and a 1,000-character summary: the character
+    // count fits, but the parts break at line ends and the pruning note used to tip the summary into a ninth,
+    // dropped part.
     let line = format!("{}\n", "w".repeat(99));
     let body = line.repeat(79);
-    let entries: Vec<Entry> = (0..8)
-        .map(|i| Entry { label: format!("f{i}.md"), tier: Tier::Personal, text: format!("---\nmetadata:\n  type: project\n---\n{body}"), name: format!("f{i}.md"), system: false, bundle_id: None, path: None })
+    let mut entries: Vec<Entry> = (0..8)
+        .map(|i| Entry { label: format!("g{i}"), tier: Tier::Global, text: body.clone(), name: format!("g{i}"), system: false, bundle_id: Some(format!("id{i}")), path: None })
         .collect();
+    entries.push(Entry { label: "big.md".into(), tier: Tier::Personal, text: format!("---\nmetadata:\n  type: project\n---\n{}", "x".repeat(20_000)), name: "big.md".into(), system: false, bundle_id: None, path: None });
     let summary = "S".repeat(1_000);
-    let (fitted, composed, parts, delivered_chars) = fit_and_compose(entries, Some(&summary), Reason::Compact, false, &|_| Some(30)).unwrap();
+    let (fitted, composed, parts, delivered_chars) =
+        fit_and_compose(entries, Some(&summary), Reason::Compact, delivery::StartupCarry::None, false, &|_| Some(30)).unwrap();
     assert_eq!(delivered_chars, composed.text.chars().count(), "nothing is cut");
     assert!(parts.join("").contains(&summary), "the summary is in the parts");
     assert!(composed.text.contains("Your Personal Memory is"), "the nudge rides along");
     assert!(!fitted.kept.is_empty());
-}
-
-#[test]
-fn a_capped_file_shows_its_real_size_and_as_partly_delivered() {
-    let big = format!("---\nmetadata:\n  type: feedback\n---\n{}", "x".repeat(50_000));
-    let entry = Entry { label: "big.md".into(), tier: Tier::Personal, text: big.clone(), name: "big.md".into(), system: false, bundle_id: None, path: None };
-    let (fitted, composed, _parts, delivered_chars) = fit_and_compose(vec![entry], None, Reason::Startup, false, &|_| None).unwrap();
-    let mut rows = delivery_items(&fitted.kept, &composed, delivered_chars);
-    assert_eq!(rows[0].delivered, "full", "as the span alone sees it");
-    apply_capped(&mut rows, &fitted.capped);
-    assert_eq!((rows[0].delivered, rows[0].source_size_bytes), ("partial", big.len()));
-    assert!(rows[0].size_bytes < 9_000);
 }
 
 fn item(label: &str, tier: Tier, text: &str) -> Entry {

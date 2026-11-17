@@ -388,7 +388,9 @@ export interface ContextItem {
     /** Global Memory only: the entry's id. */
     bundleId?: string;
     /** How much of it went out when a delivery was cut (spec §3.4 step 3). Absent = full. */
-    delivered?: "full" | "partial" | "omitted";
+    delivered?: "full" | "partial" | "omitted" | "indexed";
+    /** Why a row is not in full, when that needs saying (a file marked always over the limit, a Global entry left out). */
+    reason?: string;
     /** Of what was delivered: a partial item's slice, 0 when omitted. */
     sizeBytes: number;
     /** The whole entry's estimated tokens, whatever was delivered (memory items). */

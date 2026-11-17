@@ -33,7 +33,8 @@ export interface PaletteSwatchesProps {
     label: string;
     /** Put a leading swatch that means "no colour" (its name, e.g. "No colour", "Default") in the grid. */
     noneLabel?: string;
-    /** Swatches per row, fixed. Default: two rows of 7 (8 and 7 with the "none" swatch). A context that must narrow
+    /** Columns, fixed, the "none" swatch's own included. Default: two rows of 7 colours; with the "none" swatch it is
+     *  alone in the first column and the colours are two rows of 7 beside it (8 columns). A context that must narrow
      *  the grid with its pane's width leaves this out and sets `--palette-cols` in its own styles. */
     columns?: number;
     class?: string;
@@ -67,19 +68,21 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
                     </Tooltip>
                 )}
             </Show>
-            <For each={PALETTE}>
-                {(slot) => (
-                    <Tooltip content={slot.name} placement="top" divClassName="palette-swatch-anchor">
-                        <Button
-                            class="palette-swatch"
-                            style={swatchStyle(slot)}
-                            pressed={chosen() === slot.id}
-                            aria-label={slot.name}
-                            onClick={() => p.onSelect(slot)}
-                        />
-                    </Tooltip>
-                )}
-            </For>
+            <div class="palette-swatches__colours">
+                <For each={PALETTE}>
+                    {(slot) => (
+                        <Tooltip content={slot.name} placement="top" divClassName="palette-swatch-anchor">
+                            <Button
+                                class="palette-swatch"
+                                style={swatchStyle(slot)}
+                                pressed={chosen() === slot.id}
+                                aria-label={slot.name}
+                                onClick={() => p.onSelect(slot)}
+                            />
+                        </Tooltip>
+                    )}
+                </For>
+            </div>
         </div>
     );
 }
