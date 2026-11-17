@@ -13,7 +13,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ROW_H } from "../hex/hex-layout";
 import { LargeTextViewer } from "./large-text-viewer";
-import { forgetLargeTextMemory, parseLine } from "./large-text-state";
+import { forgetLargeTextMemory, parseLine, revealSideways } from "./large-text-state";
 import { LINE_SHOWN_MAX, PAGE_LINES } from "./line-source";
 
 const fetchMediaRange = vi.hoisted(() => vi.fn());
@@ -292,6 +292,21 @@ describe("the Large text viewer", () => {
         expect(document.querySelector(".large-text-find-error")?.textContent).toContain("older encoding");
     });
 
+    it("takes the mark off the line when a later search finds nothing, so the old line is not taken for its answer", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "line 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBe("5");
+        fireEvent.input(findBox(), { target: { value: "nowhere" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBeUndefined();
+        expect(document.querySelector(".large-text-hit")).toBeNull();
+    });
+
     it("opens from the line box too, and closes on Escape with the focus back on the lines", async () => {
         await mount();
         fireEvent.keyDown(lineBox(), { key: "f", ctrlKey: true });
@@ -335,5 +350,30 @@ describe("parseLine", () => {
         expect(parseLine(" 1,000 ", 5000)).toBe(1000);
         expect(parseLine("10", 10)).toBe(10);
         for (const bad of ["", "0", "11", "-3", "1.5", "0x10", "abc"]) expect(parseLine(bad, 10), bad).toBeNull();
+    });
+});
+
+describe("revealSideways", () => {
+    const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect;
+    const grid = (left: number, right: number) => ({ getBoundingClientRect: () => rect(left, right), scrollLeft: 0 }) as unknown as HTMLElement;
+    const hit = (left: number, right: number) => ({ getBoundingClientRect: () => rect(left, right) }) as unknown as Element;
+
+    it("scrolls a match that is off to the right into the middle of the view", () => {
+        const g = grid(0, 371);
+        revealSideways(g, hit(925, 985));
+        // 925 - (371 - 60) / 2: the match's left edge ends up where it centres.
+        expect(g.scrollLeft).toBeCloseTo(925 - 155.5);
+    });
+
+    it("scrolls back for a match that is off to the left, and leaves one that shows alone", () => {
+        const g = grid(100, 471);
+        g.scrollLeft = 800;
+        revealSideways(g, hit(-300, -240));
+        expect(g.scrollLeft).toBeLessThan(800);
+        const still = grid(0, 371);
+        revealSideways(still, hit(40, 100));
+        expect(still.scrollLeft).toBe(0);
+        revealSideways(still, null);
+        revealSideways(undefined, hit(0, 1));
     });
 });

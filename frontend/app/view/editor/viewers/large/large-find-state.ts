@@ -29,10 +29,28 @@ export interface LargeFindParts {
     lineOf: (offset: number) => Promise<number>;
     /** Show a line (1-based) and mark it. */
     show: (line: number) => void;
+    /** Take the mark off the line: nothing is found. */
+    unmark: () => void;
     /** Back to the lines. */
     focusGrid: () => void;
     /** Tests give their own search. */
     call?: SearchCall;
+}
+
+/** One search from `cursor`: where it ended up, "none" for no match, "changed" for a match past the file's end now, null for cancelled. */
+async function searchFrom(
+    o: LargeFindParts,
+    p: { hex: string; align: 1 | 2 },
+    cursor: number,
+    backward: boolean,
+    cancelled: () => boolean
+): Promise<{ offset: number; line: number; wrapped: boolean } | "none" | "changed" | null> {
+    const r = await findAligned({ call: o.call ?? searchOnSrv, path: o.path(), hex: p.hex, size: o.size(), cursor, backward, align: p.align, cancelled });
+    if (!r) return null;
+    if (!r.found) return "none";
+    if (r.offset >= o.size()) return "changed";
+    const line = await o.lineOf(r.offset);
+    return cancelled() ? null : { offset: r.offset, line, wrapped: r.wrapped };
 }
 
 export function createLargeFind(o: LargeFindParts) {
@@ -74,31 +92,24 @@ export function createLargeFind(o: LargeFindParts) {
             const kept = at && at.text === text() ? at : null;
             // From the match on show, else from the top of the screen.
             const top = kept ? kept.offset : (await o.topOffset()) - (backward ? 0 : 1);
-            const r = await findAligned({
-                call: o.call ?? searchOnSrv,
-                path: o.path(),
-                hex: p.hex,
-                size: o.size(),
-                cursor: top,
-                backward,
-                align: p.align,
-                cancelled: () => mine !== run,
-            });
+            const r = await searchFrom(o, p, top, backward, () => mine !== run);
             if (mine !== run || !r) return;
-            if (!r.found) {
+            if (r === "none") {
+                // The line marked from an earlier match would look like this search's answer.
+                setNeedle("");
+                at = null;
+                o.unmark();
                 setStatus("No match");
                 return;
             }
-            if (r.offset >= o.size()) {
+            if (r === "changed") {
                 setStatus("The file changed; search again");
                 return;
             }
-            const line = await o.lineOf(r.offset);
-            if (mine !== run) return;
             at = { offset: r.offset, text: text() };
             setNeedle(text());
-            o.show(line + 1);
-            setStatus(`Line ${(line + 1).toLocaleString("en-US")}${r.wrapped ? ", from the other end of the file" : ""}`);
+            o.show(r.line + 1);
+            setStatus(`Line ${(r.line + 1).toLocaleString("en-US")}${r.wrapped ? ", from the other end of the file" : ""}`);
         } catch (e) {
             if (mine === run) setStatus(`Couldn't search: ${e instanceof Error ? e.message : String(e)}`);
         } finally {

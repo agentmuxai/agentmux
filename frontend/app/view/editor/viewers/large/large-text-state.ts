@@ -116,6 +116,15 @@ function createLineFeed(props: LargeTextProps) {
     return { source, total, loaded, error, want, lineAt, retry, lineOf };
 }
 
+/** Scroll `grid` sideways, as little as the find needs, so that `hit` (a match in a line) shows in the middle. */
+export function revealSideways(grid: HTMLElement | undefined, hit: Element | null): void {
+    if (!grid || !hit) return;
+    const g = grid.getBoundingClientRect();
+    const h = hit.getBoundingClientRect();
+    if (h.left >= g.left && h.right <= g.right) return;
+    grid.scrollLeft += h.left - g.left - (g.width - h.width) / 2;
+}
+
 /** What a key does in the lines: the box or the find strip to go to, the first line to scroll to, or null for nothing. */
 export function keyTarget(key: string, mod: boolean, at: { first: number; fits: number; total: number }): "box" | "find" | number | null {
     if (mod && key === "g") return "box";
@@ -146,6 +155,8 @@ export function createLargeText(props: LargeTextProps) {
     const scroll = createLineScroll(lines, remembered.get(props.path) ?? 0);
     const [mark, setMark] = createSignal<number | null>(null);
     let lineBox: HTMLInputElement | undefined;
+    let gridEl: HTMLElement | undefined;
+    let wantReveal = false;
     const [badLine, setBadLine] = createSignal(false);
 
     // The lines on screen are read (and the page after them, so a slow scroll doesn't wait), and kept in mind.
@@ -176,8 +187,21 @@ export function createLargeText(props: LargeTextProps) {
         revision: () => props.revision,
         topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
         lineOf: feed.lineOf,
-        show: goTo,
+        show: (line) => {
+            wantReveal = true;
+            goTo(line);
+        },
+        unmark: () => setMark(null),
         focusGrid: scroll.focus,
+    });
+    // A match far along a line is scrolled into view sideways once its line is drawn.
+    createEffect(() => {
+        void feed.loaded();
+        void find.needle();
+        const line = mark();
+        if (!wantReveal || line == null || !feed.lineAt(line - 1)) return;
+        wantReveal = false;
+        revealSideways(gridEl, gridEl?.querySelector(".large-text-hit") ?? null);
     });
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.altKey) return;
@@ -207,6 +231,10 @@ export function createLargeText(props: LargeTextProps) {
     return {
         ...feed,
         ...scroll,
+        bind: (node: HTMLDivElement) => {
+            gridEl = node;
+            scroll.bind(node);
+        },
         lines,
         mark,
         badLine,
