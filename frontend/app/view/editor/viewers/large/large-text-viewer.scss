@@ -95,3 +95,52 @@
 .large-text-marked {
     background: var(--accent-bg-heavy);
 }
+
+// The text a find matched, in the line it was found in.
+.large-text-hit {
+    color: inherit;
+    background: var(--search-mark-current-bg);
+    border-radius: var(--radius-sm);
+}
+
+.large-text-find {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.large-text-find-input {
+    flex: 1 1 14em;
+    min-width: 10em;
+}
+
+// The arrows (and, with nothing to say yet, the close button) stay together when the strip wraps.
+.large-text-find-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 0 0 auto;
+}
+
+// The status and the close button wrap as one unit, so a narrow pane never leaves the button alone on a line.
+.large-text-find-tail {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1 1 12em;
+    min-width: 0;
+}
+
+.large-text-find-status {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.large-text-find-error {
+    color: var(--error-text-color);
+}

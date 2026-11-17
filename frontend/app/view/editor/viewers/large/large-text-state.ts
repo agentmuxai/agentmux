@@ -16,6 +16,7 @@ import type { ViewerBarProps } from "../viewer-bar";
 import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
 import { LineSource, type LineText } from "./line-source";
+import { createLargeFind } from "./large-find-state";
 import { createLineScroll } from "./line-scroll";
 
 export interface LargeTextProps {
@@ -101,7 +102,42 @@ function createLineFeed(props: LargeTextProps) {
         setError("");
         setLoaded((v) => v + 1);
     };
-    return { source, total, loaded, error, want, lineAt, retry };
+    /** The 0-based line that holds a byte of the file. */
+    const lineOf = async (offset: number): Promise<number> => {
+        const { path } = props;
+        const encoding = props.probe?.text?.encoding;
+        const r = await RpcApi.FileIndexLinesCommand(
+            TabRpcClient,
+            { path, encoding, from_line: 0, count: 0, at_offset: offset },
+            { timeout: INDEX_TIMEOUT_MS }
+        );
+        return r.line_at ?? 0;
+    };
+    return { source, total, loaded, error, want, lineAt, retry, lineOf };
+}
+
+/** What a key does in the lines: the box or the find strip to go to, the first line to scroll to, or null for nothing. */
+export function keyTarget(key: string, mod: boolean, at: { first: number; fits: number; total: number }): "box" | "find" | number | null {
+    if (mod && key === "g") return "box";
+    if (mod && key === "f") return "find";
+    if (mod && key !== "Home" && key !== "End") return null;
+    const page = Math.max(1, at.fits - 1);
+    switch (key) {
+        case "ArrowUp":
+            return at.first - 1;
+        case "ArrowDown":
+            return at.first + 1;
+        case "PageUp":
+            return at.first - page;
+        case "PageDown":
+            return at.first + page;
+        case "Home":
+            return 0;
+        case "End":
+            return at.total;
+        default:
+            return null;
+    }
 }
 
 export function createLargeText(props: LargeTextProps) {
@@ -133,36 +169,34 @@ export function createLargeText(props: LargeTextProps) {
             scroll.focus();
         }
     };
+    const find = createLargeFind({
+        path: () => props.path,
+        size: () => props.probe?.size ?? 0,
+        encoding: () => props.probe?.text?.encoding,
+        revision: () => props.revision,
+        topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
+        lineOf: feed.lineOf,
+        show: goTo,
+        focusGrid: scroll.focus,
+    });
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.altKey) return;
-        const mod = e.ctrlKey || e.metaKey;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-        const page = Math.max(1, scroll.fits() - 1);
-        const to = (() => {
-            if (mod && key === "g") return "box";
-            if (mod && key !== "Home" && key !== "End") return null;
-            switch (key) {
-                case "ArrowUp":
-                    return scroll.first() - 1;
-                case "ArrowDown":
-                    return scroll.first() + 1;
-                case "PageUp":
-                    return scroll.first() - page;
-                case "PageDown":
-                    return scroll.first() + page;
-                case "Home":
-                    return 0;
-                case "End":
-                    return lines();
-                default:
-                    return null;
-            }
-        })();
+        const to = keyTarget(key, e.ctrlKey || e.metaKey, { first: scroll.first(), fits: scroll.fits(), total: lines() });
         if (to == null || !lines()) return;
         e.preventDefault();
         e.stopPropagation();
         if (to === "box") lineBox?.select();
+        else if (to === "find") find.openStrip();
         else scroll.showLine(to);
+    };
+    /** Keys in the viewer bar: the find strip opens from the line box too. */
+    const onBarKeyDown = (e: KeyboardEvent): void => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+            e.preventDefault();
+            e.stopPropagation();
+            find.openStrip();
+        }
     };
 
     const facts = () => {
@@ -180,7 +214,9 @@ export function createLargeText(props: LargeTextProps) {
         goToTyped,
         clearBadLine: () => setBadLine(false),
         bindLineBox: (el: HTMLInputElement) => (lineBox = el),
+        find,
         onKeyDown,
+        onBarKeyDown,
         facts,
     };
 }
