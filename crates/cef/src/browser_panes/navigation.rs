@@ -87,6 +87,9 @@ impl BrowserPaneManager {
             b.stop_load();
             let url = crate::browser_pane::callbacks::main_frame_url(&b);
             crate::browser_pane::callbacks::set_pane_main_frame_loading(state, block_id, &b, &url, false);
+            // The stopped navigation never reaches a load end, so its timing entry would say "still on its way"
+            // (and a `wait` would believe it) until it went stale. The page on screen is the one that loaded.
+            crate::browser_pane::open_timing::forget(block_id);
         }
     }
 
