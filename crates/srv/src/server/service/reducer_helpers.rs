@@ -18,9 +18,31 @@ pub(crate) async fn dispatch_to_reducer(
     state: &AppState,
     cmd: agentmux_common::ipc::Command,
 ) -> Vec<agentmux_common::ipc::Event> {
+    dispatch_to_reducer_timed(state, cmd).await.0
+}
+
+/// Where a reducer dispatch spent its time: waiting for the reducer
+/// mutex (another command held it), and running the reducer itself.
+pub(crate) struct ReducerTiming {
+    pub lock_wait: std::time::Duration,
+    pub reducer: std::time::Duration,
+}
+
+/// [`dispatch_to_reducer`] that also says how long it waited for the
+/// reducer mutex and how long the reducer took. Used where a slow call
+/// has to be told apart as queue wait, reducer or persist (#47767).
+pub(crate) async fn dispatch_to_reducer_timed(
+    state: &AppState,
+    cmd: agentmux_common::ipc::Command,
+) -> (Vec<agentmux_common::ipc::Event>, ReducerTiming) {
+    let wait_start = std::time::Instant::now();
     let mut s = state.srv_state.lock().await;
+    let lock_wait = wait_start.elapsed();
     let ctx = crate::reducer::Ctx::new(None);
-    crate::reducer::update(&mut s, cmd, &ctx)
+    let run_start = std::time::Instant::now();
+    let events = crate::reducer::update(&mut s, cmd, &ctx);
+    let reducer = run_start.elapsed();
+    (events, ReducerTiming { lock_wait, reducer })
 }
 
 /// Publish each event on the srv broadcast bus. Failures (no

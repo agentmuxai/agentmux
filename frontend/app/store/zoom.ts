@@ -40,6 +40,17 @@ import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
 import { heldPaneZoom, holdPaneZoom, paneZoom, settlePaneZoom } from "./pane-zoom-local";
 import { captureZoomAnchor, lastPointer, type ZoomPoint } from "./zoom-anchor";
 import { clampZoom, DEFAULT_ZOOM, MIN_ZOOM, writePaneZoom, zoomMaxOf } from "./zoom-factor";
+import {
+    MAIN_PART,
+    splitSubject,
+    subjectId,
+    zoomLabelKey,
+    zoomMetaKey,
+    zoomPartSpec,
+    zoomSubjectAt,
+    zoomSubjectForKeys,
+    zoomSubjectsOf,
+} from "./zoom-parts";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 
@@ -68,8 +79,10 @@ export function ratioStepOf(blockId: string, notches: number): number | undefine
 // Zoom indicator visibility (auto-hide after 1.5s)
 export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<boolean>(false);
 export const [zoomIndicatorTextAtom, setZoomIndicatorText] = createSignal<string>("");
-/** The pane the amount belongs to, drawn centred on it; null for the window (All panes, the chrome zoom). */
+/** The subject (`subjectId`, zoom-parts.ts) the amount belongs to, drawn centred on it; null for the window (All panes, the chrome zoom). */
 export const [zoomIndicatorTargetAtom, setZoomIndicatorTarget] = createSignal<string | null>(null);
+/** The i18n key of the part's name the amount carries ("File tree 130%"); null for a pane drawn as one. */
+export const [zoomIndicatorLabelAtom, setZoomIndicatorLabel] = createSignal<string | null>(null);
 let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
 
 function roundZoom(factor: number): number {
@@ -78,7 +91,10 @@ function roundZoom(factor: number): number {
 
 // ── Per-pane zoom (terminal blocks) ───────────────────────────────
 
-function getBaseFontSize(blockId: string): number {
+function getBaseFontSize(subject: string): number {
+    const { blockId } = splitSubject(subject);
+    const partFontSize = zoomPartSpec(subject)?.baseFontSize;
+    if (partFontSize != null) return partFontSize;
     const blockOref = MOS.makeORef("block", blockId);
     const blockData = MOS.getObjectValue<Block>(blockOref);
     const metaFontSize = blockData?.meta?.["term:fontsize"];
@@ -99,7 +115,8 @@ function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
 // was an oversight in this allowlist, not a deliberate exclusion, and it
 // made the all-panes batch below silently skip a pane that individual
 // Ctrl+Scroll already zooms today via the exact same mechanism.
-function getBlockZoom(blockId: string): number | null {
+function getBlockZoom(subject: string): number | null {
+    const { blockId } = splitSubject(subject);
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
     // Which views take part is their `paneZoom` capability (Pane Tab
@@ -109,7 +126,8 @@ function getBlockZoom(blockId: string): number | null {
 
     const blockOref = MOS.makeORef("block", blockId);
     const blockData = MOS.getObjectValue<Block>(blockOref);
-    return heldPaneZoom(blockId) ?? blockData?.meta?.["term:zoom"] ?? 1.0;
+    const stored = (blockData?.meta as Record<string, unknown> | undefined)?.[zoomMetaKey(subject)];
+    return heldPaneZoom(subject) ?? (typeof stored === "number" ? stored : 1.0);
 }
 
 // Returns the actual clamped/rounded zoom that was written, so a caller
@@ -123,31 +141,33 @@ function getBlockZoom(blockId: string): number | null {
 //
 // The level is held locally (`pane-zoom-local.ts`) from this call until the write has settled, so a
 // pane that reads `paneZoom` shows it at once and the next step starts from it.
-function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
+function setBlockZoom(subject: string, factor: number, showIndicator: boolean = true): number {
     let seq = 0;
-    const newZoom = writePaneZoom((meta) => {
-        seq = holdPaneZoom(blockId, meta["term:zoom"] ?? DEFAULT_ZOOM);
+    const key = zoomMetaKey(subject);
+    const { blockId } = splitSubject(subject);
+    const newZoom = writePaneZoom((meta: Record<string, number | null>) => {
+        seq = holdPaneZoom(subject, meta[key] ?? DEFAULT_ZOOM);
         fireAndForget(async () => {
             try {
                 await setBlockMeta(blockId, meta);
-                settlePaneZoom(blockId, seq, false);
+                settlePaneZoom(subject, seq, false);
             } catch (e) {
-                settlePaneZoom(blockId, seq, true);
+                settlePaneZoom(subject, seq, true);
                 throw e;
             }
         });
-    }, factor, blockId);
+    }, factor, subject, key);
 
     // Suppressed by the all-panes stepper below, which shows one summary
     // toast for the whole gesture instead of one per pane.
     if (showIndicator) {
-        showZoomIndicator(`${Math.round(newZoom * 100)}%`, blockId);
+        showZoomIndicator(`${Math.round(newZoom * 100)}%`, subject);
     }
     return newZoom;
 }
 
 function stepZoom(
-    blockId: string,
+    subject: string,
     zoom: number,
     step: number,
     direction: 1 | -1,
@@ -156,11 +176,11 @@ function stepZoom(
     anchor: ZoomPoint | null = null,
     notches: number = 1
 ): number {
-    const baseFontSize = baseFontSizeOverride ?? getBaseFontSize(blockId);
+    const baseFontSize = baseFontSizeOverride ?? getBaseFontSize(subject);
     const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
-    const ratio = ratioStepOf(blockId, notches);
+    const ratio = ratioStepOf(subject, notches);
     let newZoom = ratio == null ? zoom + step * direction : direction === 1 ? zoom * ratio : zoom / ratio;
-    const limit = direction === 1 ? zoomMaxOf(blockId) : MIN_ZOOM;
+    const limit = direction === 1 ? zoomMaxOf(subject) : MIN_ZOOM;
     // A block that steps by ratio is not drawn in font-size units, so no step is skipped for landing on the same size.
     while (
         ratio == null &&
@@ -171,26 +191,26 @@ function stepZoom(
     }
     // Note what is under the pointer before the level changes, so the pane can put it back. A step
     // that lands on the same level (the limit) moves nothing, so there is nothing to hold.
-    if (Math.abs(clampZoom(roundZoom(newZoom), blockId) - zoom) >= 0.005) captureZoomAnchor(blockId, anchor);
-    return setBlockZoom(blockId, newZoom, showIndicator);
+    if (Math.abs(clampZoom(roundZoom(newZoom), subject) - zoom) >= 0.005) captureZoomAnchor(subject, anchor);
+    return setBlockZoom(subject, newZoom, showIndicator);
 }
 
 /** `anchor`: where the pointer is, so the content under it stays under it. */
-export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
-    const zoom = getBlockZoom(blockId);
+export function zoomBlockIn(subject: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
+    const zoom = getBlockZoom(subject);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, 1, true, undefined, anchor, notches);
+    stepZoom(subject, zoom, step, 1, true, undefined, anchor, notches);
 }
 
-export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
-    const zoom = getBlockZoom(blockId);
+export function zoomBlockOut(subject: string, step: number = WHEEL_STEP, anchor: ZoomPoint | null = null, notches?: number): void {
+    const zoom = getBlockZoom(subject);
     if (zoom == null) return;
-    stepZoom(blockId, zoom, step, -1, true, undefined, anchor, notches);
+    stepZoom(subject, zoom, step, -1, true, undefined, anchor, notches);
 }
 
 /** A block's zoom set to `level`, with nothing held: a fit button, which places the content itself. */
-export function zoomBlockTo(blockId: string, level: number): void {
-    setBlockZoom(blockId, level);
+export function zoomBlockTo(subject: string, level: number): void {
+    setBlockZoom(subject, level);
 }
 
 /**
@@ -201,13 +221,14 @@ export function zoomBlockTo(blockId: string, level: number): void {
  * pane capability can't tell the stepper.
  */
 export function zoomBlockByWheel(
-    blockId: string,
+    subject: string,
     deltaY: number,
     baseFontSize?: number,
     anchor: ZoomPoint | null = null
 ): void {
-    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
-    stepZoom(blockId, paneZoom(blockId, meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize, anchor, wheelNotches(deltaY));
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", splitSubject(subject).blockId))?.meta;
+    const level = paneZoom(subject, meta, zoomMetaKey(subject));
+    stepZoom(subject, level, WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize, anchor, wheelNotches(deltaY));
 }
 
 /**
@@ -235,7 +256,8 @@ export function usePaneZoomWheel(
             // Also stops CEF's own Ctrl+scroll page zoom.
             ev.preventDefault();
             ev.stopPropagation();
-            zoomBlockByWheel(id, ev.deltaY, baseFontSize, { clientX: ev.clientX, clientY: ev.clientY });
+            // The part under the pointer, for a pane whose parts zoom apart.
+            zoomBlockByWheel(zoomSubjectAt(ev.target, id), ev.deltaY, baseFontSize, { clientX: ev.clientX, clientY: ev.clientY });
         };
         target.addEventListener("wheel", onWheel, { passive: false, capture: true });
         onCleanup(() => target.removeEventListener("wheel", onWheel, { capture: true }));
@@ -253,12 +275,17 @@ export function usePaneZoomWheel(
 // them already is today — no new filtering logic, this just reuses that
 // existing guard for every block in the window instead of one.
 
+function allSubjects(): string[] {
+    return [...getAllBlockComponentModelEntries()].flatMap(([blockId]) => zoomSubjectsOf(blockId));
+}
+
 function stepAllPanes(step: number, direction: 1 | -1, anchor: ZoomPoint | null = null): void {
     let minZoom = Infinity;
     let maxZoom = -Infinity;
 
-    for (const [blockId] of getAllBlockComponentModelEntries()) {
-        const zoom = getBlockZoom(blockId);
+    // Every level of every pane: a pane with parts steps each part by its own level.
+    for (const subject of allSubjects()) {
+        const zoom = getBlockZoom(subject);
         if (zoom == null) continue; // not a zoomable pane type — leave untouched
 
         // Suppress the per-pane indicator: N panes stepping in one gesture
@@ -271,7 +298,7 @@ function stepAllPanes(step: number, direction: 1 | -1, anchor: ZoomPoint | null 
         // MuxObjUpdate event back. Re-reading here would see the STALE
         // pre-step value on every call (ReAgent P1, PR #3090).
         // Each pane takes the pointer if it is over it, else its own centre.
-        const newZoom = stepZoom(blockId, zoom, step, direction, false, undefined, anchor);
+        const newZoom = stepZoom(subject, zoom, step, direction, false, undefined, anchor);
         minZoom = Math.min(minZoom, newZoom);
         maxZoom = Math.max(maxZoom, newZoom);
     }
@@ -288,9 +315,9 @@ function stepAllPanes(step: number, direction: 1 | -1, anchor: ZoomPoint | null 
 /** Every zoomable pane in the window back to 100%, with one summary toast. */
 export function zoomAllPanesReset(): void {
     let any = false;
-    for (const [blockId] of getAllBlockComponentModelEntries()) {
-        if (getBlockZoom(blockId) == null) continue;
-        setBlockZoom(blockId, DEFAULT_ZOOM, false);
+    for (const subject of allSubjects()) {
+        if (getBlockZoom(subject) == null) continue;
+        setBlockZoom(subject, DEFAULT_ZOOM, false);
         any = true;
     }
     if (any) showZoomIndicator("All panes: 100%");
@@ -304,27 +331,44 @@ export function zoomAllPanesOut(step: number = WHEEL_STEP, anchor: ZoomPoint | n
     stepAllPanes(step, -1, anchor);
 }
 
-export function zoomIn(step: number = KEYBOARD_STEP): void {
+/**
+ * The subject a key or command zooms: `partId`'s level in the selected pane when named, else the part that
+ * last had the keyboard in it (a pane with no parts: the pane).
+ */
+function keyboardSubject(partId?: string): string | null {
     const blockId = getFocusedBlockId();
-    if (!blockId) return;
-    const zoom = getBlockZoom(blockId);
+    if (!blockId) return null;
+    return partId ? subjectId(blockId, partId === MAIN_PART ? null : partId) : zoomSubjectForKeys(blockId);
+}
+
+function stepByKeyboard(direction: 1 | -1, step: number, partId?: string): void {
+    const subject = keyboardSubject(partId);
+    if (!subject) return;
+    const zoom = getBlockZoom(subject);
     if (zoom == null) return;
     // The keyboard has no pointer: the last one seen, if it is over the pane, else the pane's centre.
-    stepZoom(blockId, zoom, step, 1, true, undefined, lastPointer());
+    stepZoom(subject, zoom, step, direction, true, undefined, lastPointer());
 }
 
-export function zoomOut(step: number = KEYBOARD_STEP): void {
-    const blockId = getFocusedBlockId();
-    if (!blockId) return;
-    const zoom = getBlockZoom(blockId);
-    if (zoom == null) return;
-    stepZoom(blockId, zoom, step, -1, true, undefined, lastPointer());
+/** `partId`: a part of the selected pane by name (the palette's "Zoom in file tree"); none: the part with the keyboard. */
+export function zoomIn(step: number = KEYBOARD_STEP, partId?: string): void {
+    stepByKeyboard(1, step, partId);
 }
 
-export function zoomReset(): void {
+export function zoomOut(step: number = KEYBOARD_STEP, partId?: string): void {
+    stepByKeyboard(-1, step, partId);
+}
+
+export function zoomReset(partId?: string): void {
+    const subject = keyboardSubject(partId);
+    if (subject) setBlockZoom(subject, DEFAULT_ZOOM);
+}
+
+/** Every part of the selected pane back to 100% ("Reset zoom in file tree and editor"). */
+export function zoomPaneReset(): void {
     const blockId = getFocusedBlockId();
     if (!blockId) return;
-    setBlockZoom(blockId, DEFAULT_ZOOM);
+    for (const subject of zoomSubjectsOf(blockId)) setBlockZoom(subject, DEFAULT_ZOOM, subject === blockId);
 }
 
 // ── Chrome zoom (title bar + status bar) ──────────────────────────
@@ -381,14 +425,18 @@ export function initChromeZoom(opts?: { fresh?: boolean }): void {
 
 // ── Shared helpers ────────────────────────────────────────────────
 
-/** Show the amount for `blockId`'s pane, centred on it; with no block it is the window's, centred on the window. */
-export function showZoomIndicator(text: string, blockId: string | null = null): void {
+/**
+ * Show the amount for `subject`, centred on it (the pane, or the part of it that zoomed, named in the text
+ * while the pane has parts on screen); with no subject it is the window's, centred on the window.
+ */
+export function showZoomIndicator(text: string, subject: string | null = null): void {
     if (zoomIndicatorTimeout) {
         clearTimeout(zoomIndicatorTimeout);
     }
     // One update, so a second pane's amount moves the box once, from where it was to the new pane.
     batch(() => {
-        setZoomIndicatorTarget(blockId);
+        setZoomIndicatorTarget(subject);
+        setZoomIndicatorLabel(subject == null ? null : zoomLabelKey(subject));
         setZoomIndicatorText(text);
         setZoomIndicatorVisible(true);
     });

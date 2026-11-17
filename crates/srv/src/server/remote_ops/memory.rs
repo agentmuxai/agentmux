@@ -47,7 +47,16 @@ async fn write(
 
 pub(super) async fn put(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {
     let entry: FleetEntry = parse("memory.global.put", params)?;
-    write(state, caller, move |store, actor| fleet::apply_put(store, &entry, actor)).await
+    let (id, name) = (entry.id.clone(), entry.name.clone());
+    let answer = write(state, caller, move |store, actor| fleet::apply_put(store, &entry, actor)).await?;
+    // An entry that was `machine` here only by default now follows the fleet: say which one, so a
+    // steward can see it and revert it from the entry's history.
+    if answer.get("outcome").and_then(Value::as_str) == Some("adopted") {
+        let from = caller.actor();
+        tracing::warn!(entry = %id, name = %name, from = %from, "fleet memory: replaced an entry that was machine-only by default; its old text is in its history");
+        super::fleet_sync::status::global().adopted(&id, &name, &from, agentmux_common::time::now_ms());
+    }
+    Ok(answer)
 }
 
 pub(super) async fn remove(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {

@@ -11,9 +11,12 @@
 //! follows the fleet by default.
 //!
 //! The first time the table is created, every entry that exists then gets a
-//! `machine` row: those entries were copied by hand between machines, may
-//! differ on purpose, and must not be overwritten by whichever machine pushes
-//! first. Flipping one to `fleet` is the owner's choice.
+//! `machine` row: those entries were copied by hand between machines and may
+//! differ on purpose, so a push does not overwrite them silently. Such a row is
+//! a default, not a choice: `chosen` is 0 on it, and 1 on a row an owner set
+//! with [`Store::bundle_scope_set`]. A newer write from the fleet replaces an
+//! entry whose `machine` row was only the default (and the entry then follows
+//! the fleet); a `machine` row an owner chose is never overwritten.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -27,13 +30,21 @@ pub const SCOPE_MACHINE: &str = "machine";
 
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS db_bundle_scope (
         bundle_id TEXT PRIMARY KEY,
-        scope TEXT NOT NULL
+        scope TEXT NOT NULL,
+        chosen INTEGER NOT NULL DEFAULT 0
     );";
 
 /// Create the table if it is missing, marking the entries that already exist as
-/// `machine`. A no-op once the table is there.
+/// `machine`, and add the `chosen` column to a table made before it. A no-op
+/// once both are there. Rows that exist when the column is added count as
+/// defaults: only a row set after this build is known to be an owner's choice.
 fn ensure(conn: &rusqlite::Connection) -> Result<(), StoreError> {
     if table_exists(conn, "db_bundle_scope")? {
+        let has_chosen: i64 =
+            conn.query_row("SELECT COUNT(*) FROM pragma_table_info('db_bundle_scope') WHERE name = 'chosen'", [], |r| r.get(0))?;
+        if has_chosen == 0 {
+            conn.execute_batch("ALTER TABLE db_bundle_scope ADD COLUMN chosen INTEGER NOT NULL DEFAULT 0;")?;
+        }
         return Ok(());
     }
     let tx = conn.unchecked_transaction()?;
@@ -73,7 +84,7 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Set an entry's scope to `fleet` or `machine`.
+    /// Set an entry's scope to `fleet` or `machine`, as its owner's choice.
     pub fn bundle_scope_set(&self, id: &str, scope: &str) -> Result<(), StoreError> {
         if scope != SCOPE_FLEET && scope != SCOPE_MACHINE {
             return Err(StoreError::Other(format!("scope must be \"{SCOPE_FLEET}\" or \"{SCOPE_MACHINE}\", not \"{scope}\"")));
@@ -81,9 +92,33 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         ensure(&conn)?;
         conn.execute(
-            "INSERT INTO db_bundle_scope (bundle_id, scope) VALUES (?1, ?2)
-             ON CONFLICT(bundle_id) DO UPDATE SET scope = excluded.scope",
+            "INSERT INTO db_bundle_scope (bundle_id, scope, chosen) VALUES (?1, ?2, 1)
+             ON CONFLICT(bundle_id) DO UPDATE SET scope = excluded.scope, chosen = 1",
             params![id, scope],
+        )?;
+        Ok(())
+    }
+
+    /// Whether the entry is `machine` only because the scope table was created while it existed,
+    /// and no owner has set it since.
+    pub fn bundle_scope_is_default_machine(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        ensure(&conn)?;
+        let row: Option<(String, i64)> = conn
+            .query_row("SELECT scope, chosen FROM db_bundle_scope WHERE bundle_id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
+        Ok(matches!(row, Some((scope, 0)) if scope == SCOPE_MACHINE))
+    }
+
+    /// Make an entry follow the fleet, without recording it as an owner's choice: the way a
+    /// default `machine` row is lifted when the fleet's newer write replaces the entry.
+    pub fn bundle_scope_follow_fleet(&self, id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        ensure(&conn)?;
+        conn.execute(
+            "INSERT INTO db_bundle_scope (bundle_id, scope, chosen) VALUES (?1, ?2, 0)
+             ON CONFLICT(bundle_id) DO UPDATE SET scope = excluded.scope, chosen = 0",
+            params![id, SCOPE_FLEET],
         )?;
         Ok(())
     }
@@ -120,6 +155,40 @@ mod tests {
         store.bundle_upsert(&bundle("later")).unwrap();
         store.bundle_scope_ensure().unwrap();
         assert_eq!(store.bundle_scope_get("later").unwrap(), SCOPE_FLEET, "a second ensure must not mark it");
+    }
+
+    #[test]
+    fn a_machine_row_made_by_the_migration_is_a_default_and_one_an_owner_sets_is_a_choice() {
+        let store = Store::open_in_memory().unwrap();
+        store.bundle_upsert(&bundle("old")).unwrap();
+        store.bundle_upsert(&bundle("kept")).unwrap();
+        store.bundle_scope_ensure().unwrap();
+        store.bundle_scope_set("kept", SCOPE_MACHINE).unwrap();
+
+        assert!(store.bundle_scope_is_default_machine("old").unwrap());
+        assert!(!store.bundle_scope_is_default_machine("kept").unwrap(), "the owner chose it");
+        assert!(!store.bundle_scope_is_default_machine("never-written").unwrap(), "no row is fleet, not a default machine row");
+
+        store.bundle_scope_follow_fleet("old").unwrap();
+        assert_eq!(store.bundle_scope_get("old").unwrap(), SCOPE_FLEET);
+        assert!(!store.bundle_scope_is_default_machine("old").unwrap());
+    }
+
+    #[test]
+    fn a_table_made_before_the_chosen_column_gets_it_and_its_rows_count_as_defaults() {
+        let store = Store::open_in_memory().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE db_bundle_scope (bundle_id TEXT PRIMARY KEY, scope TEXT NOT NULL);
+                 INSERT INTO db_bundle_scope VALUES ('a', 'machine'), ('b', 'fleet');",
+            )
+            .unwrap();
+        }
+        assert!(store.bundle_scope_is_default_machine("a").unwrap());
+        assert_eq!(store.bundle_scope_get("b").unwrap(), SCOPE_FLEET);
+        store.bundle_scope_set("a", SCOPE_MACHINE).unwrap();
+        assert!(!store.bundle_scope_is_default_machine("a").unwrap());
     }
 
     #[test]

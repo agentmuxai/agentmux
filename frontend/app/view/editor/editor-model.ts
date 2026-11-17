@@ -60,6 +60,7 @@ import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FilePro
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
+import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeZoomOf } from "./editor-zoom-parts";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
@@ -97,9 +98,6 @@ export interface OpenFileOpts {
     page?: number;
 }
 const META_SCRATCH = "editor:scratch";
-const TREE_WIDTH_DEFAULT = 240;
-const TREE_WIDTH_MIN = 150;
-const TREE_WIDTH_MAX = 600;
 const PREVIEW_HEIGHT_DEFAULT = 300;
 const PREVIEW_HEIGHT_MIN = 80;
 const PREVIEW_HEIGHT_MAX = 1200;
@@ -221,6 +219,8 @@ export class EditorViewModel {
     meta: Accessor<MetaType | undefined>;
     private ctx: PaneTabHostContext;
     zoomAtom!: Accessor<number>;
+    /** The file tree's own zoom (`editor:tree_zoom`); the document's is `zoomAtom`. */
+    treeZoomAtom!: Accessor<number>;
 
     /** The line pane.open asked the initial file to open at, until the view
      *  has moved the cursor there (takeOpenAtLine). */
@@ -454,9 +454,8 @@ export class EditorViewModel {
         // Per-pane zoom (PR #1084). Wrapped in useBlockAtom (which calls
         // createRoot under the hood) — a bare createMemo here wouldn't have
         // a tracking owner and would snapshot once.
-        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => paneZoom(blockId, this.meta())),
-        );
+        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () => createMemo<number>(() => paneZoom(blockId, this.meta())));
+        this.treeZoomAtom = useBlockAtom(blockId, "editor-tree-zoom", () => createMemo<number>(() => treeZoomOf(blockId, this.meta())));
 
         // Pane title — full file path of active tab, with `*` for dirty.
         // Wrap in useBlockAtom for the same reason as tabsAtom/activeIdAtom —
@@ -483,13 +482,14 @@ export class EditorViewModel {
         // Restore persisted tree state from block meta.
         const meta = (mediaPatch ? applyMetaPatch(rawMeta, mediaPatch) : rawMeta) as MetaType | undefined;
         this._treeExpanded[1](initialTreeExpanded(meta));
+        seedTreeZoom(meta, (patch) => void this.persistMeta(patch));
         if (typeof meta?.[META_TREE_EXPANDED] !== "boolean") queueMicrotask(() => void this.persistMeta({ [META_TREE_EXPANDED]: this._treeExpanded[0]() }));
         if (meta?.[META_SHOW_HIDDEN] === true) {
             this._showHidden[1](true);
         }
         const persistedWidth = meta?.[META_TREE_WIDTH];
         if (typeof persistedWidth === "number") {
-            this._treeWidth[1](clampTreeWidth(persistedWidth));
+            this._treeWidth[1](clampTreeWidth(persistedWidth, Number.POSITIVE_INFINITY));
         }
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
@@ -1357,8 +1357,9 @@ export class EditorViewModel {
         return openRemoteFile(this, host, path);
     }
 
-    setTreeWidth(width: number): void {
-        this._treeWidth[1](clampTreeWidth(width));
+    /** `width` is the tree's at 100%; `zoom` is the tree's level while it is dragged: the column is drawn at least TREE_WIDTH_MIN wide. */
+    setTreeWidth(width: number, zoom = 1): void {
+        this._treeWidth[1](clampTreeWidth(width, zoom));
     }
 
     async commitTreeWidth(): Promise<void> {
@@ -1481,11 +1482,6 @@ export class EditorViewModel {
         this._encodingByTab.clear();
         unregisterEditorPane(this.blockId);
     }
-}
-
-function clampTreeWidth(w: number): number {
-    if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
-    return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
 }
 
 function clampPreviewHeight(h: number): number {

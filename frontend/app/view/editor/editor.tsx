@@ -5,6 +5,7 @@
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 import { editorSplitBlockDef } from "./editor-split";
+import { EDITOR_ZOOM } from "./editor-zoom-parts";
 
 /** The editor as a native pane tab (Pane Tab contract Phase 2c). */
 export const editorPaneTab = lazyPaneTab({
@@ -21,7 +22,7 @@ export const editorPaneTab = lazyPaneTab({
     // remounting loses the cursor, scroll and undo. Zooms from a 13px base.
     // A split opens an empty editor with this one's settings, not a copy of
     // its documents (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
-    capabilities: { lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true, splitBlockDef: editorSplitBlockDef },
+    capabilities: { lifecycle: "keepAlive", paneZoom: EDITOR_ZOOM, noPadding: true, splitBlockDef: editorSplitBlockDef },
     members: ["liveTitle", "headerText", "contextMenu", "focus"],
     load: () => import("./editor-instance"),
 });

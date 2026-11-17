@@ -50,6 +50,7 @@ mod hidden_secrets;
 mod icon_hints;
 pub mod key_typing;
 pub mod last_input;
+pub mod locate;
 pub mod nav_settle;
 mod orphan_labels;
 pub mod page_state;
@@ -99,6 +100,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
             post(act::set_files_route).layer(act::set_files_body_limit()),
         )
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
+        .route("/agentmux/browser/locate", post(locate::locate_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
         .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
         .route("/agentmux/browser/card_form", post(vault_card_form::card_form_route))

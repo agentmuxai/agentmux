@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .browser-pane-favicon {
     width: 14px;
@@ -206,9 +207,7 @@ $browser-nav-stack-below: 388px;
     margin-top: 2px;
     max-height: 360px;
     overflow-y: auto;
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    @include menu-frame.menu-surface;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
 }

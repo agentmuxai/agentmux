@@ -31,7 +31,18 @@ pub(crate) enum Refresh {
     NotClaude,
     /// No folder on the pane, or no startup file of AgentMux's in it: a user's own project is left as it is.
     NotOurs,
+    /// The pane or its agent's definition is gone, so nothing is known about the pane's folder.
+    Unknown,
     Failed,
+}
+
+impl Refresh {
+    /// Whether the pane was a Claude agent whose folder was looked at, so another pane in the same folder would meet
+    /// the same file and is not visited again. A pane that was not (another provider, a pane or definition that is
+    /// gone) leaves the folder to the next pane.
+    fn handled_the_folder(self) -> bool {
+        !matches!(self, Refresh::NotClaude | Refresh::Unknown)
+    }
 }
 
 /// Starts the watcher.
@@ -91,32 +102,50 @@ fn fingerprint(id_store: &Store) -> Option<u64> {
 /// Refreshes the startup file of every running agent pane, once per folder.
 fn refresh_running(state: &AppState) {
     let Ok(defs) = state.mstore.agent_def_list() else { return };
-    let (mut written, mut seen_dirs) = (0usize, std::collections::HashSet::new());
-    for def in &defs {
-        for block_id in crate::backend::worker_notes::live_panes_of(&state.mstore, &def.id) {
-            let Some(cwd) = pane_cwd(&state.mstore, &block_id) else { continue };
-            if seen_dirs.insert(cwd) && refresh_pane(state, &block_id) == Refresh::Written {
-                written += 1;
-            }
-        }
-    }
+    let panes: Vec<String> = defs.iter().flat_map(|def| crate::backend::worker_notes::live_panes_of(&state.mstore, &def.id)).collect();
+    let written = refresh_panes(state, &panes);
     if written > 0 {
         tracing::info!(files = written, "startup refresh: Global Memory changed, startup files rewritten");
     }
 }
 
+/// Refreshes the startup file of each pane in turn, once per folder, and returns how many it wrote. A folder counts
+/// as done only after a Claude pane has been looked at in it: a pane of another provider that comes first must not
+/// use it up and leave a Claude pane in the same folder with a stale file.
+fn refresh_panes(state: &AppState, panes: &[String]) -> usize {
+    let (mut written, mut seen_dirs) = (0usize, std::collections::HashSet::new());
+    for block_id in panes {
+        let Some(cwd) = pane_cwd(&state.mstore, block_id) else { continue };
+        if seen_dirs.contains(&cwd) {
+            continue;
+        }
+        let outcome = refresh_pane(state, block_id);
+        if outcome.handled_the_folder() {
+            seen_dirs.insert(cwd);
+        }
+        if outcome == Refresh::Written {
+            written += 1;
+        }
+    }
+    written
+}
+
+/// The pane's folder as a path that exists on this machine. `agent.open` stores a default folder as
+/// `~/.agentmux/agents/<slug>`, unexpanded, and the launch expands it when it writes the file.
 fn pane_cwd(mstore: &Store, block_id: &str) -> Option<String> {
     let block = mstore.get::<Block>(block_id).ok().flatten()?;
-    Some(obj::meta_get_string(&block.meta, "cmd:cwd", "").trim().to_string()).filter(|cwd| !cwd.is_empty())
+    let raw = obj::meta_get_string(&block.meta, "cmd:cwd", "");
+    let raw = raw.trim();
+    (!raw.is_empty()).then(|| crate::backend::base::expand_home_dir_safe(raw).to_string_lossy().into_owned())
 }
 
 /// Re-renders the pane's startup file from the agent's definition, the way its launch did, through the writer that
 /// never touches a file AgentMux does not own.
 pub(crate) fn refresh_pane(state: &AppState, block_id: &str) -> Refresh {
-    let Some(block) = state.mstore.get::<Block>(block_id).ok().flatten() else { return Refresh::NotOurs };
+    let Some(block) = state.mstore.get::<Block>(block_id).ok().flatten() else { return Refresh::Unknown };
     let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
     let Some(dir) = pane_cwd(&state.mstore, block_id) else { return Refresh::NotOurs };
-    let Ok(Some(def)) = state.mstore.agent_def_get(&agent_id) else { return Refresh::NotOurs };
+    let Ok(Some(def)) = state.mstore.agent_def_get(&agent_id) else { return Refresh::Unknown };
     let provider = state.id_store.resolve_effective_provider_id(&def);
     if crate::backend::providers::resolve_provider_alias(&provider) != "claude" {
         return Refresh::NotClaude;
@@ -125,7 +154,11 @@ pub(crate) fn refresh_pane(state: &AppState, block_id: &str) -> Refresh {
     if !has_an_agentmux_startup_file(dir) {
         return Refresh::NotOurs;
     }
-    let files = match crate::server::picker_config::launch_files(&state.mstore, &state.id_store, &state.identity_store, &agent_id, None, &dir.to_string_lossy()) {
+    // The name the pane was launched under fills `{{AGENT}}` and `{{AGENT_DISPLAY}}`, as it did when the file was
+    // first written; the whole file is replaced here, so the definition's own name would overwrite it.
+    let launched_name = obj::meta_get_string(&block.meta, "agentName", "");
+    let instance_name = Some(launched_name.as_str()).filter(|n| !n.trim().is_empty());
+    let files = match crate::server::picker_config::launch_files(&state.mstore, &state.id_store, &state.identity_store, &agent_id, instance_name, &dir.to_string_lossy()) {
         Ok(files) => files,
         Err(e) => {
             tracing::warn!(agent_id = %agent_id, error = %e, "startup refresh: could not render the startup file");

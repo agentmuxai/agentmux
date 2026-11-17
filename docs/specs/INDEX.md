@@ -254,7 +254,9 @@ than none. Add the line when you touch one and know which area it belongs to.
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
 | [`SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17`](SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md) | Spec: Memory after a compaction or a rebuilt session: an index of Personal Memory, nothing sent twice, nothing cut silently | active | 2026-11-17 |  |
+| [`SPEC_MENU_SURFACES_STAND_OUT_2026_11_17`](SPEC_MENU_SURFACES_STAND_OUT_2026_11_17.md) | Spec: menus that stand out from the background, in every theme | implemented | 2026-11-17 |  |
 | [`SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16`](SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md) | Spec: an Anthropic API key as an account in the agent pane's menu (first slice) | active | 2026-11-16 |  |
+| [`SPEC_EDITOR_TREE_AND_EDITOR_SEPARATE_ZOOM_2026_11_16`](SPEC_EDITOR_TREE_AND_EDITOR_SEPARATE_ZOOM_2026_11_16.md) | SPEC: the Editor's file tree and the editor zoom separately | active | 2026-11-16 |  |
 | [`SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16`](SPEC_HEADLESS_RENAME_AND_PER_PLATFORM_2026_11_16.md) | Spec: AgentMux Headless: one name for the server package, offered next to Standard on Windows, macOS and Linux (task #2598, build #2599) | active | 2026-11-16 |  |
 | [`SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16`](SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16.md) | Spec: hour 2,000 is as fast as hour 1: no degradation over a session's life, with budgets and local telemetry that find a slow decline | active | 2026-11-16 |  |
 | [`SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16`](SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md) | SPEC: the shared palette becomes 12 evenly spaced hues plus Black and White (14 slots, down from 16) | active | 2026-11-16 |  |

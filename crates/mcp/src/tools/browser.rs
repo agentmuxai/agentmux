@@ -24,6 +24,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "BrowserNavigate" => run_navigate(arguments, cx).await,
         "BrowserBack" | "BrowserForward" | "BrowserReload" => run_history(name, arguments, cx).await,
         "BrowserZoom" => super::browser_zoom::run_zoom(arguments, cx).await,
+        "BrowserLocate" => super::browser_locate::run_locate(arguments, cx).await,
+        "BrowserClickAt" => super::browser_locate::run_click_at(arguments, cx).await,
         "BrowserEval" => run_eval(arguments, cx).await,
         "BrowserDispatchKey" => run_dispatch_key(arguments, cx).await,
         "BrowserTerminal" => run_terminal(arguments, cx).await,
@@ -206,7 +208,7 @@ async fn run_capture(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     browser_capture(cx, auth, pane_arg(arguments), arguments).await
 }
 
-async fn run_act(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+pub(super) async fn run_act(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     require_agent_env(local_url, auth_key, block_id)?;
     let auth = sign_ui_automation_auth()?;

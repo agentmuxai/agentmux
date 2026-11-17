@@ -32,6 +32,29 @@ describe("zoomIndicatorCenter", () => {
     });
 });
 
+describe("zoomIndicatorCenter inside a pane body", () => {
+    // A tree column 252 px wide at the left of a 700 px pane that starts at x = 100; the amount is wider than the column.
+    const column = { x: 100, y: 40, width: 252, height: 800 };
+    const body = { x: 100, y: 40, width: 700, height: 800 };
+    const wide = { width: 369, height: 90 };
+
+    it("moves a part's amount right so it stays inside the pane instead of crossing the pane next to it", () => {
+        expect(zoomIndicatorCenter(column, wide, WINDOW, body)).toEqual({ x: 284.5, y: 440 });
+        // Without the pane body: centred on the column, 58.5 px past the pane's left edge.
+        expect(zoomIndicatorCenter(column, wide, WINDOW)).toEqual({ x: 226, y: 440 });
+    });
+
+    it("keeps the amount inside a pane body on the right of the window", () => {
+        const right = { x: 1000, y: 40, width: 600, height: 800 };
+        expect(zoomIndicatorCenter({ x: 1000, y: 40, width: 100, height: 800 }, wide, WINDOW, right)).toEqual({ x: 1184.5, y: 440 });
+    });
+
+    it("is the middle of the pane body when the amount is wider than the body", () => {
+        expect(zoomIndicatorCenter(column, wide, WINDOW, { x: 100, y: 40, width: 300, height: 800 })).toEqual({ x: 250, y: 440 });
+        expect(zoomIndicatorCenter(column, wide, WINDOW, { x: 100, y: 40, width: 369, height: 800 })).toEqual({ x: 284.5, y: 440 });
+    });
+});
+
 describe("paneBodyBox", () => {
     const rect = (x: number, y: number, width: number, height: number) => () =>
         ({ x, y, width, height, left: x, top: y, right: x + width, bottom: y + height, toJSON() {} }) as DOMRect;

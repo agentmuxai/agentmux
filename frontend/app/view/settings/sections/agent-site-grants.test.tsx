@@ -33,6 +33,7 @@ vi.mock("@/app/store/mps", () => ({
 vi.mock("@/app/store/ws", () => ({ addWSReconnectHandler: () => {} }));
 
 import { AgentSiteGrants } from "./agent-site-grants";
+import { completeGrants } from "./agent-site-grants-model";
 
 const agent = (slug: string, name: string) => ({ id: `id-${slug}`, slug, name });
 const row = (over: Partial<{ id: string; agent: string; origins: string[]; powers: string[] }> = {}) => ({
@@ -132,6 +133,30 @@ describe("AgentSiteGrants", () => {
         fireEvent.change(screen.getByRole("combobox", { name: "Agent to give a standing grant" }), { target: { value: "naki-2" } });
         fireEvent.click(button);
         await waitFor(() => expect(preset).toHaveBeenCalledWith({}, { preset: "google-cloud-shell", agent: "naki-2" }));
+    });
+
+    it("shows an empty list, not an error, when an older srv leaves fields out of its answer", async () => {
+        // A packaged backend older than this build knows no presets, powers, permissions or pause state.
+        list.mockResolvedValue({ rows: [] });
+        render(() => <AgentSiteGrants />);
+        expect(await screen.findByText(/No agent has a standing grant/)).toBeInTheDocument();
+        expect(screen.queryByRole("alert")).toBeNull();
+        cleanup();
+        // A row without its own lists, and a list that is missing entirely.
+        list.mockResolvedValue({ rows: [{ id: "r1", agent: "naki-2", granted_at_ms: Date.now() }] });
+        render(() => <AgentSiteGrants />);
+        expect(await screen.findByRole("button", { name: /Revoke Naki-2/ })).toBeInTheDocument();
+        cleanup();
+        list.mockResolvedValue({});
+        render(() => <AgentSiteGrants />);
+        expect(await screen.findByText(/No agent has a standing grant/)).toBeInTheDocument();
+    });
+
+    it("completes a partial answer with empty lists", () => {
+        expect(completeGrants(undefined)).toEqual({ rows: [], presets: [], powers: [], permission_kinds: [], permissions: [] });
+        const kept = completeGrants({ rows: [{ id: "r", agent: "a", origins: ["https://x.test"], powers: ["terminal"], granted_at_ms: 1 }], powers: ["terminal"] });
+        expect(kept.rows[0]).toMatchObject({ origins: ["https://x.test"], powers: ["terminal"] });
+        expect(kept.powers).toEqual(["terminal"]);
     });
 
     it("shows what went wrong when srv refuses", async () => {

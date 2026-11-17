@@ -20,7 +20,7 @@ export const MAX_PATTERN_BYTES = 256;
 
 export type FindPattern = { hex: string; length: number } | { error: string } | null;
 
-function hexOfBytes(bytes: number[]): string {
+export function hexOfBytes(bytes: number[]): string {
     return bytes.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
 }
 

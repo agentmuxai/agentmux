@@ -14,6 +14,8 @@ import { keyLabel } from "@/app/keybindings";
 import { For, Show, type JSX } from "solid-js";
 import { ViewerBar } from "../viewer-bar";
 import { contentHeight, ROW_H } from "../hex/hex-layout";
+import { LargeFindBar } from "./large-find-bar";
+import { splitHits } from "./large-find";
 import { createLargeText, type LargeTextProps, type LargeTextState } from "./large-text-state";
 import "./large-text-viewer.scss";
 
@@ -22,7 +24,7 @@ export type { LargeTextProps } from "./large-text-state";
 export function LargeTextViewer(props: LargeTextProps): JSX.Element {
     const t = createLargeText(props);
     return (
-        <div class="editor-viewer large-text-viewer" style={{ "--large-line-h": `${ROW_H}px` }}>
+        <div class="editor-viewer large-text-viewer" style={{ "--large-line-h": `${ROW_H}px` }} onKeyDown={t.onBarKeyDown}>
             <ViewerBar {...props.bar} facts={t.facts()} start={<LargeTextTools t={t} />} />
             <Show when={t.error()}>
                 <div class="large-text-error" role="alert">
@@ -31,6 +33,9 @@ export function LargeTextViewer(props: LargeTextProps): JSX.Element {
                         Try again
                     </Button>
                 </div>
+            </Show>
+            <Show when={t.find.open()}>
+                <LargeFindBar find={t.find} />
             </Show>
             <div class="large-text-body">
                 <Show when={t.total() !== 0} fallback={<div class="editor-viewer-message">This file is empty.</div>}>
@@ -85,13 +90,18 @@ function LineGrid(props: { t: LargeTextState }): JSX.Element {
 
 function Line(props: { t: LargeTextState; n: number }): JSX.Element {
     const line = () => props.t.lineAt(props.n);
+    // The text found is marked in the line it was found in.
+    const parts = () => {
+        const text = line()?.text ?? "";
+        return props.t.mark() === props.n + 1 ? splitHits(text, props.t.find.needle()) : [{ text, hit: false }];
+    };
     return (
         <div class="large-text-line" classList={{ "large-text-marked": props.t.mark() === props.n + 1 }} data-line={props.n + 1}>
             <span class="large-text-number" aria-hidden="true">
                 {props.n + 1}
             </span>
             <span class="large-text-text">
-                {line()?.text}
+                <For each={parts()}>{(p) => (p.hit ? <mark class="large-text-hit">{p.text}</mark> : p.text)}</For>
                 <Show when={line()?.hidden}>
                     <span class="large-text-hidden">…({line()?.hidden})</span>
                 </Show>

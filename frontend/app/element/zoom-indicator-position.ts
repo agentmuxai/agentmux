@@ -6,6 +6,8 @@
  * window. "All panes" and the chrome zoom name no pane and keep the window's centre (the stylesheet's 50% / 50%).
  */
 
+import { MAIN_PART, splitSubject, zoomPartElement } from "@/app/store/zoom-parts";
+
 export interface Box {
     x: number;
     y: number;
@@ -42,11 +44,24 @@ function centreOn(start: number, length: number, size: number, view: number): nu
  * that is not on screen. A pane partly outside the window counts by its visible part, a pane smaller than the
  * indicator by its centre moved the least that fits it inside the window.
  */
-export function zoomIndicatorCenter(pane: Box | null, size: Size, viewport: Size): Point | null {
+export function zoomIndicatorCenter(pane: Box | null, size: Size, viewport: Size, within: Box | null = null): Point | null {
     if (pane == null) return null;
     const x = centreOn(pane.x, pane.width, size.width, viewport.width);
     const y = centreOn(pane.y, pane.height, size.height, viewport.height);
-    return x == null || y == null ? null : { x, y };
+    if (x == null || y == null) return null;
+    if (within == null) return { x, y };
+    return {
+        x: keepIn(x, size.width, within.x, within.x + within.width, viewport.width),
+        y: keepIn(y, size.height, within.y, within.y + within.height, viewport.height),
+    };
+}
+
+/** One axis: `centre` moved the least that keeps `size` inside `[from, to]` (cut to the window); the middle of it when it does not fit. */
+function keepIn(centre: number, size: number, from: number, to: number, view: number): number {
+    const lo = Math.max(from, 0);
+    const hi = Math.min(to, view);
+    if (hi - lo <= size) return (lo + hi) / 2;
+    return clamp(centre, lo + size / 2, hi - size / 2);
 }
 
 /** The area of `r` that is inside the window. */
@@ -80,4 +95,17 @@ export function paneBodyBox(
     const content = frame.querySelector(".block-content");
     const r = (content ?? frame).getBoundingClientRect();
     return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+}
+
+/**
+ * The box a zoom amount is centred on: the part of the pane that zoomed (`subject`, zoom-parts.ts) while the
+ * pane has parts on screen, else the pane's body. A part is often narrower than the amount: the pane body
+ * (`paneBodyBox`) is what the amount must stay inside, so it never covers the pane next to it.
+ */
+export function zoomTargetBox(subject: string): Box | null {
+    const { blockId, partId } = splitSubject(subject);
+    const part = zoomPartElement(blockId, partId ?? MAIN_PART);
+    const r = part?.getBoundingClientRect();
+    if (r && r.width > 0 && r.height > 0) return { x: r.x, y: r.y, width: r.width, height: r.height };
+    return paneBodyBox(blockId);
 }

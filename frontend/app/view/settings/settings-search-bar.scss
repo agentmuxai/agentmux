@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .settings-search-bar {
     position: relative;
@@ -20,18 +21,10 @@
     right: 16px;
     top: calc(100% - 1px);
     z-index: var(--z-search-results);
-    // --panel-bg-color is deliberately translucent app-wide (the
-    // window-opacity feature) — wrong choice for a floating overlay that
-    // needs to read as solid over the settings rows behind it (reported:
-    // dropdown background see-through, hard to read). --modal-bg-color is
-    // the token this codebase already uses for exactly that (see
-    // _recent-sessions.scss's .agent-row-menu) — a real opaque color per
-    // theme, not an alpha-blended one.
-    background: var(--modal-bg-color);
-    border: 1px solid var(--border-color);
+    // The menu surface is opaque at any window opacity, so the settings rows behind never show through.
+    @include menu-frame.menu-surface;
     max-height: 320px;
     overflow-y: auto;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .settings-search-result {

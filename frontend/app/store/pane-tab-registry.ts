@@ -26,6 +26,29 @@ import { createSignal, type Accessor, type JSX } from "solid-js";
 /** What a view type declares instead of shared code checking its name
  *  (Pane Tab contract Phase 5, spec §2.4 #5). Every field is optional; the
  *  default is what an unlisted view type always got. */
+/**
+ * A part of a pane that zooms on its own (the Editor's file tree beside the document, Files' Places).
+ * The pane's own level (`term:zoom`) belongs to its main part; each part here keeps a level under its
+ * own meta key. Mark the part's element `data-zoom-part="<id>"` (`zoomPartAttrs`, store/zoom-parts.ts).
+ */
+export interface ZoomPartSpec {
+    id: string;
+    /** Block meta key holding this part's level. */
+    metaKey: string;
+    /** i18n key of the name the zoom amount shows ("File tree 130%"). */
+    labelKey: string;
+    /** The font size the part is drawn at (the stepper skips a step that lands on the same size). */
+    baseFontSize?: number;
+}
+
+export interface PaneZoomCapability {
+    baseFontSize?: number;
+    /** Parts that zoom apart from the main one, which keeps `term:zoom`. */
+    parts?: readonly ZoomPartSpec[];
+    /** i18n key of the main part's name, shown when the pane has parts on screen. */
+    mainLabelKey?: string;
+}
+
 export interface PaneTabCapabilities {
     /** Per TAB, never per pane: a `keepAlive` tab stays mounted while inactive,
      *  a `remount` tab (the default) is unmounted. */
@@ -52,7 +75,7 @@ export interface PaneTabCapabilities {
     /** Takes part in per-pane zoom (`term:zoom`, Ctrl+Scroll, the all-panes
      *  batch), scaling from `baseFontSize` (default 15) unless the block sets
      *  `term:fontsize`. */
-    paneZoom?: { baseFontSize?: number };
+    paneZoom?: PaneZoomCapability;
     /** Accepts typed/pasted text, so the pane menu offers Paste into it. */
     acceptsInput?: boolean;
     /** Ctrl+key combinations belong to the content (a shell), so app
