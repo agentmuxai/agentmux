@@ -721,3 +721,41 @@ async fn a_message_that_arrives_while_the_replacement_waits_runs_after_the_hande
     let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
     assert_eq!(texts, ["running", "queued behind", "late"]);
 }
+
+/// A container turn on an API-key account (`container::key_route`): the exec is given the gateway's address and the agent's token
+/// for it, never the key; where the gateway can't be reached from the container, the turn is refused
+/// before any exec and its token is not handed out.
+#[tokio::test]
+async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_way_out() {
+    use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn::says(&[INIT, RESULT_OK], 0)]);
+    let ctrl = controller(&unique("blk"), None);
+    let gate_token = token::renew_for_account("kt-slug", "kt-def", KEY_ROUTE_ID, "kt-acct", None);
+    let mut cfg = config("hello");
+    cfg.env_vars.extend([
+        ("AGENTMUX_LOCAL_URL".to_string(), "http://host.docker.internal:1".to_string()),
+        ("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{}{KEY_ROUTE_ID}", crate::backend::model_gateway::PATH_PREFIX)),
+        ("ANTHROPIC_AUTH_TOKEN".to_string(), gate_token.clone()),
+        ("ANTHROPIC_API_KEY".to_string(), String::new()),
+    ]);
+    ctrl.spawn_container_turn(fake.manager(), unique("c"), cli(), cfg).unwrap();
+    let ended = wait_done(&ctrl).await;
+
+    if cfg!(target_os = "linux") {
+        // No listener on the agents network in a test: no way for the container to reach the gateway.
+        assert_eq!(ended, (STATUS_DONE.to_string(), 1));
+        assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
+        assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
+    } else {
+        assert_eq!(ended, (STATUS_DONE.to_string(), 0));
+        let env = &fake.execs(Kind::Turn)[0].1;
+        let given = env.iter().find_map(|e| e.strip_prefix("ANTHROPIC_AUTH_TOKEN=")).expect("the turn is given its token");
+        // Nothing to bind it to here, and the grant is the same: the agent's token holds, so a pane's other turn is not cut off.
+        assert_eq!(given, gate_token, "the agent's token for this machine");
+        let grant = token::grant_for(given).unwrap();
+        assert_eq!((grant.def_id.as_str(), grant.account.as_str(), grant.route.as_str()), ("kt-def", "kt-acct", KEY_ROUTE_ID));
+        assert!(env.iter().any(|e| e.starts_with("ANTHROPIC_BASE_URL=") && e.ends_with("/api/v1/model/anthropic")), "{env:?}");
+    }
+    token::revoke("kt-def", KEY_ROUTE_ID);
+}

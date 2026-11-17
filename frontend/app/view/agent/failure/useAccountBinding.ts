@@ -23,7 +23,7 @@ import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import { accountPickerItems, planBind, type BindMode } from "./account-picker";
 import { AnotherAccountLogin } from "./AnotherAccountLogin";
 import { computeAccountBindCandidates } from "./bind-account-candidates";
-import { boundLabel, chipLabel, currentAccountId, KEYS_NOT_FOR_CONTAINERS, keysHeldBack, menuChoices, menuRow } from "./key-accounts";
+import { boundLabel, chipLabel, currentAccountId, menuChoices, menuRow } from "./key-accounts";
 import { usePrepWindow, type PrepMeta } from "./prep-window";
 import { switchNotice } from "./switch-notice";
 
@@ -104,8 +104,6 @@ export interface AccountBindingOptions {
     /** The agent is signed out: its chip menu offers "Log in" (`onLogin`) next to the accounts. */
     signedOut?: Accessor<boolean>;
     onLogin?: () => void;
-    /** A container agent: it is not offered an API key account yet (the menu says so). */
-    isContainer?: Accessor<boolean>;
     deps?: Partial<AccountBindingDeps>;
 }
 
@@ -200,7 +198,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     // turn ends.
     const switchChoices = createMemo(() => {
         const providerId = opts.providerId();
-        return providerId ? menuChoices(accountCache(), providerId, !!opts.isContainer?.()) : [];
+        return providerId ? menuChoices(accountCache(), providerId) : [];
     });
     // Signing in a new account is the in-app Claude login; other providers have no such panel yet.
     const canSignInAnother = createMemo(() => resolveProviderAlias(opts.providerId() ?? "") === "claude");
@@ -247,7 +245,6 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
         if (canSignInAnother()) {
             actions.push({ label: "Sign in with another account\u2026", click: () => deps.signInAnother(opts.blockId, switchToNewAccount) });
         }
-        if (keysHeldBack(accountCache(), opts.providerId() ?? "", !!opts.isContainer?.())) items.push({ label: KEYS_NOT_FOR_CONTAINERS, enabled: false });
         if (items.length > 0 && actions.length > 0) items.push({ type: "separator" });
         items.push(...actions);
         if (items.length === 0) return;

@@ -545,6 +545,8 @@ pub(super) fn key_route_dir(bindings: &[IdentityBinding], provider: &str) -> Opt
 
 /// Point a Claude agent at the gateway's key route for the API-key account `binding` names: the gateway's address and
 /// the agent's token, and nothing of the key, which stays in the keychain and is read by the gateway for each request.
+/// A container agent is given the same: its container turn rewrites the address to one the container reaches and makes
+/// the token fresh and bound to the container (`container::key_route`).
 /// `Ok(true)` when the agent is set up; `Ok(false)` when it cannot be (no account, not a key, no srv address): the
 /// unbound-provider gate then refuses the spawn, as for any Claude agent with no usable account.
 pub(super) fn inject_key_route(
@@ -563,11 +565,6 @@ pub(super) fn inject_key_route(
             return false;
         }
     };
-    // A container agent is never given a key account, nor the gateway in its place (it can't reach srv's loopback address).
-    if mstore.get::<crate::backend::obj::Block>(&instance.block_id).ok().flatten().is_some_and(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container()) {
-        tracing::warn!(target: "identity", account_id = %binding.account_id, "an API key account is not given to a container agent");
-        return false;
-    }
     let Ok(Some(def)) = mstore.agent_def_get(&instance.definition_id) else { return false };
     // The gateway checks the agent's own link on every request, so a key link inherited from a template is not carried.
     let own = identity_store.agent_identity_list_for_agent(&def.id).unwrap_or_default();

@@ -8,7 +8,7 @@
 import type { Account } from "@/app/view/identity/identity-model";
 import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import { KEYS_NOT_FOR_CONTAINERS } from "./key-accounts";
+import { menuChoices } from "./key-accounts";
 import { useAccountBinding, type AccountBindingDeps } from "./useAccountBinding";
 
 vi.mock("@/app/store/pane-requests", () => ({ openPaneModal: vi.fn() }));
@@ -21,7 +21,7 @@ const key = (id: string, displayName: string, status = "valid", updated = "2026-
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function mount(o: { accounts: Account[]; links?: Array<{ provider: string; account_id: string }>; provider?: string; container?: boolean; pending?: string }) {
+function mount(o: { accounts: Account[]; links?: Array<{ provider: string; account_id: string }>; provider?: string; pending?: string }) {
     const showPicker = vi.fn();
     const switchAccount = vi.fn(async () => ({ status: "switched", account_label: "", failed: [] as string[] }));
     const notify = vi.fn();
@@ -43,7 +43,6 @@ function mount(o: { accounts: Account[]; links?: Array<{ provider: string; accou
             providerId: () => o.provider ?? "claude",
             bindExistingAccount: async () => {},
             pendingAccountId: () => o.pending,
-            isContainer: () => !!o.container,
             deps,
         }),
         dispose,
@@ -107,26 +106,24 @@ describe("an API key account in the chip menu", () => {
         m.dispose();
     });
 
-    it("is not offered to a container agent, and the menu says why", async () => {
-        const m = mount({ accounts: [plan("p", "a@x"), key("k", "Work key")], links: [{ provider: "claude", account_id: "p" }], container: true });
+    it("is offered the same to a container agent: the menu has no other rule for it", async () => {
+        const accounts = [plan("p", "a@x", "2026-09-02"), key("k", "Work key"), key("bad", "Rejected", "invalid")];
+        // The menu is built from the accounts and the provider alone: nothing about where the agent runs reaches it.
+        expect(menuChoices(accounts, "claude").map((a) => a.id)).toEqual(["p", "k"]);
+        expect(menuChoices(accounts, "claude-code").map((a) => a.id)).toEqual(["p", "k"]);
+        expect(menuChoices(accounts, "codex").map((a) => a.id)).toEqual([]);
+        const m = mount({ accounts, links: [{ provider: "claude", account_id: "p" }] });
         await flush();
-        const menu = items(m);
-        expect(menu.some((i) => i.sublabel === "API")).toBe(false);
-        const why = menu.find((i) => i.label === KEYS_NOT_FOR_CONTAINERS);
-        expect(why?.enabled).toBe(false);
+        expect(items(m).filter((i) => i.sublabel === "API").map((i) => i.label)).toEqual(["Work key"]);
+        expect(items(m).some((i) => i.enabled === false), "no greyed note for any agent").toBe(false);
         m.dispose();
     });
 
-    it("is not offered to another provider's agent, and a container with no keys has no note", async () => {
+    it("is not offered to another provider's agent", async () => {
         const codex = mount({ accounts: [key("k", "Work key")], provider: "codex" });
         await flush();
         codex.onSwitchAccount(new MouseEvent("click"));
         expect(codex.showPicker.mock.calls.length === 0 || !(codex.showPicker.mock.calls[0][0] as ContextMenuItem[]).some((i) => i.sublabel === "API")).toBe(true);
         codex.dispose();
-
-        const plain = mount({ accounts: [plan("p", "a@x")], links: [{ provider: "claude", account_id: "p" }], container: true });
-        await flush();
-        expect(items(plain).some((i) => i.label === KEYS_NOT_FOR_CONTAINERS)).toBe(false);
-        plain.dispose();
     });
 });

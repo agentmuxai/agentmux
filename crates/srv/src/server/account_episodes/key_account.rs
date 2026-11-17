@@ -15,7 +15,6 @@ use crate::backend::obj;
 use crate::backend::storage::identities::IdentityAccount;
 use crate::server::AppState;
 
-use super::switch::open_panes;
 use super::canonical;
 
 /// An Anthropic API key: provider `anthropic`, kind `api_key`.
@@ -43,12 +42,10 @@ pub(super) fn link_provider<'a>(to: &IdentityAccount, provider: &'a str) -> &'a 
     }
 }
 
-/// Why `def_id` cannot be moved onto a key account now, or `Ok`. A container agent is never given a key account yet
-/// (it would need the gateway's address from inside the container); an agent on a model route is billed to the route.
+/// Why `def_id` cannot be moved onto a key account now, or `Ok`. An agent on a model route is billed to the route. A
+/// container agent can take a key: its container reaches the gateway, never the key (`container::key_route`), and a
+/// container with no way to the gateway says so at the turn, with what to do instead.
 pub(super) fn can_take_a_key(state: &AppState, def_id: &str) -> Result<(), String> {
-    if open_panes(state, def_id).iter().any(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container()) {
-        return Err("ACCOUNT_CANT_RUN: API keys aren't offered to container agents yet".to_string());
-    }
     if launch::choice_of(&state.mstore, def_id).is_some() {
         return Err("ACCOUNT_CANT_RUN: this agent runs on a model route, which is billed to the route's key; move it back to its own sign-in first".to_string());
     }
