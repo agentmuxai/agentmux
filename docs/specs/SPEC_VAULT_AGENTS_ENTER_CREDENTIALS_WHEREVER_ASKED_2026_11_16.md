@@ -148,7 +148,7 @@ One narrow task worth its own ticket: a Vault key store that stays locked after 
 
 ## 12. Build order (#47889)
 
-1. **Pulp's case:** sections 7 (C, including C6), 5 (A, including A10) and 6 (B), and the web read-back guarantee of G4, with the Vault pane's share list, the import card's line and `Vault` `share`. A container agent signs in on a site with a shared login.
+1. **The shared-login case:** sections 7 (C, including C6), 5 (A, including A10) and 6 (B), and the web read-back guarantee of G4, with the Vault pane's share list, the import card's line and `Vault` `share`. A container agent signs in on a site with a shared login.
 2. **Browser gaps:** D1, D2, D5, then D4, then D3.
 3. **Terminal prompts:** E, local first.
 4. **Desktop:** F, Windows first.
