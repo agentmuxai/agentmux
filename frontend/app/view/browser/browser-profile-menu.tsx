@@ -15,6 +15,7 @@ import { IconButton, MenuTrigger, type MenuEntry } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { openSettingsAt } from "@/app/view/settings/open-settings";
 import { pushNotification } from "@/app/store/global";
+import { slotOf } from "@/app/theme/palette";
 import { getLayoutModelForStaticTab, openBlockInStack } from "@/layout/index";
 import {
     IDENTITY_META_KEY,
@@ -58,10 +59,15 @@ function openProfileSettings(): void {
     void openSettingsAt("browser");
 }
 
-/** A profile's badge: its initial on its colour. */
+/** A profile's badge: its initial on its colour. A Black or White one gets a hairline and an initial that reads on it. */
 export function ProfileBadge(props: { name: string; color: string }): JSX.Element {
+    const neutral = () => slotOf(props.color)?.neutral;
     return (
-        <span class="browser-profile-badge" style={{ "background-color": props.color }} aria-hidden="true">
+        <span
+            class={clsx("browser-profile-badge", neutral() && `browser-profile-badge--${neutral()}`)}
+            style={{ "background-color": props.color }}
+            aria-hidden="true"
+        >
             {profileInitial(props.name)}
         </span>
     );

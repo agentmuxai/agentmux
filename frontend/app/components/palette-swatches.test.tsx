@@ -16,19 +16,43 @@ describe("PaletteSwatches", () => {
         const { container } = render(() => <PaletteSwatches label="Tab color" value={null} onSelect={() => {}} />);
         const names = swatches(container).map((b) => b.getAttribute("aria-label"));
         expect(names).toEqual(PALETTE.map((s) => s.name));
+        expect(names).toHaveLength(14);
+        expect(names.slice(12)).toEqual(["Black", "White"]);
         expect(container.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("Tab color");
     });
 
-    it("marks the slot a stored hex, an id or an old Tailwind hex stands for", () => {
-        for (const value of [PALETTE[11].hex, "azure", "#3b82f6"]) {
-            const { container, unmount } = render(() => <PaletteSwatches label="c" value={value} onSelect={() => {}} />);
-            const pressed = swatches(container).filter((b) => b.getAttribute("aria-pressed") === "true");
-            expect(pressed.map((b) => b.getAttribute("aria-label")), String(value)).toEqual(["Azure"]);
-            unmount();
-        }
+    const pressedNames = (value: string | number) => {
+        const { container, unmount } = render(() => <PaletteSwatches label="c" value={value} onSelect={() => {}} />);
+        const names = swatches(container)
+            .filter((b) => b.getAttribute("aria-pressed") === "true")
+            .map((b) => b.getAttribute("aria-label"));
+        unmount();
+        return names;
+    };
+
+    it("marks the slot a stored hex, an id, a retired id, one of the 16's hexes or an old Tailwind hex stands for", () => {
+        for (const value of [PALETTE[9].hex, "blue", "azure", "#53a3f2", "#3b82f6"]) expect(pressedNames(value), String(value)).toEqual(["Blue"]);
+        expect(pressedNames("indigo")).toEqual(["Violet"]);
+        expect(pressedNames("#000000")).toEqual(["Black"]);
+        expect(pressedNames("white")).toEqual(["White"]);
     });
 
-    it("leaves the columns to its styles (two even rows, 8 of the 16, or 9 and 8 with the none swatch) unless asked", () => {
+    it("paints a hue in its identity tone, Black and White as themselves, each neutral with a check mark of the other's colour", () => {
+        const { container } = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
+        const all = swatches(container);
+        const paint = (b: HTMLElement) => b.style.backgroundColor;
+        const ink = (b: HTMLElement) => b.style.getPropertyValue("--palette-swatch-ink");
+        expect(paint(all[12])).toBe("rgb(0, 0, 0)");
+        expect(paint(all[13])).toBe("rgb(255, 255, 255)");
+        expect([ink(all[12]), ink(all[13])]).toEqual(["#ffffff", "#000000"]);
+        for (const hue of all.slice(0, 12)) {
+            expect(paint(hue)).not.toBe("");
+            expect(ink(hue)).toBe("");
+        }
+        expect(new Set(all.map(paint)).size).toBe(14);
+    });
+
+    it("leaves the columns to its styles (two rows of 7, or 8 and 7 with the none swatch) unless asked", () => {
         const grid = (c: HTMLElement) => c.querySelector(".palette-swatches") as HTMLElement;
         const plain = render(() => <PaletteSwatches label="c" value={null} onSelect={() => {}} />);
         expect(grid(plain.container).style.getPropertyValue("--palette-cols")).toBe("");
@@ -57,7 +81,7 @@ describe("PaletteSwatches", () => {
         fireEvent.click(first);
         expect(onSelect).toHaveBeenCalledWith(null);
         none.unmount();
-        const plain = render(() => <PaletteSwatches label="c" value="azure" onSelect={() => {}} />);
-        expect(swatches(plain.container)).toHaveLength(16);
+        const plain = render(() => <PaletteSwatches label="c" value="blue" onSelect={() => {}} />);
+        expect(swatches(plain.container)).toHaveLength(14);
     });
 });

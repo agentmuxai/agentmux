@@ -62,6 +62,9 @@
         .ui-close__text {
             font-size: var(--text-xs);
             line-height: 1;
+            // Its words stay on one line. A host that shares a row out equally (Rename and "Close menu" under
+            // the tab colours) would otherwise squeeze them into two when the row is narrow.
+            white-space: nowrap;
         }
     }
 

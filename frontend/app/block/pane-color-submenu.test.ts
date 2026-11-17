@@ -30,6 +30,30 @@ beforeEach(() => {
 });
 afterEach(() => unregister.forEach((u) => u()));
 
+describe("the Pane Color menu", () => {
+    const shape = (meta: Record<string, unknown>) => entries(meta).map((i) => (i.type === "separator" ? "-" : i.label));
+    const HUES = ["Rose", "Red", "Orange", "Amber", "Yellow", "Green", "Jade", "Teal", "Sky", "Blue", "Violet", "Magenta"];
+
+    it("is Default, the 12 hues, then Black and White in a group of their own", () => {
+        expect(shape({ view: "t-term" })).toEqual(["Default", "-", ...HUES, "-", "Black", "White"]);
+    });
+
+    it("gives every colour a swatch, Black and White as themselves", () => {
+        const items = entries({ view: "t-term" }).filter((i) => i.type !== "separator" && i.label !== "Default");
+        expect(items).toHaveLength(14);
+        for (const item of items) expect(item.swatchColor, item.label).toMatch(/^#[0-9a-f]{6}$/);
+        expect(items.slice(12).map((i) => i.swatchColor)).toEqual(["#000000", "#ffffff"]);
+    });
+
+    it("checks Default with no pick, the picked slot otherwise, and the slot a retired id became", () => {
+        const checked = (meta: Record<string, unknown>) => entries(meta).filter((i) => i.checked).map((i) => i.label);
+        expect(checked({ view: "t-term" })).toEqual(["Default"]);
+        expect(checked({ view: "t-term", "frame:color": "black" })).toEqual(["Black"]);
+        expect(checked({ view: "t-term", "frame:color": "azure" })).toEqual(["Blue"]);
+        expect(checked({ view: "t-term", "frame:color": "indigo" })).toEqual(["Violet"]);
+    });
+});
+
 describe("Use for all <Label> panes", () => {
     it("names the widget and makes this pane's pick its color", () => {
         const item = useForAll({ view: "t-old", "frame:color": "violet" });

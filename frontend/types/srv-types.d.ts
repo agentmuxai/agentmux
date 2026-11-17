@@ -750,7 +750,7 @@ declare global {
         frame?: boolean;
         "frame:bordercolor"?: string;
         "frame:activebordercolor"?: string;
-        /** The "Pane Color" pick, a palette slot id (`"azure"`); `null` after "Default". */
+        /** The "Pane Color" pick, a palette slot id (`"blue"`); `null` after "Default". */
         "frame:color"?: string | null;
         /**
          * The pane's backdrop: a background that brings its own readable foreground

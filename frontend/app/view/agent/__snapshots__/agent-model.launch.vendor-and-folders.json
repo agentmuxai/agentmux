@@ -58,7 +58,7 @@
       "data": {
         "agent_id": "agent-1",
         "content_type": "ui:color",
-        "content": "#e8777f"
+        "content": "#00afdc"
       }
     },
     {
@@ -131,7 +131,7 @@
             "effort": "high"
           },
           "term:zoom": null,
-          "frame:activebordercolor": "#e8777f",
+          "frame:activebordercolor": "#00afdc",
           "agentInstanceId": "inst-1"
         }
       }
@@ -214,7 +214,7 @@
       "data": {
         "agent_id": "agent-1",
         "content_type": "ui:color",
-        "content": "#e8777f"
+        "content": "#00afdc"
       }
     },
     {
@@ -286,7 +286,7 @@
             "effort": "high"
           },
           "term:zoom": null,
-          "frame:activebordercolor": "#e8777f",
+          "frame:activebordercolor": "#00afdc",
           "agentInstanceId": "inst-1"
         }
       }

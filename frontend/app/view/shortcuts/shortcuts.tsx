@@ -405,7 +405,7 @@ export const shortcutsPaneTab: PaneTabManifest = {
     aliases: ["launcher"],
     label: "Shortcuts",
     icon: "shapes",
-    defaultColor: "pink",
+    defaultColor: "rose",
     // The shared per-pane zoom (Ctrl+scroll, Ctrl/Cmd +/-/0, the all-panes gesture); 12 px is its
     // text size. A zoom set here goes no further: a tile replaces this pane with a new one.
     capabilities: { header: "none", paneZoom: { baseFontSize: 12 } },

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the backdrop picker shows and writes, apart from how it draws (BackdropPicker.tsx): the 16 swatches for a
+ * What the backdrop picker shows and writes, apart from how it draws (BackdropPicker.tsx): the 14 swatches for a
  * side, the contrast readout, a typed colour, and the records a choice makes (spec §9, §10).
  */
 
@@ -27,7 +27,7 @@ export function contrastReadout(d: DerivedBackdrop): string {
     });
 }
 
-/** The 16 built-ins as swatches, each drawn as the mini-pane a choice would make under `scheme`. */
+/** The 14 built-ins as swatches, each drawn as the mini-pane a choice would make under `scheme`. */
 export function builtinOptions(scheme: AppScheme): SwatchOption<string>[] {
     return BUILTINS.map((b) => {
         const d = deriveBuiltin(b.id, scheme)!;

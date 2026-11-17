@@ -29,7 +29,7 @@ beforeEach(() => {
     setConfig.mockReset();
     setSettings({});
     unregister = [
-        registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-was"], label: "Terminal", icon: "terminal", defaultColor: "indigo", create }),
+        registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-was"], label: "Terminal", icon: "terminal", defaultColor: "violet", create }),
         registerPaneTab({ apiVersion: 1, view: "t-plain", label: "Plain", icon: "square", create }),
         registerPaneTab({ apiVersion: 1, view: "t-legacy", legacyOf: "t-term", label: "Legacy", icon: "square", create }),
     ];
@@ -57,7 +57,7 @@ describe("Widget colors", () => {
 
     it("selects the built-in color when unset, None for a widget without one", () => {
         renderSection();
-        expect(swatch("Terminal", "Indigo").getAttribute("aria-pressed")).toBe("true");
+        expect(swatch("Terminal", "Violet").getAttribute("aria-pressed")).toBe("true");
         expect(swatch("Plain", "None").getAttribute("aria-pressed")).toBe("true");
     });
 
@@ -72,7 +72,7 @@ describe("Widget colors", () => {
     it("stores nothing when the built-in color is picked back", () => {
         setSettings({ "pane:colors": { "t-term": "green", "t-plain": "amber" } });
         renderSection();
-        fireEvent.click(swatch("Terminal", "Indigo"));
+        fireEvent.click(swatch("Terminal", "Violet"));
         expect(written()).toEqual({ "pane:colors": { "t-plain": "amber" } });
     });
 

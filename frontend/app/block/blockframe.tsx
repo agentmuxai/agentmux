@@ -48,8 +48,8 @@ import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
 import { sectionPinMenuItems } from "@/app/window/section-pins";
 import { applyColorToAllPanes, setPaneColor } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
-import { paneRoleColor } from "./pane-color-scheme";
-import { PALETTE, slotOf } from "@/app/theme/palette";
+import { slotSwatchColor } from "./pane-color-scheme";
+import { PALETTE, slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
@@ -163,7 +163,8 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * item carries an inline color swatch in its exact hue (the context menu is a
  * DOM overlay, so `swatchColor` renders a real colored square before the label
  * — see showJsContextMenu). The current color is marked with a checkmark;
- * "Default" clears it.
+ * "Default" clears it. The 12 hues come first, then Black and White in a
+ * group of their own.
  */
 export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // The pane's own pick: a palette slot (`frame:color`), or an older HSL
@@ -174,6 +175,12 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // setPaneColor's own doc comment for why "Default" never passes this.
     const agentId = blockData?.meta?.agentId as string | undefined;
     const isLight = isLightThemeActive();
+    const colorItem = (slot: PaletteSlot): ContextMenuItem => ({
+        label: slot.name,
+        swatchColor: slotSwatchColor(slot, isLight),
+        checked: currentSlot?.id === slot.id,
+        click: () => setPaneColor(blockData.oid, slot.id, agentId),
+    });
     const colorItems: ContextMenuItem[] = [
         {
             label: "Default",
@@ -181,12 +188,9 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
             click: () => setPaneColor(blockData.oid, null),
         },
         { type: "separator" as const },
-        ...PALETTE.map((slot) => ({
-            label: slot.name,
-            swatchColor: paneRoleColor(undefined, slot.id, isLight, "identity"),
-            checked: currentSlot?.id === slot.id,
-            click: () => setPaneColor(blockData.oid, slot.id, agentId),
-        })),
+        ...PALETTE.filter((slot) => !slot.neutral).map(colorItem),
+        { type: "separator" as const },
+        ...PALETTE.filter((slot) => slot.neutral).map(colorItem),
     ];
     // Spec §3.7. Not on agent panes: their pick is the agent's own color, and
     // widget colors don't apply to an agent with one.

@@ -48,11 +48,14 @@ const written = () => h.set.mock.calls.map((c) => (c[1] as { backdrop: unknown }
 const teal = { kind: "builtin", id: "teal", polarity: "follow", version: 1 };
 
 describe("BackdropPicker", () => {
-    it("is a panel named Backdrop with the 16 built-ins as swatches, each named and carrying its contrast readout", () => {
+    it("is a panel named Backdrop with the 14 built-ins as swatches in rows of seven, each named and carrying its contrast readout", () => {
         const { container } = mount();
         expect(container.querySelector("[role=dialog]")?.getAttribute("aria-label")).toBe("Backdrop");
         const r = radios(container);
         expect(r.map((x) => x.getAttribute("aria-label"))).toEqual(BUILTINS.map((b) => b.name));
+        expect(r).toHaveLength(14);
+        expect(r.slice(12).map((x) => x.getAttribute("aria-label"))).toEqual(["Black", "White"]);
+        expect((container.querySelector("[role=radiogroup]") as HTMLElement).style.getPropertyValue("--swatch-columns")).toBe("7");
         expect(r[0].getAttribute("aria-description")).toMatch(/^text \d+\.\d:1, muted \d+\.\d:1$/);
     });
 
@@ -65,6 +68,22 @@ describe("BackdropPicker", () => {
         h.light = true;
         const light = mount();
         expect(radios(light.container)[0].style.getPropertyValue("--swatch-surface")).toBe(deriveBuiltin(BUILTINS[0].id, "light")!.surfaces.surface);
+    });
+
+    it("draws Black as #000000 and White as #ffffff under both app themes", () => {
+        for (const light of [false, true]) {
+            h.light = light;
+            const { container } = mount();
+            const surface = (name: string) => radios(container).find((x) => x.getAttribute("aria-label") === name)!.style.getPropertyValue("--swatch-surface");
+            expect([surface("Black"), surface("White")], light ? "light" : "dark").toEqual(["#000000", "#ffffff"]);
+            cleanup();
+        }
+    });
+
+    it("shows a record that names a retired id as the slot it became", () => {
+        const { container } = mount({ backdrop: { ...teal, id: "azure" } });
+        const checked = radios(container).filter((x) => x.getAttribute("aria-checked") === "true");
+        expect(checked.map((x) => x.getAttribute("aria-label"))).toEqual(["Blue"]);
     });
 
     it("marks the pane's built-in as checked", () => {
@@ -148,8 +167,8 @@ describe("BackdropPicker", () => {
 
     it("follows the record when it changes elsewhere", () => {
         const t = mount({ backdrop: teal });
-        t.setMeta({ backdrop: { ...teal, id: "crimson", polarity: "dark" } });
-        expect(radios(t.container).filter((x) => x.getAttribute("aria-checked") === "true").map((x) => x.getAttribute("aria-label"))).toEqual(["Crimson"]);
+        t.setMeta({ backdrop: { ...teal, id: "red", polarity: "dark" } });
+        expect(radios(t.container).filter((x) => x.getAttribute("aria-checked") === "true").map((x) => x.getAttribute("aria-label"))).toEqual(["Red"]);
         expect(button(t.container, "Dark").getAttribute("aria-checked")).toBe("true");
     });
 
@@ -316,7 +335,7 @@ describe("BackdropPicker", () => {
 
     it("still follows the pane's record when it really changes", () => {
         const t = mount({ backdrop: teal });
-        t.setMeta({ backdrop: { ...teal, polarity: "dark", id: "crimson" } });
+        t.setMeta({ backdrop: { ...teal, polarity: "dark", id: "red" } });
         expect(button(t.container, "Dark").getAttribute("aria-checked")).toBe("true");
         t.setMeta({});
         expect(button(t.container, "Follow").getAttribute("aria-checked")).toBe("true");

@@ -1,15 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// Two rows of 7: the hues Rose to Jade, then Teal to Magenta, Black and White.
 .palette-swatches {
-    --palette-cols: 8;
+    --palette-cols: 7;
     display: grid;
-    grid-template-columns: repeat(var(--palette-cols, 8), 18px);
+    grid-template-columns: repeat(var(--palette-cols, 7), 18px);
     gap: var(--space-1);
 }
 
+// The "none" swatch leads the first row: 8 and 7.
 .palette-swatches--with-none {
-    --palette-cols: 9;
+    --palette-cols: 8;
 }
 
 .palette-swatch-anchor {
@@ -25,6 +27,11 @@
     min-width: 18px;
     padding: 0;
 
+    // A hairline, so the black swatch shows on a dark menu and the white one on a light menu.
+    &:not(.palette-swatch--none) {
+        border-color: color-mix(in srgb, var(--main-text-color) 35%, transparent);
+    }
+
     // The chosen swatch: a ring, and a mark that does not rely on its colour.
     &[aria-pressed="true"] {
         outline: 2px solid var(--main-text-color);
@@ -37,7 +44,7 @@
             content: "\2713";
             font-size: var(--text-2xs);
             line-height: 1;
-            color: var(--main-bg-color);
+            color: var(--palette-swatch-ink, var(--main-bg-color));
         }
     }
 }

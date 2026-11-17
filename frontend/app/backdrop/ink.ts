@@ -3,7 +3,7 @@
 
 /**
  * The ink of a backdrop (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §3): from one surface colour, every
- * foreground colour that sits on it. One pure function serves the 16 built-ins, a custom colour the user picks and
+ * foreground colour that sits on it. One pure function serves the built-ins, a custom colour the user picks and
  * an image's solved scrim, so contrast is a property of the function and `ink.test.ts` proves it, not a hope.
  *
  * The search runs in OKLCH, where moving lightness by the same amount reads the same at every hue, and every
