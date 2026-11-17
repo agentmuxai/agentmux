@@ -50,7 +50,7 @@ pub(super) async fn reuse_editor_pane(state: &AppState, cmd: &CommandPaneOpenDat
             let connection = cmd.connection.as_deref().unwrap_or("");
             let follow = cmd.follow_folder == Some(true);
             let caller = cmd.split_reference_block_id.as_deref();
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller, named, file, connection, follow, viewer).await? {
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller, named, file, connection, follow, viewer, pane::OpenAt::of(cmd)).await? {
                 return Ok(Some(result));
             }
         }

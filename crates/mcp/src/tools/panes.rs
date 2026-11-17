@@ -89,6 +89,11 @@ async fn run_open_editor(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         reuse_editor_pane: Some(true),
         target_block_id: arguments.get("target_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string),
         follow_folder: media.then_some(true),
+        // Which viewer, and where in the file; srv checks the viewer and ignores a position the viewer has no use for.
+        viewer: arguments.get("viewer").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+        line: positive_arg(arguments, "line").and_then(|n| u32::try_from(n).ok()),
+        offset: arguments.get("offset").and_then(|v| v.as_u64()),
+        page: positive_arg(arguments, "page").and_then(|n| u32::try_from(n).ok()),
         select: None,
         // On an SSH host: srv asks the user to allow it, checking this
         // agent's signed identity (remote terminals spec §8.2).
@@ -181,6 +186,10 @@ async fn run_open_files(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         reuse_editor_pane: None, // view != "editor" — irrelevant here
         target_block_id: None,
         follow_folder: None,
+        viewer: None,
+        line: None,
+        offset: None,
+        page: None,
         select: if select.is_empty() { None } else { Some(select) },
         // On an SSH host: srv asks the user to allow it, checking this
         // agent's signed identity (remote terminals spec §8.2).
@@ -681,6 +690,11 @@ async fn run_register_dev_server(arguments: &Value, cx: &ToolCtx<'_>) -> Result<
 
 /// The `connection` an Open tool was given: an SSH host or WSL name, trimmed;
 /// `None` for absent, empty or "local" (this machine).
+/// A whole-number argument of 1 or more (a line or a page); anything else counts as absent.
+fn positive_arg(arguments: &Value, key: &str) -> Option<u64> {
+    arguments.get(key).and_then(|v| v.as_u64()).filter(|n| *n >= 1)
+}
+
 fn connection_arg(arguments: &Value) -> Option<String> {
     arguments
         .get("connection")

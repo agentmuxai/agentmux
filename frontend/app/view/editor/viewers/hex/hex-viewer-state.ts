@@ -17,6 +17,7 @@ import { ChunkCache, fileReaderOf, rangeReaderOf } from "./hex-chunks";
 import { COPY_MAX_BYTES, copyText, type CopyAs } from "./hex-copy";
 import { createHexFind } from "./hex-find-state";
 import { inspect, INSPECT_BYTES, type Inspected } from "./hex-inspector";
+import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import {
     charOf,
     firstRowAt,
@@ -386,6 +387,15 @@ export function createHexViewer(props: HexViewerProps) {
     });
     onMount(() => {
         if (was && size() > 0) scroll.showRow(was.first);
+    });
+    // Opened at a byte (pane.open's `offset`): once the file's size is known, the cursor goes there and it is scrolled
+    // into view. Runs again for a request that arrives while this viewer already shows the file. After the restore above.
+    createEffect(() => {
+        watchOpenPosition();
+        const total = size();
+        if (!total || !props.blockId || !props.path) return;
+        const at = takeOpenPosition(props.blockId, props.path, "offset");
+        if (at !== undefined) untrack(() => sel.goTo(Math.min(at, total - 1)));
     });
     onCleanup(() =>
         remember(props.memoryKey, {

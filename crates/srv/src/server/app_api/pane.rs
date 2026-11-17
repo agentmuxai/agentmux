@@ -258,8 +258,15 @@ fn editor_meta(meta: &mut MetaMapType, cmd: &CommandPaneOpenData) -> Result<(), 
     if let Some(expanded) = cmd.tree_expanded {
         meta.insert("editor:tree_expanded".to_string(), json!(expanded));
     }
-    if let Some(line) = cmd.line.filter(|&n| n > 0) {
+    let at = OpenAt::of(cmd);
+    if let Some(line) = at.line {
         meta.insert("editor:line".to_string(), json!(line));
+    }
+    if let Some(offset) = at.offset {
+        meta.insert(META_OFFSET.to_string(), json!(offset));
+    }
+    if let Some(page) = at.page {
+        meta.insert(META_PAGE.to_string(), json!(page));
     }
     if cmd.follow_folder == Some(true) {
         meta.insert(META_FOLLOW_FOLDER.to_string(), json!(true));
@@ -408,19 +415,48 @@ const META_FOLLOW_FOLDER: &str = "editor:follow_folder";
 /// `{"path": ..., "viewer": "text"}`.
 const META_VIEWER: &str = "editor:viewer";
 
-/// pane.open's `viewer`, checked: the editor takes only `"text"` so far.
+/// Block-meta keys: where a new Editor pane's initial `file` opens, once: the hex viewer's byte offset and the PDF
+/// viewer's page (`editor:line`, the text viewer's, is `open-at-line.ts`'s). An entry of `editor:pending_open_files`
+/// says the same per file, as `{"path": ..., "line": ..., "offset": ..., "page": ...}`.
+const META_OFFSET: &str = "editor:offset";
+const META_PAGE: &str = "editor:page";
+
+/// The viewers the Editor opens a file in (frontend `VIEWER_IDS`).
+const VIEWERS: [&str; 6] = ["text", "image", "media", "pdf", "hex", "info"];
+
+/// pane.open's `viewer`, checked against the Editor's viewers.
 pub(crate) fn requested_viewer(cmd: &CommandPaneOpenData) -> Result<Option<&'static str>, String> {
     match cmd.viewer.as_deref() {
         None => Ok(None),
-        Some("text") => Ok(Some("text")),
-        Some(other) => Err(format!("INVALID_ARG: viewer {other:?} isn't one the editor opens a file in (only \"text\")")),
+        Some(asked) => VIEWERS.iter().find(|v| **v == asked).map(|v| Some(*v)).ok_or_else(|| {
+            format!("INVALID_ARG: viewer {asked:?} isn't one the editor opens a file in (one of {})", VIEWERS.join(", "))
+        }),
+    }
+}
+
+/// Where in the file pane.open asks to land: a text line, a hex byte offset, a PDF page. Each is read by its own viewer
+/// and ignored by the others; a line or page of 0 counts as absent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OpenAt {
+    pub line: Option<u32>,
+    pub offset: Option<u64>,
+    pub page: Option<u32>,
+}
+
+impl OpenAt {
+    pub(crate) fn of(cmd: &CommandPaneOpenData) -> Self {
+        Self { line: cmd.line.filter(|&n| n > 0), offset: cmd.offset, page: cmd.page.filter(|&n| n > 0) }
+    }
+
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
     }
 }
 
 /// An `editor:pending_open_files` entry: the path, or `{path, ...}` with how
 /// it opens.
-fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>) -> serde_json::Value {
-    if !follow_folder && viewer.is_none() {
+fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>, at: OpenAt) -> serde_json::Value {
+    if !follow_folder && viewer.is_none() && at.is_empty() {
         return json!(file);
     }
     let mut entry = serde_json::Map::new();
@@ -430,6 +466,15 @@ fn pending_open_entry(file: &str, follow_folder: bool, viewer: Option<&str>) -> 
     }
     if let Some(viewer) = viewer {
         entry.insert("viewer".into(), json!(viewer));
+    }
+    if let Some(line) = at.line {
+        entry.insert("line".into(), json!(line));
+    }
+    if let Some(offset) = at.offset {
+        entry.insert("offset".into(), json!(offset));
+    }
+    if let Some(page) = at.page {
+        entry.insert("page".into(), json!(page));
     }
     serde_json::Value::Object(entry)
 }
@@ -469,6 +514,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     connection: &str,
     follow_folder: bool,
     viewer: Option<&str>,
+    at: OpenAt,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
     // A named Editor is in its own tab; otherwise the caller's tab is searched.
@@ -520,7 +566,7 @@ pub(super) async fn maybe_reuse_editor_pane(
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter(|v| v.is_string() || v.is_object()).cloned().collect())
         .unwrap_or_default();
-    pending.push(pending_open_entry(file, follow_folder, viewer));
+    pending.push(pending_open_entry(file, follow_folder, viewer, at));
 
     let meta_events = crate::server::service::dispatch_to_reducer(
         state,

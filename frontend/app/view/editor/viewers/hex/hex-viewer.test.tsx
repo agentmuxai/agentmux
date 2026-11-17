@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHUNK } from "./hex-chunks";
 import { ROW_H } from "./hex-layout";
 import { HexViewer } from "./hex-viewer";
+import { clearOpenPositions, setOpenPosition } from "../../open-position";
 import { forgetHexMemory } from "./hex-viewer-state";
 
 const fetchMediaRange = vi.hoisted(() => vi.fn());
@@ -43,13 +44,14 @@ async function settle() {
     await new Promise((r) => setTimeout(r, 0));
 }
 
-async function mount(props: { size?: number; path?: string; memoryKey?: string; revision?: number } = {}) {
+async function mount(props: { size?: number; path?: string; memoryKey?: string; revision?: number; blockId?: string } = {}) {
     const view = render(() => (
         <HexViewer
             path={props.path ?? "C:/bin/a.bin"}
             revision={props.revision ?? 0}
             size={props.size ?? FILE.length}
             memoryKey={props.memoryKey ?? "C:/bin/a.bin"}
+            blockId={props.blockId}
             bar={{ viewer: "hex", options: ["hex", "info"], onReopenWith: () => {} }}
         />
     ));
@@ -70,6 +72,7 @@ describe("the hex viewer", () => {
 
     beforeEach(() => {
         forgetHexMemory();
+        clearOpenPositions();
         fetchMediaRange.mockReset();
         writeText.mockClear();
         searchBytes.mockReset();
@@ -97,6 +100,50 @@ describe("the hex viewer", () => {
         expect(fetchMediaRange.mock.calls[0].slice(1, 3)).toEqual([0, CHUNK - 1]);
         expect(grid().getAttribute("aria-rowcount")).toBe(String(12_500 + 1));
         expect(facts()).toEqual(["Offset 0x0 (0)", "195 KB"]);
+    });
+
+    describe("opened at an offset (pane.open's offset)", () => {
+        it("puts the cursor on the byte and scrolls it into view, once", async () => {
+            setOpenPosition("b1", "C:/bin/a.bin", { offset: 100_000 });
+            await mount({ blockId: "b1" });
+            expect(cursorAt()).toBe(100_000);
+            expect(rowTexts()).toContain((Math.floor(100_000 / 16) * 16).toString(16).toUpperCase().padStart(8, "0"));
+            expect(facts()[0]).toBe("Offset 0x186A0 (100,000)");
+            // Taken: a second viewer on the same file starts at the top.
+            cleanup();
+            forgetHexMemory();
+            await mount({ blockId: "b1" });
+            expect(cursorAt()).toBe(0);
+        });
+
+        it("stops at the last byte for an offset past the end, and takes offset 0", async () => {
+            setOpenPosition("b1", "C:/bin/a.bin", { offset: FILE.length + 5000 });
+            await mount({ blockId: "b1" });
+            expect(cursorAt()).toBe(FILE.length - 1);
+            cleanup();
+            forgetHexMemory();
+            setOpenPosition("b1", "C:/bin/a.bin", { offset: 0 });
+            await mount({ blockId: "b1" });
+            expect(cursorAt()).toBe(0);
+        });
+
+        it("moves a viewer that already shows the file, and ignores a request for another pane or file", async () => {
+            await mount({ blockId: "b1" });
+            setOpenPosition("b2", "C:/bin/a.bin", { offset: 5000 });
+            setOpenPosition("b1", "C:/bin/other.bin", { offset: 6000 });
+            await settle();
+            expect(cursorAt()).toBe(0);
+            setOpenPosition("b1", "C:/bin/a.bin".replaceAll("/", "\\"), { offset: 7000 });
+            await settle();
+            expect(cursorAt()).toBe(7000);
+        });
+
+        it("lets an offset lapse that no hex viewer took", async () => {
+            const long = Date.now() - 10 * 60_000;
+            setOpenPosition("b1", "C:/bin/a.bin", { offset: 9000 }, long);
+            await mount({ blockId: "b1" });
+            expect(cursorAt()).toBe(0);
+        });
     });
 
     it("says so when the file is empty, and reads nothing", async () => {

@@ -61,7 +61,8 @@ import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./vie
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
-import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { setOpenPosition, whole } from "./open-position";
 import { openRemoteFile } from "./open-from-remote";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
@@ -83,6 +84,9 @@ const META_PENDING_OPEN_FILES = "editor:pending_open_files";
 // §4.9) and opens in the viewer pane.open named (`muxsh edit`: text). Cleared once used.
 const META_FOLLOW_FOLDER = "editor:follow_folder";
 const META_VIEWER = "editor:viewer";
+// Where a new pane's initial `file` opens: the hex viewer's byte, the PDF viewer's page (pane.open's `offset`, `page`).
+const META_OFFSET = "editor:offset";
+const META_PAGE = "editor:page";
 
 export type EditorMode = "preview" | "source" | "split";
 
@@ -90,6 +94,10 @@ export type EditorMode = "preview" | "source" | "split";
 export interface OpenFileOpts {
     followFolder?: boolean;
     viewer?: string;
+    /** Where to land: a text line, a hex byte offset, a PDF page (the viewer that reads it takes it). */
+    line?: number;
+    offset?: number;
+    page?: number;
 }
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
@@ -512,8 +520,12 @@ export class EditorViewModel {
         } else if (typeof legacyFile === "string" && legacyFile) {
             const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
             const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
-            void this.openFile(legacyFile, { followFolder, viewer });
-            if (followFolder || viewer) void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null });
+            const offset = whole(meta?.[META_OFFSET], 0);
+            const page = whole(meta?.[META_PAGE], 1);
+            void this.openFile(legacyFile, { followFolder, viewer, offset, page });
+            if (followFolder || viewer || offset !== undefined || page !== undefined) {
+                void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null, [META_OFFSET]: null, [META_PAGE]: null });
+            }
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
@@ -569,7 +581,31 @@ export class EditorViewModel {
      *  paths like double-click in the tree, path-input submit, drag-drop,
      *  programmatic open. The pinned tab survives subsequent tree clicks. */
     async openFile(filePath: string, opts?: OpenFileOpts): Promise<void> {
-        return this._openFileWithMode(filePath, "pinned", opts);
+        // The text view already showing this file takes a line now; a file that is still to load takes it when it does.
+        const showingNow = !!opts?.line && (!opts.viewer || opts.viewer === "text") && this.cmViewRef.current != null && !this.loadingAtom() && this.isShowing(filePath);
+        this.noteOpenPosition(filePath, opts);
+        await this._openFileWithMode(filePath, "pinned", opts);
+        if (showingNow) this.landOpenAtLine();
+    }
+
+    /** Whether `filePath` is the file the active tab shows. */
+    private isShowing(filePath: string): boolean {
+        const active = this.filePathAtom();
+        return !!active && canonicalizePath(active) === canonicalizePath(filePath);
+    }
+
+    /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
+    private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
+        if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
+    }
+
+    /** Puts the cursor on the line a request named, in the view that shows its file now. */
+    private landOpenAtLine(): void {
+        const view = this.cmViewRef.current;
+        const line = this.takeOpenAtLine(this.filePathAtom());
+        if (view && line) view.dispatch(cursorAtLine(view.state, line));
     }
 
     /** Open a file as a *preview* tab (VS Code-style). Use for tree single-

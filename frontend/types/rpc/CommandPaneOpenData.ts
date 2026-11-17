@@ -117,11 +117,22 @@ target_block_id?: string,
 follow_folder?: boolean, 
 /**
  * `view: "editor"` only: the viewer to open `file` in, instead of the
- * one the editor picks from the file's content. Only `"text"` for now,
- * sent by `muxsh edit` (any file as text); any other value is an error.
+ * one the editor picks from the file's content: `text`, `image`,
+ * `media`, `pdf`, `hex` or `info`; any other value is an error. `muxsh
+ * edit` sends `text` (any file as text).
  * SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.11.
  */
 viewer?: string, 
+/**
+ * `editor` only: the byte offset the hex viewer opens at (its cursor is
+ * put there and scrolled into view). Ignored by any other viewer.
+ */
+offset?: number, 
+/**
+ * `editor` only: the 1-based page the PDF viewer opens at. Ignored by
+ * any other viewer.
+ */
+page?: number, 
 /**
  * `view: "files"` only: names (or full paths) inside `file` to select
  * once the pane has listed it, written to `block.meta["files:select"]`

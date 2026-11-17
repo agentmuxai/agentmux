@@ -551,6 +551,18 @@ pub struct PaneOpenRequest {
     /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_folder: Option<bool>,
+    /// `view: "editor"` only: the viewer to open `file` in (`text`, `image`, `media`, `pdf`, `hex`, `info`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<String>,
+    /// `view: "editor"` only: a 1-based line to put the cursor on (text viewer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// `view: "editor"` only: the byte offset the hex viewer opens at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    /// `view: "editor"` only: the 1-based page the PDF viewer opens at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
