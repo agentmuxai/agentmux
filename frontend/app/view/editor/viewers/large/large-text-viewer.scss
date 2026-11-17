@@ -45,7 +45,8 @@
     min-width: 0;
     overflow: auto;
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    // The text editor's size, so a file reads the same in either viewer.
+    font-size: var(--text-base);
     line-height: var(--large-line-h);
 
     &:focus {
