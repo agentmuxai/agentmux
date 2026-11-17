@@ -29,10 +29,14 @@ pub(super) fn revoke_container_tokens(container_name: &str) {
     }
 }
 
+/// Whether a base URL names the gateway's key route.
+pub(super) fn names_key_route(base_url: &str) -> bool {
+    base_url.trim_end_matches('/').ends_with(&format!("{PATH_PREFIX}{KEY_ROUTE_ID}"))
+}
+
 /// Whether the turn's environment points the agent at the gateway's key route.
 fn is_key_route_env(env: &[(String, String)]) -> bool {
-    let route = format!("{PATH_PREFIX}{KEY_ROUTE_ID}");
-    env.iter().any(|(k, v)| k == "ANTHROPIC_BASE_URL" && v.trim_end_matches('/').ends_with(&route))
+    env.iter().any(|(k, v)| k == "ANTHROPIC_BASE_URL" && names_key_route(v))
 }
 
 /// The address the turn's token is bound to: the container's own on Linux, none elsewhere; or why it can't be used.

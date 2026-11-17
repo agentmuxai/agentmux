@@ -722,8 +722,8 @@ async fn a_message_that_arrives_while_the_replacement_waits_runs_after_the_hande
     assert_eq!(texts, ["running", "queued behind", "late"]);
 }
 
-/// A container turn on an API-key account (`container::key_route`): the exec is given the gateway's address and a token
-/// made for this turn, never the key; where the gateway can't be reached from the container, the turn is refused
+/// A container turn on an API-key account (`container::key_route`): the exec is given the gateway's address and the agent's token
+/// for it, never the key; where the gateway can't be reached from the container, the turn is refused
 /// before any exec and its token is not handed out.
 #[tokio::test]
 async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_way_out() {
@@ -751,8 +751,8 @@ async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_
         assert_eq!(ended, (STATUS_DONE.to_string(), 0));
         let env = &fake.execs(Kind::Turn)[0].1;
         let given = env.iter().find_map(|e| e.strip_prefix("ANTHROPIC_AUTH_TOKEN=")).expect("the turn is given its token");
-        assert_ne!(given, gate_token, "a token made for this turn");
-        assert_eq!(token::grant_for(&gate_token), None, "the earlier one ended");
+        // Nothing to bind it to here, and the grant is the same: the agent's token holds, so a pane's other turn is not cut off.
+        assert_eq!(given, gate_token, "the agent's token for this machine");
         let grant = token::grant_for(given).unwrap();
         assert_eq!((grant.def_id.as_str(), grant.account.as_str(), grant.route.as_str()), ("kt-def", "kt-acct", KEY_ROUTE_ID));
         assert!(env.iter().any(|e| e.starts_with("ANTHROPIC_BASE_URL=") && e.ends_with("/api/v1/model/anthropic")), "{env:?}");
