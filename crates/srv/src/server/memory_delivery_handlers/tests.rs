@@ -363,7 +363,7 @@ fn startup_items_carry_role_owner_and_what_the_file_contains() {
 }
 
 /// A section an AgentMux-written startup file holds byte for byte is not sent again; one it lacks, or holds in an
-/// older form, is sent whole (Codex on #4131: a foreign file counts for nothing).
+/// older form, is sent whole. A foreign file counts for nothing (#4131).
 #[test]
 fn only_the_global_sections_newer_than_the_startup_file_are_sent() {
     use crate::backend::startup_files::{Owner, StartupFile};

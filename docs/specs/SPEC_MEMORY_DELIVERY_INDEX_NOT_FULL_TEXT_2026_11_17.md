@@ -4,7 +4,7 @@ Task #47923 (spec), #47924 (build). Author: Loap-3@narko, 2026-11-17.
 
 **Status:** active (the first PR of the build carries this document; the startup-file refresh in section 3.1 follows in a second PR).
 
-Measured on narko, AgentMux 0.60.32, from the srv logs, the operator's screenshot and this agent's own session start. No private memory text is quoted; fixtures in the build use made-up entries.
+Measured on one development host, AgentMux 0.60.32, from its srv logs, a screenshot of the pane list and one agent's own session start. No private memory text is quoted; fixtures in the build use made-up entries.
 
 ## 0. What the operator asked, and what is wrong
 
@@ -13,8 +13,8 @@ The operator, after a compaction: "shouldnt it only feed an index of memory, not
 What the code and the logs show:
 
 1. **The Global Memory arrives twice and fills the delivery.** `compose_delivery` (`crates/srv/src/server/memory_delivery_handlers.rs`) decides `global_in_file` from the startup files, but it reads them only when the reason is `Startup` (`files` is empty for `Compact` and `Clear`). After a compaction Claude Code reloads `CLAUDE.md` by itself, and srv, knowing nothing of that, sends all Global Memory again. The same happens at a new session when the startup file is stale, because `global_memory_in_startup_files` needs every current section to appear byte for byte (`f.text.contains(&e.text)`).
-2. **The startup file is stale because it is written only at launch.** `write_claude_md_respecting_ownership` is called from `agent_open.rs` and the editor's Launch path. Nothing rewrites it when Global Memory changes or when a compaction begins. This agent's `CLAUDE.md` is dated 2026-11-04 20:48 and carries the old "gh-agent 0.5.0" line the current entry replaced with 0.13.0; the hook's copy said 0.13.0. That is exactly the difference AgentY saw, and it is why the check failed and the second copy was sent.
-3. **Personal Memory is last, so it is what is dropped.** The 8 hook parts of 9,000 characters (72,000) are filled by Global first. Personal files then come out as "not sent, 0 B", and, because the cut note sits after Global too, the list of names that `fit.rs` writes can itself be cut: this agent's session start ended with "memory cut here, 11360 more characters did not fit" and no Personal Memory and no list of what was missing.
+2. **The startup file is stale because it is written only at launch.** `write_claude_md_respecting_ownership` is called from `agent_open.rs` and the editor's Launch path. Nothing rewrites it when Global Memory changes or when a compaction begins. One agent's `CLAUDE.md` was 13 days old and held an older form of an entry whose current form the hook carried. That is why the check failed and the second copy was sent.
+3. **Personal Memory is last, so it is what is dropped.** The 8 hook parts of 9,000 characters (72,000) are filled by Global first. Personal files then come out as "not sent, 0 B", and, because the cut note sits after Global too, the list of names that `fit.rs` writes can itself be cut: one session start ended with a "memory cut here" note and no Personal Memory and no list of what was missing.
 4. **The pane calls an index entry "not sent".** The card has two words for what is not in full ("cut", "not sent") and no word for "listed".
 
 ## 1. How memory reaches an agent today
@@ -23,7 +23,7 @@ Verified in the code unless marked.
 
 | Path | When | What it carries | Global dedup | Personal |
 |---|---|---|---|---|
-| Startup file (`CLAUDE.md`, `.claude/AGENTMUX_MEMORY.md` by `@import`; `AGENTS.md`, `GEMINI.md`, `QWEN.md` for other providers; none for Kimi) | Written when the agent is launched (`agent_open.rs`, editor Launch). Claude Code reads it at session start and again after a compaction or `/clear` (observed by AgentY on 11-17; not documented by the provider) | All Global sections, one file | n/a | none |
+| Startup file (`CLAUDE.md`, `.claude/AGENTMUX_MEMORY.md` by `@import`; `AGENTS.md`, `GEMINI.md`, `QWEN.md` for other providers; none for Kimi) | Written when the agent is launched (`agent_open.rs`, editor Launch). Claude Code reads it at session start and again after a compaction or `/clear` (observed in a compaction that delivered Global Memory twice; not documented by the provider) | All Global sections, one file | n/a | none |
 | `SessionStart` hook, Claude Code only (`agentmux-bashwrap sessionstart --part 1..8`, `delivery.rs`) | `startup`, `clear`, `compact`. Not `resume` or `fork` (D10: the conversation is intact and the file is loaded) | Global (unless `global_in_file`), then every Personal file newest first, capped at 8,000 chars each, then a not-sent list, then the running summary after a compaction. Split in 8 parts of 9,000 chars; the parts arrive in the order the hooks finish | Only `Startup` (bug 1); needs a byte-exact match (bug 2) | Full text until the budget ends |
 | Fallback re-delivery (`compose_fallback_with`, the frontend's hidden turn, `memory-reinjection-controller.ts`) | A compaction or fresh session where the hook stood down failed or does not exist: every provider but Claude | One message, no part cap, same content as the hook | Only `FreshSession` | Full text of every file, no budget |
 | Catch-up turn (`compose_catch_up`) | A rebuilt session or a compaction: the fallback's memory plus the catch-up block | The fallback's text | As the fallback | As the fallback |
@@ -36,15 +36,15 @@ The two memory systems are one folder for Claude agents: AgentMux's `Memory` too
 
 ## 2. Measured sizes
 
-Three real agents, narko, 2026-11-17.
+Three agents on that host (anonymised), one day.
 
 | Agent | Event | Startup file | Global in the hook | Personal | Result |
 |---|---|---|---|---|---|
-| Loap-3 (Claude Code, host) | new session, ~12:32Z | 62,257 bytes, last written 11-04 | all sections: 72,000 chars arrived, 11,360 more cut (about 83,000 in all, 37 entries) | 9 files, 12.7 KB, not sent; no list arrived | Global twice (once in the stale file); no Personal; no names |
-| AgentY (Claude Code, host), from #47923 | compaction, ~12:05Z | reloaded by the CLI | arrived again in the 8 parts | none | 34,270 chars cut; parts arrived 1, 2, 5, 3, 4, 7, 6, 8 |
-| Naki-2 (the operator's screenshot) | rebuilt session | 62 KB `CLAUDE.md` "+ Global Memory", ~16k tok | about 30 Global entries again; ~35k tok in all | 11 files "not sent, 0 B" | 5 workspace entries "not sent", 1 "cut", 17 cut in all |
+| A (Claude Code, host) | new session | about 62 KB, last written 13 days earlier | all sections: 72,000 chars arrived, about 11,000 more cut (about 83,000 in all, 37 entries) | 9 files, about 13 KB, not sent; no list of names arrived | Global Memory twice (once in the stale file); no Personal Memory; no names |
+| B (Claude Code, host) | compaction | reloaded by the CLI | arrived again in the 8 parts | none | about 34,000 chars cut; parts arrived out of order (1, 2, 5, 3, 4, 7, 6, 8) |
+| C (from a screenshot of the pane list) | rebuilt session | about 62 KB `CLAUDE.md` "+ Global Memory", about 16k tok | about 30 Global entries again; about 35k tok in all | 11 files "not sent, 0 B" | 5 workspace entries "not sent", 1 "cut", 17 cut in all |
 
-Across every srv log still on disk on narko (versions 0.60.x): 325 of 325 compaction deliveries and 78 of 88 new-session deliveries used all 8 parts. A delivery of 8 parts is at or near the cap; this is a lower bound on how often a delivery is cut, not a count of cuts. The 10 that did not are probably sessions where the startup file matched (inferred from the part count, not checked per delivery), which is the case R1 makes the rule.
+Across every srv log still on disk on that host (versions 0.60.x): 325 of 325 compaction deliveries and 78 of 88 new-session deliveries used all 8 parts. A delivery of 8 parts is at or near the cap; this is a lower bound on how often a delivery is cut, not a count of cuts. The 10 that did not are probably sessions where the startup file matched (inferred from the part count, not checked per delivery), which is the case R1 makes the rule.
 
 Cost of one delivery today: up to 72,000 characters, about 18,000 tokens (srv's own estimate is one token per four characters), on every compaction and most new sessions, of which about all is a copy of what the CLI already holds.
 
@@ -204,6 +204,6 @@ Each has a recommendation; the build follows them unless AgentY says otherwise.
 
 ## 8. What I could not verify
 
-- That Claude Code rereads `CLAUDE.md` after a compaction before the `SessionStart` hook runs (AgentY's duplication shows it rereads it; the order is not documented). The refresh at `PreCompact` precedes either order.
+- That Claude Code rereads `CLAUDE.md` after a compaction before the `SessionStart` hook runs (a compaction observed to deliver Global Memory twice shows it rereads it; the order is not documented). The refresh at `PreCompact` precedes either order.
 - That `MEMORY.md` is reloaded after a compaction.
-- The 325 and 88 delivery counts are from the srv logs still on narko, not from every host.
+- The 325 and 88 delivery counts are from the srv logs still on one host, not from every host.

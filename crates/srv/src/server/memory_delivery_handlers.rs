@@ -604,7 +604,7 @@ fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::Star
 /// Which current Global sections the CLI already got from a startup file: one AgentMux wrote that holds
 /// the section byte for byte. Returns the sections newer than the files (absent, or held in an older form,
 /// which the CLI never saw in its current form), and how much of the Global Memory the files carry. A foreign
-/// file doesn't count, or the hook would drop current entries the agent never saw (Codex on #4131).
+/// file doesn't count, or the hook would drop current entries the agent never saw.
 fn global_against_startup_files(files: &[crate::backend::startup_files::StartupFile], global: &[Entry]) -> (Vec<Entry>, delivery::StartupCarry) {
     let owned: Vec<&crate::backend::startup_files::StartupFile> =
         files.iter().filter(|f| f.owner == crate::backend::startup_files::Owner::Agentmux).collect();
