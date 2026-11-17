@@ -95,7 +95,7 @@ short of running the installer (used by its tests).
 
     # A setting that replaces the keys, the floor, the place a release is downloaded from, the tool that checks a signature or the latest version
     # is for tests: when one is set, it is said before anything is downloaded (its name, never its value).
-    $overridden = @("AGENTMUX_INSTALL_TEST_KEYS", "AGENTMUX_INSTALL_SSHSIG_FLOOR", "AGENTMUX_INSTALL_RELEASE_BASE", "AGENTMUX_INSTALL_SSH_KEYGEN", "AGENTMUX_INSTALL_NO_OPENSSL", "AGENTMUX_INSTALL_LATEST") | Where-Object { [Environment]::GetEnvironmentVariable($_) }
+    $overridden = @("AGENTMUX_INSTALL_TEST_KEYS", "AGENTMUX_INSTALL_SSHSIG_FLOOR", "AGENTMUX_INSTALL_RELEASE_BASE", "AGENTMUX_INSTALL_SSH_KEYGEN", "AGENTMUX_INSTALL_NO_OPENSSL", "AGENTMUX_INSTALL_LATEST", "AGENTMUX_INSTALL_WINGET_EXE") | Where-Object { [Environment]::GetEnvironmentVariable($_) }
     if ($overridden) { Say "warning: $($overridden -join ', ') changes what this script checks or where it downloads from (a setting for tests). Unset it to install as released" }
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
@@ -497,8 +497,17 @@ short of running the installer (used by its tests).
                 Move-Item -LiteralPath $pkg -Destination $target
                 Set-CurrentJunction $current $target
             } catch {
-                if ($aside -and -not (Test-Path -LiteralPath $target)) { try { [IO.Directory]::Move($aside, $target); $aside = "" } catch { } }
-                throw
+                $why = $_
+                # The new folder could not be put in place or linked: the version that was there is put back (and linked again), never left aside.
+                if ($aside) {
+                    try {
+                        if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop }
+                        [IO.Directory]::Move($aside, $target)
+                        $aside = ""
+                        try { Set-CurrentJunction $current $target } catch { }
+                    } catch { Say "the previous install could not be put back: it is in $aside" }
+                }
+                throw $why
             }
             if ($aside) { Remove-Item -LiteralPath $aside -Recurse -Force -ErrorAction SilentlyContinue }
         } finally {
@@ -506,10 +515,13 @@ short of running the installer (used by its tests).
             if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
         }
         Add-ToUserPath $binDir
-        # The folders of the other versions go once the link has moved. One that is in use stays, and is named.
+        # The folders of the other versions go once the link has moved. Each is renamed first: a folder with a running program in it cannot
+        # be renamed, so one that is in use is left whole and named, never half deleted (the running server still reads its files).
         foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -Force | Where-Object { $_.Name -ne $Version -and $_.Name -match '^[0-9]+\.[0-9]+\.[0-9]+' })) {
             $old = $dir.FullName
-            try { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction Stop } catch { Say "could not remove the old folder $old (is AgentMux Headless running from it?): delete it once it has stopped" }
+            $going = Join-Path $root (".old-" + [Guid]::NewGuid().ToString("N"))
+            try { [IO.Directory]::Move($old, $going) } catch { Say "left the old folder ${old}: AgentMux Headless seems to be running from it. Run  agentmux restart  and delete it once it has stopped"; continue }
+            Remove-Item -LiteralPath $going -Recurse -Force -ErrorAction SilentlyContinue
         }
         Say "installed AgentMux Headless ${Version}: $target"
         Say "this package is not code-signed: Windows may ask before it lets the programs run the first time"

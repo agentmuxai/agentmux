@@ -289,6 +289,17 @@ if (-not $canSign) {
             New-Item -ItemType Directory -Path (Join-Path $folder "9.9.8\bin") -Force | Out-Null
             Expect "Headless: an update moves the link" 0 "installed AgentMux Headless $hver" $sh (HeadlessEnv $hrel $lad2) ($hargs + "-Force")
             if (-not (Test-Path (Join-Path $folder "9.9.8"))) { Pass "Headless: the older version folder is removed" } else { Fail "Headless: the older version folder is removed" "still there" }
+            if ($isWin) {
+                # An older version folder with a running program in it is left whole (never half deleted) and named.
+                $oldv = Join-Path $folder "9.9.7"
+                New-Item -ItemType Directory -Path (Join-Path $oldv "bin") -Force | Out-Null
+                [IO.File]::WriteAllText((Join-Path $oldv "bin\a.exe"), "a", $utf8); [IO.File]::WriteAllText((Join-Path $oldv "bin\b.exe"), "b", $utf8)
+                $fs2 = [IO.File]::Open((Join-Path $oldv "bin\b.exe"), "Open", "Read", "None")
+                try {
+                    Expect "Headless: an update names an old version folder that is in use" 0 "left the old folder" $sh (HeadlessEnv $hrel $lad2) ($hargs + "-Force")
+                } finally { $fs2.Dispose() }
+                if ((Test-Path (Join-Path $oldv "bin\a.exe")) -and (Test-Path (Join-Path $oldv "bin\b.exe"))) { Pass "Headless: the old folder in use is whole, not half deleted" } else { Fail "Headless: the old folder in use is whole, not half deleted" "files are gone" }
+            }
             # a "current" that is a real folder is never touched
             $lad3 = Join-Path $work "lad3-$sh"
             New-Item -ItemType Directory -Path (Join-Path $lad3 "AgentMux\Headless\current") -Force | Out-Null
@@ -311,6 +322,14 @@ if (-not $canSign) {
                 $hasProgram = Test-Path (Join-Path $ladN "AgentMux\Headless\$hver\bin\agentmux.exe")
                 if ($r.Code -ne 0 -and $r.Out.Contains("could not make the link") -and $hasProgram -and -not $r.Out.Contains("installed AgentMux Headless")) { Pass "Headless ($($z[0])): unpacked and checked; no link, so no 'installed'" } else { Fail "Headless ($($z[0])): unpacked and checked; no link, so no 'installed'" "code $($r.Code), program there: $hasProgram, $($r.Out)" }
             }
+            # -Force over an existing version when the link cannot be made: the version that was there is put back, nothing is left aside.
+            $ladF = Join-Path $work ("lad-force-" + [Guid]::NewGuid().ToString("N"))
+            $existing = Join-Path $ladF "AgentMux\Headless\$hver"
+            New-Item -ItemType Directory -Path (Join-Path $existing "bin") -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $existing "bin\marker.txt"), "the version that was there", $utf8)
+            $r = Invoke-Install $sh (HeadlessEnv $hrel $ladF) ($hargs + "-Force")
+            $left = @(Get-ChildItem -LiteralPath (Join-Path $ladF "AgentMux\Headless") -Force | Where-Object { $_.Name -like ".old-*" -or $_.Name -like ".stage-*" })
+            if ($r.Code -ne 0 -and (Test-Path (Join-Path $existing "bin\marker.txt")) -and -not (Test-Path (Join-Path $existing "bin\agentmux.exe")) -and $left.Count -eq 0) { Pass "Headless: a failed -Force replace puts the old version back and leaves nothing aside" } else { Fail "Headless: a failed -Force replace puts the old version back and leaves nothing aside" "code $($r.Code), leftovers $($left.Name -join ','), $($r.Out)" }
             Write-Host "skip - the install steps after the link run where a junction can be made"
         }
 
@@ -399,6 +418,8 @@ if (-not $canSign) {
         # A setting that changes what is checked is named before anything is downloaded (its name, never its value)
         $named = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; AGENTMUX_INSTALL_TEST_KEYS = "t1:SECRETVALUE123"; AGENTMUX_INSTALL_SSHSIG_FLOOR = "0.0.1"; LOCALAPPDATA = (Join-Path $work "lad15-$sh") }
         Expect "overrides are named in one line" 0 "warning: AGENTMUX_INSTALL_TEST_KEYS, AGENTMUX_INSTALL_SSHSIG_FLOOR change" $sh $named @("-Headless", "-DryRun", "-Version", "0.60.31")
+        $wingetNamed = @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "ai"; AGENTMUX_INSTALL_WINGET_EXE = (Join-Path $work "some-winget.cmd"); LOCALAPPDATA = (Join-Path $work "lad17-$sh") }
+        Expect "a replaced winget program is named too" 0 "warning: AGENTMUX_INSTALL_WINGET_EXE changes" $sh $wingetNamed @("-DryRun", "-NoLaunch")
         Expect-Absent "an override's value is never printed" "SECRETVALUE123" $sh $named @("-Headless", "-DryRun", "-Version", "0.60.31")
         Expect-Absent "no override, no warning" "warning:" $sh @{ AGENTMUX_INSTALL_INSTALLED = "none"; AGENTMUX_INSTALL_WINGET = "none"; LOCALAPPDATA = (Join-Path $work "lad16-$sh") } @("-Headless", "-DryRun", "-Version", "0.60.31")
     }
