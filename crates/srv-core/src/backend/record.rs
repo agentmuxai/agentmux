@@ -117,6 +117,12 @@ fn fnv(s: &str) -> u32 {
 /// no name is written.
 fn persisted_key(key: &str) -> String {
     let Some(rest) = key.strip_prefix("renderer:") else { return key.to_string() };
+    // Already cut (a line this version wrote): `<kind>:<8 hex>`.
+    if let Some((kind, hash)) = rest.split_once(':') {
+        if ["window", "browser", "pool", "other"].contains(&kind) && hash.len() == 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return key.to_string();
+        }
+    }
     let kind = if rest.contains("pool-window") {
         "pool"
     } else if rest.contains("browser-pane") {
@@ -239,14 +245,16 @@ fn series(samples: &[Sample], pick: impl Fn(&AgentMuxLine) -> &[PartLine]) -> Ve
     let mut out: Vec<(String, Vec<u64>)> = Vec::new();
     for (i, s) in samples.iter().enumerate() {
         for row in s.am.as_ref().map(&pick).unwrap_or_default() {
-            let at = match out.iter().position(|(k, _)| *k == row.k) {
+            // A line an older version wrote still has a renderer's name in its key.
+            let key = persisted_key(&row.k);
+            let at = match out.iter().position(|(k, _)| *k == key) {
                 Some(at) => at,
                 None => {
-                    out.push((row.k.clone(), vec![0; samples.len()]));
+                    out.push((key, vec![0; samples.len()]));
                     out.len() - 1
                 }
             };
-            out[at].1[i] = row.mem;
+            out[at].1[i] = out[at].1[i].max(row.mem);
         }
     }
     out
@@ -627,6 +635,18 @@ mod tests {
         // The same renderer gives the same key on the next line, and another one a different key.
         assert_eq!(persisted_key("renderer:renderer-window-a"), persisted_key("renderer:renderer-window-a"));
         assert_ne!(persisted_key("renderer:renderer-window-a"), persisted_key("renderer:renderer-window-b"));
+        // A key already cut stays as it is.
+        let cut = persisted_key("renderer:renderer-window-a");
+        assert_eq!(persisted_key(&cut), cut);
+    }
+
+    #[test]
+    fn a_rollup_of_lines_an_older_version_wrote_carries_no_names_either() {
+        let mut old = line(NOON, 1, 1, 10);
+        old.am.as_mut().unwrap().rows = vec![PartLine { k: "renderer:renderer-window-acme-payroll".into(), mem: 7, n: 1 }];
+        let json = serde_json::to_string(&rollup(NOON, &[old]).unwrap()).unwrap();
+        assert!(!json.contains("acme") && !json.contains("payroll"), "{json}");
+        assert!(json.contains("renderer:window:"), "{json}");
     }
 
     #[test]
