@@ -22,6 +22,8 @@ export const WHEEL_DIAG_TAG = "[wheel-diag]";
 export const WHEEL_DIAG_RING = 12;
 /** How long after the event the scrollers are read again: past the frame that applies a native scroll. */
 export const WHEEL_DIAG_SETTLE_MS = 80;
+/** A pause this long between two wheel events ends the gesture: the next dead event starts a new run. */
+export const WHEEL_DIAG_IDLE_MS = 500;
 /** Dead lines for the Nth consecutive dead event of a run. */
 export function logsRunEvent(n: number): boolean {
     return n === 1 || n === 3 || n === 10 || (n > 10 && n % 50 === 0);
@@ -90,12 +92,25 @@ export interface WheelDiagDeps {
 export function createWheelDiag(deps: WheelDiagDeps): (e: WheelEvent) => void {
     const ring: WheelRecord[] = [];
     let run = 0;
+    // A run belongs to one gesture on one transcript: an idle gap or another transcript starts the next (`gen`),
+    // and a settle still pending from before it counts for nothing.
+    let gen = 0;
+    let lastAt = Number.NEGATIVE_INFINITY;
+    let lastDoc: Element | null = null;
     return (e) => {
         if (!deps.enabled() || !e.isTrusted || e.ctrlKey || e.metaKey || e.deltaY === 0) return;
         const target = e.target instanceof Element ? e.target : null;
         const doc = target?.closest<HTMLElement>(".agent-document[data-follow-state]") ?? null;
         const inPanel = !!target?.closest(".agent-node-peek-overlay");
         if (!doc && !inPanel) return;
+        if (e.timeStamp - lastAt >= WHEEL_DIAG_IDLE_MS || doc !== lastDoc) {
+            gen++;
+            run = 0;
+            ring.length = 0;
+        }
+        lastAt = e.timeStamp;
+        lastDoc = doc;
+        const myGen = gen;
         const under = document.elementFromPoint(e.clientX, e.clientY);
         const before = scrollersAt(under);
         const dir: -1 | 1 = e.deltaY < 0 ? -1 : 1;
@@ -113,6 +128,7 @@ export function createWheelDiag(deps: WheelDiagDeps): (e: WheelEvent) => void {
             panel: inPanel ? "panel" : null,
         };
         deps.later(() => {
+            if (myGen !== gen) return;
             rec.hand = handoffOf(e);
             const after = scrollersAt(document.elementFromPoint(e.clientX, e.clientY));
             const moved = signature(after) !== signature(before) || e.defaultPrevented;

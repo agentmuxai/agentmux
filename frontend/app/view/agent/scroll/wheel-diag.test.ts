@@ -140,6 +140,28 @@ describe("wheel diagnostic", () => {
         expect(h.lines.map((l) => JSON.parse(String(l[1])).hand)).toEqual(["absorb", "forward"]); // runs 1 and 3
     });
 
+    it("starts a new run for a new gesture after an idle gap, with the events before it", () => {
+        const { txt } = build(100);
+        const h = harness();
+        for (let i = 1; i <= 12; i++) h.onWheel(wheel(txt, -100, i * 10)); // runs 1, 3 and 10 log
+        h.settle();
+        h.onWheel(wheel(txt, -100, 5000)); // a second stuck gesture, long after
+        h.settle();
+        const rec = h.lines.map((l) => JSON.parse(String(l[1])));
+        expect(rec.map((r) => r.dead)).toEqual([1, 3, 10, 1]);
+        expect(rec[3].before).toEqual([]); // its own gesture: the first one's events are not its context
+    });
+
+    it("starts a new run when the wheel moves to another transcript, and ignores a settle left over from before", () => {
+        const { txt } = build(100);
+        const h = harness();
+        for (let i = 1; i <= 4; i++) h.onWheel(wheel(txt, -100, 100 + i)); // pending: nothing settled yet
+        const second = build(100); // another transcript, a moment later
+        h.onWheel(wheel(second.txt, -100, 110));
+        h.settle();
+        expect(h.lines.map((l) => JSON.parse(String(l[1])).dead)).toEqual([1]); // only the new transcript's event counts
+    });
+
     it("starts a new run after the wheel moves something", () => {
         const { txt, box } = build(100);
         const h = harness();
