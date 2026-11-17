@@ -14,18 +14,20 @@
 //     inputs, and why it's the load-bearing reason for a native Edit menu.
 //   * CUSTOM items dispatch `menu:invoke {commandId}` to the host frontend
 //     renderers; the focused window runs it through the shared `commandRegistry`
-//     (frontend/app/store/command-registry.ts). Phase 1 leaves custom items
-//     accelerator-free — keymodel.ts keeps owning those chords (zero
-//     regression); shortcut reconciliation is Phase 2.
+//     (frontend/app/store/command-registry.ts). An item shows the key the
+//     shortcut table gives its command: the app pushes them (`set_menu_keys`,
+//     client/menu_keys.rs) and `apply_menu_keys` puts each on the item with the
+//     same command id, so the menu follows the person's own keybindings.
 
 #![cfg(target_os = "macos")]
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use agentmux_common::quit_question;
 
+use crate::client::menu_keys::{self, MenuKey};
 use crate::state::AppState;
 
 type Id = *mut c_void;
@@ -48,6 +50,9 @@ const MOD_OPT: u64 = 1 << 19;
 
 // AppState handle for the menu action (a bare C function with no captured env).
 static MENU_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
+
+/// The menu's target object (an `Id`), once the menu is built: the way to reach the main thread from the key push.
+static MENU_TARGET: AtomicUsize = AtomicUsize::new(0);
 
 #[inline]
 unsafe fn class(name: &[u8]) -> Class {
@@ -92,6 +97,17 @@ unsafe extern "C" fn menu_invoke(_self: Id, _cmd: Sel, sender: Id) {
         return;
     }
     let cmd = CStr::from_ptr(cstr).to_string_lossy().into_owned();
+    // Whether a key press or a click ran the item: a chord the item shows is handled once, here or by the page.
+    let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
+    let event = msg(app, sel(b"currentEvent\0"));
+    let kind: u64 = if event.is_null() {
+        0
+    } else {
+        let f: extern "C" fn(Id, Sel) -> u64 = std::mem::transmute(objc_msgSend as *const c_void);
+        f(event, sel(b"type\0"))
+    };
+    // NSEventTypeKeyDown is 10.
+    tracing::info!(command = %cmd, by_key = (kind == 10), "menu item invoked");
     match MENU_STATE.get() {
         Some(state) => crate::events::emit_event_to_top_level_windows(
             state,
@@ -161,6 +177,63 @@ unsafe extern "C" fn menu_quit(_self: Id, _cmd: Sel, _sender: Id) {
     }
 }
 
+/// A Rust string from an `NSString`; `None` for nil.
+unsafe fn string_of(s: Id) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    let utf8: extern "C" fn(Id, Sel) -> *const c_char = std::mem::transmute(objc_msgSend as *const c_void);
+    let c = utf8(s, sel(b"UTF8String\0"));
+    if c.is_null() {
+        None
+    } else {
+        Some(CStr::from_ptr(c).to_string_lossy().into_owned())
+    }
+}
+
+/// Puts each key of `keys` on the item of `menu` (and its submenus) whose command it is, and takes the key off an
+/// item whose command has none. Only items that run a command (they carry its id) are touched: the standard
+/// items and Quit keep their own keys. Main thread only.
+unsafe fn set_keys_in(menu: Id, keys: &[MenuKey]) {
+    let count_of: extern "C" fn(Id, Sel) -> usize = std::mem::transmute(objc_msgSend as *const c_void);
+    let object_at: extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let set_mask: extern "C" fn(Id, Sel, u64) = std::mem::transmute(objc_msgSend as *const c_void);
+    let items = msg(menu, sel(b"itemArray\0"));
+    for i in 0..count_of(items, sel(b"count\0")) {
+        let item = object_at(items, sel(b"objectAtIndex:\0"), i);
+        let submenu = msg(item, sel(b"submenu\0"));
+        if !submenu.is_null() {
+            set_keys_in(submenu, keys);
+        }
+        let Some(command) = string_of(msg(item, sel(b"representedObject\0"))) else { continue };
+        let key = keys.iter().find(|k| k.command == command);
+        msg_id(item, sel(b"setKeyEquivalent:\0"), nsstr(key.map_or("", |k| k.key.as_str())));
+        set_mask(item, sel(b"setKeyEquivalentModifierMask:\0"), key.map_or(0, MenuKey::mask));
+    }
+}
+
+/// `agentmuxMenuApplyKeys:` — runs on the main thread: shows the keys the app last pushed.
+unsafe extern "C" fn menu_apply_keys(_self: Id, _cmd: Sel, _arg: Id) {
+    let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
+    let main = msg(app, sel(b"mainMenu\0"));
+    if !main.is_null() {
+        set_keys_in(main, &menu_keys::current());
+    }
+}
+
+/// The app pushed new keys (any thread): have the menu show them. Before the menu exists, `install_menu_bar`
+/// shows what has been pushed by then.
+pub fn apply_menu_keys() {
+    unsafe {
+        let target = MENU_TARGET.load(Ordering::SeqCst) as Id;
+        if target.is_null() {
+            return;
+        }
+        let perform: extern "C" fn(Id, Sel, Sel, Id, u8) = std::mem::transmute(objc_msgSend as *const c_void);
+        perform(target, sel(b"performSelectorOnMainThread:withObject:waitUntilDone:\0"), sel(b"agentmuxMenuApplyKeys:\0"), std::ptr::null_mut(), 0);
+    }
+}
+
 /// Build (once) the shared target object that owns `agentmuxMenuInvoke:`.
 /// Leaked on purpose — it lives for the process lifetime.
 unsafe fn make_target() -> Id {
@@ -182,6 +255,14 @@ unsafe fn make_target() -> Id {
             cls,
             sel(b"agentmuxMenuQuit:\0"),
             quit_imp as usize,
+            b"v@:@\0".as_ptr() as *const c_char,
+        );
+        // -(void)agentmuxMenuApplyKeys:(id)unused  →  "v@:@"
+        let keys_imp: unsafe extern "C" fn(Id, Sel, Id) = menu_apply_keys;
+        class_addMethod(
+            cls,
+            sel(b"agentmuxMenuApplyKeys:\0"),
+            keys_imp as usize,
             b"v@:@\0".as_ptr() as *const c_char,
         );
         objc_registerClassPair(cls);
@@ -392,7 +473,8 @@ unsafe fn install_inner(state: Arc<AppState>) {
 
     // ── App menu (AppKit titles it from the process name; item labels use it) ──
     let app_menu = add_submenu(main, name);
-    add_cmd(app_menu, target, "Settings…", "dev:open_settings", "", 0);
+    // The Settings pane, as the palette's Settings and Cmd+, open it (not the settings file).
+    add_cmd(app_menu, target, "Settings…", "app:settings", "", 0);
     add_cmd(app_menu, target, "Connectors…", "app:connectors", "", 0);
     add_cmd(app_menu, target, "Memory…", "app:memory", "", 0);
     add_sep(app_menu);
@@ -463,6 +545,10 @@ unsafe fn install_inner(state: Arc<AppState>) {
     let app = msg(class(b"NSApplication\0") as Id, sel(b"sharedApplication\0"));
     msg_id(app, sel(b"setMainMenu:\0"), main);
     msg_id(app, sel(b"setWindowsMenu:\0"), window);
+
+    // The keys the app pushed before the menu was there; from now on a push finds the target.
+    set_keys_in(main, &menu_keys::current());
+    MENU_TARGET.store(target as usize, Ordering::SeqCst);
 
     tracing::info!("macOS: installed native menu bar (SPEC menu-bar Phase 1)");
 }

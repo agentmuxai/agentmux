@@ -6,6 +6,7 @@
 
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type { HostKey } from "@/app/keybindings/host-keys";
+import type { MenuKey } from "@/app/keybindings/menu-keys";
 import type { HealthPayload } from "@/app/store/health-signals";
 import type { NodeModel } from "@/layout/index";
 import type { SignalAtom } from "@/util/util";
@@ -542,6 +543,8 @@ declare global {
         setZoomFactor: (zoomFactor: number) => void;
         /** The app shortcuts the host forwards out of a focused browser pane; replaces its list. */
         setHostKeys: (keys: HostKey[]) => void;
+        /** The key of each command the macOS menu bar shows next to its items; replaces its list (macOS only). */
+        setMenuKeys: (keys: MenuKey[]) => void;
         onUpdaterStatusChange: (callback: (status: UpdaterStatus) => void) => void;
         getUpdaterStatus: () => UpdaterStatus;
         getUpdaterVersion: () => string | null;
