@@ -325,6 +325,8 @@ import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
 import type { EnsureProviderAuthDirReq } from "@/types/rpc/EnsureProviderAuthDirReq";
 import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuthDirResult";
 import type { ExportAgentDefinitionsResult } from "@/types/rpc/ExportAgentDefinitionsResult";
+import type { FileIndexLinesReq } from "@/types/rpc/FileIndexLinesReq";
+import type { FileIndexLinesResult } from "@/types/rpc/FileIndexLinesResult";
 import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
@@ -2392,6 +2394,10 @@ export const GeneratedApi = {
   // command "fileprobe"
   FileProbeCommand(client: RpcClient, data: FileProbeReq, opts?: RpcOpts): Promise<FileProbeResult> {
     return client.rpcCall("fileprobe", data, opts);
+  },
+  // command "fileindexlines"
+  FileIndexLinesCommand(client: RpcClient, data: FileIndexLinesReq, opts?: RpcOpts): Promise<FileIndexLinesResult> {
+    return client.rpcCall("fileindexlines", data, opts);
   },
   // command "filesearchbytes"
   FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {

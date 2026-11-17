@@ -95,7 +95,7 @@ pub const READ_ONLY: &[&str] = &[
     "browser_profiles.list", "bundle.export", "bundle.export_for_agent", "bundle.export_for_agent_with_history",
     "bundle.get", "bundle.import.preview", "bundle.list", "bundle.self.get", "bundle.validate", "checkcliauth",
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
-    "containerruntimeavailable", "eventreadhistory", "exportagents", "fileprobe", "filesearchbytes", "fleet.group.list",
+    "containerruntimeavailable", "eventreadhistory", "exportagents", "fileindexlines", "fileprobe", "filesearchbytes", "fleet.group.list",
     "forkagentdefinitionsuggest", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
     "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "getdronepayloadschema", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
