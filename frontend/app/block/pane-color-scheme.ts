@@ -69,18 +69,22 @@ export const PANE_COLOR_TOKENS: Record<"dark" | "light", Record<PaneColorRole, O
 /**
  * The OKLCH lightness (chroma 0) of each role for Black and White. A neutral cannot share the hues' tones: a black
  * line cannot be seen on dark chrome, nor a white one on light chrome. So where the neutral is the theme's own
- * colour its lines step toward the middle until they reach 3:1 (a graphite line for Black on dark, a silver one for
- * White on light), and its fills go to the neutral itself where the theme's text still reads at 4.5:1
- * (pane-color-scheme.test.ts asserts both).
+ * colour its line is a grey about as strong as a hue's line (Black on dark, White on light), and its fills go to the
+ * neutral itself where the theme's text still reads at 4.5:1.
+ *
+ * Two things hold the line and border tones (pane-color-scheme.test.ts, kanban-agent-name-colour.test.tsx):
+ * - An agent's name is written in its `identity` tone, so that tone is text: 4.5:1 on every theme's surface.
+ * - Any colour's focused ring stands out more than any colour's unfocused border, the neutrals included, so
+ *   which pane has focus never depends on which two colours sit side by side.
  */
 export const NEUTRAL_TONES: Record<"dark" | "light", Record<"black" | "white", Record<PaneColorRole, number>>> = {
     dark: {
-        black: { identity: 0.56, border: 0.4, pill: 0.16, pillActive: 0, headerTint: 0.14, widgetTint: 0.56 },
-        white: { identity: 0.97, border: 0.62, pill: 0.42, pillActive: 0.5, headerTint: 0.36, widgetTint: 0.97 },
+        black: { identity: 0.7, border: 0.4, pill: 0.16, pillActive: 0, headerTint: 0.14, widgetTint: 0.7 },
+        white: { identity: 0.97, border: 0.58, pill: 0.42, pillActive: 0.5, headerTint: 0.36, widgetTint: 0.97 },
     },
     light: {
-        black: { identity: 0.15, border: 0.55, pill: 0.8, pillActive: 0.72, headerTint: 0.86, widgetTint: 0.15 },
-        white: { identity: 0.62, border: 0.84, pill: 0.985, pillActive: 1, headerTint: 1, widgetTint: 0.62 },
+        black: { identity: 0.15, border: 0.66, pill: 0.8, pillActive: 0.72, headerTint: 0.86, widgetTint: 0.15 },
+        white: { identity: 0.52, border: 0.84, pill: 0.985, pillActive: 1, headerTint: 1, widgetTint: 0.52 },
     },
 };
 

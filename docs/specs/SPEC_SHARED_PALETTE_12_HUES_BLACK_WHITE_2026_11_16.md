@@ -5,6 +5,7 @@
 **Status:** active. Approved by the operator, 2026-11-16 (relayed by AgentY), every decision of §10 as recommended. Spec task #47850; built as #47851.
 **Verified against:** `origin/main` @ `b99a6f020a`, by reading the files named in §7 and by running the calculations in §2 and §3 (a throwaway script; §2.1 says how the build lands it as a checked tool).
 **Changes:** [`SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md`](SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md) (the 16 slots and their names; its method, its single source and its role tones are kept). It touches the built-in list of [`SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md`](SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md) §3.2.
+**Amended 2026-11-16:** §3 retuned after the macOS and Linux look checks of the build (task #47881): a neutral's line also has to read as text, and a focused ring is stronger than any unfocused border. §3.5 says what changed; the tables of §3.2 and §3.3 hold the tuned values.
 
 ## 0. The ask
 
@@ -80,20 +81,21 @@ Reading it: for typical colour vision every neighbour pair is about a third furt
 
 A hue slot gives every role the same lightness and chroma, so a role looks equally strong in every colour. A neutral cannot do that: where the theme's own chrome is near black, a black line or fill has nothing to stand against, and the same holds for white on light chrome. So a neutral gets **a lightness per role and theme, with no chroma**, chosen by three requirements:
 
-1. **Lines** (the focused ring, the tab underline, a selected Swarm row: the `identity` role) reach 3:1 against every surface they are drawn on. Where the neutral itself cannot (Black in the dark theme, White in the light one), the line steps toward the middle until it does: a graphite line for Black on dark, a silver line for White on light.
+1. **Lines** (the focused ring, the tab underline, a selected Swarm row: the `identity` role) reach 3:1 against every surface they are drawn on, and 4.5:1 against every theme's surface, because an agent's name is written in the same tone (the Kanban, the attention lists). Where the neutral itself cannot (Black in the dark theme, White in the light one), the line is a grey about as strong as a hue's line: a mid grey for Black on dark, a darker grey for White on light.
 2. **Fills** (pills, the header band) stay in the range where the theme's own text keeps 4.5:1, and go to the neutral's own colour where they can: true black fills in the dark theme, true white fills in the light one.
 3. **Where a neutral is shown for itself** (the picker's swatch, a profile chip, a pane backdrop, the stored value), it is exactly `#000000` or `#ffffff`, in both themes, with a hairline around a swatch so a black swatch shows on a dark menu and a white one on a light menu.
+4. **Focus.** Any colour's focused ring stands out from the page at least 1.5 times as much as any colour's unfocused border, the two neutrals against each other included. So a neutral's `border` tone is held under the weakest ring of its theme.
 
 ### 3.2 The tones (OKLCH lightness, chroma 0)
 
 | Role | Dark: Black | Dark: White | Light: Black | Light: White |
 |---|---|---|---|---|
-| `identity` (ring, underline) | 0.56 `#747474` | 0.97 `#f5f5f5` | 0.15 `#0b0b0b` | 0.62 `#868686` |
-| `border` (unfocused pane) | 0.40 `#484848` | 0.62 `#868686` | 0.55 `#717171` | 0.84 `#cacaca` |
+| `identity` (ring, underline, an agent's name) | 0.70 `#9e9e9e` | 0.97 `#f5f5f5` | 0.15 `#0b0b0b` | 0.52 `#696969` |
+| `border` (unfocused pane) | 0.40 `#484848` | 0.58 `#7a7a7a` | 0.66 `#929292` | 0.84 `#cacaca` |
 | `pill` | 0.16 `#0d0d0d` | 0.42 `#4d4d4d` | 0.80 `#bebebe` | 0.985 `#fafafa` |
 | `pillActive` | 0 `#000000` | 0.50 `#636363` | 0.72 `#a4a4a4` | 1 `#ffffff` |
 | `headerTint` | 0.14 `#090909` | 0.36 `#3d3d3d` | 0.86 `#d1d1d1` | 1 `#ffffff` |
-| `widgetTint` (top-bar icon) | 0.56 | 0.97 | 0.15 | 0.62 |
+| `widgetTint` (top-bar icon) | 0.70 | 0.97 | 0.15 | 0.52 |
 | Picker swatch, profile chip, backdrop, stored hex | `#000000` | `#ffffff` | `#000000` | `#ffffff` |
 
 They live beside `PANE_COLOR_TOKENS` in `pane-color-scheme.ts`, so there is still one place to tune the look, and `paneRoleColor` stays the one function every surface asks.
@@ -102,20 +104,22 @@ They live beside `PANE_COLOR_TOKENS` in `pane-color-scheme.ts`, so there is stil
 
 | Check | Dark: Black | Dark: White | Light: Black | Light: White |
 |---|---|---|---|---|
-| Identity line against its pill, selected pill, header tint (worst) | 4.16 | 5.51 | 7.90 | 3.49 |
-| Identity line against the window, the tab strip, the pane and the neutral header (worst) | 3.11 | 13.3 | 17.0 | 3.14 |
+| Identity line against its pill, selected pill, header tint (worst) | 7.25 | 5.51 | 7.90 | 5.26 |
+| Identity line against the window, the tab strip, the pane and the neutral header (worst) | 5.43 | 13.3 | 17.0 | 4.73 |
+| A name in the identity tone against the surface of every theme of its kind (worst) | 4.66 (Nord) | 11.5 | 17.4 | 4.84 (Gruvbox Light) |
 | The theme's text on its pill, selected pill, header tint (worst) | 18.1 | 5.61 | 7.70 | 18.4 |
-| Its identity line against the nearest hue's identity line (CIEDE2000) | 29.6 | 27.7 | 35.9 | 21.9 |
-| Black's identity line against White's (CIEDE2000) | 35.8 | | 40.7 | |
+| Its identity line against the nearest hue's identity line (CIEDE2000) | 22.8 | 27.7 | 35.9 | 19.1 |
+| Black's identity line against White's (CIEDE2000) | 21.6 | | 29.8 | |
+| The weakest focused ring against the strongest unfocused border, any two of the 14 (each as contrast with the page) | 7.84 to 4.89, 1.60 times (Black's ring, White's border) | | 5.18 to 3.11, 1.66 times (a hue's ring, Black's border) | |
 
-Every line clears 3:1 and every text clears 4.5:1. Each neutral's line is further from the other's, and from every hue's, than any two neighbouring hues are from each other (17.4 at most).
+Every line clears 3:1, and every text and every name clears 4.5:1. Each neutral's line is further from the other's, and from every hue's, than any two neighbouring hues are from each other (17.4 at most).
 
 ### 3.4 On each surface
 
 | Surface | Black | White |
 |---|---|---|
 | Picker (`PaletteSwatches`, the Pane Color menu) | a black swatch with a hairline, named "Black", check mark when chosen | a white swatch with a hairline, named "White" |
-| Pane ring and tab underline | dark theme: graphite; light theme: black | dark theme: white; light theme: silver |
+| Pane ring and tab underline | dark theme: mid grey; light theme: black | dark theme: white; light theme: dark grey |
 | Pane header band and tab pills | dark theme: black band and pills, darker than the neutral header; light theme: grey band and pills, darker than any hue's | dark theme: grey band and pills, lighter than any hue's; light theme: white, as an uncoloured pane's (see the limit below) |
 | Agent colour (Swarm row, Kanban, tower and attention lists) | `ui:color` is `#000000`; every one of these draws it through `paneRoleColor`, so it gets the tones above. A reader that paints the stored hex as it is paints black and needs a hairline (§7) | `#ffffff`, the same |
 | Window tab | the pill tones above with the identity underline | the same |
@@ -124,7 +128,18 @@ Every line clears 3:1 and every text clears 4.5:1. Each neutral's line is furthe
 
 **Backdrops.** A hue's built-in backdrop is a deep tone under a dark app theme and a pale one under a light theme. Black and White are not: a person who picks a black backdrop means black, whatever the app theme, so the two neutrals keep one surface each and the pane's Dark / Light / Follow choice does not change them (as it does not change a custom colour today). Their ink comes from `deriveInk`, like every other backdrop.
 
-**The limit.** The neutral that matches the theme is quiet by nature. In the light theme a White pane has the uncoloured pane's white header and pills; what marks it is its silver ring and underline (3.1:1 and up) where an uncoloured pane has the accent's. In the dark theme a Black pane's fills are darker than the chrome by 1.3:1 to 1.4:1, which reads as an area but would not as a line; its graphite ring carries it. The swatch sheet shows both. If that is too quiet, the alternative is a hairline around the near neutral's pills and header on every surface, which is more to build and to keep consistent; it is decision N2.
+**The limit.** The neutral that matches the theme is quiet by nature. In the light theme a White pane has the uncoloured pane's white header and pills; what marks it is its grey ring and underline (4.7:1 and up) where an uncoloured pane has the accent's. In the dark theme a Black pane's fills are darker than the chrome by 1.3:1 to 1.4:1, which reads as an area but would not as a line; its grey ring carries it. The swatch sheet shows both, with the two grey lines as they were before §3.5 (fainter). If that is too quiet, the alternative is a hairline around the near neutral's pills and header on every surface, which is more to build and to keep consistent; it is decision N2.
+
+### 3.5 Tuned after the look checks (2026-11-16, task #47881)
+
+Two things the first tones got wrong, found when the build was looked at on macOS and Linux:
+
+- **A name in a neutral's line tone was hard to read.** A line needs 3:1; text needs 4.5:1, and an agent's name is written in its `identity` tone. Black's line on dark was `#747474` (3.1:1 on the chrome, 2.7:1 on the Nord theme's surface) and White's on light was `#868686` (3.1:1). They are now `#9e9e9e` and `#696969`: 4.66:1 or better on every theme's surface. The line and the name stay one tone, so nothing that draws an agent's colour has to know which of the two it is drawing. The top-bar icon follows the line, as before.
+- **Focus could read the wrong way round.** In the dark theme an unfocused White pane's border (`#868686`) was brighter than a focused Black pane's ring (`#747474`), and in the light theme an unfocused Black pane's border (`#717171`) was darker than a focused White pane's ring (`#868686`). White's border on dark is now `#7a7a7a` and Black's on light `#929292`. With the stronger rings above, the weakest ring of a theme stands out from the page at least 1.6 times as much as the strongest border.
+
+Decision N2 (§10) was taken on the first tones. What it chose stands: the neutral that matches the theme is marked by a grey line, not by a hairline around its fills. The grey is stronger than the one on the swatch sheet.
+
+The tests hold both for every colour of the palette: the focus order for every pair of colours in both themes (`pane-color-scheme.test.ts`), and the name's contrast on every theme's surface (`kanban-agent-name-colour.test.tsx`).
 
 ## 4. The palette file
 
