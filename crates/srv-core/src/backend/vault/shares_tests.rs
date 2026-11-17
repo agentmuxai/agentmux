@@ -206,3 +206,135 @@ fn a_share_is_shown_to_the_agent_as_shared_with_you_and_never_with_whom() {
     let said = format!("{shown:?}{}", serde_json::to_string(&mine).unwrap());
     assert!(!said.contains(OTHER) && !said.contains(PULP), "who it is shared with is never in what an agent reads: {said}");
 }
+
+#[test]
+fn a8_the_history_names_no_agent_to_an_agent_that_reads_it() {
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    add(&s, &id, OTHER).unwrap();
+    remove(&s, &id, OTHER).unwrap();
+    for asker in [crate::backend::vault::history::Asker::Agent(Some("pulp")), crate::backend::vault::history::Asker::Agent(None), crate::backend::vault::history::Asker::Person] {
+        let said = format!("{:?}", crate::backend::vault::history::history_for(&s, &id, asker, 50).unwrap());
+        assert!(said.contains("shared") && !said.contains(PULP) && !said.contains(OTHER), "{asker:?}: {said}");
+    }
+}
+
+#[test]
+fn a1_an_edit_of_the_entry_leaves_who_it_is_shared_with_as_it_is_and_a_new_entry_cannot_name_one() {
+    use crate::backend::vault::EntryChange;
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    // The pane sends the whole field map back; a person's edit that drops or changes `shared` does not change it.
+    for shared in [None, Some("*"), Some(OTHER)] {
+        let mut f = fields_of(&row);
+        f.remove(SHARED);
+        if let Some(v) = shared {
+            f.insert(SHARED.to_string(), v.to_string());
+        }
+        f.insert("username".into(), "sam".into());
+        crate::backend::vault::update(&s, EntryChange { id: id.clone(), label: row.label.clone(), fields: f, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
+        assert_eq!(listed(&fields(&s, &id)), [PULP], "{shared:?}");
+    }
+    assert_eq!(fields(&s, &id)["username"], "sam", "the rest of the edit applied");
+    // An entry that has none can't be given one by an edit either.
+    let plain = login_in(&s, "personal", &[("site", "https://plain.example.com")]);
+    let mut f = fields(&s, &plain);
+    f.insert(SHARED.to_string(), "*".into());
+    crate::backend::vault::update(&s, EntryChange { id: plain.clone(), label: "Intranet".into(), fields: f, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
+    assert!(!fields(&s, &plain).contains_key(SHARED));
+    let made = NewEntry { kind: "login".into(), label: "New".into(), fields: [("site", SITE_URL), ("shared", "*")].map(|(k, v)| (k.to_string(), v.to_string())).into(), tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) };
+    assert!(create_in(&s, made, "personal").unwrap_err().contains("after it is saved"));
+}
+
+#[test]
+fn a7_a_share_made_again_asks_again() {
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    grant(&s, &id, &always_key(PULP));
+    remove(&s, &id, PULP).unwrap();
+    // An "Always" answered while the share was being removed lands after the removal ended the others.
+    grant(&s, &id, &always_key(PULP));
+    add(&s, &id, PULP).unwrap();
+    assert!(!s.vault_grant_check(&id, &always_key(PULP)).unwrap(), "the new share starts by asking");
+    // The same for every agent.
+    grant(&s, &id, &always_key(OTHER));
+    add(&s, &id, EVERY_AGENT).unwrap();
+    assert!(!s.vault_grant_check(&id, &always_key(OTHER)).unwrap());
+}
+
+#[test]
+fn a2_generate_cannot_make_a_login_that_is_already_shared() {
+    use crate::backend::vault::{generate_entry, GenerateRequest};
+    let s = store();
+    for shared in ["uid-pulp-0001", "*"] {
+        let req = GenerateRequest {
+            kind: "login".into(),
+            label: "Made by an agent".into(),
+            why: "an account for the staging site".into(),
+            reason: None,
+            fields: [("site", SITE_URL), ("shared", shared)].map(|(k, v)| (k.to_string(), v.to_string())).into(),
+            rules: Default::default(),
+            expires: None,
+            vault: None,
+        };
+        let why = generate_entry(&s, req, "pulp").unwrap_err();
+        assert!(why.contains("the person sets it in the Vault pane"), "{why}");
+    }
+    assert!(s.vault_list().unwrap().is_empty(), "nothing was made");
+}
+
+const FILE_PASS: &str = "correct horse battery staple example";
+
+fn vault_file(dir: &tempfile::TempDir, json: &str) -> std::path::PathBuf {
+    let path = dir.path().join("in.vault");
+    let mut out = Vec::new();
+    let mut w = age::Encryptor::with_user_passphrase(age::secrecy::SecretString::from(FILE_PASS.to_string())).wrap_output(&mut out).unwrap();
+    std::io::Write::write_all(&mut w, json.as_bytes()).unwrap();
+    w.finish().unwrap();
+    std::fs::write(&path, out).unwrap();
+    path
+}
+
+#[test]
+fn a2_an_import_never_carries_a_share_in_and_a_replaced_login_keeps_its_own() {
+    use crate::backend::vault::transfer::{commit, inspect, Duplicates};
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    // A file from another computer: its logins name that computer's agents.
+    let file = |site: &str, shared: &str| {
+        format!(r#"{{"format":"agentmux-vault","version":1,"exported_at":0,"entries":[{{"kind":"login","label":"Imported","fields":{{"site":"{site}","username":"alex","shared":"{shared}"}},"parts":{{"password":"pw-from-the-file"}}}}]}}"#)
+    };
+    // A new login: it comes in unshared.
+    let preview = inspect(&s, &vault_file(&dir, &file("https://new.example.com", "*")), Some(FILE_PASS)).unwrap();
+    assert_eq!(commit(&s, &preview.token, Duplicates::Skip, "personal").unwrap().added, 1);
+    let new = s.vault_list().unwrap().into_iter().find(|r| fields_of(r).get("site").map(String::as_str) == Some("https://new.example.com")).unwrap();
+    assert!(!fields_of(&new).contains_key(SHARED), "the file's share did not land");
+    // A duplicate replaced by the file: the person's own share stays as it was.
+    let mine = login(&s);
+    add(&s, &mine, PULP).unwrap();
+    let preview = inspect(&s, &vault_file(&dir, &file(SITE_URL, "uid-from-another-computer")), Some(FILE_PASS)).unwrap();
+    assert_eq!(commit(&s, &preview.token, Duplicates::Replace, "personal").unwrap().replaced, 1);
+    assert_eq!(listed(&fields(&s, &mine)), [PULP], "kept its own, and took none of the file's");
+    // A duplicate of a login that was never shared stays unshared.
+    let plain = login_in(&s, "personal", &[("site", "https://plain.example.com")]);
+    let preview = inspect(&s, &vault_file(&dir, &file("https://plain.example.com", "*")), Some(FILE_PASS)).unwrap();
+    commit(&s, &preview.token, Duplicates::Replace, "personal").unwrap();
+    assert!(!fields(&s, &plain).contains_key(SHARED));
+}
+
+#[test]
+fn a2_restoring_an_earlier_value_leaves_who_it_is_shared_with_as_it_is() {
+    use crate::backend::vault::{update, versions, EntryChange};
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    update(&s, EntryChange { id: id.clone(), label: row.label.clone(), fields: fields_of(&row), tags: vec![], parts: Parts([("password".to_string(), "pw-two".to_string())].into()), clear: vec![] }).unwrap();
+    let earlier = versions::list(&s, &id).unwrap().into_iter().find(|v| v.state == "previous").expect("the old value is kept").seq;
+    versions::restore(&s, &id, earlier).unwrap();
+    assert_eq!(listed(&fields(&s, &id)), [PULP]);
+}

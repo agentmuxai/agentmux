@@ -25,6 +25,12 @@ pub const SHARED: &str = "shared";
 pub const EVERY_AGENT: &str = "*";
 const MAX_SHARES: usize = 32;
 
+/// Whether `name` is the share field of a `kind` entry. It is not among the kind's listed fields, which are what the
+/// Vault pane's forms offer: a share is made with the Share button, never typed as a field.
+pub fn is_field(kind: &str, name: &str) -> bool {
+    kind == "login" && name == SHARED
+}
+
 /// Who `fields` are shared with: agent uids, or [`EVERY_AGENT`].
 pub fn listed(fields: &BTreeMap<String, String>) -> Vec<String> {
     fields.get(SHARED).map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default()
@@ -56,6 +62,9 @@ pub fn add(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     if who != EVERY_AGENT && !is_uid(who) {
         return Err("name the agent by its permanent uid, or * for every agent".into());
     }
+    // A new share starts by asking: an "Always" this agent holds for the entry from before, or one answered while an
+    // earlier share was being removed, goes first.
+    revoke_always(store, id, who, None)?;
     change(store, id, who, "shared", |list| {
         if list.iter().any(|w| w == who) {
             return Ok(false);
@@ -100,7 +109,9 @@ fn change(store: &Store, id: &str, who: &str, action: &str, edit: impl Fn(&mut V
         }
         let changed = VaultRow { fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
         if store.vault_update_kept(&changed, &row.sealed, None).map_err(|e| e.to_string())? {
-            record(store, &row.id, &row.label, PERSON, action, who, "done");
+            // The line names no agent: an agent may read an entry's history, and who a login is shared with is not
+            // for it (A8). The entry's card lists each share for the person.
+            record(store, &row.id, &row.label, PERSON, action, if who == EVERY_AGENT { "every agent" } else { "an agent" }, "done");
             return Ok(true);
         }
     }
@@ -112,13 +123,18 @@ fn change(store: &Store, id: &str, who: &str, action: &str, edit: impl Fn(&mut V
 pub fn end_always(store: &Store, id: &str, who: &str) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?;
     let still = row.as_ref().map(fields_of).unwrap_or_default();
+    revoke_always(store, id, who, Some(&still))
+}
+
+/// [`end_always`] for the entry as `still` has it: an agent `still` names keeps its own. `None` ends them all.
+fn revoke_always(store: &Store, id: &str, who: &str, still: Option<&BTreeMap<String, String>>) -> Result<(), String> {
     let keys = store.vault_grants().map_err(|e| e.to_string())?.remove(id).unwrap_or_default();
     for key in keys {
         let Some(rest) = key.strip_prefix("signin:") else { continue };
         let mut parts = rest.splitn(3, '|');
         let (agent, profile) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
         // A share is used in the agent's own profile, never Personal's or a named one's.
-        if !profile.starts_with("profile:agent-") || names(&still, agent) {
+        if !profile.starts_with("profile:agent-") || still.is_some_and(|f| names(f, agent)) {
             continue;
         }
         if who == EVERY_AGENT || agent == who {

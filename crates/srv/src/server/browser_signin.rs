@@ -42,6 +42,8 @@ const ANSWER_WAIT: Duration = Duration::from_secs(10 * 60);
 const NOTICE: Duration = Duration::from_secs(5);
 /// What an agent is told when it names a login it may use for the page that the person hasn't shared with it.
 pub(crate) const NOT_SHARED: &str = "that sign-in isn't shared with this agent's browser profile, so nothing was typed: ask the person for it with Vault share (the entry and a reason), and they decide";
+/// What a container agent is told when its tab would use Personal's sign-ins (an Incognito tab uses them).
+pub(crate) const NO_PERSONAL: &str = "a container agent is offered none of the person's Personal sign-ins, in an Incognito tab or any other, so nothing was typed: sign in from a tab of your own browser profile (open the pane without a profile) with a login the person shared with you, which you can ask for with Vault share (the entry and a reason)";
 /// What the agent is told when another sign-in's notice shows on the pane.
 pub(crate) const BUSY: &str = "another sign-in is showing its notice on this pane: nothing was typed; try again when it is done";
 
@@ -332,12 +334,16 @@ pub(crate) async fn handle_signin(
         return err_response(StatusCode::NOT_FOUND, format!("no pane {block_id}"));
     };
     let (profile, incognito) = profile_of(&block);
+    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
+    if profile == PERSONAL && super::browser_identity::in_container(&state, &agent_pane) {
+        noted(&state, &block_id, &agent, How::Refused(NO_PERSONAL.to_string()));
+        return err_response(StatusCode::FORBIDDEN, NO_PERSONAL.to_string());
+    }
     let c = match chosen(&state, &block_id, &agent, &profile, req.entry.as_deref()).await {
         Ok(c) => c,
         Err(response) => return response,
     };
     tracing::info!(agent = %agent, block_id = %block_id, entry = %c.entry, "[signin] an agent asked to sign in");
-    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let went_ahead = match approve(&state, &block_id, &agent, agent_pane, &c, incognito, &reason).await {
         Ok(w) => w,
         Err(r) => {

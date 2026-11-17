@@ -33,7 +33,7 @@ fn shared_of(state: &crate::server::AppState, id: &str) -> Option<String> {
 #[tokio::test]
 async fn a2_only_the_persons_answer_makes_a_share_and_it_leaves_the_entry_as_it_was() {
     let (app, state) = setup().await;
-    let _ = agent(&state, "vid-pulp");
+    let token = agent(&state, "vid-pulp");
     let id = login(&app).await;
     let before = state.identity_store.vault_get(&id).unwrap().unwrap();
     let (s, out) = host(&app, true, None, json!({ "op": "share_add", "id": id, "agent": "uid-vid-pulp" })).await;
@@ -42,11 +42,14 @@ async fn a2_only_the_persons_answer_makes_a_share_and_it_leaves_the_entry_as_it_
     let after = state.identity_store.vault_get(&id).unwrap().unwrap();
     assert_eq!((after.vault_id, after.sealed), (before.vault_id, before.sealed), "the Vault and the secret are as they were");
     let line = history_of_entry(&state, &id).into_iter().find(|l| l.action == "shared").expect("the share is in the entry's history");
-    assert_eq!((line.actor.as_str(), line.target.as_str()), (vault::PERSON, "uid-vid-pulp"));
+    assert_eq!((line.actor.as_str(), line.target.as_str()), (vault::PERSON, "an agent"));
 
     let (s, _) = host(&app, true, None, json!({ "op": "share_remove", "id": id, "agent": "uid-vid-pulp" })).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(shared_of(&state, &id), None);
+    // An agent that reads the history sees a share happened and no name.
+    let (_, history) = call(&app, Some(&token), "/api/v1/vault/history", json!({ "id": id, "auth": keyless("vid-pulp") })).await;
+    assert!(history.to_string().contains("shared") && !history.to_string().contains("uid-vid-pulp"), "{history}");
 }
 
 #[tokio::test]

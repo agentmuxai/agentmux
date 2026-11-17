@@ -70,6 +70,8 @@ struct Setup {
     auth: UiAutomationAuth,
     block: String,
     site: String,
+    /// A container agent has no signing key: it is proven by its token.
+    caller: Option<crate::server::caller::Caller>,
 }
 
 /// An agent with its own browser pane of `identity`, a sign-in form of a site
@@ -80,6 +82,11 @@ async fn setup(identity: Option<&str>) -> Setup {
 
 /// [`setup`] for an agent with the permanent uid `uid`, which a share names.
 async fn setup_as(identity: Option<&str>, uid: Option<&str>) -> Setup {
+    setup_with(identity, uid, false).await
+}
+
+/// [`setup_as`], for a container agent when `container`: its pane's meta says so, as an agent's block does.
+async fn setup_with(identity: Option<&str>, uid: Option<&str>, container: bool) -> Setup {
     seal::use_test_key();
     let state = crate::server::tests::test_state();
     let host = Arc::new(Host::default());
@@ -89,13 +96,17 @@ async fn setup_as(identity: Option<&str>, uid: Option<&str>) -> Setup {
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-token".into() });
 
+    let agent = format!("signer-{}", uuid::Uuid::new_v4());
     let mut block = Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
     block.meta.insert("view".into(), json!("browser"));
+    if container {
+        block.meta.insert("agentMode".into(), json!("container"));
+        block.meta.insert("agentId".into(), json!(agent));
+    }
     if let Some(i) = identity {
         block.meta.insert(crate::server::browser_identity::IDENTITY_META_KEY.into(), json!(i));
     }
     state.mstore.insert(&mut block).unwrap();
-    let agent = format!("signer-{}", uuid::Uuid::new_v4());
     match uid {
         Some(u) => state.reactive_handler.register_agent_full(&agent, &block.oid, None, 0, None, Some(u), "test.share").unwrap(),
         None => state.reactive_handler.register_agent(&agent, &block.oid, None).unwrap(),
@@ -106,7 +117,17 @@ async fn setup_as(identity: Option<&str>, uid: Option<&str>) -> Setup {
     let auth = UiAutomationAuth { agent_id: agent, ts_secs: ts, sig };
     let site = format!("https://s{}.example.com", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     crate::server::browser_signin_fill::form(&state, &block.oid, &site);
-    Setup { state, host, auth, block: block.oid, site }
+    let caller = match (container, uid) {
+        (true, Some(u)) => {
+            let mut def = crate::backend::storage::agents::test_agent_def(u, &auth.agent_id, "claude", "agent", 1, "");
+            def.slug = auth.agent_id.clone();
+            state.mstore.agent_def_insert(&mut def).unwrap();
+            state.mstore.attach_token_index().unwrap();
+            Some(crate::server::caller::Caller::Agent { uid: u.to_string() })
+        }
+        _ => None,
+    };
+    Setup { state, host, auth, block: block.oid, site, caller }
 }
 
 fn save(s: &Setup, user: &str) -> String {
@@ -116,7 +137,7 @@ fn save(s: &Setup, user: &str) -> String {
 
 async fn signin(s: &Setup, entry: Option<&str>) -> (StatusCode, Value) {
     let req = SigninRequest { auth: s.auth.clone(), pane: None, entry: entry.map(String::from), reason: Some("sign in to the intranet for the test".into()) };
-    let resp = handle_signin(State(s.state.clone()), None, Json(req)).await;
+    let resp = handle_signin(State(s.state.clone()), s.caller.clone().map(axum::Extension), Json(req)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
     (status, serde_json::from_slice(&body).unwrap_or_default())
@@ -445,4 +466,25 @@ async fn a3_every_agent_still_asks_on_first_use() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(ask.await.unwrap().signin, "the person was asked");
     assert!(typed(&s).is_none());
+}
+
+#[tokio::test]
+async fn a4_a_container_agents_incognito_tab_is_offered_no_personal_login() {
+    // Incognito unshared, Incognito with the login shared, and a Personal tab: refused, nobody asked, nothing typed.
+    for (identity, shared) in [(Some("incognito:aaaaaaaa-1111"), false), (Some("incognito:aaaaaaaa-1111"), true), (None, false)] {
+        // A uid of its own: the token's pane is found by it in a registry the tests share.
+        let uid = format!("uid-box-{}", uuid::Uuid::new_v4().simple());
+        let s = setup_with(identity, Some(&uid), true).await;
+        let entry = save(&s, "alex");
+        if shared {
+            share(&s, &entry, &uid);
+        }
+        for named in [None, Some(entry.as_str())] {
+            let (status, body) = signin(&s, named).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{identity:?} shared {shared}: {body}");
+            assert!(body["error"].as_str().unwrap().contains("Vault share"), "it says what to do: {body}");
+        }
+        assert!(typed(&s).is_none(), "{identity:?} shared {shared}: nothing typed");
+        assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id), "{identity:?} shared {shared}: nobody was asked");
+    }
 }

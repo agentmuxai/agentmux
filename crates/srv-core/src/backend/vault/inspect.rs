@@ -166,6 +166,14 @@ pub struct Updated {
 /// Fields that say where a saved sign-in is offered (the site, the realm, which browser profile, a proxy): the
 /// person's to set, like choosing a sign-in Vault. An agent that could change them could point a login's password at
 /// a site of its own.
+/// What an agent is told when it names a field only the person sets.
+pub(super) fn person_only_refusal(name: &str) -> String {
+    if name == shares::SHARED {
+        return format!("{name} decides where a saved sign-in is offered, and to whom: the person sets it in the Vault pane (an agent asks to be given a login with Vault share)");
+    }
+    format!("{name} decides where a saved sign-in is offered: the person sets it in the Vault pane")
+}
+
 fn person_only(field: &str) -> bool {
     [signins::SITE, signins::REALM, signins::PROFILE, signins::PROXY, shares::SHARED].contains(&field)
 }
@@ -189,7 +197,7 @@ fn apply_fields(kind: &kinds::Kind, now: &BTreeMap<String, String>, asked: &BTre
     let mut fields = now.clone();
     for (name, value) in asked {
         if person_only(name) {
-            return Err(format!("{name} decides where a saved sign-in is offered, and to whom: the person sets it in the Vault pane (an agent asks to be given a login with Vault share)"));
+            return Err(person_only_refusal(name));
         }
         if !kind.fields.contains(&name.as_str()) && !source_link::is_field(name) && !linked::is_field(name) {
             return Err(format!("a {} entry has no field {name:?}", kind.name));
@@ -374,7 +382,7 @@ fn entry_problems(row: &VaultRow, key: &KeyResult, today: chrono::NaiveDate) -> 
         out.push("it has no label".to_string());
     }
     for (name, value) in fields_of(row) {
-        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(&name) && !linked::is_field(&name) {
+        if !kind.fields.contains(&name.as_str()) && !source_link::is_field(&name) && !linked::is_field(&name) && !shares::is_field(kind.name, &name) {
             out.push(format!("it has a field a {} entry doesn't have: {name}", kind.name));
         } else if name == expiry::FIELD && expiry::parse(&value).is_err() {
             out.push("its expiry date isn't a date (YYYY-MM-DD)".to_string());

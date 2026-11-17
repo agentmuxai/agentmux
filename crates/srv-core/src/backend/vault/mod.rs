@@ -210,7 +210,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         return Err(format!("a label is at most {MAX_LABEL} characters"));
     }
     for (k, v) in fields {
-        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) && !shares::is_field(kind.name, k) {
             return Err(format!("a {} entry has no field {k:?}", kind.name));
         }
         if v.len() > MAX_FIELD {
@@ -428,6 +428,9 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
     let mut fields = trimmed(std::mem::take(&mut entry.fields));
+    if fields.contains_key(shares::SHARED) {
+        return Err("a login is shared with an agent after it is saved (the Share button on its card), never when it is made".into());
+    }
     signins::settle_profile(kind.name, &mut fields);
     card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
@@ -504,6 +507,9 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
         let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
         return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
     };
+    if req.fields.contains_key(shares::SHARED) {
+        return Err(inspect::person_only_refusal(shares::SHARED));
+    }
     let rules = generate::rules(&req.rules)?;
     let value = generate::generate(&rules)?;
     let mut parts = Parts::default();
@@ -530,8 +536,14 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     drop_empty(&mut change.parts);
     let mut fields = trimmed(std::mem::take(&mut change.fields));
     signins::settle_profile(kind.name, &mut fields);
-    validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    // Who a login is shared with changes only by `shares::add` and `shares::remove`, which check the Vault and end an
+    // "Always" (A5, A7): an edit of the other fields leaves it as it is.
+    match old_fields.get(shares::SHARED) {
+        Some(v) => fields.insert(shares::SHARED.to_string(), v.clone()),
+        None => fields.remove(shares::SHARED),
+    };
+    validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
         return Err(linked::SET_WHEN_MADE.into());
     }
