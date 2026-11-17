@@ -11,6 +11,7 @@ import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sortByLastUsed } from "@/app/view/agent/agent-recency";
 import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
+import { completeGrants } from "./agent-site-grants-model";
 
 export type TerminalChoice = "none" | "terminal" | "terminal_ask";
 
@@ -30,7 +31,7 @@ const store = createDomainStore<GrantsData | null>({
             RpcApi.BrowserGrantsListCommand(TabRpcClient),
             RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { is_seeded: 0 }),
         ]);
-        return { grants, agents };
+        return { grants: completeGrants(grants), agents };
     },
 });
 
@@ -50,7 +51,7 @@ export function createAgentSiteGrants() {
     const run = async (what: string, change: () => Promise<BrowserGrantsResult>) => {
         setBusy(true);
         try {
-            const grants = await change();
+            const grants = completeGrants(await change());
             const current = store.data();
             if (current) store.set({ ...current, grants });
             setChangeError(null);

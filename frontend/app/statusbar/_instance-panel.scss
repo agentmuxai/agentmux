@@ -5,12 +5,10 @@
 // Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md.
 
 @use "../mixins.scss";
+@use "../element/menu-frame";
 
 .instance-panel {
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-modal);
+    @include menu-frame.menu-surface;
     padding: var(--space-2);
     color: var(--main-text-color);
     font-size: var(--text-sm);

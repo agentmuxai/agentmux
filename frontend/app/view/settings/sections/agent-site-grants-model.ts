@@ -5,8 +5,27 @@
 // covers, and which powers a row's checkboxes offer.
 
 import { LATE_PROMPT_LIMIT, siteLabel } from "@/app/view/browser/bypass";
+import type { BrowserGrantsResult } from "@/types/rpc/BrowserGrantsResult";
 
 export { LATE_PROMPT_LIMIT };
+
+/**
+ * srv's list with every field the screen reads present. An srv older than this build (an upgrade in
+ * progress, a packaged backend under a newer frontend) leaves out what it did not have yet, and a
+ * missing list must show as an empty one, not take the whole Settings page down. `pause_all` is
+ * passed through as it came: this screen does not read it (the pause switch has its own store).
+ */
+export function completeGrants(raw: Partial<BrowserGrantsResult> | null | undefined): BrowserGrantsResult {
+    const g = raw ?? {};
+    return {
+        ...g,
+        rows: (g.rows ?? []).map((r) => ({ ...r, origins: r.origins ?? [], powers: r.powers ?? [] })),
+        presets: (g.presets ?? []).map((p) => ({ ...p, sites: p.sites ?? [] })),
+        powers: g.powers ?? [],
+        permission_kinds: g.permission_kinds ?? [],
+        permissions: (g.permissions ?? []).map((p) => ({ ...p, kinds: p.kinds ?? [] })),
+    } as BrowserGrantsResult;
+}
 
 /** What a power is called beside its checkbox. */
 export const POWER_LABELS: Record<string, string> = {

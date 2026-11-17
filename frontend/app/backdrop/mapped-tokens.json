@@ -4,6 +4,7 @@
         "--block-bg-color": "color-mix(in srgb, var(--surface) calc(var(--window-opacity, 1) * 100%), transparent)",
         "--elevated-bg-color": "var(--surface-raised)",
         "--modal-bg-color": "var(--surface-overlay)",
+        "--menu-bg-color": "var(--surface-overlay)",
         "--panel-bg-color": "color-mix(in srgb, var(--surface-raised) 50%, transparent)",
         "--block-bg-solid-color": "var(--surface)",
         "--tab-strip-bg": "color-mix(in srgb, var(--ink-text) 3%, transparent)"
@@ -13,6 +14,7 @@
         "--secondary-text-color": "--ink-muted",
         "--tertiary-text-color": "--ink-faint",
         "--border-color": "--ink-border",
+        "--menu-edge-color": "--ink-border",
         "--accent-color": "--ink-accent",
         "--accent-fg-color": "--ink-accent",
         "--link-color": "--ink-accent",

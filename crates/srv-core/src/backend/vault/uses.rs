@@ -68,6 +68,11 @@ pub struct UseRequest {
     /// An agent's sign-in with a saved `login` (`Browser` `signin`): `field` is
     /// then the masked user name, and "Always" is for this agent on this site.
     pub signin: bool,
+    /// With `signin`: the login belongs to another profile and the person shared it with this agent, which uses it in
+    /// its own profile. Not sent to the pane: only srv reads it, to answer a card whose share was removed.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub shared: bool,
     /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
     /// Vault makes the password. There is no entry yet; `origin` is the site.
     pub account: bool,

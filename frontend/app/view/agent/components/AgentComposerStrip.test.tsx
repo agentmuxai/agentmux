@@ -662,19 +662,32 @@ describe("AgentComposerStrip — a Codex pane gets the runtime panel and Compact
     });
 });
 
-describe("AgentComposerStrip — the View chip (SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5)", () => {
-    it("shows no chip while the pane shows everything", () => {
+describe("AgentComposerStrip — the View eye (SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5)", () => {
+    it("is on the strip even while the pane shows everything, as an eye with no text", () => {
         const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={() => {}} viewChip={null} />);
+        const eye = container.querySelector<HTMLElement>("[data-agent-view-chip]")!;
+        expect(eye).not.toBeNull();
+        expect(eye.textContent).toBe("");
+        expect(eye.getAttribute("aria-label")).toBe("View");
+        expect(eye.getAttribute("title")).toBe("View. What this pane shows: click to change");
+        expect(eye.classList.contains("is-changed")).toBe(false);
+    });
+
+    it("is not drawn on a strip that has no way to open the popover", () => {
+        const { container } = render(() => <AgentComposerStrip {...baseProps} viewChip={null} />);
         expect(container.querySelector("[data-agent-view-chip]")).toBeNull();
     });
 
-    it("shows the view's name and opens the popover on a click", async () => {
+    it("names a view other than Full, is tinted for it, and opens the popover on a click", async () => {
         const onOpenView = vi.fn();
         const { container } = render(() => <AgentComposerStrip {...baseProps} onOpenView={onOpenView} viewChip="Replies · this pane" viewOpen={false} />);
-        const chip = container.querySelector<HTMLElement>("[data-agent-view-chip]")!;
-        expect(chip.textContent).toBe("Replies · this pane");
-        expect(chip.getAttribute("aria-expanded")).toBe("false");
-        await userEvent.click(chip);
+        const eye = container.querySelector<HTMLElement>("[data-agent-view-chip]")!;
+        expect(eye.textContent).toBe("");
+        expect(eye.getAttribute("aria-label")).toBe("View: Replies · this pane");
+        expect(eye.getAttribute("title")).toContain("Replies · this pane");
+        expect(eye.classList.contains("is-changed")).toBe(true);
+        expect(eye.getAttribute("aria-expanded")).toBe("false");
+        await userEvent.click(eye);
         expect(onOpenView).toHaveBeenCalledTimes(1);
     });
 });

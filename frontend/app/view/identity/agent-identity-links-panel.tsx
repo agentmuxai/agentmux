@@ -25,6 +25,7 @@
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
 
 import { Show, type JSX } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 
 import { createAgentIdentityLinks, type AgentIdentityLinksPanelProps } from "./agent-identity-links-state";
 import { ClaudeLogin, ConnectAnthropic, LinkedAccounts, NoAgent } from "./agent-identity-links-parts";
@@ -32,26 +33,26 @@ import { ClaudeLogin, ConnectAnthropic, LinkedAccounts, NoAgent } from "./agent-
 import "./identity-pane-view.scss";
 
 export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JSX.Element => {
-    const t = createAgentIdentityLinks(props);
+    const links = createAgentIdentityLinks(props);
     return (
         <div class="identity-pane">
             <div class="identity-pane-detail">
-                <Show when={t.error()}>
-                    <div class="identity-pane-error">{t.error()}</div>
+                <Show when={links.error()}>
+                    <div class="identity-pane-error">{links.error()}</div>
                 </Show>
 
                 <Show when={props.agentId} fallback={<NoAgent />}>
                     <div class="identity-pane-readonly">
-                        <h2 class="identity-pane-name">{t.agent()?.name ?? "This agent"}</h2>
+                        <h2 class="identity-pane-name">{links.agent()?.name ?? t("agentLinks.thisAgent")}</h2>
 
-                        <h3 class="identity-pane-section-title">Linked accounts</h3>
-                        <LinkedAccounts t={t} />
-                        <ConnectAnthropic t={t} />
+                        <h3 class="identity-pane-section-title">{t("agentLinks.linkedAccounts")}</h3>
+                        <LinkedAccounts t={links} />
+                        <ConnectAnthropic t={links} />
                     </div>
                 </Show>
             </div>
 
-            <ClaudeLogin t={t} agentId={props.agentId} />
+            <ClaudeLogin t={links} agentId={props.agentId} />
         </div>
     );
 };

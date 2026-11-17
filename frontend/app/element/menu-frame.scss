@@ -1,16 +1,25 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// The one surface every menu, popover and list opened from a control stands on: the AgentMux logo FlyoutMenu,
+// the JS context menu (ContextMenuModel right-click sites), the tab colour popover, the Solid context menu, the
+// status-bar popovers and the lists that drop from an input. Opaque at any window opacity, a step off the pane,
+// with a 1px edge, an outer ring and a shadow, so a menu never merges with what is behind it. The tokens are in
+// theme.scss and themes/*.scss; themes/menu-surface.test.ts pins their contrast and scans the stylesheets that
+// should use this mixin. Spec: docs/specs/SPEC_MENU_SURFACES_STAND_OUT_2026_11_17.md.
+//
+// A theme that sets no `--menu-*` colours (an imported one) falls back to `--modal-bg-color` and `--border-color`,
+// which are opaque too.
 
-// Shared chrome for all menu surfaces — AgentMux logo FlyoutMenu, the JS
-// context menu used by ContextMenuModel right-click sites, and the
-// tab color/rename popover. Keeps background / border / radius /
-// shadow / padding consistent. See
-// docs/specs/SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md.
-
-@mixin menu-frame {
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
+@mixin menu-surface {
+    background: var(--menu-bg-color, var(--modal-bg-color));
+    border: 1px solid var(--menu-edge-color, var(--border-color));
     border-radius: 0;
-    box-shadow: 0px 8px 24px 0px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 0 1px var(--menu-ring-color), var(--menu-shadow);
+}
+
+/// A menu: the surface, with the padding every `.menu` shares.
+@mixin menu-frame {
+    @include menu-surface;
     padding: var(--space-0-5);
 }

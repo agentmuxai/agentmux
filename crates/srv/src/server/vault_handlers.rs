@@ -192,7 +192,13 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             check_share_target(state, &s("id"), &s("agent"))?;
             Ok((json!({ "changed": vault::shares::add(store, &s("id"), &s("agent"))? }), true))
         }
-        "share_remove" => Ok((json!({ "changed": vault::shares::remove(store, &s("id"), &s("agent"))? }), true)),
+        "share_remove" => {
+            let changed = vault::shares::remove(store, &s("id"), &s("agent"))?;
+            if changed {
+                super::browser_signin::share_removed(state, &s("id"), &s("agent"));
+            }
+            Ok((json!({ "changed": changed }), true))
+        }
         // The Vault a browser profile saves its sign-ins to and offers them from.
         "signin_vault" => {
             vault::vaults::set_signin_vault(store, &s("profile"), &s("vault_id"))?;

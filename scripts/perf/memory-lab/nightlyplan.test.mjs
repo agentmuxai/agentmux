@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergesOf, notComparedMarkdown, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { mergesOf, missingRunIds, notComparedMarkdown, pickBuilds, planMarkdown, rejectedRun } from "./lib/nightlyplan.mjs";
 
 const run = (id, sha, createdAt, portable = true) => ({ id, sha, createdAt, portable });
 
@@ -59,6 +59,43 @@ describe("which two nightly builds are compared", () => {
         const same = pickBuilds([run(5, "eee", "2026-10-19T12:00:00Z"), run(4, "eee", "2026-10-18T10:00:00Z")], { aRunId: 4 });
         expect(same.a).toBeNull();
         expect(same.reason).toMatch(/same commit/);
+    });
+});
+
+describe("a chosen run older than the lookback", () => {
+    const listed = [run(30, "ccc", "2026-10-19T12:00:00Z"), run(29, "bbb", "2026-10-18T12:00:00Z")];
+
+    it("is asked for by its id, once, when the list does not hold it", () => {
+        expect(missingRunIds(listed, ["12", 12, "29", null, undefined, ""])).toEqual(["12"]);
+        expect(missingRunIds(listed, [30, 29])).toEqual([]);
+        expect(missingRunIds(listed, ["7", "9"])).toEqual(["7", "9"]);
+    });
+
+    it("is accepted only as a nightly artifacts run on main that is not a pull-request run, whatever suffix its path has", () => {
+        const WF = "ci-nightly-artifacts.yml";
+        const ok = { path: `.github/workflows/${WF}`, head_branch: "main", event: "schedule" };
+        expect(rejectedRun(ok, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, path: `.github/workflows/${WF}@refs/heads/main` }, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, event: "workflow_dispatch" }, WF)).toBeNull();
+        expect(rejectedRun({ ...ok, path: ".github/workflows/build.yml" }, WF)).toMatch(/build\.yml/);
+        expect(rejectedRun({ ...ok, path: `.github/workflows/not-${WF}` }, WF)).toMatch(/not-ci-nightly/);
+        expect(rejectedRun({ ...ok, head_branch: "feature" }, WF)).toMatch(/feature/);
+        expect(rejectedRun({ ...ok, event: "pull_request" }, WF)).toMatch(/pull-request/);
+        expect(rejectedRun({}, WF)).toMatch(/no workflow/);
+    });
+
+    it("is used as A once fetched, where before it was treated as gone and B was measured alone", () => {
+        const old = run(12, "aaa", "2026-10-01T12:00:00Z");
+        expect(pickBuilds(listed, { aRunId: 12 }).a).toBeNull();
+        const p = pickBuilds([...listed, old], { aRunId: 12 });
+        expect([p.b.id, p.a.id]).toEqual([30, 12]);
+    });
+
+    it("is used as B once fetched, and compared with what came before it", () => {
+        const old = run(12, "aaa", "2026-10-01T12:00:00Z");
+        const older = run(11, "000", "2026-09-30T12:00:00Z");
+        const p = pickBuilds([...listed, old, older], { bRunId: 12 });
+        expect([p.b.id, p.a.id]).toEqual([12, 11]);
     });
 });
 

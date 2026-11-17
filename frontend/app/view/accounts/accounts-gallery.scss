@@ -9,6 +9,7 @@
 // (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2); this file keeps the chooser.
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .accounts-gallery {
     display: flex;
@@ -61,10 +62,7 @@
 .accounts-chooser {
     width: 320px;
     max-width: calc(100vw - 32px);
-    background: var(--modal-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    @include menu-frame.menu-surface;
     overflow: hidden;
 
     .accounts-chooser-header {

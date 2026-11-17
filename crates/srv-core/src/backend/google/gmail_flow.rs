@@ -22,6 +22,7 @@ use crate::identity::oauth_tokens::{access_token_for, HttpReply, OAuthHttp, Toke
 use super::access::{access_for, Access};
 use super::calls::{load_external_text, log_call, CallDeps};
 use super::gmail::{self, GmailArgs};
+use super::gmail_thread::{self as thread, ThreadNote};
 use super::gmail_write::{self as write, DraftView};
 use super::{google_error, GoogleHttp, Service};
 
@@ -220,10 +221,10 @@ fn reserve(deps: &CallDeps<'_, impl GoogleHttp, impl OAuthHttp, impl TokenSecret
     Ok(Asking(Some(key)))
 }
 
-async fn ask<A: Approver>(approver: &A, def: &AgentDefinition, (title, message): (String, String), yes: &str, no: &str, what: &str) -> Result<(), String> {
+async fn ask<A: Approver>(approver: &A, def: &AgentDefinition, (title, message): (String, String), yes: &str, no: &str, what: &str, if_no: &str) -> Result<(), String> {
     match approver.ask(def, title, message, yes, no).await? {
         Answer::Yes => Ok(()),
-        Answer::No => Err(format!("the person said no, so {what} was not done")),
+        Answer::No => Err(format!("the person said no, so {what} was not done{if_no}")),
         Answer::Unanswered => Err(format!("the person didn't answer, so {what} was not done. Don't ask again straight away; tell them in your reply what you wanted to do")),
     }
 }
@@ -241,8 +242,11 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
     if !view.has_recipient() {
         return Err("the draft has no recipient: update_draft it with to first".to_string());
     }
-    let question = write::send_question(&def.name, &access.email(), &view);
-    ask(approver, def, question, "Send", "Don't send", "sending").await?;
+    let note = thread_note(deps, access, &view).await;
+    let question = write::send_question_in(&def.name, &access.email(), &view, &note);
+    // A no repeats the warning, so the agent learns why the person may have said it.
+    let if_no = if note.strangers { format!(". {} Check the recipients and the thread_id.", thread::NO_PARTICIPANT) } else { String::new() };
+    ask(approver, def, question, "Send", "Don't send", "sending", &if_no).await?;
     // What the person said yes to is what goes: read the draft again and compare. A window was shown,
     // so whatever ends the call from here is logged as an answered question (it counts toward the
     // hourly limit, as a no does).
@@ -263,6 +267,19 @@ async fn send_draft<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>(
         }))
     };
     after_yes.await.map_err(|e: String| format!("{ANSWERED_YES}{e}"))
+}
+
+/// What the window says about the thread a draft replies into: one metadata read of the thread. A
+/// thread that can't be read does not stop the send; the person is told it was not checked.
+async fn thread_note<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(deps: &CallDeps<'_, G, O, S>, access: &Access, view: &DraftView) -> ThreadNote {
+    if view.thread_id.is_empty() {
+        return ThreadNote::default();
+    }
+    let read = async { send(deps, access, &thread::context_plan(&view.thread_id)?).await.map(|r| thread::context_of(&r.body)) };
+    match read.await {
+        Ok(ctx) => ThreadNote::of(view, &ctx, &access.email()),
+        Err(_) => ThreadNote::unchecked(),
+    }
 }
 
 /// The draft as it is stored now, whole: text Gmail keeps outside the message is loaded first, and a
@@ -295,7 +312,7 @@ async fn trash_thread<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets, A: Approver>
     let summary = gmail::summary_plan(args.thread_id.as_deref().unwrap_or(""))?;
     let headers = send(deps, access, &summary).await?.body;
     let question = write::trash_question(&def.name, &access.email(), &headers);
-    ask(approver, def, question, "Move to trash", "Keep it", "trashing").await?;
+    ask(approver, def, question, "Move to trash", "Keep it", "trashing", "").await?;
     let reply = send(deps, access, &trash).await.map_err(|e| format!("{ANSWERED_YES}{e}"))?;
     Ok(json!({ "thread_id": reply.body.get("id").and_then(Value::as_str).unwrap_or(""), "trashed": true }))
 }

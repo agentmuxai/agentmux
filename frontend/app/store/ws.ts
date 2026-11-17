@@ -6,12 +6,14 @@ import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import { debugLog } from "@/util/debuglog";
 import { createSlowHandlerWatch } from "./ws-slow-handler";
+import { createHandlerCostTally } from "./ws-handler-cost";
 
 const dlog = debugLog("wave:ws");
 
 const WarnWebSocketSendSize = 1024 * 1024; // 1MB
 const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
 const watchSlowHandler = createSlowHandlerWatch();
+const noteHandlerCost = createHandlerCostTally();
 const reconnectHandlers: (() => void)[] = [];
 const StableConnTime = 2000;
 // Gap between queued `blockinput` chunks when the queue drains after a
@@ -235,6 +237,8 @@ class WSControl {
         }
         // A message handled in 200 ms or more is named in the log (ws-slow-handler.ts).
         watchSlowHandler(handlingStart, eventData, typeof event.data === "string" ? event.data.length : 0);
+        // Every message's time, by kind, one log line a minute when the page spent real time here (ws-handler-cost.ts).
+        noteHandlerCost(handlingStart, eventData);
     }
 
     sendPing() {

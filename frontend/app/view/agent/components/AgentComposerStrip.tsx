@@ -43,6 +43,7 @@
 import type { AutoCompactPoint } from "@/app/store/agent-pane-state/auto-compact";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber } from "@/util/format-count";
+import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui/Button";
 import { AgentSessionStats } from "./AgentSessionStats";
@@ -165,9 +166,9 @@ interface AgentComposerStripProps {
     onCompact?: () => void;
     /** Compacts the conversation, then moves the agent to the model on the route: the model panel's rows for a model too small for it. */
     onCompactThenSwitch?: (route: string, model: string) => Promise<void>;
-    /** The View chip's text (the pane's view: "Standard", "Replies · this pane"); none while the pane shows everything. */
+    /** The pane's view when it is not the plain Full one ("Standard", "Replies · this pane"), which the eye names and is tinted for; none while the pane shows everything. */
     viewChip?: string | null;
-    /** The View popover is open, for the chip's expanded state. */
+    /** The View popover is open, for the eye's expanded state. */
     viewOpen?: boolean;
     onOpenView?: () => void;
 }
@@ -503,30 +504,30 @@ function statsSlot(props: AgentComposerStripProps): Slot {
     };
 }
 
-function viewSlot(props: AgentComposerStripProps): Slot {
-    return {
-        key: "view",
-        side: "right",
-        interactive: true,
-        compact: true,
-        // Tight: an eye, the chip's text as its tooltip and accessible name.
-        render: (_rowSide, compact) => (
+/** The accessible name and tooltip's lead of the eye: the view when it is not the plain Full one. */
+const viewName = (props: AgentComposerStripProps): string => (props.viewChip ? `View: ${props.viewChip}` : "View");
+
+/**
+ * The eye that opens the View popover: one form on every pane at every width (it has no text to give up, so
+ * it never shrinks or leaves the row). A view other than Full names itself in the tooltip and takes the accent colour.
+ */
+function viewEye(props: AgentComposerStripProps): JSX.Element {
+    return (
+        <Show when={props.onOpenView}>
             <Button
                 variant="link"
-                class="agent-composer-strip-view"
+                class={clsx("agent-composer-strip-view", props.viewChip && "is-changed")}
                 data-strip-button
                 data-agent-view-chip
-                icon={compact() ? "eye" : undefined}
-                aria-label={compact() ? (props.viewChip ?? undefined) : undefined}
+                icon="eye"
+                aria-label={viewName(props)}
                 aria-haspopup="dialog"
                 aria-expanded={props.viewOpen ? "true" : "false"}
-                title={compact() ? `${props.viewChip}. What this pane shows: click to change` : "What this pane shows: click to change"}
+                title={`${viewName(props)}. What this pane shows: click to change`}
                 onClick={() => props.onOpenView?.()}
-            >
-                {compact() ? undefined : props.viewChip}
-            </Button>
-        ),
-    };
+            />
+        </Show>
+    );
 }
 
 function hostShellSlot(props: AgentComposerStripProps): Slot {
@@ -570,10 +571,12 @@ function hostShellSlot(props: AgentComposerStripProps): Slot {
                     {compact() ? undefined : "Shell"}
                 </Button>
             );
+            // The eye sits right of the NATIVE / CONTAINER label, on the Compact and Shell side.
             return (
                 <>
                     {rowSide === "left" && shellBtn()}
                     {hostBadge()}
+                    {viewEye(props)}
                     {rowSide === "right" && shellBtn()}
                 </>
             );
@@ -1094,11 +1097,6 @@ function createSlots(props: AgentComposerStripProps, d: StripDerived): Accessor<
 
         // The CPU and memory readout, after the context reading (the last of the forms to give way).
         if (hasStats()) out.push(statsSlot(props));
-
-        // The pane's view (agent-view-controls.ts viewChipLabel), only while it is not the plain Full.
-        // The memo reads only whether there is a chip; the text is read in render, so a change of preset does not
-        // rebuild the slots (and close the runtime panel).
-        if (props.viewChip && props.onOpenView) out.push(viewSlot(props));
 
         // Always present (Shell has no visibility gate) and always last
         // in pool order — see `createLayout` for why that keeps it on the

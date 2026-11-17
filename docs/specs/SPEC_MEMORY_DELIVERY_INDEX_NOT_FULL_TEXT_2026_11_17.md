@@ -2,13 +2,13 @@
 
 Task #47923 (spec), #47924 (build). Author: Loap-3@narko, 2026-11-17.
 
-**Status:** active (#7634 carries this document; the startup-file refresh in section 3.1 follows in a second PR).
+**Status:** active (#7634 shipped the delivery and this document; the startup-file refresh of section 3.1 ships in the follow-up that adds `startup_refresh.rs`).
 
 Measured on one development host, AgentMux 0.60.32, from its srv logs, a screenshot of the pane list and one agent's own session start. No private memory text is quoted; fixtures in the build use made-up entries.
 
-## 0. What the operator asked, and what is wrong
+## 0. The requirement, and what is wrong
 
-The operator, after a compaction: "shouldnt it only feed an index of memory, not the actual memories?" and "lets fully spec the memory issue, we should refine that, file and implement with recommendations".
+After a compaction, the pane listed Personal Memory files as candidates that were not sent. The requirement: what a compaction or a rebuilt session delivers for Personal Memory is an index, not the files' full text. The spec refines the whole path and recommends changes, and the build implements the recommendations.
 
 What the code and the logs show:
 
@@ -52,11 +52,10 @@ The five accepted recommendations are kept. Where the code shows a better way it
 
 Two parts, both needed: the file must be current, and the check must be right.
 
-**Make the file current (second PR).** The first PR ships the per-section check below and everything after it, so a stale file costs only the sections that changed. Keeping the files current needs one place where a Global Memory change commits, and there is none: entries are written by the RPC handlers, the `Memory` tool, revert, the fleet sync and the Operator Config seed. The follow-up therefore does not hook the writers: a watcher in srv compares a fingerprint of the Global sections every 20 s and refreshes the files when it changes. Not done at `PreCompact` or at the hook, on purpose: a refresh after the CLI has reloaded the old file would hide the changed sections from the delta and leave the agent with the old copy. One function, `refresh_startup_files(block)`, re-renders the agent's AgentMux-owned startup files (the same `render_agent_config_files` the launch uses, through the same ownership-aware writers, so a user-owned `CLAUDE.md` is never touched) and writes only `CLAUDE.md` and `.claude/AGENTMUX_MEMORY.md`, or the provider's `AGENTS.md` family where AgentMux owns it. Writes are atomic (temp file, rename). It runs:
+**Make the file current (second PR).** The first PR ships the per-section check below and everything after it, so a stale file costs only the sections that changed. Keeping the files current needs one place where a Global Memory change commits, and there is none: entries are written by the RPC handlers, the `Memory` tool, revert, the fleet sync and the Operator Config seed. The follow-up therefore does not hook the writers: a watcher in srv compares a fingerprint of the Global sections every 20 s and refreshes the files when it changes. Not done at `PreCompact` or at the hook, on purpose: a refresh after the CLI has reloaded the old file would hide the changed sections from the delta and leave the agent with the old copy. One function, `refresh_pane(block)` (`crates/srv/src/server/startup_refresh.rs`), re-renders the agent's startup file with the same `launch_files` the launch uses and writes it through the same ownership-aware writer, so a user-owned `CLAUDE.md` is never touched. It writes only for a Claude agent whose folder already holds a `CLAUDE.md` with AgentMux's marker, or the `.claude/AGENTMUX_MEMORY.md` a user's own `CLAUDE.md` imports; a folder with neither is not given a file. The other providers' files are never overwritten once they exist, so they are not refreshed. Writes are atomic (the workdir's). It runs:
 
-1. When Global Memory changes, for every running agent on this host that has an AgentMux-owned startup file, debounced 3 s. (The build finds the one place a Global bundle change commits, and the fleet sync's apply path, and calls it from there.) This is the main fix: the file is current whenever the CLI reads it.
-2. At `PreCompact`. The hook is synchronous: the CLI waits for its exit. The refresh runs in srv on the `compaction_started` event, and the hook does not return until srv has answered or 500 ms have passed (its existing timeout). This is the belt for the case where a change landed in the last 3 s, and it covers a container's workspace through the container route.
-3. Not on `startup` (the CLI has read the file before the hook runs) and not on `resume` or `fork`.
+1. When the watcher sees the fingerprint move, once per folder of every running pane. The first look after srv starts records a baseline and writes nothing: a file older than this srv is covered by the per-section check below, and a refresh of every agent at boot would only add a write burst. This is the main fix: the file is current whenever the CLI next reads it, within 20 s of a change.
+2. Not at `PreCompact`, `startup`, `resume` or `fork`.
 
 **Make the check right.** Today the check is all or nothing and runs only at `Startup`. It becomes:
 
@@ -166,7 +165,7 @@ Backend, next to the code (`delivery.rs`, `fit.rs`, the handlers' `tests.rs`, `s
 4. **Nothing is cut without being named.** For Global sets of 20 to 120 KB and Personal sets as above: the parts never end with the "memory cut here" note; if any whole entry is left out, the left-out note names every one of them with its read form. A fuzz over sizes fails if an entry is neither in the delivery nor in the note.
 5. **ALWAYS limits.** Six marked files, or marked files over 6,000 characters: the extras are in the index with the over-limit reason, and none vanishes.
 6. **Part order.** Any permutation of the parts of a delivery rebuilds the same content (each part labelled, the index whole in one).
-7. **Refresh.** A Global bundle change rewrites an AgentMux-owned startup file of a running fixture agent and never a user-owned one; `PreCompact` rewrites it; a read-only file reports and the delta of 3.1 still holds.
+7. **Refresh.** A Global bundle change rewrites an AgentMux-owned startup file of a running fixture agent and never a user-owned one; the first look after start writes nothing; a read-only file reports and the delta of 3.1 still holds.
 8. **Containers.** The container fixture gets an index with the tool form only, and its startup check reads the mounted workspace only.
 
 Frontend (`context-delivery.test.ts`): each state shows its chip, title counts and tooltip; no row says "not sent"; an unknown `delivered` value from an older srv falls back to the old words. The i18n ratchet covers the new strings.
@@ -177,7 +176,7 @@ One PR if it stays reviewable; if the diff passes about 1,500 lines, two: (1) se
 
 - `crates/srv-core/src/backend/memory/`: `delivery.rs` (composer classes, index, delta), `fit.rs` (budgets by class, left-out note), a new `index.rs` for the index line, ALWAYS parsing and the part placement.
 - `crates/srv/src/server/memory_delivery_handlers.rs`: the startup check for every reason and the fallback's compaction; `EntrySize` states; the refresh call at `compaction_started` (host and container routes).
-- `crates/srv-core/src/backend/startup_files.rs` / `agent_config.rs`: `refresh_startup_files` and its call from the Global bundle commit and the fleet sync apply.
+- `crates/srv/src/server/startup_refresh.rs`: the watcher and `refresh_pane`, started with the other srv services (`bootstrap/state_services.rs`).
 - `frontend/app/view/agent/context-delivery.ts`, `components/ContextDeliveryCard.tsx`: wording and chips.
 - The `Memory` tool's description (`crates/mcp`): the ALWAYS mark, its limit, and the guidance on descriptions.
 - A changeset, tests, before and after screenshots.
@@ -191,7 +190,7 @@ Each has a recommendation; the build follows them unless AgentY says otherwise.
 - **D1. Index always, or skip files `MEMORY.md` already lists?** Recommend always: about 2 KB, and it does not depend on whether the CLI reloads `MEMORY.md` after a compaction (unverified) or on `MEMORY.md` being complete.
 - **D2. ALWAYS limit and mark.** Recommend `deliver: always` in frontmatter, 5 files and 6,000 characters, marked by the agent or the person, over-limit files demoted to the index with the reason (never dropped).
 - **D3. A stale startup file: resend the Global Memory, or only what changed?** Recommend only what changed, whole sections, under one heading.
-- **D4. Rewrite the startup files of running agents when Global Memory changes?** Recommend yes, debounced 3 s, owned files only. It writes a file in each agent's workspace the agent did not ask for; the file is AgentMux's own and the CLI reads it only at start and after a compaction.
+- **D4. Rewrite the startup files of running agents when Global Memory changes?** Recommend yes, within 20 s of a change, owned files only. It writes a file in each agent's workspace the agent did not ask for; the file is AgentMux's own and the CLI reads it only at start and after a compaction.
 - **D5. Providers with no startup file (Kimi).** Recommend leaving Global Memory in the fallback in full for now, and the Personal index as everywhere.
 - **D6. Run the calibrated check (section 4)?** Recommend yes, after the build, about one hour. Needs the operator's yes through AgentY.
 - **D7. Global Memory size.** Not part of this build. Recommend a separate look: it is the larger share of every agent's startup context.

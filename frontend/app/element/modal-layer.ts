@@ -21,7 +21,6 @@ export type ModalLayerRequest =
     | AgentSeatRequest
     | AgentEnvRequest
     | AgentContainerLimitsRequest
-    | AgentBundlesRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
     | BundleImportConfirmRequest;
@@ -86,16 +85,6 @@ export interface AgentEnvRequest {
  */
 export interface AgentContainerLimitsRequest {
     kind: "agent-container-limits";
-    agentId: string;
-    agentName: string;
-}
-
-/**
- * An existing agent's ordered bundle list, opened by "Bundles…" in My Agents'
- * row menu and the agent pane's right-click menu (AgentBundlesTab).
- */
-export interface AgentBundlesRequest {
-    kind: "agent-bundles";
     agentId: string;
     agentName: string;
 }

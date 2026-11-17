@@ -20,6 +20,17 @@ use super::{agent_registry, AppState, InjectionRequest};
 use crate::backend::reactive::registry::AgentEntry;
 use crate::backend::storage::agents::FormerSlugOwner;
 
+/// What a transcript request for `agent` answers when no pane holds it: an agent that exists but has no open pane
+/// (stopped, parked, between restarts) is told apart from a name nobody has. The prefix stays "agent not found",
+/// which the forwarding code keys on.
+pub(crate) fn transcript_not_found_error(known: bool, agent: &str) -> String {
+    if known {
+        format!("agent not found: '{agent}' is a known agent with no open pane on this machine; Agents watch reads its stored transcript")
+    } else {
+        "agent not found".to_string()
+    }
+}
+
 /// The agent `name` is a former slug or display name of, unless a live
 /// registration here holds `name` itself (a live name always wins).
 pub(super) fn owner(state: &AppState, name: &str) -> Option<FormerSlugOwner> {
