@@ -29,6 +29,8 @@ import { domNodes, heapMb, windowLabel, type HeapMb } from "./renderer-sample";
 
 const FIRST_REPORT_MS = 60_000;
 const REPORT_INTERVAL_MS = 5 * 60_000;
+/** The call to srv is best effort: with no answer by then (a dropped socket) its request is let go, not kept for the session. */
+const RECORD_CALL_TIMEOUT_MS = 15_000;
 /** A fall of the heap that counts as a collection: at least this share of it, and at least MIN_DROP_MB. */
 const DROP_SHARE = 0.1;
 const MIN_DROP_MB = 50;
@@ -114,11 +116,11 @@ export function recordPageOf(state: RendererState): RecordPageReq {
 }
 
 /** The log line, and the same state to srv's record; a failed call costs nothing but that report. */
-function report(): void {
+export function reportRendererState(): void {
     const state = collectRendererState();
     console.log("[renderer-state]", JSON.stringify(state));
     try {
-        RpcApi.RecordPageCommand(TabRpcClient, recordPageOf(state)).catch(() => {});
+        RpcApi.RecordPageCommand(TabRpcClient, recordPageOf(state), { timeout: RECORD_CALL_TIMEOUT_MS }).catch(() => {});
     } catch {
         // No connection to srv yet: the next report tries again.
     }
@@ -131,7 +133,7 @@ export function startRendererStateReports(): void {
     if (started) return;
     started = true;
     setTimeout(() => {
-        report();
-        setInterval(report, REPORT_INTERVAL_MS);
+        reportRendererState();
+        setInterval(reportRendererState, REPORT_INTERVAL_MS);
     }, FIRST_REPORT_MS);
 }

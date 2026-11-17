@@ -492,7 +492,9 @@ pub struct Record {
     dir: PathBuf,
     version: String,
     gate: Mutex<Gate>,
-    started: std::time::Instant,
+    /// When this process started, by the wall clock: the uptime of a line is read from the same clock as its time,
+    /// so a suspend (which stops a monotonic clock) is part of the uptime and is not mistaken for a restart.
+    started_ms: u64,
 }
 
 impl Record {
@@ -501,7 +503,7 @@ impl Record {
             dir,
             version: version.to_string(),
             gate: Mutex::new(Gate { last_t: None, rolled_hour: None, pruned_day: None }),
-            started: std::time::Instant::now(),
+            started_ms: agentmux_common::time::now_ms_u64(),
         }
     }
 
@@ -527,7 +529,7 @@ impl Record {
             gate.last_t = Some(snap.ts_ms);
         }
         let disk = agentmux_common::disk_space::volume_free_total_bytes(&self.dir_for_disk());
-        let mut sample = compact(snap, &self.version, self.started.elapsed().as_secs(), disk);
+        let mut sample = compact(snap, &self.version, snap.ts_ms.saturating_sub(self.started_ms) / 1000, disk);
         sample.pages = pages_at(snap.ts_ms);
         if let Err(e) = self.append(&sample) {
             tracing::warn!(error = %e, "[record] a line could not be written");
@@ -920,6 +922,19 @@ mod tests {
         // An hour later the 15:00 hour is rolled up.
         again.note(&snapshot(NOON + 49 * EVERY_MS));
         assert_eq!(std::fs::read_to_string(dir.join("rollup-2026-11.jsonl")).unwrap().lines().count(), 4);
+    }
+
+    #[test]
+    fn the_uptime_of_a_line_follows_the_clock_of_its_time_so_a_sleep_is_not_a_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut record = Record::new(tmp.path().join("record"), "0.60.30");
+        record.started_ms = NOON - 2 * HOUR_MS;
+        record.note(&snapshot(NOON));
+        // An hour later by the wall clock, whatever a monotonic clock counted in between (a suspend).
+        record.note(&snapshot(NOON + HOUR_MS));
+        let text = std::fs::read_to_string(tmp.path().join("record/2026-11-16.jsonl")).unwrap();
+        let ups: Vec<u64> = text.lines().map(|l| serde_json::from_str::<Sample>(l).unwrap().up_s).collect();
+        assert_eq!(ups, [7_200, 10_800]);
     }
 
     fn page(w: &str, heap: u32, dom: u32, rows: u32) -> PageLine {

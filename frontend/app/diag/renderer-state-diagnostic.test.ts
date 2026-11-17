@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLastInputForTests } from "@/app/store/last-input";
 import { registerRecycleBlocker, reasonWithHold, recycleBlockerHolds } from "@/app/store/recycle-blockers";
 import { collectPaneStats, paneTotals, registerPaneStats, searchState } from "./pane-stats";
-import { collectRendererState, logRendererState, recordPageOf, resetRendererStateForTests } from "./renderer-state-diagnostic";
+import { RpcApi } from "@/app/store/rpc-api";
+import { collectRendererState, logRendererState, recordPageOf, reportRendererState, resetRendererStateForTests } from "./renderer-state-diagnostic";
 
 const MB = 1024 * 1024;
 const MIN = 60_000;
@@ -112,6 +113,22 @@ describe("the renderer state line", () => {
         off.forEach((f) => f());
         delete (performance as unknown as { memory?: unknown }).memory;
         expect(recordPageOf(collectRendererState())).toMatchObject({ heap_mb: null, heap_limit_mb: null });
+    });
+
+    it("sends the record a report that is let go when srv does not answer, and survives a call that fails", async () => {
+        vi.spyOn(console, "log").mockImplementation(() => {});
+        const call = vi.spyOn(RpcApi, "RecordPageCommand").mockReturnValue(Promise.reject(new Error("socket closed")));
+        reportRendererState();
+        expect(call).toHaveBeenCalledTimes(1);
+        const [, req, opts] = call.mock.calls[0];
+        expect(req).toMatchObject({ window: "main" });
+        expect(opts?.timeout).toBeGreaterThan(0);
+        // A call that throws at once (no connection yet) costs only that report.
+        call.mockImplementation(() => {
+            throw new Error("no client");
+        });
+        expect(() => reportRendererState()).not.toThrow();
+        await Promise.resolve();
     });
 
     it("says null for the heap where the engine does not report it", () => {
