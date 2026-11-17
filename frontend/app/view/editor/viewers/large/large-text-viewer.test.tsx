@@ -271,6 +271,34 @@ describe("the Large text viewer", () => {
         expect(document.querySelector('[data-line="900"] .large-text-hit')?.textContent).toBe("line 900");
     });
 
+    it("scrolls sideways to a match on a line it has read before, not only the first time the line is visited", async () => {
+        // jsdom has no layout: the match sits 900 px along a grid that is 371 px wide.
+        const was = HTMLElement.prototype.getBoundingClientRect;
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            const [left, right] = this.classList.contains("large-text-hit") ? [900, 960] : [0, 371];
+            return { left, right, width: right - left, x: left, top: 0, bottom: 0, height: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+        };
+        try {
+            await mount();
+            key("f", { ctrlKey: true });
+            await settle();
+            fireEvent.input(findBox(), { target: { value: "line 5" } });
+            const step = async (init: KeyboardEventInit, line: string) => {
+                grid().scrollLeft = 0;
+                fireEvent.keyDown(findBox(), { key: "Enter", ...init });
+                await settle();
+                await new Promise((r) => setTimeout(r, 80));
+                expect(markedLine()).toBe(line);
+                expect(grid().scrollLeft).toBeGreaterThan(0);
+            };
+            await step({}, "5"); // the first visit: the line is read now
+            await step({}, "50");
+            await step({ shiftKey: true }, "5"); // a visit to a line already read
+        } finally {
+            HTMLElement.prototype.getBoundingClientRect = was;
+        }
+    });
+
     it("says there is no match, and refuses text it cannot search in the file's encoding without asking srv", async () => {
         await mount();
         key("f", { ctrlKey: true });

@@ -11,7 +11,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
-import { createComputed, createEffect, createMemo, createSignal, untrack } from "solid-js";
+import { type Accessor, createComputed, createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { ViewerBarProps } from "../viewer-bar";
 import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
@@ -116,6 +116,11 @@ function createLineFeed(props: LargeTextProps) {
     return { source, total, loaded, error, want, lineAt, retry, lineOf };
 }
 
+/** The match marked in the drawn line `line` (1-based), null while that line is not drawn: not another line's match. */
+export function hitInLine(grid: HTMLElement | undefined, line: number): Element | null {
+    return grid?.querySelector(`.large-text-line[data-line="${line}"] .large-text-hit`) ?? null;
+}
+
 /** Scroll `grid` sideways, as little as the find needs, so that `hit` (a match in a line) shows in the middle. */
 export function revealSideways(grid: HTMLElement | undefined, hit: Element | null): void {
     if (!grid || !hit) return;
@@ -149,6 +154,36 @@ export function keyTarget(key: string, mod: boolean, at: { first: number; fits: 
     }
 }
 
+/**
+ * A match far along a line, scrolled into view sideways once its line is drawn. A line read before is not drawn until
+ * the scroll to it has happened, so this waits for the match itself in the marked line: whenever what `watch` reads
+ * changes, and a frame at a time for a short while after `want`.
+ */
+function createSidewaysReveal(grid: () => HTMLElement | undefined, mark: Accessor<number | null>, watch: () => unknown) {
+    let wanted = 0; // the line (1-based) to show the match of; 0 for none
+    const tryReveal = (): boolean => {
+        const hit = wanted && wanted === untrack(mark) ? hitInLine(grid(), wanted) : null;
+        if (!hit) return false;
+        wanted = 0;
+        revealSideways(grid(), hit);
+        return true;
+    };
+    const poll = (frames = 40): void => {
+        if (wanted && !tryReveal() && frames > 0) requestAnimationFrame(() => poll(frames - 1));
+    };
+    createEffect(() => {
+        void watch();
+        void mark();
+        tryReveal();
+    });
+    return {
+        want: (line: number) => {
+            wanted = line;
+        },
+        poll,
+    };
+}
+
 export function createLargeText(props: LargeTextProps) {
     const feed = createLineFeed(props);
     const lines = createMemo(() => Math.max(0, feed.total()));
@@ -156,7 +191,7 @@ export function createLargeText(props: LargeTextProps) {
     const [mark, setMark] = createSignal<number | null>(null);
     let lineBox: HTMLInputElement | undefined;
     let gridEl: HTMLElement | undefined;
-    let wantReveal = false;
+    let reveal!: ReturnType<typeof createSidewaysReveal>;
     const [badLine, setBadLine] = createSignal(false);
 
     // The lines on screen are read (and the page after them, so a slow scroll doesn't wait), and kept in mind.
@@ -188,21 +223,17 @@ export function createLargeText(props: LargeTextProps) {
         topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
         lineOf: feed.lineOf,
         show: (line) => {
-            wantReveal = true;
+            reveal.want(line);
             goTo(line);
+            reveal.poll();
         },
-        unmark: () => setMark(null),
+        unmark: () => {
+            reveal.want(0);
+            setMark(null);
+        },
         focusGrid: scroll.focus,
     });
-    // A match far along a line is scrolled into view sideways once its line is drawn.
-    createEffect(() => {
-        void feed.loaded();
-        void find.needle();
-        const line = mark();
-        if (!wantReveal || line == null || !feed.lineAt(line - 1)) return;
-        wantReveal = false;
-        revealSideways(gridEl, gridEl?.querySelector(".large-text-hit") ?? null);
-    });
+    reveal = createSidewaysReveal(() => gridEl, mark, () => [feed.loaded(), find.needle(), scroll.first()]);
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.altKey) return;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
