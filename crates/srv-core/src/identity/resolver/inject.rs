@@ -456,9 +456,8 @@ fn bound_oauth_config_dir(
 
     let template_parent_id = template_parent_id_if_seeded(mstore, &def.parent_id);
     let bindings = resolve_bindings_for_instance(identity_store, instance, &template_parent_id, None);
-    let binding = bindings
-        .iter()
-        .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;
+    if let Some(dir) = steps::key_route_dir(&bindings, &canonical_provider) { return Some(dir); }
+    let binding = bindings.iter().find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;
     // Per-channel only, matching the spawn gate exactly: this function's whole
     // contract is "where WOULD the spawn inject," so resolving an account the
     // spawn itself would now refuse would point a watcher at a directory no

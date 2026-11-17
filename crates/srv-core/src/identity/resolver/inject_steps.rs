@@ -533,6 +533,16 @@ pub(super) fn is_key_route_binding(binding: &IdentityBinding, def_provider: Opti
     def_provider == Some("claude") && binding.provider.eq_ignore_ascii_case(crate::backend::model_gateway::catalog::KEY_ROUTE_ID)
 }
 
+/// The folder an agent on an API key runs in (the provider's default one, whatever plan it was on before), for the
+/// readers that look where the spawn put it: the subagent watcher and the registration handler.
+pub(super) fn key_route_dir(bindings: &[IdentityBinding], provider: &str) -> Option<std::path::PathBuf> {
+    if !bindings.iter().any(|b| is_key_route_binding(b, Some(provider))) {
+        return None;
+    }
+    let config = crate::backend::providers::get_provider(provider)?;
+    crate::backend::providers::default_auth_dir(config).ok().map(std::path::PathBuf::from)
+}
+
 /// Point a Claude agent at the gateway's key route for the API-key account `binding` names: the gateway's address and
 /// the agent's token, and nothing of the key, which stays in the keychain and is read by the gateway for each request.
 /// `Ok(true)` when the agent is set up; `Ok(false)` when it cannot be (no account, not a key, no srv address): the

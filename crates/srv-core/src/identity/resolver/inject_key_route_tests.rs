@@ -60,6 +60,8 @@ fn a_claude_agent_on_an_api_key_is_given_the_gateway_and_a_token_and_never_the_k
     assert_eq!(env["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4000/api/v1/model/anthropic");
     assert!(env["ANTHROPIC_AUTH_TOKEN"].starts_with(token::TOKEN_PREFIX));
     assert_eq!(env["ANTHROPIC_API_KEY"], "", "no key of any kind in its place");
+    let folder = crate::backend::providers::default_auth_dir(crate::backend::providers::get_provider("claude").unwrap()).unwrap();
+    assert_eq!(env["CLAUDE_CONFIG_DIR"], folder, "the folder a restart looks for its session in, and the one every key agent shares");
     assert!(!env.values().any(|v| v.contains(&key) || v.contains("MADEUPMADEUP")), "the key is nowhere in the agent's environment: {env:?}");
     let grant = token::grant_for(&env["ANTHROPIC_AUTH_TOKEN"]).unwrap();
     assert_eq!((grant.route.as_str(), grant.account.as_str(), grant.def_id.as_str()), (catalog::KEY_ROUTE_ID, "acct-key-1", "def-1"));
@@ -169,4 +171,17 @@ fn a_key_linked_in_the_link_store_is_carried_when_the_stores_are_apart() {
 
     assert_eq!(res, Ok(()), "the link is read where srv writes it");
     assert!(env["ANTHROPIC_AUTH_TOKEN"].starts_with(token::TOKEN_PREFIX));
+}
+
+#[test]
+fn the_folder_readers_look_in_is_the_key_routes_folder_for_an_agent_on_a_key() {
+    let _serial = serial();
+    let store = make_store();
+    agent_on(&store, &key_account("acct-key-11", "api_key"), "block-key-11");
+    let instance = store.instance_get_active_for_block("block-key-11").unwrap().unwrap();
+
+    let folder = bound_oauth_config_dir(&store, &store, &store, &instance).expect("a key agent has a folder");
+
+    let default = crate::backend::providers::default_auth_dir(crate::backend::providers::get_provider("claude").unwrap()).unwrap();
+    assert_eq!(folder, std::path::PathBuf::from(default), "the subagent watcher and the registration handler follow the spawn");
 }
