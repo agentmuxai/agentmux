@@ -154,8 +154,8 @@ async fn run<R: Runner>(state: &AppState, runner: &R, mut plan: CheckPlan, who: 
 }
 
 /// `POST /api/v1/vault/check`
-pub(crate) async fn handle_vault_check(State(state): State<AppState>, Json(body): Json<CheckBody>) -> Response {
-    let who = match asker(&state, body.auth.as_ref(), "check", "who checked each entry") {
+pub(crate) async fn handle_vault_check(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<CheckBody>) -> Response {
+    let who = match asker(&state, caller.as_deref(), body.auth.as_ref(), "check", "who checked each entry") {
         Ok(who) => who,
         Err(refusal) => return refusal,
     };

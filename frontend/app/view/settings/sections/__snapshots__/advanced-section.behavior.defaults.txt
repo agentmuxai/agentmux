@@ -55,7 +55,7 @@
           <label class="ui-field-label" id="ui-field-label-cl-N">
             "Preview scroll skid"
           <div class="ui-field-description" id="ui-field-desc-cl-N">
-            "Wheel notches a tool preview absorbs at its top or bottom edge before the scroll passes to the pane, so a preview sliding under the pointer is not scrolled past. 0 passes it on at once. Applies to open panes"
+            "Wheel notches a tool preview absorbs at its top or bottom edge, once the wheel has scrolled it there, before the scroll passes to the pane, so its end is not overshot. A preview the wheel only passes over never holds it. 0 passes it on at once. Applies to open panes"
         <div class="ui-field-control">
           <div data-stand="NumberControl" data-props="{\"class\":\"\\\"setting-number\\\"\",\"max\":\"10\",\"min\":\"0\",\"parse\":\"\\\"int\\\"\",\"step\":\"1\",\"value\":\"2\"}">
             <span data-cb="onChange">

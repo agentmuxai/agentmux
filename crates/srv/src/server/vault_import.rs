@@ -53,10 +53,16 @@ pub(super) struct Who {
 }
 
 /// `what` is the action asked for (`import`, `check`) and `records` what the Vault's record of it names.
-pub(super) fn asker(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>, what: &str, records: &str) -> Result<Who, Response> {
-    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs the agent's signed identity: {why}"));
+pub(super) fn asker(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+    what: &str,
+    records: &str,
+) -> Result<Who, Response> {
+    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs to know which agent asks (its token or its signed identity): {why}"));
     let Some(auth) = auth else { return Err(refuse(format!("the Vault records {records}"))) };
-    let pane = super::ui_handlers::verified_block_id(state, None, auth).map_err(refuse)?;
+    let pane = super::ui_handlers::verified_block_id(state, caller, auth).map_err(refuse)?;
     let agent: String = auth.agent_id.chars().take(64).collect();
     let uid = crate::backend::reactive::handler::get_global_handler().get_agent(&auth.agent_id).and_then(|r| r.uid);
     let def = uid.as_deref().and_then(|u| state.mstore.agent_def_get(u).ok().flatten());
@@ -148,8 +154,8 @@ pub(super) async fn credentials(state: &AppState, who: &Who, profile: &str, reas
 }
 
 /// `POST /api/v1/vault/import`
-pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body): Json<ImportBody>) -> Response {
-    let who = match asker(&state, body.auth.as_ref(), "import", "who copied each secret") {
+pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ImportBody>) -> Response {
+    let who = match asker(&state, caller.as_deref(), body.auth.as_ref(), "import", "who copied each secret") {
         Ok(who) => who,
         Err(refusal) => return refusal,
     };
