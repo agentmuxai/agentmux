@@ -3,11 +3,12 @@
 
 /**
  * The agent pane's right-click menu (`AgentViewModel.getBodyContextMenuItems`):
- * Agent History, Quick Fork and View for the pane's conversation, then Seat…,
- * Bundles… and Personal memory for the agent itself, "Starts agents without asking" (its Always
+ * Agent History and Quick Fork for the pane's conversation, then Seat… and
+ * Personal memory for the agent itself, "Starts agents without asking" (its Always
  * allow, taken back here), and Shut down, the one act that ends it
  * (closing the pane keeps it running). The pane header has no
- * button of its own (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6).
+ * button of its own (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6). What the pane shows
+ * (View) is the eye in the composer's control row, and an agent's bundles are in My Agents.
  */
 
 import type { ModalLayerRequest } from "@/app/element/modal-layer";
@@ -25,8 +26,6 @@ export interface AgentBodyMenuHost {
     /** Opens a modal in the pane's own layer; null while the pane's view isn't mounted. */
     openModal: ((req: ModalLayerRequest) => void) | null;
     quickFork: () => void;
-    /** Opens the View popover (what the pane shows). */
-    openView: () => void;
     /** Shuts the pane's agent down (asks first when something would be lost). */
     shutDown: () => void;
 }
@@ -43,9 +42,8 @@ export function agentBodyMenuItems(host: AgentBodyMenuHost): ContextMenuItem[] {
             click: () => void openOrFocusHistoryTab({ currentBlockId: host.blockId, agentId }),
         },
         { label: "Quick Fork", icon: MENU_ICON.fork, click: host.quickFork },
-        { label: "View…", icon: MENU_ICON.show, click: host.openView },
     ];
-    // Seat, bundles and memory all hang off the saved definition.
+    // Seat and memory hang off the saved definition.
     if (host.hasDefinition) {
         const agentName = (host.meta?.["agentName"] as string | undefined) || agentId;
         items.push(
@@ -64,11 +62,6 @@ export function agentBodyMenuItems(host: AgentBodyMenuHost): ContextMenuItem[] {
                       },
                   ]
                 : []),
-            {
-                label: "Bundles…",
-                icon: MENU_ICON.bundles,
-                click: () => host.openModal?.({ kind: "agent-bundles", agentId, agentName }),
-            },
             { label: "Personal memory", icon: MENU_ICON.memory, click: () => void openMemory("personal", { agentId }) },
             // The card's Always allow, shown and taken back here (spec §4).
             {

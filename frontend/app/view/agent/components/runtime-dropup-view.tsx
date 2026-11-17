@@ -123,9 +123,12 @@ function OptionRowView(props: DropupViewProps & { row: Extract<Row, { kind: "opt
             classList={{
                 active: !row.disabled && optIndex() === s.selectedOptIndex(),
                 "is-disabled": !!row.disabled,
+                "is-disclosure": !!row.disclosure,
+                "is-nested": !!row.nested,
             }}
             role="option"
             aria-selected={row.current}
+            aria-expanded={row.disclosure ? row.disclosure.expanded : undefined}
             aria-disabled={row.disabled ? "true" : undefined}
             {...tip(row.detail)}
             onMouseEnter={() => {
@@ -159,6 +162,12 @@ function OptionRowView(props: DropupViewProps & { row: Extract<Row, { kind: "opt
                     <span class="agent-runtime-dropup-description">{row.description}</span>
                 </Show>
             </span>
+            <Show when={row.disclosure}>
+                <i
+                    class={`fa-solid fa-fw agent-runtime-dropup-chevron ${row.disclosure?.expanded ? "fa-chevron-down" : "fa-chevron-right"}`}
+                    aria-hidden="true"
+                />
+            </Show>
         </div>
     );
 }
@@ -173,16 +182,6 @@ function DropupRow(props: DropupViewProps & { row: Row }): JSX.Element {
                     <span class="agent-runtime-dropup-section-note" {...tip(row.note)}>
                         {row.note}
                     </span>
-                </Show>
-            </div>
-        );
-    }
-    if (row.kind === "group") {
-        return (
-            <div class="agent-runtime-dropup-group">
-                {row.text}
-                <Show when={row.note}>
-                    <span class="agent-runtime-dropup-section-note">{row.note}</span>
                 </Show>
             </div>
         );

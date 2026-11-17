@@ -139,7 +139,6 @@ function slotKey(slot: Element): string {
     if (slot.querySelector(".agent-composer-strip-log-btn")) return "hostShell";
     if (slot.querySelector(".agent-runtime-dropup-trigger")) return "runtime";
     if (slot.querySelector(".agent-composer-strip-auth")) return "auth";
-    if (slot.querySelector(".agent-composer-strip-view")) return "view";
     return "ctx";
 }
 function layout(container: HTMLElement): { left: string[]; right: string[] }[] {
@@ -559,38 +558,45 @@ describe("AgentComposerStrip — a ~420 px pane (the operator's screenshot, #302
     });
 });
 
-describe("AgentComposerStrip — the view chip", () => {
-    const chipProps = { viewChip: "Replies · this pane", onOpenView: () => {} };
+describe("AgentComposerStrip — the view eye", () => {
+    const eyeProps = { viewChip: "Replies · this pane", onOpenView: () => {} };
 
-    it("shrinks to an eye, named by its text, after Shell and before the readout gives way", () => {
-        widths.view = 150;
-        Object.assign(probeWidths, PROBES, { "view:full": 150, "view:compact": 24 });
-        const { container } = renderStrip({ authEmail: "alice@example.com", ...chipProps });
-        const chip = () => real(container, ".agent-composer-strip-view");
+    it("sits right of the runtime label and left of Shell, in the same slot, on the Compact and Shell side", () => {
+        widths.view = 24;
+        Object.assign(probeWidths, PROBES);
+        const { container } = renderStrip({ authEmail: "alice@example.com", ...eyeProps });
         resizeTo(container, 1000);
-        expect(chip().textContent).toBe("Replies · this pane");
-        // 120 + 32 + 112 + 32 + 24 + 4 x 8 = 352 with every compact form; 480 with the chip still in words.
-        resizeTo(container, 400);
-        expect(layout(container).length).toBe(1);
-        expect(chip().textContent).toBe("");
-        expect(chip().getAttribute("aria-label")).toBe("Replies · this pane");
-        expect(chip().getAttribute("title")).toContain("Replies · this pane");
+        const slot = container.querySelector(".agent-composer-strip-log-btn")!.parentElement!;
+        const order = [...slot.children].map((el) => (el.matches(".runtime-badge") ? "badge" : el.matches(".agent-composer-strip-view") ? "eye" : el.matches(".agent-composer-strip-log-btn") ? "shell" : "other"));
+        expect(order).toEqual(["badge", "eye", "shell"]);
+        expect(layout(container).flatMap((r) => r.right)).toContain("hostShell");
     });
 
-    it("lays the strip out again when the chip appears or goes while the pane keeps its width", () => {
-        widths.view = 150;
-        const [chip, setChip] = createSignal<string | null>(null);
-        const utils = render(() => <AgentComposerStrip {...baseProps} viewChip={chip()} onOpenView={() => {}} />);
-        const strip = utils.container.querySelector(".agent-composer-strip") as HTMLElement;
-        Object.defineProperty(strip, "clientWidth", { configurable: true, value: 100 });
+    it("is an eye with no text at every width, named by the view", () => {
+        widths.view = 24;
+        Object.assign(probeWidths, PROBES);
+        const { container } = renderStrip({ authEmail: "alice@example.com", ...eyeProps });
+        const eye = () => real(container, ".agent-composer-strip-view");
+        resizeTo(container, 1000);
+        expect(eye().textContent).toBe("");
+        expect(eye().getAttribute("aria-label")).toBe("View: Replies · this pane");
+        resizeTo(container, 400);
+        expect(eye().textContent).toBe("");
+        expect(eye().getAttribute("title")).toContain("Replies · this pane");
+    });
+
+    it("is the same element whatever the view is, so the popover's anchor is never replaced under it", () => {
+        widths.view = 24;
+        const [view, setView] = createSignal<string | null>(null);
+        const utils = render(() => <AgentComposerStrip {...baseProps} viewChip={view()} onOpenView={() => {}} />);
         resizeTo(utils.container, 400);
-        const before = layout(utils.container).length;
-        expect(before).toBeGreaterThan(1);
-        setChip("Replies · this pane");
-        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).toContain("view");
-        expect(layout(utils.container).length).toBeGreaterThan(1);
-        setChip(null);
-        expect(layout(utils.container).flatMap((r) => [...r.left, ...r.right])).not.toContain("view");
-        expect(layout(utils.container).length).toBe(before);
+        const eye = () => utils.container.querySelector<HTMLElement>("[data-agent-view-chip]");
+        const first = eye()!;
+        expect(first).not.toBeNull();
+        for (const next of ["Replies · this pane", "Custom · this pane", null, "Standard"]) {
+            setView(next);
+            expect(eye()).toBe(first);
+            expect(first.isConnected).toBe(true);
+        }
     });
 });
