@@ -796,7 +796,7 @@ pub async fn snapshot_route(
     let mut describes_left = MAX_DESCRIBES.saturating_sub(facts.len());
     let (frame_trees, frame_refs) = match scope {
         Some(_) => (Vec::new(), HashMap::new()),
-        None => frames::read_frames(&mut cdp, &mut describes_left, state.site_limits.list(&req.block_id).as_deref()).await,
+        None => frames::read_frames_asking(&state, &req.block_id, &mut cdp, &mut describes_left).await,
     };
     let mut rendered = snapshot::with_text_limit(req.max_text, || snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees));
     visibility::add_note(&mut rendered.text, cut);

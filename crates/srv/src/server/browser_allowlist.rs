@@ -346,9 +346,18 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
         push_then_replay(state, &stopped).await;
         return Settled::Replayed("it is on the pane's sites");
     }
+    let is_frame = stopped.kind == "frame";
     let Some(origin) = allowed_origins::target_origin(&stopped.url) else {
+        // A frame's site is a question about what the agent may act on; nothing
+        // was stopped, so there is no navigation notice to show.
+        if is_frame {
+            return Settled::Notice("it isn't a web address".to_string());
+        }
         return show_notice(state, &stopped, None, "It isn't a web address.");
     };
+    if is_frame {
+        return ask_about_frame(state, &stopped, &list, &origin);
+    }
     let agent = crate::server::browser_owner::owner_of(&stopped.pane).unwrap_or_default();
     let payload = json!({
         "url": stopped.url, "origin": origin, "window": window_of(&stopped), "popup": stopped.kind == "popup",
@@ -391,6 +400,38 @@ async fn settle_stopped_navigation(state: &AppState, stopped: Stopped, timeout: 
         Err(e @ AskError::NotShown(_)) => {
             tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't ask");
             show_notice(state, &stopped, Some(&origin), "AgentMux couldn't ask you about it.")
+        }
+    }
+}
+
+/// A snapshot found a frame from `origin`, a site off the pane's `list`
+/// (forms-in-frames spec §5.3): tell the person in the pane's banner, with
+/// Allow. It is a notice, not a question about a navigation, because nothing
+/// is stopped and the agent's tools on the pane must not pause for an
+/// incidental frame; the frame stays unactable until Allow, and the agent
+/// takes a new snapshot after. Allow adds the site and loads nothing.
+fn ask_about_frame(state: &AppState, stopped: &Stopped, list: &[String], origin: &str) -> Settled {
+    use crate::server::browser_attention::{self, Answer, AskError, Kind};
+    let payload = json!({
+        "url": origin, "origin": origin, "sites": list, "why": "", "allow": true, "frame": true, "popup": false, "window": null,
+    });
+    match browser_attention::raise(state, &stopped.pane, "", Kind::Notice, payload) {
+        Ok(raised) => {
+            let (st, stopped, origin) = (state.clone(), stopped.clone(), origin.to_string());
+            tokio::spawn(async move {
+                let (answer, waiting) = raised.answer(None).await;
+                if matches!(answer, Answer::Yes | Answer::YesAlways | Answer::YesAsking) {
+                    let outcome = allow_and_load(&st, &stopped, &origin).await;
+                    tracing::info!(pane = %stopped.pane, origin = %origin, outcome = %outcome, "[browser-allowlist] a frame's site allowed from the banner");
+                }
+                drop(waiting);
+            });
+            Settled::Notice("the person is told about the frame's site; the agent isn't paused".to_string())
+        }
+        Err(AskError::Busy { .. }) => Settled::Busy,
+        Err(e) => {
+            tracing::warn!(pane = %stopped.pane, error = %e, "[browser-allowlist] couldn't tell the person about a frame's site");
+            Settled::Unshown(e.to_string())
         }
     }
 }
