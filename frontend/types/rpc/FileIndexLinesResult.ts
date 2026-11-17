@@ -21,4 +21,9 @@ mtime: number, start: number, end: number,
  * The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found from the start of the
  * file: the probe says only "legacy" for a file that isn't UTF-8.
  */
-encoding: string, };
+encoding: string, 
+/**
+ * Where each of the lines starts, in order, when the request asked (`line_starts`): the one after the last starts
+ * at `end`. Empty otherwise.
+ */
+starts: Array<number>, };
