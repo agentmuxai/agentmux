@@ -39,11 +39,14 @@ vi.mock("@/app/util/menu-position", () => ({
 vi.mock("@/app/element/search-parts", () => ({ SearchBar: () => <div class="search-container">find</div> }));
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
+import { Modal } from "@/app/element/modal";
+import { ModalLayer } from "@/app/element/ModalLayer";
 import { Search, useSearch } from "@/app/element/search";
 import { initTitleTooltips } from "@/app/element/title-tooltip";
 import { resetTooltipTiming, SHOW_DELAY_MS } from "@/app/element/tooltip-timing";
 import { openMenuAt } from "@/app/element/ui/open-menu-at";
 import { closeJsContextMenu, showJsContextMenu } from "@/app/host/js-context-menu";
+import { NotificationItem } from "@/app/notification/notificationitem";
 import { closeMenuAt } from "@/app/util/menu-at-open";
 import { PeekOverlay } from "@/app/view/agent/components/PeekOverlay";
 import { BUILTINS, deriveBuiltin } from "./builtins";
@@ -275,5 +278,75 @@ describe("the agent pane's hover panel (PeekOverlay)", () => {
             </PeekOverlay>
         ));
         expectUnscoped(screen.getByText("peek content").closest(".agent-node-peek-overlay")?.parentElement, "the panel's mount");
+    });
+});
+
+describe("a dialog about a pane (Modal, scope pane)", () => {
+    const root = () => document.querySelector<HTMLElement>(".modal-root");
+    /** The pane's own modal layer, as the block frame has it, with a dialog open in it. */
+    const Pane = (props: { scope: "pane" | "window" }) => (
+        <ModalLayer scope="pane" fill>
+            <Modal open={true} scope={props.scope} onClose={() => {}}>
+                <button>dialog content</button>
+            </Modal>
+        </ModalLayer>
+    );
+
+    it("takes the scope of the pane it is mounted in, on its root, so its panel is on the pane's overlay surface", () => {
+        render(() => <Pane scope="pane" />, { container: inside.parentElement! });
+        expect(root()?.dataset.scope).toBe("pane");
+        expect(inside.parentElement!.contains(root()), "the dialog is inside the pane").toBe(true);
+        expectScoped(root(), "the dialog's root");
+        // A menu or a tooltip opened from the dialog finds the pane through the dialog's own root, too.
+        expect(screen.getByText("dialog content").closest(`[${OVERLAY_BLOCK_ATTR}]`)).toBe(root());
+    });
+
+    it("follows the pane while it is open", () => {
+        render(() => <Pane scope="pane" />, { container: inside.parentElement! });
+        registerPaneScope("pane-1", undefined);
+        expectUnscoped(root(), "backdrop removed");
+        registerPaneScope("pane-1", vars);
+        expectScoped(root(), "backdrop set again");
+    });
+
+    it("one that locks the whole window is the window's, whichever pane it was opened from", () => {
+        render(() => <Pane scope="window" />, { container: inside.parentElement! });
+        expect(root()?.dataset.scope).toBe("window");
+        expect(root()?.parentElement?.parentElement, "it is mounted on the body").toBe(document.body);
+        expectUnscoped(root(), "a window dialog");
+    });
+
+    it("in a pane with no backdrop is left as it was", () => {
+        releasePaneScope("pane-1");
+        render(() => <Pane scope="pane" />, { container: inside.parentElement! });
+        expectUnscoped(root(), "a dialog in a plain pane");
+    });
+});
+
+describe("a toast (NotificationItem)", () => {
+    const toast = (debug?: NotificationDebug) => {
+        const notification = { id: "n1", icon: "", title: "Stopped", message: "The agent has stopped", timestamp: "", debug } as NotificationType;
+        return render(() => (
+            <NotificationItem notification={notification} onRemove={() => {}} onCopy={() => {}} onActionClick={() => {}} formatTimestamp={() => ""} isBubble={true} />
+        ));
+    };
+    const card = () => document.querySelector<HTMLElement>(".notification-bubble");
+
+    it("about a pane takes that pane's scope, and follows it", () => {
+        toast({ blockId: "pane-1" });
+        expectScoped(card(), "a toast about the pane");
+        registerPaneScope("pane-1", undefined);
+        expectUnscoped(card(), "backdrop removed");
+    });
+
+    it("about the app, or about a pane with no backdrop, is left as it was", () => {
+        toast();
+        expectUnscoped(card(), "an app toast");
+        cleanup();
+        toast({ agentName: "someone" });
+        expectUnscoped(card(), "a toast that names no pane");
+        cleanup();
+        toast({ blockId: "pane-2" });
+        expectUnscoped(card(), "a toast about a plain pane");
     });
 });

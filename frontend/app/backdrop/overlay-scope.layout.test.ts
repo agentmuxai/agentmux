@@ -5,7 +5,8 @@
  * What a panel opened from a pane with a backdrop looks like, measured in a real browser
  * (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.4): a menu and a tooltip that carry the pane's scope
  * (overlay-scope.ts) are drawn with the pane's ink on its overlay surface, a step above the pane and never the same
- * colour as it, for every built-in backdrop on both sides.
+ * colour as it, for every built-in backdrop on both sides. So are a dialog about the pane, which is mounted inside
+ * it, and a toast about it.
  *
  * It compiles the real theme, the pane scope's stylesheet and the menu's, and gives a panel exactly the properties
  * `carryPaneScope` gives it. jsdom cannot resolve `var()` through a stylesheet, so this is a browser test; it skips,
@@ -40,7 +41,7 @@ function tailwind(): string {
 // An opaque window, as the app sets it for a window that is not see-through (the stylesheet's own value is for one that is).
 const OPAQUE_WINDOW = ":root{--window-opacity:1}";
 
-const CSS = [compile("theme.scss"), OPAQUE_WINDOW, tailwind(), compile("backdrop/backdrop.scss"), compile("element/flyoutmenu.scss"), compile("element/ui/menu.scss")].join("\n");
+const CSS = [compile("theme.scss"), OPAQUE_WINDOW, tailwind(), compile("backdrop/backdrop.scss"), compile("element/flyoutmenu.scss"), compile("element/ui/menu.scss"), compile("element/modal.scss"), compile("notification/notificationitem.scss")].join("\n");
 
 const inline = (vars: ScopeVars) =>
     Object.entries(vars)
@@ -51,14 +52,24 @@ const PANEL = `<div class="menu ui-menu" data-menu style="position:static">
   <div class="menu-item ui-menu-item" data-row><span class="label">Copy</span><span class="menu-item-sublabel" data-sub>Ctrl+C</span></div>
   <div class="menu-divider" data-divider></div>
 </div>
-<div class="bg-modalbg border border-border text-foreground" data-tip>Close the pane</div>`;
+<div class="bg-modalbg border border-border text-foreground" data-tip>Close the pane</div>
+<div class="notification-bubble" data-toast style="position:static"><div class="notification-inner"><div class="notification-text">
+  <div class="notification-title green" data-toast-title>Stopped</div><div class="notification-message">The agent has stopped</div>
+</div></div></div>`;
+
+// A dialog about a pane: its root is inside the pane (the pane's own modal layer) and carries the scope a panel carries.
+const DIALOG = `<div class="modal-panel" data-size="sm" data-dialog style="animation:none">
+  <div class="modal-panel-header"><h2 class="modal-panel-title" data-dialog-title>Close the pane?</h2><p class="modal-panel-description" data-dialog-text>Its agent keeps running.</p></div>
+  <div class="modal-panel-footer" data-dialog-footer></div>
+</div>`;
 
 /** A pane with its scope, and beside it (not inside it, as on `document.body`) a panel with the scope a panel carries. */
 function block(id: string, vars: ScopeVars | undefined): string {
     const pane = vars ? `data-backdrop style="${inline(vars)}"` : "";
     const panel = vars ? `data-backdrop style="${inline(overlayScopeVars(vars))}"` : "";
     return `<section data-case="${id}">
-<div ${pane}><div data-pane style="background:var(--main-bg-color);color:var(--main-text-color)">pane</div></div>
+<div ${pane}><div data-pane style="background:var(--main-bg-color);color:var(--main-text-color)">pane</div>
+<div ${vars ? "data-backdrop" : ""} class="modal-root" data-scope="pane" style="position:static;${vars ? inline(overlayScopeVars(vars)) : ""}">${DIALOG}</div></div>
 <div ${panel}>${PANEL}</div>
 </section>`;
 }
@@ -77,6 +88,15 @@ interface Measured {
     tip: Rgba;
     tipText: Rgba;
     tipBorder: Rgba;
+    dialog: Rgba;
+    dialogTitle: Rgba;
+    dialogText: Rgba;
+    dialogBorder: Rgba;
+    dialogFooter: Rgba;
+    toast: Rgba;
+    toastText: Rgba;
+    toastTitle: Rgba;
+    toastBorder: Rgba;
 }
 
 // Colours are read back through a canvas pixel, so every form a computed colour takes (`rgb()`, `color(srgb …)` out
@@ -98,6 +118,15 @@ for (const s of document.querySelectorAll("[data-case]")) {
     tip: rgba(cs("[data-tip]").backgroundColor),
     tipText: rgba(cs("[data-tip]").color),
     tipBorder: rgba(cs("[data-tip]").borderTopColor),
+    dialog: rgba(cs("[data-dialog]").backgroundColor),
+    dialogTitle: rgba(cs("[data-dialog-title]").color),
+    dialogText: rgba(cs("[data-dialog-text]").color),
+    dialogBorder: rgba(cs("[data-dialog]").borderTopColor),
+    dialogFooter: rgba(cs("[data-dialog-footer]").backgroundColor),
+    toast: rgba(cs("[data-toast]").backgroundColor),
+    toastText: rgba(cs("[data-toast]").color),
+    toastTitle: rgba(cs("[data-toast-title]").color),
+    toastBorder: rgba(cs("[data-toast]").borderTopColor),
   };
 }
 const pre = document.createElement("pre"); pre.id = "result"; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
@@ -116,6 +145,18 @@ function expectColour(actual: Rgba, hex: string, what: string): void {
     const slack = want[3] === 255 ? 1 : 12;
     for (let i = 0; i < 3; i++) expect(Math.abs(actual[i] - want[i]), `${what}: ${actual} against ${hex}`).toBeLessThanOrEqual(slack);
     expect(Math.abs(actual[3] - want[3]), `${what}: alpha of ${actual} against ${hex}`).toBeLessThanOrEqual(2);
+}
+
+/**
+ * A see-through wash of a colour. The canvas stores a colour multiplied by its alpha, so a faint wash comes back in
+ * coarse steps (at 3%, steps of about 32): the slack is one such step.
+ */
+function expectTintOf(actual: Rgba, hex: string, what: string): void {
+    expect(actual[3], `${what} is see-through`).toBeLessThan(255);
+    expect(actual[3], `${what} is there`).toBeGreaterThan(0);
+    const want = bytes(hex);
+    const slack = Math.ceil(255 / actual[3]) + 2;
+    for (let i = 0; i < 3; i++) expect(Math.abs(actual[i] - want[i]), `${what} ${actual} is a tint of ${hex}`).toBeLessThanOrEqual(slack);
 }
 
 const differ = (a: Rgba, b: Rgba) => a.some((v, i) => Math.abs(v - b[i]) > 1);
@@ -151,10 +192,7 @@ describe.skipIf(!BROWSER)("a panel opened from a pane with a backdrop", () => {
         const d = deriveBuiltin(builtin, scheme)!;
         const m = r[id];
         // The divider is a tint of the text colour: the pane's text, not the window's.
-        expect(m.divider[3], "the divider is a see-through tint").toBeLessThan(255);
-        expect(m.divider[3]).toBeGreaterThan(0);
-        const text = bytes(d.ink.text);
-        for (let i = 0; i < 3; i++) expect(Math.abs(m.divider[i] - text[i]), `the divider ${m.divider} is a tint of ${d.ink.text}`).toBeLessThanOrEqual(12);
+        expectTintOf(m.divider, d.ink.text, "the divider");
     });
 
     it.each(cases)("$id: a tooltip drawn with Tailwind's classes follows the pane too", ({ id, builtin, scheme }) => {
@@ -163,5 +201,26 @@ describe.skipIf(!BROWSER)("a panel opened from a pane with a backdrop", () => {
         expectColour(m.tip, d.surfaces.overlay, "the tooltip's surface");
         expectColour(m.tipText, d.ink.text, "the tooltip's text");
         expectColour(m.tipBorder, d.ink.border, "the tooltip's border");
+    });
+
+    it.each(cases)("$id: a dialog about the pane is on its overlay surface, in its ink", ({ id, builtin, scheme }) => {
+        const d = deriveBuiltin(builtin, scheme)!;
+        const m = r[id];
+        expectColour(m.dialog, d.surfaces.overlay, "the dialog's surface");
+        expect(differ(m.dialog, m.pane), "the dialog is not the colour of the pane it covers").toBe(true);
+        expectColour(m.dialogTitle, d.ink.text, "the dialog's title");
+        expectColour(m.dialogText, d.ink.muted, "the dialog's description");
+        expectColour(m.dialogBorder, d.ink.border, "the dialog's border");
+        // The footer's wash is a tint of the text colour: the pane's text.
+        expectTintOf(m.dialogFooter, d.ink.text, "the footer");
+    });
+
+    it.each(cases)("$id: a toast about the pane is on its overlay surface, in its ink", ({ id, builtin, scheme }) => {
+        const d = deriveBuiltin(builtin, scheme)!;
+        const m = r[id];
+        expectColour(m.toast, d.surfaces.overlay, "the toast's surface");
+        expectColour(m.toastText, d.ink.text, "the toast's text");
+        expectColour(m.toastTitle, d.ink.success, "the toast's title");
+        expectTintOf(m.toastBorder, d.ink.text, "the toast's border");
     });
 });

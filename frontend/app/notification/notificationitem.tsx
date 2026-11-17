@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { fadeOutCopy } from "@/app/element/exit-copy";
 import { useMotion } from "@/app/motion/solid";
 import { Button } from "@/element/button";
@@ -34,6 +35,28 @@ const PinBadge = (): JSX.Element => (
     </span>
 );
 
+/**
+ * A toast's coming and going. It slides in when it appears, and a copy of it fades out where it was when it goes (the
+ * stack removes it at once, so the others close up without waiting). A toast about a pane (`debug.blockId`) that has a
+ * backdrop is drawn in that pane's colours, on its overlay surface (SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.4);
+ * any other toast keeps the window's.
+ */
+function useToastLife(root: () => HTMLElement | undefined, blockId: string | undefined): void {
+    const motion = useMotion();
+    let stopScope: (() => void) | undefined;
+    onMount(() => {
+        const el = root();
+        if (!el) return;
+        stopScope = carryPaneScope(el, blockId);
+        motion.enter(el, "slideY");
+    });
+    onCleanup(() => {
+        const el = root();
+        if (el) fadeOutCopy(el, "slideY", { fixed: true });
+        stopScope?.(); // after the copy is made: the copy that fades out keeps the pane's colours
+    });
+}
+
 const NotificationItem = ({
     notification,
     onRemove,
@@ -54,13 +77,7 @@ const NotificationItem = ({
     const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
     let root: HTMLDivElement | undefined;
     const { copied, copy } = useCopyFeedback(() => onCopy(id));
-    // A toast slides in when it appears and a copy of it fades out where it was when it goes
-    // (the stack removes it at once, so the others close up without waiting).
-    if (isBubble) {
-        const motion = useMotion();
-        onMount(() => root && motion.enter(root, "slideY"));
-        onCleanup(() => root && fadeOutCopy(root, "slideY", { fixed: true }));
-    }
+    if (isBubble) useToastLife(() => root, notification.debug?.blockId);
 
     const renderCloseButton = () => {
         if (!isBubble && persistent) {
