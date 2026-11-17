@@ -25,6 +25,8 @@ const STEP: u64 = 1024;
 const MAX_COUNT: u64 = 100_000;
 /// The indexes kept (the most recently used).
 const CACHE_ENTRIES: usize = 6;
+/// How much of the start of a file says what encoding its text is in.
+const DETECT_BYTES: u64 = 256 * 1024;
 
 /// How a file's text marks the end of a line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +60,8 @@ pub struct LineIndex {
     pub step: u64,
     /// The start of line 0, `step`, `2 * step`, ...
     pub checkpoints: Vec<u64>,
+    /// The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found when the file was indexed.
+    pub encoding: String,
 }
 
 /// The offsets just after each line break in `block` (which starts at file offset `base`, an even number for UTF-16).
@@ -111,7 +115,27 @@ pub fn build_index<R: Read>(file: &mut R, size: u64, mtime: i64, unit: Unit, ste
         });
         at += want as u64;
     }
-    Ok(LineIndex { size, mtime, total_lines: lines, step, checkpoints })
+    Ok(LineIndex { size, mtime, total_lines: lines, step, checkpoints, encoding: String::new() })
+}
+
+/// The WHATWG name of the encoding of the text that `file` holds, from its start: UTF-16 as the unit says, else a
+/// UTF-8 BOM, else valid UTF-8 (a character cut at the end of the sample is not an error), else the detector's guess,
+/// as the Editor's own reader makes it. The probe says only "legacy" for a file that isn't UTF-8.
+pub fn detect_encoding<R: Read>(file: &mut R, unit: Unit) -> std::io::Result<String> {
+    match unit {
+        Unit::Utf16Le => return Ok("utf-16le".into()),
+        Unit::Utf16Be => return Ok("utf-16be".into()),
+        Unit::Byte => {}
+    }
+    let mut head = Vec::new();
+    file.take(DETECT_BYTES).read_to_end(&mut head)?;
+    let utf8 = head.starts_with(b"\xEF\xBB\xBF") || std::str::from_utf8(&head).map_or_else(|e| e.error_len().is_none(), |_| true);
+    if utf8 {
+        return Ok("utf-8".into());
+    }
+    let mut det = chardetng::EncodingDetector::new();
+    det.feed(&head, true);
+    Ok(det.guess(None, false).name().to_string())
 }
 
 /// The offset `n` lines after the line that starts at `from` (the size, when the file has fewer lines).
@@ -185,7 +209,9 @@ fn index_of(path: &Path, unit: Unit) -> std::io::Result<Arc<LineIndex>> {
         }
     }
     let mut file = std::fs::File::open(path)?;
-    let built = Arc::new(build_index(&mut file, size, mtime, unit, STEP, BLOCK)?);
+    let encoding = detect_encoding(&mut file, unit)?;
+    file.seek(SeekFrom::Start(0))?;
+    let built = Arc::new(LineIndex { encoding, ..build_index(&mut file, size, mtime, unit, STEP, BLOCK)? });
     let mut kept = cache().lock().unwrap_or_else(|e| e.into_inner());
     kept.retain(|(k, _)| *k != key);
     kept.insert(0, (key, built.clone()));
@@ -200,7 +226,7 @@ fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64) -> std::io::Res
     let start = line_start(&mut file, &idx, from_line, unit, BLOCK)?;
     let wanted = count.min(idx.total_lines.saturating_sub(from_line));
     let end = if from_line.saturating_add(count) >= idx.total_lines { idx.size } else { skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)? };
-    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end })
+    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone() })
 }
 
 /// `fileindexlines`. This computer's files only, like `fileprobe`.
@@ -322,6 +348,36 @@ mod tests {
         let r = lines_of(&path, Unit::Byte, 0, 100).unwrap();
         assert_eq!((r.total_lines, r.size), (6, 21));
         assert!(lines_of(&dir, Unit::Byte, 0, 1).is_err(), "a folder is no file");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn names_the_encoding_the_text_is_in() {
+        let name = |bytes: &[u8], unit| detect_encoding(&mut Cursor::new(bytes.to_vec()), unit).unwrap();
+        assert_eq!(name("plain ascii\n".as_bytes(), Unit::Byte), "utf-8");
+        assert_eq!(name("caf\u{e9} \u{4e2d}\n".as_bytes(), Unit::Byte), "utf-8");
+        assert_eq!(name(b"\xEF\xBB\xBFhello", Unit::Byte), "utf-8");
+        // A character cut at the end of the sample is still UTF-8.
+        assert_eq!(name(&"\u{4e2d}".as_bytes()[..2], Unit::Byte), "utf-8");
+        assert_eq!(name(b"", Unit::Utf16Le), "utf-16le");
+        assert_eq!(name(b"", Unit::Utf16Be), "utf-16be");
+        // Not UTF-8: what the detector says, not a fixed code page.
+        let (cyrillic, _, _) = encoding_rs::WINDOWS_1251.encode("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}, \u{43c}\u{438}\u{440}! \u{41a}\u{430}\u{43a} \u{434}\u{435}\u{43b}\u{430}?");
+        assert_eq!(name(&cyrillic, Unit::Byte), "windows-1251");
+        let (jis, _, _) = encoding_rs::SHIFT_JIS.encode("\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}\u{4e16}\u{754c}\u{3001}\u{3053}\u{308c}\u{306f}\u{30c6}\u{30b9}\u{30c8}\u{3067}\u{3059}");
+        assert_eq!(name(&jis, Unit::Byte), "Shift_JIS");
+    }
+
+    #[test]
+    fn the_answer_names_the_encoding_of_the_file() {
+        let dir = std::env::temp_dir().join(format!("fileindexlines-enc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ru.txt");
+        let (cyrillic, _, _) = encoding_rs::WINDOWS_1251.encode("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}, \u{43c}\u{438}\u{440}! \u{41a}\u{430}\u{43a} \u{434}\u{435}\u{43b}\u{430}?\n");
+        std::fs::write(&path, &cyrillic).unwrap();
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1).unwrap().encoding, "windows-1251");
+        std::fs::write(&path, "just ascii\n").unwrap();
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1).unwrap().encoding, "utf-8");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
