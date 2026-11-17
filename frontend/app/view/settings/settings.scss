@@ -101,10 +101,13 @@
 // its timer removes it. Under reduced motion it holds, then goes.
 .setting-saved {
     flex: 0 0 auto;
+    // The wrapper is the flex item and its own line box is as tall as its font, so it takes the flag's small size
+    // and one em of line height: the label row does not grow while the flag shows.
+    font-size: var(--text-xs);
+    line-height: 1;
 }
 
 .setting-saved-flag {
-    font-size: var(--text-xs);
     color: var(--success-text-color);
     white-space: nowrap;
     // Up for the first 70% of the linger, fading over the rest.
