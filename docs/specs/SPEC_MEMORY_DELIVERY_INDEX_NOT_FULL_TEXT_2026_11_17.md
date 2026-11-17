@@ -2,7 +2,7 @@
 
 Task #47923 (spec), #47924 (build). Author: Loap-3@narko, 2026-11-17.
 
-**Status:** active (the first PR of the build carries this document; the startup-file refresh in section 3.1 follows in a second PR).
+**Status:** active (#7634 carries this document; the startup-file refresh in section 3.1 follows in a second PR).
 
 Measured on one development host, AgentMux 0.60.32, from its srv logs, a screenshot of the pane list and one agent's own session start. No private memory text is quoted; fixtures in the build use made-up entries.
 
