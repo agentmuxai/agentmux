@@ -13,7 +13,7 @@ use tower::ServiceExt;
 const HOST: (&str, &str) = ("X-Host-Token", "host-ipc-token");
 
 /// A state with agent `slug` (uid `uid-<slug>`) running in pane `b-<slug>`, and its token.
-fn agent(state: &crate::server::AppState, slug: &str) -> String {
+pub(super) fn agent(state: &crate::server::AppState, slug: &str) -> String {
     let uid = format!("uid-{slug}");
     let mut def = crate::backend::storage::agents::test_agent_def(&uid, slug, "claude", "agent", 1, "");
     def.slug = slug.to_string();
@@ -23,7 +23,7 @@ fn agent(state: &crate::server::AppState, slug: &str) -> String {
     state.mstore.agent_token_ensure(&uid).unwrap()
 }
 
-async fn call(app: &axum::Router, token: Option<&str>, uri: &str, body: Value) -> (StatusCode, Value) {
+pub(super) async fn call(app: &axum::Router, token: Option<&str>, uri: &str, body: Value) -> (StatusCode, Value) {
     let mut req = Request::builder().uri(uri).method("POST").header("X-AuthKey", "test-secret-key").header("Content-Type", "application/json");
     if let Some(t) = token {
         req = req.header("X-Agent-Token", t);
@@ -35,18 +35,18 @@ async fn call(app: &axum::Router, token: Option<&str>, uri: &str, body: Value) -
 }
 
 /// The identity a container agent sends: its name, and a signature that verifies nowhere (it has no key).
-fn keyless(slug: &str) -> Value {
+pub(super) fn keyless(slug: &str) -> Value {
     json!({ "agent_id": slug, "ts_secs": agentmux_common::time::now_ms() / 1000, "sig": "no-key" })
 }
 
-async fn setup() -> (axum::Router, crate::server::AppState) {
+pub(super) async fn setup() -> (axum::Router, crate::server::AppState) {
     crate::backend::vault::seal::use_test_key();
     let state = crate::server::tests::test_state();
     *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
     (crate::server::build_router(state.clone()), state)
 }
 
-async fn login(app: &axum::Router) -> String {
+pub(super) async fn login(app: &axum::Router) -> String {
     let body = json!({ "op": "create", "kind": "login", "label": "Dashboard", "fields": { "site": "https://dash.example.com", "username": "alice" }, "parts": { "password": "pw-one-of-a-kind" } });
     let req = Request::builder().uri("/api/v1/host/vault").method("POST").header("X-AuthKey", "test-secret-key").header("X-Host-Token", HOST.1).header("Content-Type", "application/json").body(Body::from(body.to_string())).unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -55,7 +55,7 @@ async fn login(app: &axum::Router) -> String {
     v["data"]["id"].as_str().unwrap().to_string()
 }
 
-fn update(id: &str, slug: &str, fields: Value) -> Value {
+pub(super) fn update(id: &str, slug: &str, fields: Value) -> Value {
     json!({ "id": id, "fields": fields, "tags": ["dashboard"], "reason": "tag the sign-in for the dashboard task", "auth": keyless(slug) })
 }
 

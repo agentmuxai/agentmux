@@ -377,6 +377,8 @@ pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mappi
         let mut parts = Parts(e.parts);
         parts.0.retain(|_, v| !v.is_empty());
         let mut fields: BTreeMap<String, String> = e.fields.into_iter().map(|(k, v)| (k, v.trim().to_string())).filter(|(_, v)| !v.is_empty()).collect();
+        // Who a login is shared with is this computer's and the person's to say, never a file's.
+        fields.remove(super::shares::SHARED);
         let settled = settle_incoming(kind, &mut fields, &mut parts).and_then(|()| validate(kind, &e.label, &fields, &e.tags, &parts));
         if let Err(why) = settled {
             skipped.push(Skipped { label: e.label, reason: why });
@@ -572,6 +574,10 @@ fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates, vault_
             }
             if let Some(row) = &current {
                 super::source_link::carry_over(&mut fields, row);
+                // A replaced login keeps who it is shared with.
+                if let Some(shared) = signins::fields_of(row).get(super::shares::SHARED) {
+                    fields.insert(super::shares::SHARED.to_string(), shared.clone());
+                }
             }
             updates.push(VaultRow {
                 id: existing.clone(),

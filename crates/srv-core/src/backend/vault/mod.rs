@@ -34,6 +34,7 @@ pub mod route_key;
 pub mod scrub;
 pub mod seal;
 pub mod setting_key;
+pub mod shares;
 pub mod signins;
 pub mod signups;
 pub mod slots;
@@ -117,6 +118,9 @@ pub struct VaultAgentEntry {
     /// Where a copy of its value lives outside the Vault, and what the newest check of it found.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<source_link::AgentLink>,
+    /// A login the person shared with this agent's own browser profile (never with whom else, A8).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shared_with_you: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -206,7 +210,7 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         return Err(format!("a label is at most {MAX_LABEL} characters"));
     }
     for (k, v) in fields {
-        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) {
+        if !kind.fields.contains(&k.as_str()) && !source_link::is_field(k) && !linked::is_field(k) && !shares::is_field(kind.name, k) {
             return Err(format!("a {} entry has no field {k:?}", kind.name));
         }
         if v.len() > MAX_FIELD {
@@ -217,6 +221,9 @@ fn validate(kind: &kinds::Kind, label: &str, fields: &BTreeMap<String, String>, 
         }
         if k == signins::PROFILE && !signins::is_profile(v) {
             return Err(format!("{v:?} isn't a browser profile: personal or profile:<id>"));
+        }
+        if k == shares::SHARED && v.split(',').any(|w| w.trim() != shares::EVERY_AGENT && !shares::is_uid(w.trim())) {
+            return Err("shared lists agents by their permanent uid, or *".into());
         }
         if k == signins::PROXY && v != "yes" {
             return Err("proxy is \"yes\" for a proxy's sign-in, or left out".into());
@@ -421,6 +428,9 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
     let mut fields = trimmed(std::mem::take(&mut entry.fields));
+    if fields.contains_key(shares::SHARED) {
+        return Err("a login is shared with an agent after it is saved (the Share button on its card), never when it is made".into());
+    }
     signins::settle_profile(kind.name, &mut fields);
     card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
@@ -497,6 +507,9 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
         let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
         return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
     };
+    if req.fields.contains_key(shares::SHARED) {
+        return Err(inspect::person_only_refusal(shares::SHARED));
+    }
     let rules = generate::rules(&req.rules)?;
     let value = generate::generate(&rules)?;
     let mut parts = Parts::default();
@@ -523,8 +536,14 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     drop_empty(&mut change.parts);
     let mut fields = trimmed(std::mem::take(&mut change.fields));
     signins::settle_profile(kind.name, &mut fields);
-    validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
+    // Who a login is shared with changes only by `shares::add` and `shares::remove`, which check the Vault and end an
+    // "Always" (A5, A7): an edit of the other fields leaves it as it is.
+    match old_fields.get(shares::SHARED) {
+        Some(v) => fields.insert(shares::SHARED.to_string(), v.clone()),
+        None => fields.remove(shares::SHARED),
+    };
+    validate(kind, &change.label, &fields, &change.tags, &change.parts)?;
     if linked::is_linked(&fields) != linked::is_linked(&old_fields) {
         return Err(linked::SET_WHEN_MADE.into());
     }
@@ -800,6 +819,11 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
 /// Every entry `agent` may use, as it may see it. Reads no value, so it never needs the
 /// keychain. An agent that isn't proven (`None`) sees the Vaults open to every agent.
 pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
+    list_for_agent_as(store, agent, None)
+}
+
+/// [`list_for_agent`], telling the agent whose permanent uid is `uid` which logins are shared with it.
+pub fn list_for_agent_as(store: &Store, agent: Option<&str>, uid: Option<&str>) -> Result<Vec<VaultAgentEntry>, String> {
     let vaults = store.vaults().map_err(|e| e.to_string())?;
     Ok(store
         .vault_list()
@@ -814,7 +838,8 @@ pub fn list_for_agent(store: &Store, agent: Option<&str>) -> Result<Vec<VaultAge
             let expires = expiry::of(&r).map(|d| d.to_string());
             let vault = vault.map(|v| v.name.clone()).unwrap_or_default();
             let source = source_link::for_agent(store, &r);
-            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source })
+            let shared_with_you = uid.is_some_and(|u| shares::names(&signins::fields_of(&r), u));
+            Some(VaultAgentEntry { id: r.id, label: r.label, kind: r.kind, section, vault, expires, source, shared_with_you })
         })
         .collect())
 }

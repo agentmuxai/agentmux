@@ -145,6 +145,21 @@ impl Store {
         Ok(true)
     }
 
+    /// Changes only an entry's `fields`, and only if they are still `was_fields`
+    /// and the entry is still the one read (`created_at`, `sealed`): its label,
+    /// tags and sealed parts are left as they are. False, with nothing written, if
+    /// any of them changed or the entry is gone. For a change that touches no
+    /// sealed part (a share), where two overlapping changes must not each succeed
+    /// on what the other has since undone.
+    pub fn vault_set_fields_if(&self, id: &str, created_at: i64, sealed: &[u8], was_fields: &str, fields: &str, updated_at: i64) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_vault_entries SET fields = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?2 AND sealed = ?3 AND fields = ?4",
+            params![id, created_at, sealed, was_fields, fields, updated_at],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Commits a capture's writes in one transaction. False, with nothing written,
     /// if an entry it replaces changed or was made again since it was read.
     pub fn vault_capture_commit(&self, writes: &[CaptureWrite]) -> Result<bool, StoreError> {

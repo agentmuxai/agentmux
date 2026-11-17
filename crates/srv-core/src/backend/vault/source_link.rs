@@ -268,6 +268,8 @@ pub struct AgentLink {
 /// An entry's plain fields as an agent is given them: all of them but the login its machine copy is read under.
 pub fn fields_for_agent(mut fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
     fields.remove(PROFILE);
+    // Who else a login is shared with is the person's business; the agent is told only whether it is (`shared_with_you`).
+    fields.remove(super::shares::SHARED);
     fields
 }
 
