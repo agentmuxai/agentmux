@@ -138,6 +138,12 @@
           "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Incognito tabs never ask (Chrome refuses suggest requests from off-the-record profiles). Off: suggestions come only from this computer (history, typed addresses).",
           "x-section": "Browser panes"
         },
+        "browser:askdownloadlocation": {
+          "type": "boolean",
+          "default": true,
+          "description": "A download in a browser pane opens the system Save As dialog, so you choose where it goes. On by default. Off: a download saves into your Downloads folder, under a name that doesn't replace a file, and the strip under the address bar shows it.",
+          "x-section": "Browser panes"
+        },
         "jobs:cap:runusd": {
           "type": "number",
           "minimum": 0,

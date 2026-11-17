@@ -74,6 +74,11 @@ thread_local! {
     static SAVING: std::cell::RefCell<HashMap<(String, u32), Saving>> = std::cell::RefCell::new(HashMap::new());
 }
 
+/// Whether this download is being saved into an agent's workspace.
+pub(crate) fn is_saving(pane: &str, id: u32) -> bool {
+    SAVING.with(|m| m.borrow().contains_key(&(pane.to_string(), id)))
+}
+
 /// The words for a size in a message: `13 bytes`, `4.2 MB`.
 pub(crate) fn size_words(bytes: i64) -> String {
     let b = bytes.max(0) as f64;
@@ -158,7 +163,7 @@ fn full_words(dir: &Path) -> String {
 }
 
 /// The first of `name`, `name (1)`, `name (2)`… that doesn't exist in `dir`: a download never replaces a file.
-fn free_path(dir: &Path, name: &str, taken: &[PathBuf]) -> Option<PathBuf> {
+pub(crate) fn free_path(dir: &Path, name: &str, taken: &[PathBuf]) -> Option<PathBuf> {
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name, ""),

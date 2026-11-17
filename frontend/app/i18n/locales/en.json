@@ -212,6 +212,8 @@
     "settings.browser.searchSuggestions.description": "The address bar also asks your search engine for suggestions as you type, as Chrome does, which sends it what you type before you press Enter. Incognito tabs never ask, as in Chrome. Turn it off to keep suggestions to this computer (your history and the addresses you typed).",
     "settings.browser.hibernate.label": "Hibernate hidden browser panes",
     "settings.browser.hibernate.description": "A browser pane out of sight for a while goes to sleep: its page is put away to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. It comes back with its back/forward history, scroll position and anything typed into it, on browser engines that support it; on older ones it loads fresh. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server.",
+    "settings.browser.askDownloadLocation.label": "Ask where to save each download",
+    "settings.browser.askDownloadLocation.description": "A download in a browser pane opens the system Save As dialog, so you choose where it goes. Turn it off to save straight into your Downloads folder, under a name that doesn't replace a file; the strip under the address bar still shows it, and Show in folder finds it.",
     "settings.browser.hibernateAfter.label": "Minutes hidden before it sleeps",
     "settings.browser.hibernateAfter.description": "Sooner when the computer is low on memory: 5 minutes, then 1.",
     "settings.browser.keepAwakeSites.label": "Sites that never sleep",
