@@ -55,6 +55,7 @@ pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
 pub(crate) mod agent_model;
+mod agent_runtime_pick;
 pub(crate) mod agent_spend;
 pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;

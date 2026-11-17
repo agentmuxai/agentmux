@@ -486,6 +486,11 @@ impl Change {
         self.added.keys().chain(self.changed.keys()).any(|n| is_endpoint_name(n))
     }
 
+    /// Whether the change adds or changes `ANTHROPIC_MODEL`.
+    pub fn sets_model_name(&self) -> bool {
+        self.added.keys().chain(self.changed.keys()).any(|n| n.eq_ignore_ascii_case("ANTHROPIC_MODEL"))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }
@@ -534,6 +539,13 @@ pub fn diff(old: &str, new: &str) -> Change {
 /// `text` as an agent is shown it: the values of names it may not set hidden,
 /// a comment that may hold a secret and a skipped line as `# [hidden]`, every
 /// other line as written.
+/// Whether the environment in `text` points the agent at a server of its own: an `ANTHROPIC_BASE_URL` that is not
+/// Anthropic's. Only then does the launch ask for the model `ANTHROPIC_MODEL` names (`endpoint_model`); anywhere else it
+/// passes the model its pane's runtime chose, which that variable cannot change.
+pub fn points_at_own_server(text: &str) -> bool {
+    effective(text).iter().any(|(k, v)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") && !v.trim().is_empty() && !is_anthropic_url(v.trim()))
+}
+
 pub fn redacted(text: &str) -> String {
     let mut out: Vec<String> = text
         .lines()

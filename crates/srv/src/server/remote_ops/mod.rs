@@ -179,6 +179,7 @@ pub(crate) fn lookup(op: &str) -> Option<Op> {
         "agents.stop" => Op::write(|state, caller, params| Box::pin(agent_ops::stop(state, caller, params))),
         "agents.set_seat" => Op::write(|state, caller, params| Box::pin(agent_ops::set_seat(state, caller, params))),
         "agents.rename" => Op::write(|state, caller, params| Box::pin(agent_ops::rename(state, caller, params))),
+        "agents.update" => Op::write(|state, caller, params| Box::pin(agent_ops::update(state, caller, params))),
         // A write too: an environment holds the operator's own lines, and a read can go on a first-seen pin.
         "agents.env_get" => Op::write(|state, caller, params| Box::pin(agent_ops::env_get(state, caller, params))),
         "agents.env_set" => Op::write(|state, caller, params| Box::pin(agent_ops::env_set(state, caller, params))),

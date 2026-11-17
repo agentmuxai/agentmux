@@ -645,6 +645,11 @@ pub(crate) fn restart_panes_of(state: &AppState, def_id: &str) -> (u32, u32, Vec
     (restarted, next_turn, failed)
 }
 
+/// The panes (open, or parked) an agent's definition has: what a change to the agent's runtime is written to.
+pub(crate) fn panes_of(state: &AppState, def_id: &str) -> Vec<Block> {
+    switch::open_panes(state, def_id)
+}
+
 /// These RPCs are the operator's, except `agent.account.switch` and
 /// `identity.account.availability`: an agent connection (`bus:register`) is refused for the
 /// others, since the move relinks and restarts other agents and a sign-in clears other agents'
