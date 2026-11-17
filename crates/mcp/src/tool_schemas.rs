@@ -325,7 +325,7 @@ pub(crate) const PANE_TOOL: &str = r#"{
       "split":         { "type": "string", "enum": ["right", "left", "down", "up"], "description": "open: where the pane goes relative to this one (default right; ignored when floating, and when the file goes into the Editor pane you already have)" },
       "floating":      { "type": "boolean", "description": "open: a floating window over the app instead of a docked split (default false)" },
       "collapse_tree": { "type": "boolean", "description": "open editor: the file-tree sidebar starts collapsed by default for a file; false opens it expanded; only for a newly made pane, an existing Editor pane keeps its own tree" },
-      "viewer":        { "type": "string", "enum": ["text", "image", "media", "pdf", "hex", "info"], "description": "open editor: show the file in this viewer instead of the one the editor picks (for example hex for the bytes of any file, text to read a binary file as text)" },
+      "viewer":        { "type": "string", "enum": ["text", "large", "image", "media", "pdf", "hex", "info"], "description": "open editor: show the file in this viewer instead of the one the editor picks (for example hex for the bytes of any file, text to read a binary file as text, large for a text file over 10 MB)" },
       "line":          { "type": "integer", "minimum": 1, "description": "open editor (text viewer): put the cursor on this line and scroll to it" },
       "offset":        { "type": "integer", "minimum": 0, "description": "open editor (hex viewer): the byte offset to open at, in decimal" },
       "page":          { "type": "integer", "minimum": 1, "description": "open editor (pdf viewer): the page to open at" },

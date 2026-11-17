@@ -422,7 +422,7 @@ const META_OFFSET: &str = "editor:offset";
 const META_PAGE: &str = "editor:page";
 
 /// The viewers the Editor opens a file in (frontend `VIEWER_IDS`).
-const VIEWERS: [&str; 6] = ["text", "image", "media", "pdf", "hex", "info"];
+const VIEWERS: [&str; 7] = ["text", "large", "image", "media", "pdf", "hex", "info"];
 
 /// pane.open's `viewer`, checked against the Editor's viewers.
 pub(crate) fn requested_viewer(cmd: &CommandPaneOpenData) -> Result<Option<&'static str>, String> {

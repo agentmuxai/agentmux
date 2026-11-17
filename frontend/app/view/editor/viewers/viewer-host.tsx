@@ -20,6 +20,7 @@ import { AvViewer } from "./media/av-viewer";
 import { ImageViewer } from "./image/image-viewer";
 import { HexViewer } from "./hex/hex-viewer";
 import { InfoCard } from "./info/info-card";
+import { LargeTextViewer } from "./large/large-text-viewer";
 import { PdfViewer } from "./pdf/pdf-viewer";
 import { ViewerBar, type ViewerBarProps } from "./viewer-bar";
 import { isProgramPath, TEXT_MAX_BYTES, type ViewerId } from "./viewer-choice";
@@ -153,6 +154,9 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
             <Match when={props.viewer === "hex"}>
                 <HexViewer path={dropped() ? "" : path()} file={file()} revision={revision()} size={probe()?.size} blockId={model.blockId} memoryKey={path()} bar={bar()} />
             </Match>
+            <Match when={props.viewer === "large"}>
+                <LargeTextViewer path={dropped() ? "" : path()} revision={revision()} probe={probe()} blockId={model.blockId} bar={bar()} />
+            </Match>
             <Match when={props.viewer === "info"}>
                 <InfoCard
                     path={path()}
@@ -162,10 +166,10 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     onOpenAsHex={() => model.reopenWith(props.tabId, "hex")}
                     note={
                         probe()?.kind === "text" && (probe()?.size ?? 0) > TEXT_MAX_BYTES
-                            ? "This text file is larger than the editor opens (10 MB)."
+                            ? "This text file is larger than the editor opens (10 MB): open it as text to read it in parts."
                             : undefined
                     }
-                    onOpenAsText={dropped() ? undefined : () => model.reopenWith(props.tabId, "text")}
+                    onOpenAsText={dropped() ? undefined : () => model.reopenWith(props.tabId, (probe()?.size ?? 0) > TEXT_MAX_BYTES ? "large" : "text")}
                     onOpenWithSystem={dropped() ? undefined : openWithSystem}
                     onReveal={dropped() ? undefined : () => void model.revealInExplorer(path())}
                     onCopyPath={dropped() ? undefined : () => void clipboardWriteText(path()).catch(() => {})}
