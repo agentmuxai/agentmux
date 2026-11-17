@@ -6,6 +6,8 @@
  * window. "All panes" and the chrome zoom name no pane and keep the window's centre (the stylesheet's 50% / 50%).
  */
 
+import { MAIN_PART, splitSubject, zoomPartElement } from "@/app/store/zoom-parts";
+
 export interface Box {
     x: number;
     y: number;
@@ -80,4 +82,16 @@ export function paneBodyBox(
     const content = frame.querySelector(".block-content");
     const r = (content ?? frame).getBoundingClientRect();
     return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+}
+
+/**
+ * The box a zoom amount is centred on: the part of the pane that zoomed (`subject`, zoom-parts.ts) while the
+ * pane has parts on screen, else the pane's body.
+ */
+export function zoomTargetBox(subject: string): Box | null {
+    const { blockId, partId } = splitSubject(subject);
+    const part = zoomPartElement(blockId, partId ?? MAIN_PART);
+    const r = part?.getBoundingClientRect();
+    if (r && r.width > 0 && r.height > 0) return { x: r.x, y: r.y, width: r.width, height: r.height };
+    return paneBodyBox(blockId);
 }

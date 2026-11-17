@@ -132,7 +132,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Move the pane somewhere else in the layout | a pane by its header | drag | drag |
 | Mouse Back / Forward: select the pane you had selected before / after, in any tab, with the caret in it |  | sidebutton | sidebutton |
 | Number every pane, for ⌃⇧1 / Ctrl+Shift+1 to ⌃⇧9 / Ctrl+Shift+9 |  | hold ⌃ + ⇧ | hold Ctrl + Shift |
-| Zoom that pane; over the title bar, status bar or a pane's header, zoom the app's frame instead | over a pane | ⌘ + scroll | Ctrl + scroll |
+| Zoom that pane (in the Editor, the part under the pointer); over the title bar, status bar or a pane's header, zoom the app's frame instead | over a pane | ⌘ + scroll | Ctrl + scroll |
 | Zoom every pane in the window together (over a browser pane's page, only that page zooms) | over a pane | ⌘ + ⇧ + scroll | Ctrl + Shift + scroll |
 | Hold over the tab to open it and place the pane, or drop on the tab to move the pane there | a pane onto a window tab | drag | drag |
 | Open it in a floating window; drag that back over the main window to dock it | a pane or pane tab out of the window | drag | drag |
@@ -163,6 +163,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Rename its file in place; an untitled document is saved under the name (Enter renames, Esc or a click elsewhere cancels) | on a document tab in the editor | double-click | double-click |
 | A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
 | Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
+| Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or the pointer | over the editor's file tree | ⌘ + scroll | Ctrl + scroll |
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |

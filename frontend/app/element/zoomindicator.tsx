@@ -2,16 +2,34 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { zoomIndicatorTargetAtom, zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom";
+import { t } from "@/app/i18n/i18n";
+import {
+    zoomIndicatorLabelAtom,
+    zoomIndicatorTargetAtom,
+    zoomIndicatorTextAtom,
+    zoomIndicatorVisibleAtom,
+} from "@/app/store/zoom";
 import { createEffect, JSX, on, onMount, Show } from "solid-js";
-import { paneBodyBox, zoomIndicatorCenter } from "./zoom-indicator-position";
+import { zoomIndicatorCenter, zoomTargetBox } from "./zoom-indicator-position";
 import "./zoomindicator.scss";
+
+/** The amount with the name of the part it belongs to, when the pane has parts on screen: "File tree 130%". */
+const indicatorText = (): string => {
+    const label = zoomIndicatorLabelAtom();
+    return label ? `${t(label)} ${zoomIndicatorTextAtom()}` : zoomIndicatorTextAtom();
+};
 
 export function ZoomIndicator(): JSX.Element {
     return (
-        <Show when={zoomIndicatorVisibleAtom()}>
-            <ZoomIndicatorBox />
-        </Show>
+        <>
+            {/* A live region that is always there, so a screen reader announces each amount as it changes. */}
+            <div class="zoom-indicator-live" role="status" aria-live="polite">
+                {zoomIndicatorVisibleAtom() ? indicatorText() : ""}
+            </div>
+            <Show when={zoomIndicatorVisibleAtom()}>
+                <ZoomIndicatorBox />
+            </Show>
+        </>
     );
 }
 
@@ -23,7 +41,7 @@ function ZoomIndicatorBox(): JSX.Element {
     const place = (): void => {
         const target = zoomIndicatorTargetAtom();
         const centre = zoomIndicatorCenter(
-            target == null ? null : paneBodyBox(target),
+            target == null ? null : zoomTargetBox(target),
             { width: box.offsetWidth, height: box.offsetHeight },
             { width: window.innerWidth, height: window.innerHeight }
         );
@@ -36,11 +54,11 @@ function ZoomIndicatorBox(): JSX.Element {
         box.style.top = `${centre.y}px`;
     };
     onMount(place);
-    createEffect(on([zoomIndicatorTargetAtom, zoomIndicatorTextAtom], place, { defer: true }));
+    createEffect(on([zoomIndicatorTargetAtom, zoomIndicatorTextAtom, zoomIndicatorLabelAtom], place, { defer: true }));
     // `data-pane-overlay`: over a browser pane's native window too, a hole is cut in it for the amount.
     return (
         <div ref={box} class="zoom-indicator" data-pane-overlay>
-            <div class="zoom-indicator-content">{zoomIndicatorTextAtom()}</div>
+            <div class="zoom-indicator-content">{indicatorText()}</div>
         </div>
     );
 }

@@ -30,6 +30,7 @@ import {
     WHEEL_STEP,
     wheelNotches,
 } from "@/store/zoom";
+import { zoomSubjectAt } from "@/store/zoom-parts";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -251,9 +252,11 @@ const AppZoomHandler = () => {
             const blockId = blockEl?.getAttribute("data-blockid");
             if (!blockId) return;
 
+            // A pane whose parts zoom apart (the Editor's tree, Files' Places) zooms the part under the pointer.
+            const subject = zoomSubjectAt(target, blockId);
             const anchor = { clientX: e.clientX, clientY: e.clientY };
-            if (zoomOut) zoomBlockOut(blockId, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
-            else zoomBlockIn(blockId, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
+            if (zoomOut) zoomBlockOut(subject, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
+            else zoomBlockIn(subject, WHEEL_STEP, anchor, wheelNotches(e.deltaY));
         };
 
         // Add with passive: false to allow preventDefault

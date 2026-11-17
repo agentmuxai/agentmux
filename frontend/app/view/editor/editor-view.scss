@@ -31,6 +31,29 @@
     background: var(--main-bg-color);
 }
 
+// The tree's part of the pane: its own CSS `zoom` (`editor:tree_zoom`), so the file tree zooms apart from
+// the document. Fills its column; a zoomed box lays out in its own (zoomed) units.
+.editor-tree-zoom {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
+// The document's part: the pane's own zoom (`term:zoom`) around the tab strip, toolbar and body.
+.editor-main-zoom {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+}
+
 // Vertical resize strip between the tree column and the main editor column.
 // 4px wide; cursor flips to col-resize on hover; the center 1px line acts as
 // the visual border. Drag handlers live in editor-view.tsx (track global

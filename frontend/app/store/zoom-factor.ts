@@ -34,29 +34,39 @@ export function clampZoom(factor: number, blockId?: string): number {
     return Math.min(Math.max(factor, MIN_ZOOM), zoomMaxOf(blockId));
 }
 
+/** The block meta key of a pane's own zoom; a part of a pane (store/zoom-parts.ts) keeps its own key. */
+export const PANE_ZOOM_KEY = "term:zoom";
+
 /**
- * The meta write for a pane's zoom: clamped, rounded to 0.01, and `null` (unset)
- * at 100% so an unzoomed pane carries no `term:zoom`.
+ * The meta write for a pane's zoom: clamped, rounded to 0.01, and `null` (unset) at 100% so an unzoomed
+ * pane carries no `term:zoom`. A part's key holds `1` at 100% instead: "set" and "never set" stay
+ * apart, which the first-start seeding (`seedZoomParts`) relies on.
  */
-export function paneZoomPatch(level: number, blockId?: string): { "term:zoom": number | null } {
+export function paneZoomPatch<K extends string = typeof PANE_ZOOM_KEY>(
+    level: number,
+    blockId?: string,
+    key: K = PANE_ZOOM_KEY as K
+): { [P in K]: number | null } {
     const next = clampZoom(Math.round(level * 100) / 100, blockId);
-    return { "term:zoom": Math.abs(next - DEFAULT_ZOOM) < 0.005 ? null : next };
+    const atDefault = Math.abs(next - DEFAULT_ZOOM) < 0.005;
+    return { [key]: atDefault ? (key === PANE_ZOOM_KEY ? null : DEFAULT_ZOOM) : next } as { [P in K]: number | null };
 }
 
 /** The one way to save a pane's zoom (`paneZoomPatch`). Returns the level written. */
-export function writePaneZoom(
-    setMeta: (meta: { "term:zoom": number | null }) => unknown,
+export function writePaneZoom<K extends string = typeof PANE_ZOOM_KEY>(
+    setMeta: (meta: { [P in K]: number | null }) => unknown,
     level: number,
-    blockId?: string
+    blockId?: string,
+    key: K = PANE_ZOOM_KEY as K
 ): number {
-    const patch = paneZoomPatch(level, blockId);
+    const patch = paneZoomPatch(level, blockId, key);
     void setMeta(patch);
-    return patch["term:zoom"] ?? DEFAULT_ZOOM;
+    return patch[key] ?? DEFAULT_ZOOM;
 }
 
-/** A pane's `term:zoom`, clamped; DEFAULT_ZOOM when unset or not a number. */
-export function readZoom(meta: { "term:zoom"?: unknown } | null | undefined, blockId?: string): number {
-    const z = meta?.["term:zoom"];
+/** A pane's zoom under `key` (`term:zoom` unless a part's), clamped; DEFAULT_ZOOM when unset or not a number. */
+export function readZoom(meta: object | null | undefined, blockId?: string, key: string = PANE_ZOOM_KEY): number {
+    const z = (meta as Record<string, unknown> | null | undefined)?.[key];
     if (typeof z !== "number" || isNaN(z)) return DEFAULT_ZOOM;
     return clampZoom(z, blockId);
 }

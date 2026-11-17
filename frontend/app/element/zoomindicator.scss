@@ -51,3 +51,7 @@
         transform: translate(-50%, -50%) scale(0.8);
     }
 }
+
+.zoom-indicator-live {
+    @include mixins.sr-only;
+}
