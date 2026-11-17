@@ -231,6 +231,8 @@ pub fn spawn_state_services(state: &AppState) {
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
     spawn_spend_services(state);
+    // A running agent's startup file follows Global Memory (SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md §3.1).
+    crate::server::startup_refresh::start(state.clone());
     spawn_background_task_sweep(state);
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.

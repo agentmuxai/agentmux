@@ -32,6 +32,7 @@ pub const NO_CAP: usize = usize::MAX / 4;
 const OVERHEAD_CHARS: usize = 1_500;
 /// The most names the hygiene note spells out.
 const MAX_LISTED: usize = 25;
+const DAY_MS: i64 = 86_400_000;
 /// The most Global Memory entries the left-out note names; a name is about 60 characters, so the note stays small.
 const MAX_LEFT_OUT_LISTED: usize = 100;
 
@@ -131,17 +132,24 @@ pub fn hygiene_note(files: &[Seen]) -> Option<String> {
 /// one delivery after `reserve_chars` (the running summary and anything else that rides along). Global Memory
 /// goes in whole entries only; Personal Memory goes in the index, and the few files marked `deliver: always`
 /// in full within their limit. The tail is the left-out note, and the hygiene note when `hygiene` is set.
-pub fn fit(entries: Vec<Entry>, capacity_chars: usize, reserve_chars: usize, hygiene: bool, age_days: &dyn Fn(&Entry) -> Option<i64>) -> Fitted {
+pub fn fit(entries: Vec<Entry>, capacity_chars: usize, reserve_chars: usize, hygiene: bool, modified_ms: &dyn Fn(&Entry) -> Option<i64>, now_ms: i64) -> Fitted {
     let seen: Vec<Seen> = entries
         .iter()
         .filter(|e| e.tier == Tier::Personal)
-        .map(|e| Seen { name: e.name.clone(), chars: e.text.chars().count(), kind: frontmatter_value(&e.text, "type"), age_days: age_days(e) })
+        .map(|e| Seen {
+            name: e.name.clone(),
+            chars: e.text.chars().count(),
+            kind: frontmatter_value(&e.text, "type"),
+            age_days: modified_ms(e).map(|m| (now_ms - m).max(0) / DAY_MS),
+        })
         .collect();
     let (global, personal): (Vec<Entry>, Vec<Entry>) = entries.into_iter().partition(|e| e.tier == Tier::Global);
 
-    // Marked files, oldest marking first, until a limit is reached; the rest of them go in the index with the reason.
+    // Marked files, oldest marking first (by the modification time, not by whole days: files changed today keep their
+    // order), until a limit is reached; the rest of them go in the index with the reason. A file with no known time
+    // counts as the newest.
     let mut marked: Vec<&Entry> = personal.iter().filter(|e| index::is_always(&e.text)).collect();
-    marked.sort_by_key(|e| std::cmp::Reverse(age_days(e).unwrap_or(0)));
+    marked.sort_by_key(|e| modified_ms(e).unwrap_or(i64::MAX));
     let (mut always, mut over_limit, mut always_chars) = (Vec::<Entry>::new(), Vec::<String>::new(), 0usize);
     for e in marked {
         let n = e.text.chars().count() + 5;
@@ -159,11 +167,16 @@ pub fn fit(entries: Vec<Entry>, capacity_chars: usize, reserve_chars: usize, hyg
     // Leave room for the notes before counting.
     let notes_room = 1_200 + MAX_LEFT_OUT_LISTED * 80;
     let budget = capacity_chars.saturating_sub(OVERHEAD_CHARS + reserve_chars + notes_room + index_chars + always_chars);
-    let mut used = 0usize;
+    // System entries (Operator Config) are always kept: they are small, and the agent cannot read one back with the
+    // `Memory` tool, so a left-out note could not tell it how to recover it. They count against the budget first.
+    let weight = |e: &Entry| e.text.chars().count() + 5;
+    let mut used: usize = global.iter().filter(|e| e.system).map(weight).sum();
     let (mut kept, mut skipped) = (Vec::new(), Vec::new());
     for e in global {
-        let n = e.text.chars().count() + 5;
-        if used + n <= budget {
+        let n = weight(&e);
+        if e.system {
+            kept.push(e);
+        } else if used + n <= budget {
             used += n;
             kept.push(e);
         } else {
