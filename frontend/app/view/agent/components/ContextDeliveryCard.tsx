@@ -18,7 +18,7 @@
 import { formatCompactNumber } from "@/util/format-count";
 import clsx from "clsx";
 import { For, Show, createMemo, type JSX } from "solid-js";
-import { contextDeliveryTitle, isTextCard } from "../context-delivery";
+import { contextDeliveryTitle, isTextCard, rowBadge } from "../context-delivery";
 import { proseDoc } from "../preview-text/docs";
 import type { ContextDeliveryNode, ContextItem } from "../../../agent-model/types";
 import { CollapsibleMessage } from "./CollapsibleMessage";
@@ -107,17 +107,12 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
                 + Global Memory
             </Tag>
         </Show>
-        <Show when={props.item.delivered === "partial" || props.item.delivered === "omitted"}>
-            <span
-                class="agent-context-delivery-item-cut"
-                {...tip(
-                    props.item.delivered === "omitted"
-                        ? "Not delivered: the memory was larger than one delivery can carry"
-                        : "Cut: only part of this fit in the delivery"
-                )}
-            >
-                {props.item.delivered === "omitted" ? "not sent" : "cut"}
-            </span>
+        <Show when={rowBadge(props.item)}>
+            {(badge) => (
+                <span class={`agent-context-delivery-item-${badge().tone}`} {...tip(badge().title)}>
+                    {badge().label}
+                </span>
+            )}
         </Show>
         <span class="agent-context-delivery-item-size">{sizeText(props.item)}</span>
     </div>

@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::container::credential::ContainerGrant;
 use crate::backend::memory::delivery::{self, Entry, Reason, Tier};
 use crate::backend::memory::fit;
+use crate::backend::memory::index;
 use crate::backend::memory::delivery_state::{
     state_lock, Delivery, DeliveryKey, EntrySize, FallbackClaim, FallbackDelivery, StartupDetail,
     PARKED_NOTICE_WAIT, PENDING_POLL, PENDING_WAIT,
@@ -442,17 +443,25 @@ fn compose_fallback_delivery(
 ) -> Option<FallbackDelivery> {
     let global = global_entries(state, block_id);
     let uid = crate::backend::spawn_env::block_identity::persisted_agent_identity(&state.mstore, block_id).map(|i| i.uid);
-    // A new session whose startup file carries every current Global section
-    // doesn't get them a second time, as the hook doesn't send them (LC3).
-    let global_in_file = reason == delivery::FallbackReason::FreshSession
-        && uid.as_deref().is_some_and(|uid| global_memory_in_latest_startup_files(uid, &global));
-    let mut entries = if global_in_file { Vec::new() } else { global.clone() };
-    if let Some(uid) = &uid {
-        entries.extend(personal_entries(uid));
-    }
-    let composed = delivery::compose_fallback_with(&entries, reason, global_in_file)?;
-    let mut items = if global_in_file { global.iter().map(in_startup_file_item).collect() } else { Vec::new() };
+    // A new session or a compaction whose startup file carries a current Global section doesn't get it a
+    // second time, as the hook doesn't send it (LC3); only the sections newer than the file are sent.
+    let files = uid.as_deref().map(latest_startup_files).unwrap_or_default();
+    let (newer, carry) = global_against_startup_files(&files, &global);
+    let personal = uid.as_deref().map(personal_entries).unwrap_or_default();
+    let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((agentmux_common::time::now_ms() - m).max(0)) / 86_400_000);
+    let fitted = fit::fit(newer.iter().cloned().chain(personal).collect(), fit::NO_CAP, 0, false, &age_days);
+    let entries = fitted.kept.clone();
+    let tool_only = block_is_container(state, block_id);
+    let layout = delivery::Layout {
+        carry,
+        index: index::IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only },
+        tail: fitted.tail.as_deref(),
+    };
+    let composed = delivery::compose_fallback_layout(&entries, reason, &layout)?;
+    let mut items = carried_items(&global, &newer);
     items.extend(delivery_items(&entries, &composed, composed.text.chars().count()));
+    items.extend(indexed_items(&fitted, tool_only));
+    items.extend(fitted.skipped.iter().map(global_left_out_item));
     // A compaction's running summary rides along: srv's input handler appends
     // it to this same message (`continuity_state::with_state_after_compaction`).
     let summary = (reason == delivery::FallbackReason::Compaction)
@@ -550,6 +559,7 @@ fn in_startup_file_item(e: &Entry) -> EntrySize {
         source_tokens: estimate_tokens(&e.text) as usize,
         startup: None,
         via: Some("startup_file"),
+        reason: None,
     }
 }
 
@@ -591,31 +601,54 @@ fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::Star
     crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
 }
 
-/// Whether the CLI already got the current Global Memory from a startup
-/// file: one AgentMux wrote that holds every current section, byte for byte.
-/// A foreign or stale file with some old section doesn't count, or the hook
-/// would drop current entries the agent never saw (Codex on #4131).
-fn global_memory_in_startup_files(files: &[crate::backend::startup_files::StartupFile], global: &[Entry]) -> bool {
-    !global.is_empty()
-        && files.iter().any(|f| {
-            f.owner == crate::backend::startup_files::Owner::Agentmux && global.iter().all(|e| f.text.contains(&e.text))
-        })
+/// Which current Global sections the CLI already got from a startup file: one AgentMux wrote that holds
+/// the section byte for byte. Returns the sections newer than the files (absent, or held in an older form,
+/// which the CLI never saw in its current form), and how much of the Global Memory the files carry. A foreign
+/// file doesn't count, or the hook would drop current entries the agent never saw.
+fn global_against_startup_files(files: &[crate::backend::startup_files::StartupFile], global: &[Entry]) -> (Vec<Entry>, delivery::StartupCarry) {
+    let owned: Vec<&crate::backend::startup_files::StartupFile> =
+        files.iter().filter(|f| f.owner == crate::backend::startup_files::Owner::Agentmux).collect();
+    let newer: Vec<Entry> = global.iter().filter(|e| !owned.iter().any(|f| f.text.contains(&e.text))).cloned().collect();
+    let carry = if global.is_empty() || newer.len() == global.len() {
+        delivery::StartupCarry::None
+    } else if newer.is_empty() {
+        delivery::StartupCarry::All
+    } else {
+        delivery::StartupCarry::Partly
+    };
+    (newer, carry)
 }
 
-/// [`global_memory_in_startup_files`] for the agent's latest Claude spawn, from
-/// where its continuity segment says the CLI started: the fallback has no
-/// hook request to read them from.
-fn global_memory_in_latest_startup_files(agent_uid: &str, global: &[Entry]) -> bool {
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return false };
+/// The startup files of the agent's latest Claude spawn, from where its continuity segment says the CLI
+/// started: the fallback has no hook request to read them from.
+fn latest_startup_files(agent_uid: &str) -> Vec<crate::backend::startup_files::StartupFile> {
+    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return Vec::new() };
     let Some(latest) = crate::backend::continuity_segments::segments(fs.as_ref(), agent_uid)
         .into_iter()
         .filter(|s| s.start.provider == "claude" && !s.start.cwd.is_empty())
         .max_by_key(|s| s.start.started_at_ms)
     else {
-        return false;
+        return Vec::new();
     };
     let launch = LaunchDirs { cwd: latest.start.cwd.into(), config_dir: latest.start.config_dir.filter(|c| !c.is_empty()).map(Into::into), workspace_only: false };
-    global_memory_in_startup_files(&startup_files(&launch), global)
+    startup_files(&launch)
+}
+
+/// Whether the pane is a container agent's: its host folders aren't readable from inside, so an index line
+/// names the `Memory` tool's form only.
+fn block_is_container(state: &AppState, block_id: &str) -> bool {
+    state
+        .mstore
+        .get::<crate::backend::obj::Block>(block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| crate::backend::runtime_adapter::RuntimeKind::of_block_meta(&b.meta).is_container())
+}
+
+/// The card's rows for the Global entries the startup file carried (every one that is not in `newer`): listed,
+/// sized 0 (the file's row counts them).
+fn carried_items(global: &[Entry], newer: &[Entry]) -> Vec<EntrySize> {
+    global.iter().filter(|g| !newer.iter().any(|n| n.text == g.text)).map(in_startup_file_item).collect()
 }
 
 fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> Vec<EntrySize> {
@@ -638,6 +671,7 @@ fn startup_items_of(files: Vec<crate::backend::startup_files::StartupFile>) -> V
                 source_tokens: tokens,
                 startup: Some(StartupDetail { role: f.role, owner: f.owner.as_str(), count: f.count, contains: f.contains }),
                 via: None,
+                reason: None,
             }
         })
         .collect()
@@ -654,35 +688,28 @@ fn compose_delivery(
     launch: Option<&LaunchDirs>,
     now: i64,
 ) -> Option<Delivery> {
-    // What the CLI loaded itself comes first, then what the hook carried.
-    let files = match (reason, launch) {
-        (Reason::Startup, Some(launch)) => startup_files(launch),
-        _ => Vec::new(),
-    };
+    // The startup files the CLI read: they decide which Global sections the hook leaves out, on every reason
+    // (a compaction and /clear reload them too). Only a new session lists them on the card.
+    let files = launch.map(startup_files).unwrap_or_default();
     let global = global_entries(state, block_id);
-    // A startup file the CLI loaded already carries the current Global
-    // Memory: the hook doesn't send it a second time (LC3, §4.4). The card
-    // still lists each entry, marked as coming through that file.
-    let global_in_file = global_memory_in_startup_files(&files, &global);
-    let mut items = startup_items_of(files);
-    let mut entries = if global_in_file { Vec::new() } else { global.clone() };
-    if let Some(uid) = agent_uid {
-        entries.extend(personal_entries(uid));
-    }
-    if global_in_file {
-        items.extend(global.iter().map(in_startup_file_item));
-    }
+    let (newer, carry) = global_against_startup_files(&files, &global);
+    let mut items = if reason == Reason::Startup { startup_items_of(files) } else { Vec::new() };
+    let personal = agent_uid.map(personal_entries).unwrap_or_default();
+    items.extend(carried_items(&global, &newer));
+    let mut entries = newer;
+    entries.extend(personal);
     let summary = (reason == Reason::Compact)
         .then(|| crate::backend::continuity_state::running_summary_section(&state.mstore, block_id))
         .flatten();
     // Nothing left for the hook to carry is still a delivery when there are
     // startup items to show: it has no parts, and its card goes out at once.
     let age_days = |e: &Entry| modified_ms_of(e).map(|m| ((now - m).max(0)) / 86_400_000);
-    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, global_in_file, &age_days) {
+    let tool_only = launch.is_some_and(|l| l.workspace_only) || block_is_container(state, block_id);
+    let (parts, delivered) = match fit_and_compose(entries, summary.as_deref(), reason, carry, tool_only, &age_days) {
         Some((fitted, composed, parts, delivered_chars)) => {
             let mut delivered = delivery_items(&fitted.kept, &composed, delivered_chars);
-            apply_capped(&mut delivered, &fitted.capped);
-            delivered.extend(fitted.skipped.iter().map(not_sent_item));
+            delivered.extend(indexed_items(&fitted, tool_only));
+            delivered.extend(fitted.skipped.iter().map(global_left_out_item));
             (parts, delivered)
         }
         None if !items.is_empty() => (Vec::new(), Vec::new()),
@@ -760,15 +787,16 @@ fn personal_entries_in(dir: &std::path::Path) -> Vec<Entry> {
     entries
 }
 
-/// The files that fit one delivery (newest first and capped, the rest named, not dropped silently), composed and
-/// split the way the hooks will carry them. The character budget is only a guess at how the parts break at line
-/// ends, so when the real split still cuts (the notes at the end are what can tip it), a little more room is
-/// kept back and the fit is redone, so the reserved summary and the notes are never the part that is lost.
+/// The delivery's entries sorted by what each gets (`fit::fit`), composed and split the way the hooks will
+/// carry them. The character budget is only a guess at how the parts break at line ends, so when the real
+/// split still cuts (the notes at the end are what can tip it), a little more room is kept back and the fit is
+/// redone, so the reserved summary and the notes are never the part that is lost.
 fn fit_and_compose(
     entries: Vec<Entry>,
     summary: Option<&str>,
     reason: Reason,
-    global_in_file: bool,
+    carry: delivery::StartupCarry,
+    tool_only: bool,
     age_days: &dyn Fn(&Entry) -> Option<i64>,
 ) -> Option<(fit::Fitted, delivery::Composed, Vec<String>, usize)> {
     const STEP: usize = 2_000;
@@ -776,25 +804,18 @@ fn fit_and_compose(
     let reserve = summary.map_or(0, |s| s.chars().count());
     let mut slack = 0;
     loop {
-        let fitted = fit::fit(entries.clone(), reserve + slack, reason == Reason::Compact, age_days);
-        let composed = delivery::compose_items_tail(&fitted.kept, reason, summary, global_in_file, fitted.tail.as_deref())?;
+        let fitted = fit::fit(entries.clone(), delivery::HOOK_PARTS * delivery::MAX_PART_CHARS, reserve + slack, reason == Reason::Compact, age_days);
+        let layout = delivery::Layout {
+            carry,
+            index: index::IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only },
+            tail: fitted.tail.as_deref(),
+        };
+        let composed = delivery::compose_items_tail(&fitted.kept, reason, summary, &layout)?;
         let (parts, delivered_chars) = delivery::split_into_parts_counted(&composed.text, delivery::MAX_PART_CHARS, delivery::HOOK_PARTS);
         if delivered_chars >= composed.text.chars().count() || slack >= LAST {
             return Some((fitted, composed, parts, delivered_chars));
         }
         slack += STEP;
-    }
-}
-
-/// A file the cap cut shows on the card with its real size, as partly delivered.
-fn apply_capped(rows: &mut [EntrySize], capped: &[fit::Capped]) {
-    for row in rows.iter_mut().filter(|r| r.kind == "personal_memory") {
-        let Some(c) = capped.iter().find(|c| c.name == row.name) else { continue };
-        row.source_size_bytes = c.source_bytes;
-        row.source_tokens = tokens_for_chars(c.source_chars as u64) as usize;
-        if row.delivered == delivery::Delivered::Full.as_str() {
-            row.delivered = delivery::Delivered::Partial(0).as_str();
-        }
     }
 }
 
@@ -810,23 +831,54 @@ fn modified_ms_of(e: &Entry) -> Option<i64> {
     i64::try_from(mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
 }
 
-/// The card's row for a file left out of the delivery whole.
-fn not_sent_item(e: &Entry) -> EntrySize {
+/// The card's rows for the Personal files listed in the index: each sized by its index line, not "0 B".
+fn indexed_items(fitted: &fit::Fitted, tool_only: bool) -> Vec<EntrySize> {
+    let plan = index::IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only };
+    let lines = index::lines(&plan);
+    fitted
+        .indexed
+        .iter()
+        .map(|e| {
+            let line = lines.iter().find(|(n, _)| *n == e.name).map_or("", |(_, l)| l.as_str());
+            EntrySize {
+                label: e.label.clone(),
+                source: e.tier.as_str(),
+                size_bytes: line.len(),
+                tokens: estimate_tokens(line) as usize,
+                kind: "personal_memory",
+                name: e.name.clone(),
+                tier: None,
+                bundle_id: e.bundle_id.clone(),
+                path: e.path.clone(),
+                delivered: delivery::Delivered::Indexed.as_str(),
+                source_size_bytes: e.text.len(),
+                source_tokens: estimate_tokens(&e.text) as usize,
+                startup: None,
+                via: None,
+                reason: fitted.over_limit.contains(&e.name).then(|| "marked always, over the limit of 5 files and 6,000 characters".to_string()),
+            }
+        })
+        .collect()
+}
+
+/// The card's row for a Global Memory entry left out of the delivery whole because it was full.
+fn global_left_out_item(e: &Entry) -> EntrySize {
     EntrySize {
         label: e.label.clone(),
         source: e.tier.as_str(),
         size_bytes: 0,
         tokens: 0,
-        kind: "personal_memory",
+        kind: "global_memory",
         name: e.name.clone(),
-        tier: None,
+        tier: Some(if e.system { "system" } else { "workspace" }),
         bundle_id: e.bundle_id.clone(),
-        path: e.path.clone(),
+        path: None,
         delivered: delivery::Delivered::Omitted.as_str(),
         source_size_bytes: e.text.len(),
         source_tokens: estimate_tokens(&e.text) as usize,
         startup: None,
         via: None,
+        reason: Some("the delivery was full; its name and how to read it were in the delivery".to_string()),
     }
 }
 
@@ -861,6 +913,7 @@ fn delivery_items(entries: &[Entry], composed: &delivery::Composed, delivered_ch
                     source_tokens,
                     startup: None,
                     via: None,
+                    reason: None,
                 },
                 None => EntrySize::running_summary(size_bytes, tokens, delivered.as_str(), source_size_bytes, source_tokens),
             }

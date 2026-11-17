@@ -57,7 +57,7 @@ pub struct EntrySize {
     /// Personal Memory only: the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// `full`, `partial` or `omitted` (§3.4 step 3).
+    /// `full`, `partial`, `omitted` (left out) or `indexed` (listed in the Personal Memory index).
     pub delivered: &'static str,
     /// The whole entry's size, whatever was delivered: what the Personal
     /// Memory size band measures, so a cut delivery still warns.
@@ -71,6 +71,9 @@ pub struct EntrySize {
     /// own (the file's row counts it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via: Option<&'static str>,
+    /// Why a row is not in full when that needs saying: a file marked always over the limit, or a Global entry left out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl EntrySize {
@@ -97,6 +100,7 @@ impl EntrySize {
             source_tokens,
             startup: None,
             via: None,
+            reason: None,
         }
     }
 }
