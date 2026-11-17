@@ -19,7 +19,7 @@ function fileOf(text: string, mtime = 1) {
     for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10 && i + 1 < bytes.length) starts.push(i + 1);
     const index = vi.fn(async (from: number, count: number) => {
         const at = (n: number) => (n >= starts.length ? bytes.length : starts[n]);
-        return { total_lines: starts.length, size: bytes.length, mtime, start: at(from), end: at(from + count) };
+        return { total_lines: starts.length, size: bytes.length, mtime, start: at(from), end: at(from + count), encoding: "utf-8" };
     });
     const read = vi.fn(async (start: number, end: number) => bytes.slice(start, end + 1));
     return { index, read, lines: starts.length };
@@ -91,7 +91,7 @@ describe("LineSource", () => {
         const f = fileOf(text, 1);
         const s = new LineSource(f.index, f.read, "utf-8");
         await s.ensure(0, 0);
-        f.index.mockImplementation(async () => ({ total_lines: 450, size: 5, mtime: 2, start: 0, end: 0 }));
+        f.index.mockImplementation(async () => ({ total_lines: 450, size: 5, mtime: 2, start: 0, end: 0, encoding: "utf-8" }));
         await s.ensure(200, 200);
         expect(s.has(0, 0)).toBe(false);
     });
@@ -107,6 +107,21 @@ describe("LineSource", () => {
         expect(s.lineAt(2)?.text).toBe("last");
         // Nothing read was bigger than a line's start.
         for (const [a, b] of f.read.mock.calls) expect(b - a + 1).toBeLessThanOrEqual(LINE_READ_BYTES);
+    });
+
+    it("decodes a legacy file with the encoding srv found in it, not a fixed code page", async () => {
+        // "Привет" in Windows-1251; the probe only said "legacy".
+        const bytes = Uint8Array.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x0a]);
+        const index = vi.fn(async () => ({ total_lines: 1, size: bytes.length, mtime: 1, start: 0, end: bytes.length, encoding: "windows-1251" }));
+        const s = new LineSource(index, async (a, b) => bytes.slice(a, b + 1), "legacy");
+        await s.ensure(0, 0);
+        expect(s.lineAt(0)?.text).toBe("Привет");
+    });
+
+    it("falls back to UTF-8 for an encoding name the browser doesn't know", () => {
+        expect(linesOfBytes(enc("abc\n"), "x-no-such-encoding").map((l) => l.text)).toEqual(["abc"]);
+        expect(decoderLabel("legacy")).toBe("windows-1252");
+        expect(decoderLabel("Shift_JIS")).toBe("Shift_JIS");
     });
 
     it("reports a read that fails, and tries again when asked again", async () => {

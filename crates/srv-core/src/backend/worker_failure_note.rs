@@ -5,6 +5,11 @@
 //! failure was stored under (`agent:last_failure`, written before the `agentfailure` event that
 //! `worker_notes` hears), whether it is worth retrying, and who retries it.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use parking_lot::Mutex;
+
 use crate::agents::failure::FailureClass;
 use crate::backend::obj::MetaMapType;
 
@@ -14,6 +19,30 @@ pub(crate) struct StoredFailure {
     pub code: FailureClass,
     pub retryable: bool,
     pub resets_at_ms: Option<u64>,
+}
+
+/// Whether `worker_notes`'s own note for a worker's failure was actually admitted (delivered), or held by its
+/// one-note-a-minute throttle (`worker_notes::Gaps`, SPEC_AGENT_WORKERS_2026_10_15.md §"at most one note per
+/// worker per minute") — keyed by the worker's own block id, the outcome of its most recent `Failed` event.
+/// `sender_failure_note::already_tells_its_leader` reads this before skipping its own note: a held note tells
+/// the leader nothing, so the sender's own note must go through instead (#2629). Set only by `worker_notes`'s
+/// own processing of a `Failed` event, never read-and-cleared, since a later failure simply overwrites it.
+pub(crate) static FAILURE_NOTE_ADMITTED: LazyLock<Mutex<HashMap<String, bool>>> = LazyLock::new(Default::default);
+
+/// Records whether `worker_notes` admitted (delivered) or held its own note for `block_id`'s failure.
+pub(crate) fn record_failure_admission(block_id: &str, admitted: bool) {
+    let mut map = FAILURE_NOTE_ADMITTED.lock();
+    if map.len() > 4096 {
+        map.clear(); // a long-running instance's worker count is nowhere near this; cheap enough to just reset
+    }
+    map.insert(block_id.to_string(), admitted);
+}
+
+/// Whether `worker_notes` is known to have admitted (delivered) its own note for `block_id`'s most recent
+/// failure. `false` when nothing was ever recorded for it — the conservative default: tell the sender rather
+/// than risk assuming a note went out that didn't.
+pub(crate) fn failure_note_was_admitted(block_id: &str) -> bool {
+    FAILURE_NOTE_ADMITTED.lock().get(block_id).copied().unwrap_or(false)
 }
 
 /// The block's stored failure, or `None` when it has none this build can read.
@@ -124,6 +153,18 @@ mod tests {
 
     fn meta(f: serde_json::Value) -> MetaMapType {
         MetaMapType::from([("agent:last_failure".to_string(), f)])
+    }
+
+    /// The default, with nothing recorded yet, is `false` (not admitted): the conservative read, so a
+    /// caller that finds no record tells the sender rather than assume a note went out that didn't (#2629).
+    #[test]
+    fn failure_note_admission_defaults_to_false_and_round_trips() {
+        let block = format!("block-{}", uuid::Uuid::new_v4());
+        assert!(!failure_note_was_admitted(&block), "nothing recorded yet");
+        record_failure_admission(&block, true);
+        assert!(failure_note_was_admitted(&block));
+        record_failure_admission(&block, false);
+        assert!(!failure_note_was_admitted(&block), "the latest record wins");
     }
 
     #[test]

@@ -517,6 +517,7 @@ import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 import type { ReactiveRegistrationFlagsResult } from "@/types/rpc/ReactiveRegistrationFlagsResult";
 import type { ReactiveRegistrationsParams } from "@/types/rpc/ReactiveRegistrationsParams";
 import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
+import type { RecordPageReq } from "@/types/rpc/RecordPageReq";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
@@ -1612,6 +1613,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<ReactiveRegistrationsResult> {
     return client.rpcCall("reactive.registrations", data, opts);
+  },
+  // command "record.page"
+  RecordPageCommand(client: RpcClient, data: RecordPageReq, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("record.page", data, opts);
   },
   // command "gettoolstatus"
   GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
