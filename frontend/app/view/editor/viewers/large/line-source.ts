@@ -85,6 +85,13 @@ export class LineSource {
         private readonly keep = PAGES_KEPT
     ) {}
 
+    /** Where line `n` (0-based) starts in the file, in bytes. */
+    async startOf(n: number): Promise<number> {
+        const r = await this.index(n, 0);
+        this.note(r);
+        return r.start;
+    }
+
     /** Line `n` (0-based), when its page is here. */
     lineAt(n: number): LineText | undefined {
         return this.pages.get(Math.floor(n / PAGE_LINES))?.[n % PAGE_LINES];

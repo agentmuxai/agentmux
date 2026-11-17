@@ -11,11 +11,12 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
-import { createComputed, createEffect, createMemo, createSignal, untrack } from "solid-js";
+import { type Accessor, createComputed, createEffect, createMemo, createSignal, untrack } from "solid-js";
 import type { ViewerBarProps } from "../viewer-bar";
 import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
 import { LineSource, type LineText } from "./line-source";
+import { createLargeFind } from "./large-find-state";
 import { createLineScroll } from "./line-scroll";
 
 export interface LargeTextProps {
@@ -101,7 +102,86 @@ function createLineFeed(props: LargeTextProps) {
         setError("");
         setLoaded((v) => v + 1);
     };
-    return { source, total, loaded, error, want, lineAt, retry };
+    /** The 0-based line that holds a byte of the file. */
+    const lineOf = async (offset: number): Promise<number> => {
+        const { path } = props;
+        const encoding = props.probe?.text?.encoding;
+        const r = await RpcApi.FileIndexLinesCommand(
+            TabRpcClient,
+            { path, encoding, from_line: 0, count: 0, at_offset: offset },
+            { timeout: INDEX_TIMEOUT_MS }
+        );
+        return r.line_at ?? 0;
+    };
+    return { source, total, loaded, error, want, lineAt, retry, lineOf };
+}
+
+/** The match marked in the drawn line `line` (1-based), null while that line is not drawn: not another line's match. */
+export function hitInLine(grid: HTMLElement | undefined, line: number): Element | null {
+    return grid?.querySelector(`.large-text-line[data-line="${line}"] .large-text-hit`) ?? null;
+}
+
+/** Scroll `grid` sideways, as little as the find needs, so that `hit` (a match in a line) shows in the middle. */
+export function revealSideways(grid: HTMLElement | undefined, hit: Element | null): void {
+    if (!grid || !hit) return;
+    const g = grid.getBoundingClientRect();
+    const h = hit.getBoundingClientRect();
+    if (h.left >= g.left && h.right <= g.right) return;
+    grid.scrollLeft += h.left - g.left - (g.width - h.width) / 2;
+}
+
+/** What a key does in the lines: the box or the find strip to go to, the first line to scroll to, or null for nothing. */
+export function keyTarget(key: string, mod: boolean, at: { first: number; fits: number; total: number }): "box" | "find" | number | null {
+    if (mod && key === "g") return "box";
+    if (mod && key === "f") return "find";
+    if (mod && key !== "Home" && key !== "End") return null;
+    const page = Math.max(1, at.fits - 1);
+    switch (key) {
+        case "ArrowUp":
+            return at.first - 1;
+        case "ArrowDown":
+            return at.first + 1;
+        case "PageUp":
+            return at.first - page;
+        case "PageDown":
+            return at.first + page;
+        case "Home":
+            return 0;
+        case "End":
+            return at.total;
+        default:
+            return null;
+    }
+}
+
+/**
+ * A match far along a line, scrolled into view sideways once its line is drawn. A line read before is not drawn until
+ * the scroll to it has happened, so this waits for the match itself in the marked line: whenever what `watch` reads
+ * changes, and a frame at a time for a short while after `want`.
+ */
+function createSidewaysReveal(grid: () => HTMLElement | undefined, mark: Accessor<number | null>, watch: () => unknown) {
+    let wanted = 0; // the line (1-based) to show the match of; 0 for none
+    const tryReveal = (): boolean => {
+        const hit = wanted && wanted === untrack(mark) ? hitInLine(grid(), wanted) : null;
+        if (!hit) return false;
+        wanted = 0;
+        revealSideways(grid(), hit);
+        return true;
+    };
+    const poll = (frames = 40): void => {
+        if (wanted && !tryReveal() && frames > 0) requestAnimationFrame(() => poll(frames - 1));
+    };
+    createEffect(() => {
+        void watch();
+        void mark();
+        tryReveal();
+    });
+    return {
+        want: (line: number) => {
+            wanted = line;
+        },
+        poll,
+    };
 }
 
 export function createLargeText(props: LargeTextProps) {
@@ -110,6 +190,8 @@ export function createLargeText(props: LargeTextProps) {
     const scroll = createLineScroll(lines, remembered.get(props.path) ?? 0);
     const [mark, setMark] = createSignal<number | null>(null);
     let lineBox: HTMLInputElement | undefined;
+    let gridEl: HTMLElement | undefined;
+    let reveal!: ReturnType<typeof createSidewaysReveal>;
     const [badLine, setBadLine] = createSignal(false);
 
     // The lines on screen are read (and the page after them, so a slow scroll doesn't wait), and kept in mind.
@@ -133,36 +215,43 @@ export function createLargeText(props: LargeTextProps) {
             scroll.focus();
         }
     };
+    const find = createLargeFind({
+        path: () => props.path,
+        size: () => props.probe?.size ?? 0,
+        encoding: () => props.probe?.text?.encoding,
+        revision: () => props.revision,
+        topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
+        lineOf: feed.lineOf,
+        show: (line) => {
+            reveal.want(line);
+            goTo(line);
+            reveal.poll();
+        },
+        unmark: () => {
+            reveal.want(0);
+            setMark(null);
+        },
+        focusGrid: scroll.focus,
+    });
+    reveal = createSidewaysReveal(() => gridEl, mark, () => [feed.loaded(), find.needle(), scroll.first()]);
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.altKey) return;
-        const mod = e.ctrlKey || e.metaKey;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-        const page = Math.max(1, scroll.fits() - 1);
-        const to = (() => {
-            if (mod && key === "g") return "box";
-            if (mod && key !== "Home" && key !== "End") return null;
-            switch (key) {
-                case "ArrowUp":
-                    return scroll.first() - 1;
-                case "ArrowDown":
-                    return scroll.first() + 1;
-                case "PageUp":
-                    return scroll.first() - page;
-                case "PageDown":
-                    return scroll.first() + page;
-                case "Home":
-                    return 0;
-                case "End":
-                    return lines();
-                default:
-                    return null;
-            }
-        })();
+        const to = keyTarget(key, e.ctrlKey || e.metaKey, { first: scroll.first(), fits: scroll.fits(), total: lines() });
         if (to == null || !lines()) return;
         e.preventDefault();
         e.stopPropagation();
         if (to === "box") lineBox?.select();
+        else if (to === "find") find.openStrip();
         else scroll.showLine(to);
+    };
+    /** Keys in the viewer bar: the find strip opens from the line box too. */
+    const onBarKeyDown = (e: KeyboardEvent): void => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+            e.preventDefault();
+            e.stopPropagation();
+            find.openStrip();
+        }
     };
 
     const facts = () => {
@@ -173,6 +262,10 @@ export function createLargeText(props: LargeTextProps) {
     return {
         ...feed,
         ...scroll,
+        bind: (node: HTMLDivElement) => {
+            gridEl = node;
+            scroll.bind(node);
+        },
         lines,
         mark,
         badLine,
@@ -180,7 +273,9 @@ export function createLargeText(props: LargeTextProps) {
         goToTyped,
         clearBadLine: () => setBadLine(false),
         bindLineBox: (el: HTMLInputElement) => (lineBox = el),
+        find,
         onKeyDown,
+        onBarKeyDown,
         facts,
     };
 }
