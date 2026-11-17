@@ -438,6 +438,18 @@ describe("the hex viewer", () => {
         expect(down.defaultPrevented).toBe(true);
     });
 
+    it("moves a file that scrolls in proportion by the distance the wheel moved, small events and all", async () => {
+        const big = new Uint8Array(8_000_000);
+        serve(big);
+        await mount({ size: big.length });
+        // A trackpad: sixty events of a quarter row each are fifteen rows, not sixty.
+        for (let i = 0; i < 60; i++) grid().dispatchEvent(new WheelEvent("wheel", { deltaY: ROW_H / 4, bubbles: true, cancelable: true }));
+        expect(rowTexts()[0]).toBe((15 * 16).toString(16).toUpperCase().padStart(8, "0"));
+        // One notch of a wheel: six rows.
+        grid().dispatchEvent(new WheelEvent("wheel", { deltaY: ROW_H * 6, bubbles: true, cancelable: true }));
+        expect(rowTexts()[0]).toBe((21 * 16).toString(16).toUpperCase().padStart(8, "0"));
+    });
+
     it("finds a pattern on srv from just past the selection, selects the match, and goes on from it", async () => {
         await mount();
         key("f", { ctrlKey: true });
