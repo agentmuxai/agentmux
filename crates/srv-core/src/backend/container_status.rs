@@ -197,12 +197,16 @@ impl Registry {
         }
     }
 
-    /// The agent containers a full list shows to be not running or not there, other than one srv is still bringing up.
-    fn ended_by(&self, listed: &[Listed], now_ms: u64) -> Vec<String> {
-        let coming_up = |name: &str| self.raw.get(name).is_some_and(|r| r.state == ContainerState::Starting && now_ms.saturating_sub(r.since_ms) < STARTING_GRACE_MS);
+    /// The containers this registry had running that a full list shows to be not running or not there: a stop the event stream
+    /// missed. A container already known to be stopped is not one (a stopped container left over for an agent that now runs
+    /// locally has a token of its own), and nor is one srv is still bringing up.
+    fn stopped_unseen_by(&self, listed: &[Listed]) -> Vec<String> {
         let running: std::collections::HashSet<&str> = listed.iter().filter(|l| l.running).map(|l| l.name.as_str()).collect();
-        let listed_names: Vec<&str> = listed.iter().map(|l| l.name.as_str()).collect();
-        self.raw.keys().map(String::as_str).chain(listed_names).filter(|n| !running.contains(n) && !coming_up(n)).map(str::to_string).collect()
+        self.raw.iter().filter(|(name, r)| r.state == ContainerState::Running && !running.contains(name.as_str())).map(|(name, _)| name.clone()).collect()
+    }
+
+    fn is_running(&self, name: &str) -> bool {
+        self.raw.get(name).is_some_and(|r| r.state == ContainerState::Running)
     }
 
     fn set(&mut self, name: &str, state: ContainerState, image: &str, labelled: bool, now_ms: u64) {
@@ -313,15 +317,18 @@ impl Hub {
     }
 
     pub fn on_event(&self, event: DockerEvent) {
-        if matches!(event.action, Action::Stop | Action::Die | Action::Destroy) {
+        // Only a container that was running ends a token: a repeat (`die` then `stop`) or the end of one already stopped has nothing
+        // more to end, and a token made for the agent since is not that container's.
+        let ends = matches!(event.action, Action::Stop | Action::Die | Action::Destroy) && self.lock().is_running(&event.name);
+        if ends {
             end_key_tokens(&event.name, self.token_recent);
         }
         self.publish_after(|r, now| r.apply(event, now));
     }
 
     pub fn on_listed(&self, listed: Vec<Listed>) {
-        // A stop the event stream missed is found here.
-        let ended = self.lock().ended_by(&listed, agentmux_common::time::now_ms_u64());
+        // A stop the event stream missed is found here, once: after it the registry has the container stopped.
+        let ended = self.lock().stopped_unseen_by(&listed);
         for name in ended {
             end_key_tokens(&name, self.token_recent);
         }

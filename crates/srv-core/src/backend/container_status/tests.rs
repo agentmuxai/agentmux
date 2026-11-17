@@ -234,11 +234,15 @@ fn a_stop_and_a_removal_each_end_the_token_and_a_token_made_just_now_stays() {
     let (stop_id, destroy_id, fresh_id) = ("11111111-1111-4111-8111-000000000003", "11111111-1111-4111-8111-000000000004", "11111111-1111-4111-8111-000000000005");
     let hub = hub_ending_all_tokens();
     let (stopped, destroyed) = (key_token(stop_id), key_token(destroy_id));
+    for id in [stop_id, destroy_id] {
+        hub.on_event(event(Action::Start, id));
+    }
     hub.on_event(event(Action::Stop, stop_id));
     hub.on_event(event(Action::Destroy, destroy_id));
     assert_eq!((token::grant_for(&stopped), token::grant_for(&destroyed)), (None, None));
     // With the grace a real hub has, a token made moments ago (for the container that took the stopped one's place) stays.
     let (hub, _) = self::hub();
+    hub.on_event(event(Action::Start, fresh_id));
     let fresh = key_token(fresh_id);
     hub.on_event(event(Action::Die, fresh_id));
     assert!(token::grant_for(&fresh).is_some());
@@ -265,4 +269,31 @@ fn a_stop_the_event_stream_missed_is_found_by_the_next_list() {
     for id in [running_id, stopped_id, absent_id, coming_id] {
         token::revoke(id, KEY_ROUTE_ID);
     }
+}
+
+#[test]
+fn a_container_already_known_stopped_does_not_end_a_token_made_after_it_on_each_list() {
+    let id = "11111111-1111-4111-8111-000000000010";
+    let hub = hub_ending_all_tokens();
+    hub.on_event(event(Action::Start, id));
+    hub.on_event(event(Action::Die, id));
+    // The agent now runs locally and was given a key token while its old container stays stopped.
+    let token = key_token(id);
+    for _ in 0..2 {
+        hub.on_listed(vec![listed(id, false)]);
+    }
+    assert!(token::grant_for(&token).is_some(), "a list that shows the same stopped container leaves the token");
+    token::revoke(id, KEY_ROUTE_ID);
+}
+
+#[test]
+fn a_stop_event_for_a_container_not_known_to_be_running_ends_nothing() {
+    let id = "11111111-1111-4111-8111-000000000011";
+    let hub = hub_ending_all_tokens();
+    let token = key_token(id);
+    // The second event of a stop, or one for a container that was never seen running (a local agent's token is not its).
+    hub.on_event(event(Action::Stop, id));
+    hub.on_event(event(Action::Die, id));
+    assert!(token::grant_for(&token).is_some());
+    token::revoke(id, KEY_ROUTE_ID);
 }
