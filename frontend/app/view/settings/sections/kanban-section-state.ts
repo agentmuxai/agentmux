@@ -42,6 +42,8 @@ export interface CopyResult {
  *  show (the cog on a Kanban pane names it), by slug. */
 function useStagedBoard(requested: () => string | null) {
     const [chosen, setChosen] = createSignal<string | null>(null);
+    // A new ask (the cog on a Kanban pane) wins over a board picked here before it.
+    createEffect(on(requested, (r) => r && setChosen(r), { defer: true }));
     const model = new KanbanModel(() => chosen() ?? requested());
     model.setVisible(true);
     onCleanup(() => model.dispose());

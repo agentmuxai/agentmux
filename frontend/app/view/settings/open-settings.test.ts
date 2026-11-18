@@ -35,6 +35,15 @@ describe("openSettingsAt", () => {
         );
     });
 
+    it("forgets an earlier board when the Kanban section is opened without one", async () => {
+        await openSettingsAt("kanban");
+        expect(h.open).toHaveBeenCalledWith(
+            "settings",
+            { meta: { view: "settings", "settings:section": "kanban" } },
+            { "settings:section": "kanban", "settings:kanban-board": null },
+        );
+    });
+
     it("never asks the server to pick the tab", async () => {
         await openSettingsAt("agents");
         expect(h.rpc).not.toHaveBeenCalled();

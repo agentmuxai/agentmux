@@ -23,6 +23,7 @@ import {
     untrackedAgents,
 } from "./kanban-columns";
 import { parseCollapsedStages, stagesOfBoard, toggleCollapsedStage, type KanbanStage } from "./kanban-stages";
+import { sameStages } from "./kanban-stages-draft";
 import { boardSlugOf, defaultSlugOf, infoOf, needsByBoard, resolveBoard, taskForOpenRequestAnywhere, tasksOnLiveBoards } from "./kanban-boards";
 import { KanbanModel } from "./kanban-model";
 import type { KanbanSectionProps } from "./kanban-props";
@@ -131,11 +132,16 @@ export function createKanbanSection(props: SectionProps) {
     const { wanted, select } = useSelectedBoard(props);
     const model = useBoardModel(props, wanted);
     // The stages of the board shown (its own set, or the default eight).
-    const stages = createMemo(() => {
-        const everything = model.everything();
-        const boards = everything?.boards ?? [];
-        return stagesOfBoard(infoOf(boards, resolveBoard(boards, wanted(), defaultSlugOf(everything))));
-    });
+    // Equal sets keep the same objects, so a refresh that changed nothing doesn't remount the board's columns.
+    const stages = createMemo(
+        () => {
+            const everything = model.everything();
+            const boards = everything?.boards ?? [];
+            return stagesOfBoard(infoOf(boards, resolveBoard(boards, wanted(), defaultSlugOf(everything))));
+        },
+        undefined,
+        { equals: sameStages }
+    );
     const tick = useTick(10_000);
     const { bindContainer, narrow } = useNarrow();
     const now = () => (tick(), Date.now());

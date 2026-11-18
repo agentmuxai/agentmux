@@ -7,6 +7,7 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, IconButton, Notice, Select, TextInput } from "@/app/element/ui";
+import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import { COLUMNS, type ColumnId } from "@/app/view/kanban/kanban-columns";
 import { canRemove, canShow } from "@/app/view/kanban/kanban-stages-draft";
@@ -104,7 +105,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
                     onChange={(v) => s.recolour(stage().id, v as StageColour)}
                     options={colourOptions()}
                 />
-                <span class="kanban-stages__count" title={t("settings.kanban.tasksHere")}>
+                <span class="kanban-stages__count" {...tip(t("settings.kanban.tasksHere"))}>
                     {s.counts()[stage().id] ?? 0}
                 </span>
                 <IconButton
@@ -124,7 +125,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
                     fallback={<span class="kanban-stages__required">{t("settings.kanban.required")}</span>}
                 >
                     <IconButton
-                        icon="xmark"
+                        icon="trash-can"
                         label={t("settings.kanban.removeStage", { name: stage().name })}
                         disabled={!s.editable() || !canRemove(s.stages(), stage().id)}
                         onClick={() => setRemoving(true)}
@@ -305,15 +306,16 @@ export function StageActions(props: Part): JSX.Element {
             <Button density="compact" tone="quiet" disabled={!s.editable()} onClick={s.reset}>
                 {t("settings.kanban.reset")}
             </Button>
-            <Button
-                density="compact"
-                icon="plus"
-                disabled={!s.editable() || !s.canAdd()}
-                title={s.canAdd() ? undefined : t("settings.kanban.atMost", { max: MAX_STAGES })}
-                onClick={() => s.add(t("settings.kanban.newStageName", { n: s.stages().length + 1 }))}
-            >
-                {t("settings.kanban.addStage")}
-            </Button>
+            <span class="ui-tooltip-anchor" {...tip(s.canAdd() ? undefined : t("settings.kanban.atMost", { max: MAX_STAGES }))}>
+                <Button
+                    density="compact"
+                    icon="plus"
+                    disabled={!s.editable() || !s.canAdd()}
+                    onClick={() => s.add(t("settings.kanban.newStageName", { n: s.stages().length + 1 }))}
+                >
+                    {t("settings.kanban.addStage")}
+                </Button>
+            </span>
         </div>
     );
 }
