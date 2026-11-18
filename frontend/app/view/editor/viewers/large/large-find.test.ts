@@ -22,6 +22,13 @@ describe("largePatternFor", () => {
         expect(largePatternFor("windows-1251", "é")).toEqual({ error: "This file is in windows-1251: only plain ASCII text can be found" });
     });
 
+    it("refuses a multibyte legacy encoding, where an ASCII byte can be half of a character", () => {
+        for (const enc of ["Shift_JIS", "GBK", "Big5", "EUC-JP", "EUC-KR", "gb18030", "ISO-2022-JP"]) {
+            expect(largePatternFor(enc, "\\")).toEqual({ error: `This file is in ${enc}, which spells some characters with several bytes: it can't be searched yet` });
+        }
+        expect(largePatternFor("windows-1252", "\\")).toMatchObject({ hex: "5C" });
+    });
+
     it("takes at most as many bytes as srv does", () => {
         expect(largePatternFor("utf-8", "x".repeat(256))).toMatchObject({ length: 256 });
         expect(largePatternFor("utf-8", "x".repeat(257))).toEqual({ error: "At most 256 bytes" });

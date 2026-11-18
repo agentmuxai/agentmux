@@ -85,6 +85,11 @@ export class LineSource {
         private readonly keep = PAGES_KEPT
     ) {}
 
+    /** The file's text encoding: srv's name for it once it has said, else the probe's. */
+    encodingName(): string | undefined {
+        return this.encoding;
+    }
+
     /** Where line `n` (0-based) starts in the file, in bytes. */
     async startOf(n: number): Promise<number> {
         const r = await this.index(n, 0);
