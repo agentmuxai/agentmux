@@ -33,6 +33,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [query, setQuery] = createSignal("");
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
+    let listRef!: HTMLDivElement;
     // The agents AgentMux knows, listed after the commands and found by name, seat or state.
     const agents = usePaletteAgents();
 
@@ -81,17 +82,24 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         }, 0);
     }
 
+    // A keyboard move keeps the selected row in view. Only the keys do it: a pointer resting on a row
+    // selects it (mouseenter), and scrolling that row into view would move the list under the pointer.
+    function moveSelection(next: (i: number) => number) {
+        setSelectedIdx(next(clampedIdx()));
+        listRef.querySelector(".command-palette-item.selected")?.scrollIntoView?.({ block: "nearest" });
+    }
+
     // Arrow keys + Enter are palette-specific navigation. ESC and
     // backdrop close are handled by `<Modal>` → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
         if (e.key === "ArrowDown") {
             e.preventDefault();
-            setSelectedIdx((i) => Math.min(i + 1, filtered().length - 1));
+            moveSelection((i) => Math.min(i + 1, filtered().length - 1));
             return;
         }
         if (e.key === "ArrowUp") {
             e.preventDefault();
-            setSelectedIdx((i) => Math.max(i - 1, 0));
+            moveSelection((i) => Math.max(i - 1, 0));
             return;
         }
         if (e.key === "Enter") {
@@ -104,6 +112,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     function handleInput(e: InputEvent) {
         setQuery((e.target as HTMLInputElement).value);
         setSelectedIdx(0);
+        listRef.scrollTop = 0; // the first row is selected again: show it
     }
 
     return (
@@ -129,7 +138,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                     />
                     <kbd class="command-palette-esc-hint">ESC</kbd>
                 </div>
-                <div class="command-palette-list">
+                <div class="command-palette-list" ref={listRef}>
                     <For each={filtered()}>
                         {(cmd, i) => (
                             <div
