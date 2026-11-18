@@ -440,3 +440,49 @@ fn an_archived_conversation_is_not_carried_into_a_fresh_session() {
     let zone = global_prior_zone(Some(&archived), "block");
     assert_eq!(packet_from(&local, zone.as_deref().map(|z| (&global, z))), None);
 }
+
+/// A task the agent holds on the Kanban's own store (a build with a work store of its own keeps the
+/// queue's claims there, not in the identity store) is part of what the retried resume carries.
+#[test]
+fn a_task_claimed_on_the_work_store_is_in_the_packet_of_a_retried_resume() {
+    use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
+    let store = store_with_resume_failed(BANNER_BLOCK);
+    let mut block: crate::backend::obj::Block = store.get(BANNER_BLOCK).unwrap().unwrap();
+    block.meta.insert("agentId".to_string(), serde_json::json!("Retry-p47999"));
+    store.update(&mut block).unwrap();
+    let work = Arc::new(Store::open_in_memory().unwrap());
+    work.apply_identity_schema_for_tests().unwrap();
+    let item = WorkItem {
+        id: "w-p47999".into(),
+        title: "Finish the retried resume check".into(),
+        payload: String::new(),
+        kind: String::new(),
+        target_agent: String::new(),
+        target_group: String::new(),
+        priority: 0,
+        state: String::new(),
+        claimed_by: String::new(),
+        target_agent_uid: String::new(),
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: "tester".into(),
+        created_by_uid: String::new(),
+        created_at: 1000,
+        updated_at: 1000,
+        not_before: None,
+        result: String::new(),
+    };
+    work.work_queue_enqueue(&item).unwrap();
+    let claim = ClaimFilter { kind: None, agent_id: "Retry-p47999".into(), agent_uid: String::new(), groups: vec![] };
+    work.work_queue_claim(&claim, 2000, 600_000).unwrap().expect("claimed");
+    crate::backend::work_store_handle::attach(work);
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(BANNER_BLOCK, PERSISTENT_OUTPUT_SUBJECT, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.write_file(BANNER_BLOCK, PERSISTENT_OUTPUT_SUBJECT, &stream(&[r#"{"type":"user","message":{"role":"user","content":"earlier request"}}"#])).unwrap();
+    // The controller's own identity store holds no claim: only the work store does.
+    let c = banner_controller(&store, fs);
+    let packet = c.carry_continuation().expect("the pane's record is carried");
+    assert!(packet.contains("Finish the retried resume check"), "{packet}");
+}
