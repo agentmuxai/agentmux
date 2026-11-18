@@ -22,6 +22,7 @@ In a clone of `agentmuxai/agentmux`, from a fresh branch off up-to-date `origin/
 3. `scripts/release.sh --as patch` bumps `package.json`, `Cargo.toml` and the lockfiles, appends `VERSION_HISTORY.md`, deletes the consumed changesets and stages everything.
 4. Commit as `chore: release vX.Y.Z` and open a PR (title prefix `<name>@<host>: `, the agent tag in the body). It needs no changeset of its own: release PRs are exempt.
 5. **Merge only on muxreview's approval for the head commit with CI green**, like any PR. The release workflow builds and tags it.
+6. **The release publishes only when every package job has succeeded**: the desktop installers and the Headless server package for each platform. If one fails (a registry or network error, say), nothing is published and the run shows the failed job. Use "Re-run failed jobs" on the run (`gh-agent run rerun <run id> --failed`); the release publishes when all of them pass. The tag stays, so don't cut a new version for it. A failure that comes back is a CI problem to fix in a PR, not a reason to publish without the package.
 
 ## Rules
 

@@ -673,6 +673,11 @@ export type AgentPaneCommand =
      * claiming "sends at the agent's next step".
      */
     | { type: "PendingMessageFlushStarted"; id: string }
+    /**
+     * srv has the message but queued it behind the agent's live process (`agent-message-queued`): `ahead` messages
+     * are in front of it. The panel says what it waits for.
+     */
+    | { type: "PendingMessageWaiting"; id: string; ahead: number }
     /** Backend acknowledged the message — remove from pending. */
     | { type: "PendingMessageAccepted"; id: string }
     /** RPC failed — remove the entry so user doesn't see a ghost row. */
@@ -976,6 +981,7 @@ export type AgentPaneEvent =
      */
     | { type: "submit-timed-out"; at: number }
     | { type: "pending-flush-started"; id: string }
+    | { type: "pending-waiting"; id: string; ahead: number }
     | { type: "pending-queued"; id: string }
     | { type: "pending-accepted"; id: string; wasPresent: boolean }
     | { type: "pending-rejected"; id: string; wasPresent: boolean }

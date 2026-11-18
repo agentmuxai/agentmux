@@ -43,6 +43,8 @@ export const WpsEvent = {
     EventsDropped: "ws:eventsdropped",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
+    // A message reached srv while the agent's process is alive, so it waits for it to end. Payload MessageQueuedEvent.
+    AgentMessageQueued: "agent-message-queued",
     // One message between two agents handled by an srv: ids and times only (Atlas pulses). Payload MessageFlowEvent.
     MessageFlow: "message-flow",
     // A task filed, reassigned, started or handed back: names and numbers only (Atlas lines). Payload TaskFlowEvent.

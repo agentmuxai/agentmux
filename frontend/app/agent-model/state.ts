@@ -94,6 +94,13 @@ export interface PendingMessage {
      * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
      */
     flushing?: boolean;
+    /**
+     * Set by `PendingMessageWaiting` (srv's `agent-message-queued`): the message reached srv while the agent's
+     * process was still alive, so it waits for that process to end — a running turn, or only a command the model
+     * sent to the background — behind `ahead` messages already queued. The panel says so instead of "reaching the
+     * agent any moment", which is only true when nothing is in the way.
+     */
+    waiting?: { ahead: number };
     /** Images sent with this message, carried to its transcript node on
      *  acceptance (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §5.8). */
     attachments?: { id: string; name: string }[];

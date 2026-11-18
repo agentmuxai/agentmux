@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { SearchCall } from "../hex/hex-find";
-import { findAligned, largePatternFor, splitHits } from "./large-find";
+import { findAligned, hitOrdinal, largePatternFor, splitHits } from "./large-find";
 
 describe("largePatternFor", () => {
     it("is the text's bytes in the file's encoding", () => {
@@ -25,6 +25,31 @@ describe("largePatternFor", () => {
         expect(largePatternFor("utf-8", "x".repeat(256))).toMatchObject({ length: 256 });
         expect(largePatternFor("utf-8", "x".repeat(257))).toEqual({ error: "At most 256 bytes" });
         expect(largePatternFor("utf-16le", "x".repeat(129))).toEqual({ error: "At most 256 bytes" });
+    });
+});
+
+describe("hitOrdinal", () => {
+    it("names which of a line's matches starts at a byte of the line", () => {
+        // "a err b err c err": the matches start at bytes 2, 8 and 14.
+        const line = "a err b err c err";
+        expect(hitOrdinal(line, "err", 2, "utf-8")).toBe(0);
+        expect(hitOrdinal(line, "err", 8, "utf-8")).toBe(1);
+        expect(hitOrdinal(line, "err", 14, "utf-8")).toBe(2);
+    });
+
+    it("counts the bytes of the file's encoding, not the characters", () => {
+        // "é" is two bytes in UTF-8 and every character two bytes in UTF-16.
+        expect(hitOrdinal("é err é err", "err", 3, "utf-8")).toBe(0);
+        expect(hitOrdinal("é err é err", "err", 10, "utf-8")).toBe(1);
+        expect(hitOrdinal("a err b err", "err", 4, "utf-16le")).toBe(0);
+        expect(hitOrdinal("a err b err", "err", 16, "utf-16le")).toBe(1);
+    });
+
+    it("takes the first match at or past the byte when none starts there, and none when the line is cut before it", () => {
+        expect(hitOrdinal("a err b err", "err", 5, "utf-8")).toBe(1);
+        expect(hitOrdinal("a err b err", "err", 99, "utf-8")).toBe(-1);
+        expect(hitOrdinal("abc", "err", 0, "utf-8")).toBe(-1);
+        expect(hitOrdinal("abc", "", 0, "utf-8")).toBe(-1);
     });
 });
 

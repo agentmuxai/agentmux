@@ -90,10 +90,13 @@ function LineGrid(props: { t: LargeTextState }): JSX.Element {
 
 function Line(props: { t: LargeTextState; n: number }): JSX.Element {
     const line = () => props.t.lineAt(props.n);
-    // The text found is marked in the line it was found in.
+    // The text found is marked in the line it was found in, the match on show (one of several in the line) as the current one.
     const parts = () => {
         const text = line()?.text ?? "";
-        return props.t.mark() === props.n + 1 ? splitHits(text, props.t.find.needle()) : [{ text, hit: false }];
+        if (props.t.mark() !== props.n + 1) return [{ text, hit: false, current: false }];
+        const now = props.t.currentHit(props.n);
+        let hits = 0;
+        return splitHits(text, props.t.find.needle()).map((p) => ({ ...p, current: p.hit && hits++ === now }));
     };
     return (
         <div class="large-text-line" classList={{ "large-text-marked": props.t.mark() === props.n + 1 }} data-line={props.n + 1}>
@@ -101,7 +104,17 @@ function Line(props: { t: LargeTextState; n: number }): JSX.Element {
                 {props.n + 1}
             </span>
             <span class="large-text-text">
-                <For each={parts()}>{(p) => (p.hit ? <mark class="large-text-hit">{p.text}</mark> : p.text)}</For>
+                <For each={parts()}>
+                    {(p) =>
+                        p.hit ? (
+                            <mark class="large-text-hit" classList={{ "large-text-hit-current": p.current }}>
+                                {p.text}
+                            </mark>
+                        ) : (
+                            p.text
+                        )
+                    }
+                </For>
                 <Show when={line()?.hidden}>
                     <span class="large-text-hidden">…({line()?.hidden})</span>
                 </Show>

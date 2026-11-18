@@ -27,6 +27,15 @@
     }
   },
   {
+    "event": "agent-message-queued",
+    "payloadTs": {
+      "imports": [
+        "MessageQueuedEvent"
+      ],
+      "name": "MessageQueuedEvent"
+    }
+  },
+  {
     "event": "agent-resume-retry",
     "payloadTs": {
       "imports": [
