@@ -14,7 +14,7 @@
  * the pane fetch anything.
  */
 
-import { openMediaInEditor, type MarkdownMediaOpts, type MediaGallery } from "@/app/element/markdown-media";
+import { handBackVideo, openMediaInEditor, type MarkdownMediaOpts, type MediaGallery } from "@/app/element/markdown-media";
 import { createContext, createSignal, Show, useContext, type Accessor, type JSX } from "solid-js";
 import { MessageImageLightbox } from "./components/MessageImageLightbox";
 import { AgentDormancyProvider } from "./agent-dormancy";
@@ -26,7 +26,8 @@ import { isContainerAgentType, isContainerRuntime, parseRuntimeKind } from "@/ut
 const AgentMediaContext = createContext<Accessor<MarkdownMediaOpts | undefined>>(() => undefined);
 
 export function AgentMediaProvider(props: { baseDir: Accessor<string>; children: JSX.Element }): JSX.Element {
-    // The preview that steps through one message's images: one per pane, opened by an image's click.
+    // The preview that steps through one message's images and videos, over the whole tab: one per pane, opened by
+    // a click on an image or a video's enlarge button.
     const [gallery, setGallery] = createSignal<MediaGallery>();
     const media = (): MarkdownMediaOpts => ({ baseDir: props.baseDir(), openGallery: setGallery });
     return (
@@ -37,7 +38,11 @@ export function AgentMediaProvider(props: { baseDir: Accessor<string>; children:
                     <MessageImageLightbox
                         items={g().items}
                         index={g().index}
-                        onClose={() => setGallery(undefined)}
+                        start={g().start}
+                        onClose={(back) => {
+                            setGallery(undefined);
+                            if (back) handBackVideo(back);
+                        }}
                         onOpenEditor={(path) => {
                             setGallery(undefined);
                             openMediaInEditor(path);

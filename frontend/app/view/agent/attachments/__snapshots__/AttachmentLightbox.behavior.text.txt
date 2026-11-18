@@ -1,12 +1,12 @@
-Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+Modal open=true scope=tab size=fit panelClass=agent-attachment-lightbox__panel agent-attachment-lightbox__panel--fit
 useAttachmentUrl send id=undefined
 useAttachmentText thumb id=a1
-initialFocus -> agent-attachment-lightbox__dialog
+initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit
 -- loading
 <div>
   <div data-stand="Modal" data-aria-label="File 1: notes.txt">
-    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
-      <div class="agent-attachment-lightbox__image">
+    <div class="agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit" tabindex="-1">
+      <div class="agent-attachment-lightbox__image agent-attachment-lightbox__image--fit">
         <span class="agent-attachment-lightbox__missing">
           "Loading…"
       <div class="agent-attachment-lightbox__bar">
@@ -23,8 +23,8 @@ initialFocus -> agent-attachment-lightbox__dialog
 -- whole file, no note
 <div>
   <div data-stand="Modal" data-aria-label="File 1: notes.txt">
-    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
-      <div class="agent-attachment-lightbox__image">
+    <div class="agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit" tabindex="-1">
+      <div class="agent-attachment-lightbox__image agent-attachment-lightbox__image--fit">
         <div class="agent-attachment-lightbox__text">
           <pre>
             "hello
@@ -41,15 +41,15 @@ world"
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- cut
-Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+Modal open=true scope=tab size=fit panelClass=agent-attachment-lightbox__panel agent-attachment-lightbox__panel--fit
 useAttachmentUrl send id=undefined
 useAttachmentText thumb id=a1
-initialFocus -> agent-attachment-lightbox__dialog
+initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit
 -- the first lines, with the note
 <div>
   <div data-stand="Modal" data-aria-label="File 1: notes.txt">
-    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
-      <div class="agent-attachment-lightbox__image">
+    <div class="agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit" tabindex="-1">
+      <div class="agent-attachment-lightbox__image agent-attachment-lightbox__image--fit">
         <div class="agent-attachment-lightbox__text">
           <pre>
             "hello"
@@ -67,15 +67,15 @@ initialFocus -> agent-attachment-lightbox__dialog
         <span class="agent-attachment-lightbox__actions">
           <span data-stand="CloseButton" data-label="Close preview" data-tooltip="false">
 -- gone
-Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+Modal open=true scope=tab size=fit panelClass=agent-attachment-lightbox__panel agent-attachment-lightbox__panel--fit
 useAttachmentUrl send id=undefined
 useAttachmentText thumb id=a1
-initialFocus -> agent-attachment-lightbox__dialog
+initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit
 -- missing
 <div>
   <div data-stand="Modal" data-aria-label="File 1: notes.txt">
-    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
-      <div class="agent-attachment-lightbox__image">
+    <div class="agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit" tabindex="-1">
+      <div class="agent-attachment-lightbox__image agent-attachment-lightbox__image--fit">
         <span class="agent-attachment-lightbox__missing">
           "This file is no longer available."
       <div class="agent-attachment-lightbox__bar">

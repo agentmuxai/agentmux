@@ -39,6 +39,8 @@ export const KEEP = new Map([
     ["frontend/app/window/window-close.ts", { openModal: 2, why: "closing or removing a window: the whole window" }],
     ["frontend/app/window/workspaces.ts", { openModal: 7, why: "switch, create, rename, pick, delete and import a workspace: the whole window" }],
     ["frontend/app/tab/tabcontent.tsx", { tabScope: 1, why: "the tab's own modal layer: it hosts nothing today (a pane's questions are the pane's); a question about the whole tab would go here" }],
+    ["frontend/app/view/agent/components/MessageImageLightbox.tsx", { tabScope: 1, why: "a picture or video of an agent's message enlarged over the whole tab, not a question: a preview, closed by Esc or a click outside" }],
+    ["frontend/app/view/agent/attachments/AttachmentLightbox.tsx", { tabScope: 1, why: "an attachment enlarged over the whole tab, not a question: a preview, closed by Esc or a click outside" }],
     ["frontend/app/tab/tab-close-confirm-modal.tsx", { windowScope: 1, why: "closing a tab is asked from the tab bar, outside any pane's lock; it ends agents in every pane of the tab" }],
     ["frontend/app/block/upgrade-requests.tsx", { openModal: 1, confirmModal: 1, why: "an app upgrade restarts every agent" }],
     ["frontend/app/block/desktop-requests.tsx", { openModal: 1, why: "a desktop-control request that names no pane; one from an agent is a card in its pane" }],
