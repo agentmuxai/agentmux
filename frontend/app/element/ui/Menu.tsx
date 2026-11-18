@@ -47,6 +47,8 @@ export interface MenuEntry {
     class?: string;
     /** A submenu: the row opens it (hovering, Right or Enter) and has no pick of its own. */
     submenu?: MenuEntry[];
+    /** A pick runs `onSelect` and leaves the menu open (colours to try one after another); Esc, an outside press or another row closes it. */
+    keepOpen?: boolean;
 }
 
 /** An element (followed live), a rect, or a point (a right-click). */
@@ -246,7 +248,7 @@ function useMenuNav(props: MenuPanelProps, sub: ReturnType<typeof useSubmenus>, 
         if (!pickable(i)) return;
         const entry = props.items[i];
         if (entry.submenu) return sub.openNow(i, false);
-        props.onPick();
+        if (!entry.keepOpen) props.onPick();
         entry.onSelect?.();
     };
     const onKeyDown = (e: KeyboardEvent) => {

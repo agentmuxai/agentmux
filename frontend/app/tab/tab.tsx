@@ -241,7 +241,7 @@ function Tab(props: TabProps): JSX.Element {
         fireAndForget(async () => {
             await ObjectService.UpdateObjectMeta(oref, { "tab:color": hex } as MetaType);
         });
-        setShowColorPicker(false);
+        // The panel stays open (a click outside, Esc or Close menu ends it): colours are tried one after another.
     };
 
     const handleContextMenu = (e: MouseEvent) => {

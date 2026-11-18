@@ -63,7 +63,6 @@ import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 import * as util from "@/util/util";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { resetThemeAnsi } from "@/app/backdrop/ansi";
-import { closeBackdropPicker, openBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { BlockFrame, buildPaneColorSubmenu } from "./blockframe";
 
@@ -310,33 +309,16 @@ describe("the backdrop", () => {
         expect(frame(live.view.container).style.getPropertyValue("--surface")).toBe(scope?.["--surface"]);
     });
 
-    it("draws the picker inside the frame while it is open for this pane, and not for another or in a drag preview", () => {
-        const t = setup();
-        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
-        openBackdropPicker(t.blockId);
-        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
-        closeBackdropPicker(t.blockId);
-        expect(t.view.container.querySelector(".backdrop-picker")).toBeNull();
-        cleanup();
-        const other = setup();
-        openBackdropPicker("some-other-block");
-        expect(other.view.container.querySelector(".backdrop-picker")).toBeNull();
-        cleanup();
-        const preview = setup({ preview: true });
-        openBackdropPicker(preview.blockId);
-        expect(preview.view.container.querySelector(".backdrop-picker")).toBeNull();
-    });
-
-    it("an agent pane's menu has a Backdrop… entry, after Pane Color, that opens the picker; other panes have none yet", () => {
-        const t = setup({ meta: { view: "agent" } });
-        const items = buildPaneColorSubmenu({ oid: t.blockId, meta: { view: "agent" } } as unknown as Block);
+    it("an agent pane's menu has a Backdrop submenu, after Pane Color, laid out like it; other panes have none yet", () => {
+        const items = buildPaneColorSubmenu({ oid: "x", meta: { view: "agent" } } as unknown as Block);
         const labels = items.map((i) => i.label);
-        expect(labels.indexOf("Backdrop…")).toBe(labels.indexOf("Pane Color") + 1);
-        items.find((i) => i.label === "Backdrop…")!.click!();
-        expect(frame(t.view.container).querySelector(".backdrop-picker")).not.toBeNull();
+        expect(labels.indexOf("Backdrop")).toBe(labels.indexOf("Pane Color") + 1);
+        const HUES = ["Rose", "Red", "Orange", "Amber", "Yellow", "Green", "Jade", "Teal", "Sky", "Blue", "Violet", "Magenta"];
+        const rows = items.find((i) => i.label === "Backdrop")!.submenu!.map((i) => (i.type === "separator" ? "-" : i.label));
+        expect(rows).toEqual(["None", "-", ...HUES, "-", "Black", "White"]);
         for (const view of ["term", "files", "browser"]) {
             const other = buildPaneColorSubmenu({ oid: "x", meta: { view } } as unknown as Block);
-            expect(other.map((i) => i.label), view).not.toContain("Backdrop…");
+            expect(other.map((i) => i.label), view).not.toContain("Backdrop");
         }
     });
 
@@ -350,22 +332,6 @@ describe("the backdrop", () => {
             expect(getPaneScope(t.blockId)(), view).toBeUndefined();
             cleanup();
         }
-    });
-
-    it("a drag preview of a block that is unmounted leaves the live pane's open picker open, and Backdrop… still reopens it", () => {
-        const meta = { view: "agent" };
-        const live = setup({ meta });
-        openBackdropPicker(live.blockId);
-        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
-        const preview = setup({ blockId: live.blockId, preview: true, meta });
-        preview.view.unmount();
-        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
-        closeBackdropPicker(live.blockId);
-        expect(frame(live.view.container).querySelector(".backdrop-picker")).toBeNull();
-        buildPaneColorSubmenu({ oid: live.blockId, meta } as unknown as Block)
-            .find((i) => i.label === "Backdrop…")!
-            .click!();
-        expect(frame(live.view.container).querySelector(".backdrop-picker")).not.toBeNull();
     });
 
     it("a terminal with a backdrop record already in its meta renders exactly as one without", () => {

@@ -24,6 +24,7 @@ vi.mock("@/app/motion/motion", () => ({ shouldReduceMotion: () => true, scaledMs
 const computeMenuPosition = vi.hoisted(() => vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })));
 vi.mock("@/app/util/menu-position", () => ({ computeMenuPosition }));
 
+import { createSignal } from "solid-js";
 import { closeMenuAt, isMenuAtOpen } from "@/app/util/menu-at-open";
 import { menuEntriesFrom, openMenuAt } from "./open-menu-at";
 
@@ -138,6 +139,42 @@ describe("openMenuAt", () => {
         fireEvent.click(rows()[1]);
         expect(click).toHaveBeenCalledTimes(1);
         expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it("a keepOpen pick runs and leaves the menu open, and the checked row follows it", () => {
+        const [picked, setPicked] = createSignal("red");
+        const colour = (id: string): ContextMenuItem => ({
+            label: id,
+            swatchColor: id,
+            checked: picked() === id,
+            live: () => ({ checked: picked() === id }),
+            keepOpen: true,
+            click: () => setPicked(id),
+        });
+        openMenuAt([colour("red"), colour("blue"), { label: "Close", click: () => {} }], event());
+        const checked = () => rows().map((r) => r.getAttribute("aria-checked"));
+        expect(checked()).toEqual(["true", "false", null]);
+        fireEvent.click(rows()[1]);
+        expect(picked()).toBe("blue");
+        expect(rows()).toHaveLength(3);
+        expect(checked()).toEqual(["false", "true", null]);
+        fireEvent.click(rows()[0]);
+        expect(checked()).toEqual(["true", "false", null]);
+        // A row without keepOpen still closes it.
+        fireEvent.click(rows()[2]);
+        expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it("a keepOpen row from the keyboard: Enter applies it and the menu stays", () => {
+        const click = vi.fn();
+        openMenuAt([{ label: "Red", keepOpen: true, click }, { label: "Blue", keepOpen: true, click }], event());
+        const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+        fireEvent.keyDown(menu, { key: "ArrowDown" });
+        fireEvent.keyDown(menu, { key: "Enter" });
+        fireEvent.keyDown(menu, { key: "ArrowDown" });
+        fireEvent.keyDown(menu, { key: " " });
+        expect(click).toHaveBeenCalledTimes(2);
+        expect(document.querySelector('[role="menu"]')).not.toBeNull();
     });
 
     it("closes on an outside press and on Esc", () => {
