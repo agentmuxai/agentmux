@@ -1,0 +1,35 @@
+name: tmp go-task runners proof (removed before merge)
+on:
+  pull_request:
+    paths:
+      - .github/workflows/tmp-go-task-runners.yml
+permissions:
+  contents: read
+jobs:
+  proof:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install go-task (as the build workflows do)
+        shell: bash
+        run: |
+          bash scripts/ci-install-go-task.sh "$RUNNER_TEMP/go-task"
+          if [ "$RUNNER_OS" = Windows ]; then export PATH="$(cygpath -u "$RUNNER_TEMP")/go-task:$PATH"; else export PATH="$RUNNER_TEMP/go-task:$PATH"; fi
+          bash scripts/ci-require-tools.sh task
+      - name: A later step sees task on PATH
+        shell: bash
+        run: |
+          task --version
+          bash scripts/ci-require-tools.sh task ninja
+      - name: Windows only, Inno Setup compiler
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/ci-require-tools.sh iscc
+      - name: The self-test
+        shell: bash
+        run: bash scripts/ci-install-go-task.test.sh
