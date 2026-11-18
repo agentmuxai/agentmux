@@ -69,6 +69,7 @@ mod tests {
             "/api/v1/ui/browser/open",
             "/api/v1/ui/browser/snapshot",
             "/api/v1/ui/browser/find",
+            "/api/v1/ui/browser/locate",
             "/api/v1/ui/browser/act",
             "/api/v1/ui/browser/navigate",
             "/api/v1/ui/browser/eval",

@@ -232,7 +232,9 @@ pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Va
         .into_iter()
         .map(|r| json!({ "id": r.id, "name": r.name, "removed_at": r.removed_at, "removed_by": r.removed_by }))
         .collect();
-    Ok(json!({ "entries": entries, "removed": removed }))
+    // What the fleet sync did with each peer, and what a newer write from the fleet replaced here.
+    let sync = crate::server::remote_ops::fleet_sync::status::global().snapshot();
+    Ok(json!({ "entries": entries, "removed": removed, "sync": sync }))
 }
 
 /// Every Global Memory entry's reach, for the Memory pane. Backs `globalmemory:reach_list`.

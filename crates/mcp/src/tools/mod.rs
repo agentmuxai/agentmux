@@ -15,6 +15,7 @@ mod app_tool;
 mod browser;
 mod browser_account;
 mod browser_key_text;
+mod browser_locate;
 mod browser_tool;
 mod browser_waiting;
 mod browser_zoom;
@@ -154,6 +155,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("BrowserForward", "Browser with action \"forward\""),
     ("BrowserReload", "Browser with action \"reload\""),
     ("BrowserZoom", "Browser with action \"zoom\""),
+    ("BrowserLocate", "Browser with action \"locate\""),
+    ("BrowserClickAt", "Browser with action \"click_at\""),
     ("BrowserRequestStatus", "Browser with action \"request_status\""),
     ("BrowserCancelRequest", "Browser with action \"cancel_request\""),
     ("BrowserEval", "Browser with action \"eval\""),

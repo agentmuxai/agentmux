@@ -195,3 +195,105 @@ fn a_container_srv_is_bringing_up_survives_a_list_that_does_not_name_it_for_a_wh
     let gone = registry.changes(&agents, 2_000_000 + STARTING_GRACE_MS);
     assert!(gone.iter().any(|c| c.state == ContainerState::Gone), "{gone:?}");
 }
+
+/// A hub whose stop handling ends every token, not only one older than the grace.
+fn hub_ending_all_tokens() -> Hub {
+    let (mut hub, _) = hub();
+    hub.token_recent = Duration::ZERO;
+    hub
+}
+
+fn key_token(id: &str) -> String {
+    token::token_for_account(id, id, KEY_ROUTE_ID, "acct")
+}
+
+#[test]
+fn a_container_stopped_outside_agentmux_ends_its_agents_key_token_and_only_that() {
+    let id = "11111111-1111-4111-8111-000000000001";
+    let hub = hub_ending_all_tokens();
+    let key = key_token(id);
+    let model = token::token_for(id, id, "openrouter");
+    let other = key_token("11111111-1111-4111-8111-000000000002");
+    for action in [Action::Create, Action::Start] {
+        hub.on_event(event(action, id));
+    }
+    assert!(token::grant_for(&key).is_some(), "a running container keeps its token");
+    hub.on_event(event(Action::Die, id));
+    assert_eq!(token::grant_for(&key), None, "the token ends with the container");
+    assert!(token::grant_for(&model).is_some(), "another route's token stays");
+    assert!(token::grant_for(&other).is_some(), "another agent's token stays");
+    // The next turn gets a new token, never the one that ended.
+    assert_ne!(key_token(id), key);
+    for (agent, route) in [(id, "openrouter"), (id, KEY_ROUTE_ID), ("11111111-1111-4111-8111-000000000002", KEY_ROUTE_ID)] {
+        token::revoke(agent, route);
+    }
+}
+
+#[test]
+fn a_stop_and_a_removal_each_end_the_token_and_a_token_made_just_now_stays() {
+    let (stop_id, destroy_id, fresh_id) = ("11111111-1111-4111-8111-000000000003", "11111111-1111-4111-8111-000000000004", "11111111-1111-4111-8111-000000000005");
+    let hub = hub_ending_all_tokens();
+    let (stopped, destroyed) = (key_token(stop_id), key_token(destroy_id));
+    for id in [stop_id, destroy_id] {
+        hub.on_event(event(Action::Start, id));
+    }
+    hub.on_event(event(Action::Stop, stop_id));
+    hub.on_event(event(Action::Destroy, destroy_id));
+    assert_eq!((token::grant_for(&stopped), token::grant_for(&destroyed)), (None, None));
+    // With the grace a real hub has, a token made moments ago (for the container that took the stopped one's place) stays.
+    let (hub, _) = self::hub();
+    hub.on_event(event(Action::Start, fresh_id));
+    let fresh = key_token(fresh_id);
+    hub.on_event(event(Action::Die, fresh_id));
+    assert!(token::grant_for(&fresh).is_some());
+    token::revoke(fresh_id, KEY_ROUTE_ID);
+}
+
+#[test]
+fn a_stop_the_event_stream_missed_is_found_by_the_next_list() {
+    let (running_id, stopped_id, absent_id, coming_id) = (
+        "11111111-1111-4111-8111-000000000006",
+        "11111111-1111-4111-8111-000000000007",
+        "11111111-1111-4111-8111-000000000008",
+        "11111111-1111-4111-8111-000000000009",
+    );
+    let hub = hub_ending_all_tokens();
+    for id in [absent_id, stopped_id, running_id] {
+        hub.on_event(event(Action::Start, id));
+    }
+    hub.on_starting(&name_of(coming_id), "agentmux-agent:1");
+    let tokens: Vec<String> = [running_id, stopped_id, absent_id, coming_id].map(key_token).into();
+    hub.on_listed(vec![listed(running_id, true), listed(stopped_id, false)]);
+    let live: Vec<bool> = tokens.iter().map(|t| token::grant_for(t).is_some()).collect();
+    assert_eq!(live, [true, false, false, true], "running and still-starting keep their token; stopped and missing end it");
+    for id in [running_id, stopped_id, absent_id, coming_id] {
+        token::revoke(id, KEY_ROUTE_ID);
+    }
+}
+
+#[test]
+fn a_container_already_known_stopped_does_not_end_a_token_made_after_it_on_each_list() {
+    let id = "11111111-1111-4111-8111-000000000010";
+    let hub = hub_ending_all_tokens();
+    hub.on_event(event(Action::Start, id));
+    hub.on_event(event(Action::Die, id));
+    // The agent now runs locally and was given a key token while its old container stays stopped.
+    let token = key_token(id);
+    for _ in 0..2 {
+        hub.on_listed(vec![listed(id, false)]);
+    }
+    assert!(token::grant_for(&token).is_some(), "a list that shows the same stopped container leaves the token");
+    token::revoke(id, KEY_ROUTE_ID);
+}
+
+#[test]
+fn a_stop_event_for_a_container_not_known_to_be_running_ends_nothing() {
+    let id = "11111111-1111-4111-8111-000000000011";
+    let hub = hub_ending_all_tokens();
+    let token = key_token(id);
+    // The second event of a stop, or one for a container that was never seen running (a local agent's token is not its).
+    hub.on_event(event(Action::Stop, id));
+    hub.on_event(event(Action::Die, id));
+    assert!(token::grant_for(&token).is_some());
+    token::revoke(id, KEY_ROUTE_ID);
+}

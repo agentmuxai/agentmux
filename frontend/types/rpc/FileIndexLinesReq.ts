@@ -21,4 +21,9 @@ count: number,
 /**
  * Also say where each of those lines starts (`starts` in the answer), found in the same pass that finds `end`.
  */
-line_starts?: boolean, };
+line_starts?: boolean, 
+/**
+ * Start at the line that holds this byte (a match `filesearchbytes` found) instead of `from_line`: the answer's
+ * `line_at` says which line that is, and `start`, `end` and `starts` are the run from it.
+ */
+at_offset?: number, };

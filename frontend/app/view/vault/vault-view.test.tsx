@@ -57,6 +57,21 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
     };
 }
 
+function apiKey(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
+    return ssn({ id: "api-key-payments", kind: "api-key", section: "api-keys", label: "Payments test key", fields: { service: "Payments" }, tail: "9f3a", ...over });
+}
+
+function login(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
+    return ssn({ id: "login-shop", kind: "login", section: "logins", label: "Shop", fields: { site: "https://shop.example.com", username: "sam" }, tail: "", ...over });
+}
+
+const ALL_SECTIONS = ["Personal data", "Cards and banks", "API keys", "Logins", "Notes", "Kept by AgentMux", "Activity"];
+/** The list's sections, by name, in the order shown. */
+const sectionNames = (container: HTMLElement) => Array.from(container.querySelectorAll(".vault-section")).map((s) => s.getAttribute("aria-label"));
+const sectionOf = (container: HTMLElement, id: string) => container.querySelector(`.vault-section[data-section="${id}"]`) as HTMLElement;
+/** The button in a section's head that folds and unfolds it. */
+const toggleOf = (name: string) => within(screen.getByRole("region", { name })).getAllByRole("button")[0];
+
 // jsdom has no layout: the view's width observer is a stand-in a test fires with the pane's width.
 const sizeCallbacks: Array<(entries: unknown[]) => void> = [];
 class FakeResizeObserver {
@@ -103,16 +118,102 @@ describe("the Vault pane", () => {
         expect(container.querySelector('[data-agent-hidden="vault"]')).not.toBeNull();
         // Shown: srv is told, so agents' whole-window captures of AgentMux are refused.
         await waitFor(() => expect(calls("on_screen")[0]).toEqual({ pane: "vault-block", on: true }));
-        const rail = screen.getByRole("tablist", { name: "Vault section" });
-        expect(Array.from(rail.querySelectorAll('[role="tab"]')).map((t) => t.textContent)).toEqual([
-            "Personal data",
-            "Cards and banks",
-            "API keys",
-            "Logins",
-            "Notes",
-            "Kept by AgentMux",
-            "Activity",
-        ]);
+        // One list of sections, a type each, then what AgentMux keeps and the Activity log, folded.
+        expect(screen.queryByRole("tablist")).toBeNull();
+        expect(sectionNames(container)).toEqual(ALL_SECTIONS);
+        expect(sectionOf(container, "personal").querySelector(".vault-section__count")?.textContent).toBe("1");
+        expect(sectionOf(container, "logins").querySelector(".vault-section__count")?.textContent).toBe("0");
+        expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("true");
+        expect(toggleOf("Kept by AgentMux").getAttribute("aria-expanded")).toBe("false");
+        expect(toggleOf("Activity").getAttribute("aria-expanded")).toBe("false");
+        // Nothing of a folded section is read until it is opened.
+        expect(calls("kept")).toEqual([]);
+        expect(calls("activity")).toEqual([]);
+    });
+
+    it("narrows every section with one filter: a section with no match is left out, and clearing brings all back", async () => {
+        entries = [ssn(), apiKey(), login()];
+        const { container } = renderVault();
+        await screen.findByText("Shop");
+        const filter = screen.getByPlaceholderText("Filter the Vault");
+
+        fireEvent.input(filter, { target: { value: "payments" } });
+        expect(sectionNames(container)).toEqual(["API keys"]);
+        expect(sectionOf(container, "api-keys").querySelector(".vault-section__count")?.textContent).toBe("1 of 1");
+        expect(screen.queryByText("Alex")).toBeNull();
+
+        // By its type's name as well as its own.
+        fireEvent.input(filter, { target: { value: "login" } });
+        expect(sectionNames(container)).toEqual(["Logins"]);
+
+        fireEvent.input(filter, { target: { value: "no such entry" } });
+        expect(sectionNames(container)).toEqual([]);
+        expect(screen.getByText("No entry matches.")).toBeInTheDocument();
+
+        fireEvent.input(filter, { target: { value: "" } });
+        expect(sectionNames(container)).toEqual(ALL_SECTIONS);
+        expect(screen.queryByText("No entry matches.")).toBeNull();
+    });
+
+    it("shows what a filter finds in a folded section, and folds it again when the filter is cleared", async () => {
+        const { container } = renderVault();
+        await screen.findByText("Alex");
+        fireEvent.click(toggleOf("Personal data"));
+        expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("false");
+        expect((sectionOf(container, "personal").querySelector(".vault-section__body") as HTMLElement).hidden).toBe(true);
+
+        fireEvent.input(screen.getByPlaceholderText("Filter the Vault"), { target: { value: "alex" } });
+        expect((sectionOf(container, "personal").querySelector(".vault-section__body") as HTMLElement).hidden).toBe(false);
+
+        fireEvent.input(screen.getByPlaceholderText("Filter the Vault"), { target: { value: "" } });
+        expect((sectionOf(container, "personal").querySelector(".vault-section__body") as HTMLElement).hidden).toBe(true);
+    });
+
+    it("offers Expiring soon while an entry has a date, across every type", async () => {
+        const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+        entries = [ssn(), apiKey({ fields: { service: "Payments", expires: soon } }), login({ fields: { site: "https://shop.example.com", expires: "2099-01-01" } })];
+        const { container } = renderVault();
+        fireEvent.click(await screen.findByRole("button", { name: "Expiring soon" }));
+        expect(sectionNames(container)).toEqual(["API keys"]);
+        fireEvent.click(screen.getByRole("button", { name: "Expiring soon" }));
+        expect(sectionNames(container)).toEqual(ALL_SECTIONS);
+    });
+
+    it("has no Expiring soon when nothing has a date, and names the kind only in a section of several kinds", async () => {
+        entries = [ssn(), apiKey()];
+        const { container } = renderVault();
+        await screen.findByText("Payments test key");
+        await waitFor(() => expect(screen.queryByRole("button", { name: "Expiring soon" })).toBeNull());
+        expect(sectionOf(container, "personal").textContent).toContain("Social Security number");
+        expect(sectionOf(container, "api-keys").textContent).not.toContain("API key or token");
+    });
+
+    it("opens and scrolls to the section the pane is opened on, and takes the request off the pane", async () => {
+        const scrolled: string[] = [];
+        const scrollIntoView = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = function (this: Element) {
+            scrolled.push(this.getAttribute("data-section") ?? "");
+        };
+        try {
+            setBlockMeta({ "vault:section": "activity" });
+            renderVault();
+            await waitFor(() => expect(toggleOf("Activity").getAttribute("aria-expanded")).toBe("true"));
+            await waitFor(() => expect(scrolled).toEqual(["activity"]));
+            await waitFor(() => expect(calls("activity")).toHaveLength(1));
+            expect(blockMeta()["vault:section"]).toBeNull();
+            // Asked for again later (from the Audit, a pin): it scrolls again.
+            setBlockMeta((m) => ({ ...m, "vault:section": "cards" }));
+            await waitFor(() => expect(scrolled).toEqual(["activity", "cards"]));
+            // The default section is a request like any other: opened again after the person folded it.
+            fireEvent.click(toggleOf("Personal data"));
+            expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("false");
+            setBlockMeta((m) => ({ ...m, "vault:section": "personal" }));
+            await waitFor(() => expect(toggleOf("Personal data").getAttribute("aria-expanded")).toBe("true"));
+            await waitFor(() => expect(scrolled).toEqual(["activity", "cards", "personal"]));
+            expect(blockMeta()["vault:section"]).toBeNull();
+        } finally {
+            Element.prototype.scrollIntoView = scrollIntoView;
+        }
     });
 
     it("keeps Import, Export and the note in the pane when the pane is too narrow for them in its header", async () => {
@@ -138,8 +239,7 @@ describe("the Vault pane", () => {
     it("saves a new entry through the host, and the typed value doesn't stay in the page", async () => {
         const { container } = renderVault();
         await screen.findByText("Alex");
-        const personal = container.querySelector(".bundle-manager-pane:not(.is-hidden)") as HTMLElement;
-        fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
+        fireEvent.click(screen.getByRole("button", { name: "Add to Personal data" }));
         const dialog = await screen.findByRole("dialog");
         const [label] = within(dialog).getAllByRole("textbox");
         fireEvent.input(label, { target: { value: "Sam" } });
@@ -187,7 +287,8 @@ describe("the Vault pane", () => {
         fireEvent.click(within(dialog).getByRole("button", { name: "Save to Vault" }));
         await waitFor(() => expect(calls("create")).toHaveLength(1));
         expect(calls("create")[0]).toMatchObject({ kind: "api-key", label: "Stripe test key", request_id: "req-1" });
-        expect(blockMeta()["vault:section"]).toBe("api-keys");
+        // The list is taken to the request's type, where the new entry appears.
+        expect(setMeta).toHaveBeenCalledWith({ "vault:section": "api-keys" });
     });
 
     it("closes an open Show or copy dialog when the Vault stops being shown (its tab goes to the background)", async () => {
@@ -251,19 +352,20 @@ describe("the Vault pane", () => {
         setPlatform("darwin");
         entries = [];
         const { container } = renderVault();
-        await waitFor(() => expect(screen.getAllByText(/Nothing here yet/).length).toBeGreaterThan(0));
-        const personal = container.querySelector(".bundle-manager-pane:not(.is-hidden)") as HTMLElement;
-        fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
+        // Said once, over the sections, each of which is its head alone.
+        await waitFor(() => expect(screen.getAllByText(/Nothing here yet/)).toHaveLength(1));
+        expect(sectionNames(container)).toEqual(ALL_SECTIONS);
+        expect(container.querySelectorAll(".vault-section--empty")).toHaveLength(5);
+        fireEvent.click(screen.getByRole("button", { name: "Add to Personal data" }));
         const dialog = await screen.findByRole("dialog");
         expect(within(dialog).getByText(/macOS asks whether AgentMux may use the keychain/)).toBeInTheDocument();
     });
 
     it("doesn't warn before a save once the Vault has entries", async () => {
         setPlatform("darwin");
-        const { container } = renderVault();
+        renderVault();
         await screen.findByText("Alex");
-        const personal = container.querySelector(".bundle-manager-pane:not(.is-hidden)") as HTMLElement;
-        fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
+        fireEvent.click(screen.getByRole("button", { name: "Add to Personal data" }));
         const dialog = await screen.findByRole("dialog");
         expect(within(dialog).queryByText(/macOS asks whether AgentMux may use the keychain/)).toBeNull();
     });
@@ -273,7 +375,7 @@ describe("the Vault pane", () => {
         try {
             renderVault();
             await screen.findByText("Alex");
-            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            fireEvent.click(toggleOf("Kept by AgentMux"));
             const row = (await screen.findByText("https://intranet.example.com (Admin)")).closest("tr") as HTMLElement;
             expect(row.textContent).toContain("sign-in for ab*** saved by a browser pane");
             expect(row.textContent).toContain("The browser pane that asked for it");
@@ -283,18 +385,38 @@ describe("the Vault pane", () => {
         }
     });
 
-    it("reads the kept list again each time the tab is shown", async () => {
+    it("reads the kept list again each time its section is opened", async () => {
         keptRows = [{ label: "first sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
         try {
             renderVault();
             await screen.findByText("Alex");
-            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            fireEvent.click(toggleOf("Kept by AgentMux"));
             await screen.findByText("first sign-in");
-            fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+            fireEvent.click(toggleOf("Kept by AgentMux"));
             keptRows = [{ label: "second sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
-            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            fireEvent.click(toggleOf("Kept by AgentMux"));
             await screen.findByText("second sign-in");
             expect(screen.queryByText("first sign-in")).toBeNull();
+        } finally {
+            keptRows = [];
+        }
+    });
+
+    it("doesn't say nothing matches over an open Kept by AgentMux section that does", async () => {
+        keptRows = [{ label: "wiki sign-in", what: "sign-in saved by a browser pane", managed_in: "browser" }];
+        try {
+            const { container } = renderVault();
+            await screen.findByText("Alex");
+            fireEvent.click(toggleOf("Kept by AgentMux"));
+            await screen.findByText("wiki sign-in");
+            const filter = screen.getByPlaceholderText("Filter the Vault");
+            fireEvent.input(filter, { target: { value: "wiki" } });
+            expect(sectionNames(container)).toEqual(["Kept by AgentMux"]);
+            expect(screen.queryByText("No entry matches.")).toBeNull();
+            // Nothing anywhere: the note is back.
+            fireEvent.input(filter, { target: { value: "no such thing" } });
+            expect(sectionNames(container)).toEqual([]);
+            expect(screen.getByText("No entry matches.")).toBeInTheDocument();
         } finally {
             keptRows = [];
         }

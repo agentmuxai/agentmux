@@ -120,14 +120,25 @@ pub(crate) fn default_save_dir(
     first_existing_dir(&[last, downloads, home])
 }
 
-/// The last folder a pane download was saved to this session. In memory only
-/// in this version (spec §4.4).
+/// The last folder a pane download was saved to. It is kept across restarts
+/// (`download_place`), and is only where the dialog opens (spec §4.4).
 static LAST_DOWNLOAD_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-fn remember_download_dir(path: &Path) {
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        *LAST_DOWNLOAD_DIR.lock() = Some(dir.to_path_buf());
+/// Remember the folder of `path`. Returns it when it is a different folder from the last one, so the caller
+/// writes it down once, not at every progress update.
+fn remember_download_dir(path: &Path) -> Option<PathBuf> {
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty())?;
+    let mut last = LAST_DOWNLOAD_DIR.lock();
+    if last.as_deref() == Some(dir) {
+        return None;
     }
+    *last = Some(dir.to_path_buf());
+    Some(dir.to_path_buf())
+}
+
+/// The folder kept from an earlier run, used only when this run has not saved anywhere yet.
+pub(crate) fn seed_last_download_dir(dir: PathBuf) {
+    LAST_DOWNLOAD_DIR.lock().get_or_insert(dir);
 }
 
 /// The full path offered to the dialog for a download named `suggested`.
@@ -599,6 +610,7 @@ wrap_task! {
             RUNNING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
             SAVE_DIALOGS.with(|d| d.borrow_mut().clear_pane(&self.block_id));
             super::agent_downloads::forget_pane(&self.block_id);
+            super::download_place::forget_pane(&self.block_id);
             ASKING.with(|m| m.borrow_mut().retain(|(p, _), _| p != &self.block_id));
         }
     }
@@ -712,6 +724,7 @@ wrap_download_handler! {
                 tracing::info!(target: "pane-download", id, "dropping download — pane is gone");
                 return 0;
             };
+            super::download_place::load_last_dir_once(self.state.version_data_dir.lock().as_deref());
             // A pane an agent owns saves into the agent's workspace with no dialog (D3b); a person's keeps asking.
             match super::agent_downloads::before(&self.state, browser.as_deref(), &block_id, id, &suggested, item.total_bytes()) {
                 super::agent_downloads::Before::Ask => {}
@@ -732,6 +745,10 @@ wrap_download_handler! {
                 let path = dir.join(safe_download_name(&suggested));
                 tracing::info!(target: "pane-download", %block_id, id, "test instance: saving without asking");
                 cb.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+                return 1;
+            }
+            // "Ask where to save" is off: straight into Downloads (or the pane's share is full).
+            if super::download_place::answer_quietly(&self.state, &block_id, id, &suggested, cb) {
                 return 1;
             }
             // `can_download` already checked, but another download may have
@@ -786,6 +803,11 @@ wrap_download_handler! {
             // already gone had its entries cleared when it closed.
             let mut browser = browser;
             let block_id = browser.as_deref_mut().and_then(|b| self.state.block_id_for_browser(b));
+            // Only a folder the person chose is remembered: an agent's workspace or Downloads, where a download
+            // went with no dialog, is not "the last folder you saved to".
+            let chosen = !block_id.as_deref().is_some_and(|b| {
+                super::agent_downloads::is_saving(b, id) || super::download_place::is_quiet(b, id)
+            });
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
@@ -793,9 +815,14 @@ wrap_download_handler! {
                     tracing::info!(target: "pane-download", %block_id, id = nid, ext = %extension_of(&suggested), "asking where to save");
                     show_save_dialog(block_id, nid, &suggested, &cb);
                 }
+                if ended {
+                    super::download_place::ended(block_id, id);
+                }
             }
-            if !path.is_empty() {
-                remember_download_dir(Path::new(&path));
+            if !path.is_empty() && chosen {
+                if let (Some(dir), Some(data)) = (remember_download_dir(Path::new(&path)), self.state.version_data_dir.lock().clone()) {
+                    super::download_place::save_last_dir(Path::new(&data), &dir);
+                }
             }
             if ended {
                 tracing::info!(

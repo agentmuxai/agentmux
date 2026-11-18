@@ -26,4 +26,9 @@ encoding: string,
  * Where each of the lines starts, in order, when the request asked (`line_starts`): the one after the last starts
  * at `end`. Empty otherwise.
  */
-starts: Array<number>, };
+starts: Array<number>, 
+/**
+ * The 0-based line that holds the request's `at_offset` (the last line for an offset past the end); absent when
+ * the request gave none.
+ */
+line_at?: number, };

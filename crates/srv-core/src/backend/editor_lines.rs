@@ -219,6 +219,27 @@ pub fn line_start<F: Read + Seek>(file: &mut F, idx: &LineIndex, line: u64, unit
     skip_lines(file, checkpoint, line % idx.step, idx.size, unit, block)
 }
 
+/// The line (0-based) that holds byte `offset`: the last one that starts at or before it. An offset past the end is in
+/// the last line. Reads from the nearest checkpoint to `offset`, counting breaks, so at most `STEP` lines.
+pub fn line_of<F: Read + Seek>(file: &mut F, idx: &LineIndex, offset: u64, unit: Unit, block: usize) -> std::io::Result<u64> {
+    let Some(last) = idx.size.checked_sub(1).filter(|_| idx.total_lines > 0) else { return Ok(0) };
+    let offset = offset.min(last);
+    let k = idx.checkpoints.partition_point(|c| *c <= offset).saturating_sub(1);
+    let Some(&from) = idx.checkpoints.get(k) else { return Ok(0) };
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let (mut at, mut line) = (from, k as u64 * idx.step);
+    file.seek(SeekFrom::Start(from))?;
+    // A break whose last byte is before `offset` starts a line at or before it.
+    while at < offset {
+        let want = (offset - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        breaks_in(&buf[..want], at, unit, |_| line += 1);
+        at += want as u64;
+    }
+    Ok(line)
+}
+
 type CacheKey = (PathBuf, u8);
 
 fn cache() -> &'static Mutex<Vec<(CacheKey, Arc<LineIndex>)>> {
@@ -276,7 +297,14 @@ fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64, with_starts: bo
     } else {
         (Vec::new(), skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)?)
     };
-    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone(), starts })
+    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone(), starts, line_at: None })
+}
+
+/// The answer for `count` lines from the line that holds byte `offset` of `path`, with that line's number in `line_at`.
+fn lines_at(path: &Path, unit: Unit, offset: u64, count: u64, with_starts: bool) -> std::io::Result<FileIndexLinesResult> {
+    let idx = index_of(path, unit)?;
+    let line = line_of(&mut std::fs::File::open(path)?, &idx, offset, unit, BLOCK)?;
+    Ok(FileIndexLinesResult { line_at: Some(line), ..lines_of(path, unit, line, count, with_starts)? })
 }
 
 /// `fileindexlines`. This computer's files only, like `fileprobe`.
@@ -287,9 +315,16 @@ pub fn register(engine: &std::sync::Arc<WshRpcEngine>) {
             return Err(format!("fileindexlines: at most {MAX_COUNT} lines a call"));
         }
         let path = expand_home_dir_safe(&cmd.path);
-        tokio::task::spawn_blocking(move || lines_of(&path, unit, cmd.from_line, cmd.count, cmd.line_starts.unwrap_or(false)).map_err(|e| format!("fileindexlines: {e}")))
-            .await
-            .map_err(|e| format!("fileindexlines: {e}"))?
+        let with_starts = cmd.line_starts.unwrap_or(false);
+        tokio::task::spawn_blocking(move || {
+            match cmd.at_offset {
+                Some(offset) => lines_at(&path, unit, offset, cmd.count, with_starts),
+                None => lines_of(&path, unit, cmd.from_line, cmd.count, with_starts),
+            }
+            .map_err(|e| format!("fileindexlines: {e}"))
+        })
+        .await
+        .map_err(|e| format!("fileindexlines: {e}"))?
     });
 }
 
@@ -333,6 +368,57 @@ mod tests {
             assert_eq!(start_of(data, &idx, idx.total_lines, Unit::Byte), data.len() as u64, "{text:?} past the end");
             assert_eq!(start_of(data, &idx, idx.total_lines + 50, Unit::Byte), data.len() as u64);
         }
+    }
+
+    fn line_at(data: &[u8], idx: &LineIndex, offset: u64, unit: Unit) -> u64 {
+        line_of(&mut Cursor::new(data.to_vec()), idx, offset, unit, 5).unwrap()
+    }
+
+    #[test]
+    fn every_byte_is_in_the_line_that_starts_at_or_before_it() {
+        for text in ["a\nbb\nccc\ndddd\n", "a\nbb\nccc\ndddd", "a\r\nbb\r\nccc\r\ndddd\r\n", "\n\n\n\n\n\n\n\n", "one"] {
+            let data = text.as_bytes();
+            let idx = small(data, Unit::Byte);
+            let want = starts(data);
+            for offset in 0..data.len() as u64 {
+                let expect = want.iter().rposition(|s| *s <= offset).unwrap() as u64;
+                assert_eq!(line_at(data, &idx, offset, Unit::Byte), expect, "{text:?} byte {offset}");
+            }
+            // Past the end is the last line.
+            assert_eq!(line_at(data, &idx, data.len() as u64 + 99, Unit::Byte), idx.total_lines - 1, "{text:?} past the end");
+        }
+        assert_eq!(line_at(b"", &small(b"", Unit::Byte), 5, Unit::Byte), 0);
+    }
+
+    #[test]
+    fn finds_the_line_of_a_byte_in_utf16_text() {
+        let text = "ab\ncd\r\nef\n\u{0a0a}x\ng";
+        for (unit, bytes) in [
+            (Unit::Utf16Le, text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>()),
+            (Unit::Utf16Be, text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect::<Vec<u8>>()),
+        ] {
+            let idx = small(&bytes, unit);
+            // The first byte of each line is in it, and so is the byte before the next one.
+            let mut at = 0u64;
+            let units: Vec<u16> = text.encode_utf16().collect();
+            for (n, line) in units.split_inclusive(|u| *u == 10).enumerate() {
+                let len = line.len() as u64 * 2;
+                assert_eq!(line_at(&bytes, &idx, at, unit), n as u64, "{unit:?} start of line {n}");
+                assert_eq!(line_at(&bytes, &idx, at + len - 1, unit), n as u64, "{unit:?} end of line {n}");
+                at += len;
+            }
+        }
+    }
+
+    #[test]
+    fn answers_at_a_byte_with_the_run_from_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "zero\none\ntwo\nthree\n").unwrap();
+        // Byte 9 is the 't' that starts "two".
+        let r = lines_at(&path, Unit::Byte, 9, 2, true).unwrap();
+        assert_eq!((r.line_at, r.start, r.end, r.starts), (Some(2), 9, 19, vec![9, 13]));
+        assert_eq!(lines_of(&path, Unit::Byte, 2, 1, false).unwrap().line_at, None);
     }
 
     #[test]

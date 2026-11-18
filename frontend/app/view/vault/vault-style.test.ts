@@ -29,4 +29,16 @@ describe("the Vault's stylesheets", () => {
         expect(css).toContain("@container vault-dialog (max-width: 640px)");
         expect(css).toMatch(/\.vault-dialog-scope\s*\{[^}]*container:\s*vault-dialog/);
     });
+
+    it("measures the pane's lists inside the pane's zoom, not on its outer box", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        // `.vault-view` carries the zoom; its outer `.vault-container` is 1200px wide at 150% with 800px of room.
+        expect(css).toMatch(/\.vault-list\s*\{[^}]*container-name:\s*vault;/);
+        expect(css).not.toMatch(/\.vault-container\s*\{[^}]*container/);
+    });
+
+    it("clears a stacked cell's own line and padding with a rule that outranks the shared table's", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        expect(css).toMatch(/\.vault-table tbody td\s*\{[^}]*padding:\s*0;[^}]*border-bottom:\s*0;/);
+    });
 });

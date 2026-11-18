@@ -42,10 +42,10 @@ describe("the Vault pane", () => {
         expect(screen.getByTestId("vault-view").dataset.shown).toBe("false");
     });
 
-    it("is titled with the selected section, which a block saved by the old Warden Vault keeps", () => {
+    it("is titled Vault whichever section it was opened on: the list shows them all", () => {
         setBlockMeta({ view: "vault", "vault:section": "cards" });
         const instance = createRoot(() => create(host()));
-        expect(instance.liveTitle?.().text).toBe("Vault · Cards and banks");
+        expect(instance.liveTitle).toBeUndefined();
     });
 
     it("has the Vault import, export and note actions", () => {
@@ -57,7 +57,7 @@ describe("the Vault pane", () => {
         ]);
     });
 
-    it("moves its header buttons into the pane, and shortens its title, as the pane narrows", () => {
+    it("moves its header buttons into the pane as the pane narrows", () => {
         const instance = createRoot(() => create(host()));
         const Component = instance.component;
         render(() => <Component ctx={host()} />);
@@ -68,21 +68,12 @@ describe("the Vault pane", () => {
         expect(titles()).toHaveLength(3);
         setWidth(900);
         expect(titles()).toHaveLength(3);
-        expect(instance.liveTitle?.().text).toBe("Vault · Personal data");
 
         // Too narrow for the title and the three buttons: the buttons are in the pane (vault-narrow-actions.tsx).
         setWidth(420);
         expect(titles()).toEqual([]);
-        expect(instance.liveTitle?.().text).toBe("Vault · Personal data");
-
-        // Too narrow for "Vault · " as well: the section's short name.
-        setWidth(300);
-        expect(instance.liveTitle?.().text).toBe("Personal");
-        setBlockMeta({ view: "vault", "vault:section": "kept" });
-        expect(instance.liveTitle?.().text).toBe("Kept");
 
         setWidth(900);
         expect(titles()).toHaveLength(3);
-        expect(instance.liveTitle?.().text).toBe("Vault · Kept by AgentMux");
     });
 });

@@ -752,6 +752,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/open", post(ui_handlers::handle_ui_browser_open))
         .route("/api/v1/ui/browser/snapshot", post(ui_handlers::handle_ui_browser_snapshot))
         .route("/api/v1/ui/browser/find", post(crate::server::browser_find::handle_ui_browser_find))
+        .route("/api/v1/ui/browser/locate", post(crate::server::browser_locate::handle_ui_browser_locate))
         .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/set_files", post(ui_handlers::handle_ui_browser_set_files))
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))

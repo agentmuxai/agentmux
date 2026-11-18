@@ -13,7 +13,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ROW_H } from "../hex/hex-layout";
 import { LargeTextViewer } from "./large-text-viewer";
-import { forgetLargeTextMemory, parseLine } from "./large-text-state";
+import { forgetLargeTextMemory, parseLine, revealSideways } from "./large-text-state";
 import { LINE_SHOWN_MAX, PAGE_LINES } from "./line-source";
 
 const fetchMediaRange = vi.hoisted(() => vi.fn());
@@ -21,7 +21,9 @@ const indexLines = vi.hoisted(() => vi.fn());
 
 vi.mock("@/app/element/local-media", async (actual) => ({ ...(await actual<object>()), fetchMediaRange }));
 vi.mock("@/app/store/global", () => ({ pushNotification: vi.fn() }));
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FileIndexLinesCommand: indexLines } }));
+const searchBytes = vi.hoisted(() => vi.fn());
+
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FileIndexLinesCommand: indexLines, FileSearchBytesCommand: searchBytes } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 const VIEW_LINES = 10;
@@ -31,9 +33,18 @@ function serve(text: string) {
     const bytes = new TextEncoder().encode(text);
     const starts = text.length ? [0] : [];
     for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10 && i + 1 < bytes.length) starts.push(i + 1);
-    indexLines.mockImplementation(async (_c: unknown, req: { from_line: number; count: number }) => {
+    indexLines.mockImplementation(async (_c: unknown, req: { from_line: number; count: number; at_offset?: number }) => {
         const at = (n: number) => (n >= starts.length ? bytes.length : starts[n]);
-        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(req.from_line), end: at(req.from_line + req.count), encoding: "utf-8", starts: [] };
+        const line_at = req.at_offset == null ? undefined : starts.filter((s) => s <= req.at_offset!).length - 1;
+        const from = line_at ?? req.from_line;
+        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(from), end: at(from + req.count), encoding: "utf-8", starts: [], line_at };
+    });
+    // srv's byte search: the first match at or after `from`, the last at or before it going backward.
+    searchBytes.mockImplementation(async (_c: unknown, req: { pattern: string; from: number; backward: boolean }) => {
+        const needle = String.fromCharCode(...req.pattern.split(" ").map((h) => parseInt(h, 16)));
+        const hay = String.fromCharCode(...bytes);
+        const offset = req.backward ? hay.lastIndexOf(needle, req.from) : hay.indexOf(needle, req.from);
+        return { found: offset >= 0, offset: Math.max(0, offset), length: needle.length, done: offset < 0, next_from: 0 };
     });
     fetchMediaRange.mockImplementation(async (_path: string, start: number, end: number) => ({
         blob: { arrayBuffer: async () => bytes.slice(start, end + 1).buffer } as unknown as Blob,
@@ -49,12 +60,12 @@ async function settle() {
     await new Promise((r) => setTimeout(r, 0));
 }
 
-async function mount(props: { path?: string; revision?: number; size?: number } = {}) {
+async function mount(props: { path?: string; revision?: number; size?: number; encoding?: string } = {}) {
     const view = render(() => (
         <LargeTextViewer
             path={props.path ?? "C:/logs/big.log"}
             revision={props.revision ?? 0}
-            probe={{ size: props.size ?? FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+            probe={{ size: props.size ?? FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: props.encoding ?? "utf-8", bom: "none" } }}
             bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
         />
     ));
@@ -76,6 +87,7 @@ describe("the Large text viewer", () => {
         forgetLargeTextMemory();
         fetchMediaRange.mockReset();
         indexLines.mockReset();
+        searchBytes.mockReset();
         serve(FILE);
         clientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
         Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => ROW_H * VIEW_LINES });
@@ -216,6 +228,148 @@ describe("the Large text viewer", () => {
         expect(document.querySelector(`[data-line="${was}"] .large-text-text`)?.textContent).toBe(`line ${was}`);
         expect(facts()[0]).toBe(`Line ${was} of 1,001`);
     });
+
+    const hex = (s: string) => Array.from(s, (c) => c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")).join(" ");
+    const findBox = () => screen.getByLabelText("Find in the file", { selector: "input" }) as HTMLInputElement;
+    const markedLine = () => document.querySelector(".large-text-marked")?.getAttribute("data-line");
+
+    it("finds text on srv from the top of the screen, shows its line with the text marked, and goes on from the match", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        expect(document.activeElement).toBe(findBox());
+        fireEvent.input(findBox(), { target: { value: "line 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        // From the first byte on screen; "line 5" is the fifth line, 28 bytes in.
+        expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", pattern: hex("line 5"), from: 0, backward: false });
+        expect(markedLine()).toBe("5");
+        expect(document.querySelector(".large-text-hit")?.textContent).toBe("line 5");
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("Line 5");
+        // The next match starts past this one; the previous one, before it.
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(searchBytes).toHaveBeenLastCalledWith({}, { path: "C:/logs/big.log", pattern: hex("line 5"), from: 29, backward: false });
+        expect(markedLine()).toBe("50");
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBe("51");
+        fireEvent.keyDown(findBox(), { key: "Enter", shiftKey: true });
+        await settle();
+        expect(markedLine()).toBe("50");
+    });
+
+    it("finds a match far from the screen and scrolls to it", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "line 900" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBe("900");
+        expect(numbers()).toContain(900);
+        expect(document.querySelector('[data-line="900"] .large-text-hit')?.textContent).toBe("line 900");
+    });
+
+    it("scrolls sideways to a match on a line it has read before, not only the first time the line is visited", async () => {
+        // jsdom has no layout: the match sits 900 px along a grid that is 371 px wide.
+        const was = HTMLElement.prototype.getBoundingClientRect;
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            const [left, right] = this.classList.contains("large-text-hit") ? [900, 960] : [0, 371];
+            return { left, right, width: right - left, x: left, top: 0, bottom: 0, height: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+        };
+        try {
+            await mount();
+            key("f", { ctrlKey: true });
+            await settle();
+            fireEvent.input(findBox(), { target: { value: "line 5" } });
+            const step = async (init: KeyboardEventInit, line: string) => {
+                grid().scrollLeft = 0;
+                fireEvent.keyDown(findBox(), { key: "Enter", ...init });
+                await settle();
+                await new Promise((r) => setTimeout(r, 80));
+                expect(markedLine()).toBe(line);
+                expect(grid().scrollLeft).toBeGreaterThan(0);
+            };
+            await step({}, "5"); // the first visit: the line is read now
+            await step({}, "50");
+            await step({ shiftKey: true }, "5"); // a visit to a line already read
+        } finally {
+            HTMLElement.prototype.getBoundingClientRect = was;
+        }
+    });
+
+    it("says there is no match, and refuses text it cannot search in the file's encoding without asking srv", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "nowhere" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(document.querySelector(".large-text-find-status")?.textContent).toBe("No match");
+        expect(markedLine()).toBeUndefined();
+        cleanup();
+        searchBytes.mockClear();
+        await mount({ encoding: "legacy" });
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "é" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(searchBytes).not.toHaveBeenCalled();
+        expect(document.querySelector(".large-text-find-error")?.textContent).toContain("older encoding");
+    });
+
+    it("takes the mark off the line when a later search finds nothing, so the old line is not taken for its answer", async () => {
+        await mount();
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "line 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBe("5");
+        fireEvent.input(findBox(), { target: { value: "nowhere" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(markedLine()).toBeUndefined();
+        expect(document.querySelector(".large-text-hit")).toBeNull();
+    });
+
+    it("opens from the line box too, and closes on Escape with the focus back on the lines", async () => {
+        await mount();
+        fireEvent.keyDown(lineBox(), { key: "f", ctrlKey: true });
+        await settle();
+        expect(document.activeElement).toBe(findBox());
+        fireEvent.keyDown(findBox(), { key: "Escape" });
+        expect(screen.queryByRole("search")).toBeNull();
+        expect(document.activeElement).toBe(grid());
+    });
+
+    it("drops a search that was running when the file changed", async () => {
+        const [revision, setRevision] = createSignal(0);
+        render(() => (
+            <LargeTextViewer
+                path="C:/logs/big.log"
+                revision={revision()}
+                probe={{ size: FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: "utf-8", bom: "none" } }}
+                bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
+            />
+        ));
+        await settle();
+        key("f", { ctrlKey: true });
+        await settle();
+        let answer: (r: unknown) => void = () => {};
+        searchBytes.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+        fireEvent.input(findBox(), { target: { value: "line 5" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        setRevision(1);
+        await settle();
+        answer({ found: true, offset: 28, length: 6, done: false, next_from: 0 });
+        await settle();
+        expect(markedLine()).toBeUndefined();
+        expect(document.querySelector(".large-text-find-status")?.textContent ?? "").not.toContain("Line");
+    });
 });
 
 describe("parseLine", () => {
@@ -224,5 +378,30 @@ describe("parseLine", () => {
         expect(parseLine(" 1,000 ", 5000)).toBe(1000);
         expect(parseLine("10", 10)).toBe(10);
         for (const bad of ["", "0", "11", "-3", "1.5", "0x10", "abc"]) expect(parseLine(bad, 10), bad).toBeNull();
+    });
+});
+
+describe("revealSideways", () => {
+    const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect;
+    const grid = (left: number, right: number) => ({ getBoundingClientRect: () => rect(left, right), scrollLeft: 0 }) as unknown as HTMLElement;
+    const hit = (left: number, right: number) => ({ getBoundingClientRect: () => rect(left, right) }) as unknown as Element;
+
+    it("scrolls a match that is off to the right into the middle of the view", () => {
+        const g = grid(0, 371);
+        revealSideways(g, hit(925, 985));
+        // 925 - (371 - 60) / 2: the match's left edge ends up where it centres.
+        expect(g.scrollLeft).toBeCloseTo(925 - 155.5);
+    });
+
+    it("scrolls back for a match that is off to the left, and leaves one that shows alone", () => {
+        const g = grid(100, 471);
+        g.scrollLeft = 800;
+        revealSideways(g, hit(-300, -240));
+        expect(g.scrollLeft).toBeLessThan(800);
+        const still = grid(0, 371);
+        revealSideways(still, hit(40, 100));
+        expect(still.scrollLeft).toBe(0);
+        revealSideways(still, null);
+        revealSideways(undefined, hit(0, 1));
     });
 });

@@ -307,7 +307,7 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
     // "The key is", "It is read": one row is said as one.
     const count = b.items.length;
     // The Vault the rows go into as the card stands: the one asked for, or the one the person chose. Who may use it
-    // is read from the person's Vaults while that list is current, so a change made in the Vaults dialog shows on a
+    // is read from the person's Vaults while that list is current, so a change made in the Vaults row's form shows on a
     // card that is already open; otherwise it is what srv said when it asked.
     const into = () => {
         const asked = b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };

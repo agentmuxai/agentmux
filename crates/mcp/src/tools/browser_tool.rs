@@ -28,6 +28,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "forward", tool: "BrowserForward", rename: &[] },
     Act { action: "reload", tool: "BrowserReload", rename: &[] },
     Act { action: "zoom", tool: "BrowserZoom", rename: &[] },
+    Act { action: "locate", tool: "BrowserLocate", rename: &[] },
+    Act { action: "click_at", tool: "BrowserClickAt", rename: &[] },
     Act { action: "key", tool: "BrowserDispatchKey", rename: &[] },
     Act { action: "terminal", tool: "BrowserTerminal", rename: &[] },
     Act { action: "focus", tool: "BrowserFocusElement", rename: &[] },
@@ -52,7 +54,7 @@ pub(super) const ACTS: &[Act] = &[
 ];
 
 /// Actions after which `until_*` and `snapshot` may follow in the same call.
-const CHANGES_THE_PAGE: &[&str] = &["click", "fill", "select", "check", "key", "navigate", "back", "forward", "reload"];
+const CHANGES_THE_PAGE: &[&str] = &["click", "click_at", "fill", "select", "check", "key", "navigate", "back", "forward", "reload"];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {

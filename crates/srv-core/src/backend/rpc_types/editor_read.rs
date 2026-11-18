@@ -305,6 +305,11 @@ pub struct FileIndexLinesReq {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line_starts: Option<bool>,
+    /// Start at the line that holds this byte (a match `filesearchbytes` found) instead of `from_line`: the answer's
+    /// `line_at` says which line that is, and `start`, `end` and `starts` are the run from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub at_offset: Option<u64>,
 }
 
 /// Response for `fileindexlines`: the bytes `[start, end)` hold lines `from_line` up to `from_line + count` (fewer at
@@ -333,4 +338,9 @@ pub struct FileIndexLinesResult {
     #[serde(default)]
     #[ts(type = "Array<number>")]
     pub starts: Vec<u64>,
+    /// The 0-based line that holds the request's `at_offset` (the last line for an offset past the end); absent when
+    /// the request gave none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub line_at: Option<u64>,
 }

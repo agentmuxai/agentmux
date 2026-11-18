@@ -7,6 +7,7 @@
 // (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7).
 
 @use "../../mixins.scss";
+@use "../../element/ui/color-section";
 
 // The width at or under which the board is one list (§8); KANBAN_NARROW_PX in kanban-columns.ts.
 $kanban-narrow: 760px;
@@ -189,10 +190,7 @@ $kanban-narrow: 760px;
     }
 
     .kanban-column__head {
-        position: sticky;
-        top: 0;
-        z-index: var(--z-tab-name);
-        background: var(--main-bg-color);
+        @include color-section.sticky-head;
     }
 
     // Extra-large section labels, so where one section ends and the next begins reads at a glance
@@ -268,13 +266,9 @@ $kanban-narrow: 760px;
     font-weight: 600;
 }
 
+// The box, the head and the dotted label are the shared coloured section (element/ui/_color-section.scss).
 .kanban-column {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    border: 1px solid var(--border-color);
-    border-top: 3px solid var(--kanban-stage, var(--border-color));
-    border-radius: var(--radius-sm);
+    @include color-section.box(var(--kanban-stage, var(--border-color)));
 }
 
 .kanban-column--backlog {
@@ -312,30 +306,12 @@ $kanban-narrow: 760px;
 }
 
 .kanban-column__head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0 var(--space-1);
-    padding: var(--space-1) var(--space-2);
-    border-bottom: 1px solid var(--border-color);
+    @include color-section.head;
 }
 
+// The stage's dot is beside its name.
 .kanban-column__label {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-weight: 600;
-    font-size: var(--text-sm);
-
-    // The stage's dot, beside its name.
-    &::before {
-        content: "";
-        width: 8px;
-        height: 8px;
-        border-radius: var(--radius-full);
-        background: var(--kanban-stage, var(--border-color));
-    }
+    @include color-section.label(var(--kanban-stage, var(--border-color)));
 }
 
 .kanban-column__head--foldable {

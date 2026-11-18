@@ -16,6 +16,7 @@ import { openCommandPalette } from "@/app/store/open-command-palette";
 import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { zoomPartCommands } from "@/app/store/zoom-part-commands";
 import { isSingletonView } from "@/app/store/widget-singleton";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { userInThisWindow } from "@/app/store/input-owner";
@@ -656,6 +657,8 @@ function registerViewCommands(): void {
         icon: "magnifying-glass",
         execute: () => zoomReset(),
     });
+    // The same by part, for a pane whose parts zoom apart (the Editor's file tree and its document).
+    for (const entry of zoomPartCommands()) commandRegistry.register(entry);
 }
 
 /** The app-level commands the native macOS menu bar also runs (Phase 1). */

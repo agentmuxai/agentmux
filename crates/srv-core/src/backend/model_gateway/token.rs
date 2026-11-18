@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Prefix that marks a gateway token in logs and bug reports.
 pub const TOKEN_PREFIX: &str = "amxg_";
@@ -33,9 +34,12 @@ pub struct Grant {
 struct Registry {
     by_digest: HashMap<[u8; 32], Grant>,
     by_agent: HashMap<(String, String), String>,
-    /// A key-route token that [`renew_for_account`] replaced, and whose agent and route it was for: only so a turn that was
-    /// set up with it can still say whose turn it is ([`current_grant_of_replaced`]). It authorizes nothing.
+    /// The key-route token that [`renew_for_account`] last replaced for an agent and route (one per agent and route), and whose
+    /// it was: only so a turn that was set up with it can still say whose turn it is ([`current_grant_of_replaced`]). It
+    /// authorizes nothing.
     replaced: HashMap<[u8; 32], (String, String)>,
+    /// When each live token was made, so an event about a container that ended can leave alone a token made after it.
+    minted: HashMap<[u8; 32], Instant>,
 }
 
 fn registry() -> &'static Mutex<Registry> {
@@ -63,6 +67,7 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     let mut reg = registry().lock().unwrap();
     let key = (def_id.to_string(), route.to_string());
     let token = reg.by_agent.get(&key).cloned().unwrap_or_else(mint);
+    reg.minted.entry(digest(&token)).or_insert_with(Instant::now);
     reg.by_agent.insert(key, token.clone());
     // A token a container turn is running on keeps its address when the next message's environment asks for it again.
     let peer = reg.by_digest.get(&digest(&token)).and_then(|g| g.peer);
@@ -85,11 +90,15 @@ pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, 
         }
         reg.by_agent.remove(&key);
         reg.by_digest.remove(&digest(&old));
+        reg.minted.remove(&digest(&old));
+        // Only the latest replaced token is kept for this agent and route: the ones before it are not asked for again.
+        reg.replaced.retain(|_, k| *k != key);
         reg.replaced.insert(digest(&old), key.clone());
     }
     let token = mint();
     reg.by_agent.insert(key, token.clone());
     reg.by_digest.insert(digest(&token), grant);
+    reg.minted.insert(digest(&token), Instant::now());
     token
 }
 
@@ -113,28 +122,39 @@ pub fn grant_for(token: &str) -> Option<Grant> {
 pub fn revoke(def_id: &str, route: &str) {
     let mut reg = registry().lock().unwrap();
     let key = (def_id.to_string(), route.to_string());
-    if let Some(token) = reg.by_agent.remove(&key) {
-        reg.by_digest.remove(&digest(&token));
-    }
-    reg.replaced.retain(|_, k| *k != key);
+    end_token(&mut reg, &key);
 }
 
 /// Ends every token for `route` that was made for the agent `name` names: its definition id or its routing id (slug). A
 /// container is named from the agent's id, so this is what its stop, recreation and removal can say.
 pub fn revoke_agent(name: &str, route: &str) {
+    revoke_agent_older_than(name, route, Duration::ZERO);
+}
+
+/// [`revoke_agent`] for the tokens made at least `min_age` ago. A container that ended outside AgentMux is only heard of
+/// from Docker's event stream, which can run behind: a token made since (for the container that took its place) is left alone.
+pub fn revoke_agent_older_than(name: &str, route: &str, min_age: Duration) {
     let mut reg = registry().lock().unwrap();
     let ended: Vec<(String, String)> = reg
         .by_agent
-        .keys()
-        .filter(|(def_id, r)| r == route && reg.by_agent.get(&(def_id.clone(), r.clone())).and_then(|t| reg.by_digest.get(&digest(t))).is_some_and(|g| g.def_id == name || g.agent == name))
-        .cloned()
+        .iter()
+        .filter(|((_, r), _)| r == route)
+        .filter(|(_, token)| reg.by_digest.get(&digest(token)).is_some_and(|g| g.def_id == name || g.agent == name))
+        .filter(|(_, token)| reg.minted.get(&digest(token)).map_or(true, |at| at.elapsed() >= min_age))
+        .map(|(key, _)| key.clone())
         .collect();
     for key in ended {
-        if let Some(token) = reg.by_agent.remove(&key) {
-            reg.by_digest.remove(&digest(&token));
-        }
-        reg.replaced.retain(|_, k| *k != key);
+        end_token(&mut reg, &key);
     }
+}
+
+/// Drops the token for `key` and every record of it.
+fn end_token(reg: &mut Registry, key: &(String, String)) {
+    if let Some(token) = reg.by_agent.remove(key) {
+        reg.by_digest.remove(&digest(&token));
+        reg.minted.remove(&digest(&token));
+    }
+    reg.replaced.retain(|_, k| k != key);
 }
 
 #[cfg(test)]
@@ -222,5 +242,38 @@ mod tests {
         assert_eq!(grant_for("amxg_not-a-real-token"), None);
         assert_eq!(grant_for("amxc_not-a-gateway-token"), None);
         assert_eq!(grant_for(""), None);
+    }
+
+    #[test]
+    fn only_the_latest_replaced_token_is_kept_for_an_agent_and_route() {
+        let ip: IpAddr = "172_30_0_9".replace('_', ".").parse().unwrap();
+        let other: IpAddr = "172_30_0_10".replace('_', ".").parse().unwrap();
+        let first = token_for_account("lr-agent", "lr-def", "anthropic", "acct");
+        let second = renew_for_account("lr-agent", "lr-def", "anthropic", "acct", Some(ip));
+        let third = renew_for_account("lr-agent", "lr-def", "anthropic", "acct", Some(other));
+        assert_ne!(second, third);
+        let reg = registry().lock().unwrap();
+        let kept = reg.replaced.values().filter(|k| **k == ("lr-def".to_string(), "anthropic".to_string())).count();
+        assert_eq!(kept, 1, "one entry per agent and route, not one per renewal");
+        drop(reg);
+        assert_eq!(current_grant_of_replaced(&second), grant_for(&third), "the latest replaced token still names the agent's turn");
+        assert_eq!(current_grant_of_replaced(&first), None);
+        assert_eq!(grant_for(&first), None);
+        revoke("lr-def", "anthropic");
+    }
+
+    #[test]
+    fn an_older_token_ends_with_a_container_that_stopped_and_a_newer_one_stays() {
+        let old = token_for_account("ag-agent", "ag-def", "anthropic", "acct");
+        // Just made: an event about the container that ended before it was made must not end it.
+        revoke_agent_older_than("ag-agent", "anthropic", Duration::from_secs(3600));
+        assert!(grant_for(&old).is_some(), "a token made within the age is left alone");
+        // Made longer ago than the age: it ends.
+        revoke_agent_older_than("ag-agent", "anthropic", Duration::ZERO);
+        assert_eq!(grant_for(&old), None);
+        // A new token is made for the next turn, never the ended one.
+        let next = token_for_account("ag-agent", "ag-def", "anthropic", "acct");
+        assert_ne!(next, old);
+        revoke("ag-def", "anthropic");
     }
 }

@@ -5,16 +5,14 @@ import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { readZoom } from "@/app/store/zoom-factor";
-import { sectionOf } from "@/app/store/pane-sections";
-import { SECTION_LABELS, VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
+import { hasSection } from "@/app/store/pane-sections";
+import { VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
 
 /**
  * Below this many pixels of pane width (at chrome zoom 1) the header cannot hold the title and the
  * Import, Export and note buttons without scrolling sideways, so the buttons move into the pane.
  */
 export const NARROW_PX = 500;
-/** Below this the title is the section's short name alone: "Vault · Kept by AgentMux" no longer fits beside the tab's and the pane's own controls. */
-export const TIGHT_PX = 340;
 
 /** The Vault's state behind its native pane tab (vault.tsx). */
 export class VaultViewModel {
@@ -22,15 +20,15 @@ export class VaultViewModel {
     blockId: string;
     setMeta: (patch: Record<string, unknown>) => void;
     zoomAtom: Accessor<number>;
-    /** The selected section, meta-backed so it survives a remount. */
-    sectionAtom: Accessor<VaultPaneSection>;
+    /** The section the pane was asked to open and scroll to (vault-list.tsx): the meta's own value, not the pane's default
+     *  when it names none, so asking for the default section is a request like any other. */
+    sectionAsked: Accessor<VaultPaneSection | undefined>;
     /** The Vault the lists are narrowed to (its id), meta-backed; empty for all of them. */
     vaultAtom: Accessor<string>;
     /** An agent's request to fill in, set when the request's prompt opens the Vault. */
     requestAtom: Accessor<string>;
     /** A pending use or ask to show in the Requests list, set by openVaultAt. */
     focusAtom: Accessor<string>;
-    viewName: Accessor<string>;
     /** Whether the pane is on screen (its tab active, its window shown). */
     shown: Accessor<boolean>;
     /** The note on what may ask the person: open until they dismiss it. */
@@ -42,8 +40,6 @@ export class VaultViewModel {
     setWidth: (px: number) => void;
     /** The header has no room for its own buttons: they sit in the pane instead. */
     narrow: Accessor<boolean>;
-    /** The header has no room for "Vault · " before the section's name. */
-    tight: Accessor<boolean>;
 
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
@@ -51,7 +47,10 @@ export class VaultViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<VaultPaneSection>(() => sectionOf(VAULT_SECTIONS, "vault", meta()));
+        this.sectionAsked = createMemo<VaultPaneSection | undefined>(() => {
+            const s = meta()?.["vault:section"];
+            return hasSection(VAULT_SECTIONS, s) ? s : undefined;
+        });
         this.vaultAtom = createMemo<string>(() => {
             const v = meta()?.["vault:vault"];
             return typeof v === "string" ? v : "";
@@ -64,7 +63,6 @@ export class VaultViewModel {
             const f = meta()?.["vault:focus"];
             return typeof f === "string" ? f : "";
         });
-        this.viewName = createMemo<string>(() => SECTION_LABELS[this.sectionAtom()]);
         this.promptsOpen = createMemo<boolean>(() => meta()?.["vault:prompts-read"] !== true);
         const [transfer, setTransfer] = createSignal<"export" | "import" | null>(null);
         this.transfer = transfer;
@@ -73,6 +71,5 @@ export class VaultViewModel {
         const [width, setWidth] = createSignal(Infinity);
         this.setWidth = setWidth;
         this.narrow = createMemo(() => width() < NARROW_PX * chromeZoomAtom());
-        this.tight = createMemo(() => width() < TIGHT_PX * chromeZoomAtom());
     }
 }
