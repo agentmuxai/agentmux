@@ -21,6 +21,7 @@ export type SettingsSection =
     | "devices"
     | "widgets"
     | "agents"
+    | "kanban"
     | "advanced";
 
 /** One searchable settings row. `keywords` is where "synonyms match" lives —
@@ -119,6 +120,9 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     get agents() {
         return t("settings.sections.agents");
     },
+    get kanban() {
+        return t("settings.sections.kanban");
+    },
     get advanced() {
         return t("settings.sections.advanced");
     },
@@ -140,6 +144,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
         { id: "devices", get label() { return SETTINGS_SECTION_LABELS.devices; }, icon: "mobile-screen" },
         { id: "widgets", get label() { return SETTINGS_SECTION_LABELS.widgets; }, icon: "puzzle-piece" },
         { id: "agents", get label() { return SETTINGS_SECTION_LABELS.agents; }, icon: "robot" },
+        { id: "kanban", get label() { return SETTINGS_SECTION_LABELS.kanban; }, icon: "table-columns" },
         { id: "advanced", get label() { return SETTINGS_SECTION_LABELS.advanced; }, icon: "sliders" },
     ],
 };
@@ -152,6 +157,8 @@ export class SettingsViewModel {
     viewName: () => string;
     /** The pane's zoom (`term:zoom`), applied to the whole view; 1 without a block (tests). */
     zoom: () => number;
+    /** The board the Kanban section was asked to show (`settings:kanban-board`, a slug), from the cog on a Kanban pane. */
+    kanbanBoard: () => string | null;
 
     // Search query — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
     // Same plain-createSignal treatment as activeSection (no blockAtom; see
@@ -184,6 +191,10 @@ export class SettingsViewModel {
         }
         this.viewName = () => SETTINGS_SECTION_LABELS[this.activeSection()];
         this.zoom = () => readZoom(block?.meta());
+        this.kanbanBoard = () => {
+            const board = block?.meta()?.["settings:kanban-board"];
+            return typeof board === "string" && board ? board : null;
+        };
         const [query, setQuery] = createSignal("");
         this.query = query;
         this.setQuery = setQuery;

@@ -220,7 +220,7 @@ $kanban-narrow: 760px;
         display: none;
     }
 
-    .kanban-column--needs {
+    .kanban-column--has-needs {
         order: -1;
     }
 
@@ -271,38 +271,10 @@ $kanban-narrow: 760px;
     @include color-section.box(var(--kanban-stage, var(--border-color)));
 }
 
-.kanban-column--backlog {
-    --kanban-stage: var(--kanban-stage-backlog);
-}
-
-.kanban-column--research {
-    --kanban-stage: var(--kanban-stage-research);
-}
-
-.kanban-column--specd {
-    --kanban-stage: var(--kanban-stage-specd);
-}
-
-.kanban-column--progress {
-    --kanban-stage: var(--kanban-stage-progress);
-}
-
-.kanban-column--needs {
-    --kanban-stage: var(--kanban-stage-needs);
-
+// A stage's colour is a `data-stage-colour` (kanban-stage-colours.scss maps each name to a theme token). The stage
+// that shows what needs the operator keeps its border.
+.kanban-column--has-needs {
     border-color: var(--kanban-stage-needs);
-}
-
-.kanban-column--review {
-    --kanban-stage: var(--kanban-stage-review);
-}
-
-.kanban-column--merged {
-    --kanban-stage: var(--kanban-stage-merged);
-}
-
-.kanban-column--released {
-    --kanban-stage: var(--kanban-stage-released);
 }
 
 .kanban-column__head {

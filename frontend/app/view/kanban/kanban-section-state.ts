@@ -18,13 +18,11 @@ import {
     KANBAN_NARROW_PX,
     matchesQuery,
     needsCountOf,
-    parseCollapsed,
     repoLanes,
     reviewLimitOf,
-    toggleCollapsed,
     untrackedAgents,
-    type ColumnId,
 } from "./kanban-columns";
+import { parseCollapsedStages, stagesOfBoard, toggleCollapsedStage, type KanbanStage } from "./kanban-stages";
 import { boardSlugOf, defaultSlugOf, infoOf, needsByBoard, resolveBoard, taskForOpenRequestAnywhere, tasksOnLiveBoards } from "./kanban-boards";
 import { KanbanModel } from "./kanban-model";
 import type { KanbanSectionProps } from "./kanban-props";
@@ -64,22 +62,24 @@ function useNarrow() {
 }
 
 /**
- * Columns collapsed to a strip: the pane's (it survives a restart), or this section's own when it
+ * Stages collapsed to a strip: the pane's (it survives a restart), or this section's own when it
  * mounts alone. A choice shows at once and holds until the pane's meta says the same (or a few seconds
- * pass), so two clicks in a row, or a slow write, don't undo each other.
+ * pass), so two clicks in a row, or a slow write, don't undo each other. The stored ids may name stages
+ * of other boards; they are kept as they are and only the shown board's are read.
  */
-function useCollapsedColumns(props: SectionProps) {
-    const [ownCollapsed, setOwnCollapsed] = createSignal<ColumnId[]>([]);
-    const [pending, setPending] = createSignal<ColumnId[] | null>(null);
-    const collapsed = () => pending() ?? parseCollapsed(props.collapsed ?? ownCollapsed());
+function useCollapsedColumns(props: SectionProps, stages: () => readonly KanbanStage[]) {
+    const [ownCollapsed, setOwnCollapsed] = createSignal<string[]>([]);
+    const [pending, setPending] = createSignal<string[] | null>(null);
+    const stored = () => pending() ?? props.collapsed ?? ownCollapsed();
+    const collapsed = () => parseCollapsedStages(stored(), stages());
     createEffect(() => {
         const mine = pending();
-        if (mine && parseCollapsed(props.collapsed).join() === mine.join()) setPending(null);
+        if (mine && props.collapsed?.join() === mine.join()) setPending(null);
     });
     let pendingTimer: number | undefined;
     onCleanup(() => window.clearTimeout(pendingTimer));
-    const toggleColumn = (id: ColumnId) => {
-        const next = toggleCollapsed(collapsed(), id);
+    const toggleColumn = (id: string) => {
+        const next = toggleCollapsedStage(stored(), stages(), id);
         if (!props.onCollapsed) return setOwnCollapsed(next);
         setPending(next);
         window.clearTimeout(pendingTimer);
@@ -130,6 +130,12 @@ function useSelectedBoard(props: SectionProps) {
 export function createKanbanSection(props: SectionProps) {
     const { wanted, select } = useSelectedBoard(props);
     const model = useBoardModel(props, wanted);
+    // The stages of the board shown (its own set, or the default eight).
+    const stages = createMemo(() => {
+        const everything = model.everything();
+        const boards = everything?.boards ?? [];
+        return stagesOfBoard(infoOf(boards, resolveBoard(boards, wanted(), defaultSlugOf(everything))));
+    });
     const tick = useTick(10_000);
     const { bindContainer, narrow } = useNarrow();
     const now = () => (tick(), Date.now());
@@ -146,7 +152,7 @@ export function createKanbanSection(props: SectionProps) {
     const [ownLanes, setOwnLanes] = createSignal(false);
     const lanes = () => props.lanes ?? ownLanes();
     const setLanes = (on: boolean) => (props.onLanes ? props.onLanes(on) : setOwnLanes(on));
-    const { collapsed, toggleColumn } = useCollapsedColumns(props);
+    const { collapsed, toggleColumn } = useCollapsedColumns(props, stages);
     const { folded, fold } = useFoldedLanes();
     const reviewLimit = () => reviewLimitOf(settingsAtom() as unknown as Record<string, unknown>);
 
@@ -201,7 +207,7 @@ export function createKanbanSection(props: SectionProps) {
         model, bindContainer, narrow, now,
         query, setQuery, repo, setRepo, lead, setLead, showUntracked, setShowUntracked,
         boards, defaultSlug, selectedSlug, selectedInfo, selectBoard: select, needsOn, readOnly, managing, setManaging,
-        adding, setAdding, setOpenId, lanes, setLanes, collapsed, toggleColumn, folded, fold, reviewLimit,
+        stages, adding, setAdding, setOpenId, lanes, setLanes, collapsed, toggleColumn, folded, fold, reviewLimit,
         board, agents, repos, tasks, openTask, holding, untracked, laneList, reviewTotal, open, openAgent,
     };
 }

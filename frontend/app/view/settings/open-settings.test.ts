@@ -26,6 +26,15 @@ describe("openSettingsAt", () => {
         );
     });
 
+    it("points the Kanban section at a board when it is asked for one", async () => {
+        await openSettingsAt("kanban", "client-x");
+        expect(h.open).toHaveBeenCalledWith(
+            "settings",
+            { meta: { view: "settings", "settings:section": "kanban", "settings:kanban-board": "client-x" } },
+            { "settings:section": "kanban", "settings:kanban-board": "client-x" },
+        );
+    });
+
     it("never asks the server to pick the tab", async () => {
         await openSettingsAt("agents");
         expect(h.rpc).not.toHaveBeenCalled();

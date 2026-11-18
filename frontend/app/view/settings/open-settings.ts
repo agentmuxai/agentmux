@@ -11,6 +11,12 @@
 
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 
-export function openSettingsAt(section: string): Promise<void> {
-    return openOrFocusPaneByView("settings", { meta: { view: "settings", "settings:section": section } }, { "settings:section": section });
+/** `board` (a board's slug) points a Kanban section at that board's stages (`settings:kanban-board`). */
+export function openSettingsAt(section: string, board?: string): Promise<void> {
+    const extra = board ? { "settings:kanban-board": board } : {};
+    return openOrFocusPaneByView(
+        "settings",
+        { meta: { view: "settings", "settings:section": section, ...extra } },
+        { "settings:section": section, ...extra }
+    );
 }
