@@ -766,6 +766,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
       - name: Install build deps (Linux — CEF)
         timeout-minutes: 20
         env:
