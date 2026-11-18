@@ -15,6 +15,7 @@ import tsconfigPaths from "vite-tsconfig-paths";
 import { devInstance } from "./scripts/dev-instance-plugin.mjs";
 import { shikiNoThemes } from "./scripts/shiki-no-themes.mjs";
 import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
+import { solidStaleReadGuard } from "./scripts/solid-stale-read-guard.mjs";
 import { thirdPartyNotices } from "./scripts/third-party-notices.mjs";
 import { makeWatchIgnore } from "./scripts/vite-watch-ignore.mjs";
 
@@ -150,6 +151,9 @@ export default defineConfig({
     },
     resolve: HOST_MODULE ? { alias: { "@host-module": HOST_MODULE } } : {},
     optimizeDeps: {
+        // Solid is pre-bundled in dev, which skips the plugin list above: the same guard goes in here, so a dev
+        // build answers a stale <Show> read the way the release does (scripts/solid-stale-read-guard.mjs).
+        rolldownOptions: { plugins: [solidStaleReadGuard()] },
         // The Shiki grammars are loaded lazily, one `import("shiki/langs/x.mjs")` per
         // language. Left to discovery, the dev server finds each one when a code block
         // in that language first reaches the page, optimizes it, and reloads the whole
@@ -274,6 +278,7 @@ export default defineConfig({
         devInstance(),
         platformResolve(),
         shikiNoThemes(),
+        solidStaleReadGuard(),
         tsconfigPaths(HOST_TSCONFIG ? { projects: [path.resolve(__dirname, "tsconfig.json"), HOST_TSCONFIG] } : {}),
         svgr({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
