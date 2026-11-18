@@ -223,14 +223,19 @@ jobs:
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
 
-      # The ref above can be older than scripts/ci-apt.sh (a tag rebuilt by hand, a dispatch for an old SHA),
-      # so the apt helper comes from the revision this workflow file is at, not from the tree being built.
-      - name: Fetch the apt helper from the workflow revision
+      # The ref above can be older than these scripts (a tag rebuilt by hand, a dispatch for an old SHA),
+      # so the CI helpers (apt retries, the pinned go-task install, the tool check) come from the revision this
+      # workflow file is at, not from the tree being built.
+      - name: Fetch the CI helpers from the workflow revision
         uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}
           path: .ci-helper
-          sparse-checkout: scripts/ci-apt.sh
+          sparse-checkout: |
+            scripts/ci-apt.sh
+            scripts/ci-install-go-task.sh
+            scripts/ci-require-tools.sh
+            scripts/go-task.pins
           sparse-checkout-cone-mode: false
 
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -268,9 +273,12 @@ jobs:
             libglib2.0-dev libpango1.0-dev libcairo2-dev \
             libgdk-pixbuf2.0-dev libatk1.0-dev
 
+      # The release pinned in scripts/go-task.pins, hash-checked, with retries; not the installer script from taskfile.dev.
       - name: Install go-task
         run: |
-          sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+          bash .ci-helper/scripts/ci-install-go-task.sh "$RUNNER_TEMP/go-task"
+          export PATH="$RUNNER_TEMP/go-task:$PATH"
+          bash .ci-helper/scripts/ci-require-tools.sh task cmake ninja
 
       # ── Patched libcef.so ─────────────────────────────────────────────────
       # We cache by CEF tag so repeat builds don't re-download 600 MB.

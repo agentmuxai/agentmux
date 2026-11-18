@@ -234,6 +234,12 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install ninja cmake
 
+      # A package manager can answer an error and still exit 0 (0.60.34's Chocolatey 504): say so here, not in the build.
+      - name: Check the build tools are on PATH
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then bash scripts/ci-require-tools.sh ninja; else bash scripts/ci-require-tools.sh ninja cmake; fi
+
       - uses: Swatinem/rust-cache@v2
         with:
           # The two modes build different profiles; one cache each.
