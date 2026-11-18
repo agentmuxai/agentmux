@@ -19,7 +19,7 @@ const s = () => settingsAtom() ?? ({} as any);
 
 /** The setting a gateway route's daily spend cap is kept under (the gateway reads it at each request). */
 const routeCapSetting = (route: string) => `model:spend_cap_usd:${route}`;
-const DEFAULT_ROUTE_CAP_USD = 100;
+const DEFAULT_ROUTE_CAP_USD = 500;
 
 /**
  * The gateway's routes, each with its own cap: OpenRouter, and the Anthropic key route that agents bound to an API-key

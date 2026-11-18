@@ -34,8 +34,8 @@ They are independent: each can ship alone, in this order (section 8).
 
 | Cap | Default | Set by | Notes |
 |---|---|---|---|
-| **Per agent per day** | **$20** for an agent on a route (the task's example; section 9 of the parent spec said $5, see D1) | the agent's definition setting `agent:spend_cap_usd`; `0` or `none` means no cap | The agent's own default is stored when it is first put on a route. |
-| **Per route per day** | **$100** (mirror of the OpenRouter key's own limit) | the route's setting in Settings; an agent through `Agents update` | The sum over all agents on that route. |
+| **Per agent per day** | **$50** for an agent on a route (it was $20; the default is the setting `model:agent_spend_cap_usd`) | the agent's definition setting `agent:spend_cap_usd`; `0` or `none` means no cap | The agent's own default is stored when it is first put on a route. |
+| **Per route per day** | **$500** (it was $100); one setting per route, for the OpenRouter route and the Anthropic API-key route | the route's setting in Settings; an agent through `Agents update` | The sum over all agents on that route. |
 
 - **The OpenRouter key limit is the hard stop; the in-app cap is the one that explains itself.** The key limit (set by the person in OpenRouter) cuts every user of the key, ends in an opaque 402, and counts spend we do not see. The in-app cap stops one agent first, says why in the pane and to its leader, and can be lifted. The Vault entry's notes keep recommending a key limit (parent spec section 9); the app does not rely on it.
 - **A leader can raise or reset a cap, and a person can.** No operator-only gate (the workspace rule): `Agents update` with `spend_cap_usd` on a worker the caller leads, or on itself only downward; the pane card's buttons call the same API. **Every raise and reset is written to the audit log** with who, from and to.

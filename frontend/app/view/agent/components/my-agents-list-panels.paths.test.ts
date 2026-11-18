@@ -634,6 +634,7 @@ describe("the sub-views", () => {
         ["Seat…", "seat"],
         ["Bundles…", "bundles"],
         ["Environment…", "env"],
+        ["Spend cap…", "spend"],
         ["Delete", "delete"],
     ])("%s opens the %s view of its row and closes every other panel", (label, kind) => {
         const { panels } = build();
@@ -976,7 +977,7 @@ describe("the grid", () => {
 describe("the actions", () => {
     const labels = (a: ReturnType<RowPanels["rowActions"]>) => a.map((x) => x.label);
 
-    it("are Rename, Duplicate, View History, Seat, Bundles, Environment and Delete", () => {
+    it("are Rename, Duplicate, View History, Seat, Bundles, Environment, Spend cap and Delete", () => {
         const { panels } = build();
         const actions = panels.rowActions(A, true);
         expect(labels(actions)).toEqual([
@@ -986,6 +987,7 @@ describe("the actions", () => {
             "Seat…",
             "Bundles…",
             "Environment…",
+            "Spend cap…",
             "Delete",
         ]);
         expect(actions.map((a) => a.icon)).toEqual([
@@ -995,6 +997,7 @@ describe("the actions", () => {
             "chair",
             "layer-group",
             "terminal",
+            "dollar-sign",
             "trash-can",
         ]);
         expect(actions.map((a) => a.testId)).toEqual([
@@ -1004,9 +1007,11 @@ describe("the actions", () => {
             "agent-my-agents-seat",
             "agent-my-agents-bundles",
             "agent-my-agents-env",
+            "agent-my-agents-spend",
             "agent-my-agents-delete",
         ]);
         expect(actions.map((a) => a.tone)).toEqual([
+            undefined,
             undefined,
             undefined,
             undefined,

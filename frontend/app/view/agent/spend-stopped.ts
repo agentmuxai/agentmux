@@ -179,12 +179,12 @@ export function raisedCap(cap: number): number {
 
 /** Sets the agent's daily cap (null: no cap). Rejects with srv's reason. */
 export async function setSpendCap(blockId: string, cap: number | null): Promise<void> {
-    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, action: "set", cap_usd: cap });
+    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, agent: null, action: "set", cap_usd: cap });
 }
 
 /** Zeroes today's figure. Rejects with srv's reason. */
 export async function resetSpendToday(blockId: string): Promise<void> {
-    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, action: "reset", cap_usd: null });
+    await RpcApi.AgentSpendCommand(TabRpcClient, { blockid: blockId, agent: null, action: "reset", cap_usd: null });
 }
 
 /** Takes the card off the pane; the stop stays. Best effort. */
