@@ -33,11 +33,11 @@ function serve(text: string) {
     const bytes = new TextEncoder().encode(text);
     const starts = text.length ? [0] : [];
     for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10 && i + 1 < bytes.length) starts.push(i + 1);
-    indexLines.mockImplementation(async (_c: unknown, req: { from_line: number; count: number; at_offset?: number }) => {
+    indexLines.mockImplementation(async (_c: unknown, req: { from_line: number; count: number; at_offset?: number; encoding?: string }) => {
         const at = (n: number) => (n >= starts.length ? bytes.length : starts[n]);
         const line_at = req.at_offset == null ? undefined : starts.filter((s) => s <= req.at_offset!).length - 1;
         const from = line_at ?? req.from_line;
-        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(from), end: at(from + req.count), encoding: "utf-8", starts: [], line_at };
+        return { total_lines: starts.length, size: bytes.length, mtime: 1, start: at(from), end: at(from + req.count), encoding: req.encoding === "legacy" ? "windows-1252" : (req.encoding ?? "utf-8"), starts: [], line_at };
     });
     // srv's byte search: the first match at or after `from`, the last at or before it going backward.
     searchBytes.mockImplementation(async (_c: unknown, req: { pattern: string; from: number; backward: boolean }) => {
@@ -359,7 +359,19 @@ describe("the Large text viewer", () => {
         fireEvent.keyDown(findBox(), { key: "Enter" });
         await settle();
         expect(searchBytes).not.toHaveBeenCalled();
-        expect(document.querySelector(".large-text-find-error")?.textContent).toContain("older encoding");
+        // srv's own name for the file's encoding is what the message gives, not the probe's "legacy".
+        expect(document.querySelector(".large-text-find-error")?.textContent).toContain("windows-1252");
+    });
+
+    it("refuses any search in a multibyte legacy encoding, saying why, without asking srv", async () => {
+        await mount({ encoding: "Shift_JIS" });
+        key("f", { ctrlKey: true });
+        await settle();
+        fireEvent.input(findBox(), { target: { value: "a" } });
+        fireEvent.keyDown(findBox(), { key: "Enter" });
+        await settle();
+        expect(searchBytes).not.toHaveBeenCalled();
+        expect(document.querySelector(".large-text-find-error")?.textContent).toContain("several bytes");
     });
 
     it("takes the mark off the line when a later search finds nothing, so the old line is not taken for its answer", async () => {
