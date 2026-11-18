@@ -4,6 +4,7 @@
 /** Placing the panel: where it sits, how wide and tall it may be, and whether it is pinned. */
 
 import { findScrollContainerRect } from "./hover-anchor";
+import { peekFloatingStyle } from "./peek-floating-style";
 import { computePeekHorizontal, computePeekVertical } from "./peek-placement";
 import type { PeekMeasure } from "./peek-overlay-measure";
 import type { PeekState } from "./peek-overlay-state";
@@ -58,20 +59,8 @@ export function createPeekPlacement(s: PeekState, m: PeekMeasure) {
         // it still needs its linger, and pins on the first move).
         s.lastEnterable = s.pinnedOffsetY != null || vt.scrolls;
         s.setOutside(hz.extendsPastRow || vt.leavesContainer);
-        s.setFloatingStyle(
-            withPaneZoom(
-                {
-                    position: "fixed",
-                    left: `${hz.left}px`,
-                    top: `${vt.top}px`,
-                    ...(hz.shift > 0 ? { transform: `translateX(${-hz.shift * 100}%)` } : {}),
-                    "max-width": `${hz.maxWidth}px`,
-                    "min-width": `${hz.minWidth}px`,
-                    "max-height": `${vt.maxHeight}px`,
-                },
-                paneZoom,
-            ),
-        );
+        // A panel that only shows information takes no pointer events (peek-floating-style.ts); only an enterable one does.
+        s.setFloatingStyle(withPaneZoom(peekFloatingStyle(hz, vt, s.lastEnterable), paneZoom));
     };
 
     return { update };

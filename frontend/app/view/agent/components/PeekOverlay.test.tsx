@@ -191,13 +191,14 @@ describe("PeekOverlay", () => {
             return peek;
         }
 
-        it("a panel that fits follows the pointer, as before", () => {
+        it("a panel that fits follows the pointer, above it, and takes no pointer events", () => {
             vi.useFakeTimers();
             try {
                 const { moveTo } = setup({ panelHeight: 40 });
-                expect(topOf()).toBe(215 + 12);
+                expect(topOf()).toBe(215 - 12 - 40);
                 moveTo(222);
-                expect(topOf()).toBe(222 + 12);
+                expect(topOf()).toBe(222 - 12 - 40);
+                expect(panel()!.style.pointerEvents).toBe("none");
             } finally {
                 vi.useRealTimers();
             }
@@ -616,7 +617,7 @@ describe("PeekOverlay", () => {
             return row;
         }
 
-        it("positions the panel below the cursor, with room to spare", () => {
+        it("positions the panel above the cursor, with room to spare", () => {
             vi.useFakeTimers();
             try {
                 const row = makeScrollableRow(
@@ -637,7 +638,7 @@ describe("PeekOverlay", () => {
                 vi.advanceTimersByTime(50);
 
                 const top = parseFloat(overlay.style.top);
-                expect(top).toBeGreaterThan(mouseY); // below the cursor, not at/above it
+                expect(top + 40).toBeLessThan(mouseY); // wholly above the cursor, clear of it
             } finally {
                 vi.useRealTimers();
             }

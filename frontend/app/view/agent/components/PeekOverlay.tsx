@@ -43,7 +43,7 @@
  * near the pointer. Horizontally: right-aligned to the row when it fits the row's
  * width; when wider, reaching over the pane borders by at most half the row's width,
  * split by the pane's place in the window (all to the right at the left edge, all to
- * the left at the right edge, even when centred). Vertically: below or above the pointer
+ * the left at the right edge, even when centred). Vertically: above the pointer (else below it)
  * inside the transcript when it fits; otherwise it leaves the transcript, on the
  * side of the pointer with more room, with its HEIGHT cut to that room so it can
  * never reach the pointer, and the rest scrolls. The old code clamped the
@@ -63,8 +63,10 @@
  *     HOVER_BRIDGE_MAX_MS), then stays while the pointer is on it;
  *  4. while the pointer is crossing to it, other rows' peeks wait
  *     (peek-bridge.ts), so one it passes over on the way cannot open on top.
- * A panel that fits behaves as before: it follows the pointer and closes the
- * instant the pointer leaves the row.
+ * A panel that fits follows the pointer and closes the instant the pointer leaves the row. It takes
+ * NO pointer events (peek-floating-style.ts): a scroll box near the pointer took the wheel from the
+ * transcript (measured: dead within about 20 px of its edge, with `overscroll-behavior: contain`, even
+ * with the pointer on the row), so only a panel that was cut and scrolls is ever entered.
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  *
  * It additionally tracks the mouse's Y position while
