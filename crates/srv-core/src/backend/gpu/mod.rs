@@ -289,13 +289,18 @@ pub struct Named {
 /// Whether a process is worth a row: it uses the GPU, or holds a megabyte of its memory.
 fn active(f: &ProcessFigures) -> bool {
     const MEMORY: u64 = 1 << 20;
-    f.use_pct.is_some_and(|u| u >= 0.5) || f.dedicated.unwrap_or(0) + f.shared.unwrap_or(0) >= MEMORY
+    f.use_pct.is_some_and(|u| u >= 0.5) || f.dedicated.unwrap_or(0) >= MEMORY
 }
 
 /// The rows of the panel: AgentMux's own processes and the biggest [`OTHERS_LISTED`] others, sorted by use and then
 /// memory (AgentMux's first where those are equal), and the rest of the others added up.
+///
+/// A row's memory is what it holds on the card, and only where it holds none there, what it holds of the machine's
+/// (`shared_limit` is the most the OS lets the GPU have): a process's shared figure is often a mapping, far more than
+/// the machine has (a compositor's, 105 GB), and is not shown as a number.
 pub fn shape_processes(
     figures: &[ProcessFigures],
+    shared_limit: Option<u64>,
     name_of: impl Fn(u32) -> Option<Named>,
 ) -> (Vec<GpuProcess>, Option<GpuOthers>) {
     let row = |f: &ProcessFigures| {
@@ -307,7 +312,10 @@ pub fn shape_processes(
             kind: n.as_ref().and_then(|n| n.kind),
             use_pct: f.use_pct,
             dedicated: f.dedicated,
-            shared: f.shared,
+            shared: f
+                .shared
+                .filter(|_| f.dedicated.unwrap_or(0) == 0)
+                .filter(|s| shared_limit.is_none_or(|limit| *s <= limit)),
         }
     };
     let (mut own, mut others): (Vec<GpuProcess>, Vec<GpuProcess>) =

@@ -48,7 +48,8 @@ async fn sample(state: &AppState) -> Result<GpuSampleResult, String> {
             }
         }
     };
-    let (processes, others) = shape_processes(&sample.reading.processes, |pid| names.get(&pid).cloned());
+    let shared_limit = sample.reading.adapters.iter().filter_map(|a| a.shared_total).max();
+    let (processes, others) = shape_processes(&sample.reading.processes, shared_limit, |pid| names.get(&pid).cloned());
     Ok(GpuSampleResult {
         ts_ms: agentmux_common::time::now_ms_u64(),
         os: std::env::consts::OS.to_string(),

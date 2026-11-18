@@ -58,11 +58,22 @@ pub struct Reading {
 /// memory pressure is the shared figure. (An integrated GPU's "dedicated" is a carve-out of 64 MB to 512 MB.)
 const INTEGRATED_BELOW: u64 = 1 << 30;
 
+/// Whether a name is the CPU's own graphics. DXGI has no flag for it (an AMD APU reserves a gigabyte or two, which looks
+/// like a card), so the names of the CPU makers' graphics are the other half of the rule: Intel's, except its Arc cards,
+/// and AMD's "Radeon Graphics" and "Vega n Graphics", which end in "Graphics" where a card ends in a model.
+fn named_integrated(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    if n.contains("intel") {
+        return !n.contains("arc");
+    }
+    (n.contains("radeon") || n.contains("amd")) && n.trim_end().ends_with("graphics") && !n.contains(" rx ")
+}
+
 /// An adapter's kind, from what DXGI says.
 fn kind_of(info: &AdapterInfo) -> GpuAdapterKind {
     if info.software {
         GpuAdapterKind::Software
-    } else if info.dedicated_total < INTEGRATED_BELOW {
+    } else if info.dedicated_total < INTEGRATED_BELOW || named_integrated(&info.name) {
         GpuAdapterKind::Integrated
     } else {
         GpuAdapterKind::Discrete
@@ -130,7 +141,7 @@ pub fn aggregate(raw: &RawCounters, infos: &[AdapterInfo]) -> Reading {
             known(adapter, &mut ids);
         }
     }
-    let adapters = ids
+    let mut adapters: Vec<GpuAdapter> = ids
         .into_iter()
         .map(|luid| {
             let info = infos.iter().find(|i| i.luid == luid);
@@ -158,6 +169,10 @@ pub fn aggregate(raw: &RawCounters, infos: &[AdapterInfo]) -> Reading {
             }
         })
         .collect();
+    // DXGI always lists the OS's software renderer, which no one asked about: it is a row only when it is all there is.
+    if adapters.iter().any(|a| a.kind != GpuAdapterKind::Software) {
+        adapters.retain(|a| a.kind != GpuAdapterKind::Software);
+    }
 
     let pdm = raw.process_dedicated.as_ref().map(|i| sum_by(i, |n| parse_process_memory(n).map(|(pid, _)| pid)));
     let psm = raw.process_shared.as_ref().map(|i| sum_by(i, |n| parse_process_memory(n).map(|(pid, _)| pid)));
@@ -257,6 +272,28 @@ mod tests {
         assert_eq!(r.adapters[1].use_pct, Some(65.0));
         assert_eq!(r.adapters[1].dedicated_used, Some(2_000_000_000));
         assert_eq!(r.processes.iter().find(|p| p.pid == 10).unwrap().use_pct, Some(60.0));
+    }
+
+    #[test]
+    fn the_cpus_own_graphics_are_integrated_whatever_they_reserve() {
+        let kind = |name: &str, mb: u64| kind_of(&info(A, name, mb));
+        assert_eq!(kind("AMD Radeon(TM) Graphics", 2048), GpuAdapterKind::Integrated);
+        assert_eq!(kind("AMD Radeon(TM) Vega 8 Graphics", 2048), GpuAdapterKind::Integrated);
+        assert_eq!(kind("Intel(R) UHD Graphics 770", 128), GpuAdapterKind::Integrated);
+        assert_eq!(kind("Intel(R) Iris(R) Xe Graphics", 2048), GpuAdapterKind::Integrated);
+        assert_eq!(kind("Intel(R) Arc(TM) A770 Graphics", 16384), GpuAdapterKind::Discrete);
+        assert_eq!(kind("AMD Radeon RX 7900 XTX", 24576), GpuAdapterKind::Discrete);
+        assert_eq!(kind("NVIDIA GeForce RTX 3060", 12288), GpuAdapterKind::Discrete);
+    }
+
+    #[test]
+    fn the_software_renderer_is_a_row_only_when_it_is_all_there_is() {
+        let soft = AdapterInfo { software: true, ..info(B, "Microsoft Basic Render Driver", 0) };
+        let both = aggregate(&RawCounters::default(), &[info(A, "RTX", 8192), soft.clone()]);
+        assert_eq!(both.adapters.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["RTX"]);
+        let alone = aggregate(&RawCounters::default(), &[soft]);
+        assert_eq!(alone.adapters.len(), 1);
+        assert_eq!(alone.adapters[0].kind, GpuAdapterKind::Software);
     }
 
     #[test]
