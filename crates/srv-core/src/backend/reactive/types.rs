@@ -815,7 +815,7 @@ fn default_event_kind() -> String {
     "delivery".to_string()
 }
 
-/// Poller configuration for AgentMux cloud service.
+/// Poller configuration for AgentMux Cloud service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PollerConfig {
     // ARCH-001: the wire key is now `muxbus_url`/`muxbus_token` (matches the
@@ -839,7 +839,7 @@ pub struct AgentMuxConfigFile {
     pub token: Option<String>,
 }
 
-/// Pending injection from AgentMux cloud.
+/// Pending injection from AgentMux Cloud.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingInjection {
