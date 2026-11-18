@@ -187,6 +187,21 @@ describe("CommandPaletteModal keyboard scroll", () => {
         expect(list.scrollTop).toBe(0);
     });
 
+    it("moves by a page with PageDown and PageUp, and to the ends with End and Home, keeping the row in view", () => {
+        const input = open();
+        const selected = () => document.querySelector(".command-palette-item.selected .command-palette-item-label")?.textContent;
+        const last = document.querySelectorAll(".command-palette-item").length - 1;
+        fireEvent.keyDown(input, { key: "End" });
+        expect(selected()).toBe("Close Pane");
+        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Pane"), { block: "nearest" });
+        fireEvent.keyDown(input, { key: "Home" });
+        expect(selected()).toBe("Split Right");
+        fireEvent.keyDown(input, { key: "PageDown" }); // jsdom has no layout: a page is 8 rows, held to the last
+        expect(document.querySelectorAll(".command-palette-item")[last].classList.contains("selected")).toBe(true);
+        fireEvent.keyDown(input, { key: "PageUp" });
+        expect(selected()).toBe("Split Right");
+    });
+
     it("shows the top of the list again when the search changes", () => {
         const input = open();
         const list = document.querySelector(".command-palette-list") as HTMLElement;

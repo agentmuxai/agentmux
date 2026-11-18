@@ -74,6 +74,33 @@ function createPointerGate(): (e: MouseEvent) => boolean {
     };
 }
 
+/** The row a navigation key selects from row `i` (`last` is the last row), or null for any other key. */
+function selectionAfterKey(key: string, i: number, last: number, page: number): number | null {
+    const to = (row: number) => Math.max(0, Math.min(row, last));
+    switch (key) {
+        case "ArrowDown":
+            return to(i + 1);
+        case "ArrowUp":
+            return to(i - 1);
+        case "PageDown":
+            return to(i + page);
+        case "PageUp":
+            return to(i - page);
+        case "Home":
+            return 0;
+        case "End":
+            return to(last);
+        default:
+            return null;
+    }
+}
+
+/** How many rows the list shows at once, for PageUp and PageDown (at least 1). */
+function rowsPerPage(list: HTMLElement): number {
+    const row = list.querySelector<HTMLElement>(".command-palette-item");
+    return row && row.offsetHeight > 0 ? Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1) : 8;
+}
+
 /** After a key move: the selected row in view (the first row: the list's top, padding included). */
 function keepRowInView(list: HTMLElement, idx: number) {
     if (idx === 0) list.scrollTop = 0;
@@ -143,14 +170,10 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     // Arrow keys + Enter are palette-specific navigation. ESC and
     // backdrop close are handled by `<Modal>` → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === "ArrowDown") {
+        const target = selectionAfterKey(e.key, clampedIdx(), filtered().length - 1, rowsPerPage(listRef));
+        if (target != null) {
             e.preventDefault();
-            moveSelection((i) => Math.min(i + 1, filtered().length - 1));
-            return;
-        }
-        if (e.key === "ArrowUp") {
-            e.preventDefault();
-            moveSelection((i) => Math.max(i - 1, 0));
+            moveSelection(() => target);
             return;
         }
         if (e.key === "Enter") {
