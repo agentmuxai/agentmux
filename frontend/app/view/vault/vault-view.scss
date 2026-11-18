@@ -442,7 +442,7 @@
     }
 
     .vault-section__head .ui-button {
-        padding-inline: 2px;
+        padding-inline: 0;
     }
 
     .vault-section__body {
@@ -454,6 +454,13 @@
     }
 
     .vault-table td .ui-pill {
+        overflow-wrap: anywhere;
+    }
+
+    // The time and the kind are short and stay whole above this; here they wrap, and a word wider than the room breaks.
+    .vault-table td.vault-when,
+    .vault-table td.vault-kind {
+        white-space: normal;
         overflow-wrap: anywhere;
     }
 
