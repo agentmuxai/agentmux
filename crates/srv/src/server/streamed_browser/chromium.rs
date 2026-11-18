@@ -33,7 +33,8 @@ pub fn args(profile: &Path, no_sandbox: bool, proxy_port: u16) -> Vec<String> {
         format!("--proxy-server=socks5://127.0.0.1:{proxy_port}"),
         // The loopback addresses are proxied too (the proxy decides which loopback ports a page may reach).
         "--proxy-bypass-list=<-loopback>".to_string(),
-        "--host-resolver-rules=MAP * ~NOTFOUND".to_string(),
+        // Every name is unresolvable inside Chromium (the proxy resolves); the proxy's own address is a literal.
+        "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1".to_string(),
         "--disable-quic".to_string(),
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_string(),
         "--dns-prefetch-disable".to_string(),
@@ -357,7 +358,7 @@ mod tests {
             // Every connection goes through the proxy, loopback included, and names are the proxy's to resolve.
             assert!(a.contains(&"--proxy-server=socks5://127.0.0.1:41234".to_string()));
             assert!(a.contains(&"--proxy-bypass-list=<-loopback>".to_string()));
-            assert!(a.contains(&"--host-resolver-rules=MAP * ~NOTFOUND".to_string()));
+            assert!(a.contains(&"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1".to_string()));
             // No UDP out of it (QUIC, WebRTC that is not proxied) and no lookups ahead of a click.
             assert!(a.contains(&"--disable-quic".to_string()));
             assert!(a.contains(&"--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_string()));

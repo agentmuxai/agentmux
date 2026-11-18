@@ -56,9 +56,10 @@ impl Resolve for SystemResolver {
     }
 }
 
-/// The address a connection to `target` on `port` goes to, or the SOCKS5 reply that refuses it. Every address the
-/// name resolved to has to pass the policy; the first is the one used.
-pub async fn plan<R: Resolve>(resolver: &R, target: &Target, port: u16, own_ports: &[u16]) -> Result<SocketAddr, u8> {
+/// The addresses a connection to `target` on `port` may go to, in the order to try them, or the SOCKS5 reply that
+/// refuses it. Every address the name resolved to has to pass the policy, and only those are tried (a name that
+/// answers `::1` and `127.0.0.1` reaches a development server on either).
+pub async fn plan<R: Resolve>(resolver: &R, target: &Target, port: u16, own_ports: &[u16]) -> Result<Vec<SocketAddr>, u8> {
     let addrs = match target {
         Target::Ip(ip) => vec![*ip],
         Target::Name(name) => match resolver.resolve(name, port).await {
@@ -72,7 +73,20 @@ pub async fn plan<R: Resolve>(resolver: &R, target: &Target, port: u16, own_port
             return Err(NOT_ALLOWED);
         }
     }
-    Ok(SocketAddr::new(addrs[0], port))
+    Ok(addrs.into_iter().map(|ip| SocketAddr::new(ip, port)).collect())
+}
+
+/// Connect to the first of `addrs` that answers, each within the connect limit. The reply for the last failure.
+async fn connect_first(addrs: &[SocketAddr]) -> Result<TcpStream, u8> {
+    let mut code = HOST_UNREACHABLE;
+    for addr in addrs {
+        match tokio::time::timeout(CONNECT, TcpStream::connect(addr)).await {
+            Ok(Ok(s)) => return Ok(s),
+            Ok(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => code = REFUSED,
+            _ => code = HOST_UNREACHABLE,
+        }
+    }
+    Err(code)
 }
 
 /// The client's request: the address it wants and the port.
@@ -136,23 +150,23 @@ async fn serve_one<R: Resolve>(mut client: TcpStream, resolver: Arc<R>) {
         Ok(r) => r,
         Err(code) => return reply(&mut client, code).await,
     };
-    let addr = match plan(&*resolver, &target, port, &own_ports_with_proxy()).await {
+    let addrs = match plan(&*resolver, &target, port, &own_ports_with_proxy()).await {
         Ok(a) => a,
         Err(code) => return reply(&mut client, code).await,
     };
-    let mut upstream = match tokio::time::timeout(CONNECT, TcpStream::connect(addr)).await {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => return reply(&mut client, REFUSED).await,
-        _ => return reply(&mut client, HOST_UNREACHABLE).await,
+    let mut upstream = match connect_first(&addrs).await {
+        Ok(s) => s,
+        Err(code) => return reply(&mut client, code).await,
     };
     reply(&mut client, OK).await;
     let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
 }
 
-/// This server's own ports, and this proxy's.
+/// This server's own ports, this proxy's, and the development-server router's.
 fn own_ports_with_proxy() -> Vec<u16> {
     let mut ports = address_policy::own_ports();
     ports.extend(PROXY_PORT.get());
+    ports.push(crate::backend::dev_proxy::port());
     ports
 }
 
@@ -162,7 +176,11 @@ static PROXY_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 async fn accept_loop<R: Resolve>(listener: TcpListener, resolver: Arc<R>) {
     let open = Arc::new(Semaphore::new(MAX_OPEN));
     loop {
-        let Ok((client, _)) = listener.accept().await else { continue };
+        let Ok((client, _)) = listener.accept().await else {
+            // A persistent failure (out of descriptors) must not spin.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            continue;
+        };
         let Ok(permit) = open.clone().try_acquire_owned() else { continue };
         let resolver = resolver.clone();
         tokio::spawn(async move {
@@ -236,10 +254,33 @@ mod tests {
         // The rebinding trick: the first lookup is public, the next is the metadata address.
         let r = Scripted::new(&[&["93.184.216.34"], &["169.254.170.2"]]);
         // The first connection is planned for the public address the policy saw...
-        assert_eq!(plan(&r, &name("rebind.example"), 80, &[]).await, Ok(SocketAddr::new("93.184.216.34".parse().unwrap(), 80)));
+        assert_eq!(plan(&r, &name("rebind.example"), 80, &[]).await, Ok(vec![SocketAddr::new("93.184.216.34".parse().unwrap(), 80)]));
         // ...and a new connection asks again and is refused. A connection already planned never resolves again,
         // because `serve_one` connects to the planned address itself.
         assert_eq!(plan(&r, &name("rebind.example"), 80, &[]).await, Err(NOT_ALLOWED));
+    }
+
+    #[tokio::test]
+    async fn every_judged_address_of_a_name_is_offered_in_order() {
+        // `localhost` answers `::1` first; a development server listening on IPv4 only is reached on the second.
+        let r = Scripted::new(&[&["::1", "127.0.0.1"]]);
+        let got = plan(&r, &name("localhost"), 3000, &[]).await.unwrap();
+        assert_eq!(got, vec![SocketAddr::new("::1".parse().unwrap(), 3000), SocketAddr::new("127.0.0.1".parse().unwrap(), 3000)]);
+    }
+
+    #[tokio::test]
+    async fn the_connection_falls_through_to_the_next_address_when_the_first_is_refused() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let live = listener.local_addr().unwrap();
+        // Port 1 on the loopback address nothing listens on: refused at once.
+        let dead = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1);
+        assert!(connect_first(&[dead, live]).await.is_ok());
+        assert_eq!(connect_first(&[dead]).await.err(), Some(REFUSED));
+    }
+
+    #[test]
+    fn the_development_server_router_is_one_of_the_servers_own_ports() {
+        assert!(own_ports_with_proxy().contains(&crate::backend::dev_proxy::port()));
     }
 
     #[tokio::test]
