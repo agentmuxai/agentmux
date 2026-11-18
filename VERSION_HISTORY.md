@@ -1,5 +1,86 @@
 # AgentMux Version History
 
+## 0.60.34 — 2026-11-18
+
+- The Vault is one list of coloured sections, one per type of entry, under a single filter that narrows all of them; Kept by AgentMux and Activity are folded sections at its end
+- Large text viewer: Ctrl+F finds text in a file of any size, shows its line and marks the match
+- Removing a login's share answers a sign-in card waiting on it No, and a request still waiting when a share is removed and made again types nothing.
+- The model panel keeps the Claude models and effort together and puts the OpenRouter models behind one row at the bottom that opens in place
+- A running Claude agent's AgentMux-owned startup file is rewritten within 20 seconds of a Global Memory change, so a compaction no longer resends the entries that changed. The memory delivery also keeps a note that names a too-large Global entry, says how to list Personal files an index could not fit, always keeps Operator Config entries, and admits `deliver: always` files by modification time.
+- Menus, popovers and the lists that drop from a control now share one opaque surface that stands out from the pane in every theme: a lifted fill, a 3:1 edge, a ring and a shadow
+- Gmail: a mail body or raw header block cut by exactly one character is now reported as cut
+- The Editor's file tree and its document zoom separately: scroll over either to zoom it, and the zoom keys follow the one that has the keyboard
+- Account form: its labels, placeholders, options and key notes are translatable
+- Hidden agent panes flush their streams at the slow hidden rate and a shown pane catches up at once; the page logs a per-minute tally of websocket handler time by message kind
+- Gmail: the window that asks to send a draft replying into a thread names the thread and who is in it, and warns first when none of the recipients has taken part in it; get_thread counts unsent drafts
+- The nightly performance check now finds a run you choose with --a-run or --b-run even when it is older than the latest twelve nightly runs, instead of measuring the other build alone
+- The agent pane's View options open from an eye button that is always in the composer row, next to the NATIVE or CONTAINER label; the View popover no longer jumps when an option is changed; the pane's right-click menu no longer lists View or Bundles
+- Accounts tab, agent identity links and the account form's labels: text from the dictionary, and field labels follow a language change
+- A leader's note about a worker no longer quotes an older turn's words when the worker's last turn was only tool calls, Agents watch reads the same transcript as Agents transcript when an agent's shared copy has stopped receiving lines, and Agents transcript says when a known agent has no open pane instead of a bare not found
+- Browser locate and click_at: for a part of a page the snapshot can't describe, point at a screenshot and get the element there as a reference, or click it
+- The literal-text ratchet counts strings chosen inside a template's interpolation, so its baseline no longer hides them
+- A container agent can ask the person to share a login with its own browser profile (Vault share), the Vault pane has a Share button and a list of who each login is shared with, a login an agent generates belongs to its own profile, and no writer of a login can bring a removed share back.
+- Settings > Browser: the agents-on-sites list shows empty instead of an error when the backend's answer leaves out a field
+- A skill for the rule that confirms are panels inside the element that asks, not window modals
+- A slow tab switch now logs where the time went: the backend's wait, reducer and save, and how long the window's main thread was blocked
+- Global Memory fleet sync: a newer write replaces an entry that was machine-only only by default and the Memory list shows, per peer, which entries were not applied and why
+- Settings > Advanced has a daily cap for each model route (OpenRouter and Anthropic API keys), so raising one no longer leaves key-account agents stopped at the default, and its rows show a "Saved" note that fades after a change
+- The model panel shows which row the keyboard is on
+- Startup-file refresh: a home-relative pane folder is expanded, a pane keeps the name it was launched under, and a folder is used up only after a Claude pane is refreshed in it
+- Browser panes: a Downloads button lists finished downloads, an Ask where to save each download setting, and the last Save As folder is kept across restarts
+- A container that stops outside AgentMux now ends its agent's API-key gateway token, and the gateway keeps one replaced token per agent
+- Large text find: Next and Previous step through the matches on one long line, marking and scrolling to the current one instead of the first
+- Closing a pane with its X button now fades the pane out and glides its neighbours into the space, as closing it any other way does (Windows)
+- A message that waits for an agent's running command now says so and how many are ahead of it, instead of 'reaching the agent any moment'
+- Agents have a default daily spend cap of $50 and routes of $500, and a person can set, remove or reset one agent's cap in My Agents (Spend cap...)
+- A container agent's model-gateway token now works only from its own container on Docker Desktop too, through a small gateway forwarder on the agents network
+- The Linux server package check pulls its Debian image with retries and two fallback sources, so a registry rate limit no longer fails the release leg
+- A release is published only when every package job has succeeded, so none goes out missing a file; a failed one is fixed with Re-run failed jobs
+- The time and token hover panel no longer stops the mouse wheel: a panel that fits sits above the pointer and takes no pointer events
+- Browser pane Downloads menu: long names are cut so the menu fits a narrow pane, every line has an icon, and a cancelled Save As dialog is not listed
+- text: AgentMux Cloud is spelled with a capital C in messages and settings that name the web services
+- A container agent can never be given a container runtime's socket, pipe or control folder through any mount: a definition's volumes, its workspace folder or an imported definition
+- The model panel's View popover fits inside a pane narrower than itself
+- A container agent can import a login's user name and password from one AWS secret with one approval, and ask for the new login to be shared with it
+- perf: the frame sample ignores a pane's own follow-scrolls and drops its pending frame when the window is hidden
+- App record: the events kind is listed in the tool's schema, and the stall totals in the summary say when they cover only the newest 500 (#47906)
+- Browser panes: a value typed from the Vault into a page stays out of everything an agent reads from it, even if the page changes the field
+- Memory view: an "Over days" chart of AgentMux's memory, window JS heap, elements and rows by the hour over 1, 7 or 30 days, with srv restarts and stalls beside it (#47820)
+- Find in an agent pane: a bar brought back after a recycle keeps its saved match until older rows have loaded, then takes it (#47840)
+- Agent pane: the memory delivery card's rows no longer cut the size and chips off at the card's edge in a narrow pane; they wrap under the name (#47959)
+- Renderer recycle: an open dialog, a waiting agent and a drag now show in the state line and the decline text with how long they have held the window (#47869)
+- UI-stall log line: on macOS the free RAM is read at the stall (from vm_stat), not shown as unknown (#47872)
+- The host hang dump test waits for a started child instead of dumping a process still loading, so it stops failing intermittently on Windows
+- Streamed Browser pane: Chromium's only way out is an address proxy that refuses the metadata address, private ranges and the server's own ports; Chromium gets an environment allow-list, no UDP, blocked file and internal schemes, and starts with its sandbox unless told not to
+- AgentMux Web hides the window grip in the header, since a browser tab has no window to drag
+- AgentMux Web: a headless server accepts the attestation of a registered external host, so operator-only actions work for a signed-in person's window
+- A tall hover panel stays inside the window when its row scrolls past an edge, and keeps its own scroll position when the transcript scrolls
+- AgentMux Web: an operator-only action whose proof lapsed proves the window again and is sent once more, and a refusal that stands is shown to the person
+- A stale read of a <Show> or <Match> accessor no longer throws and drops the window's queued updates; it answers with the last value and logs the reader's stack
+- A hover panel for a row that a wheel notch scrolled under a still pointer now opens above the pointer, not level with it
+- Atlas: a card's hover label stays while the pointer rests on it through live updates, on the menus' opaque surface
+- Vault: the Details column of an entry keeps room for a few words in a list 600 to 900 px wide, and breaks between words
+- Closing a pane goes on to the backend when a computation throws while the tree commits, instead of stopping half way, and the edit's intent is still sent
+- Swarm: the spend chip opens the Spend cap panel, so a person sets, removes or resets an agent's daily cap from its card; its tooltip says the figure counts a model route or an API key
+- Files: Ctrl+= and Ctrl+- zoom the Places list and the file list on their own, each with its own level
+- Streamed Browser guard probe also checks WebRTC candidates and Chromium's own environment and flags
+- Large text find: srv skips UTF-16 matches that start between two code units inside its scan, so a search takes one call however many there are
+- Hover labels: a label that is open follows a change of its text while the pointer rests, instead of keeping the first
+- Status bar summary: agents signed out and agents out of quota each get a part and a row in the Waiting on you list
+- Vault: the details cell drops its minimum width in the stacked layout, and a card's brand badge wraps between words, not inside one
+- Large text find: a file in Shift_JIS, GBK, Big5 or another multibyte legacy encoding is not searched, since an ASCII byte can be half of one of its characters
+- Editor: a click on the file tree's toolbar or blank space keeps the zoom keys on the tree
+- Streamed Browser guard probe: canaries for Chromium's environment, the final command line, and the blocked schemes
+- Status bar summary: agents with messages held for them because they are not running get a part and a row; srv answers the counts (jekt.held.summary) and says when they change
+- The streamed Browser image also installs Chromium's sandbox helper, so its sandbox can start where the container allows it
+- A file sent with Message to a container agent is copied into its workspace, and its path in the message is the path inside the container.
+- Every Settings section now shows the Saved note after a change, not only Advanced
+- Drone polls: api polls run in their own task, a few at a time, so a slow or down site no longer delays local polls or the dead-man's-switch checks
+- The all-panes zoom toast says which way it went when the panes are at different levels, not a range of their sizes
+- Command palette: Open Editor, Open Browser, Open Drone and an Open entry for every other widget (the messengers included), Bundles and Backdrop…, a named entry for each keyboard-bound command (New Pane, Rename Tab, Swap Pane, Keyboard shortcuts…) and the Files, Editor, Documents, Browser and Terminal commands while their pane has focus; two tests keep every pane view and every key-bound command in the palette
+- Pane open with a line opens a large text file at that line in the Large text viewer
+- An account switch no longer leaves a stale pending choice when its window ends first, counts tasks claimed on the work queue's own store, and hands a prepared handoff to non-Claude agents too.
+
 ## 0.60.33 — 2026-11-17
 
 - Pane backdrops: a dialog about a pane with a backdrop, and a toast about it, are drawn in that pane's colours on its overlay surface
