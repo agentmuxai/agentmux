@@ -421,7 +421,7 @@ pub fn spawn(startup_rx: Receiver<StartupEvent>) {
     std::env::set_var("AGENTMUX_SPLASH_READY_FILE", &ready_file);
 
     // Footer identity, gathered once and clamped to the card width.
-    let info = crate::splash_info::SplashInfo::gather();
+    let info = crate::splash_info::SplashInfo::gather_and_log("start");
     let max_chars = ((CARD_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
     let footer = info.footer_lines(max_chars);
 
