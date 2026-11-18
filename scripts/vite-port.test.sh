@@ -120,6 +120,24 @@ distinct="$(cat "$PICKS"/* | sort -u | wc -l | tr -d ' ')"
 if [ "$distinct" = 12 ]; then ok; else bad "12 simultaneous picks gave $distinct different ports, not 12"; fi
 rm -rf "$PICKS"
 
+# The claim must not depend on `mkdir` failing for the second caller: uutils coreutils' mkdir (Ubuntu
+# 26.04) reports success to callers racing on one path, which gave one port to several picks and made
+# the check above fail at random on runners. A `mkdir` that always says yes stands in for it.
+FAKE="$(mktemp -d)"
+printf '#!/bin/sh\nfor last; do :; done\n[ -d "$last" ] || /bin/mkdir -p "$last"\nexit 0\n' >"$FAKE/mkdir"
+chmod +x "$FAKE/mkdir"
+FAKE_CLAIMS="$(mktemp -d)"
+FPICKS="$(mktemp -d)"
+for i in $(seq 1 12); do
+  PATH="$FAKE:$PATH" AGENTMUX_DEV_PORT_CLAIMS="$FAKE_CLAIMS" AGENTMUX_DEV_PORT_OWNER="clone$i" bash "$SUT" pick 5500 >"$FPICKS/$i" 2>/dev/null &
+done
+wait
+distinct="$(cat "$FPICKS"/* | sort -u | wc -l | tr -d ' ')"
+if [ "$distinct" = 12 ]; then ok; else bad "with a mkdir that always succeeds, 12 simultaneous picks gave $distinct different ports, not 12"; fi
+PATH="$FAKE:$PATH" AGENTMUX_DEV_PORT_CLAIMS="$FAKE_CLAIMS" AGENTMUX_DEV_PORT_OWNER=clone-x bash "$SUT" claim 5560 >/dev/null 2>&1 && ok || bad "first claim refused (mkdir always succeeds)"
+PATH="$FAKE:$PATH" AGENTMUX_DEV_PORT_CLAIMS="$FAKE_CLAIMS" AGENTMUX_DEV_PORT_OWNER=clone-y bash "$SUT" claim 5560 >/dev/null 2>&1 && bad "a second clone got a held port when mkdir always succeeds" || ok
+rm -rf "$FAKE" "$FAKE_CLAIMS" "$FPICKS"
+
 CLAIM_PORT=5450
 AGENTMUX_DEV_PORT_OWNER=clone-a bash "$SUT" claim "$CLAIM_PORT" >/dev/null 2>&1 && ok || bad "first claim refused"
 AGENTMUX_DEV_PORT_OWNER=clone-a bash "$SUT" claim "$CLAIM_PORT" >/dev/null 2>&1 && ok || bad "a clone's own claim must renew"
