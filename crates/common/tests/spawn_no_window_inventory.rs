@@ -140,6 +140,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: Linux sandbox probe, compiled only on Linux"),
     ("crates/cef/src/linux_sandbox.rs", "\"pkexec\"", 1,
      "not-windows: Linux sandbox probe, compiled only on Linux"),
+    ("crates/cef/src/memory_heartbeat/ui_stall.rs", "\"/usr/bin/vm_stat\"", 1,
+     "not-windows: macOS-only (free memory for the UI-stall line)"),
     ("crates/cef/src/sidecar.rs", "&backend_path", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/app/gl_probe.rs", "exe", 1,
