@@ -59,9 +59,12 @@ export interface GuideShown {
  * A spot's width is this share of the hovered pane (its width, or its height over the picture's proportions,
  * whichever is smaller), so the guides grow with the pane they are over: a large pane has large guides and a
  * small one has small ones. Three across, the compass is then about half of the pane's width and less of its
- * height, which leaves the panes under it, as the live reflow moves them, in view.
+ * height, which leaves the panes under it, as the live reflow moves them, in view. A small pane keeps the size every
+ * pane had before ([`SPOT_W_BASE`]), as far as it fits in it, so its guides are never smaller than they were.
  */
 const SPOT_SHARE = 0.15;
+/** The size of a spot before it followed the pane: where the share of a small pane is less, this is the size. */
+const SPOT_W_BASE = 56;
 /** The widest spot, px: on a very large pane the compass stays one a pointer can take in at a glance. */
 const SPOT_W_MAX = 180;
 /** The narrowest spot: a pane too small for the compass at this size has it overflow rather than vanish. */
@@ -159,7 +162,7 @@ export function guideSpots(rect: Dimensions, targetId: string, options: DropOpti
     const sized = (acrossX: number, acrossY: number): [number, number] => {
         const fit = Math.min(fitOf(rect.width, acrossX, 1), fitOf(rect.height, acrossY, ratio));
         // As wide as the pane's size asks, and no wider than the spots standing side by side fit in it.
-        const wanted = Math.min(SPOT_W_MAX, SPOT_SHARE * Math.min(rect.width, rect.height / ratio));
+        const wanted = Math.min(SPOT_W_MAX, Math.max(SPOT_W_BASE, SPOT_SHARE * Math.min(rect.width, rect.height / ratio)));
         const w = Math.round(Math.max(SPOT_W_MIN, Math.min(wanted, fit)));
         return [w, Math.round(w * ratio)];
     };

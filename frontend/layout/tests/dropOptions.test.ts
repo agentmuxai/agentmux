@@ -225,6 +225,11 @@ describe("guideSpots", () => {
         expect(Math.abs(medium / 600 - large / 1200)).toBeLessThan(0.01);
         expect(widthIn(4000, 2400)).toBe(180);
         expect(widthIn(60, 60)).toBe(28);
+        // A small pane keeps the size every pane had before, as far as it fits: never smaller than it was.
+        // (300 wide: five side by side fit at 53, what they were before; 340 wide has room for the full 56.)
+        expect(widthIn(300, 200)).toBe(53);
+        expect(widthIn(340, 300)).toBe(56);
+        expect(widthIn(170, 600)).toBeGreaterThanOrEqual(45);
         // The gap between two spots grows with the spot, and so does how far past its edge one takes the pointer.
         const gapIn = (width: number, height: number) => {
             const { spots } = spotsIn(width, height);
@@ -252,7 +257,7 @@ describe("guideSpots", () => {
         // 200 wide: the edges are not clear of the compass, so five across, the outer spot next to the compass.
         const narrow = spotsIn(200, 600).spots;
         expect(narrow).toHaveLength(ALL_AROUND.length);
-        expect(narrow[0].width).toBeLessThanOrEqual(Math.ceil(0.15 * 200));
+        expect(narrow[0].width).toBeLessThanOrEqual(56);
         expect(narrow[0].width).toBeGreaterThanOrEqual(28);
         const outer = narrow.find((s) => s.direction === DropDirection.OuterRight)!;
         expect(outer.x - narrow[0].x).toBe(2 * (narrow[0].width + 5));
