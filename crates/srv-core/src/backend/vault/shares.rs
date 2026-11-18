@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 
 use agentmux_common::time::now_ms;
 
-use super::signins::{fields_of, REALM, SITE};
-use super::{record, PERSON};
+use super::signins::{fields_of, REALM, SITE, USERNAME};
+use super::{history, inspect, record, record_line, signins, Line, PERSON};
 use crate::backend::storage::store::Store;
 
 /// The login field that lists the agents (by uid) an entry is shared with.
@@ -58,13 +58,18 @@ fn joined(list: &[String]) -> String {
 /// Share entry `id` with `who` (an agent's uid, or [`EVERY_AGENT`]), as the person: a login saved for a site.
 /// Returns false when it already was.
 pub fn add(store: &Store, id: &str, who: &str) -> Result<bool, String> {
+    add_shown(store, id, who, None)
+}
+
+/// [`add`], for a share the person allowed when shown `ask`: made only if the login is still the one they were shown.
+fn add_shown(store: &Store, id: &str, who: &str, shown: Option<&Ask>) -> Result<bool, String> {
     if who != EVERY_AGENT && !is_uid(who) {
         return Err("name the agent by its permanent uid, or * for every agent".into());
     }
     // A new share starts by asking: an "Always" this agent holds for the entry from before, or one answered while an
     // earlier share was being removed, goes first.
     revoke_always(store, id, who, None)?;
-    change(store, id, who, "shared", true, |list| {
+    change(store, id, who, "shared", true, shown, |list| {
         if list.iter().any(|w| w == who) {
             return Ok(false);
         }
@@ -79,7 +84,7 @@ pub fn add(store: &Store, id: &str, who: &str) -> Result<bool, String> {
 /// Stop sharing entry `id` with `who`. Ends the "Always" the agent holds for it and returns whether a share was removed.
 pub fn remove(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     // A removal needs no eligibility: a login that has since lost its site, or gained a realm, can still be unshared.
-    let removed = change(store, id, who, "unshared", false, |list| {
+    let removed = change(store, id, who, "unshared", false, None, |list| {
         let before = list.len();
         list.retain(|w| w != who);
         Ok(list.len() != before)
@@ -88,15 +93,30 @@ pub fn remove(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-fn change(store: &Store, id: &str, who: &str, action: &str, eligible: bool, edit: impl Fn(&mut Vec<String>) -> Result<bool, String>) -> Result<bool, String> {
+/// Whether an entry of `kind` with these `fields` can be shared: a login saved for a site, which is no sign-in for a
+/// site's HTTP prompt or a proxy.
+pub fn check_shareable(kind: &str, fields: &BTreeMap<String, String>) -> Result<(), String> {
+    if kind != "login" || !fields.contains_key(SITE) {
+        return Err("only a login saved for a site can be shared".into());
+    }
+    if fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY) {
+        return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared".into());
+    }
+    Ok(())
+}
+
+fn change(store: &Store, id: &str, who: &str, action: &str, eligible: bool, shown: Option<&Ask>, edit: impl Fn(&mut Vec<String>) -> Result<bool, String>) -> Result<bool, String> {
     for _ in 0..3 {
         let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
         let mut fields = fields_of(&row);
-        if eligible && (row.kind != "login" || !fields.contains_key(SITE)) {
-            return Err("only a login saved for a site can be shared".into());
+        if eligible {
+            check_shareable(&row.kind, &fields)?;
         }
-        if eligible && (fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY)) {
-            return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared".into());
+        // Checked on the row this write is made over, so no edit of the login can land between the check and the write.
+        if let Some(ask) = shown {
+            if &asked_of(&row, &fields, &ask.reason) != ask {
+                return Err(format!("{} changed while the person was asked, so nothing was shared: ask again", ask.label));
+            }
         }
         let mut list = listed(&fields);
         if !edit(&mut list)? {
@@ -145,6 +165,67 @@ fn revoke_always(store: &Store, id: &str, who: &str, still: Option<&BTreeMap<Str
     }
     Ok(())
 }
+
+/// What an agent's `Vault share` asks the person, as the card shows it: the login, its site and its user name masked.
+/// `created_at` binds it to this login: one deleted and made again is another.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    pub entry_id: String,
+    pub label: String,
+    pub site: String,
+    pub user: String,
+    pub created_at: i64,
+    pub reason: String,
+}
+
+/// What `plan_ask` found.
+#[derive(Debug, PartialEq)]
+pub enum Asked {
+    /// The login is shared with the agent already: nobody is asked. Its label.
+    Already(String),
+    Ask(Ask),
+}
+
+fn asked_of(row: &super::VaultRow, fields: &BTreeMap<String, String>, reason: &str) -> Ask {
+    Ask {
+        entry_id: row.id.clone(),
+        label: row.label.clone(),
+        site: fields.get(SITE).cloned().unwrap_or_default(),
+        user: signins::mask(fields.get(USERNAME).map(String::as_str).unwrap_or("")),
+        created_at: row.created_at,
+        reason: reason.to_string(),
+    }
+}
+
+/// Every check of an agent's `Vault share`, with nothing written: the reason, that the agent may use the entry (anything
+/// else is "no entry"), that it is a login that can be shared, and that it is not shared with the agent already. `uid`
+/// is the agent's permanent uid, proven by the caller: an agent asks for a share for itself only.
+pub fn plan_ask(store: &Store, id: &str, agent: &str, uid: &str, reason: Option<&str>) -> Result<Asked, String> {
+    let reason = history::require_reason(reason)?;
+    if !is_uid(uid) {
+        return Err("this agent has no permanent identity a share could name".into());
+    }
+    let row = inspect::entry_for(store, id, Some(agent))?;
+    let fields = fields_of(&row);
+    check_shareable(&row.kind, &fields)?;
+    if names(&fields, uid) {
+        return Ok(Asked::Already(row.label));
+    }
+    Ok(Asked::Ask(asked_of(&row, &fields, &reason)))
+}
+
+/// The person allowed `ask`: shares the login with the agent `uid`, if it is still the login they were shown.
+pub fn grant_asked(store: &Store, ask: &Ask, uid: &str) -> Result<(), String> {
+    add_shown(store, &ask.entry_id, uid, Some(ask)).map(|_| ())
+}
+
+/// The history line of an ask that did not end in a share: `outcome` is `denied`, `expired` or the like.
+pub fn note_ask(store: &Store, ask: &Ask, agent: &str, outcome: &str) {
+    record_line(store, Line { entry_id: &ask.entry_id, label: &ask.label, actor: agent, action: ASKED_TO_BE_SHARED, target: &ask.site, outcome, reason: &ask.reason });
+}
+
+/// The history action of an agent's request to be given a login.
+pub const ASKED_TO_BE_SHARED: &str = "asked to be given it";
 
 /// Agent `uid` is gone: its shares go, and the "Always" it held with them (A9).
 pub fn forget_agent(store: &Store, uid: &str) -> Result<usize, String> {

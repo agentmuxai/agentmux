@@ -20,6 +20,7 @@ use super::vault_handlers::{asking_agent, publish};
 use super::AppState;
 use crate::backend::vault::inspect::{self, KeyResult, LinkChange, UpdateRequest};
 use crate::backend::vault::seal;
+use crate::backend::vault::shares::{self, Ask, Asked};
 use crate::backend::vault::source_link::Link;
 use crate::backend::vault::uses::{Ended, UseLink, UseRequest};
 
@@ -186,6 +187,104 @@ pub(crate) async fn handle_vault_update(State(state): State<AppState>, caller: O
         publish(&state);
     }
     response
+}
+
+/// How long the person has to answer an agent's request to be given a login by default, and at most.
+const SHARE_WAIT: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ShareBody {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    /// An agent may name only itself: a share for another agent, or for every agent, is the person's to make.
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    auth: Auth,
+    #[serde(default)]
+    wait_secs: Option<u64>,
+}
+
+/// The question for the person: the login, its site and who asks to be able to sign in with it.
+fn share_card(ask: &Ask, agent: &str, pane: &str) -> UseRequest {
+    UseRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent: agent.to_string(),
+        block_id: pane.to_string(),
+        entry_id: ask.entry_id.clone(),
+        entry_label: ask.label.clone(),
+        what: "share".into(),
+        origin: ask.site.clone(),
+        field: ask.user.clone(),
+        offer_always: false,
+        reason: "an agent asked to be able to sign in with this login".into(),
+        agent_reason: ask.reason.clone(),
+        kind: "login".into(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+        share: true,
+        ..Default::default()
+    }
+}
+
+/// What the agent is told when the card didn't end in a yes: silence is a no.
+fn share_not_allowed(ended: Ended) -> String {
+    match ended {
+        Ended::Expired | Ended::NoAnswer => "nobody answered, and a login is shared only on a yes: nothing was shared; ask the person".to_string(),
+        other => other.refusal("nothing was shared"),
+    }
+}
+
+/// `POST /api/v1/vault/share`: an agent asks the person to share a login with its own browser profile, so that it can
+/// sign in to the login's site with it (docs/specs/SPEC_VAULT_AGENTS_ENTER_CREDENTIALS_WHEREVER_ASKED_2026_11_16.md
+/// A2). Only the person's yes makes the share, and only for the agent that proved who it is. The agent learns the
+/// login's label and site, never its user name or its password.
+pub(crate) async fn handle_vault_share(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ShareBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
+    let Some(pane) = pane else {
+        return error(StatusCode::FORBIDDEN, "share needs to know which agent asks (its token or its signed identity, neither of which verified): a login is shared with the agent that proved who it is; respawn the agent if it has neither");
+    };
+    let uid = state.reactive_handler.get_agent(&agent).and_then(|a| a.uid).unwrap_or_default();
+    if let Some(named) = body.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        if !named.eq_ignore_ascii_case(&agent) && named != uid {
+            return error(StatusCode::FORBIDDEN, "an agent asks for a share for itself only: leave agent out. A login shared with another agent, or with every agent, is the person's to share, from the login's card in the Vault pane");
+        }
+    }
+    let Some(id) = body.id.map(|i| i.trim().to_string()).filter(|i| !i.is_empty()) else {
+        return error(StatusCode::BAD_REQUEST, "share needs an id: the login to be given (list shows them)");
+    };
+    let (store, reason, who, who_uid) = (state.identity_store.clone(), body.reason, agent.clone(), uid.clone());
+    let planned = {
+        let id = id.clone();
+        blocking(move || shares::plan_ask(&store, &id, &who, &who_uid, reason.as_deref())).await
+    };
+    let ask = match planned {
+        Ok(Asked::Already(label)) => return Json(json!({ "status": "shared", "id": id, "label": label, "already": true })).into_response(),
+        Ok(Asked::Ask(ask)) => ask,
+        Err(refusal) => return refusal,
+    };
+    let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(SHARE_WAIT).min(ANSWER_WAIT_MAX);
+    let headline = format!("{agent} wants to sign in to {} with {}", ask.site, ask.label);
+    let (ended, _) = super::vault_ask::ask(&state, &pane, share_card(&ask, &agent, &pane), wait, &headline).await;
+    if !ended.allowed() {
+        let (store, ask, who) = (state.identity_store.clone(), ask.clone(), agent.clone());
+        let _ = tokio::task::spawn_blocking(move || shares::note_ask(&store, &ask, &who, ended.outcome())).await;
+        publish(&state);
+        return error(StatusCode::FORBIDDEN, share_not_allowed(ended));
+    }
+    let (store, made, who) = (state.identity_store.clone(), ask.clone(), agent.clone());
+    let granted = blocking(move || {
+        shares::grant_asked(&store, &made, &uid)?;
+        shares::note_ask(&store, &made, &who, "done");
+        Ok(())
+    })
+    .await;
+    publish(&state);
+    match granted {
+        Ok(()) => Json(json!({ "status": "shared", "id": ask.entry_id, "label": ask.label, "site": ask.site })).into_response(),
+        Err(refusal) => refusal,
+    }
 }
 
 #[cfg(test)]

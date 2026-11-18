@@ -331,3 +331,32 @@ fn a_container_agent_needs_a_grant_that_is_on_and_open_to_it() {
     assert!(check_grant(&Ok(None), Some("read"), "builder").unwrap_err().contains("isn't shared"));
     assert!(check_grant(&Err("bad".into()), Some("read"), "builder").unwrap_err().contains("doesn't parse"));
 }
+
+#[test]
+fn a_replaced_secret_beside_a_share_removal_leaves_the_share_removed() {
+    use crate::backend::vault::shares;
+    const AGENT: &str = "uid-pulp-0001";
+    let s = store();
+    for round in 0..40 {
+        let fields = [("username", "alex".to_string()), ("site", format!("https://race{round}.example.com"))].map(|(k, v)| (k.to_string(), v)).into();
+        let entry = NewEntry { kind: "login".into(), label: "Intranet".into(), fields, tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) };
+        let id = create_in(&s, entry, "personal").unwrap();
+        shares::add(&s, &id, AGENT).unwrap();
+        let created = s.vault_get(&id).unwrap().unwrap().created_at;
+        std::thread::scope(|t| {
+            let w = t.spawn(|| {
+                // Written, or refused because the entry changed meanwhile: never a write that brings the share back.
+                let _ = replace_main(&s, &id, created, "password", &Zeroizing::new(format!("pw-{round}")), "builder");
+            });
+            let r = t.spawn(|| shares::remove(&s, &id, AGENT));
+            w.join().unwrap();
+            assert!(r.join().unwrap().unwrap(), "round {round}: the share was there to remove");
+        });
+        let row = s.vault_get(&id).unwrap().unwrap();
+        assert!(!shares::listed(&crate::backend::vault::signins::fields_of(&row)).contains(&AGENT.to_string()), "round {round}: the removed share came back");
+    }
+    // On its own the replacement is written, so the race above is a real one.
+    let id = create_in(&s, NewEntry { kind: "login".into(), label: "Alone".into(), fields: [("site".to_string(), "https://alone.example.com".to_string())].into(), tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) }, "personal").unwrap();
+    let created = s.vault_get(&id).unwrap().unwrap().created_at;
+    replace_main(&s, &id, created, "password", &Zeroizing::new("pw-new".to_string()), "builder").unwrap();
+}

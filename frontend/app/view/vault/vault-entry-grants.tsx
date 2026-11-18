@@ -10,6 +10,7 @@ import { For, Show, type JSX } from "solid-js";
 import { CloseButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SETTING_GRANT, settingGrantLabel, SIGNIN_GRANT, signinGrantLabel } from "./vault-grant-labels";
+import { EntryShares } from "./vault-share";
 import { siteOf } from "./vault-use-question";
 
 /** One kind of grant: a line of names, each with its revoke button. */
@@ -68,6 +69,7 @@ export function EntryGrants(props: { entry: VaultEntryInfo; revoke: (grant: stri
                 stop={(g) => `Stop ${settingGrantLabel(g)} reading ${label()}`}
                 revoke={props.revoke}
             />
+            <EntryShares entry={props.entry} />
         </>
     );
 }

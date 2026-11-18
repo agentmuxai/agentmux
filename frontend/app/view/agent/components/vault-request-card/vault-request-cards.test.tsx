@@ -57,6 +57,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "C:/work",
     replaces: false,
     signin: false,
+    share: false,
     account: false,
     change: false,
     requested_ms: Date.now(),

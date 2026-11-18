@@ -226,6 +226,7 @@ describe("the question before an agent changes where a machine copy is", () => {
         cwd: "",
         replaces: false,
         signin: false,
+        share: false,
         account: false,
         change: false,
         requested_ms: 1,

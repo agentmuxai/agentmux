@@ -36,7 +36,7 @@ fn usable(store: &Store, agent: Option<&str>) -> Result<Vec<VaultRow>, String> {
 }
 
 /// `id`'s entry if `agent` may use it; anything else is "no entry", as for an id that isn't there.
-fn entry_for(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow, String> {
+pub(super) fn entry_for(store: &Store, id: &str, agent: Option<&str>) -> Result<VaultRow, String> {
     let no_entry = || format!("no entry {id}");
     let row = store.vault_get(id.trim()).map_err(|e| e.to_string())?.ok_or_else(no_entry)?;
     if !vaults::entry_row_usable(store, &row.vault_id, agent)? {
@@ -342,7 +342,7 @@ fn update_with(store: &Store, req: &UpdateRequest, agent: &str, allowed: Option<
         (Some(_), None) => return Err("where an entry's machine copy is decides what a check reads, so the person is asked before it changes: nothing was changed".into()),
     }
     let Planned { row, reason, label, fields, tags, changed } = plan;
-    let was = row.sealed.clone();
+    let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
     let new = VaultRow {
         label: label.clone(),
         fields: serde_json::to_string(&fields).map_err(|e| e.to_string())?,
@@ -350,7 +350,7 @@ fn update_with(store: &Store, req: &UpdateRequest, agent: &str, allowed: Option<
         updated_at: now_ms(),
         ..row
     };
-    if !store.vault_update_kept(&new, &was, None).map_err(|e| e.to_string())? {
+    if !store.vault_update_kept(&new, &was, &was_fields, None).map_err(|e| e.to_string())? {
         return Err(format!("{label} changed while this was being saved, so nothing was changed: look at it again"));
     }
     let target = changed.join(", ");

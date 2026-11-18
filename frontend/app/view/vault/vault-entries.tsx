@@ -23,6 +23,7 @@ import { copyCheck, machineCopy, MachineCopyLine } from "./vault-source";
 import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
+import { canShare, ShareButton } from "./vault-share";
 import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList } from "./vault-store";
 import { VaultSectionBox } from "./vault-section";
 import { vaultNameOf, VaultMoveDialog } from "./vault-vaults";
@@ -152,6 +153,9 @@ function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "cha
             <IconButton icon="pen" label="Change" density="compact" onClick={() => props.on("change")} />
             <Show when={vaultList().length > 1}>
                 <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => props.on("move")} />
+            </Show>
+            <Show when={canShare(props.entry)}>
+                <ShareButton entry={props.entry} />
             </Show>
             <IconButton icon="book" label="History" density="compact" onClick={() => props.on("history")} />
             <Show when={props.entry.versions > 0}>
