@@ -308,19 +308,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Real MiniDumpWriteDump against a live child process.
+    /// The test binary itself as a child that has finished starting and then blocks on its stdin: the dump
+    /// of a process still loading (a `cmd` that has just been created) is cut short, and a killed `cmd`
+    /// leaves its `ping` running with the test's pipes. Returns the child, the line it printed that starts
+    /// with `ready`, and its output, which the caller keeps open until the child has ended.
+    #[cfg(target_os = "windows")]
+    fn spawn_helper(test: &str, ready: &str) -> (std::process::Child, String, impl Iterator<Item = std::io::Result<String>>) {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--ignored", "--nocapture"])
+            .env("AGENTMUX_HD_CHILD", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let line = lines.by_ref().map(|l| l.unwrap()).find(|l| l.starts_with(ready));
+        (child, line.unwrap_or_default(), lines)
+    }
+
+    /// Real MiniDumpWriteDump against a live child process that is up and waiting.
     #[cfg(target_os = "windows")]
     #[test]
     fn writes_a_readable_dump_of_another_process() {
-        let mut child = std::process::Command::new("cmd")
-            .args(["/c", "ping -n 30 127.0.0.1 >NUL"])
-            .spawn()
-            .expect("spawn child");
+        let (mut child, ready, _output) = spawn_helper("host_hang_dump::tests::waiting_hang_child", "WAITING");
+        assert_eq!(ready, "WAITING", "the child came up");
         let dir = std::env::temp_dir().join(format!("amux-hang-dump-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let result = write_hang_dump(child.id(), None, &dir);
-        let _ = child.kill();
+        drop(child.stdin.take());
         let _ = child.wait();
 
         let path = result.expect("dump written");
@@ -336,6 +354,20 @@ mod tests {
         assert!(types.contains(&THREAD_LIST), "thread stacks: {types:?}");
         assert!(types.contains(&HANDLE_DATA), "handle data: {types:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Runs only as the child of the previous test: says it is up and waits for its stdin to close.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "runs as the child of writes_a_readable_dump_of_another_process"]
+    fn waiting_hang_child() {
+        use std::io::{Read, Write};
+        if std::env::var_os("AGENTMUX_HD_CHILD").is_none() {
+            return;
+        }
+        println!("WAITING");
+        std::io::stdout().flush().unwrap();
+        let _ = std::io::stdin().read_to_end(&mut Vec::new());
     }
 
     /// Runs only as the child of the next test: hardens itself and waits for its stdin to close.
@@ -357,22 +389,12 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn dumps_a_hardened_process_through_the_handle_its_creator_holds() {
-        use std::io::{BufRead, BufReader};
         use std::os::windows::io::AsRawHandle;
-        use std::process::{Command, Stdio};
         if agentmux_common::debug_privilege::refusal_cannot_be_observed("dumps_a_hardened_process_through_the_handle_its_creator_holds") {
             return;
         }
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "host_hang_dump::tests::hardened_hang_child", "--ignored", "--nocapture"])
-            .env("AGENTMUX_HD_CHILD", "1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-        let hardened = lines.by_ref().map(|l| l.unwrap()).find(|l| l.starts_with("HARDENED "));
-        assert_eq!(hardened.as_deref(), Some("HARDENED true"));
+        let (mut child, hardened, _output) = spawn_helper("host_hang_dump::tests::hardened_hang_child", "HARDENED ");
+        assert_eq!(hardened, "HARDENED true");
         let dir = std::env::temp_dir().join(format!("amux-hang-dump-hardened-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 

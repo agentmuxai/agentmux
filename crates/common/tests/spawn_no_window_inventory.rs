@@ -224,8 +224,6 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_hang_dump.rs", "std::env::current_exe(", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/launcher/src/host_hang_dump.rs", "\"cmd\"", 1,
-     "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/old_versions.rs", "&running_copy", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/host_spawn.rs", "real_exe", 2,
