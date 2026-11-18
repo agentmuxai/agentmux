@@ -413,6 +413,8 @@ describe("Tower", () => {
         // Under the pointer: when, and how much.
         fireEvent.pointerMove(charts[1], { clientX: 10_000 });
         expect(screen.getByTestId("tower-chart-tip")).toHaveTextContent("0 s ago · 50%");
+        // At the right end the label's own right edge meets the line, so it is not cut off by the plot's edge.
+        expect(screen.getByTestId("tower-chart-tip").style.transform).toBe("translate(-100%, -100%)");
         fireEvent.pointerLeave(charts[1]);
         expect(screen.queryByTestId("tower-chart-tip")).toBeNull();
     });
