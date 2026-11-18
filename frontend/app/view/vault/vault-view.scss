@@ -57,12 +57,20 @@
 
 .vault-list__bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+
+    // Expiring soon goes under the filter in a pane too narrow for both, and its words wrap, so the bar never
+    // needs a sideways scroll.
+    .ui-button {
+        max-width: 100%;
+        white-space: normal;
+    }
 }
 
 .vault-list__filter {
-    flex: 1 1 auto;
+    flex: 1 1 6rem;
     min-width: 0;
 }
 
@@ -130,6 +138,15 @@
     justify-content: flex-start;
     min-width: 0;
     text-align: left;
+}
+
+// The name and its count wrap in a pane under about 10rem; a word that is still wider than the pane breaks last, so
+// the head never pushes the list sideways. The head's other buttons (Add) keep their words whole and drop to a line
+// of their own: the head wraps.
+.vault-section__toggle {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .vault-section__label {
@@ -388,6 +405,14 @@
         flex: 1 1 100%;
     }
 
+    // A row's action buttons wrap in a row of their own, so two or three of them fit a pane under about 10rem.
+    td.vault-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1);
+        white-space: normal;
+    }
+
     // An entry's name on the Activity tab is a button: a long one wraps inside it.
     td:not(.vault-actions) .ui-button {
         max-width: 100%;
@@ -405,6 +430,43 @@
 @container vault (max-width: 700px) {
     .vault-table--wide {
         @include stacked-rows;
+    }
+}
+
+// A list under about 10rem (about 130px of room): nothing may push it sideways. The padding tightens, and a word wider
+// than the room (a card's brand, the last four digits) breaks as a last resort, after its line has wrapped between
+// words. Above this the brand and the digits stay whole.
+@container vault (max-width: 130px) {
+    .vault-section__head {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-section__head .ui-button {
+        padding-inline: 0;
+    }
+
+    .vault-section__body {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-table tr {
+        padding-inline: var(--space-1);
+    }
+
+    .vault-table td .ui-pill {
+        overflow-wrap: anywhere;
+    }
+
+    // The time and the kind are short and stay whole above this; here they wrap, and a word wider than the room breaks.
+    .vault-table td.vault-when,
+    .vault-table td.vault-kind {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .vault-table .vault-last-four {
+        white-space: normal;
+        overflow-wrap: anywhere;
     }
 }
 
