@@ -392,4 +392,64 @@ describe("useInSessionSearch: a bar brought back after a recycle", () => {
         expect(again.search.highlightId()).toBe("b");
         again.dispose();
     });
+    describe("while the pane is still bringing its history in", () => {
+        const tail = [md("a", "alpha hit"), md("b", "beta"), md("c", "gamma hit")];
+        const whole = [...tail, md("d", "delta hit")];
+        function mountLoading(blockId: string) {
+            const [document, setDocument] = createSignal<DocumentNode[]>(tail);
+            const [restoring, setRestoring] = createSignal(true);
+            sessionStorage.setItem(`agentmux:find-in-pane:${blockId}`, JSON.stringify({ text: "hit", matchId: "d", dim: true }));
+            const made = createRoot((dispose) => ({
+                search: useInSessionSearch({ blockId, document, restoring, clock: immediate }),
+                dispose,
+            }));
+            return { ...made, setDocument, setRestoring };
+        }
+
+        it("keeps the saved match until the older rows that hold it have loaded", async () => {
+            const m = mountLoading("b6");
+            await vi.advanceTimersByTimeAsync(0);
+            expect(m.search.matches()).toEqual(["a", "c"]);
+            expect(m.search.currentIndex()).toBe(-1);
+            m.setDocument(whole);
+            await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS);
+            expect(m.search.matches()).toEqual(["a", "c", "d"]);
+            expect(m.search.highlightId()).toBe("d");
+            m.dispose();
+        });
+
+        it("gives up on it when the history is in and the row is not there, and a later row does not pull it back", async () => {
+            const m = mountLoading("b7");
+            await vi.advanceTimersByTimeAsync(0);
+            m.setRestoring(false);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(m.search.currentIndex()).toBe(-1);
+            m.setDocument(whole);
+            await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS);
+            expect(m.search.matches()).toEqual(["a", "c", "d"]);
+            expect(m.search.currentIndex()).toBe(-1);
+            m.dispose();
+        });
+
+        it("takes it from the last rows when they arrive together with the end of the load", async () => {
+            const m = mountLoading("b8");
+            await vi.advanceTimersByTimeAsync(0);
+            m.setDocument(whole);
+            m.setRestoring(false);
+            await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS);
+            expect(m.search.highlightId()).toBe("d");
+            m.dispose();
+        });
+
+        it("stepping to another match drops it", async () => {
+            const m = mountLoading("b9");
+            await vi.advanceTimersByTimeAsync(0);
+            m.search.next();
+            expect(m.search.highlightId()).toBe("a");
+            m.setDocument(whole);
+            await vi.advanceTimersByTimeAsync(SEARCH_REFRESH_MS);
+            expect(m.search.highlightId()).toBe("a");
+            m.dispose();
+        });
+    });
 });
