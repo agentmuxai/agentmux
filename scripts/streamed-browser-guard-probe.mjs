@@ -87,10 +87,20 @@ const cases = ${JSON.stringify(CASES)}.map((c) => ({ ...c, url: c.url.replace('O
   } catch (e) {
     out['webrtc'] = { candidates: [], err: String(e) };
   }
+  try { await fetch('file:///etc/hostname'); out['file-fetch'] = { reached: true }; } catch (e) { out['file-fetch'] = { reached: false }; }
   navigator.sendBeacon('/report', JSON.stringify(out));
+  // The page then tries to leave for each address. A refused one leaves the page where it is, so it can still call
+  // back; one that loaded replaces the page and the call never comes.
+  const to = ['file:///etc/hostname', 'chrome://version/', 'devtools://devtools/bundled/inspector.html', 'view-source:' + location.origin + '/'];
+  for (let i = 0; i < to.length; i++) {
+    try { location.href = to[i]; } catch (e) {}
+    await new Promise((r) => setTimeout(r, 1500));
+    navigator.sendBeacon('/alive?i=' + i);
+  }
 })();
 </script>`;
 
+const alive = new Set();
 let resolveReport;
 const reported = new Promise((r) => (resolveReport = r));
 const server = http.createServer((req, res) => {
@@ -102,6 +112,10 @@ const server = http.createServer((req, res) => {
             resolveReport(JSON.parse(body));
         });
         return;
+    }
+    if (req.url.startsWith("/alive")) {
+        alive.add(req.url.split("i=")[1]);
+        return void res.writeHead(204).end();
     }
     if (req.url === "/ping") return void res.writeHead(200, { "access-control-allow-origin": "*" }).end("ok");
     res.writeHead(200, { "content-type": "text/html" }).end(page(`http://127.0.0.1:${server.address().port}`));
@@ -123,7 +137,18 @@ ws.on("message", (data, isBinary) => {
 ws.on("error", (e) => errors.push(String(e)));
 
 const report = await Promise.race([reported, new Promise((r) => setTimeout(() => r(null), 40000))]);
+for (let i = 0; i < 40 && alive.size < 4; i++) await new Promise((r) => setTimeout(r, 500));
 ws.close();
+
+// A pane never starts on an address of the browser's own or the server's: the server refuses the request.
+const SCHEMES = ["file:///etc/hostname", "chrome://version/", "devtools://devtools/bundled/inspector.html", `view-source:http://127.0.0.1:${probePort}/`];
+const startRefusals = await Promise.all(SCHEMES.map((u) => new Promise((resolve) => {
+    const w = new WebSocket(`ws://127.0.0.1:${webPort}/agentmux/streamed-browser?url=${encodeURIComponent(u)}&w=800&h=500`, { headers: { "X-AuthKey": key } });
+    const t = setTimeout(() => { w.terminate(); resolve({ u, refused: false, how: "opened" }); }, 8000);
+    w.on("unexpected-response", (_req, res) => { clearTimeout(t); resolve({ u, refused: res.statusCode === 400, how: `HTTP ${res.statusCode}` }); });
+    w.on("open", () => { clearTimeout(t); w.close(); resolve({ u, refused: false, how: "opened" }); });
+    w.on("error", () => {});
+})));
 server.close();
 
 const violations = [];
@@ -137,6 +162,9 @@ else {
         else if (!c.reach && r.ms > 3000) violations.push(`${c.label}: failed only after ${r.ms} ms (a timeout, not the proxy's refusal)`);
     }
 }
+if (report && report["file-fetch"]?.reached) violations.push("a page fetched file:// (must be refused)");
+if (alive.size < 4) violations.push(`a page left for a refused address: only ${alive.size} of 4 navigations left it in place`);
+for (const r of startRefusals) if (!r.refused) violations.push(`a pane was started on ${r.u} (${r.how}); must be refused with HTTP 400`);
 // A candidate is "typ host" with an address, or "srflx"/"relay"; a name ending in .local (mDNS) leaks no address.
 const rtc = report?.webrtc;
 if (report && !rtc) violations.push("webrtc: no result");
@@ -144,5 +172,9 @@ for (const c of rtc?.candidates ?? []) {
     const literal = /candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (\S+)/.exec(c);
     if (literal && (literal[2] !== "host" || !literal[1].endsWith(".local"))) violations.push(`webrtc: candidate leaves the proxy: ${c}`);
 }
-console.log(JSON.stringify({ ok: violations.length === 0, violations, report }, null, 2));
+// A line per item on stderr, so a green run shows what it proved.
+if (report?.["file-fetch"] && !report["file-fetch"].reached) console.error("guard: ok a page's fetch of file:// is refused");
+if (alive.size >= 4) console.error("guard: ok a page's navigations to file:, chrome:, devtools: and view-source: addresses all left it in place");
+for (const r of startRefusals) if (r.refused) console.error(`guard: ok a pane started on ${r.u} is refused (${r.how})`);
+console.log(JSON.stringify({ ok: violations.length === 0, violations, report, navigationsLeftInPlace: alive.size, startRefusals }, null, 2));
 process.exit(violations.length ? 1 : 0);
