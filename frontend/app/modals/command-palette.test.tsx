@@ -7,7 +7,7 @@
 // uses it.
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
     const cmd = (id: string, label: string, category: string, hidden?: boolean, requires?: string) => ({
@@ -126,5 +126,87 @@ describe("CommandPaletteModal agents", () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe("CommandPaletteModal keyboard scroll", () => {
+    const scrolled = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    beforeEach(() => {
+        scrolled.mockReset();
+        Element.prototype.scrollIntoView = function (this: Element, arg?: boolean | ScrollIntoViewOptions) {
+            scrolled(this.textContent, arg);
+        };
+    });
+    afterEach(() => {
+        Element.prototype.scrollIntoView = original;
+    });
+
+    function open() {
+        render(() => <CommandPaletteModal close={() => {}} />);
+        return screen.getByPlaceholderText("Search commands and agents...");
+    }
+
+    it("keeps the selected row in view when Down or Up moves it", () => {
+        const input = open();
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Window"), { block: "nearest" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        fireEvent.keyDown(input, { key: "ArrowUp" });
+        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Window"), { block: "nearest" });
+    });
+
+    it("does not scroll when the pointer selects a row", () => {
+        open();
+        const row = document.querySelectorAll(".command-palette-item")[2];
+        fireEvent.mouseMove(row, { clientX: 10, clientY: 10 });
+        fireEvent.mouseMove(row, { clientX: 12, clientY: 10 });
+        expect(row.classList.contains("selected")).toBe(true);
+        expect(scrolled).not.toHaveBeenCalled();
+    });
+
+    it("keeps the keyboard's row when the list scrolls a different row under a pointer at rest", () => {
+        const input = open();
+        const rows = () => document.querySelectorAll(".command-palette-item");
+        fireEvent.mouseMove(rows()[3], { clientX: 50, clientY: 90 });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        // The list scrolled: the browser reports the same pointer position over another row (no new position).
+        fireEvent.mouseMove(rows()[4], { clientX: 50, clientY: 90 });
+        fireEvent.mouseEnter(rows()[4]);
+        expect(rows()[2].classList.contains("selected")).toBe(true);
+        expect(rows()[4].classList.contains("selected")).toBe(false);
+    });
+
+    it("shows the very top of the list when Up reaches the first row", () => {
+        const input = open();
+        const list = document.querySelector(".command-palette-list") as HTMLElement;
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        list.scrollTop = 4;
+        fireEvent.keyDown(input, { key: "ArrowUp" });
+        expect(list.scrollTop).toBe(0);
+    });
+
+    it("moves by a page with PageDown and PageUp, and to the ends with End and Home, keeping the row in view", () => {
+        const input = open();
+        const selected = () => document.querySelector(".command-palette-item.selected .command-palette-item-label")?.textContent;
+        const last = document.querySelectorAll(".command-palette-item").length - 1;
+        fireEvent.keyDown(input, { key: "End" });
+        expect(selected()).toBe("Close Pane");
+        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Pane"), { block: "nearest" });
+        fireEvent.keyDown(input, { key: "Home" });
+        expect(selected()).toBe("Split Right");
+        fireEvent.keyDown(input, { key: "PageDown" }); // jsdom has no layout: a page is 8 rows, held to the last
+        expect(document.querySelectorAll(".command-palette-item")[last].classList.contains("selected")).toBe(true);
+        fireEvent.keyDown(input, { key: "PageUp" });
+        expect(selected()).toBe("Split Right");
+    });
+
+    it("shows the top of the list again when the search changes", () => {
+        const input = open();
+        const list = document.querySelector(".command-palette-list") as HTMLElement;
+        list.scrollTop = 400;
+        fireEvent.input(input, { target: { value: "close" } });
+        expect(list.scrollTop).toBe(0);
     });
 });

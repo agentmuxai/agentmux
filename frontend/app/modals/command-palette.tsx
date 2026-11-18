@@ -29,13 +29,88 @@ function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
     });
 }
 
-const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
-    const [query, setQuery] = createSignal("");
-    const [selectedIdx, setSelectedIdx] = createSignal(0);
-    let inputRef!: HTMLInputElement;
+function PaletteRow(props: {
+    cmd: CommandEntry;
+    selected: boolean;
+    onHover: (e: MouseEvent) => void;
+    onPick: (e: MouseEvent) => void;
+}): JSX.Element {
+    return (
+        <div
+            class={`command-palette-item${props.selected ? " selected" : ""}`}
+            onClick={(e) => props.onPick(e)}
+            onMouseMove={(e) => props.onHover(e)}
+        >
+            {props.cmd.icon && (
+                <i
+                    class={`fa-solid fa-${props.cmd.icon} command-palette-item-icon`}
+                    style={props.cmd.iconColor ? { color: props.cmd.iconColor } : {}}
+                />
+            )}
+            <span class="command-palette-item-text">
+                <span class="command-palette-item-label">{props.cmd.label}</span>
+                <Show when={props.cmd.detail}>
+                    <span class="command-palette-item-detail">{props.cmd.detail}</span>
+                </Show>
+            </span>
+            <span class="command-palette-item-category">{props.cmd.category}</span>
+            <Show when={shortcutFor(props.cmd.id)}>{(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}</Show>
+        </div>
+    );
+}
+
+/**
+ * A pointer over the list selects the row it moves onto, and only a real move does: the list scrolling under a
+ * pointer at rest (a key move) puts another row under it, and that must not take the selection. The first
+ * event only records where the pointer is.
+ */
+function createPointerGate(): (e: MouseEvent) => boolean {
+    let at: string | null = null;
+    return (e) => {
+        const here = `${e.clientX},${e.clientY}`;
+        const moved = at != null && at !== here;
+        at = here;
+        return moved;
+    };
+}
+
+/** The row a navigation key selects from row `i` (`last` is the last row), or null for any other key. */
+function selectionAfterKey(key: string, i: number, last: number, page: number): number | null {
+    const to = (row: number) => Math.max(0, Math.min(row, last));
+    switch (key) {
+        case "ArrowDown":
+            return to(i + 1);
+        case "ArrowUp":
+            return to(i - 1);
+        case "PageDown":
+            return to(i + page);
+        case "PageUp":
+            return to(i - page);
+        case "Home":
+            return 0;
+        case "End":
+            return to(last);
+        default:
+            return null;
+    }
+}
+
+/** How many rows the list shows at once, for PageUp and PageDown (at least 1). */
+function rowsPerPage(list: HTMLElement): number {
+    const row = list.querySelector<HTMLElement>(".command-palette-item");
+    return row && row.offsetHeight > 0 ? Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1) : 8;
+}
+
+/** After a key move: the selected row in view (the first row: the list's top, padding included). */
+function keepRowInView(list: HTMLElement, idx: number) {
+    if (idx === 0) list.scrollTop = 0;
+    else list.querySelector(".command-palette-item.selected")?.scrollIntoView?.({ block: "nearest" });
+}
+
+/** What the palette lists for `query`, and which row is selected (held to the list when it shrinks). */
+function usePaletteResults(query: () => string, selectedIdx: () => number) {
     // The agents AgentMux knows, listed after the commands and found by name, seat or state.
     const agents = usePaletteAgents();
-
     const filtered = createMemo(() => {
         const q = query().trim();
         const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
@@ -45,13 +120,16 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         // equals); fuzzy only for a typo. See command-palette-search.ts.
         return searchCommands(all, q);
     });
+    const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
+    return { filtered, clampedIdx };
+}
 
-    // Clamp selectedIdx when results change
-    const clampedIdx = createMemo(() => {
-        const len = filtered().length;
-        if (len === 0) return 0;
-        return Math.min(selectedIdx(), len - 1);
-    });
+const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
+    const [query, setQuery] = createSignal("");
+    const [selectedIdx, setSelectedIdx] = createSignal(0);
+    let inputRef!: HTMLInputElement;
+    let listRef!: HTMLDivElement;
+    const { filtered, clampedIdx } = usePaletteResults(query, selectedIdx);
 
     onMount(() => {
         disableGlobalKeybindings();
@@ -81,17 +159,21 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         }, 0);
     }
 
+    const pointerMoved = createPointerGate();
+
+    function moveSelection(next: (i: number) => number) {
+        const idx = next(clampedIdx());
+        setSelectedIdx(idx);
+        keepRowInView(listRef, idx);
+    }
+
     // Arrow keys + Enter are palette-specific navigation. ESC and
     // backdrop close are handled by `<Modal>` → `onClose`.
     function handleKeyDown(e: KeyboardEvent) {
-        if (e.key === "ArrowDown") {
+        const target = selectionAfterKey(e.key, clampedIdx(), filtered().length - 1, rowsPerPage(listRef));
+        if (target != null) {
             e.preventDefault();
-            setSelectedIdx((i) => Math.min(i + 1, filtered().length - 1));
-            return;
-        }
-        if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setSelectedIdx((i) => Math.max(i - 1, 0));
+            moveSelection(() => target);
             return;
         }
         if (e.key === "Enter") {
@@ -104,6 +186,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     function handleInput(e: InputEvent) {
         setQuery((e.target as HTMLInputElement).value);
         setSelectedIdx(0);
+        listRef.scrollTop = 0; // the first row is selected again: show it
     }
 
     return (
@@ -129,34 +212,20 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                     />
                     <kbd class="command-palette-esc-hint">ESC</kbd>
                 </div>
-                <div class="command-palette-list">
+                <div class="command-palette-list" ref={listRef}>
                     <For each={filtered()}>
                         {(cmd, i) => (
-                            <div
-                                class={`command-palette-item${i() === clampedIdx() ? " selected" : ""}`}
-                                onClick={(e) => {
+                            <PaletteRow
+                                cmd={cmd}
+                                selected={i() === clampedIdx()}
+                                onHover={(e) => {
+                                    if (pointerMoved(e)) setSelectedIdx(i());
+                                }}
+                                onPick={(e) => {
                                     setSelectedIdx(i());
                                     executeSelected(e.shiftKey);
                                 }}
-                                onMouseEnter={() => setSelectedIdx(i())}
-                            >
-                                {cmd.icon && (
-                                    <i
-                                        class={`fa-solid fa-${cmd.icon} command-palette-item-icon`}
-                                        style={cmd.iconColor ? { color: cmd.iconColor } : {}}
-                                    />
-                                )}
-                                <span class="command-palette-item-text">
-                                    <span class="command-palette-item-label">{cmd.label}</span>
-                                    <Show when={cmd.detail}>
-                                        <span class="command-palette-item-detail">{cmd.detail}</span>
-                                    </Show>
-                                </span>
-                                <span class="command-palette-item-category">{cmd.category}</span>
-                                <Show when={shortcutFor(cmd.id)}>
-                                    {(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}
-                                </Show>
-                            </div>
+                            />
                         )}
                     </For>
                     {filtered().length === 0 && (
