@@ -14,8 +14,8 @@ set window:bgcolor "#abcdef"
 set window:bgcolor null
 SliderControl 1 click
 set window:magnifiedblockopacity 1
-NumberControl 1.5 click
-set window:magnifiedblocksize 7
+NumberControl 0.9 click
+set window:magnifiedblocksize 1
 NumberControl 0 click
 set window:magnifiedblockblurprimarypx 7
 NumberControl 0 click
@@ -46,8 +46,10 @@ set splash:disabled false
       "Pane hover-magnify"
     <div data-stand="SettingRow" data-id="appearance.magnified_opacity" data-indent="false" data-label="Magnified opacity" data-description="Background opacity of a pane while magnified (0–1)">
       <span data-stand="SliderControl" data-min="0" data-max="1" data-step="0.05" data-value="1">
-    <div data-stand="SettingRow" data-id="appearance.magnified_size" data-indent="false" data-label="Magnified size" data-description="Scale factor applied to a pane while magnified">
-      <span data-stand="NumberControl" class="setting-number setting-number--wide" data-min="1" data-step="0.1" data-value="1.5">
+    <div data-stand="SettingRow" data-id="appearance.magnified_size" data-indent="false" data-label="Magnified size" data-description="How much of the layout area a pane fills while magnified (0.5 to 1; 1 fills it)">
+      <span data-stand="NumberControl" class="setting-number setting-number--wide" data-min="-1000000" data-max="1000000" data-step="0.05" data-value="0.9">
+    <p class="setting-snap" role="status" data-testid="magnified-size-snap">
+      "7 is out of range: using 1. Use 0.5 to 1."
     <div data-stand="SettingRow" data-id="appearance.magnified_blur_primary" data-indent="false" data-label="Magnified blur (primary)" data-description="Backdrop blur, in pixels, applied to the magnified pane itself">
       <span data-stand="NumberControl" class="setting-number" data-min="0" data-step="1" data-parse="int" data-value="0">
     <div data-stand="SettingRow" data-id="appearance.magnified_blur_secondary" data-indent="false" data-label="Magnified blur (secondary)" data-description="Backdrop blur, in pixels, applied to the other panes behind it">

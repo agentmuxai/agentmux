@@ -127,7 +127,6 @@ const MENU_SURFACES: [file: string, selector: string][] = [
     ["view/settings/settings-search-bar.scss", ".settings-search-results"],
     ["view/browser/browser-view.scss", ".browser-address-suggestions"],
     ["view/accounts/accounts-gallery.scss", ".accounts-chooser"],
-    ["backdrop/backdrop-picker.scss", ".backdrop-picker"],
 ];
 
 describe("the menu-family stylesheets use the one mixin", () => {

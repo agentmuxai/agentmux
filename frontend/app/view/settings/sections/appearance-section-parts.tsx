@@ -11,6 +11,7 @@ import { hostHas } from "@/util/host-caps";
 import { NumberControl, SettingRow, SliderControl, ToggleControl, set } from "../settings-controls";
 import type { APPEARANCE_SETTINGS as AppearanceSettings } from "./appearance-section";
 import { LanguageRow } from "./language-row";
+import { MagnifiedSizeRow } from "./magnified-size-row";
 
 type Rows = { s: () => any; rows: typeof AppearanceSettings };
 
@@ -147,21 +148,7 @@ export function MagnifyRows(props: Rows): JSX.Element {
                     />
                 }
             />
-            <SettingRow
-                settingKey="window:magnifiedblocksize"
-                id={rows.magnifiedSize.id}
-                label={rows.magnifiedSize.label}
-                description={rows.magnifiedSize.description}
-                control={
-                    <NumberControl
-                        class="setting-number setting-number--wide"
-                        min={1}
-                        step={0.1}
-                        value={(s()["window:magnifiedblocksize"] as number) ?? 1.5}
-                        onChange={(v) => set("window:magnifiedblocksize", v)}
-                    />
-                }
-            />
+            <MagnifiedSizeRow s={s} row={rows.magnifiedSize} />
             <SettingRow
                 settingKey="window:magnifiedblockblurprimarypx"
                 id={rows.magnifiedBlurPrimary.id}

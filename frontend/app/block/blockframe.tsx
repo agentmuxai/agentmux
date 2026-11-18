@@ -26,9 +26,8 @@ import { DeclIconButton } from "@/app/element/ui/DeclIconButton";
 import { NodeModel } from "@/layout/index";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
-import { BackdropPicker } from "@/app/backdrop/BackdropPicker";
+import { backdropSubmenuItem } from "@/app/backdrop/backdrop-menu";
 import { supportsBackdrop } from "@/app/backdrop/meta";
-import { closeBackdropPicker, isBackdropPickerOpen, openBackdropPicker, releaseBackdropPicker } from "@/app/backdrop/picker-state";
 import { getPaneScope } from "@/app/backdrop/scope";
 import { usePaneBackdrop } from "@/app/backdrop/usePaneBackdrop";
 import * as util from "@/util/util";
@@ -166,25 +165,32 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * "Default" clears it. The 12 hues come first, then Black and White in a
  * group of their own.
  */
-export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
+export function buildPaneColorSubmenu(blockData: Block, live?: () => Block | undefined): ContextMenuItem[] {
+    // The pane's block as it is now: with `live`, the open menu follows a pick (it stays open); without, as it was built.
+    const now = () => live?.() ?? blockData;
     // The pane's own pick: a palette slot (`frame:color`), or an older HSL
     // pick (`frame:hue`) read as the slot nearest it.
-    const own = blockData?.meta?.["frame:color"] ?? blockData?.meta?.["frame:hue"];
-    const currentSlot = slotOf(own as string | number | null | undefined);
+    const pickOf = (b: Block) => slotOf((b?.meta?.["frame:color"] ?? b?.meta?.["frame:hue"]) as string | number | null | undefined);
+    const currentSlot = pickOf(blockData);
     // Only real agent panes have an identity color to persist into — see
     // setPaneColor's own doc comment for why "Default" never passes this.
     const agentId = blockData?.meta?.agentId as string | undefined;
     const isLight = isLightThemeActive();
+    // A colour pick leaves the menu open: the person tries one colour after another.
     const colorItem = (slot: PaletteSlot): ContextMenuItem => ({
         label: slot.name,
         swatchColor: slotSwatchColor(slot, isLight),
         checked: currentSlot?.id === slot.id,
+        live: () => ({ checked: pickOf(now())?.id === slot.id }),
+        keepOpen: true,
         click: () => setPaneColor(blockData.oid, slot.id, agentId),
     });
     const colorItems: ContextMenuItem[] = [
         {
             label: "Default",
             checked: !currentSlot,
+            live: () => ({ checked: !pickOf(now()) }),
+            keepOpen: true,
             click: () => setPaneColor(blockData.oid, null),
         },
         { type: "separator" as const },
@@ -193,15 +199,21 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
         ...PALETTE.filter((slot) => slot.neutral).map(colorItem),
     ];
     // Spec §3.7. Not on agent panes: their pick is the agent's own color, and
-    // widget colors don't apply to an agent with one.
+    // widget colors don't apply to an agent with one. In a menu that follows the pane it is always there
+    // (it is off until the pane has a pick), since a pick can come while the menu is open.
     const widgetView = widgetColorView(blockData?.meta?.view);
-    if (currentSlot && widgetView && !agentId) {
+    if ((currentSlot || live) && widgetView && !agentId) {
         colorItems.push(
             { type: "separator" as const },
             {
                 label: `Use for all ${paneTabLabelFor(widgetView)} panes`,
                 icon: MENU_ICON.paneColorAll,
-                click: () => applyColorToAllPanes(blockData.oid, widgetView, currentSlot.id),
+                live: () => ({ enabled: !!pickOf(now()) }),
+                keepOpen: true,
+                click: () => {
+                    const pick = pickOf(now());
+                    if (pick) applyColorToAllPanes(blockData.oid, widgetView, pick.id);
+                },
             }
         );
     }
@@ -211,8 +223,7 @@ export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     // implement getSettingsMenuItems (sysinfo).
     // A backdrop is offered on the pane types whose own colours follow it. Phase 1 is the agent pane; a terminal keeps its
     // own default text colour until phase 2 gives it the backdrop's, and would be unreadable on a pale one (spec §6, §14).
-    const backdropItems =
-        supportsBackdrop(blockData?.meta?.view) ? [{ label: "Backdrop…", icon: MENU_ICON.paneColor, click: () => openBackdropPicker(blockData.oid) }] : [];
+    const backdropItems = supportsBackdrop(blockData?.meta?.view) ? [backdropSubmenuItem(blockData, live)] : [];
     return [
         { type: "separator" as const },
         { label: "Pane Color", icon: MENU_ICON.paneColor, type: "submenu" as const, submenu: colorItems },
@@ -249,7 +260,7 @@ function handleHeaderContextMenu(
     );
 
     // Header-only: pane color submenu
-    menu.push(...buildPaneColorSubmenu(blockData));
+    menu.push(...buildPaneColorSubmenu(blockData, () => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockData.oid))()));
 
     // Header-only: a pane on a remote links to that host's row in Remotes
     menu.push(...remoteSettingsMenuItems(blockData.oid, blockData.meta?.connection));
@@ -1393,10 +1404,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         { owner: !props.preview }
     );
     const backdropVars = getPaneScope(nodeModel.blockId);
-    const pickerOpen = isBackdropPickerOpen(nodeModel.blockId);
-    // Only the live frame owns the picker's flag: a drag preview is a second frame for the same block, and its unmounting
-    // must not close the live pane's picker or delete the flag the live frame still holds.
-    if (!props.preview) onCleanup(() => releaseBackdropPicker(nodeModel.blockId));
 
     return (
         <div
@@ -1438,13 +1445,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 />
             </Show>
             {renderFrameInner(s)}
-            <Show when={pickerOpen() && !props.preview}>
-                <BackdropPicker
-                    blockId={nodeModel.blockId}
-                    meta={() => ({ backdrop: s.blockData()?.meta?.backdrop, bg: s.blockData()?.meta?.bg })}
-                    onClose={() => closeBackdropPicker(nodeModel.blockId)}
-                />
-            </Show>
             {renderFrameOverlays(s)}
         </div>
     );

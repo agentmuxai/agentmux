@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A click on an image of an agent's message: two or more local images open the preview that steps through them
- * (in reading order, not the missing ones, not video), one image goes to the Editor as before
- * (SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md §3.1).
+ * A click on an image of an agent's message opens the preview over the tab, stepping through the message's local
+ * images and videos in reading order, not the missing ones; even a lone image opens it, the Editor stays one button
+ * away (SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md §3.1).
  */
 
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
@@ -59,20 +59,21 @@ describe("a message's images", () => {
         expect(h.editor).not.toHaveBeenCalled();
     });
 
-    it("leave out an image that is missing and a video", async () => {
+    it("leave out an image that is missing, and count a video among the items", async () => {
         const { container } = mount("![one](a.png) ![x](gone.png) ![clip](v.mp4) ![two](b.png)");
         await waitFor(() => expect(container.textContent).toContain("[image not found: gone.png]"));
         await waitFor(() => expect(shown(container)).toHaveLength(2));
         fireEvent.click(shown(container)[1]);
-        expect(modalLabel(container)).toBe("Image 2 of 2: two");
+        // one, the clip, two: the video is the second of three, the missing image none.
+        expect(modalLabel(container)).toBe("Image 3 of 3: two");
     });
 
-    it("go to the Editor, as before, when the message has one image", async () => {
-        const { container } = mount("![only](a.png) and a clip ![clip](v.mp4)");
+    it("open the preview, not the Editor, when the message has one image", async () => {
+        const { container } = mount("![only](a.png)");
         await waitFor(() => expect(shown(container)).toHaveLength(1));
         fireEvent.click(shown(container)[0]);
-        expect(modalLabel(container)).toBeUndefined();
-        expect(h.editor).toHaveBeenCalledWith("D:/proj/a.png", { followFolder: true });
+        expect(modalLabel(container)).toBe("Image 1 of 1: only");
+        expect(h.editor).not.toHaveBeenCalled();
     });
 
     it("are buttons for the keyboard, named with their place once focused", async () => {

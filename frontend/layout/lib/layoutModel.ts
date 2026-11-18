@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
+import { getMagnifiedSizeAtom } from "./magnified-size";
 import { focusManager } from "@/app/store/focusManager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -551,7 +552,7 @@ export class LayoutModel {
             });
 
             this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
-            this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+            this.magnifiedNodeSizeAtom = getMagnifiedSizeAtom() as () => number;
             this.magnifyMount = createSignalAtom<HTMLElement | null>(null);
             this.minimizedNodeIds = createSignalAtom<Set<string>>(new Set());
 

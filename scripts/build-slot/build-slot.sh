@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 9
+# build-slot-version: 10
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -11,7 +11,10 @@
 #
 # Works in Git Bash (Windows), Linux and macOS: it needs only bash, mkdir, date, sleep.
 # One run at a time by default; BUILD_SLOT_MAX, or a number in <locks>/build/limit, allows more
-# (a machine with the memory for two srv compiles). A slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
+# (a machine with the memory for two srv compiles). A slot is a directory holding a `lock` file that its holder created with the
+# shell's exclusive create (`set -C`, open with O_EXCL), which the kernel arbitrates; mkdir is not
+# the arbiter, because uutils coreutils' mkdir (Ubuntu 26.04) can report success to several callers
+# racing on one path (https://github.com/uutils/coreutils/issues/16344). The holder refreshes a heartbeat
 # file every 20 s; a slot whose heartbeat is older than STALE_SECS belongs to a dead
 # process and is taken over. Waiters line up by ticket, oldest first; a waiter keeps its
 # place for as long as its process is alive, however slow the host makes its loop (see ticket_live).
@@ -233,9 +236,34 @@ first_in_line() {
   [ "$oldest" = "$TICKET" ]
 }
 
+# Take the slot folder $1 if nobody holds it: make the folder (several callers may all succeed at
+# that, which is harmless), then create its `lock` file exclusively. Exactly one creator wins.
+# A folder with an owner or heartbeat file is held by a run of an older build-slot (it made the
+# folder with mkdir and has no lock file), so it is left alone.
+claim_slot() {
+  local d="$1"
+  mkdir -p "$d" 2>/dev/null
+  if [ -e "$d/owner" ] || [ -e "$d/heartbeat" ]; then return 1; fi
+  ( set -C; : >"$d/lock" ) 2>/dev/null
+}
+
+# A slot whose heartbeat stopped belongs to a dead process: remove it, so it can be taken. Two
+# waiters can judge it stale together (one that has been in line the whole time, one that just
+# reached the head), and the one that removes it second would remove the slot the first took, so
+# the removal happens under a lock of its own and the staleness is checked again inside it.
+take_over_stale() {
+  local d="$1" m="$1.takeover"
+  [ -n "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$m" 2>/dev/null   # left by a killed taker
+  ( set -C; : >"$m" ) 2>/dev/null || return 0
+  SLOT="$d"
+  if [ -d "$d" ] && slot_is_stale; then rm -rf "$d"; fi
+  rm -rf "$m" 2>/dev/null
+  return 0
+}
+
 # Take the first free slot, up to the limit. Only the run at the head of the queue tries.
-# Returns 0 with SLOT set when it got one, 1 when all are held, 3 when a mkdir failed and left no
-# slot behind (a holder that released in that instant, or a folder that can't be used: the
+# Returns 0 with SLOT set when it got one, 1 when all are held, 3 when a slot could not be made and
+# none is there (a holder that released in that instant, or a folder that can't be used: the
 # caller tells the two apart by whether it keeps happening).
 try_slots() {
   local lim i d
@@ -243,12 +271,12 @@ try_slots() {
   for i in $(seq 1 "$lim"); do
     d=$(slot_dir "$i")
     SLOT="$d"
-    if [ -d "$d" ] && slot_is_stale; then rm -rf "$d"; fi
-    if mkdir "$d" 2>/dev/null; then return 0; fi
-    # Neither made nor there any more: a holder released between the two steps, or the folder
+    if [ -d "$d" ] && slot_is_stale; then take_over_stale "$d"; SLOT="$d"; fi
+    if claim_slot "$d"; then return 0; fi
+    # Neither claimed nor there any more: a holder released between the two steps, or the folder
     # can't be written. Try once more before calling it unusable.
     if [ ! -d "$d" ]; then
-      mkdir "$d" 2>/dev/null && return 0
+      claim_slot "$d" && return 0
       [ -d "$d" ] || return 3
     fi
   done

@@ -8,7 +8,7 @@ const h = vi.hoisted(() => ({
     view: undefined as string | undefined,
     dev: true,
     keyCommands: new Map<string, (e: unknown) => boolean>(),
-    openBackdropPicker: vi.fn(),
+    openBackdropMenu: vi.fn(),
     openMemory: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("@/app/store/block-component-registry", () => ({
@@ -17,7 +17,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 vi.mock("@/app/store/dev-mode", () => ({ devModeOn: () => h.dev }));
 vi.mock("@/app/store/keymodel-dispatch", () => ({ keyCommands: h.keyCommands }));
-vi.mock("@/app/backdrop/picker-state", () => ({ openBackdropPicker: h.openBackdropPicker }));
+vi.mock("@/app/backdrop/backdrop-menu", () => ({ openBackdropMenu: h.openBackdropMenu }));
 vi.mock("@/app/store/section-panes", () => ({ openMemory: h.openMemory }));
 
 import { isCommandAvailable } from "./command-registry";
@@ -105,17 +105,17 @@ describe("the pane-scoped commands", () => {
 describe("Backdrop… and Bundles", () => {
     beforeEach(() => {
         h.view = undefined;
-        h.openBackdropPicker.mockClear();
+        h.openBackdropMenu.mockClear();
         h.openMemory.mockClear();
     });
 
-    it("offers Backdrop… only for a pane that takes one, and opens its picker", () => {
+    it("offers Backdrop… only for a pane that takes one, and opens its backdrop menu", () => {
         h.view = "term";
         expect(shown("pane:backdrop")).toBe(false);
         h.view = "agent";
         expect(shown("pane:backdrop")).toBe(true);
         void entry("pane:backdrop").execute();
-        expect(h.openBackdropPicker).toHaveBeenCalledWith("b1");
+        expect(h.openBackdropMenu).toHaveBeenCalledWith("b1");
     });
 
     it("opens Memory on its Bundles section", () => {

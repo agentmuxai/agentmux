@@ -53,28 +53,33 @@ describe("AttachmentLightbox", () => {
     });
 });
 
-describe("AttachmentLightbox as a pane modal", () => {
+describe("AttachmentLightbox as a tab modal", () => {
+    // The pane's own modal layer sits inside the tab's, as in the app (block.tsx inside tabcontent.tsx).
     const mount = (handlers: { onClose?: () => void; onIndex?: (i: number) => void } = {}) =>
         render(() => (
-            <div data-testid="pane">
-                <ModalLayer scope="pane">
-                    <AttachmentLightbox
-                        items={[
-                            { key: "a", number: 1, name: "one.pdf", pending: true },
-                            { key: "b", number: 2, name: "two.pdf", pending: true },
-                        ]}
-                        index={0}
-                        onIndex={handlers.onIndex ?? (() => {})}
-                        onClose={handlers.onClose ?? (() => {})}
-                    />
-                </ModalLayer>
-            </div>
+            <ModalLayer scope="tab">
+                <div data-testid="pane">
+                    <ModalLayer scope="pane">
+                        <AttachmentLightbox
+                            items={[
+                                { key: "a", number: 1, name: "one.pdf", pending: true },
+                                { key: "b", number: 2, name: "two.pdf", pending: true },
+                            ]}
+                            index={0}
+                            onIndex={handlers.onIndex ?? (() => {})}
+                            onClose={handlers.onClose ?? (() => {})}
+                        />
+                    </ModalLayer>
+                </div>
+            </ModalLayer>
         ));
 
-    it("covers the pane it is in, not the window", () => {
+    it("covers the whole tab, not just the pane it is in", () => {
         const { container } = mount();
         const dialog = screen.getByRole("dialog", { name: "File 1: one.pdf" });
-        expect(container.querySelector(".modal-layer-mount")?.contains(dialog)).toBe(true);
+        const [tabMount, paneMount] = Array.from(container.querySelectorAll(".modal-layer-mount"));
+        expect(tabMount?.contains(dialog)).toBe(true);
+        expect(paneMount?.contains(dialog)).toBe(false);
         expect(document.body.querySelectorAll(".agent-attachment-lightbox__dialog")).toHaveLength(1);
     });
 

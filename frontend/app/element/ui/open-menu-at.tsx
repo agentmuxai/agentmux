@@ -20,17 +20,24 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
         .filter((item) => item.visible !== false)
         .map((item): MenuEntry => {
             if (item.type === "separator") return { label: "", divider: true };
+            const choice = item.checked !== undefined || item.live?.().checked !== undefined;
             return {
                 label: item.label ?? "",
                 icon: item.icon,
                 // A row that has `checked` and no type is a choice among its peers (the pane colours): a radio.
-                type: item.type === "checkbox" || item.type === "radio" ? item.type : item.checked !== undefined ? "radio" : undefined,
-                checked: item.checked,
+                type: item.type === "checkbox" || item.type === "radio" ? item.type : choice ? "radio" : undefined,
+                // Read each time the row draws: a row with `live` follows what a pick changed while the menu stays open.
+                get checked() {
+                    return item.live ? item.live().checked : item.checked;
+                },
                 swatchColor: item.swatchColor,
                 sublabel: item.sublabel,
                 submenu: item.submenu?.length ? menuEntriesFrom(item.submenu) : undefined,
-                disabled: item.enabled === false,
+                get disabled() {
+                    return (item.live ? item.live().enabled : item.enabled) === false;
+                },
                 onSelect: item.click,
+                keepOpen: item.keepOpen,
             };
         });
 }

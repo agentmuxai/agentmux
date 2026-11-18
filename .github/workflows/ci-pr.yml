@@ -1083,6 +1083,10 @@ jobs:
       - name: go-task install and tool check self-test
         run: bash scripts/ci-install-go-task.test.sh
 
+      # The build slot's claim: one holder at a time, even when mkdir answers yes to a caller that lost the race.
+      - name: build slot self-test
+        run: bash scripts/build-slot/build-slot.test.sh
+
       # The nextest step's stall handling: which attempt statuses are retried, and when memory counts as gone.
       - name: nextest step script self-test
         run: bash scripts/ci-nextest-run.test.sh

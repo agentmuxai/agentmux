@@ -459,7 +459,7 @@ $gap: 6px;
     }
 }
 
-// ── Preview (a pane modal: drawn over the pane it is in, by the modal layer, so not under .agent-view) ───
+// ── Preview (a tab modal: drawn over the whole tab the pane is in, by the modal layer, so not under .agent-view) ───
 .agent-attachment-lightbox {
     // The modal panel is the frame (border, background, radius, scroll): a preview larger than the pane
     // scrolls inside it.
@@ -487,33 +487,66 @@ $gap: 6px;
         }
     }
 
-    // The message image preview (MessageImageLightbox.tsx) fits the pane, not the window: the panel is capped to
-    // the pane (and scales with chrome zoom), so the picture shrinks inside it by flex rather than by vw and vh,
-    // and the bar always stays in view. The picture keeps its proportions (contain).
-    &__panel--message {
+    // The preview (both lightboxes) fits the tab it is drawn over: the panel is capped to the tab (and scales
+    // with chrome zoom), so the picture shrinks inside it by flex rather than by vw and vh, and the bar always
+    // stays in view. The picture keeps its proportions (contain) and is never drawn larger than its own size.
+    &__panel--fit {
         display: flex;
         flex-direction: column;
         overflow: hidden;
     }
 
-    &__dialog--message {
+    &__dialog--fit {
         flex: 1 1 auto;
         min-height: 0;
     }
 
-    &__image--message {
+    &__image--fit {
         flex: 1 1 auto;
         flex-direction: column;
         min-height: 0;
         overflow: hidden;
 
-        img {
+        img,
+        video {
             flex: 0 1 auto;
             min-height: 0;
             max-width: 100%;
             max-height: none;
             object-fit: contain;
         }
+
+        img {
+            cursor: zoom-in;
+        }
+
+        // Actual size: one picture pixel per screen pixel (the chrome zoom still applies); a picture larger
+        // than the tab is panned by scrolling, with scroll bars, the wheel or the touchpad.
+        &.is-actual {
+            overflow: auto;
+            align-items: flex-start;
+            justify-content: flex-start;
+
+            img {
+                flex: none;
+                max-width: none;
+                cursor: zoom-out;
+                margin: auto;
+            }
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+    }
+
+    // What the keys are, for the item shown.
+    &__hint {
+        padding: 0 10px 6px;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
     }
 
     // The message image preview's step announcement (MessageImageLightbox.tsx): read, never seen.
@@ -532,10 +565,12 @@ $gap: 6px;
         display: flex;
         flex-direction: column;
         width: min(80vw, 900px);
+        max-width: 100%;
+        min-height: 0;
 
         pre {
             margin: 0;
-            max-height: calc(92vh - 72px);
+            max-height: 100%;
             padding: 12px 14px;
             overflow: auto;
             font-family: var(--font-mono, monospace);

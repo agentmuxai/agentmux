@@ -429,6 +429,30 @@
         }
     }
 
+    // Enlarge a video over the whole tab: shown while the pointer or the keyboard is on the stage.
+    .am-media-enlarge {
+        @include mixins.flex-center(inline-flex);
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        z-index: var(--z-over-badge);
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: var(--radius-full);
+        background: rgb(0 0 0 / 55%);
+        color: white;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity var(--duration-fast);
+    }
+
+    .am-media-stage:hover .am-media-enlarge,
+    .am-media-stage:focus-within .am-media-enlarge,
+    .am-media-enlarge:focus-visible {
+        opacity: 1;
+    }
+
     .am-media-stage-overlay {
         @include mixins.abs-fill;
         @include mixins.flex-center;

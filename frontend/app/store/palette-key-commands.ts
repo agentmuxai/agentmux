@@ -16,7 +16,7 @@
 import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyPane } from "@/app/keybindings/defaults";
 import { DOC_TAB_HOSTS } from "@/app/keybindings/registry";
 import { supportsBackdrop } from "@/app/backdrop/meta";
-import { openBackdropPicker } from "@/app/backdrop/picker-state";
+import { openBackdropMenu } from "@/app/backdrop/backdrop-menu";
 import { getBlockComponentModel, getFocusedBlockId } from "@/app/store/block-component-registry";
 import type { CommandEntry } from "@/app/store/command-registry";
 import { devModeOn } from "@/app/store/dev-mode";
@@ -154,7 +154,7 @@ function placeEntries(): CommandEntry[] {
             icon: "fill-drip",
             keywords: "background colour color image theme pane backdrop",
             when: () => supportsBackdrop(focusedView()),
-            execute: () => openBackdropPicker(getFocusedBlockId()),
+            execute: () => openBackdropMenu(getFocusedBlockId()),
         },
         {
             id: "open:bundles",

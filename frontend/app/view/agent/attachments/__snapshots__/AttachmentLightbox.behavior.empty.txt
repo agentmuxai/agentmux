@@ -1,15 +1,15 @@
-Modal open=true scope=pane size=fit panelClass=agent-attachment-lightbox__panel
+Modal open=true scope=tab size=fit panelClass=agent-attachment-lightbox__panel agent-attachment-lightbox__panel--fit
 useAttachmentUrl send id=a1
 useAttachmentText thumb id=undefined
-initialFocus -> agent-attachment-lightbox__dialog
+initialFocus -> agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit
 useAttachmentUrl send id=undefined
 useAttachmentText thumb id=undefined
 onClose
 -- no items
 <div>
   <div data-stand="Modal" data-aria-label="File undefined: undefined">
-    <div class="agent-attachment-lightbox__dialog" tabindex="-1">
-      <div class="agent-attachment-lightbox__image">
+    <div class="agent-attachment-lightbox__dialog agent-attachment-lightbox__dialog--fit" tabindex="-1">
+      <div class="agent-attachment-lightbox__image agent-attachment-lightbox__image--fit">
         <span class="agent-attachment-lightbox__missing">
           "This file is no longer available."
       <div class="agent-attachment-lightbox__bar">

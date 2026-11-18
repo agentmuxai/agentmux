@@ -157,7 +157,7 @@
     "frontend/app/view/agent/components/JektNeedsYouCard.tsx": 9,
     "frontend/app/view/agent/components/JektParts.tsx": 7,
     "frontend/app/view/agent/components/MarkdownBlockParts.tsx": 2,
-    "frontend/app/view/agent/components/MessageImageLightbox.tsx": 10,
+    "frontend/app/view/agent/components/MessageImageLightbox.tsx": 9,
     "frontend/app/view/agent/components/MyAgentsList.tsx": 2,
     "frontend/app/view/agent/components/MyAgentsRow.tsx": 8,
     "frontend/app/view/agent/components/MyAgentsRowPanel.tsx": 13,
