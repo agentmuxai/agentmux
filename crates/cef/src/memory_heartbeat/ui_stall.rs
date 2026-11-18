@@ -218,14 +218,14 @@ fn context(ui_tid: Option<u64>, data_root: Option<&std::path::Path>) -> String {
         parts.push(format!("host {mb} MB private"));
     }
     // Read now where the system can be asked now; the heartbeat's figure is up to 20 s old. Linux's `MemAvailable`
-    // (below) is read now too.
+    // (below) is read now too, and macOS's free memory comes from `vm_stat`.
     #[cfg(target_os = "windows")]
     {
         parts.push(format!("free RAM {} MB", fresh_phys_free_mb().map_or("unknown".to_string(), |mb| mb.to_string())));
         parts.push(format!("free commit {} MB", mb_or_unknown(super::commit_free_mb())));
     }
     #[cfg(target_os = "macos")]
-    parts.push(format!("free RAM {} MB (as of the last heartbeat)", mb_or_unknown(super::phys_free_mb())));
+    parts.push(format!("free RAM {} MB", fresh_phys_free_mb().map_or("unknown".to_string(), |mb| mb.to_string())));
     if let Some(root) = data_root {
         if let Some((free, total)) = agentmux_common::disk_space::volume_free_total_bytes(root) {
             parts.push(format!("free disk {} GB of {} GB", free / (1 << 30), total / (1 << 30)));
@@ -247,8 +247,30 @@ fn fresh_phys_free_mb() -> Option<u64> {
     (unsafe { GlobalMemoryStatusEx(&mut mem) } != 0).then(|| mem.ullAvailPhys / (1024 * 1024))
 }
 
+/// Physical RAM free now, in MB: what `vm_stat` says (it is part of macOS and answers in a few milliseconds). The
+/// heartbeat's own figure is only ever written on Windows, so it is never read here.
+#[cfg(target_os = "macos")]
+fn fresh_phys_free_mb() -> Option<u64> {
+    let out = std::process::Command::new("/usr/bin/vm_stat").output().ok()?;
+    parse_vm_stat(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The memory the system hands to a new request without swapping, in MB, from `vm_stat`'s text: its free, inactive and
+/// speculative pages times the page size on its first line (16 384 bytes on Apple silicon, 4 096 on Intel).
+/// Written so every platform compiles it; only a macOS build calls it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_vm_stat(text: &str) -> Option<u64> {
+    let size: u64 = text.lines().next()?.split("page size of ").nth(1)?.split_whitespace().next()?.parse().ok()?;
+    let pages = |key: &str| -> Option<u64> {
+        let line = text.lines().find(|l| l.strip_prefix(key).is_some_and(|rest| rest.starts_with(':')))?;
+        line.split_once(':')?.1.trim().trim_end_matches('.').parse().ok()
+    };
+    let available = pages("Pages free")?.checked_add(pages("Pages inactive")?)?.checked_add(pages("Pages speculative").unwrap_or(0))?;
+    Some(available.checked_mul(size)? / (1024 * 1024))
+}
+
 /// `u64::MAX` is the heartbeat's "not sampled yet".
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn mb_or_unknown(mb: u64) -> String {
     if mb == u64::MAX {
         "unknown".to_string()
@@ -423,6 +445,36 @@ mod tests {
         assert_eq!(thread_state("4321 (a (b) c) S 1 2 3"), Some('S'));
         assert_eq!(thread_state("garbage"), None);
         assert!(state_name('D').contains("uninterruptible"));
+    }
+
+    #[test]
+    fn vm_stat_text_gives_the_memory_a_new_request_can_have() {
+        let text = "Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               12800.
+Pages active:                            400000.
+Pages inactive:                           51200.
+Pages speculative:                         6400.
+Pages wired down:                        100000.
+";
+        // (12 800 + 51 200 + 6 400) pages of 16 KiB: 1 100 MB.
+        assert_eq!(parse_vm_stat(text), Some(1100));
+        // An Intel Mac counts 4 KiB pages; no speculative line is no speculative pages.
+        let intel = "Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free: 262144.
+Pages inactive: 262144.
+";
+        assert_eq!(parse_vm_stat(intel), Some(2048));
+        // Not the tool's text, or without its figures: unknown, not zero.
+        assert_eq!(parse_vm_stat(""), None);
+        assert_eq!(parse_vm_stat("command not found"), None);
+        assert_eq!(parse_vm_stat("Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages active: 5.
+"), None);
+        // A key that only starts the same is not the key.
+        assert_eq!(parse_vm_stat("Mach Virtual Memory Statistics: (page size of 4096 bytes)
+Pages free for purge: 9.
+Pages inactive: 1.
+"), None);
     }
 
     #[test]
