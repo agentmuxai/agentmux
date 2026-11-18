@@ -329,6 +329,7 @@ mod tests {
             conn: "local".to_string(),
             agent_id: String::new(),
             operator_proven: true,
+            ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains(r#""ctype":"connserver""#));

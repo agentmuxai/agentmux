@@ -114,6 +114,10 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
     // Checked before anything is written, so a typo leaves no lock or key behind.
     let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins, cli.public_origin.as_deref())?;
+    // The external host, if there is one, is registered here: once, before srv serves a connection or starts an agent.
+    if let Some(file) = &cli.external_host_key_file {
+        crate::server::external_host::register_from_file(file)?;
+    }
     // A key srv did not generate is held to a floor when a browser can sign in: checked before anything is written.
     let serves_ui = web.frontend_dir.is_some();
     check_env_key(env_key().as_deref(), serves_ui)?;

@@ -27,7 +27,7 @@ pub(crate) fn check_agent_config_write(
     auto_allocate: bool,
 ) -> Result<(), String> {
     match actor_of(ctx) {
-        Actor::Operator => return Ok(()),
+        Actor::Operator | Actor::Person(_) => return Ok(()),
         Actor::Unproven | Actor::Srv => {
             return Err("FORBIDDEN: only the AgentMux window, or an agent for its own workspace, writes agent config (this connection is neither)".to_string())
         }
