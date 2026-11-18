@@ -267,6 +267,48 @@ describe("closing state", () => {
         expect(seen).toEqual([0, 1]);
     });
 
+    it("a computation that throws while the tree commits does not stop the close: the backend is told, then the error is reported", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.onNodeDelete = vi.fn().mockResolvedValue(undefined);
+        model.beforeNodeDelete = vi.fn(async () => true);
+        const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        intentCall.mockClear();
+        // Reads the tree and throws once the pane has left it, as a stale binding does.
+        const dispose = createRoot((d) => {
+            createEffect(() => {
+                if (model.localTreeStateAtom().rootNode === undefined) throw new Error("a binding threw");
+            });
+            return d;
+        });
+
+        await expect(closeNode(model, nodeId)).rejects.toThrow("a binding threw");
+        expect(model.treeState.rootNode).toBeUndefined();
+        expect(model.onNodeDelete).toHaveBeenCalledTimes(1);
+        await settle();
+        expect(intentCall).toHaveBeenCalled(); // the edit's intent still went to srv
+        expect(closingTabs(model, nodeId)).toBe(0);
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining("closing it in the backend anyway"), expect.any(Error));
+        logged.mockRestore();
+        dispose();
+    });
+
+    it("a reducer that throws before the pane left the tree is the close's own error and the backend is not told", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.onNodeDelete = vi.fn().mockResolvedValue(undefined);
+        model.beforeNodeDelete = vi.fn(async () => true);
+        const reducer = vi.spyOn(model, "treeReducer").mockImplementation(() => {
+            throw new Error("reducer failed");
+        });
+
+        await expect(closeNode(model, nodeId)).rejects.toThrow("reducer failed");
+        reducer.mockRestore();
+        expect(model.treeState.rootNode).toBeDefined();
+        expect(model.onNodeDelete).not.toHaveBeenCalled();
+        expect(closingTabs(model, nodeId)).toBe(0);
+    });
+
     it("a no to the prompt leaves the pane, not closing", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");

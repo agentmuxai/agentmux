@@ -724,8 +724,7 @@ export class LayoutModel {
                 const newId = this.treeState.focusedNodeId;
                 this.focusedNodeIdStack = [newId, ...this.focusedNodeIdStack.filter((id) => id !== newId)];
             }
-            this.localTreeStateAtom._set({ ...this.treeState });
-            void flushLayoutOutbox(this);
+            this.commitTreeState();
         }
         // Fires only once state has actually committed above — see this
         // function's leading comment. Gated on setState too: with
@@ -734,6 +733,19 @@ export class LayoutModel {
         // fresh for refocusNode() to read yet.
         if (shouldRequestFocus && setState) {
             focusManager.requestNodeFocus();
+        }
+    }
+
+    /**
+     * Publishes the tree to every computation that reads it, then sends what the edit queued. A computation that
+     * throws makes the publish throw after the tree has changed: the edit's intent is already queued, so it is
+     * still sent, or srv's stored layout would keep the old tree until the next edit.
+     */
+    private commitTreeState() {
+        try {
+            this.localTreeStateAtom._set({ ...this.treeState });
+        } finally {
+            void flushLayoutOutbox(this);
         }
     }
 
