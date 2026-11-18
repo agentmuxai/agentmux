@@ -64,20 +64,20 @@ export function registerAgentViewCommands(): () => void {
     offs.push(
         commandRegistry.register({
             id: "agent:messages:show",
-            label: "Agent: Show messages panel",
+            label: "Show messages panel",
             category: "Agent",
             icon: "inbox",
-            keywords: "messages jekts incoming panel side inbox",
+            keywords: "agent messages jekts incoming panel side inbox",
             when: () => focused() !== undefined && !messagesEnabled(getFocusedBlockId()),
             execute: () => setMessagesEnabled(getFocusedBlockId(), true),
         }),
         // The header button opens the panel with a click; the palette opens it too.
         commandRegistry.register({
             id: "agent:messages:open",
-            label: "Agent: Open messages panel",
+            label: "Open messages panel",
             category: "Agent",
             icon: "inbox",
-            keywords: "messages jekts incoming panel overlay open inbox",
+            keywords: "agent messages jekts incoming panel overlay open inbox",
             when: () => {
                 const c = messagesControlsFor(getFocusedBlockId());
                 return focused() !== undefined && !!c && c.state().enabled && !c.state().open;
@@ -86,10 +86,10 @@ export function registerAgentViewCommands(): () => void {
         }),
         commandRegistry.register({
             id: "agent:messages:hide",
-            label: "Agent: Hide messages panel",
+            label: "Hide messages panel",
             category: "Agent",
             icon: "inbox",
-            keywords: "messages jekts incoming panel side inbox",
+            keywords: "agent messages jekts incoming panel side inbox",
             when: () => focused() !== undefined && messagesEnabled(getFocusedBlockId()),
             execute: () => setMessagesEnabled(getFocusedBlockId(), false),
         }),
