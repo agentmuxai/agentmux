@@ -15,7 +15,7 @@
 
 import { getApi } from "@/app/store/global";
 import { pushFlashError } from "@/app/store/flash-notifications";
-import { reasonWithHold, recycleBlockers } from "@/app/store/recycle-blockers";
+import { reasonWithHold, recycleBlockers, registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { saveForReload } from "@/app/store/recycle-savers";
 
 function ownWindowLabel(): string {
@@ -53,7 +53,7 @@ export async function recycleWindow(
 ): Promise<boolean> {
     // A second call (a double Enter in the palette) would measure and reload twice.
     if (recycling) return false;
-    const blocked = [...recycleBlockers(), ...busyNow()];
+    const blocked = [...new Set([...recycleBlockers(), ...busyNow()])];
     if (blocked.length > 0) {
         onRefused(blocked);
         return false;
@@ -80,7 +80,7 @@ export async function recycleWindow(
     }
     // Saving and the cover can take seconds while the window stays usable:
     // whatever started meanwhile would be lost too, so look again.
-    const late = [...recycleBlockers(), ...busyNow()];
+    const late = [...new Set([...recycleBlockers(), ...busyNow()])];
     if (late.length > 0) {
         recycling = false;
         void getApi().windows.recycleCancel(ownWindowLabel()).catch(() => {});
@@ -121,32 +121,46 @@ export async function answerRecycleRequest(idleMs = IDLE_MS): Promise<boolean> {
     const decline = (reasons: string[]) => {
         void getApi().windows.recycleDeclined(ownWindowLabel(), reasons.map((r) => reasonWithHold(r)).join("; ")).catch(() => {});
     };
-    const [{ msSinceLastInput }, { anyAgentWaitingForYou }, { modalsModel }, { anyModalOpen }, { isAnyUnderway, ALL_DRAG_KINDS }] =
-        await Promise.all([
-            import("@/app/store/last-input"),
-            import("@/app/notification/waiting-for-you"),
-            import("@/app/store/modalmodel"),
-            import("@/app/element/modal-stack"),
-            import("@/app/drag/drag-session"),
-        ]);
+    const [{ msSinceLastInput }] = await Promise.all([import("@/app/store/last-input"), installGovernorBlockers()]);
     // Checked now and again just before the reload: the window can come into
     // use while the recycle saves and the host takes its picture.
     const busyNow = (): string[] => {
-        const busy: string[] = [];
+        const busy = recycleBlockers(Date.now(), true);
         if (msSinceLastInput() < idleMs) busy.push("the window was used recently");
-        if (anyAgentWaitingForYou()) busy.push("an agent is waiting for an answer");
-        // `openModal` dialogs and declarative `<Modal>`s are tracked apart. No limit: a form in one may hold what the
-        // person typed and has not saved.
-        if (modalsModel.hasOpenModals() || anyModalOpen()) busy.push("a dialog is open");
-        if (isAnyUnderway(ALL_DRAG_KINDS)) busy.push("a drag is in progress");
         return busy;
     };
     return recycleWindow("idle", decline, busyNow);
 }
 
+let governorBlockersInstalled: Promise<void> | null = null;
+
+/**
+ * What holds back only the governor's idle recycle, registered once as blockers (so the state line and the decline
+ * text see them and say how long each has held): an agent waiting for an answer, an open dialog, a drag. No time
+ * limit: a form in a dialog may hold what the person typed and has not saved. Loaded on first use, not at startup.
+ */
+export function installGovernorBlockers(): Promise<void> {
+    governorBlockersInstalled ??= (async () => {
+        const [{ anyAgentWaitingForYou }, { modalsModel }, { anyModalOpen }, { isAnyUnderway, ALL_DRAG_KINDS }] = await Promise.all([
+            import("@/app/notification/waiting-for-you"),
+            import("@/app/store/modalmodel"),
+            import("@/app/element/modal-stack"),
+            import("@/app/drag/drag-session"),
+        ]);
+        const governorOnly = { governorOnly: true };
+        // `openModal` dialogs and declarative `<Modal>`s are tracked apart.
+        registerRecycleBlocker(() => (anyAgentWaitingForYou() ? "an agent is waiting for an answer" : null), governorOnly);
+        registerRecycleBlocker(() => (modalsModel.hasOpenModals() || anyModalOpen() ? "a dialog is open" : null), governorOnly);
+        registerRecycleBlocker(() => (isAnyUnderway(ALL_DRAG_KINDS) ? "a drag is in progress" : null), governorOnly);
+    })();
+    return governorBlockersInstalled;
+}
+
 /** Answer the governor's requests in this window (once, at startup). */
 export function installRecycleRequests(): void {
     void import("@/app/store/last-input").then(({ installLastInput }) => installLastInput());
+    // So the state line names a dialog or a waiting agent that holds the window, from the first one on.
+    void installGovernorBlockers();
     void getApi().listen<{ idle_ms?: number }>("recycle:request", (payload) => {
         // The host's idle time: shorter under memory pressure or a lab override.
         const idleMs = typeof payload?.idle_ms === "number" ? payload.idle_ms : IDLE_MS;
