@@ -173,7 +173,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let old = existing.iter().find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
                 crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
-                    .map_err(|e| format!("updateagent: {e}"))?;
+                    .and_then(|()| crate::server::app_api::check_volumes(&cmd.container_volumes)).map_err(|e| format!("updateagent: {e}"))?;
                 // Model vendor base URL: `None` (omitted) preserves the
                 // stored value; `Some(url)` overrides it (including
                 // `Some("")` to explicitly clear). Validated against the
