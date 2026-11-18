@@ -172,5 +172,9 @@ for (const c of rtc?.candidates ?? []) {
     const literal = /candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (\S+)/.exec(c);
     if (literal && (literal[2] !== "host" || !literal[1].endsWith(".local"))) violations.push(`webrtc: candidate leaves the proxy: ${c}`);
 }
+// A line per item on stderr, so a green run shows what it proved.
+if (report?.["file-fetch"] && !report["file-fetch"].reached) console.error("guard: ok a page's fetch of file:// is refused");
+if (alive.size >= 4) console.error("guard: ok a page's navigations to file:, chrome:, devtools: and view-source: addresses all left it in place");
+for (const r of startRefusals) if (r.refused) console.error(`guard: ok a pane started on ${r.u} is refused (${r.how})`);
 console.log(JSON.stringify({ ok: violations.length === 0, violations, report, navigationsLeftInPlace: alive.size, startRefusals }, null, 2));
 process.exit(violations.length ? 1 : 0);
