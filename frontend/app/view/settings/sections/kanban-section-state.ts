@@ -79,12 +79,38 @@ function useDraft(b: ReturnType<typeof useStagedBoard>, onSwitch: () => void) {
     return { draft, setDraft, baseRev, setBaseRev, stages, dirty, problems, changedMeanwhile, start };
 }
 
+/** Send `set` to one board; true when srv took it. A set that is the default is a reset. */
+async function sendStages(model: KanbanModel, slug: string, set: readonly KanbanStage[], rev: number | undefined): Promise<boolean> {
+    const res = await model.act({
+        action: "board_edit",
+        board: slug,
+        ...(sameStages(set, defaultStages()) ? { stages_reset: true } : { stages: toStageSet(set) }),
+        ...(rev === undefined ? {} : { stages_rev: rev }),
+    });
+    return res !== null;
+}
+
+/** The operations the rows and buttons call: each one edits the draft. */
+function stageEdits(edit: (f: (s: readonly KanbanStage[]) => KanbanStage[]) => void) {
+    return {
+        rename: (id: string, name: string) => edit((s) => renameStage(s, id, name)),
+        recolour: (id: string, colour: StageColour) => edit((s) => recolourStage(s, id, colour)),
+        move: (id: string, delta: number) => edit((s) => moveStage(s, id, delta)),
+        toggle: (id: string, source: ColumnId, on: boolean) => edit((s) => toggleSource(s, id, source, on)),
+        add: (name: string) => edit((s) => addStage(s, name)),
+        remove: (id: string, into: string | null) => edit((s) => removeStage(s, id, into)),
+        reset: () => edit(() => defaultStages()),
+    };
+}
+
 /** `requested`: the board the pane was asked to show (the cog on a Kanban pane names it), by slug. */
 export function createKanbanStagesState(requested: () => string | null) {
     const b = useStagedBoard(requested);
     const { model } = b;
     const [busy, setBusy] = createSignal(false);
     const [copy, setCopy] = createSignal<CopyResult | null>(null);
+    // Why the last Apply was refused: kept here, since the re-read after it clears the model's own error.
+    const [refused, setRefused] = createSignal<string | null>(null);
     const d = useDraft(b, () => setCopy(null));
     const { stages, dirty, problems } = d;
     const archived = () => b.info()?.archived === true;
@@ -98,26 +124,20 @@ export function createKanbanStagesState(requested: () => string | null) {
         setCopy(null);
     };
 
-    /** Send `set` to one board; true when srv took it. A set that is the default is a reset. */
-    const send = async (slug: string, set: readonly KanbanStage[], rev: number | undefined): Promise<boolean> => {
-        const res = await model.act({
-            action: "board_edit",
-            board: slug,
-            ...(sameStages(set, defaultStages()) ? { stages_reset: true } : { stages: toStageSet(set) }),
-            ...(rev === undefined ? {} : { stages_rev: rev }),
-        });
-        return res !== null;
-    };
+    const send = (slug: string, set: readonly KanbanStage[], rev: number | undefined) => sendStages(model, slug, set, rev);
 
     const apply = async () => {
         if (!editable() || !dirty() || problems().length > 0) return;
         setBusy(true);
+        setRefused(null);
         const ok = await send(b.selected(), stages(), d.baseRev());
+        const why = ok ? null : model.error();
         setBusy(false);
-        if (ok) d.setDraft(null);
-        // A refusal (a stale revision, a rule srv checks, a network failure) is shown by the section; read the board
+        if (ok) return d.setDraft(null);
+        // A refusal (a stale revision, a rule srv checks, a network failure) is shown until dismissed; read the board
         // again now, so a change made meanwhile shows as "Load theirs" or "Apply mine" at once.
-        else await model.refresh();
+        setRefused(why);
+        await model.refresh();
     };
 
     /** Apply after a change made meanwhile, on top of it. */
@@ -162,15 +182,17 @@ export function createKanbanStagesState(requested: () => string | null) {
         copy,
         otherLiveBoards: () => b.boards().filter((o) => o.slug !== b.selected() && !o.archived).length,
         canAdd: () => canAdd(stages()),
-        rename: (id: string, name: string) => edit((s) => renameStage(s, id, name)),
-        recolour: (id: string, colour: StageColour) => edit((s) => recolourStage(s, id, colour)),
-        move: (id: string, delta: number) => edit((s) => moveStage(s, id, delta)),
-        toggle: (id: string, source: ColumnId, on: boolean) => edit((s) => toggleSource(s, id, source, on)),
-        add: (name: string) => edit((s) => addStage(s, name)),
+        ...stageEdits(edit),
         removeInto: (id: string) => removalTarget(stages(), id),
-        remove: (id: string, into: string | null) => edit((s) => removeStage(s, id, into)),
-        reset: () => edit(() => defaultStages()),
-        discard: () => d.setDraft(null),
+        refused,
+        dismissRefused: () => {
+            setRefused(null);
+            model.dismissError();
+        },
+        discard: () => {
+            d.setDraft(null);
+            setRefused(null);
+        },
         apply,
         applyMine,
         copyToAll,

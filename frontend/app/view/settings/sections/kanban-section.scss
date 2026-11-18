@@ -79,6 +79,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-1);
+
+    // The chips are the quietest thing in a row: the size of the controls, not the page's text.
+    .ui-filter-chip {
+        font-size: var(--text-xs);
+    }
 }
 
 .kanban-stages__why,

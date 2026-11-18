@@ -202,9 +202,9 @@ export function Notices(props: Part): JSX.Element {
     const s = props.s;
     return (
         <>
-            <Show when={s.model.error()}>
+            <Show when={s.refused() ?? s.model.error()}>
                 {(why) => (
-                    <Notice tone="danger" onDismiss={() => s.model.dismissError()}>
+                    <Notice tone="danger" onDismiss={s.dismissRefused}>
                         {why()}
                     </Notice>
                 )}

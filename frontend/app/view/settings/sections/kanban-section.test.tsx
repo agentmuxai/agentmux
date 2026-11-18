@@ -156,6 +156,9 @@ describe("Settings → Kanban", () => {
         fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
         fireEvent.click(apply());
         await screen.findByText("the stages changed since you read them (now revision 2)");
+        // The board is read again after a refusal; the reason stays on screen when that answer arrives.
+        await new Promise((r) => setTimeout(r, 100));
+        expect(screen.getByText("the stages changed since you read them (now revision 2)")).toBeTruthy();
         expect(names()[0]).toBe("Waiting");
         await waitFor(() => expect(apply().disabled).toBe(false));
     });
