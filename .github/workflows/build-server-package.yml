@@ -431,14 +431,27 @@ jobs:
       #
       # The image is Debian's own, from Amazon's public mirror of the official images and by digest (that of the
       # `bookworm-slim` tag on 2026-11-04, the same index Docker Hub serves): Docker Hub limits anonymous pulls per
-      # address, and the runners share addresses, so a pull from there can fail a leg for no fault of the package. A newer
-      # Debian point release is a deliberate change of this line.
+      # address, and the runners share addresses, so a pull from there can fail a leg for no fault of the package. The
+      # Amazon mirror limits anonymous pulls per address too (the v0.60.33 leg was refused with "toomanyrequests"), so the
+      # pull is its own step: it retries with a growing wait, and falls back to two other sources of the same digest (so
+      # the same bytes) before it gives up. None of them needs a credential. A newer Debian point release is a deliberate
+      # change of the digest on the next line.
       - name: Run the package in an image with no certificates (Linux)
         if: matrix.os == 'linux'
         env:
-          IMAGE: public.ecr.aws/docker/library/debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+          DEBIAN_DIGEST: sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
         run: |
           set -eu
+          IMAGE=
+          for source in public.ecr.aws/docker/library/debian mirror.gcr.io/library/debian docker.io/library/debian; do
+            for attempt in 1 2 3 4; do
+              if docker pull --quiet "$source@$DEBIAN_DIGEST" >/dev/null; then IMAGE="$source@$DEBIAN_DIGEST"; break 2; fi
+              echo "::warning::pulling $source failed (attempt $attempt of 4)"
+              [ "$attempt" -lt 4 ] && sleep $((attempt * 20))
+            done
+          done
+          if [ -z "$IMAGE" ]; then echo "::error::no source would give the Debian image after retries"; exit 1; fi
+          echo "image: $IMAGE"
           top=$(ls unpacked)
           dir="$PWD/unpacked/$top"
           # `doctor` exits 1 when a check fails: the missing certificates are the failure expected here.
