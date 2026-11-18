@@ -57,12 +57,20 @@
 
 .vault-list__bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+
+    // Expiring soon goes under the filter in a pane too narrow for both, and its words wrap, so the bar never
+    // needs a sideways scroll.
+    .ui-button {
+        max-width: 100%;
+        white-space: normal;
+    }
 }
 
 .vault-list__filter {
-    flex: 1 1 auto;
+    flex: 1 1 6rem;
     min-width: 0;
 }
 
@@ -130,6 +138,14 @@
     justify-content: flex-start;
     min-width: 0;
     text-align: left;
+}
+
+// The head's buttons (the name and its count, and the ones after them) wrap in a pane under about 10rem; a word that
+// is still wider than the pane breaks last, so the head never pushes the list sideways.
+.vault-section__head .ui-button {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .vault-section__label {
@@ -386,6 +402,14 @@
     td:first-child,
     td.vault-actions {
         flex: 1 1 100%;
+    }
+
+    // A row's action buttons wrap in a row of their own, so two or three of them fit a pane under about 10rem.
+    td.vault-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1);
+        white-space: normal;
     }
 
     // An entry's name on the Activity tab is a button: a long one wraps inside it.
