@@ -18,6 +18,6 @@ applies: boolean,
  */
 own_cap: boolean, 
 /**
- * The default cap (Settings > Advanced); absent when the default is no cap.
+ * The default cap (the setting `model:agent_spend_cap_usd`); absent when the default is no cap.
  */
 default_cap_usd: number | null, };

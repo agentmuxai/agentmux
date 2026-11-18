@@ -4,7 +4,7 @@
 /**
  * AgentSpendPanel: the "Spend cap…" view of My Agents' row panel. What the agent has used today and its daily cap, and
  * the person's choices at any time: a number of dollars, no cap, or the default every agent without a cap of its own has
- * (a setting, Settings > Advanced). One `agent.spend` call each, by the agent's id, so it works for an agent with no
+ * (a setting). One `agent.spend` call each, by the agent's id, so it works for an agent with no
  * pane open. An agent can only lower its own cap (`Agents update spend_cap_usd`); this is the person's.
  */
 

@@ -138,7 +138,7 @@
     "agentSpend.line.default": "Used today: ${{spent}}. Its cap is ${{cap}} a day, the default every agent has until one is set for it.",
     "agentSpend.line.defaultNone": "Used today: ${{spent}}. It has no cap: the default is no cap.",
     "agentSpend.label": "Daily cap, in dollars",
-    "agentSpend.hint": "At least $0.01. The default for every agent is set in Settings > Advanced.",
+    "agentSpend.hint": "At least $0.01. An agent without a cap of its own has the default.",
     "agentSpend.placeholder": "for example 100",
     "agentSpend.set": "Set cap",
     "agentSpend.noCap": "No cap",

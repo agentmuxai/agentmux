@@ -19,7 +19,7 @@ const s = () => settingsAtom() ?? ({} as any);
 
 /** The setting a model route's daily spend cap is kept under (the gateway reads it at each request). */
 const ROUTE_CAP_SETTING = "model:spend_cap_usd:openrouter";
-const DEFAULT_ROUTE_CAP_USD = 100;
+const DEFAULT_ROUTE_CAP_USD = 500;
 
 /** The cap in dollars as the field shows it: unset is the default, `none` or 0 is shown as 0 (no cap). */
 function routeCapShown(stored: unknown): number {

@@ -34,7 +34,7 @@ They are independent: each can ship alone, in this order (section 8).
 
 | Cap | Default | Set by | Notes |
 |---|---|---|---|
-| **Per agent per day** | **$50** for an agent on a route (it was $20; the default is the setting `model:agent_spend_cap_usd`, shown in Settings > Advanced) | the agent's definition setting `agent:spend_cap_usd`; `0` or `none` means no cap | The agent's own default is stored when it is first put on a route. |
+| **Per agent per day** | **$50** for an agent on a route (it was $20; the default is the setting `model:agent_spend_cap_usd`) | the agent's definition setting `agent:spend_cap_usd`; `0` or `none` means no cap | The agent's own default is stored when it is first put on a route. |
 | **Per route per day** | **$500** (it was $100); one setting per route, for the OpenRouter route and the Anthropic API-key route | the route's setting in Settings; an agent through `Agents update` | The sum over all agents on that route. |
 
 - **The OpenRouter key limit is the hard stop; the in-app cap is the one that explains itself.** The key limit (set by the person in OpenRouter) cuts every user of the key, ends in an opaque 402, and counts spend we do not see. The in-app cap stops one agent first, says why in the pane and to its leader, and can be lifted. The Vault entry's notes keep recommending a key limit (parent spec section 9); the app does not rely on it.

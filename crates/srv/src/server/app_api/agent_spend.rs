@@ -42,7 +42,7 @@ pub struct AgentSpendResult {
     pub applies: bool,
     /// Whether the cap is the agent's own, and not the default every agent without one has.
     pub own_cap: bool,
-    /// The default cap (Settings > Advanced); absent when the default is no cap.
+    /// The default cap (the setting `model:agent_spend_cap_usd`); absent when the default is no cap.
     pub default_cap_usd: Option<f64>,
 }
 
@@ -109,9 +109,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return outcome.map(|(result, _, _)| result);
                 }
                 let request_id = uuid::Uuid::new_v4().to_string();
+                // The audit row names where the change was made: the pane, or the agent when it was named with no pane.
+                let place = if req.blockid.is_empty() { req.agent.clone().unwrap_or_default() } else { req.blockid.clone() };
                 match &outcome {
-                    Ok((_, name, note)) => s.reactive_handler.log_fleet_action_audit(Some("you"), name, &req.blockid, "agent.spend", true, None, &request_id, Some(note)),
-                    Err(e) => s.reactive_handler.log_fleet_action_audit(Some("you"), &req.blockid, &req.blockid, "agent.spend", false, Some(e), &request_id, Some("refused")),
+                    Ok((_, name, note)) => s.reactive_handler.log_fleet_action_audit(Some("you"), name, &place, "agent.spend", true, None, &request_id, Some(note)),
+                    Err(e) => s.reactive_handler.log_fleet_action_audit(Some("you"), &place, &place, "agent.spend", false, Some(e), &request_id, Some("refused")),
                 }
                 outcome.map(|(result, _, _)| result)
             })
