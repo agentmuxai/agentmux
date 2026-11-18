@@ -41,8 +41,9 @@ pub async fn current_doc(cdp: &mut CdpSession) -> Option<String> {
 
 /// `value` was typed into the page of pane `block`: from now on no answer to an agent holds it.
 pub async fn note_typed(state: &Arc<AppState>, cdp: &mut CdpSession, block: &str, value: &str) {
-    let doc = current_doc(cdp).await.unwrap_or_else(|| "unknown".to_string());
-    state.browser_api.typed.note(block, &doc, value);
+    // A document that can't be read now is the first one a later read names (never "none": that would let `eval` run).
+    let doc = current_doc(cdp).await;
+    state.browser_api.typed.note(block, doc.as_deref(), value);
 }
 
 /// Whether a Vault value was typed into the document pane `block` shows now.

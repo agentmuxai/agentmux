@@ -44,8 +44,34 @@ struct Typed {
 }
 
 struct Doc {
-    id: String,
+    /// The document, or `None` when it could not be read as the value was typed: the first read that can tell takes it.
+    id: Option<String>,
     typed: Vec<Typed>,
+}
+
+impl Doc {
+    /// Whether a read of `doc` is of this document: one that can't tell which it is counts as it is, and a document
+    /// that wasn't known is the first one a read names.
+    fn is_document(&mut self, doc: Option<&str>) -> bool {
+        match (&self.id, doc) {
+            (_, None) => true,
+            (None, Some(id)) => {
+                self.id = Some(id.to_string());
+                true
+            }
+            (Some(have), Some(id)) => have == id,
+        }
+    }
+}
+
+/// The digests of pane `block`'s document when a read of `doc` is of it; another document is a page with nothing typed
+/// in it, and the digests kept are dropped.
+fn of_document<'a>(docs: &'a mut HashMap<String, Doc>, block: &str, doc: Option<&str>) -> Option<&'a Doc> {
+    if !docs.get_mut(block)?.is_document(doc) {
+        docs.remove(block);
+        return None;
+    }
+    docs.get(block)
 }
 
 /// The values typed into the documents of this process's panes, as digests.
@@ -85,18 +111,20 @@ impl TypedSecrets {
         mac.finalize().into_bytes().into()
     }
 
-    /// `value` was typed into the document `doc` of pane `block`. A different `doc` than the one kept for the pane
-    /// replaces it: the earlier document is gone.
-    pub fn note(&self, block: &str, doc: &str, value: &str) {
+    /// `value` was typed into the document `doc` of pane `block` (`None`: the document could not be read, and the first
+    /// read that can tell is taken for it). A different `doc` than the one kept for the pane replaces it: the earlier
+    /// document is gone.
+    pub fn note<'a>(&self, block: &str, doc: impl Into<Option<&'a str>>, value: &str) {
+        let doc: Option<&str> = doc.into();
         let text: Vec<char> = value.chars().collect();
         if text.is_empty() {
             return;
         }
         let typed = Typed { chars: text.len(), fingerprint: self.fingerprint(&text), mac: self.mac(value) };
         let mut docs = self.docs.lock().unwrap_or_else(|p| p.into_inner());
-        let entry = docs.entry(block.to_string()).or_insert_with(|| Doc { id: doc.to_string(), typed: Vec::new() });
-        if entry.id != doc {
-            *entry = Doc { id: doc.to_string(), typed: Vec::new() };
+        let entry = docs.entry(block.to_string()).or_insert_with(|| Doc { id: doc.map(str::to_string), typed: Vec::new() });
+        if !entry.is_document(doc) {
+            *entry = Doc { id: doc.map(str::to_string), typed: Vec::new() };
         }
         if entry.typed.iter().any(|t| t.mac == typed.mac) {
             return;
@@ -116,14 +144,7 @@ impl TypedSecrets {
     /// `None` is a read that could not tell which document it is: it counts as the document the values were typed in.
     pub fn typed_into(&self, block: &str, doc: Option<&str>) -> bool {
         let mut docs = self.docs.lock().unwrap_or_else(|p| p.into_inner());
-        match docs.get(block) {
-            Some(d) if doc.is_none_or(|id| id == d.id) => !d.typed.is_empty(),
-            Some(_) => {
-                docs.remove(block);
-                false
-            }
-            None => false,
-        }
+        of_document(&mut docs, block, doc).is_some_and(|d| !d.typed.is_empty())
     }
 
     /// `text` with every part that is a value typed into the document replaced by [`TYPED_FROM_VAULT`], or `None`
@@ -131,14 +152,8 @@ impl TypedSecrets {
     pub fn withhold(&self, block: &str, doc: Option<&str>, text: &str) -> Option<String> {
         let typed: Vec<(usize, u64, [u8; 32])> = {
             let mut docs = self.docs.lock().unwrap_or_else(|p| p.into_inner());
-            match docs.get(block) {
-                Some(d) if doc.is_none_or(|id| id == d.id) => d.typed.iter().map(|t| (t.chars, t.fingerprint, t.mac)).collect(),
-                Some(_) => {
-                    docs.remove(block);
-                    return None;
-                }
-                None => return None,
-            }
+            let Some(d) = of_document(&mut docs, block, doc) else { return None };
+            d.typed.iter().map(|t| (t.chars, t.fingerprint, t.mac)).collect()
         };
         if typed.is_empty() || text.is_empty() {
             return None;
@@ -313,6 +328,19 @@ mod tests {
         assert_eq!(s.withhold("pane-1", Some("doc-3"), "second-document-value"), None);
         s.forget("pane-1");
         assert!(!s.typed_into("pane-1", None), "a closed pane keeps nothing");
+    }
+
+    #[test]
+    fn a_value_typed_while_the_document_could_not_be_read_is_kept_for_the_first_one_a_read_names() {
+        let s = secrets();
+        s.note("pane-1", None, PASSWORD);
+        assert!(s.typed_into("pane-1", None), "eval stays refused");
+        assert!(s.withhold("pane-1", None, PASSWORD).is_some());
+        // The first read that can tell which document it is takes it; a later document is another one.
+        assert!(s.typed_into("pane-1", Some("doc-1")));
+        assert!(s.withhold("pane-1", Some("doc-1"), PASSWORD).is_some());
+        assert!(!s.typed_into("pane-1", Some("doc-2")));
+        assert_eq!(s.withhold("pane-1", Some("doc-2"), PASSWORD), None);
     }
 
     #[test]

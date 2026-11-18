@@ -159,9 +159,10 @@ pub async fn signin_fill_route(State(state): State<Arc<AppState>>, headers: Head
     if let Some(id) = cdp.browser_id() {
         crate::browser_pane::signin_list::clear(id).await;
     }
-    let result = fill(&mut cdp, &req).await;
-    // The password is typed once the fill is done; the user name is not a secret.
-    if result.is_ok() {
+    let mut typed = false;
+    let result = fill(&mut cdp, &req, &mut typed).await;
+    // The password counts once the page has had it, also when the page then refused it; the user name is not a secret.
+    if typed {
         super::typed_value::note_typed(&state, &mut cdp, &req.block_id, &req.password).await;
     }
     let _ = cdp.close().await;
@@ -237,11 +238,11 @@ pub(super) async fn frames_for(root: &mut CdpSession, origin: &str) -> Result<Ve
     Ok(sessions)
 }
 
-async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillData, String> {
+async fn fill(root: &mut CdpSession, req: &SigninFillReq, typed: &mut bool) -> Result<SigninFillData, String> {
     for (session, frames) in frames_for(root, &req.origin).await? {
         let mut cdp = root.in_session(session.as_deref());
         for frame in frames {
-            if let Some(done) = fill_frame(&mut cdp, &frame, req).await? {
+            if let Some(done) = fill_frame(&mut cdp, &frame, req, typed).await? {
                 return Ok(done);
             }
         }
@@ -250,14 +251,14 @@ async fn fill(root: &mut CdpSession, req: &SigninFillReq) -> Result<SigninFillDa
 }
 
 /// Fill the sign-in form in `frame`, if it has one: `None` when it has none.
-async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> Result<Option<SigninFillData>, String> {
+async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq, typed: &mut bool) -> Result<Option<SigninFillData>, String> {
     let ctx = super::act::isolated_context(cdp, Some(frame)).await?;
     let Some(password) = object(cdp, ctx, &find_password()).await? else { return Ok(None) };
     let focused = if req.keep_focus { focused_element(cdp, ctx).await } else { None };
     let user = call_on_object(cdp, &password, &user_for()).await?;
     let username_filled = match &user {
         Some(user) if !req.username.is_empty() => {
-            type_into(cdp, user, &req.username, &req.origin, "user").await?;
+            type_into(cdp, user, &req.username, &req.origin, "user", &mut false).await?;
             true
         }
         _ => false,
@@ -269,7 +270,7 @@ async fn fill_frame(cdp: &mut CdpSession, frame: &str, req: &SigninFillReq) -> R
     } else {
         object(cdp, ctx, &find_password()).await?.ok_or("the password field left the page after the user name was typed, so the password wasn't")?
     };
-    type_into(cdp, &password, &req.password, &req.origin, "password").await?;
+    type_into(cdp, &password, &req.password, &req.origin, "password", typed).await?;
     if let Some(focused) = focused {
         give_back_focus(cdp, &focused).await;
     }
@@ -309,7 +310,7 @@ pub(super) async fn call_on_object(cdp: &mut CdpSession, obj: &str, func: &str) 
 /// set `text` as its value in one call ([`check_and_set`]). `kind` is the field
 /// it was found as: `password` or `user`. Checked to be in a document of
 /// `origin` before focusing too.
-pub(super) async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str, kind: &str) -> Result<(), String> {
+pub(super) async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origin: &str, kind: &str, set: &mut bool) -> Result<(), String> {
     let left = || format!("the page left {origin}, so nothing more was typed");
     if call_on(cdp, obj, IN_ORIGIN, vec![json!(origin)]).await?.as_bool() != Some(true) {
         return Err(left());
@@ -318,7 +319,10 @@ pub(super) async fn type_into(cdp: &mut CdpSession, obj: &str, text: &str, origi
     if let Some(e) = prepared.get("error").and_then(Value::as_str) {
         return Err(e.to_string());
     }
-    match call_on(cdp, obj, &check_and_set(), vec![json!(origin), json!(text), json!(TAINT_ATTR), json!(kind)]).await?.as_str() {
+    let seen = call_on(cdp, obj, &check_and_set(), vec![json!(origin), json!(text), json!(TAINT_ATTR), json!(kind)]).await?;
+    // The page has had the value unless a check refused before it was set (a page that then changed it still had it).
+    *set |= !matches!(seen.as_str(), Some("origin" | "changed" | "covered"));
+    match seen.as_str() {
         Some("ok") => Ok(()),
         Some("origin") => Err(left()),
         Some("changed") => Err("the field changed when it took the focus (hidden, read-only or no longer that kind of field), so nothing more was typed".to_string()),

@@ -139,7 +139,7 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
     }
 }
 
-/// `typed` is set once the password is in the first field.
+/// `typed` is set once the page has had the password.
 async fn fill(root: &mut CdpSession, req: &SignupFillReq, typed: &mut bool) -> Result<SignupFillData, String> {
     if req.field.is_empty() || req.field.len() > 64 || !req.field.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("no field was offered for this password, so nothing was filled".to_string());
@@ -152,11 +152,10 @@ async fn fill(root: &mut CdpSession, req: &SignupFillReq, typed: &mut bool) -> R
             // Found before the first value goes in: setting it runs the page's handlers.
             let confirm = call_on_object(&mut cdp, &field, &confirm_for()).await?;
             let focused = if req.keep_focus { focused_element(&mut cdp, ctx).await } else { None };
-            type_into(&mut cdp, &field, &req.password, &req.origin, "password").await?;
-            *typed = true;
+            type_into(&mut cdp, &field, &req.password, &req.origin, "password", typed).await?;
             let mut fields = 1;
             if let Some(confirm) = confirm {
-                type_into(&mut cdp, &confirm, &req.password, &req.origin, "password").await?;
+                type_into(&mut cdp, &confirm, &req.password, &req.origin, "password", typed).await?;
                 fields = 2;
             }
             if let Some(focused) = focused {
