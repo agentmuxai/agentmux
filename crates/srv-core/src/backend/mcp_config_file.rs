@@ -193,7 +193,14 @@ mod tests {
             std::fs::create_dir_all(&owned).unwrap();
             let owned_path = owned.to_string_lossy().into_owned();
             assert_eq!(relocated_path(&owned_path), None);
-            assert_eq!(config_path(&owned_path), owned.join(".mcp.json"));
+            // The config path is resolved, so compare the folder resolved the same way: on macOS
+            // the temp dir is under /var, a link to /private/var.
+            let config = config_path(&owned_path);
+            assert_eq!(config.file_name(), Some(std::ffi::OsStr::new(".mcp.json")));
+            assert_eq!(
+                std::fs::canonicalize(config.parent().unwrap()).unwrap(),
+                std::fs::canonicalize(&owned).unwrap()
+            );
         });
     }
 

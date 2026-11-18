@@ -38,7 +38,7 @@ pub fn get_docsite_dir() -> Option<&'static PathBuf> {
 /// # Examples
 ///
 /// ```
-/// use backend_test::backend::docsite::resolve_docsite_path;
+/// use agentmux_srv_core::backend::docsite::resolve_docsite_path;
 ///
 /// // Without docsite configured, always returns None
 /// assert!(resolve_docsite_path("/docs/foo").is_none());
