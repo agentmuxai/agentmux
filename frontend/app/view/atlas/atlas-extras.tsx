@@ -11,6 +11,7 @@ import { CloseButton } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { clockTime } from "@/app/store/muxbus-delivery";
 import { createMemo, For, Show, type JSX } from "solid-js";
+import { ByKey } from "./atlas-by-key";
 import { containerLine } from "./atlas-card-facts";
 import type { AtlasGraph, AtlasOrphan, AtlasService } from "./atlas-graph";
 import { NODE_H, NODE_W, type Placed, type RegionBox } from "./atlas-layout";
@@ -91,22 +92,20 @@ export function ExtraNodes(props: {
     const orphans = createMemo(() => props.graph.regions.flatMap((r) => r.orphans));
     return (
         <>
-            <For each={orphans()}>
-                {(orphan) => (
-                    <Show when={props.nodes.get(orphan.key)}>
-                        {(at) => <OrphanNode orphan={orphan} at={at()} selected={props.selected === orphan.key} onSelect={props.onSelect} />}
+            <ByKey each={orphans()}>
+                {(orphan, key) => (
+                    <Show when={props.nodes.get(key)}>
+                        {(at) => <OrphanNode orphan={orphan()} at={at()} selected={props.selected === key} onSelect={props.onSelect} />}
                     </Show>
                 )}
-            </For>
-            <For each={props.graph.services}>
-                {(service) => (
-                    <Show when={props.nodes.get(service.key)}>
-                        {(at) => (
-                            <ServiceNode service={service} at={at()} selected={props.selected === service.key} onSelect={props.onSelect} />
-                        )}
+            </ByKey>
+            <ByKey each={props.graph.services}>
+                {(service, key) => (
+                    <Show when={props.nodes.get(key)}>
+                        {(at) => <ServiceNode service={service()} at={at()} selected={props.selected === key} onSelect={props.onSelect} />}
                     </Show>
                 )}
-            </For>
+            </ByKey>
         </>
     );
 }
