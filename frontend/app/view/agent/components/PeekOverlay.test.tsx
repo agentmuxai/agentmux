@@ -16,10 +16,11 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSignal, Show } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
+import { resetPointerForTest, trackPointer } from "./peek-pointer";
 import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
 import { createFollowScroll, type FollowScrollHost } from "@/app/scroll/follow-scroll";
 
@@ -30,6 +31,7 @@ vi.mock("@floating-ui/dom", () => ({
 afterEach(() => {
     cleanup();
     vi.mocked(autoUpdate).mockClear();
+    resetPointerForTest();
 });
 
 function makeRow(): HTMLElement {
@@ -202,6 +204,89 @@ describe("PeekOverlay", () => {
             } finally {
                 vi.useRealTimers();
             }
+        });
+
+        // A wheel notch scrolls a new row under a still pointer: that row never hears a mousemove, but the document
+        // has heard the pointer (or the notch itself, which carries its position).
+        describe("a row that scrolled under a still pointer", () => {
+            beforeEach(trackPointer); // listening, as it is from the first row of a real pane
+            function openWithoutRowMove() {
+                const container = document.createElement("div");
+                container.style.overflowY = "auto";
+                document.body.appendChild(container);
+                const row = document.createElement("div");
+                container.appendChild(row);
+                rectOf(container, { top: 100, bottom: 400 });
+                rectOf(row, { top: 200, bottom: 230, left: 100, right: 800, width: 700 });
+                Object.defineProperty(window, "innerWidth", { value: 1400, configurable: true });
+                Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
+                render(() => (
+                    <PeekOverlay show={true} rowEl={() => row}>
+                        <span>peek content</span>
+                    </PeekOverlay>
+                ));
+                vi.advanceTimersByTime(50);
+                rectOf(panel()!, { height: 40, width: 300, top: 230, bottom: 270, left: 200, right: 500 });
+                (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)(); // re-place, now measured
+            }
+
+            it("sits above the pointer the document last saw, not level with it", () => {
+                vi.useFakeTimers();
+                try {
+                    pointerAt(300, 215);
+                    openWithoutRowMove();
+                    expect(topOf()).toBe(215 - 12 - 40);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
+
+            it("takes the pointer's place from a wheel notch too", () => {
+                vi.useFakeTimers();
+                try {
+                    document.dispatchEvent(new WheelEvent("wheel", { clientX: 300, clientY: 222 }));
+                    openWithoutRowMove();
+                    expect(topOf()).toBe(222 - 12 - 40);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
+
+            it("prefers the pointer the document sees now over the row's own older move", () => {
+                vi.useFakeTimers();
+                try {
+                    setup({ panelHeight: 40, mouseY: 205 }); // the row heard a move at 205
+                    expect(topOf()).toBe(205 - 12 - 40);
+                    // a wheel notch scrolls the row back under the pointer, now at 222: no move on the row
+                    document.dispatchEvent(new WheelEvent("wheel", { clientX: 300, clientY: 222 }));
+                    (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)();
+                    expect(topOf()).toBe(222 - 12 - 40);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
+
+            it("counts a pointer a fraction of a pixel past the row's edge as on the row, as the browser's hit test does", () => {
+                vi.useFakeTimers();
+                try {
+                    pointerAt(300, 230.15); // the row's bottom edge is 230
+                    openWithoutRowMove();
+                    expect(topOf()).toBe(230.15 - 12 - 40);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
+
+            it("ignores a pointer position outside the row, and sits at the row's top as before", () => {
+                vi.useFakeTimers();
+                try {
+                    pointerAt(300, 600);
+                    openWithoutRowMove();
+                    expect(topOf()).toBe(200);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
         });
 
         it("a panel too tall to fit is pinned: it holds still, and keeps its height, while the pointer moves toward it", () => {

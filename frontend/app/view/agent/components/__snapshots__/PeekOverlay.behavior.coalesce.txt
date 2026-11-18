@@ -9,4 +9,4 @@ autoUpdate #1 disposed
 advance 100ms
 after unmount: panel=-
 advance 100ms
-[the row went away before the first frame] panel={position: fixed; left: 800px; top: 200px; pointer-events: none; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
+[the row went away before the first frame] panel={position: fixed; left: 800px; top: 214px; pointer-events: none; transform: translateX(-100%); max-width: 700px; min-width: 0px; max-height: 0px;} outside=false hidden=null class="agent-node-peek-overlay" bridge=- afterLeave=-
