@@ -15,6 +15,7 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PeekOverlay } from "./PeekOverlay";
 import { peekBridgeRow, peekPanelOpenAfterLeaveRow } from "./peek-bridge";
+import { resetPointerForTest } from "./peek-pointer";
 
 const T: string[] = [];
 const log = (line: string) => T.push(line);
@@ -30,6 +31,7 @@ const nameOf = (el: Element | null) => (el ? (rowIds.get(el) ?? "?") : "-");
 beforeEach(() => {
     T.length = 0;
     rowIds = new Map();
+    resetPointerForTest(); // the app-wide pointer memory must not carry a previous case's moves in
     vi.useFakeTimers();
     let n = 0;
     vi.mocked(autoUpdate).mockReset();

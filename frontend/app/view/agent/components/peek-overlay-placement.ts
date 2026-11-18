@@ -8,6 +8,7 @@ import { peekFloatingStyle } from "./peek-floating-style";
 import { computePeekHorizontal, computePeekVertical } from "./peek-placement";
 import type { PeekMeasure } from "./peek-overlay-measure";
 import type { PeekState } from "./peek-overlay-state";
+import { pointerYWithin } from "./peek-pointer";
 import { PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX, PEEK_MIN_WIDTH_PX, readPaneZoom, withPaneZoom } from "./peek-zoom";
 
 export function createPeekPlacement(s: PeekState, m: PeekMeasure) {
@@ -45,13 +46,16 @@ export function createPeekPlacement(s: PeekState, m: PeekMeasure) {
         if (s.pinnedOffsetY != null) {
             vt = computePeekVertical({ ...placeAt, mouseY: rect.top + s.pinnedOffsetY, flushToRow: true });
         } else {
-            vt = computePeekVertical({ ...placeAt, mouseY: s.lastMouseY });
+            // A row that scrolled under a still pointer (a wheel notch) never heard it move: the app's last
+            // known pointer position stands in, when it is over this row.
+            const mouseY = s.lastMouseY ?? pointerYWithin(rect.top, rect.bottom);
+            vt = computePeekVertical({ ...placeAt, mouseY });
             // Enterable: pin it, and keep its near edge on the row so the way to
             // it does not cross another row. Decided on the unpinned placement
             // and then sticky until it closes, so the two never alternate.
-            if (vt.scrolls && s.lastMouseY != null) {
-                s.pinnedOffsetY = s.lastMouseY - rect.top;
-                vt = computePeekVertical({ ...placeAt, mouseY: s.lastMouseY, flushToRow: true });
+            if (vt.scrolls && mouseY != null) {
+                s.pinnedOffsetY = mouseY - rect.top;
+                vt = computePeekVertical({ ...placeAt, mouseY, flushToRow: true });
             }
         }
         // Enterable if pinned, or if it scrolls with no pointer Y to pin to yet
