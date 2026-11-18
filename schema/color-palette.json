@@ -1,106 +1,122 @@
 {
-  "note": "The shared identity palette: 16 hues evenly spaced by CIEDE2000 around the sRGB-limited identity ring (SPEC_SHARED_PERCEPTUAL_PALETTE_16_2026_11_01.md). hue is OKLCH degrees; hex is the stored, theme-neutral value (OKLCH L 0.70, C 0.14 at that hue). Every surface derives its own tones from the hue (pane-color-scheme.ts). Read by frontend/app/theme/palette.ts and crates/srv-core/src/backend/palette.rs; do not copy this list.",
-  "version": 1,
+  "note": "The shared identity palette: 12 hues evenly spaced by CIEDE2000 around the sRGB-limited identity ring, then Black and White (SPEC_SHARED_PALETTE_12_HUES_BLACK_WHITE_2026_11_16.md). A hue slot's hue is OKLCH degrees and its hex is the stored, theme-neutral value (OKLCH L 0.70, C 0.14 at that hue); a neutral slot has no hue and stores itself. Every surface derives its own tones from the slot (pane-color-scheme.ts). retired maps the ids and stored hexes of the 16 slots before version 2 to the slot each now means. Read by frontend/app/theme/palette.ts and crates/srv-core/src/backend/palette.rs; do not copy this list. scripts/palette-tool.mjs --check holds the hues to the method.",
+  "version": 2,
   "swatch": {
     "l": 0.7,
     "c": 0.14
   },
   "slots": [
     {
-      "id": "crimson",
-      "name": "Crimson",
-      "hue": 17,
-      "hex": "#e8777f"
+      "id": "rose",
+      "name": "Rose",
+      "hue": 3,
+      "hex": "#e47696"
     },
     {
       "id": "red",
       "name": "Red",
-      "hue": 33,
-      "hex": "#e87b64"
+      "hue": 27,
+      "hex": "#e8796e"
     },
     {
       "id": "orange",
       "name": "Orange",
-      "hue": 50,
-      "hex": "#e28247"
+      "hue": 49,
+      "hex": "#e38149"
     },
     {
       "id": "amber",
       "name": "Amber",
-      "hue": 71,
-      "hex": "#d48d24"
+      "hue": 78,
+      "hex": "#cd9219"
     },
     {
       "id": "yellow",
       "name": "Yellow",
-      "hue": 94,
-      "hex": "#bb9c12"
-    },
-    {
-      "id": "lime",
-      "name": "Lime",
-      "hue": 116,
-      "hex": "#9aa932"
+      "hue": 108,
+      "hex": "#a7a425"
     },
     {
       "id": "green",
       "name": "Green",
-      "hue": 136,
-      "hex": "#75b255"
+      "hue": 135,
+      "hex": "#77b154"
     },
     {
       "id": "jade",
       "name": "Jade",
-      "hue": 155,
-      "hex": "#47b777"
+      "hue": 161,
+      "hex": "#33b981"
     },
     {
       "id": "teal",
       "name": "Teal",
-      "hue": 178,
-      "hex": "#00b89e"
-    },
-    {
-      "id": "cyan",
-      "name": "Cyan",
-      "hue": 202,
-      "hex": "#00b4be"
+      "hue": 193,
+      "hex": "#00b5b3"
     },
     {
       "id": "sky",
       "name": "Sky",
-      "hue": 226,
-      "hex": "#00aedd"
+      "hue": 225,
+      "hex": "#00afdc"
     },
     {
-      "id": "azure",
-      "name": "Azure",
-      "hue": 250,
-      "hex": "#53a3f2"
-    },
-    {
-      "id": "indigo",
-      "name": "Indigo",
-      "hue": 273,
-      "hex": "#8297f5"
+      "id": "blue",
+      "name": "Blue",
+      "hue": 256,
+      "hex": "#61a0f4"
     },
     {
       "id": "violet",
       "name": "Violet",
-      "hue": 301,
-      "hex": "#ae88e7"
+      "hue": 290,
+      "hex": "#9e8eef"
     },
     {
       "id": "magenta",
       "name": "Magenta",
-      "hue": 330,
-      "hex": "#ce7cc8"
+      "hue": 329,
+      "hex": "#cd7dc9"
     },
     {
-      "id": "pink",
-      "name": "Pink",
-      "hue": 357,
-      "hex": "#e276a0"
+      "id": "black",
+      "name": "Black",
+      "neutral": "black",
+      "hex": "#000000"
+    },
+    {
+      "id": "white",
+      "name": "White",
+      "neutral": "white",
+      "hex": "#ffffff"
     }
-  ]
+  ],
+  "retired": {
+    "ids": {
+      "crimson": "red",
+      "lime": "yellow",
+      "cyan": "teal",
+      "azure": "blue",
+      "indigo": "violet",
+      "pink": "rose"
+    },
+    "hexes": {
+      "#e8777f": "red",
+      "#e87b64": "red",
+      "#e28247": "orange",
+      "#d48d24": "amber",
+      "#bb9c12": "yellow",
+      "#9aa932": "yellow",
+      "#75b255": "green",
+      "#47b777": "jade",
+      "#00b89e": "teal",
+      "#00b4be": "teal",
+      "#00aedd": "sky",
+      "#53a3f2": "blue",
+      "#8297f5": "violet",
+      "#ae88e7": "violet",
+      "#ce7cc8": "magenta",
+      "#e276a0": "rose"
+    }
+  }
 }

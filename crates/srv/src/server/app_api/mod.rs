@@ -55,6 +55,7 @@ pub(crate) mod agent_seats;
 pub(crate) mod agent_rename;
 pub(crate) mod agent_definition;
 pub(crate) mod agent_model;
+mod agent_runtime_pick;
 pub(crate) mod agent_spend;
 pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;
@@ -76,7 +77,7 @@ pub(crate) mod container_update;
 /// (`server::agent_handlers::template`/`core`) can reuse the same
 /// vendor-base-url validation `agent.define` already uses, instead of
 /// duplicating it.
-pub(crate) use agent_define::{check_provider_unchanged, validate_vendor_base_url};
+pub(crate) use agent_define::{check_provider_unchanged, check_volumes, validate_vendor_base_url};
 // pub(crate): `server/mod.rs`'s `POST /api/v1/agent/pane/close` handler (the
 // `ClosePane` MCP tool's backing route) calls `pane::handle_close_pane`
 // directly, same as `fleet`'s exposure just below.
@@ -145,6 +146,7 @@ pub(crate) mod viewer;
 mod input_history;
 mod presence;
 pub(crate) mod tower_pane;
+pub(crate) mod record_read;
 mod blockstats;
 mod history_agents;
 mod audit_query;

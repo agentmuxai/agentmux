@@ -1459,6 +1459,26 @@ async fn reactive_transcript_unknown_agent_is_404() {
 }
 
 #[tokio::test]
+async fn reactive_transcript_of_a_known_agent_with_no_pane_says_so_and_points_to_watch() {
+    // A container agent between restarts has a definition and no open pane: not a bare "agent not found".
+    let state = test_state();
+    token_for(&state, "pulse-like-agent");
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/agentmux/reactive/transcript?agent=pulse-like-agent")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let error = json["error"].as_str().unwrap();
+    assert!(error.starts_with("agent not found"), "the forwarding code keys on this prefix: {error}");
+    assert!(error.contains("no open pane") && error.contains("Agents watch"), "{error}");
+}
+
+#[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
@@ -7970,6 +7990,75 @@ async fn memory_session_start_skips_global_memory_the_startup_file_carries() {
         .expect("the Global entry is still listed");
     assert_eq!(rules["via"], "startup_file");
     assert_eq!(rules["size_bytes"], 0, "the file's row counts it");
+}
+
+/// The 11-17 incident: after a compaction (and /clear) the CLI reloads its startup file, but the hook only looked at
+/// that file for a new session, so it sent all the Global Memory a second time.
+#[tokio::test]
+async fn memory_session_start_after_a_compaction_does_not_repeat_the_startup_files_global_memory() {
+    let (state, token) = m4c1_state();
+    let bundle: crate::backend::storage::store::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "g-rules", "name": "Rules", "is_global": true, "instructions": "workspace rules",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&bundle).unwrap();
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md
+").unwrap();
+    std::fs::write(ws.path().join(".claude/AGENTMUX_MEMORY.md"), "# Memory
+# [Workspace] Rules
+
+workspace rules
+").unwrap();
+    let cwd = ws.path().to_string_lossy().into_owned();
+    for source in ["compact", "clear"] {
+        let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+        let req = serde_json::json!({"block_id": block_id, "session_id": format!("s-{source}"), "source": source, "part": 1, "cwd": cwd});
+        let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert!(v["text"].is_null() && v["of"] == 0, "{source}: the file carries it, so there is nothing to send: {v}");
+    }
+}
+
+/// A startup file written before a Global entry changed: only that entry is sent, whole, and the one the file holds
+/// current is not repeated.
+#[tokio::test]
+async fn memory_session_start_sends_only_the_global_sections_newer_than_the_startup_file() {
+    let (state, token) = m4c1_state();
+    for (id, name, text) in [("g-rules", "Rules", "workspace rules v2"), ("g-other", "Other", "other rules")] {
+        let bundle: crate::backend::storage::store::Bundle =
+            serde_json::from_value(serde_json::json!({"id": id, "name": name, "is_global": true, "instructions": text})).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
+    }
+    let ws = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ws.path().join(".claude")).unwrap();
+    std::fs::write(ws.path().join("CLAUDE.md"), "@.claude/AGENTMUX_MEMORY.md
+").unwrap();
+    std::fs::write(
+        ws.path().join(".claude/AGENTMUX_MEMORY.md"),
+        "# Memory
+# [Workspace] Rules
+
+workspace rules v1
+
+---
+
+# [Workspace] Other
+
+other rules
+",
+    )
+    .unwrap();
+    let block_id = format!("blk-{}", uuid::Uuid::new_v4());
+    let cwd = ws.path().to_string_lossy().into_owned();
+    let req = serde_json::json!({"block_id": block_id, "session_id": "s-stale", "source": "compact", "part": 1, "cwd": cwd});
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/memory/session-start/part", req).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["text"].as_str().expect("the newer section is sent");
+    assert!(text.contains("workspace rules v2"), "{text}");
+    assert!(text.contains("newer than your startup copy"), "{text}");
+    assert!(!text.contains("other rules"), "the current section is not repeated: {text}");
 }
 
 // ---- Container-agent credential (backend/container/credential.rs) ----

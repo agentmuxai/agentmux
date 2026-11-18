@@ -66,6 +66,49 @@ describe("PendingMessagesPanel — flushing copy split", () => {
         expect(screen.getByText(/Queued — sends at the agent's next step.*\(1 message\)/)).toBeTruthy();
     });
 
+    // srv queued the delivered message behind the agent's live process (a command sent to the background keeps it
+    // alive): "any moment" is not true, and the person is told what it waits for and how many are ahead.
+    it("says the agent's command is still running, not 'any moment', once srv queued it behind the process", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true, waiting: { ahead: 0 } })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.getByText(/Waiting \(1 message\) — the agent's command is still running/)).toBeTruthy();
+        expect(screen.queryByText(/reaching the agent any moment/)).toBeNull();
+    });
+
+    it("names how many messages are ahead of the first waiting one", () => {
+        const [pending] = createSignal<PendingMessage[]>([
+            msg({ id: "a", flushing: true, waiting: { ahead: 2 } }),
+            msg({ id: "b", flushing: true, waiting: { ahead: 3 } }),
+        ]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.getByText(/Waiting \(2 messages, 2 ahead\) — the agent's command is still running/)).toBeTruthy();
+    });
+
+    // The header must follow the count and `ahead` while the panel stays in the waiting state (no clearing between).
+    it("updates the waiting header when the count and ahead change while it stays waiting", () => {
+        const [pending, setPending] = createSignal<PendingMessage[]>([msg({ id: "a", flushing: true, waiting: { ahead: 0 } })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.getByText(/Waiting \(1 message\) — /)).toBeTruthy();
+        setPending([
+            msg({ id: "a", flushing: true, waiting: { ahead: 0 } }),
+            msg({ id: "b", flushing: true, waiting: { ahead: 1 } }),
+            msg({ id: "c", flushing: true, waiting: { ahead: 2 } }),
+        ]);
+        expect(screen.getByText(/Waiting \(3 messages\) — /)).toBeTruthy();
+        setPending([
+            msg({ id: "b", flushing: true, waiting: { ahead: 1 } }),
+            msg({ id: "c", flushing: true, waiting: { ahead: 2 } }),
+        ]);
+        expect(screen.getByText(/Waiting \(2 messages, 1 ahead\) — /)).toBeTruthy();
+    });
+
+    it("keeps 'any moment' for a flushing message srv did not report as waiting", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.getByText(/Sending — reaching the agent any moment/)).toBeTruthy();
+        expect(screen.queryByText(/Waiting — the agent/)).toBeNull();
+    });
+
     it("the flushing item gets the agent-pending-item-flushing class", () => {
         const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true })]);
         const { container } = render(() => (

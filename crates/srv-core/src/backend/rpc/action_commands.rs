@@ -74,7 +74,7 @@ pub const UNLESS_OPERATOR: &[&str] = &[
     "layout.applyIntent", "layout.open", "layout.restoreOtherBuild", "layout.save", "memorydelivery:claim_fallback",
     "notify.ack", "notify.attention", "notify.emit", "notify.focus", "notify.takeactivation", "notify.test",
     "operator.challenge", "pane.activateTab", "pane.confirm.decide", "pane.moveTab", "pane.moveTabs", "pane.open", "pane.removeTab",
-    "presence.publish-now", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
+    "presence.publish-now", "record.page", "setmeta", "unwatcheditorfile", "unwatchmediadir", "viewer.agent-hidden",
     "watcheditorfile", "watchmediadir", "widgets.endsession",
 ];
 
@@ -95,7 +95,7 @@ pub const READ_ONLY: &[&str] = &[
     "browser_profiles.list", "bundle.export", "bundle.export_for_agent", "bundle.export_for_agent_with_history",
     "bundle.get", "bundle.import.preview", "bundle.list", "bundle.self.get", "bundle.validate", "checkcliauth",
     "connectivity.status", "connlist", "connlistaws", "connsessions", "containerimagecheck",
-    "containerruntimeavailable", "eventreadhistory", "exportagents", "fileprobe", "filesearchbytes", "fleet.group.list",
+    "containerruntimeavailable", "eventreadhistory", "exportagents", "fileindexlines", "fileprobe", "filesearchbytes", "fleet.group.list",
     "forkagentdefinitionsuggest", "fs.git_status", "fs.list", "fs.places", "getagentbundles", "getagentcontent",
     "getagentinstance", "getallagentcontent", "getbuildslot", "getclaudeglobalconfig", "getcontainercaches", "getcontainerlimits", "getdrone", "getdronepayloadschema", "geteditorhome",
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",

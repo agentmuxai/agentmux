@@ -40,8 +40,23 @@ describe("parseBackdrop", () => {
         }
     });
 
-    it("knows every one of the 16 built-ins", () => {
+    it("knows every one of the 14 built-ins", () => {
+        expect(BUILTINS).toHaveLength(14);
         for (const b of BUILTINS) expect(parseBackdrop({ kind: "builtin", id: b.id })?.id).toBe(b.id);
+    });
+
+    it("reads an id retired with the 16 slots as the slot it became", () => {
+        for (const [was, now] of [
+            ["crimson", "red"],
+            ["lime", "yellow"],
+            ["cyan", "teal"],
+            ["azure", "blue"],
+            ["indigo", "violet"],
+            ["pink", "rose"],
+        ]) {
+            expect(parseBackdrop({ kind: "builtin", id: was }), was).toEqual({ kind: "builtin", id: now, polarity: "follow", version: 1 });
+        }
+        expect(resolveBackdrop({ backdrop: { kind: "builtin", id: "azure" } }, "dark")).toEqual({ id: "builtin:blue", derived: deriveBuiltin("blue", "dark") });
     });
 });
 
@@ -52,6 +67,22 @@ describe("resolveBackdrop", () => {
         const fixed = { ...teal, polarity: "dark" };
         expect(resolveBackdrop({ backdrop: fixed }, "light")?.derived).toEqual(deriveBuiltin("teal", "dark"));
         expect(resolveBackdrop({ backdrop: { ...teal, polarity: "light" } }, "dark")?.derived).toEqual(deriveBuiltin("teal", "light"));
+    });
+
+    it("keeps Black and White the same surface under either app theme and any polarity", () => {
+        for (const [id, hex] of [
+            ["black", "#000000"],
+            ["white", "#ffffff"],
+        ]) {
+            for (const polarity of ["follow", "dark", "light"]) {
+                for (const app of ["dark", "light"] as const) {
+                    const resolved = resolveBackdrop({ backdrop: { kind: "builtin", id, polarity } }, app);
+                    expect(resolved?.id).toBe(`builtin:${id}`);
+                    expect(resolved?.derived.surfaces.surface, `${id}/${polarity}/${app}`).toBe(hex);
+                    expect(resolved?.derived).toEqual(deriveInk(hex));
+                }
+            }
+        }
     });
 
     it("derives a custom colour from the colour, whatever the app theme or polarity", () => {
@@ -101,7 +132,7 @@ describe("sameBackdrop and sameResolved", () => {
         const base = parseBackdrop(teal)!;
         expect(sameBackdrop(base, undefined)).toBe(false);
         expect(sameBackdrop(undefined, base)).toBe(false);
-        for (const other of [{ ...teal, id: "crimson" }, { ...teal, polarity: "dark" }, { kind: "color", hex: "#336699" }]) {
+        for (const other of [{ ...teal, id: "red" }, { ...teal, polarity: "dark" }, { kind: "color", hex: "#336699" }]) {
             expect(sameBackdrop(base, parseBackdrop(other)), JSON.stringify(other)).toBe(false);
         }
         expect(sameBackdrop(parseBackdrop({ kind: "color", hex: "#336699" }), parseBackdrop({ kind: "color", hex: "#336698" }))).toBe(false);
@@ -111,7 +142,7 @@ describe("sameBackdrop and sameResolved", () => {
         const a = resolveBackdrop({ backdrop: teal }, "dark");
         expect(sameResolved(a, resolveBackdrop({ backdrop: { ...teal } }, "dark"))).toBe(true);
         expect(sameResolved(a, resolveBackdrop({ backdrop: teal }, "light"))).toBe(false);
-        expect(sameResolved(a, resolveBackdrop({ backdrop: { ...teal, id: "crimson" } }, "dark"))).toBe(false);
+        expect(sameResolved(a, resolveBackdrop({ backdrop: { ...teal, id: "red" } }, "dark"))).toBe(false);
         expect(sameResolved(a, undefined)).toBe(false);
         expect(sameResolved(undefined, undefined)).toBe(true);
     });

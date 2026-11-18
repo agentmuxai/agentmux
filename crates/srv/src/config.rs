@@ -138,6 +138,17 @@ pub enum SrvCommand {
         #[arg(long, value_name = "FILE")]
         key_file: Option<PathBuf>,
     },
+    /// Ask a headless srv that serves its own UI to shut down, as a termination signal does (`agentmux stop` on
+    /// Windows, which has no such signal). Proves the key to the server the way `open` does. Run by the same user.
+    Shutdown {
+        /// The server's web port (`--web-port`). By default read from the file the server writes
+        /// beside its key file.
+        #[arg(long)]
+        port: Option<u16>,
+        /// The server's key file (default: `srv-auth-key` in its data folder).
+        #[arg(long, value_name = "FILE")]
+        key_file: Option<PathBuf>,
+    },
     /// Give pre-fix forks the agent id `fork_slug` gives, keeping the old one
     /// as a former slug (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md §4 Phase 2).
     /// With no flag, or `--plan`, prints what would change and changes nothing.

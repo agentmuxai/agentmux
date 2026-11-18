@@ -173,6 +173,29 @@ fn no_config_dir_means_nothing_to_check_reachability_against() {
     assert_eq!(c.find_continuation_session_id(&f.config), None);
 }
 
+/// A move between a plan and an API key (SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH): a plan's sessions live in its
+/// own login's folder and the key route runs in the provider's default folder, so the session is not reachable
+/// from the other side. The restart then carries AgentMux's record of the conversation, as for any move between
+/// logins; a restart that stays on the same folder (the key route again, another key) resumes the same session.
+#[test]
+fn a_move_between_a_plan_and_an_api_key_carries_the_record_and_a_restart_in_one_folder_resumes_the_session() {
+    let turns = stream(&[
+        r#"{"type":"user","message":{"role":"user","content":"earlier request"}}"#,
+        &format!(r#"{{"type":"result","session_id":"{LIVE_SID}"}}"#),
+    ]);
+
+    let same_folder = fixture(true);
+    write_pane_transcript(&same_folder.fs, &turns);
+    assert_eq!(controller_with(&same_folder.fs).find_continuation_session_id(&same_folder.config).as_deref(), Some(LIVE_SID));
+
+    let other_folder = fixture(false);
+    write_pane_transcript(&other_folder.fs, &turns);
+    let c = controller_with(&other_folder.fs);
+    assert_eq!(c.find_continuation_session_id(&other_folder.config), None, "the session sits under the other login's folder");
+    let packet = c.carry_continuation().expect("the record of the conversation is carried instead");
+    assert!(packet.contains("earlier request"), "{packet}");
+}
+
 // ── the continuation packet's source ────────────────────────────────────
 
 const AGENT_ZONE: &str = "agent:d76da857:current";

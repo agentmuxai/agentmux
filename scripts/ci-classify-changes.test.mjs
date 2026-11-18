@@ -11,7 +11,7 @@
 // and every case that should RUN is written as the assertion, not implied.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -227,6 +227,31 @@ describe("classifyChanges — docs_index, the cross-platform specs-index job", (
         ]) {
             expect(classifyChanges([p]).docs_index, p).toBe(true);
         }
+    });
+
+    // The job's own step names the test files it runs; a PR that changes any of them, or a script they import, has to
+    // run the job on all three OSes, or a Windows-only failure first shows on main (#7447: release-manifest.mjs and its
+    // tests changed, the job was skipped on the PR, and the push run to main failed on windows-latest for three hours).
+    // Read from the step itself so the two cannot drift apart again.
+    it("runs when a test the job runs, or a script that test imports, changes", () => {
+        const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+        const yml = readFileSync(join(root, ".github/workflows/ci-pr.yml"), "utf8");
+        const step = /- name: generator and classifier tests\s+run: npx vitest run ([^\n]+)/.exec(yml);
+        expect(step, "the docs-index job's test step is in ci-pr.yml").not.toBeNull();
+        const listed = step[1].trim().split(/\s+/);
+        expect(listed.length).toBeGreaterThan(3);
+        const seen = new Set();
+        const walk = (rel) => {
+            if (seen.has(rel)) return;
+            seen.add(rel);
+            const text = readFileSync(join(root, rel), "utf8");
+            for (const m of text.matchAll(/(?:import|from)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g)) {
+                const target = relative(root, resolve(join(root, dirname(rel)), m[1])).replaceAll("\\", "/");
+                if (/^scripts\/.+\.m?js$/.test(target) && statSync(join(root, target), { throwIfNoEntry: false })) walk(target);
+            }
+        };
+        listed.forEach(walk);
+        expect([...seen].filter((p) => !classifyChanges([p]).docs_index).sort()).toEqual([]);
     });
 
     it("runs when the job, its classifier or its runtime changes", () => {

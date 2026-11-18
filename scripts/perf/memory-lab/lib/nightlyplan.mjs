@@ -31,6 +31,35 @@ export function pickBuilds(runs, { bRunId = null, aRunId = null } = {}) {
     return { b, a, reason };
 }
 
+/**
+ * The chosen run ids (`--b-run`, `--a-run`) that the lookback list does not hold, as strings and without repeats. The list
+ * only reaches back a fixed number of runs, and a chosen run older than that still has its artifact: it has to be fetched by
+ * its id, not treated as gone.
+ *
+ * @param {{id: number}[]} runs
+ * @param {(number|string|null|undefined)[]} wanted
+ */
+export function missingRunIds(runs, wanted) {
+    const have = new Set(runs.map((r) => String(r.id)));
+    return [...new Set(wanted.filter((id) => id !== null && id !== undefined && String(id) !== "").map(String))].filter((id) => !have.has(id));
+}
+
+/**
+ * Why a run fetched by its id cannot be a nightly to compare, or null when it can: the lookback list only holds runs of the
+ * nightly artifacts workflow on `main` that are not pull-request runs, and a run chosen by hand is held to the same.
+ * The run's `path` may carry a ref suffix (`.github/workflows/x.yml@main`), which is not part of the file name.
+ *
+ * @param {{path?: string, head_branch?: string, event?: string}} run  a run as GitHub's runs API returns it
+ * @param {string} workflow  the workflow's file name
+ */
+export function rejectedRun(run, workflow) {
+    const file = String(run?.path ?? "").split("@")[0].split("/").pop();
+    if (file !== workflow) return `it belongs to ${file || "no workflow"}, not ${workflow}`;
+    if (run.head_branch !== "main") return `it ran on ${run.head_branch || "no branch"}, not main`;
+    if (String(run.event ?? "").startsWith("pull_request")) return "it is a pull-request run";
+    return null;
+}
+
 import { unrunnableSides } from "./abplan.mjs";
 
 const MAX_MERGES = 40;

@@ -6,6 +6,7 @@
 // so every host uses this one (`jsContextMenuApi`). Moved out of the CEF shim
 // (app/host/cef-api.ts), which was its only user.
 
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { registerPaneOverlay, type PaneOverlayHandle } from "@/app/platform/pane-overlay";
 import "../element/anchored-popover.scss";
 import {
@@ -99,6 +100,8 @@ interface MenuState {
     /** The submenu shells of every level, siblings of `menuShell` in the overlay. */
     subShells: HTMLElement[];
     overlayHandles: PaneOverlayHandle[];
+    /** Takes the pane's colours off the overlay again (a menu opened on a pane with a backdrop). */
+    stopScope?: () => void;
     submenuHandles: PaneOverlayHandle[];
     topLevelSubmenus: Map<string, { hover: SubmenuHoverController; sub: HTMLElement }>;
     onDocMouseDown: (e: MouseEvent) => void;
@@ -176,6 +179,7 @@ function closeMenu(s: MenuState) {
     }
     for (const h of s.overlayHandles) h.release();
     s.overlayHandles.length = 0;
+    s.stopScope?.();
     for (const h of s.submenuHandles) h.release();
     s.submenuHandles.length = 0;
     for (const listener of [...closeListeners]) listener();
@@ -263,7 +267,8 @@ function appendSwatchAndLabels(row: HTMLElement, item: NativeContextMenuItem) {
     // accepted and forwarded here but never drawn.
     if (item.sublabel) {
         const sub = document.createElement("span");
-        sub.className = "menu-item-sublabel";
+        // A short mark ("API") is what the row is for: it keeps its width and the label gives way.
+        sub.className = item.sublabel.length <= 8 ? "menu-item-sublabel menu-item-sublabel--mark" : "menu-item-sublabel";
         sub.textContent = item.sublabel;
         row.appendChild(sub);
     }
@@ -495,6 +500,10 @@ export function showJsContextMenu(
     document.getElementById("cef-context-menu-overlay")?.remove();
 
     const s = createMenuState(position, onClick);
+    // A menu opened on a pane with a backdrop takes that pane's colours: the pane under the pointer, asked before the
+    // menu's own overlay covers it. Every level is inside the overlay, so they all follow.
+    const under = typeof document.elementFromPoint === "function" ? document.elementFromPoint(position.x, position.y) : null;
+    s.stopScope = carryPaneScope(s.overlay, under);
     installDismissal(s);
     // The menu goes in before its rows are rendered, so the submenus (appended while rendering) sit above it.
     s.overlay.appendChild(s.menuShell);

@@ -32,7 +32,8 @@ import { focusWhenRendered } from "@/util/focusutil";
 
 export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
-    const openRaw = () => props.onOpen("settings.json");
+    // The file the first error is about: a mistake in widgets.json opens widgets.json, anything else settings.json.
+    const openRaw = () => props.onOpen(/widgets\.json$/i.test(errors()[0]?.file ?? "") ? "widgets.json" : "settings.json");
     return (
         <Show when={errors().length > 0}>
             <div class="settings-config-errors">

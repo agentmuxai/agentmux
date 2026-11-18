@@ -84,6 +84,16 @@
         opacity: 0.7;
     }
 
+    // A scrolling preview is as wide as its longest line, like the lines in it (and never narrower than the scroll
+    // box). A result that draws a frame (a text result, JSON, a file's content) then draws it around all of its
+    // text and the frame scrolls with it. Left at the scroll box's width, the frame stayed where it was while long
+    // lines ran through its right border (styles/tool-result-frame.layout.test.ts).
+    &.agent-preview--scroll {
+        box-sizing: border-box;
+        min-width: 100%;
+        width: max-content;
+    }
+
     &.agent-preview--wrap {
         .agent-preview-lines {
             width: auto;

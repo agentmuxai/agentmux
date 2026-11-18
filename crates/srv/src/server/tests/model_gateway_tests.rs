@@ -20,8 +20,10 @@ use crate::server::routes::build_router;
 use crate::server::tests::test_state;
 use crate::server::AppState;
 
+/// The stand-in upstream's address is one for the whole test binary: a test that reaches it holds this.
+pub(super) static UPSTREAM_IN_USE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const KEY: &str = "sk-or-test-key-0000";
-const SSE: &str = concat!(
+pub(super) const SSE: &str = concat!(
     "event: message_start\n",
     "data: {\"type\":\"message_start\",\"message\":{\"model\":\"deepseek/deepseek-v4.1-flash-1017\",\"usage\":{\"input_tokens\":1000,\"output_tokens\":1}}}\n\n",
     "event: message_delta\n",
@@ -29,15 +31,15 @@ const SSE: &str = concat!(
 );
 
 #[derive(Default)]
-struct Seen {
-    authorization: Option<String>,
-    x_api_key: Option<String>,
-    path: String,
-    body: Value,
+pub(super) struct Seen {
+    pub(super) authorization: Option<String>,
+    pub(super) x_api_key: Option<String>,
+    pub(super) path: String,
+    pub(super) body: Value,
 }
 
 /// A stand-in for the route's upstream: records what it was sent and answers with a stream.
-async fn upstream(seen: Arc<Mutex<Seen>>) -> String {
+pub(super) async fn upstream(seen: Arc<Mutex<Seen>>) -> String {
     async fn messages(State(seen): State<Arc<Mutex<Seen>>>, headers: HeaderMap, body: String) -> impl IntoResponse {
         let text = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).map(str::to_string);
         *seen.lock().unwrap() = Seen { authorization: text("authorization"), x_api_key: text("x-api-key"), path: "/v1/messages".into(), body: serde_json::from_str(&body).unwrap_or_default() };
@@ -51,7 +53,7 @@ async fn upstream(seen: Arc<Mutex<Seen>>) -> String {
 }
 
 /// An agent on the `openrouter` route with a key in the Vault; returns its gateway token.
-fn agent_on_route(state: &AppState, name: &str, with_key: bool) -> (String, String) {
+pub(super) fn agent_on_route(state: &AppState, name: &str, with_key: bool) -> (String, String) {
     crate::backend::vault::seal::use_test_key();
     let uid = format!("uid-{name}");
     let mut def = test_agent_def(&uid, name, "claude", "agent", 1, "");
@@ -65,7 +67,7 @@ fn agent_on_route(state: &AppState, name: &str, with_key: bool) -> (String, Stri
     (token::token_for(name, &uid, "openrouter"), uid)
 }
 
-async fn call(state: &AppState, token: Option<&str>, uri: &str, body: Value) -> (StatusCode, String) {
+pub(super) async fn call(state: &AppState, token: Option<&str>, uri: &str, body: Value) -> (StatusCode, String) {
     let mut req = Request::builder().method(Method::POST).uri(uri).header("content-type", "application/json");
     if let Some(t) = token {
         req = req.header("authorization", format!("Bearer {t}"));
@@ -78,6 +80,7 @@ async fn call(state: &AppState, token: Option<&str>, uri: &str, body: Value) -> 
 
 #[tokio::test]
 async fn a_request_reaches_the_upstream_with_the_key_and_the_agents_model_and_is_counted() {
+    let _upstream = UPSTREAM_IN_USE.lock().await;
     let state = test_state();
     let seen = Arc::new(Mutex::new(Seen::default()));
     *catalog::TEST_BASE_URL.lock().unwrap() = Some(upstream(seen.clone()).await);

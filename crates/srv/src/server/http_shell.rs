@@ -13,7 +13,13 @@ type Prepared = (Option<super::shell_secrets::Injected>, (Option<crate::backend:
 /// Asks for the Vault secrets a command is given and checks the values its output goes into the Vault as, together,
 /// so the whole asking fits the Terminal tool's wait. The agent says why first (a rotation's own commands carry the
 /// rotation's): a missing reason is refused before anything is asked or run.
-async fn prepare_secrets(state: &AppState, req: &ShellCreateRequest, remote: bool, preapproved: Option<&super::shell_secrets::Preapproved>) -> Result<Prepared, Response> {
+async fn prepare_secrets(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    req: &ShellCreateRequest,
+    remote: bool,
+    preapproved: Option<&super::shell_secrets::Preapproved>,
+) -> Result<Prepared, Response> {
     let gives = req.secrets.as_ref().is_some_and(|m| !m.is_empty())
         || req.stdin_secret.as_deref().is_some_and(|s| !s.trim().is_empty())
         || req.secret_files.as_ref().is_some_and(|m| !m.is_empty())
@@ -23,10 +29,10 @@ async fn prepare_secrets(state: &AppState, req: &ShellCreateRequest, remote: boo
     } else {
         req.reason.clone().unwrap_or_default()
     };
-    let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref(), reason: &reason };
+    let wanted = super::shell_secrets::Wanted { env: req.secrets.as_ref(), stdin: req.stdin_secret.as_deref(), files: req.secret_files.as_ref(), reason: &reason, caller };
     let cwd = req.cwd.as_deref().unwrap_or("");
     let injecting = super::shell_secrets::inject(state, &req.agent_block_id, req.auth.as_ref(), wanted, remote, &req.cmd, cwd, preapproved);
-    let capturing = super::shell_secrets::plan_capture(state, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, cwd, &reason);
+    let capturing = super::shell_secrets::plan_capture(state, caller, &req.agent_block_id, req.auth.as_ref(), req.capture.as_deref(), &req.cmd, cwd, &reason);
     tokio::try_join!(injecting, capturing).map_err(|(code, why)| (code, Json(json!({ "error": why }))).into_response())
 }
 
@@ -37,15 +43,16 @@ async fn prepare_secrets(state: &AppState, req: &ShellCreateRequest, remote: boo
 /// as `shell_chunk` MPS events without blocking the agent.
 pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<ShellCreateRequest>,
 ) -> Response {
-    create_shell(state, req, None).await
+    create_shell(state, caller.as_deref(), req, None).await
 }
 
 /// Starts a shell for `req`. `preapproved`: the person approved its secrets with a
 /// rotation (`Vault` `rotate`), which runs its commands through here.
 pub(super) async fn create_shell(
-    state: AppState,
+    state: AppState, caller: Option<&super::caller::Caller>,
     req: ShellCreateRequest,
     preapproved: Option<&super::shell_secrets::Preapproved>,
 ) -> Response {
@@ -92,7 +99,7 @@ pub(super) async fn create_shell(
     }
     // Vault secrets for this command: the person is asked first, and the values go into this one process (its
     // environment, stdin or private files, further down) and out of its output.
-    let (injected, (capture, mut went_ahead)) = match prepare_secrets(&state, &req, remote, preapproved).await {
+    let (injected, (capture, mut went_ahead)) = match prepare_secrets(&state, caller, &req, remote, preapproved).await {
         Ok(both) => both,
         Err(refused) => return refused,
     };
@@ -347,11 +354,12 @@ pub(super) async fn handle_shell_status(
 /// no kept output, and another agent's pane is refused.
 pub(super) async fn handle_shell_output(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<agentmux_common::api_types::ShellOutputRequest>,
 ) -> impl IntoResponse {
     // The pane is the caller's own, from its signed identity: the instance key every agent
     // holds proves nothing about which agent is asking.
-    let pane = match crate::server::ui_handlers::verified_block_id(&state, None, &req.auth) {
+    let pane = match crate::server::ui_handlers::verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(p) => p,
         Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": format!("could not verify which agent is asking: {e}") }))).into_response(),
     };

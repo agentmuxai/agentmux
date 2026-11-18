@@ -46,11 +46,11 @@ fn an_action_the_tool_does_not_have_is_refused_with_the_list() {
 }
 
 #[test]
-fn a_summary_asks_for_three_headers_only() {
+fn a_summary_asks_for_the_headers_of_the_line_and_the_sender_check_only() {
     let r = summary_plan("abc123").unwrap();
     assert_eq!(q(&r, "format"), Some("metadata"));
     let headers: Vec<_> = r.query.iter().filter(|(n, _)| *n == "metadataHeaders").map(|(_, v)| v.as_str()).collect();
-    assert_eq!(headers, ["From", "Subject", "Date"]);
+    assert_eq!(headers, ["From", "Subject", "Date", "Authentication-Results", "Reply-To"]);
 }
 
 #[test]
@@ -130,6 +130,29 @@ fn a_long_message_and_a_long_thread_are_cut() {
     assert_eq!(msgs[0]["body_cut"], true);
     let total: usize = msgs.iter().map(|m| m["body"].as_str().unwrap().chars().count()).sum();
     assert!(total <= THREAD_CHARS + MESSAGES, "{total}");
+}
+
+#[test]
+fn a_thread_with_a_draft_in_it_says_how_many_are_unsent() {
+    let mail = |id: &str, labels: &[&str]| json!({ "id": id, "labelIds": labels, "payload": { "mimeType": "text/plain", "body": { "data": b64("hi") } } });
+    let out = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"]), mail("b", &["DRAFT"]), mail("c", &["DRAFT", "SENT"])] }));
+    assert_eq!(out["unsent_drafts"], 2);
+    let none = shape("get_thread", &json!({ "id": "t", "messages": [mail("a", &["INBOX"])] }));
+    assert!(none.get("unsent_drafts").is_none());
+}
+
+#[test]
+fn a_body_one_character_over_the_room_says_it_was_cut() {
+    let one = |n: usize| {
+        let thread = json!({ "id": "t", "messages": [{ "id": "m", "payload": { "mimeType": "text/plain", "body": { "data": b64(&"x".repeat(n)) } } }] });
+        shape("get_thread", &thread)["messages"][0].clone()
+    };
+    let exact = one(BODY_CHARS);
+    assert!(exact.get("body_cut").is_none(), "exactly the room is not a cut");
+    // The ellipsis makes the shown text as long as the original, so its length can't tell.
+    let over = one(BODY_CHARS + 1);
+    assert_eq!(over["body_cut"], true);
+    assert_eq!(over["body"].as_str().unwrap().chars().count(), BODY_CHARS + 1);
 }
 
 #[test]

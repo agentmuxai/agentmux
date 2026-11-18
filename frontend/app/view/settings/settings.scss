@@ -96,6 +96,28 @@
     }
 }
 
+// "Saved", on a row's label line for the moment after its setting was written (settings-saved.ts). The live region
+// (`.setting-saved`) is always there and empty at rest; the flag fades over the linger the app gives a confirmation, and
+// its timer removes it. Under reduced motion it holds, then goes.
+.setting-saved {
+    flex: 0 0 auto;
+    // The wrapper is the flex item and its own line box is as tall as its font, so it takes the flag's small size
+    // and one em of line height: the label row does not grow while the flag shows.
+    font-size: var(--text-xs);
+    line-height: 1;
+}
+
+.setting-saved-flag {
+    color: var(--success-text-color);
+    white-space: nowrap;
+    // Up for the first 70% of the linger, fading over the rest.
+    animation: am-fade-out calc(var(--duration-linger) * 0.3) var(--ease-standard) calc(var(--duration-linger) * 0.7) forwards;
+
+    @include mixins.when-motion-reduced(feedback) {
+        animation: none;
+    }
+}
+
 // ── Control widths ────────────────────────────────────────────────────────────
 
 .setting-select {
@@ -181,7 +203,7 @@
 
 // ── Widget colors ───────────────────────────────────────────────────────────
 
-// One row at a wide pane: chip, the 17 swatches (the "no colour" one and the 16 of the palette), Reset. It wraps
+// One row at a wide pane: chip, the 15 swatches (the "no colour" one and the 14 of the palette), Reset. It wraps
 // by the Settings pane's own width (the `settings` container below), never the window's: the swatches take a line
 // of their own, and then fewer columns, so nothing runs past the pane's edge.
 .setting-widget-color {
@@ -191,7 +213,7 @@
     gap: var(--space-2) 10px;
 
     .palette-swatches.palette-swatches {
-        --palette-cols: 17;
+        --palette-cols: 15;
     }
 }
 
@@ -344,7 +366,7 @@
 }
 
 // Widget colors: the swatches under the chip (Reset beside it) once the pane is under the width the whole row needs;
-// 17 swatches in a line need about 440 px, 9 per line about 260 px, and below that 6.
+// 15 swatches in a line need about 400 px; then 8 per line (the picker's own two rows, about 240 px), and below that 5.
 @container settings (max-width: 639px) {
     .setting-widget-color {
         > .ui-button {
@@ -360,13 +382,13 @@
 
 @container settings (max-width: 459px) {
     .setting-widget-color .palette-swatches.palette-swatches {
-        --palette-cols: 9;
+        --palette-cols: 8;
     }
 }
 
 @container settings (max-width: 259px) {
     .setting-widget-color .palette-swatches.palette-swatches {
-        --palette-cols: 6;
+        --palette-cols: 5;
     }
 }
 

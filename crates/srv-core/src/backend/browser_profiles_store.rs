@@ -108,9 +108,10 @@ fn check_color(color: &str) -> Result<String, String> {
 }
 
 /// A new profile added to `profiles`: a fresh id, a checked name, and the
-/// given colour or the shared palette's slot farthest from the ones in use
+/// given colour or the shared palette's hue farthest from the ones in use
 /// (`palette::farthest_free_slot`), so a deleted profile's colour is reused
-/// and nothing repeats until all 16 are taken.
+/// and nothing repeats until all 12 hues are taken. Black and White are never
+/// given: they are only ever someone's own choice.
 pub fn add(
     profiles: &mut Vec<BrowserProfile>,
     name: &str,

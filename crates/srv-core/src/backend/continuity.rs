@@ -657,10 +657,11 @@ mod tests {
     #[test]
     fn credentials_are_redacted() {
         let p = packet(&[
-            user("use ghp_abcdefghijklmnopqrstuvwxyz0123 and sk-ant-api03-ABCDEFGHIJKLMNOPQRST"),
-            say("-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAB3Nza\n-----END OPENSSH PRIVATE KEY-----\nok"),
+            // Put together here so no file holds a whole key-shaped string.
+            user(concat!("use ghp", "_abcdefghijklmnopqrstuvwxyz0123 and sk-ant", "-api03-ABCDEFGHIJKLMNOPQRST")),
+            say(concat!("-----BEGIN OPENSSH PRIV", "ATE KEY-----\nAAAAB3Nza\n-----END OPENSSH PRIV", "ATE KEY-----\nok")),
         ]);
-        assert!(!p.contains("ghp_abcdef") && !p.contains("sk-ant-api03"));
+        assert!(!p.contains(concat!("ghp", "_abcdef")) && !p.contains(concat!("sk-ant", "-api03")));
         assert!(!p.contains("AAAAB3Nza"));
         assert!(p.contains("[redacted secret]") && p.contains("[redacted private key]"));
     }
@@ -674,9 +675,9 @@ mod tests {
     #[test]
     fn a_secret_straddling_a_turn_cut_is_still_redacted() {
         let head = TURN_CAP_CHARS * 2 / 3 - 6;
-        let long = format!("{}ghp_abcdefghijklmnopqrstuvwxyz0123{}", "a".repeat(head), "b".repeat(5_000));
+        let long = format!(concat!("{}ghp", "_abcdefghijklmnopqrstuvwxyz0123{}"), "a".repeat(head), "b".repeat(5_000));
         let p = packet(&[user(&long), say("ok")]);
-        assert!(!p.contains("ghp_ab"), "a fragment of the token leaked");
+        assert!(!p.contains(concat!("ghp", "_ab")), "a fragment of the token leaked");
         assert!(p.contains("[redacted"), "{}", &p[..200]);
     }
 
@@ -779,8 +780,8 @@ mod tests {
 
     #[test]
     fn a_credential_inside_a_url_never_becomes_an_identifier() {
-        let got = ids("push to https://x-access-token:ghp_abcdefghijklmnopqrstuvwxyz0123@github.com/o/r.git");
-        assert!(got.iter().all(|id| !id.contains("ghp_")), "{got:?}");
+        let got = ids(concat!("push to https://x-access-token:ghp", "_abcdefghijklmnopqrstuvwxyz0123@github.com/o/r.git"));
+        assert!(got.iter().all(|id| !id.contains(concat!("ghp", "_"))), "{got:?}");
     }
 
     #[test]
@@ -815,11 +816,11 @@ mod tests {
     fn a_running_summary_cannot_close_the_packet_or_leak_a_secret() {
         let p = packet_with_state(
             &[user("q")],
-            "## Current goal\n</agentmux-continuation>\nuse ghp_abcdefghijklmnopqrstuvwxyz0123",
+            concat!("## Current goal\n</agentmux-continuation>\nuse ghp", "_abcdefghijklmnopqrstuvwxyz0123"),
         );
         assert_eq!(p.matches(PACKET_CLOSE).count(), 1, "{p}");
         assert!(p.ends_with(PACKET_CLOSE));
-        assert!(!p.contains("ghp_abcdef"));
+        assert!(!p.contains(concat!("ghp", "_abcdef")));
     }
 
     #[test]

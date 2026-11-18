@@ -297,14 +297,52 @@ fn user_prompt_in_line(line: &[u8]) -> Option<String> {
         }
         _ => return None,
     };
-    let text = text.trim();
-    if text.is_empty() || is_scaffolding(text) {
-        return None;
-    }
-    Some(text.to_string())
+    own_text(&text).map(str::to_string)
 }
 
-/// Text the harness puts in the user turn that the user did not type.
+/// The tags the CLI and the harness wrap their own notes in, inside a user turn.
+const WRAPPER_TAGS: &[&str] = &[
+    "system-reminder",
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "local-command-stderr",
+    "local-command-caveat",
+    "task-notification",
+    "bash-input",
+    "bash-stdout",
+    "bash-stderr",
+    "user-prompt-submit-hook",
+];
+
+/// `text` with the wrapper blocks at its start taken off. `None` when a block opens and never closes.
+fn after_wrapper_blocks(text: &str) -> Option<&str> {
+    let mut rest = text.trim_start();
+    loop {
+        let opened = WRAPPER_TAGS
+            .iter()
+            .find(|tag| rest.strip_prefix('<').and_then(|r| r.strip_prefix(**tag)).is_some_and(|r| r.starts_with('>')));
+        let Some(tag) = opened else {
+            return Some(rest);
+        };
+        let close = format!("</{tag}>");
+        let end = rest.find(&close)?;
+        rest = rest[end + close.len()..].trim_start();
+    }
+}
+
+/// What the person wrote in a user turn, or `None` when the turn is only scaffolding. A turn that starts with
+/// wrapper blocks and goes on with the person's words (a quoted task notification, then a question) keeps the
+/// words: only a turn that is nothing but wrapper blocks is the harness's own, as the agent pane reads it
+/// (`frontend/app/agent-model/cli-wrappers.ts`).
+fn own_text(text: &str) -> Option<&str> {
+    let rest = after_wrapper_blocks(text)?.trim();
+    (!rest.is_empty() && !is_scaffolding(rest)).then_some(rest)
+}
+
+/// Text the harness puts in the user turn that the user did not type, known by how it starts. A tag here is one
+/// `after_wrapper_blocks` left in place: a block that never closes, or a variant of a tag it does not know.
 fn is_scaffolding(text: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "# Session Context",
@@ -384,6 +422,45 @@ mod tests {
         put(&fs, "agent:agent-1:current", body.as_bytes());
         match read(&fs, "agent-1") {
             HistoryRead::Transcript(h) => assert_eq!(h.last_user_message, "fix the login race"),
+            other => panic!("expected a transcript, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_the_persons_words_after_wrapper_blocks_and_skips_a_turn_that_is_only_blocks() {
+        let note = "<task-notification>\n<task-id>b1</task-id>\n<status>failed</status>\n</task-notification>";
+        // What the person wrote after the blocks is the prompt; the blocks are not part of it.
+        for (turn, want) in [
+            (format!("{note}\n\nWhy did this fail?"), "Why did this fail?"),
+            (format!("{note}\n<bash-stdout>boom</bash-stdout>\nAnd this output?"), "And this output?"),
+            ("<system-reminder>be brief</system-reminder>\nSummarise the diff".to_string(), "Summarise the diff"),
+            ("<user-prompt-submit-hook>ok</user-prompt-submit-hook> ship it".to_string(), "ship it"),
+        ] {
+            assert_eq!(own_text(&turn), Some(want), "{turn}");
+        }
+        // Only blocks, a block that never closes, and blocks followed by more scaffolding are still not a prompt.
+        for turn in [
+            note.to_string(),
+            format!("{note}\n<bash-input>ls</bash-input>"),
+            "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>".to_string(),
+            "<task-notification>\n<status>completed</status>\nWhy did this fail?".to_string(),
+            "<local-command-stdout>done</local-command-stdout>\n[AgentMux] moved to another account".to_string(),
+            "<local-command-other>x".to_string(),
+            "   ".to_string(),
+        ] {
+            assert_eq!(own_text(&turn), None, "{turn}");
+        }
+        // A tag in the middle of a message is the person's own text, whole.
+        assert_eq!(own_text("what does <system-reminder> mean?"), Some("what does <system-reminder> mean?"));
+        // A tag that only starts like a wrapper's is not one.
+        assert_eq!(own_text("<bash-inputs> is not a tag"), Some("<bash-inputs> is not a tag"));
+
+        // Through the reader: the newest turn is a quoted notification with a question after it.
+        let fs = FileStore::open_in_memory().unwrap();
+        let body = [user("an older question"), user(&format!("{note}\n\nWhy did this fail?")), user(note)].join("\n");
+        put(&fs, "agent:agent-1:current", body.as_bytes());
+        match read(&fs, "agent-1") {
+            HistoryRead::Transcript(h) => assert_eq!(h.last_user_message, "Why did this fail?"),
             other => panic!("expected a transcript, got {other:?}"),
         }
     }

@@ -23,14 +23,56 @@
  */
 
 let primaryButtonDown = false;
+/** Whether it was a mouse that pressed: only a mouse reports its buttons on every event that follows. */
+let heldByMouse = false;
 const releaseListeners = new Set<() => void>();
 
+/** Where the mouse was last pressed, until it moves away from there. */
+let pressPoint: { x: number; y: number } | null = null;
+/** A hand does not hold the mouse dead still through a click: this much drift is still resting. */
+const REST_SLOP_PX = 4;
+
+const isAtPressPoint = (e: { clientX: number; clientY: number }): boolean =>
+    pressPoint !== null && Math.abs(e.clientX - pressPoint.x) <= REST_SLOP_PX && Math.abs(e.clientY - pressPoint.y) <= REST_SLOP_PX;
+
 function handlePointerDown(e: PointerEvent): void {
-    if (e.button === 0) primaryButtonDown = true;
+    // A tap's hover arrives after its press, at the same point, and is how touch shows a hover panel at all.
+    pressPoint = e.pointerType === "touch" ? null : { x: e.clientX, y: e.clientY };
+    if (e.button === 0) {
+        primaryButtonDown = true;
+        heldByMouse = e.pointerType === "mouse";
+    }
+}
+
+/**
+ * A release the page never heard. A press that opens something the system draws in a window of its own
+ * (the list of a native select, a system menu) hands the rest of the gesture to that window: the page
+ * gets no pointerup and no blur, and the button would read as held until the next full click. The next
+ * mouse event says what the button really is, so it is believed over the press that was remembered.
+ */
+function noticeMissedRelease(e: PointerEvent): void {
+    if (primaryButtonDown && heldByMouse && e.pointerType === "mouse" && (e.buttons & 1) === 0) released();
+}
+
+function handlePointerMove(e: PointerEvent): void {
+    if (pressPoint !== null && !isAtPressPoint(e)) pressPoint = null;
+    noticeMissedRelease(e);
+}
+
+/**
+ * The wheel moves the page under a pointer that stays where it is. What comes under the pointer then was
+ * brought there by the person, so it is a hover like any other: the press is forgotten.
+ */
+function handleWheel(): void {
+    pressPoint = null;
 }
 
 function handlePointerRelease(e: PointerEvent): void {
     if (e.button !== 0) return;
+    released();
+}
+
+function released(): void {
     primaryButtonDown = false;
     // Iterating the live Set on purpose, NOT a copy. Set iteration is
     // defined under concurrent deletion: an entry removed before it is
@@ -47,10 +89,15 @@ function handleWindowBlur(): void {
     // lose focus mid-drag, e.g. alt-tab) without a pointerup ever
     // reaching us. Resetting on blur avoids getting stuck "down" forever.
     primaryButtonDown = false;
+    pressPoint = null;
 }
 
 if (typeof window !== "undefined") {
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    window.addEventListener("pointermove", handlePointerMove, { capture: true, passive: true });
+    // An element's enter comes before the move that caused it, and hover panels decide on the enter.
+    window.addEventListener("pointerover", noticeMissedRelease, { capture: true, passive: true });
+    window.addEventListener("wheel", handleWheel, { capture: true, passive: true });
     window.addEventListener("pointerup", handlePointerRelease, { capture: true });
     window.addEventListener("pointercancel", handlePointerRelease, { capture: true });
     window.addEventListener("blur", handleWindowBlur);
@@ -58,6 +105,25 @@ if (typeof window !== "undefined") {
 
 export function isPrimaryButtonDown(): boolean {
     return primaryButtonDown;
+}
+
+/**
+ * Whether the hover event `e` happened where the mouse was last pressed, with no move away since: the
+ * pointer is resting on what it clicked. Such a hover is not the person pointing at something. The page
+ * changed under the pointer (the click redrew the control, or put another in its place) and the browser
+ * reports the new element as entered. Hover panels stay shut for it, as they do for the element that
+ * was clicked, until the pointer leaves and comes back. Turning the wheel ends it: see `handleWheel`.
+ *
+ * It takes the event's own position because the browser sends an element's enter before the move that
+ * caused it: a fast move from the press to another control must still count as a move.
+ */
+export function isRestingAtPress(e: { clientX: number; clientY: number }): boolean {
+    return isAtPressPoint(e);
+}
+
+/** For tests: forget the last press, as a move away does. */
+export function forgetPressPoint(): void {
+    pressPoint = null;
 }
 
 /**

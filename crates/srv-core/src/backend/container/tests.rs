@@ -720,3 +720,45 @@ fn the_tools_folder_is_a_read_only_mount_and_drift_only_where_the_host_sets_it()
     assert!(!ContainerManager::mounts_match(&made_for(&without), "agentmux-a-1", &with), "the CLIs are not mounted yet");
     assert!(ContainerManager::mounts_match(&made_for(&without), "agentmux-a-1", &without), "a host that shares no AWS rebuilds nothing");
 }
+
+// ── An agent's container drops NET_RAW; a key account's token ends with the container ──
+
+fn unreachable_daemon() -> ContainerManager {
+    let docker = bollard::Docker::connect_with_http("http://127.0.0.1:1", 1, bollard::API_DEFAULT_VERSION).unwrap();
+    ContainerManager::with_docker(docker, None)
+}
+
+/// The token a key account's turn runs on, for the agent whose definition id is `def_id`.
+fn key_token_for(def_id: &str) -> String {
+    use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+    token::renew_for_account("slug-of-it", def_id, KEY_ROUTE_ID, "acct", None)
+}
+
+#[tokio::test]
+async fn stopping_a_container_ends_its_agents_key_token_whatever_the_daemon_says() {
+    let token = key_token_for("kr-stop");
+    let _ = unreachable_daemon().stop("agentmux-kr-stop", 1).await;
+    assert_eq!(crate::backend::model_gateway::token::grant_for(&token), None);
+}
+
+#[tokio::test]
+async fn removing_a_container_ends_its_agents_key_token() {
+    let token = key_token_for("kr-remove");
+    let _ = unreachable_daemon().remove("agentmux-kr-remove", true).await;
+    assert_eq!(crate::backend::model_gateway::token::grant_for(&token), None);
+}
+
+#[test]
+fn only_the_named_agents_gateway_tokens_end() {
+    use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+    let mine = key_token_for("kr-mine");
+    let theirs = key_token_for("kr-theirs");
+    let model = token::token_for("kr-mine-slug", "kr-mine", "openrouter");
+    key_route::revoke_container_tokens("agentmux-kr-mine");
+    assert_eq!(token::grant_for(&mine), None);
+    assert!(token::grant_for(&theirs).is_some(), "another agent's token stays");
+    assert_eq!(token::grant_for(&model), None, "a model route's token ends with the container too");
+    key_route::revoke_container_tokens("not-an-agent-container");
+    assert!(token::grant_for(&theirs).is_some(), "a name that is no agent's container ends nothing");
+    token::revoke("kr-theirs", KEY_ROUTE_ID);
+}

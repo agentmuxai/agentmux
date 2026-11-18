@@ -419,10 +419,10 @@ describe("the Files pane: navigation", () => {
         // A stored ui:color wins; an agent with none gets the deterministic
         // pick its pane would be seeded with. The name takes that hue at the lightness made for
         // text on the theme's surface (readableAgentColor), not the raw colour (#22c55e, which the palette reads as Jade).
-        expect((v.getByText("korp") as HTMLElement).style.color).toBe("rgb(78, 201, 131)");
+        expect((v.getByText("korp") as HTMLElement).style.color).toBe("rgb(57, 203, 142)");
         const loap = (v.getByText("loap") as HTMLElement).style.color;
         expect(loap).not.toBe("");
-        expect(loap).not.toBe("rgb(78, 201, 131)");
+        expect(loap).not.toBe("rgb(57, 203, 142)");
     });
 
     it("opens only the Files pane's menu on blank space, not the pane frame's as well", async () => {

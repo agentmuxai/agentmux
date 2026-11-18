@@ -485,7 +485,7 @@ export const terminalPaneTab: PaneTabManifest = {
     view: "term",
     label: "Terminal",
     icon: "terminal",
-    defaultColor: "indigo",
+    defaultColor: "blue",
     capabilities: {
         // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1
         // §5): remounting loses the scrollback and the running shell's view.

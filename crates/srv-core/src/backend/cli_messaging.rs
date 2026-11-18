@@ -73,7 +73,7 @@ pub fn is_cli_session_dir(source: &str) -> bool {
 }
 
 /// `source` with `\` as `/`, repeated separators, `.` and `..` resolved, and no trailing separator.
-fn normalized(source: &str) -> String {
+pub(crate) fn normalized(source: &str) -> String {
     let unified = source.trim().replace('\\', "/");
     let mut parts: Vec<&str> = Vec::new();
     for part in unified.split('/') {

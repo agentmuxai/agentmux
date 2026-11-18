@@ -481,6 +481,20 @@ pub fn blocked_by_ancestry(list: &[String], all: &[RawFrame], id: &str) -> bool 
     false
 }
 
+/// The web sites of the blocked frames a snapshot shows, each once, in page
+/// order: what the person is asked to allow (spec §5.3). A frame with no
+/// site of its own (an opaque origin) has nothing to allow.
+pub fn blocked_sites(trees: &[FrameTree]) -> Vec<String> {
+    let mut sites: Vec<String> = Vec::new();
+    for t in trees.iter().filter(|t| t.blocked && t.note.is_none()) {
+        let web = t.origin.starts_with("https://") || t.origin.starts_with("http://");
+        if web && !sites.contains(&t.origin) {
+            sites.push(t.origin.clone());
+        }
+    }
+    sites
+}
+
 /// Refuses a frame reference whose frame, or one of the frames it is in, shows
 /// a site off the pane's current allowed list: the list may have been
 /// tightened since the snapshot, or a frame may have navigated within it.
@@ -495,6 +509,23 @@ pub async fn refuse_if_blocked(root: &mut CdpSession, allowed: Option<&[String]>
         ));
     }
     Ok(())
+}
+
+/// The pane's frames for a snapshot (`read_frames`). A frame from a site off
+/// the pane's list is shown without references, and the person is told, in the
+/// pane's banner, so they can allow its site (spec §5.3).
+pub async fn read_frames_asking(
+    state: &std::sync::Arc<crate::state::AppState>,
+    block_id: &str,
+    cdp: &mut CdpSession,
+    describes_left: &mut usize,
+) -> (Vec<FrameTree>, HashMap<usize, FrameRef>) {
+    let read = read_frames(cdp, describes_left, state.site_limits.list(block_id).as_deref()).await;
+    let blocked = blocked_sites(&read.0);
+    if !blocked.is_empty() {
+        crate::client::allowed_origins::report_frame_sites(state, block_id, &blocked);
+    }
+    read
 }
 
 /// How long one snapshot waits in all for frames still loading their document.
@@ -616,6 +647,27 @@ mod tests {
             origin: origin.into(),
             session: session.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn the_sites_to_ask_about_are_the_blocked_web_frames_once_each() {
+        let frame = |origin: &str, blocked: bool, note: Option<&str>| FrameTree {
+            origin: origin.to_string(),
+            blocked,
+            note: note.map(str::to_string),
+            ..Default::default()
+        };
+        let trees = [
+            frame("https://forms.example.gov", true, None),
+            frame("https://forms.example.gov", true, None),
+            frame("https://ads.example", false, None),
+            frame("", true, None),
+            frame("null", true, None),
+            frame("https://late.example", true, Some("not shown: over the frame limit")),
+            frame("http://other.example:8080", true, None),
+        ];
+        assert_eq!(blocked_sites(&trees), ["https://forms.example.gov", "http://other.example:8080"]);
+        assert!(blocked_sites(&[]).is_empty());
     }
 
     #[test]

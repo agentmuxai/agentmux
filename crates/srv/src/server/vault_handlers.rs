@@ -152,6 +152,47 @@ fn import_commit(store: &crate::backend::storage::store::Store, body: &Value) ->
     Ok((json!({ "result": vault::transfer::commit_for(store, token, duplicates, &vault, profile)? }), true))
 }
 
+/// A share names an agent this computer has, and a Vault the agent may use: a login in a Vault closed to it would
+/// not be offered, so the person is told to open the Vault first (A5).
+fn check_share_target(state: &AppState, id: &str, agent: &str) -> Result<(), String> {
+    if agent == vault::shares::EVERY_AGENT {
+        return Ok(());
+    }
+    let def = state.mstore.agent_def_get(agent).ok().flatten().ok_or_else(|| format!("no agent {agent} on this computer"))?;
+    let store = &state.identity_store;
+    if vault::vaults::entry_usable(store, id, Some(&def.slug))? || vault::vaults::entry_usable(store, id, Some(&def.id))? {
+        return Ok(());
+    }
+    Err(format!("the Vault this login is in isn't open to {}: open the Vault to it first (in the Vault pane, the Vault's agents), then share the login", def.name))
+}
+
+/// What the pane shows of an entry's shares: each agent it is shared with (or every agent), how often it signed in
+/// with the login and when it last did, and the agents the person can still share it with. Never a value: the sign-ins
+/// are read from the entry's history, and an agent is named by its permanent uid, which is its definition's id.
+fn share_list(state: &AppState, id: &str) -> Result<Value, String> {
+    let store = &state.identity_store;
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let listed = vault::shares::listed(&vault::signins::fields_of(&row));
+    let defs = state.mstore.agent_def_list().map_err(|e| e.to_string())?;
+    let signed_in = store.vault_activity_for_entry(id, &[vault::signins::SIGNED_IN], row.created_at, 1000).map_err(|e| e.to_string())?;
+    let uses: Vec<(String, i64)> = signed_in
+        .iter()
+        .filter(|r| r.outcome == "done")
+        .map(|r| (state.reactive_handler.get_agent(&r.actor).and_then(|a| a.uid).unwrap_or_default(), r.at))
+        .collect();
+    let shares: Vec<Value> = listed
+        .iter()
+        .map(|who| {
+            let every = who == vault::shares::EVERY_AGENT;
+            let mine: Vec<i64> = uses.iter().filter(|(uid, _)| every || uid == who).map(|(_, at)| *at).collect();
+            let name = if every { "Every agent".to_string() } else { defs.iter().find(|d| &d.id == who).map_or_else(|| "an agent that is gone".to_string(), |d| d.name.clone()) };
+            json!({ "agent": who, "name": name, "uses": mine.len(), "last_used_ms": mine.iter().copied().max().unwrap_or(0) })
+        })
+        .collect();
+    let agents: Vec<Value> = defs.iter().filter(|d| !listed.contains(&d.id)).map(|d| json!({ "uid": d.id, "name": d.name })).collect();
+    Ok(json!({ "shares": shares, "agents": agents }))
+}
+
 /// The host ops on Vaults and on an entry's earlier values.
 fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), String> {
     let store: &crate::backend::storage::store::Store = &state.identity_store;
@@ -171,6 +212,21 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
         "move_entry" => {
             vault::vaults::move_entry(store, &s("id"), &s("vault_id"))?;
             Ok((json!({}), true))
+        }
+        // The person shares a login with an agent's own browser profile, or stops (spec section 5). The agent is
+        // named by its permanent uid, `*` for every agent.
+        "share_add" => {
+            check_share_target(state, &s("id"), &s("agent"))?;
+            Ok((json!({ "changed": vault::shares::add(store, &s("id"), &s("agent"))? }), true))
+        }
+        // Who a login is shared with, and the agents it could still be shared with (the Share dialog and the card's list).
+        "share_list" => Ok((share_list(state, &s("id"))?, false)),
+        "share_remove" => {
+            let changed = vault::shares::remove(store, &s("id"), &s("agent"))?;
+            if changed {
+                super::browser_signin::share_removed(state, &s("id"), &s("agent"));
+            }
+            Ok((json!({ "changed": changed }), true))
         }
         // The Vault a browser profile saves its sign-ins to and offers them from.
         "signin_vault" => {
@@ -262,7 +318,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::delete(&store, id)?;
                 Ok((json!({}), true))
             }
-            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
+            "vault_create" | "vault_update" | "vault_delete" | "move_entry" | "share_add" | "share_remove" | "share_list" | "signin_vault" | "allow_setting" | "check_source" | "versions" | "restore" | "history" | "history_check" => entry_ops(&st, &op, &body),
             "decline_request" => {
                 let id = body.get("request_id").and_then(Value::as_str).unwrap_or("");
                 if let Some(req) = requests::requests().get(id) {
@@ -292,7 +348,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     }
                 }
                 let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
-                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)?, rows: super::vault_import_batch::ticked_rows(&request, body.get("rows"), decision)?, vault: super::vault_import_batch::chosen_vault(&request, body.get("vault").and_then(Value::as_str), decision)? };
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save, by: vault::uses::By::Person, choice: chosen_card(&request, body.get("choice").and_then(Value::as_str), decision)?, rows: super::vault_import_batch::ticked_rows(&request, body.get("rows"), decision)?, vault: super::vault_import_batch::chosen_vault(&request, body.get("vault").and_then(Value::as_str), decision)?, share: super::vault_import::ticked_share(&request, body.get("share"), decision) };
                 if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }
@@ -430,11 +486,12 @@ pub(crate) struct ListBody {
 
 /// `POST /api/v1/vault/list`: the entries of the Vaults the proven agent may use. An agent that
 /// doesn't prove who it is sees only the Vaults open to every agent, as `GET /api/v1/vault` does.
-pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, Json(body): Json<ListBody>) -> Response {
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+pub(crate) async fn handle_vault_list_for(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ListBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let proven = pane.is_some();
+    let uid = proven.then(|| state.reactive_handler.get_agent(&agent).and_then(|a| a.uid)).flatten();
     let store = state.identity_store.clone();
-    match tokio::task::spawn_blocking(move || vault::list_for_agent(&store, proven.then_some(agent.as_str()))).await {
+    match tokio::task::spawn_blocking(move || vault::list_for_agent_as(&store, proven.then_some(agent.as_str()), uid.as_deref())).await {
         Ok(Ok(entries)) => Json(json!({ "entries": entries })).into_response(),
         Ok(Err(e)) => error(StatusCode::INTERNAL_SERVER_ERROR, e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -462,8 +519,8 @@ pub(crate) struct HistoryBody {
 /// `POST /api/v1/vault/history`: an entry's history (who did what, when, under which version, and why), for an
 /// entry in a Vault the proven agent may use. It holds no value
 /// (docs/specs/SPEC_VAULT_PARITY_ENTRY_HISTORY_REASONS_AND_IMPORT_2026_11_06.md §5.3).
-pub(crate) async fn handle_vault_history(State(state): State<AppState>, Json(body): Json<HistoryBody>) -> Response {
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+pub(crate) async fn handle_vault_history(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<HistoryBody>) -> Response {
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let proven = pane.is_some();
     let store = state.identity_store.clone();
     let limit = body.limit.unwrap_or(100);
@@ -484,17 +541,19 @@ pub(crate) async fn handle_vault_history(State(state): State<AppState>, Json(bod
 /// person isn't asked: the value is no secret of theirs, nobody has seen it, and
 /// using it later asks as every use does. The answer names the entry, never the
 /// value.
-pub(crate) async fn handle_vault_generate(State(state): State<AppState>, Json(body): Json<GenerateBody>) -> Response {
+pub(crate) async fn handle_vault_generate(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<GenerateBody>) -> Response {
     let Some(auth) = body.auth.as_ref() else {
-        return error(StatusCode::FORBIDDEN, "generate needs the agent's signed identity: the Vault records who made each entry");
+        return error(StatusCode::FORBIDDEN, "generate needs to know which agent asks (its token or its signed identity): the Vault records who made each entry");
     };
-    let agent: String = match super::ui_handlers::verified_block_id(&state, None, auth) {
+    let agent: String = match super::ui_handlers::verified_block_id(&state, caller.as_deref(), auth) {
         Ok(_) => auth.agent_id.chars().take(64).collect(),
-        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs the agent's signed identity: {e}")),
+        Err(e) => return error(StatusCode::FORBIDDEN, format!("generate needs to know which agent asks (its token or its signed identity): {e}")),
     };
     let store = state.identity_store.clone();
     let request = body.request;
-    match tokio::task::spawn_blocking(move || vault::generate_entry(&store, request, &agent)).await {
+    // A login with a site is made for the agent's own browser profile, named by its permanent uid.
+    let own_profile = state.reactive_handler.get_agent(&agent).and_then(|a| a.uid).map(|uid| format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&uid)));
+    match tokio::task::spawn_blocking(move || vault::generate_entry_in(&store, request, &agent, own_profile.as_deref())).await {
         Ok(Ok(made)) => {
             publish(&state);
             Json(json!({ "status": "created", "id": made.id, "label": made.label, "kind": made.kind, "made": made.made })).into_response()
@@ -553,14 +612,18 @@ fn hold_use(body: &Value) -> Result<(Value, bool), String> {
     Ok((json!({}), true))
 }
 
-/// Who the request says is asking, and its pane: the agent whose signature
-/// verified, else a plain "not a verified agent".
-pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>) -> (String, Option<String>) {
+/// Who the request says is asking, and its pane: the agent whose token or signature
+/// verified (a container agent has a token and no signing key), else a plain "not a verified agent".
+pub(super) fn asking_agent(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> (String, Option<String>) {
     const UNVERIFIED: &str = "Something on this computer (not a verified agent)";
-    match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, None, a))) {
+    match auth.map(|a| (a, super::ui_handlers::verified_block_id(state, caller, a))) {
         Some((a, Ok(pane))) => (a.agent_id.chars().take(64).collect(), Some(pane)),
         Some((a, Err(e))) => {
-            tracing::warn!(claimed = %a.agent_id, error = %e, "a Vault request's signed identity didn't verify");
+            tracing::warn!(claimed = %a.agent_id, error = %e, "a Vault request's identity didn't verify");
             (UNVERIFIED.to_string(), None)
         }
         None => (UNVERIFIED.to_string(), None),
@@ -574,7 +637,7 @@ pub(super) fn asking_agent(state: &AppState, auth: Option<&agentmux_common::api_
 /// Asking again for the same kind and label is safe: a verified agent whose
 /// session ended mid-wait joins the request already open, or gets the answer
 /// the person gave, and no second form opens. Every answer carries `request_id`.
-pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(body): Json<RequestBody>) -> Response {
+pub(crate) async fn handle_vault_request(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<RequestBody>) -> Response {
     if vault::kinds::kind(&body.kind).is_none() {
         let kinds: Vec<&str> = vault::kinds::KINDS.iter().map(|k| k.name).collect();
         return error(StatusCode::BAD_REQUEST, format!("unknown kind {:?}; one of {}", body.kind, kinds.join(", ")));
@@ -588,7 +651,7 @@ pub(crate) async fn handle_vault_request(State(state): State<AppState>, Json(bod
         Ok(r) => r,
         Err(e) => return error(StatusCode::BAD_REQUEST, e),
     };
-    let (agent, pane) = asking_agent(&state, body.auth.as_ref());
+    let (agent, pane) = asking_agent(&state, caller.as_deref(), body.auth.as_ref());
     let vault_id = match body.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         None => String::new(),
         Some(which) => {
@@ -657,3 +720,10 @@ fn answered(request_id: &str, answer: Result<requests::Answer, ()>) -> Response 
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod identity_tests;
+#[cfg(test)]
+mod share_tests;
+#[cfg(test)]
+mod share_ask_tests;

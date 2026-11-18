@@ -87,7 +87,7 @@ pub(super) async fn take_over(state: &AppState, caller: Option<&super::caller::C
                 None => {
                     let agent = if name.is_empty() { "this agent" } else { name.as_str() };
                     let error = format!(
-                        "AgentMux cloud says the instance on this computer in channel {channel} holds {agent}, \
+                        "AgentMux Cloud says the instance on this computer in channel {channel} holds {agent}, \
                          but that instance isn't running. Its hold ends within a minute; try again then."
                     );
                     return (StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response();
@@ -401,7 +401,7 @@ fn wan_takeover_target(agent: &str) -> WanTarget {
 fn kept_relay_hold_error(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "this agent" } else { agent };
     format!(
-        "AgentMux cloud still says {agent} is held by the AgentMux instance on {where_}. \
+        "AgentMux Cloud still says {agent} is held by the AgentMux instance on {where_}. \
          That instance is probably an older version that can't hand it over. \
          Quit it completely (from the tray, not just its window); its hold ends \
          within a minute, then try again."
@@ -411,7 +411,7 @@ fn kept_relay_hold_error(agent: &str, where_: &str) -> String {
 fn other_computer_error(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "this agent" } else { agent };
     format!(
-        "{agent} is running on another computer ({where_}), according to AgentMux cloud. \
+        "{agent} is running on another computer ({where_}), according to AgentMux Cloud. \
          Take over only works between AgentMux instances on this computer. \
          Close {agent} there, then try again."
     )

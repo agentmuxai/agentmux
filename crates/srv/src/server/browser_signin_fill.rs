@@ -153,21 +153,25 @@ pub(crate) async fn fill_picked(state: &AppState, block_id: &str, entry: &str, k
 /// Type sign-in `entry` of `profile` into pane `block_id`'s page, if the page
 /// still shows a form for the site it is saved for, and record it as `actor`'s.
 /// Gives the site and whether a user name field was filled; never a value.
-/// `shown`: for an agent's sign-in, the entry's `created_at` and site the person
-/// approved. Nothing is typed if the entry was made again with its id, or its
-/// site was edited, while they were asked.
+/// `shown`: for an agent's sign-in, the entry's `created_at`, site and `updated_at` the
+/// person approved. Nothing is typed if the entry was made again with its id, or
+/// edited (its site, or who it is shared with, included), while they were asked.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String)>, reason: &str, keep_focus: bool) -> Result<(String, bool), String> {
+pub(crate) async fn fill_as(state: &AppState, block_id: &str, entry: &str, profile: &str, actor: &str, shown: Option<(i64, String, i64)>, reason: &str, keep_focus: bool) -> Result<(String, bool), String> {
     let origins = form_origins(block_id);
+    // An agent's sign-in is limited to the Vaults it may use, and in its own profile's tab to the logins shared with it.
+    let own = shown.is_some().then(|| super::browser_signin::own_uid(state, actor, profile)).flatten();
+    let agent = shown.is_some().then(|| actor.to_string());
     let (store, id, profile) = (state.identity_store.clone(), entry.to_string(), profile.to_string());
     let (origin, username, password, label) = tokio::task::spawn_blocking(move || {
-        let Some((created, site)) = shown else {
-            return signins::for_fill(&store, &id, &profile, &origins);
+        let who = agent.as_deref().map(|a| (a, own.as_deref()));
+        let Some((created, site, updated)) = shown else {
+            return signins::for_fill(&store, &id, &profile, &origins, who);
         };
-        if store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| r.created_at) != Some(created) {
-            return Err("the sign-in was deleted or replaced while the person was asked, so nothing was typed".to_string());
+        if store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| (r.created_at, r.updated_at)) != Some((created, updated)) {
+            return Err("the sign-in was deleted, replaced or changed while the person was asked, so nothing was typed".to_string());
         }
-        let found = signins::for_fill(&store, &id, &profile, &origins)?;
+        let found = signins::for_fill(&store, &id, &profile, &origins, who)?;
         if found.0 != site {
             return Err(format!("the sign-in's site was changed from {site} while the person was asked, so nothing was typed"));
         }

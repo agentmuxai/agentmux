@@ -18,10 +18,12 @@ use crate::backend::tower::sampler::{block_label, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_peers(engine, state);
+    register_record_page(engine);
     let auth_key = state.auth_key.clone();
     let lan = state.lan_discovery.clone();
     let local = state.clone();
     spawn_ledger_timer(&local);
+    spawn_record_timer(&local);
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
         let (local, auth_key) = (local.clone(), auth_key.clone());
         let lan = lan.clone();
@@ -131,8 +133,60 @@ fn spawn_ledger_timer(state: &AppState) {
     });
 }
 
+/// The record (`backend::record`): every five minutes the memory sample is also written to the file of its day,
+/// whether or not a Tower is open. One timer per process; a sample costs about the ledger's 15-25 ms.
+fn spawn_record_timer(state: &AppState) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let dir = || agentmux_common::data_paths::DataPaths::from_env().map(|p| p.data_dir.join("record"));
+    let Some(record) = crate::backend::record::Record::global(dir, env!("CARGO_PKG_VERSION")) else {
+        return;
+    };
+    let state = state.clone();
+    STARTED.call_once(|| {
+        runtime.spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(crate::backend::record::EVERY_MS));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick is now, before anything has run long enough to be worth a line: skip it.
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let req = TowerSampleReq { memory: Some(true), ..Default::default() };
+                match sample_local(&state, &req).await {
+                    // The append is a file write: off the async workers.
+                    Ok(snap) => drop(tokio::task::spawn_blocking(move || record.note(&snap))),
+                    Err(e) => tracing::debug!(error = %e, "[record] the sample for the record failed"),
+                }
+            }
+        });
+    });
+}
+
 /// `tower.peers`, `tower.pair` and `tower.forget`: the AgentMux computers this
 /// one is paired with (`backend::tower::peers`).
+/// `record.page`: the page's own figures, kept for the next line of the record.
+fn register_record_page(engine: &Arc<WshRpcEngine>) {
+    engine.register_typed(COMMAND_RECORD_PAGE, |req: RecordPageReq, ctx| async move {
+        not_an_agent_api(&ctx)?;
+        let page = crate::backend::record::PageLine {
+            w: req.window,
+            heap: req.heap_mb,
+            heap_limit: req.heap_limit_mb,
+            dom: req.dom,
+            panes: req.panes,
+            rows: req.rows,
+            max_rows: req.max_rows,
+            searches: req.searches,
+            blocked: req.blocked,
+            up_min: req.up_min,
+        };
+        crate::backend::record::note_page(page, agentmux_common::time::now_ms_u64());
+        Ok(())
+    });
+}
+
 fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_PEERS, |_req: Option<NoArgsReq>, ctx| async move {
         not_an_agent_api(&ctx)?;

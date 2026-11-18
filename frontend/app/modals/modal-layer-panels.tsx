@@ -7,7 +7,6 @@
 // has an entry below.
 
 import { registerModalKind } from "@/app/element/modal-dispatch";
-import { AgentBundlesTab } from "@/app/view/agent/components/AgentBundlesTab";
 import { AgentContainerLimitsPanel } from "@/app/view/agent/components/AgentContainerLimitsPanel";
 import { AgentEnvPanel } from "@/app/view/agent/components/AgentEnvPanel";
 import { AgentSeatPanel } from "@/app/view/agent/components/AgentSeatPanel";
@@ -50,11 +49,6 @@ registerModalKind("agent-env", {
 registerModalKind("agent-container-limits", {
     label: (req) => `Container limits — ${req.agentName}`,
     panel: (req, api) => <AgentContainerLimitsPanel agentId={req.agentId} agentName={req.agentName} onClose={api.close} />,
-});
-
-registerModalKind("agent-bundles", {
-    label: (req) => `Bundles — ${req.agentName}`,
-    panel: (req, api) => <AgentBundlesTab agentId={req.agentId} onClose={api.close} />,
 });
 
 registerModalKind("bundle-import-select", {

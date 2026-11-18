@@ -62,6 +62,8 @@ pub(super) struct Wanted<'a> {
     pub files: Option<&'a std::collections::HashMap<String, String>>,
     /// The agent's reason for the command's secrets, already checked.
     pub reason: &'a str,
+    /// Who the request is attributed to: a container agent is proven by its token, as `Browser` proves it.
+    pub caller: Option<&'a super::caller::Caller>,
 }
 
 /// Where one value goes.
@@ -147,9 +149,15 @@ fn refused(ended: Ended) -> Refusal {
 
 /// The agent asking, proved by its own signature: a prompt names them, and what
 /// they make or are allowed is theirs alone.
-fn agent_of(state: &AppState, agent_block_id: &str, auth: Option<&agentmux_common::api_types::UiAutomationAuth>, needs: &str) -> Result<String, Refusal> {
-    let agent = super::app_api::connections::verified_agent(state, agent_block_id, auth)
-        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("{needs} needs the agent's signed identity: {}", e.replace("an SSH connection needs", "this needs"))))?;
+fn agent_of(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    agent_block_id: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+    needs: &str,
+) -> Result<String, Refusal> {
+    let agent = super::app_api::connections::verified_agent_as(state, caller, agent_block_id, auth)
+        .map_err(|e| refuse(StatusCode::FORBIDDEN, format!("{needs} needs to know which agent asks (its token or its signed identity): {}", e.replace("an SSH connection needs", "this needs"))))?;
     Ok(agent.chars().take(64).collect())
 }
 
@@ -161,6 +169,7 @@ fn agent_of(state: &AppState, agent_block_id: &str, auth: Option<&agentmux_commo
 /// of the entries nobody answered for, which went ahead.
 pub(super) async fn plan_capture(
     state: &AppState,
+    caller: Option<&super::caller::Caller>,
     agent_block_id: &str,
     auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
     rules: Option<&[agentmux_common::api_types::CaptureRule]>,
@@ -171,7 +180,7 @@ pub(super) async fn plan_capture(
     let Some(rules) = rules.filter(|r| !r.is_empty()) else {
         return Ok((None, Vec::new()));
     };
-    let agent = agent_of(state, agent_block_id, auth, "capture")?;
+    let agent = agent_of(state, caller, agent_block_id, auth, "capture")?;
     let (store, rules, a, c) = (state.identity_store.clone(), rules.to_vec(), agent.clone(), cmd.to_string());
     let mut plan = tokio::task::spawn_blocking(move || capture::plan(&store, &rules, &a, &c))
         .await
@@ -302,7 +311,7 @@ pub(super) async fn inject(
     cwd: &str,
     preapproved: Option<&Preapproved>,
 ) -> Result<Option<Injected>, Refusal> {
-    let reason = wanted.reason.to_string();
+    let (reason, wanted_caller) = (wanted.reason.to_string(), wanted.caller);
     // A rotation's approval covers exactly the secrets it approved, nothing more.
     let preapproved = preapproved.is_some_and(|p| {
         wanted.stdin.is_none_or(|s| s.trim().is_empty()) && wanted.files.is_none_or(|f| f.is_empty()) && wanted.env == Some(&p.env)
@@ -323,7 +332,7 @@ pub(super) async fn inject(
             format!("a command given Vault secrets must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
         ));
     }
-    let agent = agent_of(state, agent_block_id, auth, "a Vault secret")?;
+    let agent = agent_of(state, wanted_caller, agent_block_id, auth, "a Vault secret")?;
     let mut targets: Vec<(Delivery, FillTarget)> = Vec::new();
     for (delivery, entry) in wanted {
         let (store, who) = (state.identity_store.clone(), agent.clone());

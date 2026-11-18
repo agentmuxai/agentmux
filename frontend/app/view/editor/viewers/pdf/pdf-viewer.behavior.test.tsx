@@ -213,6 +213,7 @@ vi.mock("@/app/keybindings", async (original) => ({
     keyLabel: (k: string) => `[${k}]`,
 }));
 
+import { clearOpenPositions, setOpenPosition } from "../../open-position";
 import { PdfViewer, WHOLE_FILE_MAX_BYTES, type PdfViewerProps } from "./pdf-viewer";
 
 const SNAP = (name: string) => `./__snapshots__/PdfViewer.behavior.${name}.txt`;
@@ -295,6 +296,7 @@ async function ready(opts: Opts = {}) {
 }
 
 beforeEach(() => {
+    clearOpenPositions();
     h.T.length = 0;
     h.docPages = 5;
     h.manual = false;
@@ -557,6 +559,47 @@ describe("PdfViewer behavior", () => {
         await settle();
         show("a dropped file");
         await snapshot("reloads");
+    });
+
+    describe("opened at a page (pane.open's page)", () => {
+        const page = () => (h.viewer as { currentPageNumber: number }).currentPageNumber;
+
+        it("shows that page once the pages are laid out", async () => {
+            setOpenPosition("blk-1", "/docs/a.pdf", { page: 3 });
+            mount();
+            await settle();
+            h.bus!.emit("pagesinit");
+            expect(page()).toBe(3);
+        });
+
+        it("stops at the last page for a page past the end, and leaves other panes' and files' requests alone", async () => {
+            setOpenPosition("blk-2", "/docs/a.pdf", { page: 2 });
+            setOpenPosition("blk-1", "/docs/other.pdf", { page: 2 });
+            setOpenPosition("blk-1", "/docs/a.pdf", { page: 99 });
+            mount();
+            await settle();
+            h.bus!.emit("pagesinit");
+            expect(page()).toBe(5);
+        });
+
+        it("moves a viewer that already shows the file", async () => {
+            await ready();
+            expect(page()).toBe(1);
+            setOpenPosition("blk-1", "/docs/a.pdf", { page: 4 });
+            expect(page()).toBe(4);
+        });
+
+        it("beats the page a reload keeps", async () => {
+            const m = await ready();
+            fireEvent.click(byLabel("Next page"));
+            expect(page()).toBe(2);
+            setOpenPosition("blk-1", "/docs/a.pdf", { page: 4 });
+            expect(page()).toBe(4);
+            m.setRevision(2);
+            await settle();
+            h.bus!.emit("pagesinit");
+            expect(page()).toBe(4);
+        });
     });
 
     it("drops a load that was superseded", async () => {

@@ -216,7 +216,7 @@ async fn gmail_read_with<G: GoogleHttp, O: OAuthHttp, S: TokenSecrets>(
         // A long mail's text can be stored outside the message: fetch those parts (not files) first.
         let mut thread = reply.body;
         load_external_text(deps.google, &token, &mut thread).await;
-        return Ok(gmail::shape(action, &thread));
+        return Ok(gmail::shape_thread(&thread, gmail::raw_headers_arg(args)?));
     }
     if action != "search_threads" {
         return Ok(gmail::shape(action, &reply.body));

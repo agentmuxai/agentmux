@@ -31,6 +31,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "",
     replaces: false,
     signin: false,
+    share: false,
     account: false,
     change: false,
     requested_ms: 1,
@@ -136,7 +137,7 @@ describe("the prompt for an agent's use of an entry", () => {
     });
 
     it("asks to copy a secret in from AWS: names the secret, key, region and Vault, offers no Always, and never goes ahead on silence", async () => {
-        const importing = { service: "AWS Secrets Manager", secret: "staging/db-creds", key: "db.password", region: "eu-west-1", profile: "work-read", grant: false, vault: "Staging", replaces: false };
+        const importing = { service: "AWS Secrets Manager", secret: "staging/db-creds", key: "db.password", region: "eu-west-1", profile: "work-read", grant: false, vault: "Staging", replaces: false, user_key: "", site: "", share: false };
         uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", what: "secret", offer_always: false, agent_reason: "copy the staging password, task 28071", import: importing })];
         await refreshVault();
         const first = render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
@@ -166,6 +167,41 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(replacing).toContain("It is read with this computer's default AWS login.");
     });
 
+    const loginImport = { service: "AWS Secrets Manager", secret: "staging/intranet", key: "creds.password", region: "eu-west-1", profile: "", grant: false, vault: "Personal", replaces: false, user_key: "creds.user", site: "https://intranet.example.com", share: true };
+    const askLogin = async (over: Partial<typeof loginImport> = {}) => {
+        uses = [use({ entry_id: "", entry_label: "Intranet", kind: "login", origin: "", field: "", what: "secret", offer_always: false, agent_reason: "sign in to the intranet, task 31010", import: { ...loginImport, ...over } })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        return screen.findByRole("group");
+    };
+
+    it("asks to make a login from one secret's two keys and says the share it asks for as a line the person can untick", async () => {
+        const dialog = await askLogin();
+        expect(dialog.textContent).toContain("(key creds.password)");
+        expect(dialog.textContent).toContain("Its user name is read from the key creds.user of the same secret.");
+        const tick = within(dialog).getByRole("checkbox", { name: "Agent1 will be able to sign in to intranet.example.com with this login." }) as HTMLInputElement;
+        expect(tick.checked).toBe(true);
+        expect(within(dialog).queryByRole("button", { name: /Always|Share it/ })).toBeNull();
+        fireEvent.click(tick);
+        expect(tick.checked).toBe(false);
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", share: false }]));
+    });
+
+    it("sends the share as ticked when the person leaves it, and says nothing of one when the import asks for none", async () => {
+        const dialog = await askLogin();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", share: true }]));
+    });
+
+    it("shows a login import with no share and no second key as the plain import it was", async () => {
+        const dialog = await askLogin({ user_key: "", share: false, site: "" });
+        expect(within(dialog).queryByRole("checkbox")).toBeNull();
+        expect(dialog.textContent).not.toContain("user name is read");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
+    });
+
     it("cuts a long secret id in the middle, so the name at its end stays readable, with the whole in the tooltip's place", async () => {
         const long = `team-a/secrets/${"team/".repeat(20)}staging-db-creds-AbCdEf`;
         const shown = clipMiddle(long, 90);
@@ -174,7 +210,7 @@ describe("the prompt for an agent's use of an entry", () => {
         expect(shown.endsWith("staging-db-creds-AbCdEf")).toBe(true);
         expect(clipMiddle("staging/db-creds", 90)).toBe("staging/db-creds");
 
-        uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", offer_always: false, import: { service: "AWS Secrets Manager", secret: long, key: "", region: "eu-west-1", profile: "", grant: false, vault: "Personal", replaces: false } })];
+        uses = [use({ entry_id: "", entry_label: "Staging database", kind: "api-key", origin: "", field: "", offer_always: false, import: { service: "AWS Secrets Manager", secret: long, key: "", region: "eu-west-1", profile: "", grant: false, vault: "Personal", replaces: false, user_key: "", site: "", share: false } })];
         await refreshVault();
         render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
         const text = (await screen.findByRole("group")).textContent!;

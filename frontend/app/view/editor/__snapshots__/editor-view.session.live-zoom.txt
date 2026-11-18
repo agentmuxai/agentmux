@@ -1,1 +1,3 @@
-zoom: "1" scope=undefined
+root zoom: "" scope=undefined
+document zoom: "1" part=main scope=undefined
+tree zoom: "1" part=tree scope=pane

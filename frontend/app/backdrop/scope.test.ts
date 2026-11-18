@@ -45,6 +45,7 @@ describe("scopeVars", () => {
         expect(vars["--secondary-text-color"]).toBe("var(--ink-muted)");
         expect(vars["--tertiary-text-color"]).toBe("var(--ink-faint)");
         expect(vars["--border-color"]).toBe("var(--ink-border)");
+        expect(vars["--menu-edge-color"]).toBe("var(--ink-border)");
         expect(vars["--accent-color"]).toBe("var(--ink-accent)");
         expect(vars["--accent-fg-color"]).toBe("var(--ink-accent)");
         expect(vars["--link-color"]).toBe("var(--ink-accent)");
@@ -56,6 +57,7 @@ describe("scopeVars", () => {
 
     it("re-points the fixed-colour tokens the agent pane paints with: panel, modal, hover, strip, solid block and grey", () => {
         expect(vars["--modal-bg-color"]).toBe("var(--surface-overlay)");
+        expect(vars["--menu-bg-color"]).toBe("var(--surface-overlay)");
         expect(vars["--block-bg-solid-color"]).toBe("var(--surface)");
         expect(vars["--panel-bg-color"]).toBe("color-mix(in srgb, var(--surface-raised) 50%, transparent)");
         expect(vars["--tab-strip-bg"]).toBe("color-mix(in srgb, var(--ink-text) 3%, transparent)");
@@ -76,6 +78,7 @@ describe("scopeVars", () => {
             "--block-bg-color",
             "--elevated-bg-color",
             "--modal-bg-color",
+            "--menu-bg-color",
             "--panel-bg-color",
             "--block-bg-solid-color",
             "--tab-strip-bg",
@@ -101,7 +104,7 @@ describe("scopeVars with the theme's terminal palette", () => {
     });
 
     it("sets each one read to 4.5:1 on all three layers, on a pale and on a dark backdrop", () => {
-        for (const [id, scheme] of [["yellow", "light"], ["indigo", "dark"]] as const) {
+        for (const [id, scheme] of [["yellow", "light"], ["violet", "dark"]] as const) {
             const d = deriveBuiltin(id, scheme)!;
             const vars = scopeVars(d, palette);
             for (const token of ANSI_TOKENS) {
@@ -111,7 +114,7 @@ describe("scopeVars with the theme's terminal palette", () => {
     });
 
     it("keeps a palette colour that already reads, as it is", () => {
-        const dark = deriveBuiltin("indigo", "dark")!;
+        const dark = deriveBuiltin("violet", "dark")!;
         expect(scopeVars(dark, { "--term-bright-cyan": "#34e2e2" })["--term-bright-cyan"]).toBe("#34e2e2");
     });
 

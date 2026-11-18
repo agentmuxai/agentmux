@@ -162,7 +162,7 @@ fn main() {
     // Workstream 4 requires.
     {
         // Before anything reads it, and before any child could inherit it.
-        autostart::take_stable_exe_env();
+        autostart::startup();
         let args: Vec<String> = std::env::args().collect();
         if autostart::handle_cli(&args) {
             return;

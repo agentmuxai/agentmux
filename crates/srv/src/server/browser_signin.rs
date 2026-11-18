@@ -40,6 +40,10 @@ pub(crate) const PENDING_META_KEY: &str = "browser:signin_pending";
 const ANSWER_WAIT: Duration = Duration::from_secs(10 * 60);
 /// How long the notice shows before a sign-in under a grant is typed.
 const NOTICE: Duration = Duration::from_secs(5);
+/// What an agent is told when it names a login it may use for the page that the person hasn't shared with it.
+pub(crate) const NOT_SHARED: &str = "that sign-in isn't shared with this agent's browser profile, so nothing was typed: ask the person for it with Vault share (the entry and a reason), and they decide";
+/// What a container agent is told when its tab would use Personal's sign-ins (an Incognito tab uses them).
+pub(crate) const NO_PERSONAL: &str = "a container agent is offered none of the person's Personal sign-ins, in an Incognito tab or any other, so nothing was typed: sign in from a tab of your own browser profile (open the pane without a profile) with a login the person shared with you, which you can ask for with Vault share (the entry and a reason)";
 /// What the agent is told when another sign-in's notice shows on the pane.
 pub(crate) const BUSY: &str = "another sign-in is showing its notice on this pane: nothing was typed; try again when it is done";
 
@@ -65,6 +69,13 @@ pub(crate) struct SigninRequest {
 /// whose site or profile is edited afterwards is asked about again.
 pub(crate) fn grant_key(agent: &str, profile: &str, origin: &str) -> String {
     format!("signin:{agent}|{profile}|{origin}")
+}
+
+/// [`grant_key`] for a login shared with the agent: it is used in the agent's own profile (`profile`), and the key also
+/// names the profile the login is saved for (`saved`), so a login whose profile is edited afterwards is asked about again
+/// whatever writes it (A6).
+pub(crate) fn shared_grant_key(uid: &str, profile: &str, origin: &str, saved: &str) -> String {
+    grant_key(uid, profile, &format!("{origin}|{saved}"))
 }
 
 /// Which of the sign-ins the page can take, `(entry, origin, user)`, is meant.
@@ -167,12 +178,21 @@ pub(crate) fn stop(block_id: &str, id: &str) -> Result<(), String> {
 /// tab's profile, and the entry's `created_at`, which tells it from one deleted
 /// and made again with the same id while the person was asked.
 struct Chosen {
+    /// Whom an "Always" for this entry names: the agent's permanent uid when the login was reached through a share
+    /// (A10), otherwise the agent.
+    grant_agent: String,
+    shared: bool,
+    /// The profile the entry is saved for (what a share's "Always" is also bound to).
+    saved: String,
     entry: String,
     label: String,
     origin: String,
     user: String,
     profile: String,
     created: i64,
+    /// The entry's `updated_at` as the person is shown it: a request is bound to the entry as it was then, so one edited
+    /// while it waits (a share removed and made again included) types nothing and is given no Always (A7).
+    updated: i64,
 }
 
 /// Why nothing was typed: the outcome kept in the Vault's activity, how the
@@ -194,12 +214,20 @@ pub(crate) fn profile_of(block: &crate::backend::obj::Block) -> (String, bool) {
     }
 }
 
+/// The agent's permanent uid when `profile` is its own browser profile: the one tab where a login shared with it is
+/// offered (A4). `None` for a tab of any other profile and for an agent that isn't running.
+pub(crate) fn own_uid(state: &AppState, agent: &str, profile: &str) -> Option<String> {
+    let uid = state.reactive_handler.get_agent(agent).and_then(|a| a.uid)?;
+    (profile == format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&uid))).then_some(uid)
+}
+
 /// The saved sign-in of `profile` the agent means, among those that fit a
 /// sign-in form the page shows now.
 async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, entry: Option<&str>) -> Result<Chosen, Response> {
     let origins = super::browser_signin_fill::form_origins(block_id);
-    let (store, p, who) = (state.identity_store.clone(), profile.to_string(), agent.to_string());
-    let found = match tokio::task::spawn_blocking(move || signins::offered_for_agent(&store, &p, &origins, &who)).await {
+    let own = own_uid(state, agent, profile);
+    let (store, p, who, uid, seen) = (state.identity_store.clone(), profile.to_string(), agent.to_string(), own.clone(), origins.clone());
+    let found = match tokio::task::spawn_blocking(move || signins::offered_for_agent(&store, &p, &seen, &who, uid.as_deref())).await {
         Ok(Ok(f)) => f,
         Ok(Err(e)) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e)),
         Err(e) => return Err(err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
@@ -207,10 +235,18 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
     match choose(found, entry) {
         Ok((entry, origin, user)) => {
             let row = state.identity_store.vault_get(&entry).ok().flatten();
-            let (label, created) = row.map(|r| (r.label, r.created_at)).unwrap_or_default();
-            Ok(Chosen { entry, label, origin, user, profile: profile.to_string(), created })
+            let saved = row.as_ref().and_then(|r| crate::backend::vault::signins::fields_of(r).get(signins::PROFILE).cloned()).unwrap_or_default();
+            let shared = row.is_some() && saved != profile;
+            let (label, created, updated) = row.map(|r| (r.label, r.created_at, r.updated_at)).unwrap_or_default();
+            let grant_agent = if shared { own.clone().unwrap_or_else(|| agent.to_string()) } else { agent.to_string() };
+            Ok(Chosen { grant_agent, shared, saved, entry, label, origin, user, profile: profile.to_string(), created, updated })
         }
         Err(e) => {
+            // A login the agent may use for this page, which the person hasn't shared with it: say how to ask (A8).
+            let e = match (&own, entry) {
+                (Some(uid), Some(want)) if signins::unshared_for(&state.identity_store, want, &origins, agent, uid) => NOT_SHARED.to_string(),
+                _ => e,
+            };
             noted(state, block_id, agent, How::Refused(e.clone()));
             Err(err_response(StatusCode::BAD_REQUEST, e))
         }
@@ -221,7 +257,7 @@ async fn chosen(state: &AppState, block_id: &str, agent: &str, profile: &str, en
 /// Stop; otherwise they answered the Vault's prompt, in `agent_pane`. True when
 /// nobody answered it and it went ahead.
 async fn approve(state: &AppState, block_id: &str, agent: &str, agent_pane: String, c: &Chosen, incognito: bool, reason: &str) -> Result<bool, Refusal> {
-    let key = grant_key(agent, &c.profile, &c.origin);
+    let key = if c.shared { shared_grant_key(&c.grant_agent, &c.profile, &c.origin, &c.saved) } else { grant_key(&c.grant_agent, &c.profile, &c.origin) };
     let (store, e, k) = (state.identity_store.clone(), c.entry.clone(), key.clone());
     let granted = !incognito && tokio::task::spawn_blocking(move || store.vault_grant_check(&e, &k).unwrap_or(false)).await.unwrap_or(false);
     if !granted {
@@ -259,11 +295,14 @@ fn use_request(agent: &str, agent_pane: String, c: &Chosen, incognito: bool, age
         offer_always: !incognito,
         reason: if incognito {
             "this is an Incognito tab, which keeps no sign-ins: Personal's is used, and asked for each time".to_string()
+        } else if c.shared {
+            format!("the person shared this login with {agent}; it hasn't signed in with it on this site before")
         } else {
             format!("{agent} hasn't signed in with this before")
         },
         kind: "login".to_string(),
         signin: true,
+        shared: c.shared,
         requested_ms: agentmux_common::time::now_ms_u64(),
         ..Default::default()
     }
@@ -279,8 +318,8 @@ async fn ask(state: &AppState, block_id: &str, agent: &str, agent_pane: String, 
         Ended::WentAhead => Ok(true),
         Ended::Always => {
             // Only for the entry the person was shown, not one made again with its id.
-            let (store, e, created) = (state.identity_store.clone(), c.entry.clone(), c.created);
-            let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&e, &key, agentmux_common::time::now_ms(), created)).await;
+            let (store, e, created, updated) = (state.identity_store.clone(), c.entry.clone(), c.created, c.updated);
+            let _ = tokio::task::spawn_blocking(move || store.vault_grant_add_unchanged(&e, &key, agentmux_common::time::now_ms(), created, updated)).await;
             Ok(false)
         }
         ended => {
@@ -309,12 +348,16 @@ pub(crate) async fn handle_signin(
         return err_response(StatusCode::NOT_FOUND, format!("no pane {block_id}"));
     };
     let (profile, incognito) = profile_of(&block);
+    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
+    if profile == PERSONAL && super::browser_identity::in_container(&state, &agent_pane) {
+        noted(&state, &block_id, &agent, How::Refused(NO_PERSONAL.to_string()));
+        return err_response(StatusCode::FORBIDDEN, NO_PERSONAL.to_string());
+    }
     let c = match chosen(&state, &block_id, &agent, &profile, req.entry.as_deref()).await {
         Ok(c) => c,
         Err(response) => return response,
     };
     tracing::info!(agent = %agent, block_id = %block_id, entry = %c.entry, "[signin] an agent asked to sign in");
-    let agent_pane = super::vault_ask::agent_pane(&state, caller.as_deref(), &req.auth);
     let went_ahead = match approve(&state, &block_id, &agent, agent_pane, &c, incognito, &reason).await {
         Ok(w) => w,
         Err(r) => {
@@ -332,7 +375,7 @@ pub(crate) async fn handle_signin(
         return err_response(code, e);
     }
 
-    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone())), &reason, false).await {
+    match super::browser_signin_fill::fill_as(&state, &block_id, &c.entry, &profile, &agent, Some((c.created, c.origin.clone(), c.updated)), &reason, false).await {
         Ok((site, username_filled)) => {
             noted(&state, &block_id, &agent, How::Allowed);
             let mut out = json!({ "filled": true, "entry": c.entry, "site": site, "username_filled": username_filled, "password": "[secret: hidden]" });
@@ -344,6 +387,22 @@ pub(crate) async fn handle_signin(
         Err(e) => {
             noted(&state, &block_id, &agent, How::Refused(e.clone()));
             err_response(StatusCode::BAD_GATEWAY, e)
+        }
+    }
+}
+
+/// The person removed the share of login `id` with `who` (an agent's uid, or `*`): a card still waiting on a sign-in asked
+/// through that share, from an agent the entry no longer names, is answered No, so it does not stay up for a sign-in that
+/// cannot go ahead (A7). Any other card on the entry (an ordinary sign-in, another agent's share) is left for the person.
+/// A card answered or timing out later types nothing either if the entry changed: it was bound to the entry as shown.
+pub(crate) fn share_removed(state: &AppState, id: &str, who: &str) {
+    let Ok(Some(row)) = state.identity_store.vault_get(id) else { return };
+    let fields = signins::fields_of(&row);
+    for u in uses::uses().list().into_iter().filter(|u| u.signin && u.shared && u.entry_id == id) {
+        let uid = state.reactive_handler.get_agent(&u.agent).and_then(|a| a.uid).unwrap_or_default();
+        let removed = who == crate::backend::vault::shares::EVERY_AGENT || uid == who;
+        if removed && !crate::backend::vault::shares::names(&fields, &uid) {
+            uses::uses().answer(&u.id, uses::UseAnswer::of(uses::Decision::Deny));
         }
     }
 }

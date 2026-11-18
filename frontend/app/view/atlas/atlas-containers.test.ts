@@ -63,6 +63,14 @@ describe("orphanContainers", () => {
     it("leave out one that is gone", () => {
         expect(orphanContainers([container("agentmux-z", { state: "gone" })], "local")).toEqual([]);
     });
+
+    it("say what an AgentMux helper container is, so it is not taken for an agent's or an unused one", () => {
+        const [helper, plain] = orphanContainers([container("agentmux-gateway-fwd", { helper: "AgentMux gateway forwarder" }), container("agentmux-z")], "local");
+        expect(plain.name).toBe("agentmux-z");
+        expect(plain.helper).toBeUndefined();
+        expect(helper.helper).toBe("AgentMux gateway forwarder");
+        expect(containersByAgent([container("agentmux-gateway-fwd", { helper: "AgentMux gateway forwarder" })]).size).toBe(0);
+    });
 });
 
 describe("containerRuntimeNote", () => {

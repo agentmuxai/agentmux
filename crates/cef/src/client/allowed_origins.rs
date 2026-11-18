@@ -39,6 +39,10 @@ pub struct SiteLimits {
     /// The panes srv's last push confirmed are not limited, to tell a pane newly
     /// confirmed from one a push repeats.
     pub confirmed: Mutex<std::collections::HashSet<String>>,
+    /// The sites of frames that srv was asked about for each pane (or is
+    /// being), so a snapshot that sees the same blocked frame again doesn't
+    /// ask again, whatever the person answered (`report_frame_sites`).
+    pub frame_asked: Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
 
 const EARLY_LIST_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -113,6 +117,8 @@ pub(crate) fn replace_lists_confirmed(limits: &SiteLimits, allowed: std::collect
         }
         true
     });
+    // A pane srv no longer limits has no frames left to ask about.
+    limits.frame_asked.lock().retain(|pane, _| next.contains_key(pane));
     *lists = next;
 }
 
@@ -190,6 +196,9 @@ impl AgentMuxHandler {
             stopped.insert(target.clone(), url.to_string());
         }
         report_off_list(&self.state, &pane, &target, url, "navigate");
+        // A navigation that was cancelled never reaches a load end: it is not a page on its way, and a `wait`
+        // must not take the page left in place for one (its timing entry would stand until it went stale).
+        crate::browser_pane::open_timing::forget(&target);
         true
     }
 
@@ -382,9 +391,102 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
     }
 }
 
+/// The first of `sites` srv hasn't been asked about for this pane, marked as
+/// asked. One per call: srv asks one question at a time per pane, and the
+/// rest are left for the next snapshot.
+fn next_unasked_site(limits: &SiteLimits, pane: &str, sites: &[String]) -> Option<String> {
+    let mut asked = limits.frame_asked.lock();
+    let seen = asked.entry(pane.to_string()).or_default();
+    let site = sites.iter().find(|s| !seen.contains(*s))?.clone();
+    seen.insert(site.clone());
+    Some(site)
+}
+
+/// A snapshot found frames from sites off `pane`'s list (spec §5.3): ask the
+/// person, in the pane's banner, whether to allow the first one not asked
+/// about yet. The frame's lines have no references until they answer Allow,
+/// and the agent takes a new snapshot then. On its own thread, since the
+/// caller is async and the post blocks. A question srv couldn't take (the
+/// pane is already asking something, or srv wasn't reachable) is forgotten,
+/// so a later snapshot asks again.
+pub(crate) fn report_frame_sites(state: &std::sync::Arc<crate::state::AppState>, pane: &str, sites: &[String]) {
+    let Some(site) = next_unasked_site(&state.site_limits, pane, sites) else { return };
+    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+    let auth_key = state.auth_key.lock().clone();
+    let ipc_token = state.ipc_token.clone();
+    let body = serde_json::json!({ "pane": pane, "target": pane, "url": site, "kind": "frame" });
+    let (state, pane) = (state.clone(), pane.to_string());
+    let spawned = std::thread::Builder::new().name("browser-frame-site".into()).spawn({
+        let (state, pane, site) = (state.clone(), pane.clone(), site.clone());
+        move || {
+            let answer = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body);
+            if frame_question_lost(&answer) {
+                tracing::info!(pane = %pane, site = %site, answer = ?answer, "srv didn't take the question about a frame's site; asking again at the next snapshot");
+                forget_frame_site(&state.site_limits, &pane, &site);
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "couldn't start the browser-frame-site thread");
+        forget_frame_site(&state.site_limits, &pane, &site);
+    }
+}
+
+fn forget_frame_site(limits: &SiteLimits, pane: &str, site: &str) {
+    if let Some(seen) = limits.frame_asked.lock().get_mut(pane) {
+        seen.remove(site);
+    }
+}
+
+/// Did the question about a frame's site not reach the person? srv asked
+/// (`asking`) or found the site allowed already (`replayed`), or it isn't a
+/// web site (`notice`): those are settled. Busy, nothing shown, or no answer:
+/// not.
+fn frame_question_lost(answer: &Result<serde_json::Value, String>) -> bool {
+    match answer {
+        Ok(d) => !matches!(d.get("settled").and_then(|v| v.as_str()), Some("asking" | "replayed" | "notice")),
+        Err(_) => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frames_site_is_asked_about_once_per_pane_and_one_at_a_time() {
+        let limits = SiteLimits::default();
+        let sites = vec!["https://a.example".to_string(), "https://b.example".to_string()];
+        assert_eq!(next_unasked_site(&limits, "p1", &sites).as_deref(), Some("https://a.example"));
+        assert_eq!(next_unasked_site(&limits, "p1", &sites).as_deref(), Some("https://b.example"), "the next one, on the next snapshot");
+        assert_eq!(next_unasked_site(&limits, "p1", &sites), None, "all asked");
+        assert_eq!(next_unasked_site(&limits, "p2", &sites).as_deref(), Some("https://a.example"), "another pane asks for itself");
+        forget_frame_site(&limits, "p1", "https://a.example");
+        assert_eq!(next_unasked_site(&limits, "p1", &sites).as_deref(), Some("https://a.example"), "a lost question is asked again");
+    }
+
+    #[test]
+    fn a_question_srv_didnt_take_is_forgotten_and_a_settled_one_is_not() {
+        let said = |s: &str| Ok(serde_json::json!({ "asked": s == "asking", "settled": s }));
+        assert!(!frame_question_lost(&said("asking")));
+        assert!(!frame_question_lost(&said("replayed")));
+        assert!(!frame_question_lost(&said("notice")));
+        assert!(frame_question_lost(&said("busy")));
+        assert!(frame_question_lost(&said("unshown")));
+        assert!(frame_question_lost(&Err("refused".to_string())));
+    }
+
+    #[test]
+    fn frame_sites_of_a_pane_srv_stopped_limiting_are_dropped() {
+        let limits = SiteLimits::default();
+        let list = |s: &str| std::collections::HashMap::from([("p1".to_string(), vec![s.to_string()])]);
+        replace_lists(&limits, list("https://a.example"));
+        assert!(next_unasked_site(&limits, "p1", &["https://x.example".to_string()]).is_some());
+        replace_lists(&limits, list("https://a.example"));
+        assert!(limits.frame_asked.lock().contains_key("p1"), "a push that repeats the list keeps what was asked");
+        replace_lists(&limits, std::collections::HashMap::new());
+        assert!(limits.frame_asked.lock().is_empty());
+    }
 
     #[test]
     fn the_hosts_own_pages_are_not_stopped_by_the_list_but_other_data_urls_are() {

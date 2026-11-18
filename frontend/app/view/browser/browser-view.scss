@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 @use "../../mixins.scss";
+@use "../../element/menu-frame";
 
 .browser-pane-favicon {
     width: 14px;
@@ -170,12 +171,14 @@ $browser-nav-stack-below: 388px;
 }
 
 // A profile's badge (18px) is wider than the menu's 14px icon slot: give it
-// its own width so it doesn't run into the name.
+// its own width so it doesn't run into the name. The slot mutes a glyph icon to 70%; a badge is the
+// profile's own colour and is drawn at full strength, as in Settings.
 .menu-item-icon:has(> .browser-profile-badge) {
     width: auto;
     min-width: 14px;
     display: flex;
     align-items: center;
+    opacity: 1;
 }
 
 .browser-profile-sub {
@@ -204,9 +207,7 @@ $browser-nav-stack-below: 388px;
     margin-top: 2px;
     max-height: 360px;
     overflow-y: auto;
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    @include menu-frame.menu-surface;
     font-family: var(--font-mono);
     font-size: var(--text-sm);
 }

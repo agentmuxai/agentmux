@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-20
 **Author:** AgentA
-**Status:** Diagnosis complete; fix proposed (not yet implemented)
+**Status:** analysis. Diagnosis complete; fix proposed (not yet implemented)
 **Related:** `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (failure-mode A), `SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20` (#1604), cross-channel persistence work (#1383–#1393)
 
 ---
@@ -66,7 +66,7 @@ On-disk state of `~/.agentmux/shared/providers/claude/.credentials.json` (Poal's
 - **As-found (before any test):** `expiresAt = 1781831066028` (≈ Jun 19, **past**), `refreshToken` **empty**, `accessToken` 29 chars. → expired, **cannot refresh** → 401 / needs-reauth.
 - The global `~/.claude/.credentials.json` (Nark's dir): `expiresAt = 1781978253240` (**future**), has `refreshToken` → **valid**.
 
-> **Test-artifact disclosure:** during verification a forced-401 was written into that same shared dir (`accessToken` = `sk-ant-oat01-FORCED-401-VERIFICATION-DO-NOT-USE`, future expiry, empty refresh). That dir is Poal's frozen dir, so the corruption *lands on* Poal — but the dir was **already dead before the test**, so it is not the cause of Poal's failure, only a coincident overwrite. Restorable from `~/.agentmux/shared/providers/claude/.credentials.verify-backup.json`.
+> **Test-artifact disclosure:** during verification a forced-401 was written into that same shared dir (`accessToken` = a placeholder value (`FORCED-401-VERIFICATION-DO-NOT-USE`), future expiry, empty refresh). That dir is Poal's frozen dir, so the corruption *lands on* Poal — but the dir was **already dead before the test**, so it is not the cause of Poal's failure, only a coincident overwrite. Restorable from `~/.agentmux/shared/providers/claude/.credentials.verify-backup.json`.
 
 ### 2.4 Answer
 

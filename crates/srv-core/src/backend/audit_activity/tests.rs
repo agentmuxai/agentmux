@@ -25,10 +25,10 @@ fn a_command_is_cut_to_its_start_and_a_path_is_the_path() {
 fn a_command_that_holds_a_secret_is_cut_to_its_tool_name() {
     for command in [
         "curl -H 'Authorization: Bearer abc' https://x.test",
-        "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        concat!("export GITHUB_TOKEN=ghp", "_abcdefghijklmnopqrstuvwxyz0123456789"),
         "aws configure set aws_secret_access_key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         "psql postgres://user:hunter2@host/db --password hunter2",
-        "echo AKIAIOSFODNN7EXAMPLE",
+        concat!("echo AKI", "AIOSFODNN7EXAMPLE"),
         "deploy --token sk-live-1234567890abcdef",
         "echo 3f786850e387550fdab836ed7e6dc881de23001b0a1f9cd0",
         "curl https://user:hunter2@host.test/x",

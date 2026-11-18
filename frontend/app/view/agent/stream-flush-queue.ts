@@ -32,7 +32,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { bashDescription, isAcceptedBackgroundLaunch, parseTaskNotification } from "../../agent-model/tool-adapter";
 import { injectedTurn } from "../../agent-model/cli-wrappers";
-import { cancelStreamFlush, requestStreamFlush } from "./stream-scheduler";
+import { cancelStreamFlush, requestStreamFlush, type FlushRate } from "./stream-scheduler";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "../../agent-model/types";
 
 // Unique per queue instance, not per block: a pane that remounts briefly has
@@ -195,7 +195,7 @@ function idleNoticeOnly(model: AgentPaneModel, added: DocumentNode[], updated: D
  * StreamFlush → ToolChunkAppend → ShellNodeCreate → ShellChunkAppend →
  * ShellStatusUpdate → StreamFlushObserved.
  */
-export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue {
+export function createStreamFlushQueue(model: AgentPaneModel, rate?: () => FlushRate): StreamFlushQueue {
     let pendingNew: DocumentNode[] = [];
     let pendingUpdates: DocumentNode[] = [];
     let pendingChunks: PendingChunk[] = [];
@@ -296,7 +296,7 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
     // user isn't interacting, or one pane per frame (oldest first, with a
     // starvation guard) while they are. Idempotent while a request is pending.
     function scheduleFlush() {
-        requestStreamFlush(schedulerId, flushPendingNodes);
+        requestStreamFlush(schedulerId, flushPendingNodes, rate);
     }
 
     return {

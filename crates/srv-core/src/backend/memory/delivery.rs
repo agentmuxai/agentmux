@@ -16,6 +16,11 @@
 //! This module is pure: composition, splitting and the source rules. The
 //! per-session cache, the acknowledgements and the notice live in the server
 //! handlers.
+//!
+//! Personal Memory goes in as an index (`index.rs`), and the Global Memory the agent's startup file already
+//! carries is not sent again (SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md).
+
+use super::index::{self, IndexPlan};
 
 /// The most characters one part carries. The measured per-hook cap is about
 /// 10,000; the margin covers the part label and any counting difference.
@@ -156,6 +161,47 @@ pub fn compose_items(entries: &[Entry], reason: Reason, running_summary: Option<
     compose_items_with(entries, reason, running_summary, false)
 }
 
+/// How much of the Global Memory the agent's startup file already carries
+/// (SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md §3.1). A file AgentMux wrote that holds a section
+/// byte for byte carries it; a section the file lacks, or holds in an older form, is newer than the file and
+/// is sent whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupCarry {
+    /// No AgentMux-owned startup file carries any current section: the whole Global Memory is sent.
+    None,
+    /// Every current section is in the file: none is sent.
+    All,
+    /// Some are: only the newer ones are sent.
+    Partly,
+}
+
+/// What a delivery carries besides the entries it sends in full: how much Global Memory the startup file
+/// holds, the Personal Memory index, and a closing note (`memory::fit`'s left-out note and pruning nudge).
+pub struct Layout<'a> {
+    pub carry: StartupCarry,
+    pub index: IndexPlan<'a>,
+    pub tail: Option<&'a str>,
+}
+
+impl<'a> Layout<'a> {
+    /// A delivery with no index and no tail.
+    pub fn plain(carry: StartupCarry) -> Layout<'a> {
+        Layout { carry, index: IndexPlan { files: &[], over_limit: &[], always: 0, tool_only: false }, tail: None }
+    }
+
+    /// Whether there is a closing note to deliver. A note alone is a delivery: a Global entry too big to fit leaves
+    /// nothing else, and the agent still has to be told it was left out.
+    fn has_tail(&self) -> bool {
+        self.tail.is_some_and(|t| !t.trim().is_empty())
+    }
+}
+
+impl From<bool> for StartupCarry {
+    fn from(in_file: bool) -> Self {
+        if in_file { StartupCarry::All } else { StartupCarry::None }
+    }
+}
+
 /// [`compose_items`], saying so when the Global Memory was left out because
 /// the agent's startup file already carries it (a new Claude session that
 /// loaded `AGENTMUX_MEMORY.md` or an AgentMux-owned `CLAUDE.md`;
@@ -166,42 +212,44 @@ pub fn compose_items_with(
     running_summary: Option<&str>,
     global_in_startup_file: bool,
 ) -> Option<Composed> {
-    compose_items_tail(entries, reason, running_summary, global_in_startup_file, None)
+    compose_items_tail(entries, reason, running_summary, &Layout::plain(global_in_startup_file.into()))
 }
 
-/// [`compose_items_with`], with a closing note (`memory::fit`'s not-sent list and pruning nudge) after the
-/// memory and before the running summary.
+/// The opening of a delivery: what it is, what the startup file already holds, and what follows.
+fn opening(clause: &str, layout: &Layout, has_global: bool, has_personal: bool) -> String {
+    let global = match (layout.carry, has_global) {
+        (StartupCarry::All, _) => "Your Global Memory is already in your startup instructions, so it isn't repeated here. ",
+        (StartupCarry::Partly, _) => {
+            "Your startup instructions carry your Global Memory except the entries below, which are newer than that copy: read them now. "
+        }
+        (StartupCarry::None, true) => "Read your Global Memory below now. ",
+        (StartupCarry::None, false) => "",
+    };
+    let personal = if has_personal { "Your Personal Memory follows as an index of its files. " } else { "" };
+    format!("{clause} {global}{personal}").trim_end().to_string()
+}
+
+/// [`compose_items_with`], with the Personal Memory index and a closing note (`memory::fit`'s left-out note and
+/// pruning nudge) after the memory and before the running summary.
 pub fn compose_items_tail(
     entries: &[Entry],
     reason: Reason,
     running_summary: Option<&str>,
-    global_in_startup_file: bool,
-    tail: Option<&str>,
+    layout: &Layout,
 ) -> Option<Composed> {
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
     let summary = running_summary.filter(|s| !s.trim().is_empty() && reason == Reason::Compact);
-    if global.is_empty() && personal.is_empty() && summary.is_none() {
+    let has_personal = !personal.is_empty() || !layout.index.is_empty();
+    if global.is_empty() && !has_personal && summary.is_none() && !layout.has_tail() {
         return None;
     }
 
     let mut b = Tracked { out: String::new(), chars: 0 };
-    if global_in_startup_file {
-        b.push(&format!(
-            "AgentMux memory for this agent. {} Your Global Memory is already in your startup \
-             instructions, so it isn't repeated here. Read all of this now — it is your complete \
-             Personal Memory, not just the index.\n\n",
-            reason.clause()
-        ));
-    } else {
-        b.push(&format!(
-            "AgentMux memory for this agent. {} Read all of it now — it is your complete Global \
-             Memory and Personal Memory, not just the index.\n\n",
-            reason.clause()
-        ));
-    }
+    b.push(&format!("AgentMux memory for this agent. {}\n\n", opening(reason.clause(), layout, !global.is_empty(), has_personal)));
+    let tail = layout.tail;
     let mut spans = Vec::new();
-    let mut wrote_section = push_sections(&mut b, entries, &global, &personal, &mut spans);
+    let mut wrote_section = push_sections(&mut b, entries, &global, &personal, layout, &mut spans);
     if let Some(tail) = tail.filter(|t| !t.trim().is_empty()) {
         if wrote_section {
             b.push("\n");
@@ -225,11 +273,24 @@ pub fn compose_items_tail(
 /// The frontend's `composeReinjectionMessage` writes the same, so a
 /// re-delivery carries the startup block's sections byte for byte. Returns
 /// whether anything was written.
-fn push_sections(b: &mut Tracked, entries: &[Entry], global: &[usize], personal: &[usize], spans: &mut Vec<ItemSpan>) -> bool {
+fn push_sections(
+    b: &mut Tracked,
+    entries: &[Entry],
+    global: &[usize],
+    personal: &[usize],
+    layout: &Layout,
+    spans: &mut Vec<ItemSpan>,
+) -> bool {
     let mut wrote_section = false;
+    // The index goes first and stays under its own budget, so it sits whole in the first part.
+    if let Some(index) = index::render(&layout.index) {
+        b.push(&index);
+        wrote_section = true;
+    }
+    let global_heading = if layout.carry == StartupCarry::Partly { "Global Memory newer than your startup copy" } else { "Global Memory" };
     let sections = [
-        ("Global Memory", global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
-        ("Personal Memory", personal, "\n---\n"),
+        (global_heading, global, crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR),
+        ("Personal Memory marked always", personal, "\n---\n"),
     ];
     for (heading, list, separator) in sections {
         if list.is_empty() {
@@ -312,29 +373,33 @@ pub fn compose_fallback(entries: &[Entry], reason: FallbackReason) -> Option<Com
 /// the Personal Memory only), as the hook's delivery does
 /// ([`compose_items_with`]).
 pub fn compose_fallback_with(entries: &[Entry], reason: FallbackReason, global_in_startup_file: bool) -> Option<Composed> {
+    compose_fallback_layout(entries, reason, &Layout::plain(global_in_startup_file.into()))
+}
+
+/// [`compose_fallback_with`] with the Personal Memory index and a closing note, as the hook's delivery has them.
+/// No part cap here, but the same classes: the index first, files marked always, the Global Memory the startup
+/// file lacks, then the note.
+pub fn compose_fallback_layout(entries: &[Entry], reason: FallbackReason, layout: &Layout) -> Option<Composed> {
     let global: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Global).collect();
     let personal: Vec<usize> = (0..entries.len()).filter(|&i| entries[i].tier == Tier::Personal).collect();
-    if global.is_empty() && personal.is_empty() {
+    let has_personal = !personal.is_empty() || !layout.index.is_empty();
+    if global.is_empty() && !has_personal && !layout.has_tail() {
         return None;
     }
     let mut b = Tracked { out: String::new(), chars: 0 };
-    if global_in_startup_file {
-        b.push(&format!(
-            "<system-reminder>\n{REINJECTION_SIGNATURE} {} Your Global Memory is already in your startup\n\
-             instructions, so it isn't repeated here. Below is your complete Personal Memory,\n\
-             read all of it now, not just the index.\n\n",
-            reason.clause()
-        ));
-    } else {
-        b.push(&format!(
-            "<system-reminder>\n{REINJECTION_SIGNATURE} {} Below is your\n\
-             complete Global Memory and Personal Memory content — read all of it now,\n\
-             not just the index.\n\n",
-            reason.clause()
-        ));
-    }
+    b.push(&format!(
+        "<system-reminder>\n{REINJECTION_SIGNATURE} {}\n\n",
+        opening(reason.clause(), layout, !global.is_empty(), has_personal)
+    ));
     let mut spans = Vec::new();
-    push_sections(&mut b, entries, &global, &personal, &mut spans);
+    let wrote = push_sections(&mut b, entries, &global, &personal, layout, &mut spans);
+    if let Some(tail) = layout.tail.filter(|t| !t.trim().is_empty()) {
+        if wrote {
+            b.push("\n");
+        }
+        b.push(tail);
+        b.push("\n");
+    }
     b.push("</system-reminder>\n");
     Some(Composed { text: b.out, spans })
 }
@@ -440,6 +505,8 @@ pub enum Delivered {
     /// Cut by the part cap: this many of its characters went out.
     Partial(usize),
     Omitted,
+    /// Listed in the Personal Memory index, not sent in full.
+    Indexed,
 }
 
 impl Delivered {
@@ -460,6 +527,7 @@ impl Delivered {
             Delivered::Full => "full",
             Delivered::Partial(_) => "partial",
             Delivered::Omitted => "omitted",
+            Delivered::Indexed => "indexed",
         }
     }
 }
@@ -611,7 +679,7 @@ mod tests {
             crate::backend::storage::bundles::GLOBAL_SECTION_SEPARATOR
         );
         assert!(text.contains(&format!("# Global Memory (2 entries)\n{global_block}\n")), "{text}");
-        assert!(text.contains("# Personal Memory (1 entry)\nmy notes\n"));
+        assert!(text.contains("# Personal Memory marked always (1 entry)\nmy notes\n"));
         let (g, p, s) = (text.find("# Global").unwrap(), text.find("# Personal").unwrap(), text.find("# Running summary").unwrap());
         assert!(g < p && p < s);
         assert!(text.contains("just compacted"));
@@ -724,13 +792,11 @@ mod tests {
         assert_eq!(
             c.text,
             "<system-reminder>\n\
-             Your memory was reinjected because your working context was just reset. Your recent conversation was just compacted into a summary. Below is your\n\
-             complete Global Memory and Personal Memory content — read all of it now,\n\
-             not just the index.\n\n\
+             Your memory was reinjected because your working context was just reset. Your recent conversation was just compacted into a summary. Read your Global Memory below now. Your Personal Memory follows as an index of its files.\n\n\
              # Global Memory (2 entries)\n\
              # [AgentMux System] App API\n\nG1\n\n---\n\n# [Workspace] Rules\n\nG2\n\
              \n\
-             # Personal Memory (1 entry)\n\
+             # Personal Memory marked always (1 entry)\n\
              P1\n\
              </system-reminder>\n"
         );
@@ -740,7 +806,7 @@ mod tests {
         let fresh = compose_fallback(&entries[2..], FallbackReason::FreshSession).unwrap();
         assert!(fresh.text.contains(
             "AgentMux could not resume this agent's prior session, so a fresh one was started. Any record of the prior \
-             conversation AgentMux had came with your first message, in an <agentmux-continuation> block. Below is your\n"
+             conversation AgentMux had came with your first message, in an <agentmux-continuation> block."
         ));
         assert!(!fresh.text.contains("# Global Memory"), "an empty section is left out");
         assert_eq!(compose_fallback(&[], FallbackReason::Compaction), None);
@@ -760,7 +826,7 @@ mod tests {
         let c = compose_fallback_with(&personal, FallbackReason::FreshSession, true).unwrap();
         assert!(c.text.contains("Your Global Memory is already in your startup"), "{}", c.text);
         assert!(!c.text.contains("# Global Memory"), "{}", c.text);
-        assert!(c.text.contains("# Personal Memory (1 entry)\nP1\n"));
+        assert!(c.text.contains("# Personal Memory marked always (1 entry)\nP1\n"));
         assert!(crate::ambient::digest::is_hidden_reinjection_text(&c.text), "still a hidden reinjection");
         assert_eq!(compose_fallback_with(&[], FallbackReason::FreshSession, true), None, "nothing left to say");
         assert_eq!(compose_fallback_with(&personal, FallbackReason::FreshSession, false), compose_fallback(&personal, FallbackReason::FreshSession));
@@ -787,7 +853,7 @@ mod tests {
         let c = compose_items_with(&personal, Reason::Startup, None, true).unwrap();
         assert!(c.text.contains("Your Global Memory is already in your startup instructions"), "{}", c.text);
         assert!(!c.text.contains("# Global Memory"));
-        assert!(c.text.contains("# Personal Memory (1 entry)\nP1\n"));
+        assert!(c.text.contains("# Personal Memory marked always (1 entry)\nP1\n"));
         assert_eq!(compose_items_with(&[], Reason::Startup, None, true), None);
     }
     #[test]

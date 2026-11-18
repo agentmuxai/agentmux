@@ -594,6 +594,8 @@ pub fn delete_controller(block_id: &str) {
     }
     release_block_processes(block_id);
     term_size::forget(block_id);
+    // Messages a replaced subprocess controller left for a replacement that will not come.
+    subprocess::forget_left_for_replacement(block_id);
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` and hand it back, without
@@ -1082,6 +1084,24 @@ pub struct MessageAcceptedEvent {
 pub(crate) fn publish_message_accepted(broker: &super::mps::Broker, block_id: &str, message_id: &str) {
     let payload = MessageAcceptedEvent { block_id: block_id.to_string(), message_id: message_id.to_string() };
     broker.publish_event::<super::mps_events::AgentMessageAccepted>(&payload, vec![format!("block:{}", block_id)], 0);
+}
+
+/// The `agent-message-queued` event's payload (`mps_events::AgentMessageQueued`).
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MessageQueuedEvent {
+    pub block_id: String,
+    pub message_id: String,
+    /// Messages already queued in front of this one, not counting the process that is still running.
+    #[ts(type = "number")]
+    pub ahead: usize,
+}
+
+/// Publish `agent-message-queued` for `message_id` on `block:<id>`: the agent's process is still alive, so the message
+/// waits for it, behind `ahead` others.
+pub(crate) fn publish_message_queued(broker: &super::mps::Broker, block_id: &str, message_id: &str, ahead: usize) {
+    let payload = MessageQueuedEvent { block_id: block_id.to_string(), message_id: message_id.to_string(), ahead };
+    broker.publish_event::<super::mps_events::AgentMessageQueued>(&payload, vec![format!("block:{}", block_id)], 0);
 }
 
 #[cfg(test)]

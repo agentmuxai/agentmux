@@ -52,6 +52,10 @@ export function attentionLook(a: BrowserAttention): AttentionLook {
             if (a.local && a.message) {
                 return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", answer: "approve", no: "Dismiss", text: a.message };
             }
+            // A frame from a site off the pane's list: Allow lets the agent act in it, nothing was stopped.
+            if (a.frame) {
+                return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", yes: "Allow", answer: "approve", no: "Dismiss", text: frameNoticeText(a) };
+            }
             if (a.chooser) {
                 return { agent: false, tone: "accent", density: "compact", icon: "fa-circle-info", answer: "approve", no: "Dismiss", text: chooserNoticeText(a) };
             }
@@ -103,6 +107,12 @@ export function noticeText(a: BrowserAttention): string {
     const tried = a.popup ? "open a window at" : "go to";
     const why = a.why ? ` ${a.why}` : "";
     return `Stopped: ${limited}, and the page tried to ${tried} ${where}.${why}`;
+}
+
+/** A notice about a frame on the page from a site the pane isn't limited to: the agent can read it, not act in it, until the person allows the site. */
+export function frameNoticeText(a: BrowserAttention): string {
+    const where = a.origin ? siteLabel(a.origin) : a.url || "another site";
+    return `A frame on this page is from ${where}, which this pane isn't limited to, so the agent can read it but can't act in it. Allow adds the site; nothing reloads.`;
 }
 
 /** A notice about a file chooser the pane cancelled: the page asked, an agent drives the pane, and the person is told how to answer it themselves. */

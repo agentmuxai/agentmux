@@ -209,7 +209,7 @@ fn publish_guard_marker(gh_agent_installed: bool, can_judge: bool) -> &'static s
 
 /// A model-route agent's `ANTHROPIC_BASE_URL` names srv's gateway at the host's address; in a container it
 /// names the address `AGENTMUX_LOCAL_URL` now holds, which the container can reach.
-fn point_gateway_at_srv(env: &mut [(String, String)]) {
+pub(crate) fn point_gateway_at_srv(env: &mut [(String, String)]) {
     let prefix = crate::backend::model_gateway::PATH_PREFIX;
     let Some(local) = env.iter().find(|(k, _)| k == "AGENTMUX_LOCAL_URL").map(|(_, v)| v.trim_end_matches('/').to_string()) else { return };
     if let Some((_, url)) = env.iter_mut().find(|(k, v)| k == "ANTHROPIC_BASE_URL" && v.contains(prefix)) {

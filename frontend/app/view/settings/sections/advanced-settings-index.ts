@@ -39,13 +39,21 @@ export const ADVANCED_SETTINGS = {
         groupKey: "settings.advanced.group.agentPanes",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
     }),
-    routeSpendCap: settingEntry({
-        id: "advanced.route_spend_cap",
-        labelKey: "settings.advanced.routeSpendCap.label",
-        descriptionKey: "settings.advanced.routeSpendCap.description",
+    routeSpendCapOpenrouter: settingEntry({
+        id: "advanced.route_spend_cap_openrouter",
+        labelKey: "settings.advanced.routeSpendCapOpenrouter.label",
+        descriptionKey: "settings.advanced.routeSpendCapOpenrouter.description",
         section: "advanced",
         groupKey: "settings.advanced.group.agentPanes",
-        keywords: ["spend", "cap", "budget", "dollars", "openrouter", "model route", "stopped", "model:spend_cap_usd"],
+        keywords: ["spend", "cap", "budget", "dollars", "openrouter", "model route", "stopped", "model:spend_cap_usd:openrouter"],
+    }),
+    routeSpendCapAnthropic: settingEntry({
+        id: "advanced.route_spend_cap_anthropic",
+        labelKey: "settings.advanced.routeSpendCapAnthropic.label",
+        descriptionKey: "settings.advanced.routeSpendCapAnthropic.description",
+        section: "advanced",
+        groupKey: "settings.advanced.group.agentPanes",
+        keywords: ["spend", "cap", "budget", "dollars", "anthropic", "api key", "key account", "stopped", "402", "model:spend_cap_usd:anthropic"],
     }),
     previewSkidNotches: settingEntry({
         id: "advanced.preview_skid_notches",

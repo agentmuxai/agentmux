@@ -6,7 +6,7 @@
 
 import { t } from "@/app/i18n/i18n";
 import { TextInput } from "@/app/element/ui";
-import { type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 
 import { devModeOn, setDevMode } from "@/app/store/dev-mode";
 import { settingsAtom } from "@/app/store/global";
@@ -17,9 +17,19 @@ import { ADVANCED_SETTINGS } from "./advanced-settings-index";
 
 const s = () => settingsAtom() ?? ({} as any);
 
-/** The setting a model route's daily spend cap is kept under (the gateway reads it at each request). */
-const ROUTE_CAP_SETTING = "model:spend_cap_usd:openrouter";
+/** The setting a gateway route's daily spend cap is kept under (the gateway reads it at each request). */
+const routeCapSetting = (route: string) => `model:spend_cap_usd:${route}`;
 const DEFAULT_ROUTE_CAP_USD = 100;
+
+/**
+ * The gateway's routes, each with its own cap: OpenRouter, and the Anthropic key route that agents bound to an API-key
+ * account use (catalog::ROUTES and KEY_ROUTE_ID in model_gateway/catalog.rs). One cap field for the first was why a raised
+ * cap left a key account's agents stopped at the default.
+ */
+const ROUTE_CAPS = [
+    { route: "openrouter", entry: ADVANCED_SETTINGS.routeSpendCapOpenrouter },
+    { route: "anthropic", entry: ADVANCED_SETTINGS.routeSpendCapAnthropic },
+] as const;
 
 /** The cap in dollars as the field shows it: unset is the default, `none` or 0 is shown as 0 (no cap). */
 function routeCapShown(stored: unknown): number {
@@ -57,6 +67,7 @@ export function TerminalGroup(): JSX.Element {
             <SectionHeader label={t("settings.advanced.group.terminalPowerUser")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.disableWebgl.id}
+                settingKey="term:disablewebgl"
                 label={ADVANCED_SETTINGS.disableWebgl.label}
                 description={ADVANCED_SETTINGS.disableWebgl.description}
                 control={
@@ -77,6 +88,7 @@ export function AgentPaneLimits(): JSX.Element {
             <SectionHeader label={t("settings.advanced.group.agentPanes")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.autoAnswerTimeout.id}
+                settingKey="agent:askquestiontimeoutms"
                 label={ADVANCED_SETTINGS.autoAnswerTimeout.label}
                 description={ADVANCED_SETTINGS.autoAnswerTimeout.description}
                 control={
@@ -90,6 +102,7 @@ export function AgentPaneLimits(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.compactAt.id}
+                settingKey="agent:compactat"
                 label={ADVANCED_SETTINGS.compactAt.label}
                 description={ADVANCED_SETTINGS.compactAt.description}
                 control={
@@ -101,21 +114,27 @@ export function AgentPaneLimits(): JSX.Element {
                     />
                 }
             />
-            <SettingRow
-                id={ADVANCED_SETTINGS.routeSpendCap.id}
-                label={ADVANCED_SETTINGS.routeSpendCap.label}
-                description={ADVANCED_SETTINGS.routeSpendCap.description}
-                control={
-                    <NumberControl
-                        class="setting-number setting-number--wide"
-                        min={0} step={1}
-                        value={routeCapShown(s()[ROUTE_CAP_SETTING])}
-                        onChange={(v) => set(ROUTE_CAP_SETTING, Math.max(0, v))}
+            <For each={ROUTE_CAPS}>
+                {(cap) => (
+                    <SettingRow
+                        id={cap.entry.id}
+                        settingKey={routeCapSetting(cap.route)}
+                        label={cap.entry.label}
+                        description={cap.entry.description}
+                        control={
+                            <NumberControl
+                                class="setting-number setting-number--wide"
+                                min={0} step={1}
+                                value={routeCapShown(s()[routeCapSetting(cap.route)])}
+                                onChange={(v) => set(routeCapSetting(cap.route), Math.max(0, v))}
+                            />
+                        }
                     />
-                }
-            />
+                )}
+            </For>
             <SettingRow
                 id={ADVANCED_SETTINGS.previewSkidNotches.id}
+                settingKey={SKID_NOTCHES_SETTING}
                 label={ADVANCED_SETTINGS.previewSkidNotches.label}
                 description={ADVANCED_SETTINGS.previewSkidNotches.description}
                 control={
@@ -132,12 +151,14 @@ export function AgentPaneLimits(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.containerMemory.id}
+                settingKey="agent:container_memory"
                 label={ADVANCED_SETTINGS.containerMemory.label}
                 description={ADVANCED_SETTINGS.containerMemory.description}
                 control={<LimitInput settingKey="agent:container_memory" value={s()["agent:container_memory"]} />}
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.containerCpus.id}
+                settingKey="agent:container_cpus"
                 label={ADVANCED_SETTINGS.containerCpus.label}
                 description={ADVANCED_SETTINGS.containerCpus.description}
                 control={<LimitInput settingKey="agent:container_cpus" value={s()["agent:container_cpus"]} />}
@@ -152,6 +173,7 @@ export function AgentPaneModels(): JSX.Element {
         <>
             <SettingRow
                 id={ADVANCED_SETTINGS.subagentModel.id}
+                settingKey="agent:subagentmodel"
                 label={ADVANCED_SETTINGS.subagentModel.label}
                 description={ADVANCED_SETTINGS.subagentModel.description}
                 control={
@@ -168,6 +190,7 @@ export function AgentPaneModels(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.exploreModel.id}
+                settingKey="agent:exploremodel"
                 label={ADVANCED_SETTINGS.exploreModel.label}
                 description={ADVANCED_SETTINGS.exploreModel.description}
                 control={
@@ -192,6 +215,7 @@ export function AgentPaneToggles(): JSX.Element {
         <>
             <SettingRow
                 id={ADVANCED_SETTINGS.compactHints.id}
+                settingKey="agent:compacthints"
                 label={ADVANCED_SETTINGS.compactHints.label}
                 description={ADVANCED_SETTINGS.compactHints.description}
                 control={
@@ -203,6 +227,7 @@ export function AgentPaneToggles(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.overlapNotes.id}
+                settingKey="agent:overlapnotes"
                 label={ADVANCED_SETTINGS.overlapNotes.label}
                 description={ADVANCED_SETTINGS.overlapNotes.description}
                 control={
@@ -214,6 +239,7 @@ export function AgentPaneToggles(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.retryOnReconnect.id}
+                settingKey="agent:retryonreconnect"
                 label={ADVANCED_SETTINGS.retryOnReconnect.label}
                 description={ADVANCED_SETTINGS.retryOnReconnect.description}
                 control={
@@ -225,6 +251,7 @@ export function AgentPaneToggles(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.kanbanReminders.id}
+                settingKey={KANBAN_REMINDERS_SETTING}
                 label={ADVANCED_SETTINGS.kanbanReminders.label}
                 description={ADVANCED_SETTINGS.kanbanReminders.description}
                 control={
@@ -245,6 +272,7 @@ export function SysinfoGroup(): JSX.Element {
             <SectionHeader label={t("settings.advanced.group.sysinfoWidget")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.sampleInterval.id}
+                settingKey="telemetry:interval"
                 label={ADVANCED_SETTINGS.sampleInterval.label}
                 description={ADVANCED_SETTINGS.sampleInterval.description}
                 control={
@@ -258,6 +286,7 @@ export function SysinfoGroup(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.historyLength.id}
+                settingKey="telemetry:numpoints"
                 label={ADVANCED_SETTINGS.historyLength.label}
                 description={ADVANCED_SETTINGS.historyLength.description}
                 control={
@@ -280,6 +309,7 @@ export function DragDropGroup(): JSX.Element {
             <SectionHeader label={t("settings.advanced.group.dragDrop")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.enableFileDrop.id}
+                settingKey="dnd:enabled"
                 label={ADVANCED_SETTINGS.enableFileDrop.label}
                 description={ADVANCED_SETTINGS.enableFileDrop.description}
                 control={
@@ -291,6 +321,7 @@ export function DragDropGroup(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.insertReferenceToken.id}
+                settingKey="dnd:agentinserttoken"
                 label={ADVANCED_SETTINGS.insertReferenceToken.label}
                 description={ADVANCED_SETTINGS.insertReferenceToken.description}
                 control={
@@ -302,6 +333,7 @@ export function DragDropGroup(): JSX.Element {
             />
             <SettingRow
                 id={ADVANCED_SETTINGS.maxConcurrentUploads.id}
+                settingKey="dnd:concurrency"
                 label={ADVANCED_SETTINGS.maxConcurrentUploads.label}
                 description={ADVANCED_SETTINGS.maxConcurrentUploads.description}
                 control={
@@ -330,6 +362,7 @@ export function EnvironmentGroup(): JSX.Element {
             <SectionHeader label={t("settings.advanced.group.environment")} />
             <SettingRow
                 id={ADVANCED_SETTINGS.globalEnvVars.id}
+                settingKey="cmd:env"
                 stacked
                 label={ADVANCED_SETTINGS.globalEnvVars.label}
                 description={ADVANCED_SETTINGS.globalEnvVars.description}

@@ -33,7 +33,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             },
             Some("logs") => logs(arguments, cx).await,
             Some("disk") => disk(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\" or \"disk\""),
+            Some("record") => super::app_record::record(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\", \"disk\" or \"record\""),
         },
         _ => Err(not_in_family()),
     }
@@ -150,7 +151,7 @@ fn describe_network(status: &Value, now_ms: i64) -> String {
 }
 
 /// "5 min" or "2 h 10 min" for the time from `since_ms` to `now_ms`.
-fn ago(now_ms: i64, since_ms: &Value) -> String {
+pub(super) fn ago(now_ms: i64, since_ms: &Value) -> String {
     let Some(since) = since_ms.as_i64() else { return "an unknown time".to_string() };
     let secs = ((now_ms - since) / 1000).max(0);
     match secs {
@@ -386,7 +387,7 @@ async fn disk(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(describe_disk(&host, &answer["result"]))
 }
 
-fn gb(bytes: u64) -> String {
+pub(super) fn gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
 }
 
@@ -461,7 +462,7 @@ fn describe_reclaim(st: &Value, what: &str) -> String {
     out
 }
 
-fn mb(bytes: u64) -> String {
+pub(super) fn mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
@@ -473,11 +474,11 @@ fn contains_arg(args: &Value) -> Option<String> {
 }
 
 /// `key`'s value, if it is a non-empty string.
-fn str_arg(args: &Value, key: &str) -> Option<String> {
+pub(super) fn str_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
-fn s<'a>(v: &'a Value, k: &str) -> &'a str {
+pub(super) fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
 

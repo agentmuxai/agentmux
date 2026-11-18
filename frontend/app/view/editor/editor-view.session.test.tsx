@@ -20,7 +20,9 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
+import { registerPaneTab, type PaneTabHostContext } from "@/app/store/pane-tab-registry";
+import { registerBlockComponentModel, unregisterBlockComponentModel } from "@/app/store/block-component-registry";
+import { EDITOR_ZOOM } from "./editor-zoom-parts";
 
 // Each test mounts a real CodeMirror and settles for a while; a loaded machine runs past the 5 s default.
 vi.setConfig({ testTimeout: 30_000 });
@@ -670,8 +672,13 @@ describe("live reconfiguration", () => {
 
     it("zoom is CSS zoom on the pane", async () => {
         const v = await mountView();
+        // Two parts, each its own CSS zoom; the pane's root carries none.
         const root = v.container.querySelector<HTMLElement>(".editor-view")!;
-        h.log.push(`zoom: ${JSON.stringify(root.style.zoom)} scope=${root.dataset.zoomScope}`);
+        const main = v.container.querySelector<HTMLElement>(".editor-main-zoom")!;
+        const tree = v.container.querySelector<HTMLElement>(".editor-tree-zoom")!;
+        h.log.push(`root zoom: ${JSON.stringify(root.style.zoom)} scope=${root.dataset.zoomScope}`);
+        h.log.push(`document zoom: ${JSON.stringify(main.style.zoom)} part=${main.dataset.zoomPart} scope=${main.dataset.zoomScope}`);
+        h.log.push(`tree zoom: ${JSON.stringify(tree.style.zoom)} part=${tree.dataset.zoomPart} scope=${tree.dataset.zoomScope}`);
         await expect(out()).toMatchFileSnapshot(snap("live-zoom"));
     });
 });
@@ -844,7 +851,7 @@ describe("the tree, the tab bar and the dialogs", () => {
         await open(v.model, "/home/u/b.ts");
         await v.model.openScratch();
         await settle();
-        const bar = () => v.container.querySelector(".editor-main-column > :first-child");
+        const bar = () => v.container.querySelector(".editor-main-zoom > :first-child");
         const strip = (el: Element | null) => (el ? el.outerHTML : "(absent)").replace(/></g, ">\n<");
         h.log.push(strip(bar()));
         run(v.model, "editor:saveAs");
@@ -871,7 +878,7 @@ describe("the tree, the tab bar and the dialogs", () => {
     it("zooms the pane on Ctrl+scroll", async () => {
         const v = await mountView();
         await open(v.model, "/home/u/a.ts");
-        const root = v.container.querySelector<HTMLElement>(".editor-view")!;
+        const root = v.container.querySelector<HTMLElement>(".editor-main-zoom")!;
         h.log.push(`zoom before: ${v.model.zoomAtom()}`);
         for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
             const ev = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true, clientX: 10, clientY: 10, ...mod });
@@ -879,8 +886,34 @@ describe("the tree, the tab bar and the dialogs", () => {
             h.log.push(`wheel ${JSON.stringify(mod)} prevented=${ev.defaultPrevented}`);
         }
         await settle();
-        h.log.push(`zoom after: ${v.model.zoomAtom()} style=${JSON.stringify(root.style.zoom)}`);
+        h.log.push(`zoom after: ${v.model.zoomAtom()} style=${JSON.stringify(root.style.zoom)} tree=${v.model.treeZoomAtom()}`);
         await expect(out()).toMatchFileSnapshot(snap("zoom-wheel"));
+    });
+
+    it("zooms the tree on its own with Ctrl+scroll over it, and the document with Ctrl+scroll over that", async () => {
+        const v = await mountView();
+        const unregister = registerPaneTab({ apiVersion: 1, view: "editor", label: "Editor", icon: "file", capabilities: { paneZoom: EDITOR_ZOOM }, create: () => ({}) as never });
+        registerBlockComponentModel(v.model.blockId, { viewModel: { viewType: "editor" } } as never);
+        try {
+            const tree = v.container.querySelector<HTMLElement>(".editor-tree-zoom")!;
+            const main = v.container.querySelector<HTMLElement>(".editor-main-zoom")!;
+            const wheel = (el: HTMLElement) =>
+                el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, metaKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+            wheel(tree);
+            await settle();
+            expect([v.model.zoomAtom(), v.model.treeZoomAtom()]).toEqual([1, 1.05]);
+            expect(tree.style.zoom).toBe("1.05");
+            wheel(main);
+            wheel(main);
+            await settle();
+            // The stepper skips a step that lands on the same font size, so two notches are 12%, not 10%.
+            expect(v.model.zoomAtom()).toBeGreaterThan(1.05);
+            expect(v.model.treeZoomAtom()).toBe(1.05);
+            expect([main.style.zoom, tree.style.zoom]).toEqual([String(v.model.zoomAtom()), "1.05"]);
+        } finally {
+            unregisterBlockComponentModel(v.model.blockId);
+            unregister();
+        }
     });
 
     it("Save As on a scratch tab also answers CodeMirror's own save-as key", async () => {

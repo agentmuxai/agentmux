@@ -3,7 +3,7 @@
 
 /**
  * The ink of a backdrop (docs/specs/SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §3): from one surface colour, every
- * foreground colour that sits on it. One pure function serves the 16 built-ins, a custom colour the user picks and
+ * foreground colour that sits on it. One pure function serves the built-ins, a custom colour the user picks and
  * an image's solved scrim, so contrast is a property of the function and `ink.test.ts` proves it, not a hope.
  *
  * The search runs in OKLCH, where moving lightness by the same amount reads the same at every hue, and every
@@ -100,13 +100,35 @@ const WASHED_TEXT_FLOOR = 4.5;
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
-/** The raised and overlay layers sit a step further from the ink: lighter on a dark surface, darker on a pale one. */
+/**
+ * The least a layer differs from the surface under it, as a WCAG ratio. A step in lightness is not a step the eye
+ * sees at the dark end: on black, the overlay's 0.06 is one part in 255 of sRGB, so a menu was the colour of the pane
+ * it lay over. Every colour lighter than about `#0a0a0a` already clears these (the built-ins sit at 1.06 and 1.12 or
+ * more), so they move only the near-black ones, Black among them.
+ */
+const LAYER_FLOOR = { raised: 1.05, overlay: 1.1 };
+
+/** A layer `step` away from the base in lightness, and further if that is not yet `floor` away from it to the eye. */
+function layerOf(base: Oklch, step: number, floor: number): string {
+    const surface = oklchToHex(base.l, base.c, base.h);
+    let l = clamp01(base.l + step);
+    let hex = oklchToHex(l, base.c, base.h);
+    while (contrastRatio(hex, surface) < floor) {
+        const next = clamp01(l + Math.sign(step) * 0.005);
+        if (next === l) break;
+        l = next;
+        hex = oklchToHex(l, base.c, base.h);
+    }
+    return hex;
+}
+
+/** The raised and overlay layers sit a step from the surface: lighter on a dark surface, darker on a pale one. */
 function layersOf(base: Oklch, inkIsLight: boolean): Surfaces {
     const [up, over] = inkIsLight ? [0.03, 0.06] : [-0.02, -0.04];
     return {
         surface: oklchToHex(base.l, base.c, base.h),
-        raised: oklchToHex(clamp01(base.l + up), base.c, base.h),
-        overlay: oklchToHex(clamp01(base.l + over), base.c, base.h),
+        raised: layerOf(base, up, LAYER_FLOOR.raised),
+        overlay: layerOf(base, over, LAYER_FLOOR.overlay),
     };
 }
 

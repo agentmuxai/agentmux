@@ -37,6 +37,7 @@ pub mod failover;
 mod login_expiry;
 mod login_recheck;
 mod fresh;
+mod key_account;
 mod machine;
 mod moves;
 mod resume;
@@ -288,6 +289,11 @@ fn membership(identity: &Store, block: &Block, failure: &agent_state::StoredFail
         _ => return None,
     };
     let account = run_accounts_of_block(identity, block).into_iter().next()?;
+    // A pane on an API key is in no episode: nothing moves an agent off or onto a key but a person's choice, and its
+    // failure (a rejected key, no credit, the daily cap) stands on the pane, with its own toast.
+    if identity.identity_get(&account).ok().flatten().is_some_and(|a| key_account::is_key(&a)) {
+        return None;
+    }
     Some((account, state))
 }
 
@@ -643,6 +649,11 @@ pub(crate) fn restart_panes_of(state: &AppState, def_id: &str) -> (u32, u32, Vec
         }
     }
     (restarted, next_turn, failed)
+}
+
+/// The panes (open, or parked) an agent's definition has: what a change to the agent's runtime is written to.
+pub(crate) fn panes_of(state: &AppState, def_id: &str) -> Vec<Block> {
+    switch::open_panes(state, def_id)
 }
 
 /// These RPCs are the operator's, except `agent.account.switch` and

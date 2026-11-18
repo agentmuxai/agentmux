@@ -79,8 +79,8 @@ describe("usePaneBackdrop", () => {
         const [meta, setMeta] = createSignal<{ backdrop?: unknown }>({ backdrop: teal });
         const r = mount("hb-change", meta);
         const teal1 = getPaneScope("hb-change")()?.["--surface"];
-        setMeta({ backdrop: { ...teal, id: "crimson" } });
-        expect(r()?.id).toBe("builtin:crimson");
+        setMeta({ backdrop: { ...teal, id: "red" } });
+        expect(r()?.id).toBe("builtin:red");
         expect(getPaneScope("hb-change")()?.["--surface"]).not.toBe(teal1);
         setMeta({});
         expect(r()).toBeUndefined();
@@ -137,8 +137,8 @@ describe("usePaneBackdrop", () => {
         const live = getPaneScope("hb-owner")();
         expect(live?.["--surface"]).toMatch(/^#[0-9a-f]{6}$/);
         const dispose = createRoot((d) => {
-            const r = usePaneBackdrop("hb-owner", () => ({ backdrop: { ...teal, id: "crimson" } }), { owner: false });
-            expect(r()?.id).toBe("builtin:crimson");
+            const r = usePaneBackdrop("hb-owner", () => ({ backdrop: { ...teal, id: "red" } }), { owner: false });
+            expect(r()?.id).toBe("builtin:red");
             return d;
         });
         expect(getPaneScope("hb-owner")()).toEqual(live);

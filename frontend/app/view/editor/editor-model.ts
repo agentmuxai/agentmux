@@ -60,8 +60,10 @@ import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FilePro
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
+import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeZoomOf } from "./editor-zoom-parts";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
-import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
 import { openRemoteFile } from "./open-from-remote";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
@@ -90,11 +92,12 @@ export type EditorMode = "preview" | "source" | "split";
 export interface OpenFileOpts {
     followFolder?: boolean;
     viewer?: string;
+    /** Where to land: a text line, a hex byte offset, a PDF page (the viewer that reads it takes it). */
+    line?: number;
+    offset?: number;
+    page?: number;
 }
 const META_SCRATCH = "editor:scratch";
-const TREE_WIDTH_DEFAULT = 240;
-const TREE_WIDTH_MIN = 150;
-const TREE_WIDTH_MAX = 600;
 const PREVIEW_HEIGHT_DEFAULT = 300;
 const PREVIEW_HEIGHT_MIN = 80;
 const PREVIEW_HEIGHT_MAX = 1200;
@@ -216,6 +219,8 @@ export class EditorViewModel {
     meta: Accessor<MetaType | undefined>;
     private ctx: PaneTabHostContext;
     zoomAtom!: Accessor<number>;
+    /** The file tree's own zoom (`editor:tree_zoom`); the document's is `zoomAtom`. */
+    treeZoomAtom!: Accessor<number>;
 
     /** The line pane.open asked the initial file to open at, until the view
      *  has moved the cursor there (takeOpenAtLine). */
@@ -449,9 +454,8 @@ export class EditorViewModel {
         // Per-pane zoom (PR #1084). Wrapped in useBlockAtom (which calls
         // createRoot under the hood) — a bare createMemo here wouldn't have
         // a tracking owner and would snapshot once.
-        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () =>
-            createMemo<number>(() => paneZoom(blockId, this.meta())),
-        );
+        this.zoomAtom = useBlockAtom(blockId, "editor-zoom", () => createMemo<number>(() => paneZoom(blockId, this.meta())));
+        this.treeZoomAtom = useBlockAtom(blockId, "editor-tree-zoom", () => createMemo<number>(() => treeZoomOf(blockId, this.meta())));
 
         // Pane title — full file path of active tab, with `*` for dirty.
         // Wrap in useBlockAtom for the same reason as tabsAtom/activeIdAtom —
@@ -478,13 +482,14 @@ export class EditorViewModel {
         // Restore persisted tree state from block meta.
         const meta = (mediaPatch ? applyMetaPatch(rawMeta, mediaPatch) : rawMeta) as MetaType | undefined;
         this._treeExpanded[1](initialTreeExpanded(meta));
+        seedTreeZoom(meta, (patch) => void this.persistMeta(patch));
         if (typeof meta?.[META_TREE_EXPANDED] !== "boolean") queueMicrotask(() => void this.persistMeta({ [META_TREE_EXPANDED]: this._treeExpanded[0]() }));
         if (meta?.[META_SHOW_HIDDEN] === true) {
             this._showHidden[1](true);
         }
         const persistedWidth = meta?.[META_TREE_WIDTH];
         if (typeof persistedWidth === "number") {
-            this._treeWidth[1](clampTreeWidth(persistedWidth));
+            this._treeWidth[1](clampTreeWidth(persistedWidth, Number.POSITIVE_INFINITY));
         }
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
@@ -510,10 +515,7 @@ export class EditorViewModel {
             this._docTabsSaver.holds(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
         } else if (typeof legacyFile === "string" && legacyFile) {
-            const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
-            const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
-            void this.openFile(legacyFile, { followFolder, viewer });
-            if (followFolder || viewer) void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null });
+            this.openInitialFile(legacyFile, meta);
         } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
             // Widget default: open a scratch buffer when no file was persisted.
             void this.openScratch();
@@ -546,6 +548,17 @@ export class EditorViewModel {
         // check needed here, and having both would double-open).
     }
 
+    /** Opens the pane's initial `file` the way pane.open asked (following its folder, in a viewer, at a byte or page), once. */
+    private openInitialFile(file: string, meta: MetaType | undefined): void {
+        const followFolder = meta?.[META_FOLLOW_FOLDER] === true;
+        const viewer = isViewerId(meta?.[META_VIEWER]) ? meta[META_VIEWER] : undefined;
+        const at = readPositionMeta(meta);
+        void this.openFile(file, { followFolder, viewer, ...at });
+        if (followFolder || viewer || at.offset !== undefined || at.page !== undefined) {
+            void this.persistMeta({ [META_FOLLOW_FOLDER]: null, [META_VIEWER]: null, ...POSITION_META_CLEARED });
+        }
+    }
+
     /** The line to put the cursor on now that `path`'s content is in the
      *  editor, once; undefined for any other file or while it is loading. */
     takeOpenAtLine(path: string | undefined): number | undefined {
@@ -569,7 +582,25 @@ export class EditorViewModel {
      *  paths like double-click in the tree, path-input submit, drag-drop,
      *  programmatic open. The pinned tab survives subsequent tree clicks. */
     async openFile(filePath: string, opts?: OpenFileOpts): Promise<void> {
-        return this._openFileWithMode(filePath, "pinned", opts);
+        // The text view already showing this file takes a line now; a file that is still to load takes it when it does.
+        const showingNow = !!opts?.line && (!opts.viewer || opts.viewer === "text") && this.cmViewRef.current != null && !this.loadingAtom() && canonicalizePath(this.filePathAtom() ?? "") === canonicalizePath(filePath);
+        this.noteOpenPosition(filePath, opts);
+        await this._openFileWithMode(filePath, "pinned", opts);
+        if (showingNow) this.landOpenAtLine();
+    }
+
+    /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
+    private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
+        if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
+    }
+
+    /** Puts the cursor on the line a request named, in the view that shows its file now. */
+    private landOpenAtLine(): void {
+        const view = this.cmViewRef.current;
+        const line = this.takeOpenAtLine(this.filePathAtom());
+        if (view && line) view.dispatch(cursorAtLine(view.state, line));
     }
 
     /** Open a file as a *preview* tab (VS Code-style). Use for tree single-
@@ -641,7 +672,8 @@ export class EditorViewModel {
         if (followFolder) dispatch(this.blockId, { type: "SetFollowFolder", tabId, follow: true, source: "system" });
         if (opts?.viewer && isViewerId(opts.viewer)) {
             const tab = snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
-            if (tab?.viewerOverride !== opts.viewer) {
+            // Never over unsaved text: the viewer that replaces it keeps no buffer (the user's own "Reopen with" refuses too).
+            if (tab?.viewerOverride !== opts.viewer && !tab?.dirty) {
                 dispatch(this.blockId, { type: "SetTabViewer", tabId, viewer: opts.viewer, override: true, source: "system" });
                 this._contentByTab.delete(tabId);
             }
@@ -1325,8 +1357,9 @@ export class EditorViewModel {
         return openRemoteFile(this, host, path);
     }
 
-    setTreeWidth(width: number): void {
-        this._treeWidth[1](clampTreeWidth(width));
+    /** `width` is the tree's at 100%; `zoom` is the tree's level while it is dragged: the column is drawn at least TREE_WIDTH_MIN wide. */
+    setTreeWidth(width: number, zoom = 1): void {
+        this._treeWidth[1](clampTreeWidth(width, zoom));
     }
 
     async commitTreeWidth(): Promise<void> {
@@ -1449,11 +1482,6 @@ export class EditorViewModel {
         this._encodingByTab.clear();
         unregisterEditorPane(this.blockId);
     }
-}
-
-function clampTreeWidth(w: number): number {
-    if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
-    return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
 }
 
 function clampPreviewHeight(h: number): number {

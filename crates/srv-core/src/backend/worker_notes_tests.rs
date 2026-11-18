@@ -118,6 +118,25 @@ async fn tab(state: &CoreParts) -> String {
         .unwrap()
 }
 
+#[test]
+fn the_note_quotes_only_the_turn_that_ended() {
+    // The turn's own message is quoted.
+    assert_eq!(ended_turn_text("[user] go\n[assistant] Opened the page.\n[tool] Browser"), "Opened the page.");
+    // A turn that was only tool calls has no words: the older turn's message is not quoted in its place.
+    assert_eq!(ended_turn_text("[user] first\n[assistant] The pane is still blank.\n[user] test run done\n[tool] Bash\n[tool] Bash"), "");
+    // After a compaction or restart the digest may open with an assistant message and no user entry: it still counts.
+    assert_eq!(ended_turn_text("[assistant] Resumed.\n[tool] Bash"), "Resumed.");
+    // The newest of several messages in the turn.
+    assert_eq!(ended_turn_text("[user] go\n[assistant] Starting.\n[tool] Bash\n[assistant] Done, merged."), "Done, merged.");
+    assert_eq!(ended_turn_text(""), "");
+}
+
+#[test]
+fn a_tools_only_turn_repeats_no_old_words_in_its_note() {
+    let words = LastWords { text: ended_turn_text("[user] one\n[assistant] Old words.\n[user] two\n[tool] Bash"), asked: false };
+    assert_eq!(turn_end_body("Pulp", words), "Your worker Pulp finished a turn without reporting to you.");
+}
+
 fn mark_worker(state: &CoreParts, worker_id: &str, lead: &crate::backend::storage::agents::AgentDefinition) {
     state
         .mstore
@@ -221,4 +240,36 @@ async fn a_workers_credits_failure_adds_no_note_of_its_own() {
     let failed = |title: &str| WorkerEvent::Failed { block_id: worker_pane.clone(), title: title.into() };
     assert!(note_for(&state.mstore, &state.filestore, &failed("Not authenticated")).is_some(), "another failure is noted");
     assert_eq!(note_for(&state.mstore, &state.filestore, &failed(crate::agents::failure::ROUTE_CREDITS_TITLE)), None);
+}
+
+/// A worker's turn that died of a rate limit: its failure's note names the class, that it is transient, and
+/// who retries it (#2617); an exit with a failure stored by an earlier turn still says it stopped.
+#[tokio::test]
+async fn a_rate_limited_turns_note_names_the_cause_and_the_exit_adds_none() {
+    let state = crate::test_support::core_parts();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
+    let mut lead = test_agent_def(&lead_id, &format!("Lead {}", &id[..8]), "claude", "host", 1, "");
+    let mut worker = test_agent_def(&worker_id, &format!("Helper {}", &id[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut lead).unwrap();
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    mark_worker(&state, &worker_id, &lead);
+    pane(&state, &tab, &lead_id).await;
+    let worker_pane = pane(&state, &tab, &worker_id).await;
+    let exited = WorkerEvent::Exited { block_id: worker_pane.clone(), key: "k".into() };
+    let (_, plain, _) = note_for(&state.mstore, &state.filestore, &exited).expect("no failure stored: the exit is the news");
+    assert_eq!(plain, format!("[AgentMux] Your worker {} stopped: its process exited.", worker.name));
+
+    GAPS.lock().by_worker.remove(&worker_id); // the plain exit's note used this worker's minute
+    let failure = json!({ "code": "rate_limited", "title": "API rate limit", "detail": "", "retryable": true });
+    dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ "agent:last_failure": failure }) }).await;
+    GAPS.lock().by_worker.remove(&worker_id);
+    assert!(note_for(&state.mstore, &state.filestore, &exited).is_some(), "a failure stored by an earlier turn doesn't silence an exit");
+    GAPS.lock().by_worker.remove(&worker_id);
+    let failed = WorkerEvent::Failed { block_id: worker_pane, title: "API rate limit".into() };
+    let (_, text, wait) = note_for(&state.mstore, &state.filestore, &failed).expect("the leader is told");
+    assert_eq!(wait, None);
+    assert!(text.contains("stopped with an error: API rate limit. The provider rate-limited it (HTTP 429)"), "{text}");
+    assert!(text.contains("transient and has no reset time") && text.contains("send it another message"), "{text}");
 }

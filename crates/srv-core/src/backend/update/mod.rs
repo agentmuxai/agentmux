@@ -9,6 +9,7 @@ pub mod download;
 pub mod install;
 pub mod restart;
 pub mod signature;
+pub mod signed_source;
 pub mod unpack;
 
 /// Get the updater ready and start its background check (`check::init`, `auto::spawn`).

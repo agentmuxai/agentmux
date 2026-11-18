@@ -110,7 +110,8 @@ export function createRowFocus(opts: {
 }
 
 /** The Audit's sounds (speakers, the lit row, the last sound), with the row an ask names (the status bar's last
- *  sound, a message of the Messages panel) kept lit and scrolled to. `showKind` shows a kind of row the filter hides; `body` is the pane's scroller. */
+ *  sound, a message of the Messages panel) kept lit and scrolled to. `showKind` shows a kind of row the filter hides; `body` is the pane's scroller;
+ *  `agentIn` names the agent in a pane, for the last sound's line. */
 export function createAuditSoundsAt(
     entries: Accessor<readonly AuditEntry[]>,
     now: Accessor<number>,
@@ -119,6 +120,7 @@ export function createAuditSoundsAt(
         showKind: (kind: string) => void;
         body: () => HTMLElement | undefined;
         reachBack?: (done: () => boolean) => Promise<void>;
+        agentIn?: (blockId: string) => string | undefined;
     }
 ) {
     const focused = createRowFocus({
@@ -128,5 +130,5 @@ export function createAuditSoundsAt(
         reachBack: pane.reachBack,
         scrollTo: (id) => pane.body()?.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView?.({ block: "center" }),
     });
-    return createAuditSounds(entries, now, focused);
+    return createAuditSounds(entries, now, focused, pane.agentIn);
 }

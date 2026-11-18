@@ -8,7 +8,7 @@
  */
 
 import { hexToRgb } from "../theme/oklch";
-import { BUILTINS, deriveBuiltin, type AppScheme } from "./builtins";
+import { builtinId, deriveBuiltin, type AppScheme } from "./builtins";
 import { deriveInk, type DerivedBackdrop } from "./ink";
 
 /**
@@ -29,7 +29,7 @@ export type BackdropPolarity = "follow" | "dark" | "light";
 
 export interface BackdropMeta {
     kind: BackdropKind;
-    /** `builtin`: the palette slot id (`teal`). */
+    /** `builtin`: the palette slot id (`teal`). A stored id retired with the 16 slots is read as the slot it became. */
     id?: string;
     /** `color`: `#rrggbb`. */
     hex?: string;
@@ -39,14 +39,13 @@ export interface BackdropMeta {
     version: number;
 }
 
-const BUILTIN_IDS: ReadonlySet<string> = new Set(BUILTINS.map((b) => b.id));
 const POLARITIES: ReadonlySet<string> = new Set(["follow", "dark", "light"]);
 const HEX6 = /^#[0-9a-f]{6}$/i;
 
 /**
  * The record in a pane's meta, or undefined when there is none or it can't be read: a wrong shape, an id that is
- * not one of the 16, a colour that is not `#rrggbb`, or a `version` newer than this build. A bad record must never
- * break a pane, so it reads as no backdrop.
+ * not a built-in (now or before), a colour that is not `#rrggbb`, or a `version` newer than this build. A bad record
+ * must never break a pane, so it reads as no backdrop.
  */
 export function parseBackdrop(raw: unknown): BackdropMeta | undefined {
     if (raw == null || typeof raw !== "object") return undefined;
@@ -56,7 +55,8 @@ export function parseBackdrop(raw: unknown): BackdropMeta | undefined {
     const polarity = r.polarity === undefined ? "follow" : r.polarity;
     if (typeof polarity !== "string" || !POLARITIES.has(polarity)) return undefined;
     const base = { polarity: polarity as BackdropPolarity, version };
-    if (r.kind === "builtin" && typeof r.id === "string" && BUILTIN_IDS.has(r.id)) return { ...base, kind: "builtin", id: r.id };
+    const id = r.kind === "builtin" && typeof r.id === "string" ? builtinId(r.id) : undefined;
+    if (id) return { ...base, kind: "builtin", id };
     if (r.kind === "color" && typeof r.hex === "string" && HEX6.test(r.hex)) return { ...base, kind: "color", hex: r.hex.toLowerCase() };
     if (r.kind === "image" && typeof r.imageId === "string" && r.imageId !== "") return { ...base, kind: "image", imageId: r.imageId };
     return undefined;
@@ -96,8 +96,9 @@ function plainHex(value: unknown): string | undefined {
  * What a pane's meta resolves to under an app theme, or undefined when the pane has no backdrop to apply (it then
  * keeps the app's tokens exactly as before).
  *
- * - A `backdrop` record wins. A built-in follows the app theme under `follow` and keeps its own side under `dark` or
- *   `light`; a custom colour is derived from the colour itself (a `polarity` does not change a colour the user chose).
+ * - A `backdrop` record wins. A built-in hue follows the app theme under `follow` and keeps its own side under `dark`
+ *   or `light`; Black, White and a custom colour are derived from the colour itself (a `polarity` does not change a
+ *   colour the user chose).
  * - With no record, a `bg` that is a plain colour becomes an in-memory `legacy` backdrop (§8): the old value is still
  *   painted as before, and its ink is derived by the same function. A `bg` that is a gradient or a url stays untouched
  *   until an image can be measured (phase 3).

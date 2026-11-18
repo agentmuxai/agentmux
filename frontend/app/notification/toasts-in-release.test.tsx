@@ -8,7 +8,7 @@ import { capNotifications, MAX_KEPT_NOTIFICATIONS, setNotifications } from "@/ap
 import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_VISIBLE_NOTIFICATIONS, visibleNotifications } from "./notificationbubbles";
-import { useNotification } from "./usenotification";
+import { closeAllNotifications, useNotification } from "./usenotification";
 
 function toast(id: string, extra: Partial<NotificationType> = {}): NotificationType {
     return { id, icon: "bell", title: id, message: "", timestamp: "", ...extra };
@@ -53,6 +53,21 @@ describe("closing a toast", () => {
             closeNotification("missing");
             expect(onClose).toHaveBeenCalledTimes(1);
             setNotifications([]);
+            dispose();
+        });
+    });
+
+    it("closes them all at once, persistent ones too, telling each sender once", () => {
+        const onA = vi.fn();
+        const onSticky = vi.fn();
+        createRoot((dispose) => {
+            setNotifications([toast("a", { onClose: onA }), toast("sticky", { persistent: true, onClose: onSticky }), toast("b")]);
+            const { notifications } = useNotification();
+            closeAllNotifications();
+            expect(notifications()).toEqual([]);
+            closeAllNotifications(); // nothing left: nobody is told again
+            expect(onA).toHaveBeenCalledTimes(1);
+            expect(onSticky).toHaveBeenCalledTimes(1);
             dispose();
         });
     });

@@ -3,7 +3,14 @@
 
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ACTIVE_MS, createFrameSampler, MAX_PANES, SAMPLE_EVENTS, startFrameSampler } from "./frame-sample";
+import {
+    ACTIVE_MS,
+    createFrameSampler,
+    MAX_PANES,
+    POINTER_HOLD_MAX_MS,
+    SAMPLE_EVENTS,
+    startFrameSampler,
+} from "./frame-sample";
 
 const viewOf = (id: string): string | undefined => (id.startsWith("ab12cd34") ? "agent" : undefined);
 
@@ -135,6 +142,89 @@ describe("the frame sampler", () => {
         s.flush();
         expect(lines[0]).not.toMatch(/transcript|toolbar|files/);
     });
+
+    // A streaming pane scrolls itself to its tail; those scroll events are not the person using the page.
+    it("a scroll with no gesture behind it does not start sampling, and a late one does not renew it", () => {
+        const { inPane } = page();
+        const s = make();
+        s.noteScroll();
+        expect(queued).toHaveLength(0);
+        s.note(inPane);
+        frame(16.7);
+        while (queued.length) frame(16.7);
+        clock += ACTIVE_MS; // the gesture is no longer recent
+        s.noteScroll();
+        expect(queued).toHaveLength(0);
+    });
+
+    it("a scroll just after a gesture keeps sampling going (smooth scroll, momentum)", () => {
+        const { inPane } = page();
+        const s = make();
+        s.note(inPane);
+        frame(16.7);
+        frame(300); // the gesture's window ends at ACTIVE_MS
+        s.noteScroll();
+        frame(100); // past the first window: sampling goes on only because the scroll renewed it
+        expect(queued).toHaveLength(1);
+    });
+
+    it("a scroll does not move the pane the frames are counted against", () => {
+        const { inPane } = page();
+        const s = make();
+        s.note(inPane);
+        frame(16.7);
+        // another pane scrolls itself while the person is on the first one; noteScroll has no target to move to
+        s.noteScroll();
+        frame(16.7);
+        frame(16.7);
+        s.flush();
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("block=ab12cd34 view=agent");
+    });
+
+    it("scroll events keep sampling going while a pointer button is held (dragging a scrollbar)", () => {
+        const { inPane } = page();
+        const s = make();
+        s.pointer(true);
+        s.note(inPane);
+        frame(16.7);
+        while (queued.length) frame(16.7);
+        clock += 1000; // no gesture events since, only scrolls from the drag
+        s.noteScroll();
+        expect(queued).toHaveLength(1);
+        while (queued.length) frame(16.7);
+        s.pointer(false);
+        clock += 1000;
+        s.noteScroll();
+        expect(queued).toHaveLength(0);
+    });
+
+    it("a pointer button held for POINTER_HOLD_MAX_MS is taken as released", () => {
+        const s = make();
+        s.pointer(true);
+        clock += POINTER_HOLD_MAX_MS + 1;
+        s.noteScroll();
+        expect(queued).toHaveLength(0);
+    });
+
+    // A window hidden or minimized inside a burst: its pending frame comes back when the window does, and without a
+    // reset the whole time it was away was counted as one frame.
+    it("a window hidden inside a burst does not count the time it was away as one frame", () => {
+        const { inPane } = page();
+        const s = make();
+        s.note(inPane);
+        frame(16.7);
+        frame(16.7);
+        s.suspend(); // visibilitychange to hidden
+        frame(60_000); // the pending frame would have run now; with it dropped nothing runs
+        s.note(inPane); // back, and the person touches the page again
+        frame(16.7);
+        frame(16.7);
+        s.flush();
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatch(/frames=2 .*worst=17ms$/);
+        expect(lines[0]).not.toContain("worst=60000ms");
+    });
 });
 
 describe("attached to the page", () => {
@@ -158,6 +248,35 @@ describe("attached to the page", () => {
             expect(asked).toBe(1);
         } finally {
             globalThis.requestAnimationFrame = realRaf;
+            detach();
+        }
+    });
+
+    it("a scroll alone does not start sampling; a wheel turn then a scroll does; hiding the page drops the pending frame", () => {
+        const { inPane } = page();
+        const detach = startFrameSampler({ windowLabel: "main", viewOf });
+        let asked = 0;
+        let cancelled = 0;
+        const realRaf = globalThis.requestAnimationFrame;
+        const realCancel = globalThis.cancelAnimationFrame;
+        globalThis.requestAnimationFrame = (() => ++asked) as unknown as typeof requestAnimationFrame;
+        globalThis.cancelAnimationFrame = (() => void cancelled++) as typeof cancelAnimationFrame;
+        const hidden = Object.getOwnPropertyDescriptor(Document.prototype, "hidden");
+        try {
+            inPane.dispatchEvent(new Event("scroll", { bubbles: true }));
+            expect(asked).toBe(0); // the pane scrolled itself
+            inPane.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+            expect(asked).toBe(1);
+            inPane.dispatchEvent(new Event("scroll", { bubbles: true }));
+            expect(asked).toBe(1); // a frame is already pending
+            Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+            document.dispatchEvent(new Event("visibilitychange"));
+            expect(cancelled).toBe(1);
+        } finally {
+            delete (document as unknown as { hidden?: boolean }).hidden;
+            if (hidden) Object.defineProperty(Document.prototype, "hidden", hidden);
+            globalThis.requestAnimationFrame = realRaf;
+            globalThis.cancelAnimationFrame = realCancel;
             detach();
         }
     });

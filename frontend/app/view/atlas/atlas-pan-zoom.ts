@@ -4,7 +4,7 @@
 /**
  * The map's pan and zoom state for the Atlas pane. The map fits the pane, and follows the pane and the agents,
  * until the person pans or zooms it: from then on it stays where they put it, and Fit (or the layout toggle) takes
- * it back. The wheel zooms about the pointer, the zoom buttons zoom with the map centred in the pane, and a drag
+ * it back. The wheel zooms about the pointer, the zoom buttons keep a map that still fits where the fit put it and centre one that fills the pane, and a drag
  * on the background pans. Zoomed in past the fitted view, the map's gaps close up (`spread`), so the
  * layout is a new one at each scale: a zoom keeps the node under the pointer, or the map's centre, where it was.
  */

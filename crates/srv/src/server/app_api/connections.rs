@@ -668,10 +668,22 @@ pub(crate) fn verified_agent(
     agent_block_id: &str,
     auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
 ) -> Result<String, String> {
+    verified_agent_as(state, None, agent_block_id, auth)
+}
+
+/// [`verified_agent`] for a caller whose token is known (`caller`): a container agent has a token and no signing
+/// key, and is proven by the token as `Browser` proves it. An SSH connection keeps the signature alone
+/// ([`verified_agent`]): it runs with the person's own identity.
+pub(crate) fn verified_agent_as(
+    state: &AppState,
+    caller: Option<&crate::server::caller::Caller>,
+    agent_block_id: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> Result<String, String> {
     let auth = auth.ok_or_else(|| {
         "an SSH connection needs the agent's signed identity, which this call did not carry (respawn the agent to give it a signing key)".to_string()
     })?;
-    let pane = crate::server::ui_handlers::verified_block_id(state, None, auth)
+    let pane = crate::server::ui_handlers::verified_block_id(state, caller, auth)
         .map_err(|e| format!("could not verify which agent is asking: {e}"))?;
     if pane != agent_block_id {
         return Err("this request names another agent's pane".to_string());

@@ -53,8 +53,10 @@ mod streamed_browser;
 pub(crate) mod files_root;
 mod container_workspace;
 mod model_gateway_handlers;
+mod model_gateway_key;
 pub(crate) mod compact_backstop;
 pub(crate) mod spend_watch;
+pub(crate) mod startup_refresh;
 mod container_tool_chunk;
 mod container_compaction_started;
 pub(crate) mod jekt_held;
@@ -152,6 +154,7 @@ pub(crate) mod browser_click_approval;
 pub(crate) mod browser_dialog;
 pub(crate) mod browser_permission;
 pub(crate) mod browser_find;
+pub(crate) mod browser_locate;
 pub(crate) mod browser_handoffs;
 pub(crate) mod browser_waiting;
 pub(crate) mod browser_hibernation;
@@ -217,6 +220,12 @@ mod agent_status_tests;
 #[cfg(test)]
 #[path = "tests/model_gateway_tests.rs"]
 mod model_gateway_tests;
+#[cfg(test)]
+#[path = "tests/key_route_gateway_tests.rs"]
+mod key_route_gateway_tests;
+#[cfg(test)]
+#[path = "tests/gateway_bound_peer_tests.rs"]
+mod gateway_bound_peer_tests;
 #[cfg(test)]
 #[path = "tests/http_skill_tests.rs"]
 mod http_skill_tests;

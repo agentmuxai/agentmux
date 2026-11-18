@@ -72,6 +72,28 @@ fn an_editor_with_everything_set_writes_each_key_once() {
 }
 
 #[test]
+fn an_editor_open_names_any_viewer_and_where_in_the_file() {
+    let mut c = cmd("editor");
+    c.file = Some("/work/a.bin".into());
+    for viewer in ["text", "large", "image", "media", "pdf", "hex", "info"] {
+        c.viewer = Some(viewer.into());
+        assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!(viewer));
+    }
+    c.viewer = Some("hexdump".into());
+    assert!(build_pane_meta(&c).unwrap_err().starts_with("INVALID_ARG"));
+
+    c.viewer = Some("hex".into());
+    c.offset = Some(0);
+    c.page = Some(3);
+    let meta = build_pane_meta(&c).unwrap();
+    assert_eq!((meta["editor:offset"].clone(), meta["editor:page"].clone()), (json!(0), json!(3)), "offset 0 is a request too");
+    c.offset = None;
+    c.page = Some(0);
+    let meta = build_pane_meta(&c).unwrap();
+    assert!(!meta.contains_key("editor:offset") && !meta.contains_key("editor:page"), "no offset, and page 0 is none");
+}
+
+#[test]
 fn a_terminal_is_a_shell_and_takes_a_folder_only_when_it_names_one() {
     let mut c = cmd("term");
     let meta = build_pane_meta(&c).unwrap();
@@ -180,6 +202,26 @@ fn local_or_no_connection_records_nothing_and_the_other_views_have_none() {
     b.url = Some("https://example.org".into());
     b.connection = Some("dev@host.example".into());
     assert!(!build_pane_meta(&b).unwrap().contains_key("connection"), "browser");
+}
+
+#[test]
+fn a_file_on_an_ssh_host_opens_as_text_only() {
+    let mut c = cmd("editor");
+    c.file = Some("/home/u/a.bin".into());
+    c.connection = Some("dev@host.example".into());
+    c.viewer = Some("text".into());
+    assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!("text"));
+    for viewer in ["image", "media", "pdf", "hex", "info"] {
+        c.viewer = Some(viewer.into());
+        let err = build_pane_meta(&c).unwrap_err();
+        assert!(err.starts_with("INVALID_ARG") && err.contains("SSH host") && err.contains("text"), "{viewer}: {err}");
+    }
+    // This computer, and a WSL distribution, read through the local viewers.
+    for conn in [None, Some("local"), Some("wsl://Ubuntu")] {
+        c.connection = conn.map(str::to_string);
+        c.viewer = Some("hex".into());
+        assert_eq!(build_pane_meta(&c).unwrap()["editor:viewer"], json!("hex"), "{conn:?}");
+    }
 }
 
 #[test]

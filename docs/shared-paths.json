@@ -241,6 +241,18 @@
       ]
     },
     {
+      "name": "AppImage channel record",
+      "paths": [
+        "appimage-channels.json"
+      ],
+      "why": "An AppImage that is moved or renamed (AppImageLauncher's Integrate) leaves the channel file beside it behind; the launcher keeps the channel of each recent AppImage here, by which file it is, so the moved file starts in the same channel (#47873).",
+      "gate": "A `version` field: a build reads and rewrites a file of its own version or none, and leaves a newer build's file as it is; a damaged or foreign file is replaced.",
+      "lock": "Written to a temporary file and renamed; two starts at once can lose one entry, which the next start writes again from the file's own record beside it.",
+      "users": [
+        "crates/common/src/appimage_record.rs"
+      ]
+    },
+    {
       "name": "where the shared folder is",
       "paths": [
         "shared/"

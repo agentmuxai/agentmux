@@ -118,23 +118,30 @@ pub(crate) async fn gate(version: &str, asset: &ReleaseAsset) -> Result<(), Stri
     decide(version, &outcome)
 }
 
+/// A fixed signed release (seed-7 key), for this module's tests and the second source's.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod fixtures {
+    use agentmux_common::update_manifest::UpdateKey;
 
     // The same fixed release the common crate and the release script test (seed-7 key).
-    const KEY: [u8; 32] = [
+    pub(crate) const KEY: [u8; 32] = [
         0xea, 0x4a, 0x6c, 0x63, 0xe2, 0x9c, 0x52, 0x0a, 0xbe, 0xf5, 0x50, 0x7b, 0x13, 0x2e, 0xc5, 0xf9, 0x95, 0x47, 0x76, 0xae, 0xbe, 0xbe, 0x7b, 0x92, 0x42,
         0x1e, 0xea, 0x69, 0x14, 0x46, 0xd2, 0x2c,
     ];
-    const MANIFEST: &str = "{\n  \"format\": 1,\n  \"version\": \"0.60.1\",\n  \"tag\": \"v0.60.1\",\n  \"files\": [\n    {\n      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",\n      \"size\": 100,\n      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"\n    },\n    {\n      \"name\": \"agentmux-0.60.1-x64-portable.7z\",\n      \"size\": 50,\n      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"\n    }\n  ]\n}\n";
-    const ENVELOPE: &str = "{\n  \"format\": 1,\n  \"tag\": \"v0.60.1\",\n  \"manifest_sha256\": \"8a83f0bb7ce99e7537b872b55d6e688da6713ebd078b0dd88c740b1a3c5809eb\",\n  \"created_at\": \"2026-10-25T12:00:00Z\"\n}\n";
-    const SIG: &str = "k1 oGZeVKdahQJP1mqd964PNT7Fie6IbSoUMkDXrmi1QbUVn947HuHtRZNRJt36L22rcAkLPGRWolco8DB2AZXZCw==\n";
-    const SETUP_SHA: &str = "8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73";
+    pub(crate) const MANIFEST: &str = "{\n  \"format\": 1,\n  \"version\": \"0.60.1\",\n  \"tag\": \"v0.60.1\",\n  \"files\": [\n    {\n      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",\n      \"size\": 100,\n      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"\n    },\n    {\n      \"name\": \"agentmux-0.60.1-x64-portable.7z\",\n      \"size\": 50,\n      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"\n    }\n  ]\n}\n";
+    pub(crate) const ENVELOPE: &str = "{\n  \"format\": 1,\n  \"tag\": \"v0.60.1\",\n  \"manifest_sha256\": \"8a83f0bb7ce99e7537b872b55d6e688da6713ebd078b0dd88c740b1a3c5809eb\",\n  \"created_at\": \"2026-10-25T12:00:00Z\"\n}\n";
+    pub(crate) const SIG: &str = "k1 oGZeVKdahQJP1mqd964PNT7Fie6IbSoUMkDXrmi1QbUVn947HuHtRZNRJt36L22rcAkLPGRWolco8DB2AZXZCw==\n";
+    pub(crate) const SETUP_SHA: &str = "8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73";
 
-    fn keys() -> Vec<UpdateKey> {
+    pub(crate) fn keys() -> Vec<UpdateKey> {
         vec![UpdateKey { id: "k1", public: KEY }]
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixtures::*;
+    use super::*;
 
     fn asset(name: &str, size: u64, sha256: &str) -> ReleaseAsset {
         ReleaseAsset { name: name.into(), size, url: format!("{RELEASE_DOWNLOAD_PREFIX}v0.60.1/{name}"), sha256: sha256.into() }

@@ -231,6 +231,8 @@ pub fn spawn_state_services(state: &AppState) {
     // Every agent's runtime state is looked at and each change published (`agentruntime:changed:<id>`).
     crate::server::agent_runtime::spawn(state.clone());
     spawn_spend_services(state);
+    // A running agent's startup file follows Global Memory (SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md §3.1).
+    crate::server::startup_refresh::start(state.clone());
     spawn_background_task_sweep(state);
     // Overlap notes (an agent editing a file another agent is also changing
     // is told who): the progress watcher's edits are checked from here on.
@@ -315,7 +317,13 @@ pub fn spawn_state_services(state: &AppState) {
     );
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
     backend::old_versions_service::install(Arc::clone(&state.config_watcher));
-    // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
+    install_turn_outcome_notes(state);
+}
+
+/// Tells whoever needs to know when a turn's outcome wasn't otherwise reported: a worker's leader
+/// (`worker_notes`, SPEC_AGENT_WORKERS_2026_10_15.md §3.3), and, since #2627, whoever sent the message that
+/// started a turn which then died of a retryable failure (`sender_failure_note`).
+fn install_turn_outcome_notes(state: &AppState) {
     backend::worker_notes::install(
         Arc::clone(&state.broker),
         state.srv_events_tx.subscribe(),
@@ -323,6 +331,7 @@ pub fn spawn_state_services(state: &AppState) {
         Arc::clone(&state.filestore),
         Arc::clone(&state.config_watcher),
     );
+    backend::sender_failure_note::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
 }
 
 /// Starts what is read from the data folder once the stores and watchers exist: widget
@@ -496,6 +505,10 @@ pub async fn shut_down(
         crate::muxbus::wan_presence::goodbye_on_shutdown(),
     );
     tracing::info!(agents = closed, "shutdown: agents closed");
+    // The helper container of Docker Desktop's gateway forwarder ends with this srv: its secret was made for this launch.
+    if let Some(cm) = state.container_manager.get().await {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), backend::container::gateway_fwd::remove(&cm)).await;
+    }
     #[cfg(unix)]
     backend::process_tracker::roots_file::finish();
 }

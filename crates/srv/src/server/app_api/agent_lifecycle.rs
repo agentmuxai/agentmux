@@ -54,6 +54,11 @@ impl Actor {
     pub(super) fn uid(&self) -> &str {
         &self.uid
     }
+
+    /// An agent on another machine (`slug@machine`), by the same name `run_remote` records.
+    pub(super) fn remote(who: &str) -> Self {
+        Self { uid: format!("remote:{who}"), slug: who.to_string() }
+    }
 }
 
 pub(super) fn actor_of(state: &AppState, caller: Option<&Caller>, action: &str) -> Result<Actor, Refusal> {

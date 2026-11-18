@@ -1,13 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// One Vault section's entries: label, kind, plain details and expiry, the main
-// value's last characters, and Change / Earlier values / Delete. Values are never shown.
+// One section of the Vault's list (vault-list.tsx): the entries of one type. A row has the label, the kind,
+// the plain details and expiry, the main value's last characters, and Change / Earlier values / Delete.
+// Values are never shown.
 
 import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
-import { Button, FilterInput, IconButton, Pill } from "@/app/element/ui";
+import { Button, IconButton, Pill } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
@@ -17,12 +18,14 @@ import { VaultRevealDialog } from "./vault-reveal";
 import { VaultVersionsDialog } from "./vault-versions";
 import { EXPIRING_SOON_DAYS, expiryOf, formatWhen } from "./vault-format";
 import { CARD_BRANDS } from "./vault-card";
-import { SECTION_LABELS, vaultKind } from "./vault-kinds";
+import { kindsIn, SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { copyCheck, machineCopy, MachineCopyLine } from "./vault-source";
 import { CopyPlaceButton, isLinked, LinkedBadges, LinkedDetails } from "./vault-linked";
 import { ensureBrowserProfiles, profileById } from "@/app/view/browser/browser-profiles";
 import { EntryGrants } from "./vault-entry-grants";
-import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList, vaultLoading } from "./vault-store";
+import { canShare, ShareButton } from "./vault-share";
+import { checkSource, deleteEntry, revokeGrant, vaultEntries, vaultList } from "./vault-store";
+import { VaultSectionBox } from "./vault-section";
 import { vaultNameOf, VaultMoveDialog } from "./vault-vaults";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -52,7 +55,8 @@ export function entryMatches(e: VaultEntryInfo, filter: string): boolean {
     const q = filter.trim().toLowerCase();
     if (!q) return true;
     const said = [e.fields.readers ?? "", e.fields.copies ?? ""];
-    return [e.label, e.id, vaultKind(e.kind)?.label ?? e.kind, entryDetails(e), machineCopy(e.fields), ...said, e.fields.expires ?? "", ...e.tags].some((s) =>
+    const type = [vaultKind(e.kind)?.label ?? e.kind, SECTION_LABELS[e.section] ?? ""];
+    return [e.label, e.id, ...type, entryDetails(e), machineCopy(e.fields), ...said, e.fields.expires ?? "", ...e.tags].some((s) =>
         s.toLowerCase().includes(q),
     );
 }
@@ -150,6 +154,9 @@ function EntryActions(props: { entry: VaultEntryInfo; on: (what: "reveal" | "cha
             <Show when={vaultList().length > 1}>
                 <IconButton icon="folder-open" label="Move to another Vault" density="compact" onClick={() => props.on("move")} />
             </Show>
+            <Show when={canShare(props.entry)}>
+                <ShareButton entry={props.entry} />
+            </Show>
             <IconButton icon="book" label="History" density="compact" onClick={() => props.on("history")} />
             <Show when={props.entry.versions > 0}>
                 <IconButton icon="rotate-left" label="Earlier values" density="compact" onClick={() => props.on("versions")} />
@@ -179,10 +186,36 @@ function DeleteEntryConfirm(props: { entry: VaultEntryInfo; onConfirm: () => Pro
     );
 }
 
-/** `vault` narrows the list to one Vault (its id); empty shows every Vault's entries. */
-export function VaultEntries(props: { section: VaultSection; vault?: string }): JSX.Element {
-    const [filter, setFilter] = createSignal("");
-    const [soonOnly, setSoonOnly] = createSignal(false);
+
+/** The entries of one section, in one Vault (its id) or, with none named, in all of them. */
+export function entriesOf(all: VaultEntryInfo[] | null, section: VaultSection, vault?: string): VaultEntryInfo[] {
+    return (all ?? []).filter((e) => e.section === section && (!vault || e.vault_id === vault));
+}
+
+/** Whether the list is narrowed: a filter is typed, or only what expires soon is asked for. */
+export const isNarrowing = (filter: string, soonOnly: boolean): boolean => filter.trim() !== "" || soonOnly;
+
+/** What a narrowed list shows of `entries`. */
+export function narrowedEntries(entries: VaultEntryInfo[], filter: string, soonOnly: boolean): VaultEntryInfo[] {
+    return entries.filter((e) => entryMatches(e, filter) && (!soonOnly || expiringSoon(e)));
+}
+
+type EntryAction = "reveal" | "change" | "move" | "history" | "versions" | "delete";
+
+export interface VaultEntriesProps {
+    section: VaultSection;
+    /** Narrows the section to one Vault (its id); empty shows every Vault's entries. */
+    vault?: string;
+    /** The list's one filter and its Expiring soon switch (vault-list.tsx): the section shows what matches. */
+    filter?: string;
+    soonOnly?: boolean;
+    /** Folded when false. A narrowed list shows what it found, folded or not. */
+    open?: boolean;
+    onToggle?: () => void;
+}
+
+/** What one section's rows and dialogs share. */
+function createEntriesState(props: VaultEntriesProps) {
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
     const [deleting, setDeleting] = createSignal<VaultEntryInfo | null>(null);
     const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
@@ -190,109 +223,137 @@ export function VaultEntries(props: { section: VaultSection; vault?: string }): 
     const [moving, setMoving] = createSignal<VaultEntryInfo | null>(null);
     const [historyOf, setHistoryOf] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
-    const inSection = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && (!props.vault || e.vault_id === props.vault)));
-    const dated = createMemo(() => inSection().some((e) => expiryOf(e.fields.expires) !== null));
-    const rows = createMemo(() => inSection().filter((e) => entryMatches(e, filter()) && (!soonOnly() || !dated() || expiringSoon(e))));
-    const total = createMemo(() => inSection().length);
+    const inSection = createMemo(() => entriesOf(vaultEntries(), props.section, props.vault));
+    const narrowing = () => isNarrowing(props.filter ?? "", !!props.soonOnly);
+    const rows = createMemo(() => narrowedEntries(inSection(), props.filter ?? "", !!props.soonOnly));
+    const total = () => inSection().length;
+    const count = () => (narrowing() ? t("vault.section.countOf", { shown: rows().length, total: total() }) : String(total()));
 
-    const revoke = async (id: string, origin: string) => {
+    const guarded = async (run: () => Promise<unknown>) => {
         try {
-            await revokeGrant(id, origin);
+            await run();
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         }
     };
-
-    const act = (what: "reveal" | "change" | "move" | "history" | "versions" | "delete", e: VaultEntryInfo) => {
+    const revoke = (id: string, origin: string) => void guarded(() => revokeGrant(id, origin));
+    const act = (what: EntryAction, e: VaultEntryInfo) => {
         const open = { reveal: setRevealing, move: setMoving, history: setHistoryOf, versions: setVersionsOf, delete: setDeleting };
         if (what === "change") setForm({ mode: "edit", entry: e });
         else open[what](e);
     };
-
     const confirmDelete = async () => {
         const e = deleting();
-        if (!e) return;
-        try {
-            await deleteEntry(e.id);
-            setError(null);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-        }
+        if (e) await guarded(() => deleteEntry(e.id));
         setDeleting(null);
     };
+    const add = () => setForm({ mode: "new", section: props.section, vault: props.vault });
+    return { form, setForm, deleting, setDeleting, revealing, setRevealing, versionsOf, setVersionsOf, moving, setMoving, historyOf, setHistoryOf, error, setError, narrowing, rows, count, revoke, act, confirmDelete, add };
+}
 
+type EntriesState = ReturnType<typeof createEntriesState>;
+
+/** A section's rows. The columns are named for a screen reader only: each section would repeat them, and a row
+ *  reads without them. A section of one kind has no Kind column, since its name says it. */
+function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: boolean }): JSX.Element {
+    const s = props.s;
+    const kinds = () => kindsIn(props.section).length > 1;
     return (
-        <div class="warden-manager-body vault-entries">
-            <div class="vault-bar">
-                <Show when={total() > 0}>
-                    <FilterInput value={filter()} onInput={setFilter} placeholder={`Filter ${SECTION_LABELS[props.section].toLowerCase()}`} />
+        <table class="warden-manager-table vault-table vault-entry-table">
+            {/* In a wide pane these give every section the same column widths (vault-view.scss). */}
+            <colgroup>
+                <col class="vault-col-label" />
+                <Show when={kinds()}>
+                    <col class="vault-col-kind" />
                 </Show>
-                <Show when={dated()}>
-                    <Button density="compact" icon="clock" pressed={soonOnly()} onClick={() => setSoonOnly(!soonOnly())}>
-                        Expiring soon
-                    </Button>
-                </Show>
-                <Button tone="accent" density="compact" icon="plus" onClick={() => setForm({ mode: "new", section: props.section, vault: props.vault })}>
-                    Add
-                </Button>
-            </div>
-            <Show when={error()}>
-                <div class="warden-manager-error" role="alert">
-                    ⚠ {error()}
-                </div>
-            </Show>
-            <Show
-                when={rows().length > 0}
-                fallback={
-                    <div class="warden-section-stub">
-                        {vaultEntries() === null && vaultLoading()
-                            ? "Loading…"
-                            : total() > 0
-                              ? "No entry matches."
-                              : "Nothing here yet. Add an entry, and agents can use it by name without seeing its value."}
-                    </div>
-                }
-            >
-                <table class="warden-manager-table vault-table">
-                    <thead>
-                        <tr>
-                            <th>Label</th>
-                            <th>Kind</th>
-                            <th>Details</th>
-                            <th>Value</th>
-                            <th>Changed</th>
-                            <th />
+                <col />
+                <col class="vault-col-value" />
+                <col class="vault-col-when" />
+                <col class="vault-col-actions" />
+            </colgroup>
+            <thead class="vault-entry-columns">
+                <tr>
+                    <th>Label</th>
+                    <Show when={kinds()}>
+                        <th>Kind</th>
+                    </Show>
+                    <th>Details</th>
+                    <th>Value</th>
+                    <th>Changed</th>
+                    <th />
+                </tr>
+            </thead>
+            <tbody>
+                <For each={s.rows()}>
+                    {(e) => (
+                        <tr data-entry={e.id}>
+                            <td>
+                                <EntryLabel entry={e} />
+                                <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
+                                <EntryGrants entry={e} revoke={(grant) => s.revoke(e.id, grant)} />
+                            </td>
+                            <Show when={kinds()}>
+                                <td class="vault-kind">{vaultKind(e.kind)?.label ?? e.kind}</td>
+                            </Show>
+                            <td class="warden-manager-dim">
+                                <EntryDetails entry={e} showVault={props.showVault} onError={s.setError} />
+                            </td>
+                            <EntryValue entry={e} />
+                            <td class="warden-manager-dim vault-when">{formatWhen(e.updated_at)}</td>
+                            <EntryActions entry={e} on={(what) => s.act(what, e)} onError={s.setError} />
                         </tr>
-                    </thead>
-                    <tbody>
-                        <For each={rows()}>
-                            {(e) => (
-                                <tr data-entry={e.id}>
-                                    <td>
-                                        <EntryLabel entry={e} />
-                                        <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
-                                        <EntryGrants entry={e} revoke={(grant) => void revoke(e.id, grant)} />
-                                    </td>
-                                    <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
-                                    <td class="warden-manager-dim">
-                                        <EntryDetails entry={e} showVault={!props.vault} onError={setError} />
-                                    </td>
-                                    <EntryValue entry={e} />
-                                    <td class="warden-manager-dim vault-when">{formatWhen(e.updated_at)}</td>
-                                    <EntryActions entry={e} on={(what) => act(what, e)} onError={setError} />
-                                </tr>
-                            )}
-                        </For>
-                    </tbody>
-                </table>
+                    )}
+                </For>
+            </tbody>
+        </table>
+    );
+}
+
+/** The dialogs a row opens. They stay mounted when a narrowed list hides the section they were opened from. */
+function EntryDialogs(props: { s: EntriesState }): JSX.Element {
+    const s = props.s;
+    return (
+        <>
+            <Show when={s.form()}>{(target) => <VaultEntryForm target={target()} onClose={() => s.setForm(null)} />}</Show>
+            <Show when={s.revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => s.setRevealing(null)} />}</Show>
+            <Show when={s.moving()}>{(entry) => <VaultMoveDialog entry={entry()} onClose={() => s.setMoving(null)} />}</Show>
+            <Show when={s.versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => s.setVersionsOf(null)} />}</Show>
+            <Show when={s.historyOf()}>{(e) => <VaultHistoryDialog entryId={e().id} label={e().label} onClose={() => s.setHistoryOf(null)} />}</Show>
+            <Show when={s.deleting()}>{(e) => <DeleteEntryConfirm entry={e()} onConfirm={s.confirmDelete} onCancel={() => s.setDeleting(null)} />}</Show>
+        </>
+    );
+}
+
+/** One section of the Vault's list: the entries of one type. With nothing in it, it is its head alone; in a
+ *  narrowed list a section with no match is not shown. */
+export function VaultEntries(props: VaultEntriesProps): JSX.Element {
+    const s = createEntriesState(props);
+    const label = () => SECTION_LABELS[props.section];
+    return (
+        <>
+            <Show when={!s.narrowing() || s.rows().length > 0}>
+                <VaultSectionBox
+                    id={props.section}
+                    count={s.count()}
+                    open={s.narrowing() || (props.open ?? true)}
+                    onToggle={() => props.onToggle?.()}
+                    empty={s.rows().length === 0}
+                    actions={
+                        <Button density="compact" icon="plus" aria-label={t("vault.section.addTo", { section: label() })} onClick={s.add}>
+                            {t("vault.section.add")}
+                        </Button>
+                    }
+                >
+                    <Show when={s.error()}>
+                        <div class="warden-manager-error" role="alert">
+                            ⚠ {s.error()}
+                        </div>
+                    </Show>
+                    <EntryTable s={s} section={props.section} showVault={!props.vault} />
+                </VaultSectionBox>
             </Show>
-            <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
-            <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
-            <Show when={moving()}>{(entry) => <VaultMoveDialog entry={entry()} onClose={() => setMoving(null)} />}</Show>
-            <Show when={versionsOf()}>{(entry) => <VaultVersionsDialog entry={entry()} onClose={() => setVersionsOf(null)} />}</Show>
-            <Show when={historyOf()}>{(e) => <VaultHistoryDialog entryId={e().id} label={e().label} onClose={() => setHistoryOf(null)} />}</Show>
-            <Show when={deleting()}>{(e) => <DeleteEntryConfirm entry={e()} onConfirm={confirmDelete} onCancel={() => setDeleting(null)} />}</Show>
-        </div>
+            <EntryDialogs s={s} />
+        </>
     );
 }

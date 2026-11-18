@@ -71,6 +71,23 @@ fn show_gives_names_states_and_counts_and_no_value() {
 }
 
 #[test]
+fn show_gives_a_logins_user_name_masked_and_never_whole() {
+    let s = store();
+    let login = NewEntry {
+        kind: "login".into(),
+        label: "Intranet".into(),
+        fields: [("site", "https://intranet.example.com"), ("username", "alexander")].map(|(k, v)| (k.to_string(), v.to_string())).into(),
+        tags: vec![],
+        parts: seal::Parts([("password".to_string(), VALUE.to_string())].into()),
+    };
+    let id = create(&s, login).unwrap();
+    let shown = show(&s, &id, Some("builder"), &key(), today()).unwrap();
+    assert_eq!(shown.fields.get("username").map(String::as_str), Some("al***"));
+    assert_eq!(shown.fields.get("site").map(String::as_str), Some("https://intranet.example.com"), "the rest of the fields are as they were");
+    assert!(!serde_json::to_string(&shown).unwrap().contains("alexander"));
+}
+
+#[test]
 fn show_says_so_when_the_key_cant_open_the_entry_and_hides_vaults_the_agent_may_not_use() {
     let s = store();
     let id = create(&s, entry("Stripe", &[])).unwrap();
@@ -182,7 +199,7 @@ fn verify_passes_a_sound_entry_and_names_what_is_wrong_with_the_rest_without_a_v
     let k = seal::test_key();
     let row = s.vault_get(&bare).unwrap().unwrap();
     let empty = VaultRow { sealed: seal::seal(&k, &bare, &seal::Parts::default()).unwrap(), ..row.clone() };
-    assert!(s.vault_update_kept(&empty, &row.sealed, None).unwrap());
+    assert!(s.vault_update_kept(&empty, &row.sealed, &row.fields, None).unwrap());
     let old = create(&s, entry("Old", &[("expires", "2026-11-01")])).unwrap();
     let odd = create(&s, entry("Odd", &[])).unwrap();
     s.vault_run_sql_for_tests(&format!("UPDATE db_vault_entries SET fields = '{{\"nope\":\"{NOTE}\",\"expires\":\"{NOTE}\"}}' WHERE id = '{odd}'"));

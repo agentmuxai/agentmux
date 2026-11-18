@@ -20,10 +20,10 @@
 2217 crates/srv-core/src/backend/history/index.rs
 1903 crates/srv-core/src/backend/history/mod.rs
 3205 crates/srv-core/src/backend/lan/discovery.rs
-2913 crates/srv-core/src/identity/resolver/inject.rs
+2909 crates/srv-core/src/identity/resolver/inject.rs
 2150 crates/srv-core/src/muxbus/cloud_subscriber.rs
 2120 crates/srv-core/src/persist_subscriber.rs
 1509 crates/srv-core/src/registry/migrate.rs
 2107 crates/srv/src/server/muxspect_handlers.rs
-1790 crates/srv/src/server/reactive.rs
+1787 crates/srv/src/server/reactive.rs
 1849 frontend/app/view/swarm/swarm-model.ts

@@ -325,6 +325,8 @@ import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
 import type { EnsureProviderAuthDirReq } from "@/types/rpc/EnsureProviderAuthDirReq";
 import type { EnsureProviderAuthDirResult } from "@/types/rpc/EnsureProviderAuthDirResult";
 import type { ExportAgentDefinitionsResult } from "@/types/rpc/ExportAgentDefinitionsResult";
+import type { FileIndexLinesReq } from "@/types/rpc/FileIndexLinesReq";
+import type { FileIndexLinesResult } from "@/types/rpc/FileIndexLinesResult";
 import type { FileProbeReq } from "@/types/rpc/FileProbeReq";
 import type { FileProbeResult } from "@/types/rpc/FileProbeResult";
 import type { FileSearchBytesReq } from "@/types/rpc/FileSearchBytesReq";
@@ -515,6 +517,7 @@ import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
 import type { ReactiveRegistrationFlagsResult } from "@/types/rpc/ReactiveRegistrationFlagsResult";
 import type { ReactiveRegistrationsParams } from "@/types/rpc/ReactiveRegistrationsParams";
 import type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
+import type { RecordPageReq } from "@/types/rpc/RecordPageReq";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
@@ -1611,6 +1614,10 @@ export const GeneratedApi = {
   ): Promise<ReactiveRegistrationsResult> {
     return client.rpcCall("reactive.registrations", data, opts);
   },
+  // command "record.page"
+  RecordPageCommand(client: RpcClient, data: RecordPageReq, opts?: RpcOpts): Promise<void> {
+    return client.rpcCall("record.page", data, opts);
+  },
   // command "gettoolstatus"
   GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
     return client.rpcCall("gettoolstatus", {}, opts);
@@ -2392,6 +2399,10 @@ export const GeneratedApi = {
   // command "fileprobe"
   FileProbeCommand(client: RpcClient, data: FileProbeReq, opts?: RpcOpts): Promise<FileProbeResult> {
     return client.rpcCall("fileprobe", data, opts);
+  },
+  // command "fileindexlines"
+  FileIndexLinesCommand(client: RpcClient, data: FileIndexLinesReq, opts?: RpcOpts): Promise<FileIndexLinesResult> {
+    return client.rpcCall("fileindexlines", data, opts);
   },
   // command "filesearchbytes"
   FileSearchBytesCommand(client: RpcClient, data: FileSearchBytesReq, opts?: RpcOpts): Promise<FileSearchBytesResult> {

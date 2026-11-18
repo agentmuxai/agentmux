@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { PANE_COLOR_TOKENS, contrastRatio, paneRoleColor, type PaneColorRole } from "../block/pane-color-scheme";
+import { contrastRatio, paneRoleColor, slotRoleColor, type PaneColorRole } from "../block/pane-color-scheme";
 import { hexToRgb, oklchHueOfHex, oklchToHex, srgbToLinear } from "./oklch";
-import { farthestFreeSlot, hueDistance, PALETTE, pickSlot, slotById, slotOf } from "./palette";
+import { farthestFreeSlot, HUE_SLOTS, hueDistance, PALETTE, pickSlot, slotById, slotOf, type PaletteSlot } from "./palette";
 
 // CIEDE2000 between two `#rrggbb`, the metric the palette's spacing is judged by
 // (spec §3: it predicts observers better than plain Oklab distance).
@@ -53,40 +53,78 @@ function deltaE2000(hexA: string, hexB: string): number {
 }
 
 const THEMES = ["dark", "light"] as const;
-const tone = (hue: number, role: PaneColorRole, theme: (typeof THEMES)[number]) => {
-    const t = PANE_COLOR_TOKENS[theme][role];
-    return oklchToHex(t.l, t.c, hue);
-};
+const tone = (slot: PaletteSlot, role: PaneColorRole, theme: (typeof THEMES)[number]) => slotRoleColor(slot, theme === "light", role);
+
+// The 16 slots before version 2, as [id, stored hex, the id of the slot it became] (spec §5.1).
+const THE_16: ReadonlyArray<readonly [string, string, string]> = [
+    ["crimson", "#e8777f", "red"],
+    ["red", "#e87b64", "red"],
+    ["orange", "#e28247", "orange"],
+    ["amber", "#d48d24", "amber"],
+    ["yellow", "#bb9c12", "yellow"],
+    ["lime", "#9aa932", "yellow"],
+    ["green", "#75b255", "green"],
+    ["jade", "#47b777", "jade"],
+    ["teal", "#00b89e", "teal"],
+    ["cyan", "#00b4be", "teal"],
+    ["sky", "#00aedd", "sky"],
+    ["azure", "#53a3f2", "blue"],
+    ["indigo", "#8297f5", "violet"],
+    ["violet", "#ae88e7", "violet"],
+    ["magenta", "#ce7cc8", "magenta"],
+    ["pink", "#e276a0", "rose"],
+];
 
 describe("the palette", () => {
-    it("has 16 slots with unique ids, in hue order, each a valid hex at its own hue", () => {
-        expect(PALETTE).toHaveLength(16);
-        expect(new Set(PALETTE.map((s) => s.id)).size).toBe(16);
-        for (const [i, s] of PALETTE.entries()) {
+    it("has 14 slots with unique ids: 12 hues in hue order, each a valid hex at its own hue, then Black and White", () => {
+        expect(PALETTE).toHaveLength(14);
+        expect(new Set(PALETTE.map((s) => s.id)).size).toBe(14);
+        expect(HUE_SLOTS).toHaveLength(12);
+        expect(PALETTE.slice(0, 12)).toEqual(HUE_SLOTS);
+        for (const [i, s] of HUE_SLOTS.entries()) {
             expect(s.id).toBe(s.name.toLowerCase());
-            if (i > 0) expect(s.hue).toBeGreaterThan(PALETTE[i - 1].hue);
+            expect(s.neutral).toBeUndefined();
+            if (i > 0) expect(s.hue).toBeGreaterThan(HUE_SLOTS[i - 1].hue);
             expect(s.hex).toMatch(/^#[0-9a-f]{6}$/);
             expect(hueDistance(oklchHueOfHex(s.hex)!, s.hue), s.id).toBeLessThan(0.5);
         }
+        expect(PALETTE.slice(12)).toEqual([
+            { id: "black", name: "Black", neutral: "black", hex: "#000000" },
+            { id: "white", name: "White", neutral: "white", hex: "#ffffff" },
+        ]);
     });
 
-    it("stores each hex at the swatch lightness and chroma its file declares", () => {
-        for (const s of PALETTE) expect(oklchToHex(0.7, 0.14, s.hue), s.id).toBe(s.hex);
+    it("stores each hue's hex at the swatch lightness and chroma its file declares", () => {
+        for (const s of HUE_SLOTS) expect(oklchToHex(0.7, 0.14, s.hue), s.id).toBe(s.hex);
     });
 
     for (const theme of THEMES) {
-        it(`${theme}: neighbouring slots are at least 9 apart (CIEDE2000) at the identity tone, and none is an outlier`, () => {
-            const gaps = PALETTE.map((s, i) => deltaE2000(tone(s.hue, "identity", theme), tone(PALETTE[(i + 1) % 16].hue, "identity", theme)));
-            expect(Math.min(...gaps)).toBeGreaterThanOrEqual(9);
+        const neighbourGaps = () =>
+            HUE_SLOTS.map((s, i) => deltaE2000(tone(s, "identity", theme), tone(HUE_SLOTS[(i + 1) % HUE_SLOTS.length], "identity", theme)));
+
+        it(`${theme}: neighbouring hues are at least 12.5 apart (CIEDE2000) at the identity tone, and none is an outlier`, () => {
+            const gaps = neighbourGaps();
+            expect(Math.min(...gaps)).toBeGreaterThanOrEqual(12.5);
             // "Equidistant": the widest gap is within 1.5x of the narrowest.
             expect(Math.max(...gaps) / Math.min(...gaps)).toBeLessThan(1.5);
         });
 
+        it(`${theme}: the lines of Black and White are further from each other, and from every hue's, than any two neighbouring hues`, () => {
+            const [black, white] = [slotById("black")!, slotById("white")!];
+            const widest = Math.max(...neighbourGaps());
+            expect(deltaE2000(tone(black, "identity", theme), tone(white, "identity", theme))).toBeGreaterThan(widest);
+            for (const neutral of [black, white]) {
+                for (const s of HUE_SLOTS) {
+                    expect(deltaE2000(tone(neutral, "identity", theme), tone(s, "identity", theme)), `${neutral.id} and ${s.id}`).toBeGreaterThan(widest);
+                }
+            }
+        });
+
         it(`${theme}: every slot's identity tone clears 3:1 against its pill, active pill and header tint`, () => {
             for (const s of PALETTE) {
-                const id = tone(s.hue, "identity", theme);
+                const id = tone(s, "identity", theme);
                 for (const bg of ["pill", "pillActive", "headerTint"] as const) {
-                    expect(contrastRatio(id, tone(s.hue, bg, theme)), `${s.id} on ${bg}`).toBeGreaterThanOrEqual(3);
+                    expect(contrastRatio(id, tone(s, bg, theme)), `${s.id} on ${bg}`).toBeGreaterThanOrEqual(3);
                 }
             }
         });
@@ -95,80 +133,118 @@ describe("the palette", () => {
 
 describe("slotOf", () => {
     it("takes a slot id, in any case", () => {
-        expect(slotOf("azure")?.id).toBe("azure");
-        expect(slotOf(" Azure ")?.id).toBe("azure");
+        expect(slotOf("blue")?.id).toBe("blue");
+        expect(slotOf(" Blue ")?.id).toBe("blue");
+        expect(slotOf("BLACK")?.id).toBe("black");
     });
 
     it("takes a slot's own hex back to its slot", () => {
         for (const s of PALETTE) expect(slotOf(s.hex)?.id).toBe(s.id);
     });
 
-    it("snaps any hex to the nearest hue", () => {
-        expect(slotOf("#3b82f6")?.id).toBe("azure");
+    it("sends each of the 16 slots before, by its id and by its stored hex, to the slot it became", () => {
+        for (const [id, hex, now] of THE_16) {
+            expect(slotById(id)?.id, id).toBe(now);
+            expect(slotOf(id)?.id, id).toBe(now);
+            expect(slotOf(` ${id.toUpperCase()} `)?.id, id).toBe(now);
+            expect(slotOf(hex)?.id, hex).toBe(now);
+            expect(slotOf(hex.toUpperCase())?.id, hex).toBe(now);
+            expect(slotOf(hex.slice(1))?.id, `${hex} without its #`).toBe(now);
+        }
+        // Indigo is the one the table decides: by hue alone it is as near Blue as Violet.
+        expect(slotOf("indigo")?.id).toBe("violet");
+    });
+
+    it("snaps any other hex with a hue to the nearest hue", () => {
+        expect(slotOf("#3b82f6")?.id).toBe("blue");
         expect(slotOf("#14b8a6")?.id).toBe("teal");
-        expect(slotOf("#ec4899")?.id).toBe("pink");
+        expect(slotOf("#ec4899")?.id).toBe("rose");
         expect(slotOf("#a855f7")?.id).toBe("violet");
         expect(slotOf("#f59e0b")?.id).toBe("amber");
         expect(slotOf("#F59E0B")?.id).toBe("amber");
     });
 
-    it("keeps today's 14 agent colours on 14 different slots", () => {
-        const old = ["#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e"];
-        expect(new Set(old.map((h) => slotOf(h)!.id)).size).toBe(14);
+    it("reads a grey as Black or White, and a faint colour still as a hue", () => {
+        expect(slotOf("#000000")?.id).toBe("black");
+        expect(slotOf("#ffffff")?.id).toBe("white");
+        expect(slotOf("#FFFFFF")?.id).toBe("white");
+        expect(slotOf("#1a1a1a")?.id).toBe("black");
+        expect(slotOf("#5b5b5b")?.id).toBe("black");
+        // A mid grey is the nearer of the two in lightness.
+        expect(slotOf("#808080")?.id).toBe("white");
+        // The slate of the old profile list has a chroma of 0.04: still a hue.
+        expect(slotOf("#64748b")?.id).toBe("blue");
     });
 
-    it("reads a legacy HSL hue (the old Pane Color menu) as the slot nearest the colour it drew", () => {
+    it("never reads one of the older Tailwind agent colours as a neutral", () => {
+        const old = ["#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e"];
+        for (const hex of old) expect(slotOf(hex)?.hue, hex).toBeTypeOf("number");
+    });
+
+    it("reads a legacy HSL hue (the old Pane Color menu) as the hue nearest the colour it drew, never a neutral", () => {
         // hsl(h, 65%, 52%) at the twelve 30° steps.
-        const want = ["red", "amber", "lime", "green", "green", "jade", "cyan", "azure", "indigo", "violet", "magenta", "pink"];
+        const want = ["red", "orange", "yellow", "green", "green", "jade", "teal", "blue", "blue", "violet", "magenta", "rose"];
         expect(Array.from({ length: 12 }, (_, i) => slotOf(i * 30)!.id)).toEqual(want);
         expect(slotOf(360)?.id).toBe(slotOf(0)?.id);
         expect(slotOf(-30)?.id).toBe(slotOf(330)?.id);
     });
 
     it("is no colour for anything else", () => {
-        for (const bad of [undefined, null, "", "chartreuse", "#fff", "#gggggg", "#3b82f6; }", NaN, Infinity]) {
+        for (const bad of [undefined, null, "", "chartreuse", "#fff", "#gggggg", "#3b82f6; }", "toString", "constructor", NaN, Infinity]) {
             expect(slotOf(bad as never), String(bad)).toBeUndefined();
         }
         expect(slotById("nope")).toBeUndefined();
+        expect(slotById("hasOwnProperty")).toBeUndefined();
     });
 
     it("lets a pane draw an old hex in the palette: the same tones as its slot", () => {
         for (const theme of [false, true]) {
-            expect(paneRoleColor(undefined, "#3b82f6", theme, "identity")).toBe(paneRoleColor(undefined, "azure", theme, "identity"));
+            expect(paneRoleColor(undefined, "#3b82f6", theme, "identity")).toBe(paneRoleColor(undefined, "blue", theme, "identity"));
+            expect(paneRoleColor(undefined, "azure", theme, "identity")).toBe(paneRoleColor(undefined, "blue", theme, "identity"));
         }
     });
 });
 
 describe("pickSlot", () => {
-    it("is deterministic and a member", () => {
+    it("is deterministic and a hue, never Black or White", () => {
         for (const id of ["a", "abc-123", ""]) expect(pickSlot(id)).toBe(pickSlot(id));
+        for (let i = 0; i < 200; i++) expect(pickSlot(`agent-${i}`).neutral).toBeUndefined();
     });
 
-    it("takes the least-used slot, so 25 agents use no colour more than twice", () => {
+    it("takes the least-used hue, so 25 agents use no colour more than three times and the first 12 differ", () => {
         const taken: string[] = [];
         for (let i = 0; i < 25; i++) taken.push(pickSlot(`agent-${i}`, taken).hex);
         const counts = new Map<string, number>();
         for (const h of taken) counts.set(h, (counts.get(h) ?? 0) + 1);
-        expect(Math.max(...counts.values())).toBeLessThanOrEqual(2);
-        expect(new Set(taken.slice(0, 16)).size).toBe(16);
+        expect(Math.max(...counts.values())).toBeLessThanOrEqual(3);
+        expect(new Set(taken.slice(0, 12)).size).toBe(12);
     });
 
     it("counts an old hex toward the slot it snaps to", () => {
-        const others = PALETTE.filter((s) => s.id !== "teal").map((s) => s.hex);
+        const others = HUE_SLOTS.filter((s) => s.id !== "teal").map((s) => s.hex);
         expect(pickSlot("x", [...others, "#14b8a6"]).id).not.toBe("teal");
         expect(pickSlot("x", others).id).toBe("teal");
+    });
+
+    it("does not count a Black or White agent against any hue", () => {
+        for (const id of ["a", "abc-123", "x"]) expect(pickSlot(id, ["#000000", "#ffffff", "black", "#808080"])).toBe(pickSlot(id));
     });
 });
 
 describe("farthestFreeSlot", () => {
     it("starts at the first slot, then takes the farthest unused one", () => {
         const first = farthestFreeSlot();
-        expect(first.id).toBe("crimson");
-        expect(hueDistance(first.hue, farthestFreeSlot([first.hex]).hue)).toBeGreaterThan(150);
+        expect(first.id).toBe("rose");
+        expect(hueDistance(first.hue!, farthestFreeSlot([first.hex]).hue!)).toBeGreaterThan(150);
     });
 
     it("fills a gap left by a deleted profile, never a repeat", () => {
         const used = PALETTE.filter((s) => s.id !== "jade").map((s) => s.hex);
         expect(farthestFreeSlot(used).id).toBe("jade");
+    });
+
+    it("never gives Black or White, even when every hue is in use and neither neutral is", () => {
+        expect(farthestFreeSlot(HUE_SLOTS.map((s) => s.hex)).neutral).toBeUndefined();
+        expect(farthestFreeSlot(["#000000"]).neutral).toBeUndefined();
     });
 });

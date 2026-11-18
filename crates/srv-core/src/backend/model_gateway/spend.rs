@@ -161,7 +161,7 @@ fn day(now_ms: i64) -> i64 {
 pub fn cost(model: &Model, tokens: &TokenCounts) -> f64 {
     let per_m = |n: u64, price: f64| n as f64 * price / 1_000_000.0;
     per_m(tokens.input, model.price_in)
-        + per_m(tokens.cache_creation, model.price_in)
+        + per_m(tokens.cache_creation, super::catalog::cache_write_price(model))
         + per_m(tokens.cache_read, model.price_cache_read)
         + per_m(tokens.output, model.price_out)
 }
@@ -308,6 +308,20 @@ pub fn reset_today(agent: &str, now_ms: i64) -> f64 {
 mod tests {
     use super::*;
     use crate::backend::model_gateway::catalog;
+
+    #[test]
+    fn a_cache_write_on_the_key_route_counts_at_its_real_rate_or_the_dearest_and_on_a_model_route_at_the_input_price() {
+        let written = TokenCounts { cache_creation: 2_000_000, ..Default::default() };
+        let sonnet = catalog::key_route_price("claude-sonnet-5-5");
+        assert!((catalog::key_route_cost(sonnet, &written, Some((1_000_000, 1_000_000))) - 9.75).abs() < 1e-9, "3.75 for the five-minute write and 6.00 for the one-hour write");
+        assert!((catalog::key_route_cost(sonnet, &written, None) - 12.0).abs() < 1e-9, "not told which kind: all at 2 times the 3.00 input price");
+        assert!((cost(sonnet, &written) - 12.0).abs() < 1e-9, "the estimate never counts a key's cache write under");
+        let cache_heavy = TokenCounts { input: 100, output: 1_000, cache_creation: 50_000, cache_read: 400_000 };
+        let expected = 100.0 * 3.0 / 1e6 + 50_000.0 * 6.0 / 1e6 + 400_000.0 * 0.3 / 1e6 + 1_000.0 * 15.0 / 1e6;
+        assert!((catalog::key_route_cost(sonnet, &cache_heavy, Some((0, 50_000))) - expected).abs() < 1e-9, "a cache-heavy turn counts its one-hour writes at 2 times input");
+        let route = catalog::route("openrouter").unwrap().model("deepseek/deepseek-v4.1-flash-1017").unwrap();
+        assert!((cost(route, &written) - 2.0 * route.price_in).abs() < 1e-9, "a model route counts a cache write at the input price");
+    }
 
     #[test]
     fn a_response_is_priced_by_the_models_table_and_summed_per_agent_and_day() {

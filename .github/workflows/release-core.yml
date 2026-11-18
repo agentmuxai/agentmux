@@ -423,24 +423,25 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
-  # The server package (no desktop app): one tarball per platform. It is built from the release commit like the desktop
+  # The Headless package (no desktop app): one tarball per Linux and macOS platform, a .zip for Windows x64. It is built from the release commit like the desktop
   # builds and reaches the release through the same two file selections below, so the signed manifest lists it and
-  # `install.sh --server` can check it
+  # `install.sh --headless` can check it
   # (docs/specs/SPEC_HEADLESS_SERVER_PACKAGE_AND_LOCAL_WEB_UI_2026_11_12.md section 4).
   #
-  # `legs: release`: Linux x64, Linux arm64 and macOS arm64, on kinds of runner a release already waits for (the desktop
-  # builds use ubuntu-22.04 and macos-latest; container-image, which `sign-release` needs, uses the hosted arm64 Linux
+  # `legs: release`: Linux x64, Linux arm64, macOS arm64 and Windows x64, on kinds of runner a release already waits for (the desktop
+  # builds use ubuntu-22.04, macos-latest and windows-latest; container-image, which `sign-release` needs, uses the hosted arm64 Linux
   # kind). `sign-release` and `publish` wait for this job, so it never asks for a kind they do not already wait for: a leg
   # queued for a scarce runner (macOS x64) would hold the whole release for as long as GitHub keeps it queued, and one leg
   # of a run cannot be cancelled. That platform is not in a release's package set: the manifest is signed once, from the
-  # files the release has when `sign-release` runs, and `install.sh --server` installs nothing the manifest does not
+  # files the release has when `sign-release` runs, and `install.sh --headless` installs nothing the manifest does not
   # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
   # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
   #
-  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on three legs
-  # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
-  # signed; a platform that did not is absent from the manifest, and `install.sh --server` says that version has no server
-  # package for it. It becomes required after the first release in which all three legs are green.
+  # Required: `sign-release` and `publish` run only when every leg of it succeeded, so a release never goes out missing a
+  # Headless package. A failed leg holds the release (nothing is signed or published); "Re-run failed jobs" on the run
+  # builds the leg again and the release goes on. (A release was once published without one package, and a published
+  # release can't take a file afterwards, which is why this is a requirement and not a warning.) The check is kept by
+  # scripts/release-publish-needs.test.mjs.
   build-server-package:
     name: Build — server package
     needs: gate
@@ -495,6 +496,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && needs.build-server-package.result == 'success'
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
@@ -554,7 +556,7 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
@@ -633,6 +635,16 @@ jobs:
   # only covers the whole run. v0.59.37 shipped without macOS that way. So
   # publish needs build-macos to have succeeded, or to have been skipped
   # because macOS signing isn't set up (check-macos), never anything else.
+  #
+  # Everything a release ships is attached before it publishes: every package job below must have succeeded (the Headless
+  # server package too, as a whole: its four legs), or been skipped only where the line says why. The jobs this one does
+  # not require, and why a release may go out without each:
+  #   - container-image: the agent image is pushed to a registry, not attached to the release; the signed manifest names
+  #     it by digest when there is one, and without one the app pulls the image's version tag (see sign-release).
+  #   - linux-upgrade-check, publish-linux-repo, winget, ms-store: they run after publish and need it, so they can't hold it.
+  # Skipped is accepted only where a switch turns the job off on purpose: gate (a run that is not a release), check-macos,
+  # cef-runtime-pins, build-macos (no Apple identity set up) and sign-release (RELEASE_SIGNING_ENABLED is not 'true').
+  # scripts/release-publish-needs.test.mjs fails when a package job stops being required here.
   publish:
     name: Publish release
     needs: [gate, suite, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
@@ -644,6 +656,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && needs.build-server-package.result == 'success'
       && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
@@ -662,16 +675,10 @@ jobs:
           node-version: '24'
 
       - name: Say which Headless packages this release has
-        env:
-          PACKAGE_RESULT: ${{ needs.build-server-package.result }}
         run: |
-          line="Release v${VERSION}: AgentMux Headless is built for Linux x64, Linux arm64 and macOS arm64; for macOS x64 the release has none, and install.sh --headless says so."
+          # This job runs only when every Headless leg succeeded (its condition above), so the line is always true.
+          line="Release v${VERSION}: AgentMux Headless is built for Linux x64, Linux arm64, macOS arm64 and Windows x64; for macOS x64 the release has none, and install.sh --headless says so."
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PACKAGE_RESULT" != success ]; then
-            line="Release v${VERSION}: the AgentMux Headless package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no Headless package."
-            echo "::warning::$line"
-            echo "$line" >> "$GITHUB_STEP_SUMMARY"
-          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -691,7 +698,7 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done

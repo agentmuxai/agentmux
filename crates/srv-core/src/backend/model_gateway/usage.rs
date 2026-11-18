@@ -22,12 +22,14 @@ pub struct UsageTap {
     /// (OpenRouter's `usage.cost`): the real figure, not a price-table
     /// estimate (#30143).
     cost_usd: Option<f64>,
+    /// The five-minute and one-hour cache writes, when the usage block separates them.
+    cache_split: Option<(u64, u64)>,
 }
 
 impl UsageTap {
     /// `stream`: the response is `text/event-stream`.
     pub fn new(stream: bool) -> Self {
-        Self { stream, pending: Vec::new(), body: Vec::new(), counts: TokenCounts::default(), model: None, cost_usd: None }
+        Self { stream, pending: Vec::new(), body: Vec::new(), counts: TokenCounts::default(), model: None, cost_usd: None, cache_split: None }
     }
 
     pub fn push(&mut self, chunk: &[u8]) {
@@ -83,6 +85,10 @@ impl UsageTap {
         if let Some(n) = read("cache_read_input_tokens") {
             self.counts.cache_read = n;
         }
+        if let Some(split) = usage.get("cache_creation").filter(|v| v.is_object()) {
+            let part = |key: &str| split.get(key).and_then(Value::as_u64).unwrap_or(0);
+            self.cache_split = Some((part("ephemeral_5m_input_tokens"), part("ephemeral_1h_input_tokens")));
+        }
         if let Some(cost) = usage.get("cost").and_then(Value::as_f64).filter(|c| c.is_finite() && *c >= 0.0) {
             self.cost_usd = Some(cost);
         }
@@ -90,14 +96,20 @@ impl UsageTap {
 
     /// The counts, the model the upstream says answered, and its own charge
     /// for the response when it reported one.
-    pub fn finish(mut self) -> (TokenCounts, Option<String>, Option<f64>) {
+    pub fn finish(self) -> (TokenCounts, Option<String>, Option<f64>) {
+        let (counts, model, cost, _) = self.finish_with_split();
+        (counts, model, cost)
+    }
+
+    /// [`finish`](Self::finish), and the five-minute and one-hour cache writes when the response separated them.
+    pub fn finish_with_split(mut self) -> (TokenCounts, Option<String>, Option<f64>, Option<(u64, u64)>) {
         if !self.stream {
             if let Ok(body) = serde_json::from_slice::<Value>(&self.body) {
                 self.model = body.get("model").and_then(Value::as_str).map(str::to_string);
                 self.usage(body.get("usage"));
             }
         }
-        (self.counts, self.model, self.cost_usd)
+        (self.counts, self.model, self.cost_usd, self.cache_split)
     }
 }
 
@@ -126,6 +138,17 @@ mod tests {
             assert_eq!(model.as_deref(), Some("deepseek/deepseek-v4.1-flash-1017"));
             assert_eq!(cost, Some(0.00123), "the provider's own charge rides the stream");
         }
+    }
+
+    #[test]
+    fn the_five_minute_and_one_hour_cache_writes_are_read_when_the_usage_separates_them() {
+        let mut tap = UsageTap::new(false);
+        tap.push(br#"{"model":"m","usage":{"input_tokens":9,"output_tokens":3,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":200}}}"#);
+        let (counts, _, _, split) = tap.finish_with_split();
+        assert_eq!((counts.cache_creation, split), (300, Some((100, 200))));
+        let mut plain = UsageTap::new(false);
+        plain.push(br#"{"usage":{"cache_creation_input_tokens":300}}"#);
+        assert_eq!(plain.finish_with_split().3, None, "not separated: the dearest rate counts");
     }
 
     #[test]

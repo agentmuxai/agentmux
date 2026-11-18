@@ -21,9 +21,17 @@ describe("picker-model", () => {
         for (const bad of ["", "#", "#12", "#1234", "#12345", "#1234567", "teal", "#ggg", "rgb(1,2,3)"]) expect(parseHexInput(bad), bad).toBeUndefined();
     });
 
-    it("makes the 16 swatches in the palette's order, from the same derivation a pane uses", () => {
+    it("makes the 14 swatches in the palette's order, from the same derivation a pane uses", () => {
         const options = builtinOptions("dark");
+        expect(options).toHaveLength(14);
         expect(options.map((o) => o.value)).toEqual(BUILTINS.map((b) => b.id));
+        // Black and White are the same swatch under either side.
+        for (const scheme of ["dark", "light"] as const) {
+            expect(builtinOptions(scheme).slice(12).map((o) => [o.label, o.color])).toEqual([
+                ["Black", "#000000"],
+                ["White", "#ffffff"],
+            ]);
+        }
         const d = deriveBuiltin(BUILTINS[3].id, "dark")!;
         expect(options[3]).toMatchObject({ label: BUILTINS[3].name, color: d.surfaces.surface, ink: d.ink.text, detail: contrastReadout(d) });
         expect(builtinOptions("light")[3].color).toBe(deriveBuiltin(BUILTINS[3].id, "light")!.surfaces.surface);

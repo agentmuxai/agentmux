@@ -11,6 +11,7 @@ import { chromeZoomAtom } from "@/app/store/chrome-zoom";
 import { setZoomStepRatio } from "@/app/store/zoom";
 import { setZoomMax } from "@/app/store/zoom-factor";
 import { createEffect, on, onCleanup, onMount } from "solid-js";
+import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import { registerContentZoom } from "../content-zoom";
 import { onLinkClick } from "./pdf-viewer-actions";
 import { open, teardown } from "./pdf-viewer-load";
@@ -28,6 +29,13 @@ export function usePdfLoading(s: PdfViewerState) {
     });
     // The file changed on disk, or the tab shows another one.
     createEffect(on(() => [s.props.path, s.props.revision, s.props.file] as const, () => void open(s), { defer: true }));
+    // A request to open at a page that arrives while this viewer already shows the file (the first one is taken at pagesinit).
+    createEffect(() => {
+        watchOpenPosition();
+        if (s.status() !== "ready" || !s.viewer || !s.viewer.pagesCount) return;
+        const page = takeOpenPosition(s.props.blockId, s.props.path, "page");
+        if (page !== undefined) s.viewer.currentPageNumber = Math.min(page, s.viewer.pagesCount);
+    });
     onCleanup(() => {
         s.generation++;
         teardown(s);

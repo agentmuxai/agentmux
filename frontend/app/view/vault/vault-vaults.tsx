@@ -1,14 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The person's Vaults in the pane: the picker that narrows the lists to one, which agents each is
-// for, and Move to (docs/specs/SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md §5).
+// The person's Vaults in the pane: their names and choices, which agents each is for, and Move to. The Vaults
+// row is vault-picker.tsx
+// (docs/specs/SPEC_VAULT_SHARED_ACROSS_MACHINES_LAN_AND_CLOUD_2026_11_01.md §5).
 
-import { createMemo, createSignal, Show, type JSX } from "solid-js";
+import { createSignal, Show, type JSX } from "solid-js";
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button, Field, SegmentedControl, Select, type SegmentedOption, type SelectOption } from "@/app/element/ui";
+import { Button, Field, Select, type SelectOption } from "@/app/element/ui";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import { moveEntry, vaultList } from "./vault-store";
@@ -43,25 +44,6 @@ export function VaultField(props: { value: string; onChange: (id: string) => voi
                 <Select value={props.value} onChange={props.onChange} options={vaultChoices()} ariaLabel={props.label ?? "Vault"} />
             </Field>
         </Show>
-    );
-}
-
-/** Narrows the lists to one Vault, or all of them. Shown once there is more than one. */
-export function VaultPicker(props: { value: string; onChange: (id: string) => void; onManage: () => void; extra?: JSX.Element }): JSX.Element {
-    const options = createMemo<SegmentedOption<string>[]>(() => [
-        { value: ALL_VAULTS, label: "All Vaults" },
-        ...vaultList().map((v) => ({ value: v.id, label: `${v.name} (${v.entries})` })),
-    ]);
-    return (
-        <div class="vault-picker">
-            <Show when={vaultList().length > 1}>
-                <SegmentedControl class="vault-picker-choices" density="compact" ariaLabel="Vault" options={options()} value={props.value} onChange={props.onChange} />
-            </Show>
-            {props.extra}
-            <Button density="compact" icon="gear" onClick={props.onManage}>
-                Vaults
-            </Button>
-        </div>
     );
 }
 

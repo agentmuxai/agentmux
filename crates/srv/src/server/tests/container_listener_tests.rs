@@ -130,3 +130,54 @@ async fn path_tricks_do_not_reach_an_operator_route() {
     let got = raw_status(addr, "/agentmux/discovery", &token).await;
     assert!(got != "401" && got != "403" && got != "400", "discovery answered {got}");
 }
+
+/// A key account's gateway token shown from a container other than the one it was made for: refused, the token ended, and
+/// one Audit row names the agent and the account by its display name, never the token.
+#[tokio::test]
+async fn a_key_accounts_token_from_another_container_is_refused_audited_by_name_and_ended() {
+    use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
+    use crate::backend::storage::identities::{IdentityAccount, SecretRef};
+    let state = crate::server::tests::test_state();
+    state
+        .id_store
+        .identity_upsert(&IdentityAccount {
+            id: "kf-acct".to_string(),
+            name: "kf-acct-name".to_string(),
+            provider: "anthropic".to_string(),
+            kind: "api_key".to_string(),
+            display_name: "Work key".to_string(),
+            secret_ref: SecretRef::Env { env_var: "AMX_TEST_KEY_kf".to_string() },
+            context: serde_json::json!({}),
+            status: "valid".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        })
+        .unwrap();
+    let router = crate::server::build_routers(state.clone()).container;
+    let secret = token::renew_for_account("kf-agent", "kf-def", KEY_ROUTE_ID, "kf-acct", Some(ip(d("172_30_0_7"))));
+    let ask = |peer: String, bearer: String| {
+        let router = router.clone();
+        async move {
+            let mut req = Request::builder().uri("/api/v1/model/anthropic/v1/messages").header("authorization", format!("Bearer {bearer}")).body(Body::empty()).unwrap();
+            req.extensions_mut().insert(ConnectInfo(SocketAddr::new(ip(peer), 40000)));
+            router.oneshot(req).await.unwrap().status()
+        }
+    };
+
+    assert_eq!(ask(d("172_30_0_8"), secret.clone()).await, StatusCode::FORBIDDEN, "from another container");
+    assert_eq!(token::grant_for(&secret), None, "the token ended with that use");
+
+    let mut row = None;
+    for _ in 0..40 {
+        row = state.reactive_handler.get_audit_log(100).into_iter().find(|e| e.target_agent == "kf-agent");
+        if row.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let row = row.expect("the refused use is in the audit log");
+    let written = serde_json::to_string(&row).unwrap();
+    assert!(written.contains("Work key") && written.contains("gateway.key_use_refused"), "{written}");
+    assert!(!written.contains(&secret), "the token is never written: {written}");
+    assert!(!row.success);
+}

@@ -2,6 +2,7 @@
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
 **Amended 2026-10-07:** §8 decision 4 is reversed for jekt and context-delivery boxes. Every capped transcript preview box now skids when its content fits, through one helper, `previewBox()`, and one SCSS mixin, `transcript-preview-box`. Operator's request; see [`docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md`](../reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md) §2.2–2.3.
+**Amended 2026-11-16:** a box holds the wheel only at an edge the wheel scrolled it to (§9). The skid on arrival (§1, second case) and the skid of a box whose content fits (§8 decision 4 and the 2026-10-07 amendment) are withdrawn: together they left dead spots in the wheel wherever a preview slid under a resting pointer. `skidWhenFits` is gone.
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
 **Author:** Camper (agent), at operator request
 **Related:** `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (the hand-off this spec
@@ -258,3 +259,91 @@ The operator accepted the recommendations:
    preview whose content fits still holds the skid, with the edge line, before
    the pane moves (`skidWhenFits`). Jekt and context-delivery boxes that fit keep handing
    notches straight on.
+
+## 9. Amendment, 2026-11-16: only a box the wheel scrolled holds the wheel
+
+### 9.1 The problem
+
+Scrolling a conversation with the wheel and the pointer at rest, the wheel went dead again
+and again: a notch, or a whole trackpad swipe, moved nothing. Measured in a dev build of
+main, with a conversation of expanded messages and tool calls under a resting pointer: a
+short wheel gesture moved nothing in 59 of 62 tries over a preview box (a jekt body, whether
+its content fit or overflowed), in either direction, and in 0 of 118 tries over plain rows.
+
+The cause is the skid on arrival. §4.3 rule 1 arms the skid whenever the wheel comes over a
+box, and a box is nearly always at an edge in the wheel's direction when it does: a box
+whose content fits is at both edges at once (rule 2, since the 2026-10-07 amendment), a box
+nobody scrolled sits at its top, and a log that follows its output sits at its bottom. So
+every preview that slides under the pointer costs the skid's notches (`agent:previewskidnotches`,
+2 by default) before the pane moves again, and on a trackpad the rest of the swipe. In a
+conversation full of previews that is a dead spot every few notches.
+
+### 9.2 The rule now
+
+The skid keeps the first case of §1 (scrolling a preview to its edge) and gives up the
+second (a preview arriving under the cursor):
+
+1. **A box holds the wheel at its edge only if the wheel has scrolled that box since it
+   came over it.** The state gains `scrolled`.
+2. **Scrolled is observed, not assumed.** An event left to the box (rule 3 of §4.3) records
+   the box's `scrollTop` (`leftAt`). If the next event over the same box finds it 1 px or
+   more away from there, the wheel scrolled it. Two things make "the event was left to the
+   box" too weak a sign: the browser gives a wheel sequence to the scroller it started over
+   (§2), so an event left to a box that arrived mid-gesture may move the pane and not the
+   box; and a log that follows its output moves with no wheel at all, which is why a move
+   counts only after an event that was left to the box.
+3. **At an edge with `scrolled` false, the event is forwarded at once,** with no edge line:
+   the wheel is passing over. This covers a box whose content fits (it never scrolls), a
+   box found at its edge, and a log pinned to its bottom.
+4. **`scrolled` lasts while the wheel stays over that box.** A wheel event over another box,
+   or over the pane outside every box, clears it. Turning the wheel round inside the box
+   keeps it, and starts the skid over for the other edge.
+5. With `scrolled` true, rule 4 of §4.3 applies unchanged: notched input absorbs the
+   setting's notches, continuous input until the gesture pauses, then `spent`.
+
+`skidWhenFits` and `canSkid` are removed: a box that fits can never have been scrolled.
+`previewBox()` stays the one helper every preview box attaches. A box that shrinks to fit
+after the wheel scrolled it still cancels its absorbed notches itself (§4.3, "Absorb").
+
+### 9.3 What the user feels
+
+- Scrolling the pane with the pointer at rest: a preview that has nothing to scroll in the
+  wheel's direction lets the pane carry on, with no dead notch and no edge line.
+- Scrolling inside a preview to its end: the skid, as before. The end is felt, and the
+  notches meant for the preview do not run on into the pane.
+- A preview that has room in the wheel's direction when it arrives still takes the wheel,
+  as any nested scroller does. That is §1's second case as it was before the skid, and this
+  amendment does not change it.
+
+### 9.4 The setting
+
+`agent:previewskidnotches` keeps its meaning, default (2) and range; 0 still removes the
+hold. Its descriptions (schema, settings template, Settings > Advanced) say that only a
+preview the wheel scrolled holds it.
+
+### 9.5 Tests
+
+**Unit, `nextSkid`:** an edge the wheel scrolled the box to absorbs, then forwards; an edge
+the wheel found the box at forwards at once; an event left to the box counts only if the
+box moved, by a pixel or more; a move with no event left to the box does not count; another
+box starts with nothing scrolled, and so does the first on the way back; turning the wheel
+round skids again at the other edge; coalesced and continuous input and the limit as in §6.
+
+**DOM, `attachScrollHandoff`:** the §6 cases, each after a notch that scrolls the box to its
+edge; a box found at its edge and a box that fits forward every notch in both directions,
+with no edge line; a box that did not move under an event left to it; a log that grows
+while pinned; a box that grows from fitting to overflowing forwards until it is scrolled; a
+box that shrinks to fit after it was scrolled cancels the absorbed notches; leaving for the
+pane and returning, and a second box, forward at once. The hover panel: the same, for a
+tall panel that was scrolled and one that opens at its edge.
+
+**Live:** as §6. A real mouse still needs one pass, because wheels sent through the
+debugging connection skip the browser's own latching, which rule 2 exists for.
+
+### 9.6 Alternatives not taken
+
+- **Hold only in boxes the person opened** (a tool call or message they expanded
+  themselves). It needs every preview to know who opened it, and a box the person opened
+  but only scrolls past would still go dead.
+- **Default the setting to 0.** No dead spots, but the end of a preview is no longer felt
+  for anyone who has not found the setting.

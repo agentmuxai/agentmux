@@ -341,8 +341,9 @@ async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, S
 async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> Result<PathBuf, String> {
     let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
-    let channel = crate::backend::reactive::registry::local_channel_id();
-    let instance_dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
+    let paths = agentmux_common::DataPaths::from_env();
+    let channel = upgrade_channel(paths.as_ref().map(|p| p.channel.as_str()), std::env::var("AGENTMUX_CHANNEL").ok().as_deref());
+    let instance_dir = paths.map(|p| p.instance_dir);
     let fallback = fallback_parent(instance_dir.as_deref(), version, &updates.join(version));
     // A download cut short in the fallback leaves its `<pid>-` file there.
     if let Some(root) = fallback.parent().filter(|r| *r != updates) {
@@ -360,6 +361,21 @@ async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> R
         }
     }
     Err(last)
+}
+
+/// The data channel an in-app upgrade carries to the new AppImage: the one this instance resolved for its own
+/// data (`resolved`, from the paths the launcher gave it), else `AGENTMUX_CHANNEL`, and `stable` only when
+/// neither says. The upgrade keeps the channel of the build that downloaded it (#47873).
+fn upgrade_channel(resolved: Option<&str>, env: Option<&str>) -> String {
+    resolved.or(env).filter(|c| !c.is_empty()).unwrap_or("stable").to_string()
+}
+
+/// Keep the channel of the AppImage at `file` where a move can't lose it (`agentmux_common::appimage_record`),
+/// as well as beside it. Best effort: the record beside the file is what the next start reads first.
+fn keep_channel_with_account(file: &Path, channel: &str) {
+    if let Some(record) = agentmux_common::appimage_record::record_path() {
+        let _ = agentmux_common::appimage_record::remember(&record, file, channel);
+    }
 }
 
 /// The data channel recorded beside the AppImage at `file`, if any.
@@ -392,7 +408,10 @@ async fn fetch_file(asset: &ReleaseAsset, version: &str, dir: &Path, appimage_ch
         .find(|p| !p.exists() || ours(p))
         .unwrap_or_else(|| installer_path(dir, asset));
     let finish = |file: PathBuf| match appimage_channel_of {
-        Some(channel) => finish_appimage(&file, channel).map(|()| file),
+        Some(channel) => finish_appimage(&file, channel).map(|()| {
+            keep_channel_with_account(&file, channel);
+            file
+        }),
         None => Ok(file),
     };
     // Downloaded before, or by another AgentMux meanwhile.
@@ -904,6 +923,35 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o755);
         }
+    }
+
+    #[test]
+    fn an_in_app_upgrade_keeps_the_channel_of_the_build_that_downloaded_it() {
+        // The channel the instance resolved for its own data wins, whatever the environment says.
+        assert_eq!(upgrade_channel(Some("local-main-b28b7a-f62415cd"), None), "local-main-b28b7a-f62415cd");
+        assert_eq!(upgrade_channel(Some("local-main-b28b7a-f62415cd"), Some("stable")), "local-main-b28b7a-f62415cd");
+        assert_eq!(upgrade_channel(None, Some("local-main-b28b7a-f62415cd")), "local-main-b28b7a-f62415cd");
+        // `stable` only when nothing says otherwise (a stable instance, or no channel known at all).
+        assert_eq!(upgrade_channel(Some("stable"), None), "stable");
+        assert_eq!(upgrade_channel(None, None), "stable");
+        assert_eq!(upgrade_channel(Some(""), Some("")), "stable");
+    }
+
+    #[test]
+    fn an_upgraded_appimage_is_remembered_so_that_moving_it_does_not_lose_its_channel() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("shared").join(agentmux_common::appimage_record::RECORD_FILE);
+        let file = dir.path().join("AgentMux_0.60.30_amd64.AppImage");
+        std::fs::write(&file, b"x").unwrap();
+        finish_appimage(&file, "local-main-b28b7a-f62415cd").unwrap();
+        agentmux_common::appimage_record::remember(&record, &file, "local-main-b28b7a-f62415cd").unwrap();
+        // The file moves and is renamed; the record beside it stays behind.
+        let moved = dir.path().join("Applications").join("AgentMux_0.60.30_amd64_9f8e7d.AppImage");
+        std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+        std::fs::rename(&file, &moved).unwrap();
+        assert_eq!(appimage_channel(&moved), None);
+        let found = agentmux_common::appimage_record::lookup(&record, &moved).unwrap();
+        assert_eq!(found.channel, "local-main-b28b7a-f62415cd");
     }
 
     /// The system `tar` unpacks a release-shaped tarball (`AgentMux/` with

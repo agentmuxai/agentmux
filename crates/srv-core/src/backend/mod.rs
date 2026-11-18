@@ -45,6 +45,7 @@ pub mod vault;
 pub mod build_cache;
 pub mod build_cache_service;
 pub mod build_slot_idle;
+pub mod record;
 pub mod panic_watch;
 pub mod disk_notice;
 pub mod old_versions;
@@ -98,6 +99,7 @@ pub mod codex_models;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
 pub mod editor_probe;
+pub mod editor_lines;
 pub mod editor_search;
 pub mod file_icons;
 pub mod files_watcher;
@@ -263,6 +265,10 @@ pub mod cold_hold;
 pub mod google;
 /// A model route out of credits (HTTP 402): every agent on it is stopped, and each lead is told once.
 pub mod route_credits;
+/// Whoever sent a message is told if its turn then died of a retryable failure with nothing to redeliver it.
+pub mod sender_failure_note;
+/// What a leader is told about why a worker's turn failed, and what happens next.
+pub mod worker_failure_note;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

@@ -8,6 +8,8 @@
  * order they were there.
  */
 
+import { registerPaneStats, searchState } from "@/app/diag/pane-stats";
+import { historyRestoring } from "@/app/store/agent-document-store";
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { createMemo, onCleanup } from "solid-js";
@@ -52,7 +54,9 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     // In-session search over the loaded document slice: matches, navigation, highlight. A new query starts at the
     // first match from the row at the top of the screen; a query with no match closes what a jump opened.
     const search = useInSessionSearch({
+        blockId: model.blockId,
         document: paneModel.document,
+        restoring: () => historyRestoring(model.blockId),
         // A match inside a message only the Messages panel holds opens it there: the conversation has no row for it.
         jumpTo: (id) => void (showInPanelIfHeld(model.blockId, paneModel.document(), id) || reveal.jumpTo(id)),
         onClose: () => {
@@ -68,6 +72,14 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
             return rawIdAtOrAfter(p.shown.shownDocument(), top, new Set(paneModel.document().map((n) => n.id)));
         },
     });
+
+    // What this pane holds, for the renderer's five-minute state line (diag/renderer-state-diagnostic.ts).
+    onCleanup(
+        registerPaneStats(model.blockId, () => ({
+            rows: paneModel.document().length,
+            search: searchState(search.visible(), search.text()),
+        }))
+    );
 
     // One way in: Ctrl+F, the header magnifier and the palette open the bar; with it open, they put the caret in its
     // field with the text selected. Esc, the close button and the magnifier close it (search/search-bridge.ts).

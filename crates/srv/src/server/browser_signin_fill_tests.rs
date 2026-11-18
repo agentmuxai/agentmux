@@ -75,11 +75,11 @@ async fn a_fill_takes_only_a_sign_in_of_this_profile_for_a_site_the_page_shows()
     let mine = signins::save(store, &space(PERSONAL, &site), "alex", "correct horse").unwrap();
     let work = signins::save(store, &space("profile:p-0123456789ab", &site), "sam", "battery staple").unwrap();
     let elsewhere = signins::save(store, &space(PERSONAL, "https://evil.example.net"), "alex", "staple battery").unwrap();
-    let (origin, user, password, _) = signins::for_fill(store, &mine, PERSONAL, std::slice::from_ref(&site)).unwrap();
+    let (origin, user, password, _) = signins::for_fill(store, &mine, PERSONAL, std::slice::from_ref(&site), None).unwrap();
     assert_eq!((origin.as_str(), user.as_str(), password.as_str()), (site.as_str(), "alex", "correct horse"));
-    assert!(signins::for_fill(store, &work, PERSONAL, std::slice::from_ref(&site)).is_err(), "another profile's");
-    assert!(signins::for_fill(store, &elsewhere, PERSONAL, std::slice::from_ref(&site)).is_err(), "another site's");
-    assert!(signins::for_fill(store, &mine, PERSONAL, &[]).is_err(), "no form on the page");
+    assert!(signins::for_fill(store, &work, PERSONAL, std::slice::from_ref(&site), None).is_err(), "another profile's");
+    assert!(signins::for_fill(store, &elsewhere, PERSONAL, std::slice::from_ref(&site), None).is_err(), "another site's");
+    assert!(signins::for_fill(store, &mine, PERSONAL, &[], None).is_err(), "no form on the page");
 }
 
 #[tokio::test]

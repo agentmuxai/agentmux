@@ -3170,6 +3170,25 @@
     }
   },
   {
+    "command": "fileindexlines",
+    "request": "agentmux_srv_core::backend::rpc_types::editor_read::FileIndexLinesReq",
+    "requestName": "FileIndexLinesReq",
+    "requestTs": {
+      "imports": [
+        "FileIndexLinesReq"
+      ],
+      "name": "FileIndexLinesReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::editor_read::FileIndexLinesResult",
+    "responseName": "FileIndexLinesResult",
+    "responseTs": {
+      "imports": [
+        "FileIndexLinesResult"
+      ],
+      "name": "FileIndexLinesResult"
+    }
+  },
+  {
     "command": "fileprobe",
     "request": "agentmux_srv_core::backend::rpc_types::editor_read::FileProbeReq",
     "requestName": "FileProbeReq",
@@ -6444,6 +6463,23 @@
         "CommandReadEditorFileResult"
       ],
       "name": "CommandReadEditorFileResult"
+    }
+  },
+  {
+    "command": "record.page",
+    "request": "agentmux_srv_core::backend::rpc_types::tower::RecordPageReq",
+    "requestName": "RecordPageReq",
+    "requestTs": {
+      "imports": [
+        "RecordPageReq"
+      ],
+      "name": "RecordPageReq"
+    },
+    "response": "()",
+    "responseName": "()",
+    "responseTs": {
+      "imports": [],
+      "name": "null"
     }
   },
   {

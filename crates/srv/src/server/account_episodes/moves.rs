@@ -84,13 +84,19 @@ pub(super) fn candidates(state: &AppState, from: &str, provider: &str) -> Vec<Ac
 /// spawn), then link, then clear the failures its old account caused. Returns the panes among them whose turn
 /// failed on the login: they are told they are signed in once restarted on `to`, not here
 /// ([`super::resume::start`]).
-pub(super) fn relink(state: &AppState, agent_id: &str, to: &str, provider: &str) -> Result<Vec<Failed>, String> {
+pub(super) fn relink(state: &AppState, agent_id: &str, to: &IdentityAccount, provider: &str) -> Result<Vec<Failed>, String> {
     let before = super::failed_panes(&state.mstore, &state.identity_store, agent_id, provider);
     let links = state.identity_store.agent_identity_list_for_agent(agent_id).map_err(|e| e.to_string())?;
-    for l in links.iter().filter(|l| l.provider != provider && canonical(&l.provider) == provider) {
+    // One payer: a Claude agent moved onto a key loses its plan link, and one moved onto a plan loses its key link.
+    let stored_under = super::key_account::link_provider(to, provider);
+    for l in links.iter().filter(|l| l.provider != stored_under && super::key_account::is_link_of(provider, &l.provider)) {
         state.identity_store.agent_identity_unlink(agent_id, &l.provider).map_err(|e| e.to_string())?;
     }
-    state.identity_store.agent_identity_link(agent_id, to, provider).map_err(|e| e.to_string())?;
+    state.identity_store.agent_identity_link(agent_id, &to.id, stored_under).map_err(|e| e.to_string())?;
+    if !super::key_account::is_key(to) {
+        super::key_account::left_the_key(agent_id);
+    }
+    let to = to.id.as_str();
     state.broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(agent_id, &(), vec![], 0);
     if let Some(watcher) = crate::backend::subagent_watcher::global() {
         watcher.recheck_all_watched_agents();

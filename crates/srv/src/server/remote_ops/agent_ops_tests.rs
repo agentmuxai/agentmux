@@ -45,7 +45,7 @@ fn stored_env(state: &AppState, def: &AgentDefinition) -> Option<String> {
 
 #[test]
 fn every_agent_control_operation_needs_a_certificate_backed_caller() {
-    for op in ["agents.start", "agents.open", "agents.stop", "agents.set_seat", "agents.rename", "agents.env_get", "agents.env_set"] {
+    for op in ["agents.start", "agents.open", "agents.stop", "agents.set_seat", "agents.rename", "agents.update", "agents.env_get", "agents.env_set"] {
         assert!(lookup(op).unwrap_or_else(|| panic!("{op} is registered")).changes_state, "{op}");
     }
 }
@@ -129,4 +129,19 @@ async fn a_remote_agent_renames_a_named_agent_here_and_a_clash_is_refused() {
     assert_eq!(state.mstore.agent_def_get(&other.id).unwrap().unwrap().name, other.name);
     let e = rename(&state, &caller(), json!({ "agent": other.slug })).await.unwrap_err();
     assert_eq!(e.code, "invalid_arg");
+}
+
+#[tokio::test]
+async fn a_remote_update_takes_only_model_and_effort_and_records_them_for_an_agent_with_no_pane() {
+    let state = test_state();
+    let target = agent(&state, "host");
+    let e = update(&state, &caller(), json!({ "agent": target.slug, "description": "x" })).await.unwrap_err();
+    assert_eq!(e.code, "invalid_arg", "{}", e.message);
+    assert!(e.message.contains("description"), "{}", e.message);
+    let out = update(&state, &caller(), json!({ "agent": target.slug, "model": "claude-fable-5-2", "effort": "high" })).await.unwrap();
+    assert_eq!(out["applied"]["panes"], 0, "{out}");
+    let remembered = state.mstore.agent_last_runtime_get(&target.id).unwrap();
+    assert!(remembered.contains("claude-fable-5-2") && remembered.contains("high"), "{remembered}");
+    let e = update(&state, &caller(), json!({ "agent": target.slug, "model": "gpt-9" })).await.unwrap_err();
+    assert_eq!(e.code, "invalid_arg", "{}", e.message);
 }

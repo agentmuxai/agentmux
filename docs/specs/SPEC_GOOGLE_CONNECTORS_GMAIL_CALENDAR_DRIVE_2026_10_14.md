@@ -217,6 +217,14 @@ The path from "no client" to "an agent uses Gmail, Calendar and Drive", every st
 4. **Same-OS-user residual:** a process running as the user can read the keychain entry. That is machine compromise, the same residual as every other connected account.
 5. **Data handling:** mail, events and files go only from Google to srv to the agent, then to whichever model provider that agent uses. AgentMux runs no server in this path. The consent screen, the privacy policy and the Connect panel say so plainly. Google's user-data policy (Limited Use, including its AI rules) applies, and the wording is reviewed before verification (§11 Q2).
 6. **Logs hold ids and outcomes, never content or tokens.**
+7. **Whether a mail's sender was proven (2026-11-16).** `get_thread` shows, for each message, what Google found when it received it, so an agent can tell a mail from who it says apart from a forged one. What the build guarantees:
+   - The SPF, DKIM and DMARC verdicts, each with the domain it is about, come only from the topmost `Authentication-Results` header whose authserv-id is Google's (`mx.google.com`). Every other `Authentication-Results` header is ignored, whatever it says and wherever it sits: a sender can put a forged one in the mail.
+   - For mail forwarded or delivered through an alias, the topmost `ARC-Authentication-Results` set from Google is reported the same way, as `arc` with its instance number. A mail with no header from Google gets no verdict: `no_verdict`, and nothing is made up.
+   - Each message also shows `from_domain`, `return_path`, `reply_to` (addresses only), `message_id` and `flags`: `reply_to_differs`, `not_aligned` (no passing DKIM or SPF domain belongs to the From domain), `no_verdict`, `dmarc_domain_differs`, `from_unreadable`, `reply_to_incomplete` (the `Reply-To` is too long to read whole: it is never taken as safe), `verdict_unreadable` (Google's header has a quote or backslash in it, an unclosed comment, a result named twice or too many or too long a value: no verdict is taken from it, because a sender-chosen address inside it could forge one), `several_google_results` (more than one `Authentication-Results` names Google's server: the verdict is the topmost, and the flag means read the raw headers before trusting it). A mail the person wrote (`SENT`, `DRAFT`) is marked `own_mail` and has no verdict to read.
+   - `search_threads` shows the latest message's `from_domain`, DMARC verdict and flags (the verdict names the sender it is about), from the call that already fetches its headers (no extra request).
+   - `headers: "raw"` on `get_thread` adds each message's header lines as one text, in a field of its own with a note. A line break or control character inside a value becomes a space, so a value can't start a header line of its own; each value and each message's text are cut, and `cut` is true whenever any header, name or value went missing.
+   - Every value comes back as a plain value, never as the sender's sentence: a verdict is letters only, a domain is ASCII letters, digits, dots and hyphens, an address has an ordinary local part, a `Message-ID` is one `<id@host>` token. Anything else is replaced by a fixed phrase. The tool's description says how to read it: a pass means the domain is proven, not that the sender is who you hoped (a lookalike domain passes); a fail, `no_verdict` or a flag means do not act on the mail's claims about who it is from.
+   - No new Google scope: the headers come with `format=full` (`get_thread`) and `format=metadata` (`search_threads`), both inside `gmail.readonly`. The same for every agent, container or native.
 
 ## 10. Tests
 
@@ -231,7 +239,8 @@ The path from "no client" to "an agent uses Gmail, Calendar and Drive", every st
   - the approval matrix of §6 per tool and argument (attendees vs none);
   - rate limits;
   - untrusted marking on results;
-  - redaction (no content or token in logs).
+  - redaction (no content or token in logs);
+  - the sender check (§9.7): a pass, a DKIM and DMARC fail, a forged extra `Authentication-Results` below Google's (ignored), one from another server (ignored), a `Reply-To` on another domain, a forwarded mail with ARC, more than one result from Google (flagged) and exactly one (not), a verdict hidden in a comment, a name that looks like an address, a value with a line break in the raw headers, the cuts, and `search_threads`' line.
 - **MCP:** schemas registered in `tools/list` (the family test), errors worded for an agent.
 - **Frontend:** card states, service switches with partial grants, the per-agent level editor, Disconnect's retry.
 - **End to end, per stage, against a test Google account:**

@@ -53,6 +53,8 @@ import * as MOS from "@/app/store/mos";
 import { blockEnv } from "@/app/store/block-meta";
 import type { LaunchPhase } from "../../../agent-model/launch-phase";
 import { checkCliAuth, linkedAccountFor, resolveProviderCli } from "./login-and-confirm";
+import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
+import { isKeyAccount } from "../failure/key-accounts";
 import { registerController } from "./register-controller";
 import { markLaunchBlockedOnSignIn } from "./launch-blocked";
 import type { ProviderDefinition } from "../providers";
@@ -126,11 +128,13 @@ function plannedInstallLine(provider: Pick<ProviderDefinition, "id" | "npmPackag
 }
 
 /** The agent's bound account and that account's own auth dir, when it has one. Best-effort: a failed lookup means the generic dir. */
-async function boundAccountDir(agentDefinitionId: string, providerId: string): Promise<{ accountId?: string; dir?: string }> {
-    const accountId = await linkedAccountFor(agentDefinitionId, providerId);
+async function boundAccountDir(agentDefinitionId: string, providerId: string): Promise<{ accountId?: string; dir?: string; key?: boolean }> {
+    const accountId = await linkedAccountFor(agentDefinitionId, providerId, true);
     if (!accountId) return {};
     try {
         const account = await RpcApi.GetIdentityAccountCommand(TabRpcClient, { id: accountId });
+        // An API key signs in nowhere: the gateway carries it, so the CLI's own sign-in is not what is checked.
+        if (isKeyAccount(account)) return { accountId, key: true };
         if (account?.secret_ref?.backend === "oauth_config_dir" && account.secret_ref.dir) {
             return { accountId, dir: account.secret_ref.dir };
         }
@@ -232,12 +236,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     const cliResolve = isContainerAgentMode(agentMode) ? undefined : beginCliResolve(blockId, provider, log);
     const authEnv = await opts.authEnv;
     let linkedAccountId: string | undefined;
-    let linkLookupDone = false;
+    let linkLookupDone = false, onKey = false;
     let effectiveAuthEnv = authEnv;
     if (boundAccount) {
         linkLookupDone = true;
         const bound = await boundAccount;
-        linkedAccountId = bound.accountId;
+        [linkedAccountId, onKey] = [bound.accountId, !!bound.key];
         if (bound.dir) effectiveAuthEnv = { ...authEnv, [provider.authConfigDirEnvVar]: bound.dir };
     }
 
@@ -333,7 +337,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;
     try {
-        const authResult = await checkCliAuth(cliResult.cli_path, provider.authCheckCommand, effectiveAuthEnv, 30000);
+        const authResult = onKey ? { authenticated: true, email: null, auth_method: "api key" } as CheckCliAuthResult : await checkCliAuth(cliResult.cli_path, provider.authCheckCommand, effectiveAuthEnv, 30000);
         if (authResult.authenticated || (await signedInOnRecheck(cliResult.cli_path, provider, effectiveAuthEnv, log))) {
             const emailPart = authResult.email ? ` as ${authResult.email}` : "";
             const methodPart = authResult.auth_method ? ` (${authResult.auth_method})` : "";

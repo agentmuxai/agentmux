@@ -573,7 +573,7 @@ fn wan_place(where_: &str) -> String {
 pub fn wan_denied_message(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "This agent" } else { agent };
     format!(
-        "{agent} is already running in another AgentMux instance {}, according to AgentMux cloud. \
+        "{agent} is already running in another AgentMux instance {}, according to AgentMux Cloud. \
          Close it there, then try again — an agent can only run in one place at a time.",
         wan_place(where_)
     )
@@ -582,7 +582,7 @@ pub fn wan_denied_message(agent: &str, where_: &str) -> String {
 fn wan_lost_message(agent: &str, where_: &str) -> String {
     let agent = if agent.is_empty() { "This agent" } else { agent };
     format!(
-        "{agent} was taken over by another AgentMux instance {}, according to AgentMux cloud, which \
+        "{agent} was taken over by another AgentMux instance {}, according to AgentMux Cloud, which \
          had it first. It will not start another turn here.",
         wan_place(where_)
     )

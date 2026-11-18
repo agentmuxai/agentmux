@@ -3,63 +3,39 @@
 //
 // The Vault pane (vault.tsx): the person's secrets, which agents use by name without
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
-// A rail of sections; agents' requests for new entries on top.
+// Agents' requests for new entries on top, then the list (vault-list.tsx).
 
 import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { useOnResize } from "@/app/hook/useDimensions";
-import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
-import type { VaultActivity } from "@/types/rpc/VaultActivity";
+import { Button } from "@/app/element/ui";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
-import type { VaultSection } from "@/types/rpc/VaultSection";
-import { t } from "@/app/i18n/i18n";
-import { groupBatches, type ActivityGroup } from "./vault-activity-batches";
-import { VaultEntries } from "./vault-entries";
-import { VaultHistoryDialog, whoOf, whyOf } from "./vault-history";
-import { VaultManageDialog } from "./vault-manage";
+import { VaultList } from "./vault-list";
 import { VaultNarrowActions } from "./vault-narrow-actions";
-import { ALL_VAULTS, VaultPicker } from "./vault-vaults";
+import { VaultPicker } from "./vault-picker";
+import { ALL_VAULTS } from "./vault-vaults";
 import { VaultRequestsList } from "./vault-requests-list";
 import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
-import { formatWhen, outcomeOf } from "./vault-format";
-import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
+import { vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
-import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
     followVault,
     holdVaultShown,
-    loadActivity,
-    loadKept,
     setVaultOnScreen,
     vaultAvailable,
-    vaultChangedMs,
-    vaultEntries,
     vaultError,
     vaultProblem,
     vaultList,
     vaultRequests,
-    type KeptSecret,
 } from "./vault-store";
 
-import "@/app/view/section-pane/section-pane.scss";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./vault-view.scss";
-
-const ENTRY_SECTIONS: VaultSection[] = ["personal", "cards", "api-keys", "logins", "notes"];
-
-const RAIL: TabItem<VaultPaneSection>[] = [...VAULT_SECTIONS.items];
-
-const MANAGED_IN: Record<string, string> = {
-    accounts: "the Accounts pane",
-    muxbus: "Settings, under cloud messages",
-    tower: "Tower",
-    browser: "The browser pane that asked for it",
-};
 
 /** What may ask the person while they use the Vault, said before it does. */
 function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
@@ -74,167 +50,6 @@ function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
             <Button tone="accent" density="compact" onClick={props.onClose}>
                 Got it
             </Button>
-        </div>
-    );
-}
-
-function VaultKept(props: { visible: boolean }): JSX.Element {
-    const [kept, setKept] = createSignal<KeptSecret[] | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-    // Read again each time the tab is shown: the keychain changes where these secrets are managed, with no event.
-    createEffect(
-        on(
-            () => props.visible,
-            (visible) => {
-                if (!visible) return;
-                loadKept()
-                    .then((list) => {
-                        setKept(list);
-                        setError(null);
-                    })
-                    .catch((e) => setError(String(e)));
-            }
-        )
-    );
-    return (
-        <div class="warden-manager-body">
-            <p class="warden-manager-summary">
-                {"Secrets AgentMux keeps for itself, in the same keychain. They're managed where they're used; the Vault only lists them."}
-            </p>
-            <Show when={error()}>
-                <div class="warden-manager-error">⚠ {error()}</div>
-            </Show>
-            <Show when={(kept() ?? []).length > 0} fallback={<div class="warden-section-stub">{kept() === null ? "Loading…" : "None yet."}</div>}>
-                <table class="warden-manager-table vault-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>What</th>
-                            <th>Managed in</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For each={kept()}>
-                            {(k) => (
-                                <tr>
-                                    <td>{k.label}</td>
-                                    <td>{k.what}</td>
-                                    <td class="warden-manager-dim">{MANAGED_IN[k.managed_in] ?? k.managed_in}</td>
-                                </tr>
-                            )}
-                        </For>
-                    </tbody>
-                </table>
-            </Show>
-            <p class="warden-manager-footnote">
-                {"Only sign-ins a browser pane saves from now on are listed: the keychain can't be listed, so earlier ones aren't. The sessions a browser profile keeps for websites you signed in to (cookies) are not here: they belong to the profile."}
-            </p>
-        </div>
-    );
-}
-
-/** One line of the Activity tab; an entry that still exists opens its History. A batch's own line (`secrets`
- *  lines of its own) opens and closes the lines of its secrets; `nested` is one of those. */
-function ActivityRow(props: { row: VaultActivity; onHistory: (a: VaultActivity) => void; secrets?: number; open?: boolean; onToggle?: () => void; nested?: boolean }): JSX.Element {
-    const a = () => props.row;
-    const exists = () => (vaultEntries() ?? []).some((e) => e.id === a().entry_id);
-    return (
-        <tr data-outcome={a().outcome} classList={{ "vault-activity-nested": !!props.nested }}>
-            <td class="warden-manager-dim vault-activity-word">{formatWhen(a().at)}</td>
-            <td class="vault-activity-word">{whoOf(a())}</td>
-            <td class="vault-activity-word">
-                {a().action}
-                <Show when={outcomeOf(a().outcome)}>
-                    {(o) => (
-                        <span class={o().warn ? "vault-activity-outcome vault-expiry-warn" : "vault-activity-outcome"}>
-                            {" · "}
-                            {o().text}
-                        </span>
-                    )}
-                </Show>
-            </td>
-            <td>
-                <Show when={exists()} fallback={a().entry_label}>
-                    <Button density="compact" onClick={() => props.onHistory(a())}>
-                        {a().entry_label}
-                    </Button>
-                </Show>
-                <Show when={props.secrets}>
-                    {" "}
-                    <Button density="compact" aria-expanded={!!props.open} onClick={() => props.onToggle?.()}>
-                        {t("vault.activity.batchSecrets", { count: props.secrets ?? 0 })}
-                    </Button>
-                </Show>
-            </td>
-            <td class="warden-manager-dim">{a().target}</td>
-            <td class="warden-manager-dim">{whyOf(a())}</td>
-        </tr>
-    );
-}
-
-/** A line of the Activity tab and, under a batch's own line once it is opened, the line of each of its secrets. */
-function ActivityLines(props: { group: ActivityGroup; open: boolean; onToggle: () => void; onHistory: (a: VaultActivity) => void }): JSX.Element {
-    return (
-        <>
-            <ActivityRow row={props.group.row} onHistory={props.onHistory} secrets={props.group.items.length} open={props.open} onToggle={props.onToggle} />
-            <Show when={props.open}>
-                <For each={props.group.items}>{(a) => <ActivityRow row={a} onHistory={props.onHistory} nested />}</For>
-            </Show>
-        </>
-    );
-}
-
-function VaultActivityLog(props: { visible: boolean }): JSX.Element {
-    const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
-    // The batches whose secrets' lines are shown: kept by batch, so a reload of the list leaves them open.
-    const [openBatches, setOpenBatches] = createSignal<string[]>([]);
-    const toggleBatch = (batch: string) => setOpenBatches((was) => (was.includes(batch) ? was.filter((b) => b !== batch) : [...was, batch]));
-    const [historyOf, setHistoryOf] = createSignal<VaultActivity | null>(null);
-    const [error, setError] = createSignal<string | null>(null);
-    const load = () =>
-        loadActivity()
-            .then((r) => {
-                setRows(r);
-                setError(null);
-            })
-            .catch((e) => setError(String(e)));
-    // Loads when first shown, and again whenever the Vault changes while shown.
-    createEffect(on([() => props.visible, vaultChangedMs], ([visible]) => {
-        if (visible) void load();
-    }));
-    return (
-        <div class="warden-manager-body">
-            <p class="warden-manager-summary">
-                Every change to the Vault and every use of an entry: who, what, where. Never a value.{" "}
-                <Button density="compact" onClick={() => void openOrFocusPaneByView("audit")}>
-                    {"See agents' use in the Audit"}
-                </Button>
-            </p>
-            <Show when={error()}>
-                <div class="warden-manager-error">⚠ {error()}</div>
-            </Show>
-            <Show when={(rows() ?? []).length > 0} fallback={<div class="warden-section-stub">{rows() === null ? "Loading…" : "Nothing yet."}</div>}>
-                <table class="warden-manager-table vault-table vault-table--wide">
-                    <thead>
-                        <tr>
-                            <th>When</th>
-                            <th>Who</th>
-                            <th>What</th>
-                            <th>Entry</th>
-                            <th>Where</th>
-                            <th>Why</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For each={groupBatches(rows() ?? [])}>
-                            {(g) => <ActivityLines group={g} open={openBatches().includes(g.batch)} onToggle={() => toggleBatch(g.batch)} onHistory={setHistoryOf} />}
-                        </For>
-                    </tbody>
-                </table>
-            </Show>
-            <Show when={historyOf()}>
-                {(a) => <VaultHistoryDialog entryId={a().entry_id} label={a().entry_label} onClose={() => setHistoryOf(null)} />}
-            </Show>
         </div>
     );
 }
@@ -275,10 +90,9 @@ function keepOnScreenNoted(model: VaultViewModel): void {
 
 export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     const model = props.model;
-    const section = model.sectionAtom;
+    // Names the section the list opens and scrolls to (vault-list.tsx).
     const setSection = (id: VaultPaneSection) => model.setMeta({ "vault:section": id });
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
-    const [managing, setManaging] = createSignal(false);
     // The Vault the lists are narrowed to; all of them when none is chosen or the chosen one is gone.
     const vault = () => (vaultList().some((v) => v.id === model.vaultAtom()) ? model.vaultAtom() : ALL_VAULTS);
 
@@ -332,7 +146,6 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                     <VaultPicker
                         value={vault()}
                         onChange={(id) => model.setMeta({ "vault:vault": id || null })}
-                        onManage={() => setManaging(true)}
                         extra={<Show when={model.narrow()}><VaultNarrowActions model={model} /></Show>}
                     />
                     <Show when={vaultError() ?? vaultProblem()}>
@@ -340,30 +153,13 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                             ⚠ {vaultError() ?? vaultProblem()}
                         </div>
                     </Show>
-                    <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Vault section" panelClass="bundle-manager-section">
-                        <For each={ENTRY_SECTIONS}>
-                            {(s) => (
-                                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== s }}>
-                                    <VaultEntries section={s} vault={vault()} />
-                                </div>
-                            )}
-                        </For>
-                        <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kept" }}>
-                            <VaultKept visible={section() === "kept"} />
-                        </div>
-                        <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "activity" }}>
-                            <VaultActivityLog visible={section() === "activity"} />
-                        </div>
-                    </TabbedPane>
+                    <VaultList model={model} vault={vault()} />
                     <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
                     <Show when={model.transfer() === "export"}>
                         <VaultExportDialog onClose={() => model.openTransfer(null)} />
                     </Show>
                     <Show when={model.transfer() === "import"}>
                         <VaultImportDialog into={vault() || undefined} onClose={() => model.openTransfer(null)} />
-                    </Show>
-                    <Show when={managing()}>
-                        <VaultManageDialog onClose={() => setManaging(false)} />
                     </Show>
                 </Show>
             </div>

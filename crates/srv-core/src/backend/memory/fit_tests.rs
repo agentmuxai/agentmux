@@ -1,16 +1,44 @@
 use super::*;
-use crate::backend::memory::delivery::{compose_items_tail, split_into_parts_counted, Reason};
+use crate::backend::memory::delivery::{
+    compose_fallback_layout, compose_items_tail, split_into_parts_counted, FallbackReason, Layout, Reason, StartupCarry, HOOK_PARTS, MAX_PART_CHARS,
+};
+
+const CAP: usize = HOOK_PARTS * MAX_PART_CHARS;
+const NOW: i64 = 1_800_000_000_000;
+const DAY: i64 = 86_400_000;
+const MINUTE: i64 = 60_000;
 
 fn personal(name: &str, text: &str) -> Entry {
     Entry { label: name.into(), tier: Tier::Personal, text: text.into(), name: name.into(), system: false, bundle_id: None, path: Some(format!("/mem/{name}")) }
 }
 
+fn global_named(name: &str, text: &str) -> Entry {
+    Entry { label: format!("[Workspace] {name}"), tier: Tier::Global, text: text.into(), name: name.into(), system: false, bundle_id: Some(format!("id-{name}")), path: None }
+}
+
 fn global(text: &str) -> Entry {
-    Entry { label: "[Workspace] g".into(), tier: Tier::Global, text: text.into(), name: "g".into(), system: false, bundle_id: None, path: None }
+    global_named("g", text)
 }
 
 fn with_front(kind: &str, description: &str, body_chars: usize) -> String {
     format!("---\nname: n\ndescription: {description}\nmetadata:\n  type: {kind}\n---\n{}", "x".repeat(body_chars))
+}
+
+fn always_front(description: &str, body_chars: usize) -> String {
+    format!("---\nname: n\ndescription: {description}\nmetadata:\n  type: feedback\n  deliver: always\n---\n{}", "x".repeat(body_chars))
+}
+
+fn composed_text(fitted: &Fitted, carry: StartupCarry, summary: Option<&str>) -> String {
+    composed_text_opt(fitted, carry, summary).unwrap_or_default()
+}
+
+fn composed_text_opt(fitted: &Fitted, carry: StartupCarry, summary: Option<&str>) -> Option<String> {
+    let layout = Layout {
+        carry,
+        index: IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only: false },
+        tail: fitted.tail.as_deref(),
+    };
+    compose_items_tail(&fitted.kept, Reason::Compact, summary, &layout).map(|c| c.text)
 }
 
 #[test]
@@ -23,83 +51,97 @@ fn frontmatter_is_read_at_any_indent_and_only_from_the_top_block() {
     assert_eq!(frontmatter_value("---\nname: a\n---\ndescription: body\n", "description"), None, "the body is not read");
 }
 
+/// The 11-17 incident: Global Memory filled the delivery and every Personal file came out as "not sent".
 #[test]
-fn a_personal_file_over_the_cap_is_cut_with_a_line_saying_how_much_is_left() {
-    let big = personal("big.md", &format!("{}\n{}", "a".repeat(5_000), "b".repeat(45_000)));
-    let capped = cap_entry(big);
-    assert!(capped.text.chars().count() < FILE_CAP_CHARS + 200, "{}", capped.text.chars().count());
-    assert!(capped.text.starts_with("aaaa"));
-    assert!(capped.text.ends_with("read the file: /mem/big.md]"), "{}", &capped.text[capped.text.len() - 80..]);
-    assert!(capped.text.contains("[cut: 4"), "about 42 KB are left: {}", &capped.text[capped.text.len() - 80..]);
-    let small = personal("small.md", "short");
-    assert_eq!(cap_entry(small.clone()), small, "under the cap: untouched");
-    let g = global(&"g".repeat(30_000));
-    assert_eq!(cap_entry(g.clone()), g, "Global Memory is the startup file's text, never cut");
-}
-
-#[test]
-fn the_cap_cuts_at_a_line_end_when_one_is_near() {
-    let line = format!("{}\n", "l".repeat(99));
-    let capped = cap_entry(personal("lines.md", &line.repeat(200)));
-    let body = capped.text.split("\n[cut:").next().unwrap();
-    assert!(body.ends_with('l') && !body.ends_with('\n'), "cut after a whole line");
-    assert_eq!(body.chars().count() % 100, 99, "a whole number of lines");
-}
-
-/// The 10-28 incident: a stale 50 KB snapshot used the whole budget and every later file was "not sent".
-#[test]
-fn one_big_stale_file_no_longer_crowds_out_the_rest() {
-    // Newest first, as the caller leaves them: a "read first" file and rules, then the stale snapshot.
-    let mut entries = vec![
+fn personal_memory_is_an_index_and_a_big_file_no_longer_crowds_anything_out() {
+    let entries = vec![
+        global(&"G".repeat(20_000)),
         personal("front-door-state-pm.md", &with_front("project", "READ FIRST", 3_000)),
         personal("leader-delegates-code.md", &with_front("feedback", "Leaders delegate code", 1_000)),
-        personal("security-boundary.md", &with_front("feedback", "Security boundary", 1_000)),
         personal("front-door-state-old.md", &with_front("project", "Old snapshot", 50_000)),
     ];
-    entries.insert(0, global(&"G".repeat(20_000)));
-    let fitted = fit(entries, 0, false, &|_| None);
-    assert!(fitted.skipped.is_empty(), "everything fits once the snapshot is capped: {:?}", fitted.skipped.iter().map(|e| &e.name).collect::<Vec<_>>());
-    let names: Vec<&str> = fitted.kept.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["g", "front-door-state-pm.md", "leader-delegates-code.md", "security-boundary.md", "front-door-state-old.md"]);
-    let old = fitted.kept.last().unwrap();
-    assert!(old.text.chars().count() < FILE_CAP_CHARS + 200 && old.text.contains("[cut:"));
+    let fitted = fit(entries, CAP, 0, false, &|_| None, NOW);
+    assert!(fitted.skipped.is_empty());
+    assert_eq!(fitted.kept.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["g"], "only Global rides in full");
+    assert_eq!(fitted.indexed.len(), 3, "every Personal file is in the index");
+    let text = composed_text(&fitted, StartupCarry::None, None);
+    for name in ["front-door-state-pm.md", "leader-delegates-code.md", "front-door-state-old.md"] {
+        assert_eq!(text.matches(&format!("- {name} ")).count(), 1, "{name} is listed once");
+    }
+    assert!(text.contains("READ FIRST") && !text.contains(&"x".repeat(100)), "the descriptions, not the bodies");
 }
 
 #[test]
-fn what_does_not_fit_is_left_out_whole_and_named_with_its_description() {
-    // 12 files of ~8 KB (96 KB) cannot all ride in 72 KB.
-    let mut entries = vec![global(&"G".repeat(10_000))];
-    for i in 0..12 {
-        entries.push(personal(&format!("f{i:02}.md"), &with_front("project", &format!("File number {i}"), 8_000)));
+fn files_marked_always_go_in_full_within_their_limit_and_the_rest_are_named() {
+    let mut entries: Vec<Entry> = (0..7).map(|i| personal(&format!("rule{i}.md"), &always_front(&format!("Rule {i}"), 500))).collect();
+    entries.push(personal("plain.md", &with_front("project", "A plain file", 500)));
+    let fitted = fit(entries, CAP, 0, false, &|_| None, NOW);
+    assert_eq!(fitted.always, ALWAYS_MAX_FILES);
+    assert_eq!(fitted.kept.len(), ALWAYS_MAX_FILES);
+    assert_eq!(fitted.over_limit.len(), 2, "{:?}", fitted.over_limit);
+    assert_eq!(fitted.indexed.len(), 3, "the plain file and the two over the limit");
+    let text = composed_text(&fitted, StartupCarry::None, None);
+    for name in &fitted.over_limit {
+        assert!(text.contains(&format!("- {name} ")) && text.contains("marked always, but over the limit"), "{name} is in the index with the reason");
     }
-    let fitted = fit(entries, 0, false, &|_| None);
-    assert!(!fitted.skipped.is_empty() && fitted.skipped.len() < 12, "{}", fitted.skipped.len());
-    let first_skipped = &fitted.skipped[0].name;
-    assert!(fitted.skipped.iter().all(|e| !e.text.contains("[cut:")), "a file left out is returned at its real size, for the card");
-    assert!(fitted.kept.iter().all(|e| e.name < *first_skipped || e.tier == Tier::Global), "the newest (earliest in the list) are the ones kept");
+}
+
+#[test]
+fn marked_files_over_the_character_limit_are_not_dropped() {
+    let entries: Vec<Entry> = (0..3).map(|i| personal(&format!("big{i}.md"), &always_front("big", 3_500))).collect();
+    let fitted = fit(entries, CAP, 0, false, &|_| None, NOW);
+    assert_eq!(fitted.always, 1, "one fits in 6,000 characters");
+    assert_eq!(fitted.over_limit.len(), 2);
+    assert_eq!(fitted.always + fitted.indexed.len(), 3, "none vanishes");
+}
+
+#[test]
+fn global_memory_that_does_not_fit_is_left_out_whole_and_named_with_how_to_read_it() {
+    // 10 entries of 9 KB (90 KB) cannot all ride in 72 KB.
+    let entries: Vec<Entry> = (0..10).map(|i| global_named(&format!("entry-{i}"), &"G".repeat(9_000))).collect();
+    let fitted = fit(entries, CAP, 0, false, &|_| None, NOW);
+    assert!(!fitted.skipped.is_empty() && fitted.kept.len() + fitted.skipped.len() == 10);
+    assert!(fitted.kept.iter().all(|e| e.text.len() == 9_000), "an entry is whole or not sent: none is cut");
     let tail = fitted.tail.clone().unwrap();
     for e in &fitted.skipped {
-        assert!(tail.contains(&e.name), "{tail}");
-        assert!(tail.contains("File number"), "{tail}");
+        assert!(tail.contains(&format!("- {} (id-{})", e.name, e.name)), "{tail}");
     }
-    assert!(tail.starts_with(&format!("[AgentMux] {} Personal Memory files were not sent here", fitted.skipped.len())), "{tail}");
+    assert!(tail.contains("scope global"), "{tail}");
 
-    // And the whole composed delivery, tail included, goes out uncut.
-    let composed = compose_items_tail(&fitted.kept, Reason::Compact, None, false, fitted.tail.as_deref()).unwrap();
-    let total = composed.text.chars().count();
-    let (_, delivered) = split_into_parts_counted(&composed.text, MAX_PART_CHARS, HOOK_PARTS);
-    assert_eq!(delivered, total, "nothing is cut after the fit");
-    assert!(composed.text.contains(&first_skipped.to_string()), "the list is in the text the model reads");
+    // The whole composed delivery, the note included, goes out uncut.
+    let text = composed_text(&fitted, StartupCarry::None, None);
+    let (parts, delivered) = split_into_parts_counted(&text, MAX_PART_CHARS, HOOK_PARTS);
+    assert_eq!(delivered, text.chars().count(), "nothing is cut after the fit");
+    assert!(parts.iter().all(|p| !p.contains("memory cut here")));
+}
+
+#[test]
+fn nothing_is_dropped_whatever_the_sizes() {
+    for (globals, global_kb, files) in [(0usize, 0usize, 0usize), (37, 2, 11), (20, 6, 60), (50, 2, 200), (5, 30, 9)] {
+        let mut entries: Vec<Entry> = (0..globals).map(|i| global_named(&format!("g{i}"), &"G".repeat(global_kb * 1_000))).collect();
+        entries.extend((0..files).map(|i| personal(&format!("f{i:03}.md"), &with_front("project", &format!("File {i}"), 800 * (i % 5)))));
+        let fitted = fit(entries, CAP, 0, true, &|_| Some(NOW - DAY), NOW);
+        let text = composed_text(&fitted, StartupCarry::None, None);
+        let (parts, delivered) = split_into_parts_counted(&text, MAX_PART_CHARS, HOOK_PARTS);
+        for i in 0..files {
+            assert_eq!(text.matches(&format!("- f{i:03}.md ")).count(), 1, "file {i} in the index once ({globals}, {global_kb}, {files})");
+        }
+        for e in &fitted.skipped {
+            assert!(text.contains(&format!("- {} (", e.name)), "{} is named ({globals}, {global_kb}, {files})", e.name);
+        }
+        assert_eq!(fitted.kept.len() + fitted.skipped.len(), globals, "every Global entry is sent or named");
+        if fitted.skipped.is_empty() {
+            assert_eq!(delivered, text.chars().count(), "uncut when nothing was left out ({globals}, {global_kb}, {files})");
+            assert!(parts.iter().all(|p| !p.contains("memory cut here")));
+        }
+    }
 }
 
 #[test]
 fn the_running_summary_is_kept_room_for() {
-    let mut entries = Vec::new();
-    for i in 0..12 {
-        entries.push(personal(&format!("f{i:02}.md"), &with_front("feedback", "d", 8_000)));
-    }
-    let without = fit(entries.clone(), 0, false, &|_| None).kept.len();
-    let with = fit(entries, 20_000, false, &|_| None).kept.len();
+    let entries: Vec<Entry> = (0..12).map(|i| global_named(&format!("g{i}"), &"G".repeat(7_000))).collect();
+    let without = fit(entries.clone(), CAP, 0, false, &|_| None, NOW).kept.len();
+    let with = fit(entries, CAP, 20_000, false, &|_| None, NOW).kept.len();
     assert!(with < without, "{with} < {without}");
 }
 
@@ -130,8 +172,50 @@ fn the_nudge_names_what_is_large_or_stale_and_says_nothing_is_deleted() {
 #[test]
 fn the_nudge_rides_with_the_delivery_only_on_a_compaction() {
     let entries = vec![personal("big.md", &with_front("project", "d", 20_000))];
-    let compact = fit(entries.clone(), 0, true, &|_| Some(30));
+    let compact = fit(entries.clone(), CAP, 0, true, &|_| Some(NOW - 30 * DAY), NOW);
     assert!(compact.tail.as_deref().unwrap().contains("Your Personal Memory is"));
-    let startup = fit(entries, 0, false, &|_| Some(30));
+    let startup = fit(entries, CAP, 0, false, &|_| Some(NOW - 30 * DAY), NOW);
     assert_eq!(startup.tail, None);
+}
+
+fn system_named(name: &str, text: &str) -> Entry {
+    Entry { system: true, ..global_named(name, text) }
+}
+
+#[test]
+fn a_system_global_entry_is_never_left_out_because_it_cannot_be_read_back() {
+    let mut entries = vec![system_named("ops", &"S".repeat(17_000))];
+    entries.extend((0..6).map(|i| global_named(&format!("w{i}"), &"W".repeat(20_000))));
+    let fitted = fit(entries, CAP, 0, false, &|_| None, NOW);
+    assert!(fitted.kept.iter().any(|e| e.name == "ops"), "the system entry rides in full");
+    assert!(!fitted.skipped.is_empty(), "the workspace entries that do not fit are left out");
+    assert!(fitted.skipped.iter().all(|e| !e.system), "a left-out entry can be read back with the Memory tool");
+}
+
+#[test]
+fn files_marked_always_are_admitted_oldest_marking_first_even_when_changed_minutes_apart() {
+    let name_of = |i: usize| format!("rule-{i}.md");
+    // Newest first, as the caller reads them: rule-5 changed a minute ago, rule-0 five minutes before it.
+    let entries: Vec<Entry> = (0..6).rev().map(|i| personal(&name_of(i), &always_front("a rule", 100))).collect();
+    let minutes_ago = |e: &Entry| (0..6).find(|&i| e.name == name_of(i)).map(|i| NOW - (6 - i as i64) * MINUTE);
+    let fitted = fit(entries, CAP, 0, false, &minutes_ago, NOW);
+    assert_eq!(fitted.always, ALWAYS_MAX_FILES);
+    assert_eq!(fitted.over_limit, [name_of(5)], "the newest marking is the one that goes to the index");
+    assert!(fitted.kept.iter().all(|e| e.name != name_of(5)));
+}
+
+#[test]
+fn a_global_entry_too_big_to_fit_is_still_a_delivery_that_names_it() {
+    let fitted = fit(vec![global_named("huge", &"H".repeat(65_000))], CAP, 0, false, &|_| None, NOW);
+    assert!(fitted.kept.is_empty());
+    assert_eq!(fitted.skipped.len(), 1);
+    let text = composed_text_opt(&fitted, StartupCarry::None, None).expect("the note alone is delivered");
+    assert!(text.contains("- huge (id-huge)") && text.contains("Memory tool"), "{text}");
+    let layout = Layout {
+        carry: StartupCarry::None,
+        index: IndexPlan { files: &fitted.indexed, over_limit: &fitted.over_limit, always: fitted.always, tool_only: false },
+        tail: fitted.tail.as_deref(),
+    };
+    let fallback = compose_fallback_layout(&fitted.kept, FallbackReason::Compaction, &layout).expect("the fallback delivers it too");
+    assert!(fallback.text.contains("- huge (id-huge)"), "{}", fallback.text);
 }

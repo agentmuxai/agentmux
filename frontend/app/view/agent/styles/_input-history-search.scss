@@ -6,15 +6,14 @@
 // composer (_slash.scss), above the pane's content.
 
 @use "../../../mixins.scss";
+@use "../../../element/menu-frame";
 .agent-view {
     .input-history-search {
         position: absolute;
         bottom: calc(100% + 2px);
         left: 0;
         right: 0;
-        background: var(--main-bg-color);
-        border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        @include menu-frame.menu-surface;
         z-index: var(--z-composer-popup);
         font-size: var(--text-sm);
         display: flex;

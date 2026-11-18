@@ -7,7 +7,7 @@
 //!
 //! Provides message injection into terminal panes, agent registration,
 //! rate limiting, message sanitization, audit logging, and cross-host
-//! polling via AgentMux cloud service.
+//! polling via AgentMux Cloud service.
 
 pub mod activity_watcher;
 pub mod action_audit;

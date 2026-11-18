@@ -34,6 +34,7 @@ function membersMatch(manifest: PaneTabManifest, real: PaneTabInstance, ctx: Pan
     });
 }
 import { editorSplitBlockDef } from "./editor-split";
+import { EDITOR_ZOOM } from "./editor-zoom-parts";
 
 describe("editorPaneTab", () => {
     it("a split opens an empty editor, not a copy (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md)", () => {
@@ -45,7 +46,7 @@ describe("editorPaneTab", () => {
         expect(editorPaneTab.create).toBeTypeOf("function");
         expect(editorPaneTab.capabilities).toEqual({
             lifecycle: "keepAlive",
-            paneZoom: { baseFontSize: 13 },
+            paneZoom: EDITOR_ZOOM,
             noPadding: true,
             splitBlockDef: editorSplitBlockDef,
         });

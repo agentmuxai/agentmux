@@ -103,7 +103,7 @@ pub fn plan(args: &SetupArgs, current: &Settings, service_supported: bool, servi
     } else if args.service {
         true
     } else if asking {
-        ask.yes_no("Start AgentMux at every login (a user service, no root)?", true)
+        ask.yes_no("Start AgentMux at every login (it runs as you, with no administrator or root rights)?", true)
     } else {
         // Not named and not asked: the service stays as it is, so a rerun changes only what it is told to.
         service_installed

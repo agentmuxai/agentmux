@@ -68,6 +68,7 @@ import {
     createUniqueId,
     JSX,
     onCleanup,
+    onMount,
     Show,
     useContext,
     type Accessor,
@@ -75,6 +76,7 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { carryPaneScope } from "@/app/backdrop/overlay-scope";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 
 import { nudgeDismissControl } from "./modal-dismiss-nudge";
@@ -136,8 +138,19 @@ export const OperatorOnlyModals = createContext(false);
 // to the modal's open/close lifecycle, not its component instance.
 // Full rationale: docs/specs/SPEC_MODAL_PANE_CLIP_2026_04_24.md.
 
-const ModalPaneOverlayClip: Component<{ getEl: Accessor<HTMLElement | null | undefined> }> = (p) => {
+//
+// The same component gives the root its pane's colours. A dialog about a pane is mounted inside the pane, so it
+// already reads the pane's ink; with the pane's scope for a panel (`carryPaneScope`), its surface is the pane's
+// overlay layer, a step above the pane it covers (SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.4). A dialog that
+// is mounted outside every pane (window or tab scope), or in a pane with no backdrop, is left as it was.
+
+const ModalRootBindings: Component<{ getEl: Accessor<HTMLElement | null | undefined>; mount: HTMLElement }> = (p) => {
     usePaneOverlay(p.getEl);
+    onMount(() => {
+        const el = p.getEl();
+        const stop = el ? carryPaneScope(el, p.mount) : undefined;
+        if (stop) onCleanup(stop);
+    });
     return null;
 };
 
@@ -410,7 +423,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             tabIndex={-1}
                             onKeyDown={handleKeyDown}
                         >
-                            <ModalPaneOverlayClip getEl={() => rootRef} />
+                            <ModalRootBindings getEl={() => rootRef} mount={mount()} />
                             <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"

@@ -86,7 +86,7 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
         .route("/health", get(health));
     // Browser DOM API routes (`/agentmux/browser/*`). Token auth is
     // enforced inside each handler — same bearer scheme as /ipc.
-    app = crate::browser_api::register_routes(app);
+    app = crate::browser_api::register_routes(app, state.clone());
     // srv asks the user about an agent's SSH access, or an agent's ssh asks
     // its own prompt (`ssh_approval`). Token auth inside the handler, as above.
     app = crate::ssh_approval::register_routes(app);
@@ -244,6 +244,7 @@ async fn route_command(
         "incident_acknowledge" => crate::commands::incidents::incident_acknowledge(state, args),
         // The keys the app wants forwarded out of a focused browser pane (SPEC_KEYBOARD_SHORTCUTS_SETTINGS §7).
         "set_host_keys" => crate::client::host_keys::set_host_keys(args),
+        "set_menu_keys" => crate::client::menu_keys::set_menu_keys(args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),

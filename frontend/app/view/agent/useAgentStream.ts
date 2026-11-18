@@ -49,7 +49,8 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { workingFromPhase, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createStreamFlushQueue } from "./stream-flush-queue";
+import { createPaneFlushQueue } from "./stream-flush-rate";
+import { createRekeyAccepted } from "./rekey-accepted";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
@@ -198,7 +199,7 @@ export function useAgentStream({
     // createHidingStreamFlushQueue BEFORE anything below sees it: `memoryReinjectionController.isHiding`
     // then gates every push uniformly, for every producer, with no change to any of them
     // (SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3).
-    const rawQueue = createStreamFlushQueue(model);
+    const rawQueue = createPaneFlushQueue(model, blockId);
 
     // The pane's context window for memory sizing: the meter's own reading when it has one; the
     // last-seen model's table entry next; FALLBACK_CONTEXT_WINDOW (shared with memory-reinjection.ts's
@@ -278,20 +279,17 @@ export function useAgentStream({
             addNodeId,
         });
 
-        // Promotes accepted pending messages into user_message document nodes. A sent message's row
-        // shows at once under a client id; when its record is placed, the row takes the id history
-        // gives that record, so a reload finds the same row (collapsed state, a scroll anchor).
-        // Retried a few frames while the row still waits in the flush queue.
-        const rekeyAccepted = (id: string, record: string, at: { gen: string; line: number }, tries = 0): void => {
-            const replayed = parseHistoryLines([record], outputFormat, agentName, undefined, { idFirstLine: at.line, idGen: at.gen })
-                .nodes.find((n) => n.type === "user_message");
-            if (!replayed || replayed.id === id) return;
-            const events = batch(() => model.dispatchDoc({ type: "RekeyNode", from: id, to: replayed.id }));
-            if (events.length > 0) addNodeId(replayed.id);
-            else if (tries < 5 && queue.pendingNewNodes().some((n) => n.id === id)) {
-                requestAnimationFrame(() => rekeyAccepted(id, record, at, tries + 1));
-            }
-        };
+        // Promotes accepted pending messages into user_message document nodes (rekey-accepted.ts).
+        const rekeyAccepted = createRekeyAccepted({
+            recordId: (record, at) =>
+                parseHistoryLines([record], outputFormat, agentName, undefined, { idFirstLine: at.line, idGen: at.gen })
+                    .nodes.find((n) => n.type === "user_message")?.id,
+            rekey: (from, to) => batch(() => model.dispatchDoc({ type: "RekeyNode", from, to })).length > 0,
+            isQueued: (id) => queue.pendingNewNodes().some((n) => n.id === id),
+            onRekeyed: addNodeId,
+            nextFrame: (run) => requestAnimationFrame(run),
+            now: () => Date.now(),
+        });
         const echoLedger = new EchoLedger(rekeyAccepted);
         usePendingMessageAcceptance({
             blockId,

@@ -11,7 +11,7 @@ pub use crate::file_rename_types::FileRenameRequest;
 pub use crate::agent_create_types::{ContainerAsk, CreateAgentRequest, RouteAsk, SpawnAgentRequest, SpawnManyRequest, SpawnWorkerSpec};
 pub use crate::browser_control_types::{
     UiBrowserHandoffStatusRequest, UiBrowserReleaseRequest, UiBrowserRequestRequest, UiBrowserRetakeRequest,
-    UiBrowserTakeControlRequest, UiBrowserZoomRequest,
+    UiBrowserTakeControlRequest, UiBrowserZoomRequest, UiBrowserLocateRequest,
 };
 use std::collections::HashMap;
 
@@ -551,6 +551,16 @@ pub struct PaneOpenRequest {
     /// files in its folder. Set by the `OpenMedia` alias (`Pane` open, view `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_folder: Option<bool>,
+    /// `view: "editor"` only: the viewer to open `file` in (`text`, `image`, `media`, `pdf`, `hex`, `info`), and where
+    /// in it: a text `line` (1-based), a hex byte `offset`, a PDF `page` (1-based).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
     /// `view: "files"` only: names (or full paths) inside `file` to select
     /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]

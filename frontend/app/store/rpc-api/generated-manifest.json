@@ -683,6 +683,10 @@
             "method": "GetReactiveRegistrationsCommand"
         },
         {
+            "command": "record.page",
+            "method": "RecordPageCommand"
+        },
+        {
             "command": "gettoolstatus",
             "method": "GetToolStatusCommand",
             "send": "{}"
@@ -1254,6 +1258,10 @@
         {
             "command": "fileprobe",
             "method": "FileProbeCommand"
+        },
+        {
+            "command": "fileindexlines",
+            "method": "FileIndexLinesCommand"
         },
         {
             "command": "filesearchbytes",

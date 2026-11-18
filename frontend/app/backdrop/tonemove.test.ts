@@ -22,7 +22,7 @@ function termPalette(): Array<[string, string]> {
 }
 
 const PALE = deriveBuiltin("yellow", "light")!.surfaces.surface;
-const DARK = deriveBuiltin("indigo", "dark")!.surfaces.surface;
+const DARK = deriveBuiltin("violet", "dark")!.surfaces.surface;
 const TARGET = 4.5;
 
 const hueGap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));

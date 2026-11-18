@@ -8,6 +8,9 @@
 // global.ts), the shared base module both files import, so this module stays
 // out of global.ts's import cycle.
 
+import { blockedMsBetween, startBlockedTracking } from "@/app/diag/main-thread-blocked";
+import { paneTotals } from "@/app/diag/pane-stats";
+import { heapMb, windowLabel } from "@/app/diag/renderer-sample";
 import { paneCount } from "@/app/platform/pane-rect-registry";
 import { keepInactiveTabsLaidOut } from "@/app/workspace/window-tab-visibility";
 import { markEnd, markStart } from "@/perf";
@@ -302,6 +305,9 @@ export function createTab() {
 // duplicates and the second call would silently drop its measurement.
 // Sequence guard ensures the prior switch's pending double-rAF
 // markEnd doesn't close the new switch's measurement instead.
+/** A SetActiveTab call slower than this gets the thread's blocked time on its line (#47767). */
+const SLOW_RPC_MS = 500;
+
 let tabSwitchInFlight = false;
 let tabSwitchSeq = 0;
 
@@ -322,10 +328,25 @@ function guardStep(name: string, counter: { threw: number }, step: () => void): 
 
 /** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
  *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
-function logSwitch(tabId: string, current: boolean, gated: boolean, rpcMs: number, frameMs: number, threw: number): void {
+function logSwitch(
+    tabId: string,
+    current: boolean,
+    gated: boolean,
+    rpcMs: number,
+    frameMs: number,
+    threw: number,
+    clickedAt: number
+): void {
     const rpc = rpcMs < 0 ? "failed" : `${Math.round(rpcMs)}ms`;
+    // What the window holds as it switches (#47823): agent panes and their rows, the JS heap, which window.
+    const totals = paneTotals();
+    const heap = heapMb();
+    // A slow call says whose time it was (#47767): long-task time on this thread between the click and the call
+    // returning, so a slow `rpc` with a busy thread is the renderer's, and with a quiet one is the backend's.
+    const blocked = rpcMs > SLOW_RPC_MS ? blockedMsBetween(clickedAt, clickedAt + rpcMs) : null;
+    const blockedPart = blocked == null ? "" : ` main-blocked=${blocked}ms`;
     console.info(
-        `[tab-switch] to=${tabId} rpc=${rpc} frames=${Math.round(frameMs)}ms gated=${gated} browser-panes=${paneCount()} threw=${threw}${current ? "" : " superseded=true"}`
+        `[tab-switch] to=${tabId} rpc=${rpc}${blockedPart} frames=${Math.round(frameMs)}ms gated=${gated} browser-panes=${paneCount()} agent-panes=${totals.panes} rows=${totals.rows} heap=${heap ? `${heap.used}MB` : "n/a"} window=${windowLabel()} threw=${threw}${current ? "" : " superseded=true"}`
     );
 }
 
@@ -334,6 +355,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     if (ws == null) return;
     const fromTabId = activeTabId();
     if (fromTabId === tabId) return;
+    startBlockedTracking();
     const clickedAt = performance.now();
     const guard = { threw: 0 };
     // Canonical chokepoint for tab-switch perf marks. Wraps every entry
@@ -390,7 +412,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
         });
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
-                logSwitch(tabId, mySeq === tabSwitchSeq, gated, rpcMs, performance.now() - clickedAt, guard.threw);
+                logSwitch(tabId, mySeq === tabSwitchSeq, gated, rpcMs, performance.now() - clickedAt, guard.threw, clickedAt);
                 if (mySeq === tabSwitchSeq) {
                     markEnd("tab-switch");
                     tabSwitchInFlight = false;

@@ -34,6 +34,9 @@ use serde_json::{json, Value};
 use crate::backend::obj::MetaMapType;
 use crate::backend::providers::default_model_for;
 
+mod choice;
+pub use choice::{flags_pin, is_claude_effort, is_claude_model_name, provider_flags_pin, runtime_choice, RuntimeChoice};
+
 /// `DEFAULT_RUNTIME_CONFIG.permissionMode` in `frontend/app/agent-model/document-state.ts`.
 pub(crate) const DEFAULT_PERMISSION_MODE: &str = "bypass";
 /// `DEFAULT_RUNTIME_CONFIG.effort` in `frontend/app/agent-model/document-state.ts`.
@@ -529,7 +532,7 @@ pub(crate) fn model_takes_effort(model: &str) -> bool {
 /// The model a Claude Code agent pointed at a custom server (`ANTHROPIC_BASE_URL` in its `cmd:env` that is
 /// not Anthropic's) asks it for: `ANTHROPIC_MODEL`, else the alias (`sonnet`, `opus`, `haiku`) the CLI maps to
 /// that tier's `ANTHROPIC_DEFAULT_*_MODEL`. None where the agent is not on a custom server, or names no model.
-pub(crate) fn endpoint_model(meta: &MetaMapType) -> Option<String> {
+pub fn endpoint_model(meta: &MetaMapType) -> Option<String> {
     let env = meta.get("cmd:env")?.as_object()?;
     // Names are read without regard to case, as the launch does (`spawn_env::endpoint`).
     let all = |name: &str| {

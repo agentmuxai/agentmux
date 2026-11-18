@@ -50,6 +50,17 @@
 #      counts as a stall, so the attempt is retried once. The trace lines gain `scope=` (the attempt's memory) and
 #      `oom_kill=` (what the kernel killed in it).
 #
+#   7. 2026-11-16: the stalls came back, on PRs and on main (PRs 7540 and 7551, main 95dd4691ba and f9df7891e7). The traces
+#      of every stalled and healthy run of that day put the stall in the same place: the last build, the one that builds
+#      every target of the eight packages. Its two rustc (the core's test harness, 9 to 10 GB, and the server layer's, 4 to
+#      5 GB) overlap, and the machine peaks at 14.3 to 14.7 GB demanded against the 14 GB ceiling and 15.6 GB of RAM: the two
+#      healthy runs read 14,668 MB and 14,488 MB, the stalled ones 14,305 MB and 14,341 MB, so that build is at the limit on
+#      every run and a stall is a coin toss, which a larger server layer (PR 7551 added about 1,000 lines) turns into a
+#      certainty. The first and second builds peak at 11.8 and 9.2 GB and never stalled. So the last build of a PR attempt
+#      runs with one job (CI_FINAL_JOBS, default 1): one rustc at a time, a peak about 12 GB, and the tests are run by a
+#      separate call, which compiles nothing. The retry runs every build with one job. The trace line gains `top2=`, the
+#      second biggest process, so the next trace names the pair. docs/analysis/ANALYSIS_CI_LINUX_TEST_MEMORY_2026_11_16.md.
+#
 # CI_ATTEMPT_CMD replaces the cargo commands, CI_MONITOR=0 turns the trace and watchdog off, CI_CEILING=0 turns the
 # ceiling off: all three are for scripts/ci-nextest-run.test.sh.
 #
@@ -64,6 +75,8 @@ TRACE="${CI_TRACE_FILE:-${RUNNER_TEMP:-/tmp}/resource-trace.log}"
 BUILD_LOG="${CI_BUILD_LOG:-${RUNNER_TEMP:-/tmp}/nextest-build.log}"
 FIRED="$TRACE.watchdog"
 CARGO_JOBS="${CI_CARGO_JOBS:-2}"
+# The jobs of the last build of a PR attempt (the one that builds every target of every package): see 7. in the header.
+FINAL_JOBS="${CI_FINAL_JOBS:-1}"
 STEP_NAME="${CI_STEP_NAME:-nextest}"
 CGROUP_ROOT="${CI_CGROUP_ROOT:-/sys/fs/cgroup}"
 CONFINE_BASE=()
@@ -126,19 +139,25 @@ read_mem() {
     SWAP_USED_MB=$(((swap_total - swap_free) / 1024))
 }
 
-# The process holding the most memory: TOP_PID, TOP_COMM and TOP_MB. With an argument, the runner's own processes and the
-# system's are left out (what the watchdog may kill).
+# The process holding the most memory: TOP_PID, TOP_COMM and TOP_MB; and the one after it: TOP2_COMM and TOP2_MB (the
+# stalled runs of 2026-11-16 held two rustc at once, and the trace named only the first). With an argument, the runner's
+# own processes and the system's are left out (what the watchdog may kill).
 top_process() {
-    local d rss comm best=0
-    TOP_PID="" TOP_COMM="-" TOP_MB=0
+    local d rss comm best=0 second=0
+    TOP_PID="" TOP_COMM="-" TOP_MB=0 TOP2_COMM="-" TOP2_MB=0
     for d in /proc/[0-9]*; do
         { read -r _ rss _; } 2>/dev/null < "$d/statm" || continue
-        [ "${rss:-0}" -gt "$best" ] || continue
+        [ "${rss:-0}" -gt "$second" ] || continue
         { read -r comm; } 2>/dev/null < "$d/comm" || continue
         if [ -n "${1:-}" ]; then
             case "$comm" in Runner* | dotnet* | systemd* | sshd* | bash | ps | awk) continue ;; esac
         fi
-        best=$rss TOP_PID=${d#/proc/} TOP_COMM=$comm TOP_MB=$((rss * 4 / 1024))
+        if [ "$rss" -gt "$best" ]; then
+            TOP2_COMM=$TOP_COMM TOP2_MB=$TOP_MB second=$((best))
+            best=$rss TOP_PID=${d#/proc/} TOP_COMM=$comm TOP_MB=$((rss * 4 / 1024))
+        else
+            second=$rss TOP2_COMM=$comm TOP2_MB=$((rss * 4 / 1024))
+        fi
     done
 }
 
@@ -165,7 +184,7 @@ sample() {
     memory_psi
     top_process
     read_scope
-    SAMPLE="[resources] $now mem_avail=${MEM_AVAIL_MB}MB swap_free=${SWAP_FREE_MB}MB mem_used=${MEM_USED_MB}MB swap_used=${SWAP_USED_MB}MB demand=$((MEM_USED_MB + SWAP_USED_MB))MB top=${TOP_COMM}:${TOP_MB}MB psi_full10=$PSI$SCOPE_FIELDS"
+    SAMPLE="[resources] $now mem_avail=${MEM_AVAIL_MB}MB swap_free=${SWAP_FREE_MB}MB mem_used=${MEM_USED_MB}MB swap_used=${SWAP_USED_MB}MB demand=$((MEM_USED_MB + SWAP_USED_MB))MB top=${TOP_COMM}:${TOP_MB}MB top2=${TOP2_COMM}:${TOP2_MB}MB psi_full10=$PSI$SCOPE_FIELDS"
 }
 
 # Kill the process that holds the most memory, leaving the runner's own processes alone, and say what it was. The kill comes
@@ -260,6 +279,11 @@ attempt() {
         cargo nextest run --profile queue $pkgs --lib --bin agentmux-srv --bin agentmux-mcp --test spawn_no_window_inventory 2>&1 | tee -a "$BUILD_LOG" || return $?
         return 0
     fi
+    # The last build compiles the core and the server layer once more (the other targets of the packages change what they
+    # are built with), and with two jobs their two rustc ran at once: 14.3 to 14.7 GB on a runner that has 15.6 and a
+    # 14 GB ceiling, every run (see 7. in the header). One job keeps one rustc at a time; the run after it compiles nothing.
+    # shellcheck disable=SC2086
+    CARGO_BUILD_JOBS="$FINAL_JOBS" cargo nextest run --no-run --profile ci $pkgs 2>&1 | tee -a "$BUILD_LOG" || return $?
     # shellcheck disable=SC2086
     cargo nextest run --profile ci $pkgs 2>&1 | tee -a "$BUILD_LOG"
 }
@@ -313,7 +337,12 @@ main() {
     for n in 1 2; do
         local confine=()
         [ "${#CONFINE_BASE[@]}" -gt 0 ] && confine=("${CONFINE_BASE[@]}" "--unit=ci-nextest-$$-$n" --)
-        timeout --kill-after=30 "${limits[$((n - 1))]}" "${confine[@]}" bash "$SELF" --attempt
+        # The second attempt builds with one job whatever the first had: it runs because the first stalled, and the stall is
+        # memory. (An argument, not a variable: the scope the attempt runs in keeps only the variables that existed when it
+        # was probed.)
+        local attempt_jobs="$CARGO_JOBS"
+        [ "$n" -eq 2 ] && attempt_jobs=1
+        timeout --kill-after=30 "${limits[$((n - 1))]}" "${confine[@]}" bash "$SELF" --attempt "$attempt_jobs"
         status=$?
         confine_cleanup "$n"
         [ "$status" -eq 0 ] && return 0
@@ -333,6 +362,7 @@ main() {
 }
 
 if [ "${1:-}" = "--attempt" ]; then
+    CARGO_JOBS="${2:-$CARGO_JOBS}"
     attempt
     exit $?
 fi

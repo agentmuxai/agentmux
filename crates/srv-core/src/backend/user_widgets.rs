@@ -22,7 +22,7 @@ use super::config_watcher_fs::{broadcast_full_config, resolve_settings_dir};
 use super::eventbus::EventBus;
 use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
 use super::mps::Broker;
-use super::wconfig::{self, ConfigState, WidgetConfigType};
+use super::wconfig::{self, ConfigError, ConfigState, WidgetConfigType};
 
 pub const USER_WIDGETS_FILE: &str = "widgets.json";
 
@@ -30,16 +30,30 @@ pub fn user_widgets_path() -> PathBuf {
     resolve_settings_dir().join(USER_WIDGETS_FILE)
 }
 
-/// The user's widgets; an absent or empty file is none.
-pub fn read_user_widgets(path: &Path) -> Result<HashMap<String, WidgetConfigType>, String> {
+/// The user's widgets; an absent file, or one with nothing in it but comments, is none. The file is read as
+/// JSONC, like `settings.json`: comments and trailing commas are allowed. A file that does not parse is an
+/// error that names its line and column.
+pub fn read_user_widgets(path: &Path) -> Result<HashMap<String, WidgetConfigType>, ConfigError> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let content = std::fs::read_to_string(path).map_err(|e| format!("read widgets.json: {e}"))?;
-    if content.trim().is_empty() {
+    let file = path.to_string_lossy().to_string();
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| ConfigError { file: file.clone(), err: format!("cannot read widgets.json: {e}"), ..Default::default() })?;
+    parse_user_widgets(&content, &file)
+}
+
+/// The widgets in a widgets.json's text (`read_user_widgets` without the file).
+pub fn parse_user_widgets(content: &str, file: &str) -> Result<HashMap<String, WidgetConfigType>, ConfigError> {
+    if wconfig::config_text_is_blank(content) {
         return Ok(HashMap::new());
     }
-    serde_json::from_str(&content).map_err(|e| format!("parse widgets.json: {e}"))
+    wconfig::parse_config_text(content).map_err(|e| ConfigError {
+        file: file.to_string(),
+        err: format!("widgets.json doesn't parse, so your own widgets are not loaded: {e}"),
+        line: Some(e.line() as u32),
+        column: Some(e.column() as u32),
+    })
 }
 
 /// The built-in widgets, parsed once.
@@ -73,6 +87,8 @@ pub fn last_v1_entries() -> HashMap<String, WidgetConfigType> {
 }
 
 fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) {
+    // The file read, so what it last reported is over.
+    config_watcher.set_widgets_config_errors(Vec::new());
     wconfig::validate_widget_configs(&user);
     *LAST_USER.lock().unwrap_or_else(|p| p.into_inner()) = Some(user);
     if let Some(svc) = super::widget::packages::service() {
@@ -105,10 +121,10 @@ fn same_section(a: &serde_json::Value, b: &serde_json::Value) -> bool {
 /// when the entry has to be added, the file's new text. An absent or empty file is `{}`; one that
 /// doesn't parse is an error, so a file the user is halfway through editing is never rewritten.
 pub fn section_entry_in(content: &str, base: &str, entry: serde_json::Value) -> Result<(String, Option<String>), String> {
-    let mut widgets: serde_json::Map<String, serde_json::Value> = if content.trim().is_empty() {
+    let widgets: serde_json::Map<String, serde_json::Value> = if wconfig::config_text_is_blank(content) {
         serde_json::Map::new()
     } else {
-        serde_json::from_str(content).map_err(|e| format!("widgets.json doesn't parse, so it was left alone: {e}"))?
+        wconfig::parse_config_text(content).map_err(|e| format!("widgets.json doesn't parse, so it was left alone: {e}"))?
     };
     for n in 1..=50 {
         let key = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
@@ -116,13 +132,100 @@ pub fn section_entry_in(content: &str, base: &str, entry: serde_json::Value) -> 
             Some(existing) if same_section(existing, &entry) => return Ok((key, None)),
             Some(_) => continue,
             None => {
-                widgets.insert(key.clone(), entry);
-                let text = serde_json::to_string_pretty(&widgets).map_err(|e| e.to_string())? + "\n";
+                let text = insert_member(content, &key, &entry)?;
                 return Ok((key, Some(text)));
             }
         }
     }
     Err(format!("widgets.json has no free key for {base}"))
+}
+
+/// Where the top-level object of a JSONC text ends, and what is last in it.
+struct ObjectEnd {
+    /// The byte of its closing brace.
+    close: usize,
+    /// The last thing in it that is not a comment or space, and where it ends: a comma goes after it.
+    last: Option<(char, usize)>,
+}
+
+/// The closing brace of the text's top-level object, skipping strings and comments; `None` when it has none.
+fn top_level_object_end(text: &str) -> Option<ObjectEnd> {
+    let mut depth = 0usize;
+    let mut last: Option<(char, usize)> = None;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+                last = Some(('"', i + 1));
+            }
+            continue;
+        }
+        match c {
+            '/' if chars.peek().is_some_and(|&(_, n)| n == '/') => {
+                while chars.next_if(|&(_, n)| n != '\n').is_some() {}
+            }
+            '/' if chars.peek().is_some_and(|&(_, n)| n == '*') => {
+                chars.next();
+                let mut prev = ' ';
+                for (_, n) in chars.by_ref() {
+                    if prev == '*' && n == '/' {
+                        break;
+                    }
+                    prev = n;
+                }
+            }
+            '"' => in_string = true,
+            '{' | '[' => {
+                depth += 1;
+                last = Some((c, i + 1));
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && c == '}' {
+                    return Some(ObjectEnd { close: i, last });
+                }
+                last = Some((c, i + 1));
+            }
+            c if c.is_whitespace() || c == '\u{feff}' => {}
+            _ => last = Some((c, i + c.len_utf8())),
+        }
+    }
+    None
+}
+
+/// The text of widgets.json with `key: entry` added as the last member of its object, and nothing else
+/// changed: a person's comments, order and spacing stay where they are.
+fn insert_member(content: &str, key: &str, entry: &serde_json::Value) -> Result<String, String> {
+    use serde::Serialize;
+    let mut body = Vec::new();
+    let mut ser = serde_json::Serializer::with_formatter(&mut body, serde_json::ser::PrettyFormatter::with_indent(b"    "));
+    entry.serialize(&mut ser).map_err(|e| e.to_string())?;
+    let body = String::from_utf8(body).map_err(|e| e.to_string())?.replace('\n', "\n    ");
+    let member = format!("    {}: {}", serde_json::to_string(key).map_err(|e| e.to_string())?, body);
+    let Some(end) = top_level_object_end(content) else {
+        // Nothing in the file but comments, or nothing at all.
+        let head = content.trim_end();
+        let gap = if head.is_empty() { "" } else { "\n" };
+        return Ok(format!("{head}{gap}{{\n{member}\n}}\n"));
+    };
+    let (before, after) = content.split_at(end.close);
+    let mut before = before.to_string();
+    // A member that follows another needs the comma, put straight after it, before any comment of its line.
+    if let Some((c, at)) = end.last {
+        if c != '{' && c != ',' {
+            before.insert(at, ',');
+        }
+    }
+    let before = before.trim_end_matches([' ', '\t']);
+    let gap = if before.ends_with('\n') { "" } else { "\n" };
+    Ok(format!("{before}{gap}{member}\n{after}"))
 }
 
 /// Adds a section's `entry` to the user's widgets.json (`section_entry_in`) and applies the file
@@ -150,7 +253,7 @@ pub fn add_section_entry(
         }
         std::fs::write(&path, text).map_err(|e| format!("write widgets.json: {e}"))?;
     }
-    apply(config_watcher, read_user_widgets(&path)?);
+    apply(config_watcher, read_user_widgets(&path).map_err(|e| e.err)?);
     broadcast_full_config(config_watcher, event_bus);
     Ok(key)
 }
@@ -163,7 +266,9 @@ pub fn load_user_widgets_from_disk(config_watcher: &ConfigState) {
             apply(config_watcher, user);
         }
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "user widgets.json failed to load (built-ins only)");
+            tracing::warn!(path = %path.display(), error = %e.err, line = ?e.line, "user widgets.json failed to load (built-ins only)");
+            // Settings shows it, with the line; a client reads it with the full config.
+            config_watcher.set_widgets_config_errors(vec![e]);
         }
     }
 }
@@ -230,7 +335,11 @@ pub fn spawn_user_widgets_watcher(
                     let _ = tokio::task::spawn_blocking(move || on_changed(&c, &e, &b, user)).await;
                 }
                 Err(e) => {
-                    tracing::warn!(path = %watched_path.display(), error = %e, "user widgets.json reload parse error (keeping previous widgets)");
+                    tracing::warn!(path = %watched_path.display(), error = %e.err, line = ?e.line, "user widgets.json reload parse error (keeping previous widgets)");
+                    // The widgets stay as they were; Settings says why, with the line, and clears it when the file reads.
+                    if config_watcher.set_widgets_config_errors(vec![e]) {
+                        broadcast_full_config(&config_watcher, &event_bus);
+                    }
                 }
             }
         }
@@ -333,5 +442,125 @@ mod tests {
         assert!(first.contains_key("ext@c"));
         let second = merge_widgets(&builtin, HashMap::new());
         assert!(!second.contains_key("ext@c"));
+    }
+
+    const ENTRY: &str = r#"{ "label": "Jobs", "section": "jobs", "blockdef": { "meta": { "view": "warden" } } }"#;
+
+    fn entry() -> serde_json::Value {
+        serde_json::from_str(ENTRY).unwrap()
+    }
+
+    #[test]
+    fn a_file_with_comments_and_a_trailing_comma_loads_its_entry() {
+        let text = "// my buttons\n{\n    /* the docs */\n    \"my-docs\": { \"label\": \"Docs\", \"module\": \"a//b\", },\n}\n";
+        let user = parse_user_widgets(text, "widgets.json").unwrap();
+        assert_eq!(user.len(), 1);
+        assert_eq!(user["my-docs"].label, "Docs");
+        // A // inside a string is text, not a comment.
+        assert_eq!(user["my-docs"].module, "a//b");
+    }
+
+    #[test]
+    fn a_file_with_nothing_but_comments_is_no_widgets() {
+        assert!(parse_user_widgets("// nothing here yet\n/* or here */\n", "widgets.json").unwrap().is_empty());
+        assert!(parse_user_widgets("\u{feff}", "widgets.json").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_text_a_new_file_starts_with_parses_to_no_widgets_and_says_what_each_field_is() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../frontend/app/util/widgets-json-template.jsonc");
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(parse_user_widgets(&text, "widgets.json").unwrap().is_empty());
+        for field in [
+            "label",
+            "icon",
+            "color",
+            "description",
+            "display:order",
+            "display:pinned",
+            "blockdef",
+            "singleton",
+            "scope",
+            "children",
+            "section",
+            "module",
+        ] {
+            assert!(text.contains(&format!("\"{field}\"")), "the text says nothing about {field}");
+        }
+        // The example, with its comment marks taken off, is an entry that loads.
+        let live: Vec<String> = text
+            .lines()
+            // The example is the commented lines inside the object, indented; the field list above it starts at column 0.
+            .map(|l| l.strip_prefix("    // ").unwrap_or(l).to_string())
+            .collect();
+        let user = parse_user_widgets(&live.join("\n"), "widgets.json").unwrap();
+        assert_eq!(user["defwidget@my-docs"].label, "Docs");
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_names_its_line_and_column() {
+        let err = parse_user_widgets("{\n    \"a\": { \"label\": \"A\" },\n    \"b\": oops,\n}\n", "C:/x/widgets.json").unwrap_err();
+        assert_eq!((err.line, err.file.as_str()), (Some(3), "C:/x/widgets.json"));
+        assert!(err.column.is_some());
+        assert!(err.err.contains("line 3"), "{}", err.err);
+        // Comments above it do not move the line the mistake is reported on.
+        let err = parse_user_widgets("// one\n// two\n{ \"a\": oops }", "widgets.json").unwrap_err();
+        assert_eq!(err.line, Some(3));
+    }
+
+    #[test]
+    fn adding_an_entry_keeps_every_comment_and_the_order_of_the_file() {
+        let text = "// my buttons\n{\n    /* first */\n    \"mine\": { \"label\": \"M // }\" } // the only one\n}\n";
+        let (key, out) = section_entry_in(text, "section@warden-jobs", entry()).unwrap();
+        let out = out.unwrap();
+        for kept in ["// my buttons", "/* first */", "\"M // }\"", "// the only one"] {
+            assert!(out.contains(kept), "lost {kept:?} in:\n{out}");
+        }
+        assert!(out.find("\"mine\"").unwrap() < out.find(&key).unwrap());
+        let user = parse_user_widgets(&out, "widgets.json").unwrap();
+        assert_eq!((user["mine"].label.as_str(), user[&key].section.as_str()), ("M // }", "jobs"));
+    }
+
+    #[test]
+    fn adding_an_entry_works_in_every_shape_of_file() {
+        for text in [
+            "",
+            "// only a note\n",
+            "{}",
+            "{\n}\n",
+            "{\n    // nothing yet\n}\n",
+            "{ \"a\": { \"label\": \"A\" }, }",
+            "{ \"a\": { \"label\": \"A\" } }",
+            "{ \"a\": { \"label\": \"A\" } /* last */ }",
+        ] {
+            let (key, out) = section_entry_in(text, "section@x", entry()).unwrap();
+            let out = out.unwrap();
+            let user = parse_user_widgets(&out, "widgets.json")
+                .unwrap_or_else(|e| panic!("{text:?} gave a file that does not parse ({}):\n{out}", e.err));
+            assert!(user.contains_key(&key), "{text:?}");
+            assert_eq!(user.len(), if text.contains("\"a\"") { 2 } else { 1 }, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_is_left_alone_by_the_writer() {
+        assert!(section_entry_in("{ \"a\": oops // note\n}", "section@x", entry()).is_err());
+    }
+
+    #[test]
+    fn a_widgets_json_error_stays_until_the_file_reads_and_does_not_clear_settings_errors() {
+        let config = ConfigState::new();
+        let settings = ConfigError { file: "C:/x/settings.json".into(), err: "bad".into(), ..Default::default() };
+        config.set_config_errors(vec![settings.clone()]);
+        let bad = parse_user_widgets("{ oops", "C:/x/widgets.json").unwrap_err();
+        assert!(config.set_widgets_config_errors(vec![bad.clone()]));
+        assert_eq!(config.get_full_config().config_errors, vec![settings.clone(), bad.clone()]);
+        // A settings reload that reports nothing leaves widgets.json's error.
+        config.set_config_errors(Vec::new());
+        assert_eq!(config.get_full_config().config_errors, vec![bad]);
+        config.set_config_errors(vec![settings.clone()]);
+        // Applying a file that read clears its own error and not the settings'.
+        apply(&config, HashMap::new());
+        assert_eq!(config.get_full_config().config_errors, vec![settings]);
     }
 }

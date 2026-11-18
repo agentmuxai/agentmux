@@ -193,7 +193,14 @@ pub(super) fn describe_block(
     now_ms: u64,
 ) -> Value {
     let block = live.or(state_block).and_then(|id| mstore.get::<crate::backend::obj::Block>(id).ok().flatten());
-    describe_status(&status_of(mstore, live, block.as_ref(), net, now_ms), cold_after_ms)
+    let mut out = describe_status(&status_of(mstore, live, block.as_ref(), net, now_ms), cold_after_ms);
+    if out["state"] == AgentState::Error.as_str() {
+        // An error that was classified says what: `rate_limited` and `network` are worth another message.
+        if let Some(why) = crate::backend::worker_failure_note::code_name(&block.as_ref().map(|b| b.meta.clone()).unwrap_or_default()) {
+            out["failure"] = json!(why);
+        }
+    }
+    out
 }
 
 #[derive(serde::Deserialize)]

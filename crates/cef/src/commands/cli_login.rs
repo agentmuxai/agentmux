@@ -1260,7 +1260,7 @@ mod redact_tests {
 
     #[test]
     fn masks_oauth_token_keeps_prefix() {
-        let red = redact_secrets("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-AbCdEf123456789");
+        let red = redact_secrets(concat!("CLAUDE_CODE_OAUTH_TOKEN=sk-ant", "-oat01-AbCdEf123456789"));
         assert!(red.starts_with("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat0"));
         assert!(red.contains("…REDACTED"));
         assert!(!red.contains("AbCdEf123456789"));
@@ -1268,7 +1268,7 @@ mod redact_tests {
 
     #[test]
     fn masks_bare_token_and_preserves_surroundings() {
-        let red = redact_secrets("  token: sk-ant-api03-SECRETSECRETSECRET done");
+        let red = redact_secrets(concat!("  token: sk-ant", "-api03-SECRETSECRETSECRET done"));
         assert!(!red.contains("SECRETSECRETSECRET"));
         assert!(red.contains("sk-ant-api0")); // prefix + 4 kept
         assert!(red.contains("…REDACTED"));

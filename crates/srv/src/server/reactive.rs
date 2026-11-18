@@ -1401,12 +1401,9 @@ async fn handle_reactive_transcript_cross_channel(
     state: &AppState,
     params: &TranscriptQuery,
 ) -> Response {
+    let known = crate::backend::agent_resolve::resolve_agent_id(&state.mstore, &params.agent).is_ok();
     let not_found = || {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "agent not found"})),
-        )
-            .into_response()
+        (StatusCode::NOT_FOUND, Json(json!({ "error": former_slug::transcript_not_found_error(known, &params.agent) }))).into_response()
     };
 
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {

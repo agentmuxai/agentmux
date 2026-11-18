@@ -266,6 +266,46 @@
         // The check icon lines up with the label, the first line.
         align-items: flex-start;
 
+        // The row the keys are on: the shared `.menu-item` styles only :hover, so without this a
+        // person using only the keyboard could not see where they are.
+        &.active {
+            background-color: var(--hover-bg-color);
+        }
+
+        // One cursor: a mouse resting over a row while the keys move on leaves that row unfilled, so only the row the
+        // keys (or the pointer, when it enters a row) are on has a fill.
+        &:hover:not(.active) {
+            background: transparent;
+        }
+
+        // A model route's row, the last of the panel: it opens its models in place. A line above it sets the
+        // routes apart from the Effort rows, which stay with the harness's own models.
+        &.is-disclosure {
+            margin-top: var(--space-0-5);
+            padding-top: var(--space-1);
+            border-top: 1px solid var(--border-color);
+
+            .label {
+                font-weight: 600;
+            }
+
+            .agent-runtime-dropup-text {
+                flex: 1;
+            }
+
+            .agent-runtime-dropup-chevron {
+                flex-shrink: 0;
+                align-self: center;
+                color: var(--secondary-text-color);
+                font-size: var(--text-3xs);
+            }
+        }
+
+        // A model of an open route: set in under the route's row.
+        &.is-nested {
+            padding-left: calc(var(--space-1-5) + var(--space-3));
+        }
+
         // Not selectable (effort on a model that doesn't use it, a route model that can't take this
         // conversation). Only the name is dimmed: a greyed route row's description is the reason, and
         // has to stay readable.
@@ -342,30 +382,22 @@
     }
 }
 
-// A model route's name inside the Model section, with who pays for it on the same line.
-.agent-runtime-dropup-group {
-    display: flex;
-    gap: var(--space-1-5);
-    padding: var(--space-1) var(--space-1-5) 2px;
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    color: var(--secondary-text-color);
-    white-space: nowrap;
-
-    .agent-runtime-dropup-section-note {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-weight: normal;
-        font-style: italic;
-        padding-right: 0.25em;
-    }
-}
-
 .agent-runtime-dropup-description {
     color: var(--secondary-text-color);
     font-size: var(--text-3xs);
     opacity: 0.8;
+}
+
+// The View eye, on every agent pane: quiet while the pane shows everything, tinted for a view other than the plain
+// Full one, so the strip says the pane is not showing everything without a word of text.
+.agent-composer-strip-view {
+    --ui-fg: var(--secondary-text-color);
+    --ui-fg-hover: var(--main-text-color);
+
+    &.is-changed {
+        --ui-fg: var(--accent-fg-color);
+        --ui-fg-hover: var(--accent-fg-color);
+    }
 }
 
 // Shell toggle: the kit's accent Button (compact density, pressed while the shell is open). Accent at

@@ -35,6 +35,10 @@ pub mod upload;
 pub mod credential;
 pub mod image;
 mod image_tools;
+mod agent_caps;
+pub mod gateway_fwd;
+pub mod key_route;
+pub mod runtime_socket;
 pub mod listener;
 pub mod routes;
 pub mod runtime;
@@ -335,8 +339,8 @@ pub enum ContainerError {
     /// The provider CLI could not be installed in the container.
     #[error("could not install {command} in the container: {detail}")]
     CliInstall { command: String, detail: String },
-    /// A `container_volumes` entry whose source is the host's CLI session folder.
-    #[error("the volume source {path} is a host folder the container may not mount")]
+    /// A `container_volumes` entry whose source is a CLI session folder or a container runtime's socket or folder.
+    #[error("the volume source {path} is one a container may not mount")]
     VolumeRefused { path: String },
     /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
     #[error("no login for the container: {0}")]
@@ -345,6 +349,9 @@ pub enum ContainerError {
     /// container made from it starts and cannot reach its tools, its startup memory or anyone.
     #[error("the image {image} has no {}", missing.join(" or "))]
     ImageIncomplete { image: String, missing: Vec<String> },
+    /// The agent's API-key account can't be used from this container (plain reason, with what to do instead).
+    #[error("{0}")]
+    KeyRoute(String),
 }
 
 impl ContainerError {
@@ -372,8 +379,9 @@ impl ContainerError {
                  container_image, or the agent's definition in the window), or build yours from ghcr.io/agentmuxai/agent-base.",
                 missing.join(" or ")
             ),
+            Self::KeyRoute(reason) => reason.clone(),
             Self::VolumeRefused { path } => format!(
-                "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
+                "This agent's volumes list {path}, which a container may not mount (a container runtime's socket or pipe or a folder holding one, or a folder the CLI keeps its sessions in): remove it from the agent's volumes. An agent that needs to run containers has to run on this machine, not in a container."
             ),
         }
     }
@@ -527,7 +535,7 @@ impl ContainerManager {
         observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Before the container is reused or made: an existing one is refused as well.
-        if let Some(path) = crate::backend::cli_messaging::refused_volume_source(volumes.iter().filter_map(|v| parse_volume_spec(v)).map(|(s, _, _)| s)) {
+        if let Some(path) = runtime_socket::refused_mount(volumes, spec.workspace_host_dir.as_deref()) {
             return Err(ContainerError::VolumeRefused { path });
         }
         // Always query Docker — do not rely on an in-memory cache. The container
@@ -1031,6 +1039,8 @@ impl ContainerManager {
 
     /// Gracefully stop a container. Uses SIGTERM → SIGKILL after `timeout_secs`.
     pub async fn stop(&self, container_name: &str, timeout_secs: i64) -> Result<(), ContainerError> {
+        // First, whatever the daemon answers: a key account's token never outlives the container it was made for.
+        key_route::revoke_container_tokens(container_name);
         self.inner.docker
             .stop_container(container_name, Some(StopContainerOptions { t: timeout_secs }))
             .await?;
@@ -1042,6 +1052,7 @@ impl ContainerManager {
     /// Remove a container (must be stopped first or use `force = true`).
     pub async fn remove(&self, container_name: &str, force: bool) -> Result<(), ContainerError> {
         use bollard::container::RemoveContainerOptions;
+        key_route::revoke_container_tokens(container_name);
         // A login the container refreshed goes back to the Keychain while the container is still there to ask.
         self.write_back_keychain_login(container_name).await;
         self.inner.docker
@@ -1115,6 +1126,9 @@ impl ContainerManager {
         }
         if !Self::extra_hosts_match(&details) {
             return Some("extra_hosts missing host.docker.internal:host-gateway");
+        }
+        if !agent_caps::drops_net_raw(&details) {
+            return Some("NET_RAW not dropped");
         }
         None
     }
@@ -1299,16 +1313,7 @@ impl ContainerManager {
             tty: Some(false),
             open_stdin: Some(true),
             labels: status_source::agent_labels(container_name),
-            host_config: Some(HostConfig {
-                mounts: Some(all_mounts),
-                // Security: no host network, no privileged mode.
-                network_mode: Some("bridge".to_string()),
-                // Lets the container reach agentmux-srv via `host.docker.internal` (`run_agent_turn`/`agent_io`
-                // rewrite AGENTMUX_LOCAL_URL to it, #2939). Docker Desktop resolves the name itself; `host-gateway`
-                // is what makes it resolve on native Linux's default bridge network. A no-op where it already does.
-                extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
-                ..Default::default()
-            }),
+            host_config: Some(agent_caps::agent_host_config(all_mounts)),
             ..Default::default()
         };
         wanted_limits.apply_to(config.host_config.get_or_insert_with(Default::default));
@@ -1335,21 +1340,9 @@ impl ContainerManager {
         Ok(())
     }
 
-    /// Best-effort: create the shared [`AGENTMUX_DOCKER_NETWORK`] (if it
-    /// doesn't already exist) and attach `container_name` to it, additive
-    /// to whatever `network_mode`/`extra_hosts` `create_and_start` already
-    /// set up (container→host reachability via `host.docker.internal`,
-    /// entirely unaffected). Never fails `ensure_running` — this is purely
-    /// in service of dev-proxy routing
-    /// (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1), not
-    /// required for a container agent's core turn-execution path. Called
-    /// on every `ensure_running`, not just at creation, so an
-    /// already-running container from before this feature shipped is
-    /// picked up too, and so a network deleted out-of-band (`docker
-    /// network rm`) is recreated automatically.
-    async fn ensure_agent_network(&self, container_name: &str) {
-        use bollard::models::EndpointSettings;
-        use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
+    /// Creates the shared [`AGENTMUX_DOCKER_NETWORK`] if it does not exist; whether it exists now.
+    pub(super) async fn ensure_network_exists(&self) -> bool {
+        use bollard::network::CreateNetworkOptions;
 
         let create_opts = CreateNetworkOptions {
             name: AGENTMUX_DOCKER_NETWORK,
@@ -1368,8 +1361,30 @@ impl ContainerManager {
                     error = %e,
                     "dev-proxy: failed to create shared Docker network — dev-server routing unavailable this run"
                 );
-                return;
+                return false;
             }
+        }
+        true
+    }
+
+    /// Best-effort: create the shared [`AGENTMUX_DOCKER_NETWORK`] (if it
+    /// doesn't already exist) and attach `container_name` to it, additive
+    /// to whatever `network_mode`/`extra_hosts` `create_and_start` already
+    /// set up (container→host reachability via `host.docker.internal`,
+    /// entirely unaffected). Never fails `ensure_running` — this is purely
+    /// in service of dev-proxy routing
+    /// (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1), not
+    /// required for a container agent's core turn-execution path. Called
+    /// on every `ensure_running`, not just at creation, so an
+    /// already-running container from before this feature shipped is
+    /// picked up too, and so a network deleted out-of-band (`docker
+    /// network rm`) is recreated automatically.
+    async fn ensure_agent_network(&self, container_name: &str) {
+        use bollard::models::EndpointSettings;
+        use bollard::network::ConnectNetworkOptions;
+
+        if !self.ensure_network_exists().await {
+            return;
         }
         let connect_opts = ConnectNetworkOptions {
             container: container_name,

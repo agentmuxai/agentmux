@@ -17,6 +17,8 @@
  * compact form (one row when they fit, else two, ...); the fewest slots then collapse that reach that many rows
  * (of equal counts, the earliest in the order), so a pane keeps whatever full forms it has room for.
  */
+import { API_MARK } from "../failure/key-accounts";
+
 
 /**
  * Collapse order, first to collapse first: the account (to its dot and initial), the context reading (to
@@ -131,6 +133,14 @@ export const ACCOUNT_BUDGETS = [15, 12, 9, 7] as const;
  */
 export function middleTruncate(label: string, budget: number): string {
     if (label.length <= budget) return label;
+    // A key account's label ends in its mark ("Work key · API"): the name gives way, never the mark.
+    const mark = ` · ${API_MARK}`;
+    if (label.endsWith(mark)) {
+        const name = label.slice(0, -mark.length);
+        const room = budget - mark.length;
+        if (room >= 2) return `${name.slice(0, room - 1).trimEnd()}…${mark}`;
+        return room === 1 ? `${name[0]}${mark}` : API_MARK;
+    }
     const at = label.lastIndexOf("@");
     const domain = at > 0 ? label.slice(at) : "";
     const keep = budget - domain.length - 1;

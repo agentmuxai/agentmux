@@ -115,7 +115,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// as this agent and the other machine's srv carries it out (`agents.<action>`, spec §4.3). Any other
 /// action refuses a `host`, so a call never quietly runs here when it was meant for there.
 async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str) -> Result<String> {
-    let params = match action {
+    // Over host `update` takes only what the pane's picker sets (srv refuses the rest by name).
+    if action == "update" {
+        refuse_operator_fields(args)?;
+    }
+    let params = if action == "update" { definition_params(args) } else { match action {
         "start" | "stop" | "env_get" => json!({ "agent": str_arg(args, "agent") }),
         // The public `agent` is `agent_id` by now (`ACTS` renames it for `OpenAgent`).
         "open" => json!({ "agent": str_arg(args, "agent_id") }),
@@ -127,8 +131,8 @@ async fn remote_agents(cx: &ToolCtx<'_>, action: &str, args: &Value, host: &str)
         }),
         "set_seat" => json!({ "seats": args.get("seats") }),
         "rename" => json!({ "agent": str_arg(args, "agent"), "name": str_arg(args, "name") }),
-        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, rename, env_get and env_set; the other actions run on this machine"),
-    };
+        other => anyhow::bail!("Agents {other}: host applies to start, open, stop, set_seat, rename, update (model and effort), env_get and env_set; the other actions run on this machine"),
+    } };
     let op = format!("agents.{action}");
     let reason = str_arg(args, "reason").unwrap_or_else(|| format!("Agents {action}"));
     let answer = remote_op::remote_op_call(cx, host, &op, params, &reason).await?;
@@ -628,10 +632,30 @@ async fn rename_agent(cx: &ToolCtx<'_>, args: &Value) -> Result<String> {
 
 /// The fields `update` may change (`/api/v1/agent/update`); the name, provider, environment, accounts and
 /// seat have their own actions.
-const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "spend_cap_usd", "reset_spend_today"];
+const DEFINITION_FIELDS: &[&str] = &["description", "icon", "auto_start", "restart_on_crash", "idle_timeout_minutes", "route", "model", "effort", "spend_cap_usd", "reset_spend_today"];
 /// What decides what an agent runs, where its traffic goes or which project files it reads: the operator's to set in
 /// My Agents, as `env_set` refuses the same.
 const OPERATOR_FIELDS: &[&str] = &["shell", "provider_flags", "working_directory", "model_vendor_base_url"];
+
+/// Refuses what decides what an agent runs, where its traffic goes or which project files it reads: before a local
+/// request is made, and before a remote one is sent (over `host` it would otherwise be dropped without notice).
+fn refuse_operator_fields(args: &Value) -> Result<()> {
+    if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
+        anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
+    }
+    Ok(())
+}
+
+/// The body of an `update` request: the agent and each `update` field given.
+fn definition_params(args: &Value) -> Value {
+    let mut params = json!({ "agent": str_arg(args, "agent") });
+    for field in DEFINITION_FIELDS {
+        if let Some(v) = args.get(*field).filter(|v| !v.is_null()) {
+            params[*field] = v.clone();
+        }
+    }
+    params
+}
 
 /// `update`, `bundles`, `hide` and `unhide`: srv acts on the definition of the agent in `agent` (a picker
 /// template in `template` for hide and unhide) as the agent this process's token names, and records it under
@@ -641,16 +665,9 @@ async fn definition_action(cx: &ToolCtx<'_>, action: &str, args: &Value) -> Resu
     let need = |key: &str| str_arg(args, key).ok_or_else(|| anyhow::anyhow!("missing required parameter: {key}"));
     let body = match action {
         "update" => {
-            if let Some(field) = OPERATOR_FIELDS.iter().find(|f| args.get(**f).is_some_and(|v| !v.is_null())) {
-                anyhow::bail!("Agents update does not take {field}: shell, provider_flags, working_directory and model_vendor_base_url decide what an agent runs, where its traffic goes and which project files it reads, so the operator sets them in My Agents");
-            }
-            let mut body = json!({ "agent": need("agent")? });
-            for field in DEFINITION_FIELDS {
-                if let Some(v) = args.get(*field).filter(|v| !v.is_null()) {
-                    body[*field] = v.clone();
-                }
-            }
-            body
+            refuse_operator_fields(args)?;
+            need("agent")?;
+            definition_params(args)
         }
         "bundles" => json!({ "agent": need("agent")?, "bundle_ids": args.get("bundle_ids").filter(|v| !v.is_null()) }),
         _ => json!({ "template": need("template")? }),
@@ -843,6 +860,9 @@ mod tests {
         for field in ["shell", "provider_flags", "working_directory", "model_vendor_base_url"] {
             let e = call("Agents", &json!({ "action": "update", "agent": "pulse", field: "x" }), &cx).await.unwrap_err().to_string();
             assert!(e.contains(&format!("does not take {field}")), "{field}: {e}");
+            // Over host too: it is refused here, not dropped on its way to the other machine.
+            let e = call("Agents", &json!({ "action": "update", "agent": "pulse", "host": "narko", "model": "sonnet", field: "x" }), &cx).await.unwrap_err().to_string();
+            assert!(e.contains(&format!("does not take {field}")), "host {field}: {e}");
         }
     }
 
@@ -914,7 +934,7 @@ mod tests {
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         for action in ["list", "spawn", "detach", "watch"] {
             let e = call("Agents", &json!({ "action": action, "host": "narko" }), &cx).await.unwrap_err().to_string();
-            assert!(e.contains("host applies to start, open, stop, set_seat, rename, env_get and env_set"), "{action}: {e}");
+            assert!(e.contains("host applies to start, open, stop, set_seat, rename, update (model and effort), env_get and env_set"), "{action}: {e}");
         }
     }
 

@@ -13,6 +13,29 @@ fn texts(l: &Lines) -> Vec<&str> {
 }
 
 #[test]
+fn a_watch_does_not_read_a_zone_that_stopped_growing_while_the_block_keeps_writing() {
+    // A container agent's later turns reached the block's own copy, not the zone: a watch showed the zone's old lines.
+    let put = |fs: &crate::backend::storage::filestore::FileStore, zone: &str| {
+        fs.make_file(zone, OUTPUT_FILE, FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, OUTPUT_FILE, b"{\"n\":1}\n").unwrap();
+    };
+    let (own, global) = (crate::backend::storage::filestore::FileStore::open_in_memory().unwrap(), crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+    put(&global, "agent:def-watch-live:current");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    put(&own, "blk-watch-live");
+    assert!(!zone_is_live(&global, "agent:def-watch-live:current", &own, "blk-watch-live", 0), "the newer own copy is read");
+    assert!(zone_is_live(&global, "agent:def-watch-live:current", &own, "blk-watch-live", 5_000), "within the slack the zone is read");
+    // Written the other way round, or with no own copy, the zone stays the source.
+    let (own2, global2) = (crate::backend::storage::filestore::FileStore::open_in_memory().unwrap(), crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+    put(&own2, "blk-watch-live");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    put(&global2, "agent:def-watch-live:current");
+    assert!(zone_is_live(&global2, "agent:def-watch-live:current", &own2, "blk-watch-live", 0));
+    let empty = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+    assert!(zone_is_live(&global2, "agent:def-watch-live:current", &empty, "blk-watch-live", 0));
+}
+
+#[test]
 fn a_tail_returns_whole_lines_and_leaves_a_line_being_written() {
     let data = b"one\ntwo\n\nthr";
     let l = lines_of(data, 100, false, false, 10);

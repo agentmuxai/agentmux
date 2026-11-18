@@ -5,7 +5,7 @@
 /**
  * The agent pane's header has no Stash button: the Stash drawer is gone
  * (SPEC_DROP_THE_AGENT_STASH_2026_10_24.md, D6), and nothing replaces the
- * button. Seat…, Bundles… and Personal memory are in the right-click menu.
+ * button. Seat… and Personal memory are in the right-click menu.
  *
  * Also: `agent:stashheight`, the drawer's saved height, is now only an ignored
  * block-meta key. A block that still carries it must open like any other, so no

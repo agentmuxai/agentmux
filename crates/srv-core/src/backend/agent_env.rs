@@ -486,6 +486,11 @@ impl Change {
         self.added.keys().chain(self.changed.keys()).any(|n| is_endpoint_name(n))
     }
 
+    /// Whether the change adds or changes `ANTHROPIC_MODEL`.
+    pub fn sets_model_name(&self) -> bool {
+        self.added.keys().chain(self.changed.keys()).any(|n| n.eq_ignore_ascii_case("ANTHROPIC_MODEL"))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }
@@ -529,6 +534,22 @@ pub fn diff(old: &str, new: &str) -> Change {
     }
     change.removed = old.keys().filter(|n| !new.contains_key(*n)).cloned().collect();
     change
+}
+
+/// Whether the environment in `text` points the agent at a server of its own: an `ANTHROPIC_BASE_URL` that is not
+/// Anthropic's. Only then does the launch ask for the model `ANTHROPIC_MODEL` names (`endpoint_model`); anywhere else it
+/// passes the model its pane's runtime chose, which that variable cannot change.
+pub fn points_at_own_server(text: &str) -> bool {
+    effective(text).iter().any(|(k, v)| k.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") && !v.trim().is_empty() && !is_anthropic_url(v.trim()))
+}
+
+/// [`points_at_own_server`] for an agent with a definition: the launch puts its structured `model_vendor_base_url`
+/// into the environment first, and it wins over an `ANTHROPIC_BASE_URL` line of the text, so a set one decides alone.
+pub fn points_at_own_server_with(text: &str, structured_base_url: &str) -> bool {
+    match structured_base_url.trim() {
+        "" => points_at_own_server(text),
+        url => !is_anthropic_url(url),
+    }
 }
 
 /// `text` as an agent is shown it: the values of names it may not set hidden,

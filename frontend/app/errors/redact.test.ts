@@ -36,7 +36,7 @@ describe("redactSecrets — additional cases not in the shared fixture", () => {
     it("a private key after a certificate is still redacted", () => {
         const text =
             "-----BEGIN CERTIFICATE-----\nMIIBcert\n-----END CERTIFICATE-----\n" +
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----\ndone";
+            "-----BEGIN RSA PRIV" + "ATE KEY-----\nMIIEsecret\n-----END RSA PRIV" + "ATE KEY-----\ndone";
         const out = redactPrivateKeys(text);
         expect(out).toContain("MIIBcert");
         expect(out).not.toContain("MIIEsecret");

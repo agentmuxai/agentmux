@@ -75,6 +75,11 @@ replaces: boolean,
  */
 signin: boolean, 
 /**
+ * An agent asks the person to share a login with it (`Vault` `share`): `origin` is the login's site and `field`
+ * its user name as the card shows it. Never goes ahead on silence, and never offers "Always".
+ */
+share: boolean, 
+/**
  * An agent's new account on a sign-up form (`Browser` `generate_password`): the
  * Vault makes the password. There is no entry yet; `origin` is the site.
  */

@@ -14,7 +14,7 @@ export type AgentRuntime = {
 agent_id: string, state: AgentRuntimeState, 
 /**
  * Why, for a state that has a reason: `usage_limit`, `needs_login`, `starts_on_first_message` or
- * `browser_request`.
+ * `browser_request`; for `error`, the class of its last failure (`rate_limited`, `network`...).
  */
 detail?: string, 
 /**

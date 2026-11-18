@@ -101,6 +101,28 @@ describe("usePendingMessageAcceptance — onAccepted", () => {
     });
 });
 
+describe("usePendingMessageAcceptance — agent-message-queued", () => {
+    const fireQueued = (data: unknown) => {
+        const h = hub.handlers.get("agent-message-queued");
+        if (!h) throw new Error("agent-message-queued handler not registered");
+        h({ data });
+    };
+
+    it("tells the pane the message waits behind the agent's live process, and how many are ahead", () => {
+        const { dispatched, dispose } = setup([{ id: "m1", text: "hello" } as PendingMessage]);
+        fireQueued({ block_id: BLOCK_ID, message_id: "m1", ahead: 2 });
+        expect(dispatched).toEqual([{ type: "PendingMessageWaiting", id: "m1", ahead: 2 }]);
+        dispose();
+    });
+
+    it("ignores a message the pane is not holding (a jekt, or one already accepted)", () => {
+        const { dispatched, dispose } = setup([{ id: "m1", text: "hello" } as PendingMessage]);
+        fireQueued({ block_id: BLOCK_ID, message_id: "someone-elses", ahead: 0 });
+        expect(dispatched).toEqual([]);
+        dispose();
+    });
+});
+
 describe("usePendingMessageAcceptance — onTurnStartFromQueue", () => {
     it("dispatches TurnStart and re-engages scroll-follow when accepted while idle (Done)", () => {
         hub.turnPhase = { kind: "Done", outcome: "completed", finishedAt: 0 };

@@ -4,8 +4,8 @@
 /**
  * The View popover: what this agent pane shows. The three presets (Custom lights when the five
  * switches match none), one segmented control per switch, Follow default, and Make this the default
- * (docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5). Opened from the composer chip, the
- * pane's right-click menu and the palette; every change applies at once and the panel stays open.
+ * (docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md §4.5). Opened from the eye in the composer's
+ * control row and the palette; every change applies at once and the panel stays open.
  */
 
 import { For, Show, type JSX } from "solid-js";
@@ -18,8 +18,10 @@ import "./AgentViewPopover.scss";
 
 export interface AgentViewPopoverProps {
     controls: AgentViewControls;
-    /** The element the panel hangs from. It must outlast the panel: the composer strip, not its chip, which a change of view removes. */
+    /** The element the panel hangs from: the eye in the composer's control row, or the strip itself when the eye is not drawn. */
     anchor: Element | undefined;
+    /** The agent pane: the panel stays inside it, narrowing to it when the pane is narrower than the panel. */
+    pane?: HTMLElement | undefined;
 }
 
 export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
@@ -33,6 +35,9 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            containWithin={() => props.pane}
+            fitWidth
+            fitHeight
             shellClass="anchored-popover--menu"
             class="menu agent-view-popover"
             role="dialog"

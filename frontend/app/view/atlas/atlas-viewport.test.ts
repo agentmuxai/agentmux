@@ -58,6 +58,30 @@ describe("zoomCentered", () => {
         expect(v.y + (600 * v.k) / 2).toBeCloseTo(350);
     });
 
+    it("leaves a map that still fits where it is, so the first zoom in from the fit does not slide it sideways", () => {
+        // A 400 by 300 map fitted at the top left of a 1000 by 700 pane, zoomed in once.
+        const v = zoomCentered({ x: 16, y: 16, k: 1 }, 1.25, 400, 300, 1000, 700);
+        expect(v).toEqual({ k: 1.25, x: 16, y: 16 });
+        // ...and out again.
+        expect(zoomCentered(v, 0.8, 400, 300, 1000, 700)).toEqual({ k: 1, x: 16, y: 16 });
+    });
+
+    it("keeps a map that fits inside the pane when it grows toward the far edge", () => {
+        const v = zoomCentered({ x: 500, y: 16, k: 1 }, 1.5, 400, 300, 1000, 700);
+        // 600 wide now: its right side stops at the pane's margin, not past it.
+        expect(v.x + 400 * v.k).toBeLessThanOrEqual(1000 - 16);
+        expect(v.y).toBe(16);
+    });
+
+    it("centres a map that grows to fill the pane, with no jump where it stops fitting", () => {
+        const fits = zoomCentered({ x: 16, y: 16, k: 1 }, 2.4, 400, 300, 1000, 700);
+        const fills = zoomCentered({ x: 16, y: 16, k: 1 }, 2.5, 400, 300, 1000, 700);
+        expect(fits.x).toBeGreaterThanOrEqual(16);
+        expect(fills.x + (400 * fills.k) / 2).toBeCloseTo(500);
+        // The pane's margin is the most it can move when the map stops fitting.
+        expect(Math.abs(fills.x - fits.x)).toBeLessThanOrEqual(16);
+    });
+
     it("stays centred when the map is larger than the pane, and stops at the limits", () => {
         const v = zoomCentered({ x: 0, y: 0, k: 1 }, 2, 800, 600, 400, 300);
         expect(v.x + (800 * v.k) / 2).toBeCloseTo(200);

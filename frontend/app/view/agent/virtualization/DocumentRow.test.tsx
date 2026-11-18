@@ -661,7 +661,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
 
     it("lists every item without opening the card", () => {
         renderMemory(memoryCard());
-        expect(screen.getByText("Memory re-delivered after compaction · 3 items · 2 cut")).toBeInTheDocument();
+        expect(screen.getByText("Memory re-delivered after compaction · 3 items · 1 left out · 1 cut")).toBeInTheDocument();
         expect(screen.getByText("App API")).toBeInTheDocument();
         expect(screen.getByText("AgentMux system")).toBeInTheDocument();
         expect(screen.getByText("Workspace")).toBeInTheDocument();
@@ -672,7 +672,7 @@ describe("DocumentRow — memory delivery card (SPEC_CONTEXT_DELIVERY_2026_09_30
     it("marks items the part cap cut", () => {
         renderMemory(memoryCard());
         expect(screen.getByText("cut")).toBeInTheDocument();
-        expect(screen.getByText("not sent")).toBeInTheDocument();
+        expect(screen.getByText("left out")).toBeInTheDocument();
     });
 
     it("has no chevron and doesn't pin when there's no text to open", async () => {

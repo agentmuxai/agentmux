@@ -31,9 +31,9 @@ pub enum CaptureWrite {
     /// A new entry.
     Insert(super::vault::VaultRow),
     /// A new sealed value for an entry, only if it is still the incarnation
-    /// (`row.created_at`) and value (`was`) that were read; `kept` is the value it
-    /// replaces, kept as a version.
-    Replace { row: super::vault::VaultRow, was: Vec<u8>, kept: Option<VaultVersionRow> },
+    /// (`row.created_at`), value (`was`) and plain fields (`was_fields`, which hold who a
+    /// login is shared with) that were read; `kept` is the value it replaces, kept as a version.
+    Replace { row: super::vault::VaultRow, was: Vec<u8>, was_fields: String, kept: Option<VaultVersionRow> },
 }
 
 fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultVersionRow> {
@@ -120,16 +120,18 @@ impl Store {
         Ok(true)
     }
 
-    /// Saves the person's edit of an entry: its label, fields, tags and sealed
-    /// parts, only if it still holds the value `was` read, and keeps `kept` (the
-    /// value a new one replaces) in the same transaction. False, with nothing
-    /// written, if the entry changed or is gone.
-    pub fn vault_update_kept(&self, row: &super::vault::VaultRow, was: &[u8], kept: Option<&VaultVersionRow>) -> Result<bool, StoreError> {
+    /// Saves an edit of an entry: its label, fields, tags and sealed parts, only
+    /// if it still holds the sealed value `was` and the fields `was_fields` that were
+    /// read (a change to who a login is shared with is a change to its fields, which a
+    /// write from an older read must not undo), and keeps `kept` (the value a new one
+    /// replaces) in the same transaction. False, with nothing written, if the entry
+    /// changed or is gone.
+    pub fn vault_update_kept(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: Option<&VaultVersionRow>) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
         let n = tx.execute(
-            "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, sealed = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?7 AND sealed = ?8",
-            params![row.id, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.created_at, was],
+            "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, sealed = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?7 AND sealed = ?8 AND fields = ?9",
+            params![row.id, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.created_at, was, was_fields],
         )?;
         if n == 0 {
             return Ok(false);
@@ -145,6 +147,21 @@ impl Store {
         Ok(true)
     }
 
+    /// Changes only an entry's `fields`, and only if they are still `was_fields`
+    /// and the entry is still the one read (`created_at`, `sealed`): its label,
+    /// tags and sealed parts are left as they are. False, with nothing written, if
+    /// any of them changed or the entry is gone. For a change that touches no
+    /// sealed part (a share), where two overlapping changes must not each succeed
+    /// on what the other has since undone.
+    pub fn vault_set_fields_if(&self, id: &str, created_at: i64, sealed: &[u8], was_fields: &str, fields: &str, updated_at: i64) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_vault_entries SET fields = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?2 AND sealed = ?3 AND fields = ?4",
+            params![id, created_at, sealed, was_fields, fields, updated_at],
+        )?;
+        Ok(n > 0)
+    }
+
     /// Commits a capture's writes in one transaction. False, with nothing written,
     /// if an entry it replaces changed or was made again since it was read.
     pub fn vault_capture_commit(&self, writes: &[CaptureWrite]) -> Result<bool, StoreError> {
@@ -158,10 +175,10 @@ impl Store {
                         params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at],
                     )?;
                 }
-                CaptureWrite::Replace { row, was, kept } => {
+                CaptureWrite::Replace { row, was, was_fields, kept } => {
                     let n = tx.execute(
-                        "UPDATE db_vault_entries SET sealed = ?2, updated_at = ?3, fields = ?6 WHERE id = ?1 AND created_at = ?4 AND sealed = ?5",
-                        params![row.id, row.sealed, row.updated_at, row.created_at, was, row.fields],
+                        "UPDATE db_vault_entries SET sealed = ?2, updated_at = ?3, fields = ?6 WHERE id = ?1 AND created_at = ?4 AND sealed = ?5 AND fields = ?7",
+                        params![row.id, row.sealed, row.updated_at, row.created_at, was, row.fields, was_fields],
                     )?;
                     if n == 0 {
                         // Dropping `tx` rolls back what this capture wrote so far.

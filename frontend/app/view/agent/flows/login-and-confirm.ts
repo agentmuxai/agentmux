@@ -19,6 +19,7 @@ import { RpcApi, type ResolveCliResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sleep } from "@/util/util";
 import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
+import { currentAccountId } from "../failure/key-accounts";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
 import { installPackageField } from "../providers/install-request";
@@ -48,11 +49,11 @@ export function resolveProviderCli(provider: CliProvider, blockId: string): Prom
 }
 
 /** The account linked to this agent for `providerId`, matched across legacy
- *  provider aliases. Best-effort: undefined when the lookup fails. */
-export async function linkedAccountFor(agentDefinitionId: string, providerId: string): Promise<string | undefined> {
+ *  provider aliases (`withKey`: an Anthropic API key it is moved onto counts). Best-effort: undefined when the lookup fails. */
+export async function linkedAccountFor(agentDefinitionId: string, providerId: string, withKey = false): Promise<string | undefined> {
     try {
         const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
-        return lastLinkedAccountId(links, providerId);
+        return withKey ? currentAccountId(links, providerId) : lastLinkedAccountId(links, providerId);
     } catch {
         return undefined;
     }

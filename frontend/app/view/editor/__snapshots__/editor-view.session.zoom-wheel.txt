@@ -8,4 +8,4 @@ zoom before: 1
 wheel {"ctrlKey":true} prevented=false
 rpc SetMeta {"oref":"block:session<n>","meta":{"term:zoom":1.05}}
 wheel {"metaKey":true} prevented=true
-zoom after: 1.05 style="1.05"
+zoom after: 1.05 style="1.05" tree=1

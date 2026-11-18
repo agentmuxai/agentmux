@@ -31,6 +31,9 @@ export function useDropupListeners(s: DropupState, act: DropupActions) {
         } else if (e.key === "ArrowUp") {
             e.preventDefault();
             act.move(-1);
+        } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+            // On a model route's row or one of its models: open or close its list.
+            if (act.expandActive(e.key === "ArrowRight")) e.preventDefault();
         } else if (e.key === "Enter") {
             e.preventDefault();
             void act.applySelection(s.selectedOptIndex());

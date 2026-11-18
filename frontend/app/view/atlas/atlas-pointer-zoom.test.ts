@@ -154,14 +154,20 @@ describe("a zoom past the fitted view closes the rows and keeps its place", () =
         });
     });
 
-    it("centres the map at the size it has after a zoom button's step", () => {
+    it("through a zoom button's steps, leaves a map that still fits where the fit put it and centres one that fills the pane", () => {
         zoomed((zoom, map) => {
+            const fitted = zoom.view();
             zoom.zoomBy(1.25);
             zoom.zoomBy(1.25);
             const v = zoom.view();
             expect(zoom.spread()).toBeLessThan(1);
-            expect(v.x + (map().width * v.k) / 2).toBeCloseTo(400);
-            expect(v.y + (map().height * v.k) / 2).toBeCloseTo(300);
+            const wide = map().width * v.k;
+            const tall = map().height * v.k;
+            // The pane is 800 by 600, with the fit's 16 px margin round the map.
+            if (wide + 32 < 800) expect(v.x).toBeCloseTo(fitted.x);
+            else expect(v.x + wide / 2).toBeCloseTo(400);
+            if (tall + 32 < 600) expect(v.y).toBeCloseTo(fitted.y);
+            else expect(v.y + tall / 2).toBeCloseTo(300);
         });
     });
 });

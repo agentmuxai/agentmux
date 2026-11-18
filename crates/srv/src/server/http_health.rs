@@ -153,7 +153,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
                 "seat": crate::backend::agent_seat::summary_in(&state.mstore, &defs, &i.definition_id),
-                "spend": super::spend_watch::view(&state.mstore, &defs, &i.definition_id),
+                "spend": super::spend_watch::view(&state.mstore, &state.identity_store, &defs, &i.definition_id),
                 "availability": super::availability_view::describe_block(&state.mstore, availability_block.as_deref(), runtime.get(&i.id).and_then(|r| r.block_id.as_deref()), &net, cold_after_ms, now_ms),
                 "runtime": runtime.get(&i.id),
             })

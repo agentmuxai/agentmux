@@ -36,7 +36,7 @@ describe("paneRoleColor headerTint — dark theme (default)", () => {
     });
 
     it("gives an agent's persisted identity hex the same header as an explicit pick of its slot — one system for both sources", () => {
-        for (const id of ["red", "green", "indigo"]) {
+        for (const id of ["red", "green", "violet"]) {
             expect(paneRoleColor(undefined, slotById(id)!.hex, false, "headerTint")).toBe(
                 paneRoleColor(undefined, id, false, "headerTint"),
             );
@@ -72,23 +72,35 @@ describe("setPaneColor", () => {
     });
 
     it("writes frame:color and clears the older frame:hue via SetMetaCommand", () => {
-        setPaneColor("block-1", "azure");
+        setPaneColor("block-1", "blue");
         expect(setMetaCommand).toHaveBeenCalledWith(
             {},
-            { oref: "block:block-1", meta: { "frame:color": "azure", "frame:hue": null } },
+            { oref: "block:block-1", meta: { "frame:color": "blue", "frame:hue": null } },
         );
     });
 
-    it("persists the slot's stored hex as the agent's identity color when an agentId is given", () => {
+    it("writes a retired id as the slot it became", () => {
         setPaneColor("block-1", "azure", "agent-42");
+        expect(setMetaCommand).toHaveBeenCalledWith({}, { oref: "block:block-1", meta: { "frame:color": "blue", "frame:hue": null } });
+        expect(setAgentContentCommand).toHaveBeenCalledWith({}, { agent_id: "agent-42", content_type: "ui:color", content: slotById("blue")!.hex });
+    });
+
+    it("stores Black as #000000 for an agent", () => {
+        setPaneColor("block-1", "black", "agent-42");
+        expect(setMetaCommand).toHaveBeenCalledWith({}, { oref: "block:block-1", meta: { "frame:color": "black", "frame:hue": null } });
+        expect(setAgentContentCommand).toHaveBeenCalledWith({}, { agent_id: "agent-42", content_type: "ui:color", content: "#000000" });
+    });
+
+    it("persists the slot's stored hex as the agent's identity color when an agentId is given", () => {
+        setPaneColor("block-1", "blue", "agent-42");
         expect(setAgentContentCommand).toHaveBeenCalledWith(
             {},
-            { agent_id: "agent-42", content_type: "ui:color", content: slotById("azure")!.hex },
+            { agent_id: "agent-42", content_type: "ui:color", content: slotById("blue")!.hex },
         );
     });
 
     it("does NOT touch agent identity when no agentId is given (non-agent pane)", () => {
-        setPaneColor("block-1", "azure");
+        setPaneColor("block-1", "blue");
         expect(setAgentContentCommand).not.toHaveBeenCalled();
     });
 
@@ -121,14 +133,14 @@ describe("setWidgetColor", () => {
 
     it("adds a widget's color to the others already set", () => {
         paneColors = { browser: "green" };
-        setWidgetColor("term", "indigo");
-        expect(written()).toEqual({ "pane:colors": { browser: "green", term: "indigo" } });
+        setWidgetColor("term", "violet");
+        expect(written()).toEqual({ "pane:colors": { browser: "green", term: "violet" } });
     });
 
     it("keeps an older number the user still has for another widget", () => {
         paneColors = { browser: 90 };
-        setWidgetColor("term", "indigo");
-        expect(written()).toEqual({ "pane:colors": { browser: 90, term: "indigo" } });
+        setWidgetColor("term", "violet");
+        expect(written()).toEqual({ "pane:colors": { browser: 90, term: "violet" } });
     });
 
     it("writes null for None, which is not the same as unset", () => {
@@ -137,7 +149,7 @@ describe("setWidgetColor", () => {
     });
 
     it("removes the key on undefined, returning the widget to its built-in color", () => {
-        paneColors = { browser: "green", term: "indigo" };
+        paneColors = { browser: "green", term: "violet" };
         setWidgetColor("term", undefined);
         expect(written()).toEqual({ "pane:colors": { browser: "green" } });
     });
@@ -149,15 +161,15 @@ describe("setWidgetColor", () => {
             setWidgetColor("t-new", undefined);
             expect(written()).toEqual({ "pane:colors": { browser: "amber" } });
             paneColors = { "t-old": 90 };
-            setWidgetColor("t-new", "indigo");
-            expect(written()).toEqual({ "pane:colors": { "t-new": "indigo" } });
+            setWidgetColor("t-new", "violet");
+            expect(written()).toEqual({ "pane:colors": { "t-new": "violet" } });
         } finally {
             unregister();
         }
     });
 
     it("deletes the whole setting when the last key goes", () => {
-        paneColors = { term: "indigo" };
+        paneColors = { term: "violet" };
         setWidgetColor("term", undefined);
         expect(written()).toEqual({ "pane:colors": null });
     });

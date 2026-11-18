@@ -17,12 +17,16 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
+import NEW_WIDGETS_FILE from "./widgets-json-template.jsonc?raw";
 
 /** The config files that sit beside each other in the config folder. */
 export type ConfigFile = "settings.json" | "widgets.json";
 
-/** What a new widgets.json starts as: srv reads an empty object as no widgets of the user's own. */
-const EMPTY_FILE = "{}\n";
+/**
+ * What a new widgets.json starts as: instructions and one example, all in comments, inside an empty object, which srv
+ * reads as no widgets of the person's own. The example stays commented out so a file left as it is changes nothing.
+ */
+export const NEW_WIDGETS_FILE_TEXT: string = NEW_WIDGETS_FILE;
 
 /** The folder of `path`, with its own separator at the end; empty for a bare name. */
 function folderOf(path: string): string {
@@ -47,6 +51,21 @@ async function existsIn(folder: string, name: string): Promise<boolean> {
 }
 
 /**
+ * Whether the file at `path` is still what the button first made it: empty, or an empty object and nothing else. The
+ * instructions are written into such a file; any other file is left as it is. A read that fails is "no": a file that
+ * cannot be read right now must never be written over.
+ */
+async function isStillEmpty(path: string): Promise<boolean> {
+    try {
+        const { content } = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path });
+        const text = content.replace(/^\uFEFF/, "").trim();
+        return text === "" || /^\{\s*\}$/.test(text);
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Whether the Editor can save into the folder of `settingsPath`: srv writes only under the home folder, judged on
  * the real paths (a symlink is followed). AGENTMUX_SETTINGS_DIR, or a symlinked config folder, can put it
  * elsewhere, and a file there would open in the Editor and then fail to save. srv's listing answers with the
@@ -67,7 +86,9 @@ export async function ensureConfigFile(file: ConfigFile, knownSettingsPath?: str
     if (file === "settings.json") return settingsPath;
     const path = siblingOf(settingsPath, file);
     if (!(await existsIn(folderOf(settingsPath) || ".", file))) {
-        await RpcApi.WriteEditorFileCommand(TabRpcClient, { path, content: EMPTY_FILE });
+        await RpcApi.WriteEditorFileCommand(TabRpcClient, { path, content: NEW_WIDGETS_FILE_TEXT });
+    } else if (await isStillEmpty(path)) {
+        await RpcApi.WriteEditorFileCommand(TabRpcClient, { path, content: NEW_WIDGETS_FILE_TEXT });
     }
     return path;
 }

@@ -23,9 +23,12 @@ use crate::backend::mps::{Broker, MuxEvent};
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
+use super::worker_failure_note::FAILED_AT;
 
 /// The fewest milliseconds between two notes about the same worker.
 const NOTE_GAP_MS: u64 = 60_000;
+/// How long an exit waits for the failure that ended the turn, so its note can leave the cause to that failure's.
+const EXIT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1_000);
 /// How much of a worker's last message a note quotes.
 const LAST_WORDS_CHARS: usize = 200;
 
@@ -148,13 +151,39 @@ pub fn install(
             if !seen.first(&ev) {
                 continue;
             }
-            let (store, filestore) = (mstore.clone(), filestore.clone());
-            let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
-            if let Ok(Some((leader_block, text, wait_key))) = note {
-                deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
+            if let WorkerEvent::Failed { block_id, .. } = &ev {
+                FAILED_AT.lock().record(block_id, std::time::Instant::now());
+            }
+            let (mstore, filestore, config) = (mstore.clone(), filestore.clone(), config.clone());
+            if matches!(ev, WorkerEvent::Exited { .. }) {
+                // Off the loop, so the wait delays no other worker's note.
+                tokio::spawn(note_exit(ev, mstore, filestore, config));
+            } else {
+                send_note(ev, mstore, filestore, config).await;
             }
         }
     });
+}
+
+/// The note for `ev`, delivered.
+async fn send_note(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+    let store = mstore.clone();
+    let note = tokio::task::spawn_blocking(move || note_for(&store, &filestore, &ev)).await;
+    if let Ok(Some((leader_block, text, wait_key))) = note {
+        deliver(&mstore, &config, &leader_block, &text, wait_key.as_deref());
+    }
+}
+
+/// An exit's note, unless the failure that ended the turn speaks for it (#2617): its `agentfailure` follows the
+/// exit within milliseconds and names the cause, so the exit waits `EXIT_SETTLE` for it.
+async fn note_exit(ev: WorkerEvent, mstore: Arc<Store>, filestore: Arc<FileStore>, config: Arc<crate::backend::wconfig::ConfigState>) {
+    let WorkerEvent::Exited { block_id, .. } = &ev else { return };
+    let (block_id, heard_at) = (block_id.clone(), std::time::Instant::now());
+    tokio::time::sleep(EXIT_SETTLE).await;
+    if FAILED_AT.lock().speaks_for_exit(&block_id, heard_at) {
+        return;
+    }
+    send_note(ev, mstore, filestore, config).await;
 }
 
 /// A worker pane's worker and leader, as srv knows them.
@@ -176,6 +205,23 @@ fn worker_of_block(mstore: &Store, block_id: &str) -> Option<Worker> {
     let leader_def_id = crate::backend::agent_seat::worker_of(mstore, &def_id)?;
     let def = mstore.agent_def_list().ok()?.into_iter().find(|d| d.id == def_id)?;
     Some(Worker { def_id, name: def.name, slug: def.slug, leader_def_id })
+}
+
+/// Whether this block's own note already tells `sender` (an agent slug or id) about an exit of it: it is a
+/// worker whose registered leader is `sender`, and that leader has an open pane to be told in. `sender_failure_note`
+/// skips telling the same agent again, less richly, about the same exit (#2627).
+pub(crate) fn already_tells_its_leader(mstore: &Store, block_id: &str, sender: &str) -> bool {
+    let Some(worker) = worker_of_block(mstore, block_id) else { return false };
+    let Ok(defs) = mstore.agent_def_list() else { return false };
+    let Some(sender_id) = defs.iter().find(|d| d.slug == sender || d.id == sender).map(|d| d.id.clone()) else { return false };
+    // The same check `note_for` makes: a worker's own leader is told only through its live pane, by the ad-hoc
+    // `agent:worker_of` relationship (not the formal Seats table `leader_pane_of` reads for a general seat lead).
+    if sender_id != worker.leader_def_id || live_panes_of(mstore, &worker.leader_def_id).is_empty() {
+        return false;
+    }
+    // Only suppressed when that note was actually admitted, not held by the one-note-a-minute throttle just
+    // below (#2629): a held note tells the leader nothing, so the sender's own note must go through instead.
+    super::worker_failure_note::failure_note_was_admitted(block_id)
 }
 
 /// The open panes (in a tab) of definition `def_id`.
@@ -234,13 +280,23 @@ fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(
             turn_end_body(&worker.name, words)
         }
         WorkerEvent::Exited { .. } => format!("Your worker {} stopped: its process exited.", worker.name),
-        WorkerEvent::Failed { title, .. } => format!("Your worker {} stopped with an error: {title}.", worker.name),
+        WorkerEvent::Failed { title, .. } => {
+            let meta = mstore.get::<Block>(block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
+            super::worker_failure_note::failed_body(&worker.name, title, &meta, agentmux_common::time::now_ms_u64())
+        }
         WorkerEvent::Asked { .. } => format!(
             "Your worker {} is waiting for the user to answer a question in its pane; it can't go on until they do.",
             worker.name
         ),
     };
-    let body = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64())?;
+    let admitted = GAPS.lock().admit(&worker.def_id, body, agentmux_common::time::now_ms_u64());
+    if matches!(ev, WorkerEvent::Failed { .. }) {
+        // So `sender_failure_note::already_tells_its_leader` knows whether this failure's own note actually
+        // reached the leader, or was held by the throttle just below — a held note tells the leader nothing
+        // (#2629).
+        super::worker_failure_note::record_failure_admission(block_id, admitted.is_some());
+    }
+    let body = admitted?;
     Some((leader_block, format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body)), wait_key))
 }
 
@@ -318,14 +374,20 @@ fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str) -> LastWord
     let Some(activity) = read_recent_activity(filestore, mstore, block_id) else {
         return LastWords::default();
     };
-    let text = activity
-        .text
+    LastWords { text: ended_turn_text(&activity.text), asked: matches!(activity.ending, TurnEnding::AssistantAsked | TurnEnding::AskedUser) }
+}
+
+/// The newest assistant message of the turn that ended: the one after the last `[user]` entry of the digest. A
+/// turn that was only tool calls has none, and quoting an older turn's message would repeat the same words, as if
+/// they were new, in every note that follows.
+fn ended_turn_text(digest: &str) -> String {
+    digest
         .lines()
         .rev()
+        .take_while(|l| !l.starts_with("[user] "))
         .find_map(|l| l.strip_prefix("[assistant] "))
         .map(|t| clip(t, LAST_WORDS_CHARS))
-        .unwrap_or_default();
-    LastWords { text, asked: matches!(activity.ending, TurnEnding::AssistantAsked | TurnEnding::AskedUser) }
+        .unwrap_or_default()
 }
 
 fn turn_end_body(name: &str, words: LastWords) -> String {

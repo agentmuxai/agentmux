@@ -178,6 +178,7 @@ function AgentViewOverlays({ v }: { v: AgentViewParts }): JSX.Element {
                 matchIndex={input.search.currentIndex}
                 matchCount={input.search.matchCount}
                 searching={input.search.searching}
+                text={input.search.text}
                 dim={input.search.dim}
                 onDimChange={input.search.setDim}
             />

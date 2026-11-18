@@ -130,8 +130,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         Some(dir) => with_frontend(full, dir),
         None => full,
     };
-    let full = full.layer(version_header).layer(cors).with_state(state);
-    let container = crate::backend::container::listener::layer(full.clone(), crate::backend::container::listener::current_subnet);
+    let full = full.layer(version_header).layer(cors).with_state(state.clone());
+    let container = crate::backend::container::listener::layer_reporting(full.clone(), crate::backend::container::listener::current_subnet, super::model_gateway_key::foreign_use_reporter(state));
 
     SrvRouters { full, lan, container }
 }
@@ -477,6 +477,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/api/v1/vault/import", post(super::vault_import::handle_vault_import))
         .route("/api/v1/vault/import_batch", post(super::vault_import_batch::handle_vault_import_batch))
         .route("/api/v1/vault/check", post(super::vault_source::handle_vault_check))
+        .route("/api/v1/vault/share", post(super::vault_inspect::handle_vault_share))
         .route("/api/v1/vault/show", post(super::vault_inspect::handle_vault_show))
         .route("/api/v1/vault/update", post(super::vault_inspect::handle_vault_update))
         .route("/api/v1/vault/verify", post(super::vault_inspect::handle_vault_verify))
@@ -751,6 +752,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/ui/browser/open", post(ui_handlers::handle_ui_browser_open))
         .route("/api/v1/ui/browser/snapshot", post(ui_handlers::handle_ui_browser_snapshot))
         .route("/api/v1/ui/browser/find", post(crate::server::browser_find::handle_ui_browser_find))
+        .route("/api/v1/ui/browser/locate", post(crate::server::browser_locate::handle_ui_browser_locate))
         .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/set_files", post(ui_handlers::handle_ui_browser_set_files))
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
@@ -813,6 +815,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
         .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
+        // The record of AgentMux's own size over weeks (SPEC_LONG_RUNNING_ZERO_DEGRADATION §6).
+        .route("/api/v1/app/record", get(app_api::record_read::handle_record))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
 }
 

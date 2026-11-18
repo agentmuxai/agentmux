@@ -19,6 +19,8 @@ const rpc = vi.hoisted(() => ({
     real: {} as Record<string, string>,
     GetEditorHomeCommand: vi.fn(async (_c: unknown) => ({ home: "C:\\Users\\a" })),
     WriteEditorFileCommand: vi.fn(async () => undefined),
+    // What is in widgets.json when it is in the folder: a file the person has already written in.
+    ReadEditorFileCommand: vi.fn(async (_c: unknown, _d: { path: string }) => ({ content: '{ "mine": { "label": "Mine" } }' })),
     PaneOpenCommand: vi.fn(async (_c: unknown, _a: unknown, _o: unknown) => ({ block_id: "b1" })),
 }));
 const blocks = vi.hoisted(() => ({ focused: "settings-block" as string | undefined, leafs: [{ data: { blockId: "tab-block" } }] as { data?: { blockId?: string; activeBlockId?: string } }[] }));
@@ -35,7 +37,7 @@ vi.mock("@/app/store/global", () => ({ atoms: { activeTabId: () => "tab-1" }, pu
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { ensureConfigFile, openConfigFileInEditor, openConfigFileOrTell, siblingOf } from "./open-config-file";
+import { ensureConfigFile, NEW_WIDGETS_FILE_TEXT, openConfigFileInEditor, openConfigFileOrTell, siblingOf } from "./open-config-file";
 
 const sent = () => rpc.PaneOpenCommand.mock.calls[0] as unknown as [unknown, Record<string, unknown>];
 
@@ -73,10 +75,43 @@ describe("ensureConfigFile", () => {
         expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
     });
 
-    it("widgets.json is created empty when the folder does not have it", async () => {
+    it("widgets.json is created with its instructions when the folder does not have it", async () => {
         rpc.ListEditorDirCommand.mockResolvedValue({ path: "", entries: [{ name: "settings.json" }] });
         await ensureConfigFile("widgets.json");
-        expect(rpc.WriteEditorFileCommand).toHaveBeenCalledWith({}, { path: WIN_WIDGETS, content: "{}\n" });
+        expect(rpc.WriteEditorFileCommand).toHaveBeenCalledWith({}, { path: WIN_WIDGETS, content: NEW_WIDGETS_FILE_TEXT });
+        // The text explains the file, and its example is a comment: nothing in it is a widget until the person edits it.
+        expect(NEW_WIDGETS_FILE_TEXT).toMatch(/merged over the built-in ones/);
+        const lines = NEW_WIDGETS_FILE_TEXT.split("\n").map((l) => l.trim());
+        expect(lines.filter((l) => l !== "" && !l.startsWith("//") && l !== "{" && l !== "}")).toEqual([]);
+    });
+
+    it("a widgets.json that is still empty, or only {}, gets the instructions on the next open", async () => {
+        for (const content of ["", "  \n", "{}", "{}\n", "{ }", "\uFEFF{}\n"]) {
+            rpc.WriteEditorFileCommand.mockClear();
+            rpc.ReadEditorFileCommand.mockResolvedValueOnce({ content });
+            await ensureConfigFile("widgets.json");
+            expect(rpc.WriteEditorFileCommand, JSON.stringify(content)).toHaveBeenCalledWith({}, { path: WIN_WIDGETS, content: NEW_WIDGETS_FILE_TEXT });
+        }
+    });
+
+    it("any other widgets.json is never written over", async () => {
+        for (const content of [
+            '{ "mine": { "label": "Mine" } }',
+            "// my notes\n{}\n",
+            "{ // a note\n}",
+            "{ half typed",
+            NEW_WIDGETS_FILE_TEXT,
+        ]) {
+            rpc.ReadEditorFileCommand.mockResolvedValueOnce({ content });
+            await ensureConfigFile("widgets.json");
+        }
+        expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
+    });
+
+    it("a widgets.json that can't be read right now is left alone too", async () => {
+        rpc.ReadEditorFileCommand.mockRejectedValueOnce(new Error("locked"));
+        expect(await ensureConfigFile("widgets.json")).toBe(WIN_WIDGETS);
+        expect(rpc.WriteEditorFileCommand).not.toHaveBeenCalled();
     });
 
     it("never writes when the folder can't be listed, so a file that can't be read right now is not erased", async () => {

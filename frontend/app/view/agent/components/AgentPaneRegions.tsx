@@ -5,7 +5,7 @@
 
 import { Show, type Accessor, type ComponentProps, type JSX } from "solid-js";
 import type { AgentViewModel } from "../agent-model";
-import { viewChipLabel, type createAgentViewControls } from "../agent-view-controls";
+import type { createAgentViewControls } from "../agent-view-controls";
 import type { useAgentCommands } from "../hooks/useAgentCommands";
 import type { useOfflineInput } from "../offline/useOfflineInput";
 import { AgentDocumentView } from "./AgentDocumentView";
@@ -71,16 +71,17 @@ export function AgentTranscriptRegion(
     );
 }
 
-/** Hangs from the chip, or from the strip while there is none (opened from the menu or the palette). Keyed by which: the panel reads its anchor once, and a change of view can remove the chip under it. */
+/** Hangs from the eye in the composer's control row, or from the strip when the eye is not drawn (opened from the palette on a pane whose strip is not ready). */
 export function AgentViewPopoverHost(props: { controls: ReturnType<typeof createAgentViewControls>; rootEl: () => HTMLElement | undefined }): JSX.Element {
     return (
-        <Show when={props.controls.popoverOpen() ? (viewChipLabel(props.controls.resolved()) ? "chip" : "strip") : undefined} keyed>
-            {(anchor) => (
-                <AgentViewPopover
-                    controls={props.controls}
-                    anchor={props.rootEl()?.querySelector(anchor === "chip" ? "[data-agent-view-chip]" : ".agent-composer-strip") ?? undefined}
-                />
-            )}
+        <Show when={props.controls.popoverOpen()}>
+            <AgentViewPopover
+                controls={props.controls}
+                pane={props.rootEl()}
+                anchor={
+                    props.rootEl()?.querySelector("[data-agent-view-chip]") ?? props.rootEl()?.querySelector(".agent-composer-strip") ?? undefined
+                }
+            />
         </Show>
     );
 }

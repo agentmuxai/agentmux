@@ -65,6 +65,20 @@ describe("Settings controls follow a settings.json saved elsewhere", () => {
     });
 });
 
+describe("Settings shows a widgets.json that does not parse", () => {
+    it("names the line, and its Fix button opens widgets.json, not settings.json", () => {
+        const opened: string[] = [];
+        setFullConfigAtom(
+            config({}, [{ file: "C:/Users/a/config/widgets.json", err: "widgets.json doesn't parse, so your own widgets are not loaded: expected value at line 3 column 12" }])
+        );
+        render(() => <ConfigErrorsBanner onOpen={(f) => opened.push(f)} />);
+        expect(screen.getByText(/at line 3 column 12/)).toBeInTheDocument();
+        screen.getByRole("button").click();
+        expect(opened).toEqual(["widgets.json"]);
+        setFullConfigAtom(config({}));
+    });
+});
+
 describe("Settings shows a settings.json that does not parse", () => {
     it("lists the error when the config carries one, and drops it when the file is right again", () => {
         render(() => <ConfigErrorsBanner onOpen={() => {}} />);

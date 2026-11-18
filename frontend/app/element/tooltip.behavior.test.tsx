@@ -66,6 +66,7 @@ vi.mock("./tooltip-timing", async (orig) => {
 });
 vi.mock("@/app/util/pointer-drag-state", () => ({
     isPrimaryButtonDown: () => h.state.primaryDown,
+    isRestingAtPress: () => false,
     onPrimaryButtonRelease: (cb: () => void) => {
         h.state.releaseListeners.push(cb);
         return () => {

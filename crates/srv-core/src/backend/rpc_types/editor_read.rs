@@ -281,3 +281,66 @@ pub struct FileSearchBytesResult {
     #[ts(type = "number")]
     pub next_from: u64,
 }
+
+/// Request for `fileindexlines`: where a run of a text file's lines is, so the Large text viewer can fetch that
+/// byte range. srv reads the file once per (path, modified time) and keeps the line index.
+/// docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileIndexLinesReq {
+    pub path: String,
+    /// The probe's text encoding: "utf-8" (the default), "legacy", "utf-16le" or "utf-16be".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub encoding: Option<String>,
+    /// The first line wanted, 0-based.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub from_line: u64,
+    /// How many lines, at most 100,000.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub count: u64,
+    /// Also say where each of those lines starts (`starts` in the answer), found in the same pass that finds `end`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_starts: Option<bool>,
+    /// Start at the line that holds this byte (a match `filesearchbytes` found) instead of `from_line`: the answer's
+    /// `line_at` says which line that is, and `start`, `end` and `starts` are the run from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub at_offset: Option<u64>,
+}
+
+/// Response for `fileindexlines`: the bytes `[start, end)` hold lines `from_line` up to `from_line + count` (fewer at
+/// the end of the file; both are the size for a line past the last).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FileIndexLinesResult {
+    /// All the lines of the file.
+    #[ts(type = "number")]
+    pub total_lines: u64,
+    /// The file's size when it was indexed.
+    #[ts(type = "number")]
+    pub size: u64,
+    /// Its modified time then, milliseconds since the epoch: a change in either says the index is another.
+    #[ts(type = "number")]
+    pub mtime: i64,
+    #[ts(type = "number")]
+    pub start: u64,
+    #[ts(type = "number")]
+    pub end: u64,
+    /// The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found from the start of the
+    /// file: the probe says only "legacy" for a file that isn't UTF-8.
+    pub encoding: String,
+    /// Where each of the lines starts, in order, when the request asked (`line_starts`): the one after the last starts
+    /// at `end`. Empty otherwise.
+    #[serde(default)]
+    #[ts(type = "Array<number>")]
+    pub starts: Vec<u64>,
+    /// The 0-based line that holds the request's `at_offset` (the last line for an offset past the end); absent when
+    /// the request gave none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub line_at: Option<u64>,
+}

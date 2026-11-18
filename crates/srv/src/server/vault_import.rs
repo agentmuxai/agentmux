@@ -15,11 +15,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::AppState;
 use crate::backend::vault::aws_import::{self, ImportRequest, Plan, Target, Via, SERVICE};
-use crate::backend::vault::uses::{Ended, UseImport, UseRequest};
+use crate::backend::vault::uses::{Decision, Ended, UseImport, UseRequest};
 use crate::identity::aws_broker::mint::HostRunner;
 use crate::identity::aws_broker::request::{credentials_for, Ask};
 use crate::identity::aws_broker::{policy, sessions};
@@ -53,15 +53,44 @@ pub(super) struct Who {
 }
 
 /// `what` is the action asked for (`import`, `check`) and `records` what the Vault's record of it names.
-pub(super) fn asker(state: &AppState, auth: Option<&agentmux_common::api_types::UiAutomationAuth>, what: &str, records: &str) -> Result<Who, Response> {
-    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs the agent's signed identity: {why}"));
+pub(super) fn asker(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+    what: &str,
+    records: &str,
+) -> Result<Who, Response> {
+    let refuse = |why: String| error(StatusCode::FORBIDDEN, format!("{what} needs to know which agent asks (its token or its signed identity): {why}"));
     let Some(auth) = auth else { return Err(refuse(format!("the Vault records {records}"))) };
-    let pane = super::ui_handlers::verified_block_id(state, None, auth).map_err(refuse)?;
+    let pane = super::ui_handlers::verified_block_id(state, caller, auth).map_err(refuse)?;
     let agent: String = auth.agent_id.chars().take(64).collect();
     let uid = crate::backend::reactive::handler::get_global_handler().get_agent(&auth.agent_id).and_then(|r| r.uid);
     let def = uid.as_deref().and_then(|u| state.mstore.agent_def_get(u).ok().flatten());
     let Some(def) = def else { return Err(error(StatusCode::FORBIDDEN, format!("{what} couldn't tell which agent this is"))) };
     Ok(Who { agent, pane, slug: def.slug.clone(), uid: uid.unwrap_or_default(), container: def.runtime().is_container() })
+}
+
+/// Whether the person left an import's share ticked: `None` for a use with no share on it, and for a no. The card
+/// sends the tick explicitly; an approval that sends none (a surface that doesn't draw the share line) shares nothing.
+pub(super) fn ticked_share(request: &UseRequest, share: Option<&Value>, decision: Decision) -> Option<bool> {
+    if decision == Decision::Deny || !request.import.as_ref().is_some_and(|i| i.share) {
+        return None;
+    }
+    Some(share.and_then(Value::as_bool).unwrap_or(false))
+}
+
+/// What became of the share an import asked for: whether it was made, and what the agent is told. The login is saved
+/// either way.
+pub(super) async fn share_made(state: &AppState, who: &Who, id: &str, ticked: bool) -> (bool, String) {
+    if !ticked {
+        return (false, "the share was not ticked (left unticked, or the approval sent no tick): the login is saved and not shared with you".into());
+    }
+    let (store, id, uid) = (state.identity_store.clone(), id.to_string(), who.uid.clone());
+    match tokio::task::spawn_blocking(move || crate::backend::vault::shares::add(&store, &id, &uid)).await {
+        Ok(Ok(_)) => (true, "shared with you: sign in to the site with Browser signin, which asks the person the first time".into()),
+        Ok(Err(why)) => (false, format!("the login is saved and not shared: {why}")),
+        Err(e) => (false, format!("the login is saved and not shared: {e}")),
+    }
 }
 
 /// The question for the person: the secret, where it goes, and what the agent says it is for.
@@ -88,6 +117,9 @@ fn card(plan: &Plan, who: &Who) -> UseRequest {
             grant: who.container,
             vault: plan.vault_name.clone(),
             replaces,
+            user_key: plan.source.user_key.clone().unwrap_or_default(),
+            site: plan.site().to_string(),
+            share: plan.share,
         }),
         ..Default::default()
     }
@@ -148,8 +180,8 @@ pub(super) async fn credentials(state: &AppState, who: &Who, profile: &str, reas
 }
 
 /// `POST /api/v1/vault/import`
-pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body): Json<ImportBody>) -> Response {
-    let who = match asker(&state, body.auth.as_ref(), "import", "who copied each secret") {
+pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: Option<axum::Extension<super::caller::Caller>>, Json(body): Json<ImportBody>) -> Response {
+    let who = match asker(&state, caller.as_deref(), body.auth.as_ref(), "import", "who copied each secret") {
         Ok(who) => who,
         Err(refusal) => return refusal,
     };
@@ -158,7 +190,7 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body
         Err(refusal) => return refusal,
     };
     let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(ANSWER_WAIT).min(ANSWER_WAIT_MAX);
-    let (ended, _) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who), wait, &headline(&plan, &who)).await;
+    let (ended, answer) = super::vault_ask::ask(&state, &who.pane, card(&plan, &who), wait, &headline(&plan, &who)).await;
     if !ended.allowed() {
         return refused(&state, &plan, &who, ended.outcome(), StatusCode::FORBIDDEN, not_allowed(ended));
     }
@@ -169,8 +201,15 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, Json(body
     let via = minted.as_ref().map_or(Via::Host, Via::Session);
     match aws_import::perform(&state.identity_store, &HostRunner, &plan, via, &who.agent).await {
         Ok(done) => {
+            let mut out = json!({ "status": "imported", "id": done.id, "label": done.label, "vault": done.vault });
+            if plan.share {
+                let ticked = answer.as_ref().and_then(|a| a.share) == Some(true);
+                let (shared, said) = share_made(&state, &who, &done.id, ticked).await;
+                out["shared"] = json!(shared);
+                out["share_note"] = json!(said);
+            }
             super::vault_handlers::publish(&state);
-            Json(json!({ "status": "imported", "id": done.id, "label": done.label, "vault": done.vault })).into_response()
+            Json(out).into_response()
         }
         Err(why) => refused(&state, &plan, &who, "failed", StatusCode::BAD_GATEWAY, why),
     }
@@ -188,11 +227,12 @@ mod tests {
             Target::New { kind: "api-key", part: "value", label: "Staging database".into(), fields: Default::default(), vault_id: "personal".into() }
         };
         Plan {
-            source: Source { aws_secret_id: "staging/db".into(), key: Some("db.password".into()), region: Some("eu-west-1".into()), profile: Some("work-read".into()) },
+            source: Source { aws_secret_id: "staging/db".into(), key: Some("db.password".into()), user_key: None, region: Some("eu-west-1".into()), profile: Some("work-read".into()) },
             target,
             vault_name: "Personal".into(),
             reason: "copy the staging database password for task 28071".into(),
             refs: vec![],
+            share: false,
         }
     }
 
@@ -210,6 +250,28 @@ mod tests {
         assert_eq!((import.profile.as_str(), import.grant), ("work-read", false), "the card says which AWS login the read runs under");
         assert!(in_container.import.unwrap().grant, "a container agent's profile is a grant");
         assert_eq!((card.agent_reason.as_str(), card.block_id.as_str(), card.entry_id.as_str()), ("copy the staging database password for task 28071", "block-1", ""));
+    }
+
+    #[test]
+    fn a_login_imports_card_names_its_user_key_and_its_share_and_only_a_share_has_a_tick_to_answer() {
+        let mut login = plan(false);
+        login.source.user_key = Some("db.user".into());
+        login.share = true;
+        if let Target::New { kind, part, fields, .. } = &mut login.target {
+            *kind = "login";
+            *part = "password";
+            fields.insert("site".into(), "https://intranet.example.com".into());
+        }
+        let card = card(&login, &who());
+        let import = card.import.as_ref().unwrap();
+        assert_eq!((import.user_key.as_str(), import.site.as_str(), import.share), ("db.user", "https://intranet.example.com", true));
+        let tick = |card: &UseRequest, share: Option<bool>, decision| ticked_share(card, share.map(|s| json!(s)).as_ref(), decision);
+        assert_eq!(tick(&card, None, Decision::Once), Some(false), "an approval that sends no tick shares nothing");
+        assert_eq!(tick(&card, Some(true), Decision::Once), Some(true));
+        assert_eq!(tick(&card, Some(false), Decision::Once), Some(false));
+        assert_eq!(tick(&card, Some(false), Decision::Deny), None, "a no shares nothing and has no tick");
+        let plain = super::card(&plan(false), &who());
+        assert_eq!((plain.import.as_ref().unwrap().share, tick(&plain, Some(false), Decision::Once)), (false, None), "an import with no share has nothing to untick");
     }
 
     #[test]

@@ -23,6 +23,7 @@ import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import { accountPickerItems, planBind, type BindMode } from "./account-picker";
 import { AnotherAccountLogin } from "./AnotherAccountLogin";
 import { computeAccountBindCandidates } from "./bind-account-candidates";
+import { boundLabel, chipLabel, currentAccountId, menuChoices, menuRow } from "./key-accounts";
 import { usePrepWindow, type PrepMeta } from "./prep-window";
 import { switchNotice } from "./switch-notice";
 
@@ -139,7 +140,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
         }
         try {
             const links = await deps.listIdentities(agentDefinitionId);
-            setLinkedAccountId(lastLinkedAccountId(links, providerId));
+            setLinkedAccountId(currentAccountId(links, providerId));
         } catch {
             setLinkedAccountId(undefined);
         }
@@ -157,7 +158,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     // The bound account's login email for the composer's sign-in chip
     // (SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) — live across logins and
     // rebinds via accountCache + linkedAccountId.
-    const authEmail = createMemo(() => boundAccountEmail(accountCache(), linkedAccountId()));
+    const authEmail = createMemo(() => boundLabel(accountCache(), linkedAccountId()));
 
     const bindCandidates = createMemo(() => {
         const providerId = opts.providerId();
@@ -197,11 +198,7 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     // turn ends.
     const switchChoices = createMemo(() => {
         const providerId = opts.providerId();
-        if (!providerId) return [];
-        const provider = resolveProviderAlias(providerId);
-        return accountCache()
-            .filter((a) => resolveProviderAlias(a.provider) === provider && a.status === "valid")
-            .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+        return providerId ? menuChoices(accountCache(), providerId) : [];
     });
     // Signing in a new account is the in-app Claude login; other providers have no such panel yet.
     const canSignInAnother = createMemo(() => resolveProviderAlias(opts.providerId() ?? "") === "claude");
@@ -212,13 +209,13 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     const pendingAccountLabel = createMemo(() => {
         const id = opts.pendingAccountId?.();
         const a = id ? accountCache().find((x) => x.id === id) : undefined;
-        return a ? accountLabel(a, accountCache()) : undefined;
+        return a ? chipLabel(a, accountCache()) : undefined;
     });
     const { prepCountdown, onSwitchNow } = usePrepWindow(opts, deps);
     const switchTo = async (account: Account) => {
         // Picking the account it is on cancels a queued switch; with none queued there is nothing to do.
         if (account.id === linkedAccountId() && !opts.pendingAccountId?.()) return;
-        await switchToId(account.id, accountLabel(account, accountCache()));
+        await switchToId(account.id, chipLabel(account, accountCache()));
     };
     const switchToId = async (accountId: string, label: string) => {
         const agentId = opts.agentDefinitionId();
@@ -238,17 +235,11 @@ export function useAccountBinding(opts: AccountBindingOptions): AccountBinding {
     const switchToNewAccount = (accountId: string) => {
         const all = deps.loadAccounts();
         const account = accountCache().find((a) => a.id === accountId) ?? all.find((a) => a.id === accountId);
-        void switchToId(accountId, account ? accountLabel(account, all) : "the new account");
+        void switchToId(accountId, account ? chipLabel(account, all) : "the new account");
     };
     const onSwitchAccount = (e: MouseEvent) => {
         const current = linkedAccountId();
-        const items: ContextMenuItem[] = switchChoices().map((a) => ({
-            label: accountLabel(a, accountCache()),
-            sublabel: quotaNote(a.id),
-            type: "checkbox" as const,
-            checked: a.id === current,
-            click: () => void switchTo(a),
-        }));
+        const items: ContextMenuItem[] = switchChoices().map((a) => menuRow(a, accountCache(), current, quotaNote(a.id), () => void switchTo(a)));
         const actions: ContextMenuItem[] = [];
         if (canLogIn()) actions.push({ label: "Log in", click: () => opts.onLogin?.() });
         if (canSignInAnother()) {

@@ -1,0 +1,557 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `App` with `view`: this machine's record of AgentMux's own size over weeks
+//! (docs/specs/SPEC_LONG_RUNNING_ZERO_DEGRADATION_2026_11_16.md §6, task #47820), read from srv's
+//! `GET /api/v1/app/record`. `summary` says whether AgentMux has grown, `series` lists the hours or the
+//! five-minute lines, `export` returns the lines as they are stored, to attach to a bug. The record holds numbers
+//! and stable keys only and never leaves the computer.
+
+use super::app_tool::{ago, gb, mb, s, str_arg};
+use super::*;
+
+const DAY_MS: i64 = 86_400_000;
+/// The answer of `export` is cut at this many bytes of text.
+const EXPORT_BYTES: usize = 200_000;
+const MAX_HOURS: u64 = 336;
+
+pub(super) async fn record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let view = str_arg(arguments, "view").unwrap_or_else(|| "summary".to_string());
+    let now_ms = agentmux_common::time::now_ms();
+    match view.as_str() {
+        "summary" => {
+            let from = (now_ms - 8 * DAY_MS).max(0).to_string();
+            let rolls = get(cx, &[("kind", "rollup"), ("limit", "200"), ("from_ms", &from)]).await?;
+            let raw = get(cx, &[("kind", "raw"), ("limit", "1")]).await?;
+            let events = get(cx, &[("kind", "events"), ("limit", "500"), ("from_ms", &from)]).await?;
+            let empty = Vec::new();
+            Ok(describe_summary(
+                &rolls["inventory"],
+                raw["lines"].get(0),
+                rolls["lines"].as_array().unwrap_or(&empty),
+                events["lines"].as_array().unwrap_or(&empty),
+                events["matched"].as_u64().map_or(0, |m| m as usize),
+                now_ms,
+            ))
+        }
+        "series" | "export" => {
+            let kind = str_arg(arguments, "kind").unwrap_or_else(|| "rollup".to_string());
+            if !matches!(kind.as_str(), "rollup" | "raw" | "events") {
+                anyhow::bail!("App record: kind is \"rollup\", \"raw\" or \"events\", not {kind:?}");
+            }
+            let raw = kind == "raw";
+            let hours = arguments.get("hours").and_then(Value::as_u64).unwrap_or(24).clamp(1, MAX_HOURS);
+            let limit = match kind.as_str() {
+                "raw" => (hours * 12).min(600),
+                "events" => 500,
+                _ => hours,
+            }
+            .to_string();
+            let from = (now_ms - hours as i64 * 3_600_000).max(0).to_string();
+            let day = str_arg(arguments, "day");
+            let mut query = vec![("kind", kind.as_str()), ("limit", limit.as_str())];
+            match day.as_deref() {
+                Some(day) => query.push(("day", day)),
+                None => query.push(("from_ms", from.as_str())),
+            }
+            let body = get(cx, &query).await?;
+            let lines = body["lines"].as_array().map(Vec::as_slice).unwrap_or_default();
+            let matched = body["matched"].as_u64().map_or(lines.len(), |m| m as usize);
+            Ok(match (view.as_str(), kind.as_str()) {
+                ("export", _) => describe_export(lines, matched),
+                (_, "events") => describe_events(lines, matched, now_ms),
+                _ => describe_series(raw, lines, matched, now_ms),
+            })
+        }
+        other => anyhow::bail!("App record: view is \"summary\", \"series\" or \"export\", not {other:?}"),
+    }
+}
+
+async fn get(cx: &ToolCtx<'_>, query: &[(&str, &str)]) -> Result<Value> {
+    let url = format!("{}/api/v1/app/record", cx.local_url.trim_end_matches('/'));
+    let resp = cx.client.get(&url).header(AUTH_KEY_HEADER, cx.auth_key).query(query).send().await.map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("App record: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(body)
+}
+
+/// A `[min, median, p95, max]` as numbers.
+fn stat(v: &Value) -> Option<[u64; 4]> {
+    let a = v.as_array()?;
+    Some([a.first()?.as_u64()?, a.get(1)?.as_u64()?, a.get(2)?.as_u64()?, a.get(3)?.as_u64()?])
+}
+
+/// The stat of `key` among a rollup's `parts` or `rows` (a list of `[key, stat]`).
+fn keyed(r: &Value, list: &str, key: &str) -> Option<[u64; 4]> {
+    r[list].as_array()?.iter().find(|p| p[0].as_str() == Some(key)).and_then(|p| stat(&p[1]))
+}
+
+fn parts_of(r: &Value) -> String {
+    let part = |k: &str| keyed(r, "parts", k).map_or(0, |s| s[1]);
+    format!(
+        "core {}, panes {}, agents {}, not placed {}",
+        mb(part("core")),
+        mb(part("panes")),
+        mb(part("agents")),
+        mb(part("not_placed"))
+    )
+}
+
+fn span(ms: u64) -> String {
+    ago(0, &json!(-(ms as i64)))
+}
+
+/// What the record holds, one line.
+fn stored(inv: &Value) -> String {
+    let (days, months) = (inv["raw_days"].as_u64().unwrap_or(0), inv["rollup_months"].as_u64().unwrap_or(0));
+    if days == 0 && months == 0 {
+        return "The record on this machine is empty: it starts with the first line five minutes after AgentMux starts.".to_string();
+    }
+    format!(
+        "The record on this machine (it never leaves the computer): five-minute lines for {days} day(s) since {} ({}), hourly rollups for {months} month(s) since {} ({}).",
+        inv["raw_first_day"].as_str().unwrap_or("-"),
+        mb(inv["raw_bytes"].as_u64().unwrap_or(0)),
+        inv["rollup_first_month"].as_str().unwrap_or("-"),
+        mb(inv["rollup_bytes"].as_u64().unwrap_or(0))
+    )
+}
+
+/// The newest line, as a sentence.
+fn latest(line: &Value, now_ms: i64) -> String {
+    let am = &line["am"];
+    let part = |k: &str| am["parts"].as_array().and_then(|p| p.iter().find(|x| x["k"].as_str() == Some(k))).and_then(|x| x["mem"].as_u64()).unwrap_or(0);
+    let mut out = format!(
+        "Newest line, {} ago (srv {}, up {}): AgentMux {} in {} processes (core {}, panes {}, agents {}, not placed {}).",
+        ago(now_ms, &line["t"]),
+        s(line, "v"),
+        span(line["up_s"].as_u64().unwrap_or(0) * 1000),
+        mb(am["total"].as_u64().unwrap_or(0)),
+        am["procs"],
+        mb(part("core")),
+        mb(part("panes")),
+        mb(part("agents")),
+        mb(part("not_placed"))
+    );
+    let m = &line["machine"];
+    if let Some(mem) = m["mem"].as_u64() {
+        out.push_str(&format!(" The machine: {} private", gb(mem)));
+        if let Some(total) = m["mem_total"].as_u64() {
+            out.push_str(&format!(" of {}", gb(total)));
+        }
+        if let Some(free) = m["disk"][0].as_u64() {
+            out.push_str(&format!(", record drive {} free", gb(free)));
+        }
+        out.push('.');
+    }
+    for page in line["pages"].as_array().into_iter().flatten() {
+        out.push('\n');
+        out.push_str(&page_text(page));
+    }
+    out
+}
+
+/// One window's page, from the page's own report.
+fn page_text(p: &Value) -> String {
+    let heap = match (p["heap"].as_u64(), p["heap_limit"].as_u64()) {
+        (Some(used), Some(limit)) => format!("JS heap {used} of {limit} MB, "),
+        (Some(used), None) => format!("JS heap {used} MB, "),
+        _ => String::new(),
+    };
+    let finds = p["searches"].as_u64().unwrap_or(0);
+    format!(
+        "Window {} (page up {} min): {heap}{} elements, {} agent pane(s) with {} rows (largest {}){}{}.",
+        s(p, "w"),
+        p["up_min"],
+        p["dom"],
+        p["panes"],
+        p["rows"],
+        p["max_rows"],
+        if finds > 0 { format!(", {finds} find bar(s) open") } else { String::new() },
+        if p["blocked"].as_u64().unwrap_or(0) > 0 { format!(", {} thing(s) holding a recycle back", p["blocked"]) } else { String::new() }
+    )
+}
+
+/// The rollup nearest `target_ms`.
+fn nearest(rolls: &[Value], target_ms: u64) -> Option<&Value> {
+    rolls.iter().min_by_key(|r| r["h"].as_u64().unwrap_or(0).abs_diff(target_ms))
+}
+
+/// AgentMux's size by the hour and what grew, from the hourly rollups.
+fn trend(rolls: &[Value], now_ms: i64) -> String {
+    let Some(last) = rolls.last() else {
+        return "No hour has been rolled up yet, so there is no trend to read (the first rollup is written when the first full hour ends).".to_string();
+    };
+    let last_h = last["h"].as_u64().unwrap_or(0);
+    let mut out = String::from("AgentMux's total by the hour (median, with min to max):");
+    for back in [0u64, 1, 6, 24, 168] {
+        let target = last_h.saturating_sub(back * 3_600_000);
+        let Some(r) = nearest(rolls, target).filter(|r| r["h"].as_u64().unwrap_or(0).abs_diff(target) < 3_600_000) else { continue };
+        if let Some([min, med, _, max]) = stat(&r["am"]) {
+            let when = if back == 0 { format!("the last hour ({} ago)", ago(now_ms, &r["h"])) } else { format!("{} before it", span(back * 3_600_000)) };
+            out.push_str(&format!("\n- {when}: {} ({} to {})", mb(med), mb(min), mb(max)));
+        }
+    }
+    let Some(then) = nearest(rolls, last_h.saturating_sub(DAY_MS as u64)).filter(|r| r["h"].as_u64().unwrap_or(0) + 3_600_000 <= last_h) else {
+        return out;
+    };
+    let then_h = then["h"].as_u64().unwrap_or(0);
+    let restarts = restarts_since(rolls, then_h);
+    if let (Some(a), Some(b)) = (stat(&then["am"]), stat(&last["am"])) {
+        let delta = b[1] as i64 - a[1] as i64;
+        out.push_str(&format!(
+            "\nOver {}: {}{} ({:+.1}%).{}",
+            span(last_h - then_h),
+            if delta >= 0 { "+" } else { "-" },
+            mb(delta.unsigned_abs()),
+            if a[1] == 0 { 0.0 } else { delta as f64 * 100.0 / a[1] as f64 },
+            if restarts > 0 { format!(" srv restarted {restarts} time(s) in that time, so a drop is a restart, not a fix.") } else { String::new() }
+        ));
+    }
+    out.push_str(&grown(then, last));
+    out
+}
+
+/// When a rollup's last line was taken: its own time where it has one, else the start of its hour.
+fn last_time(r: &Value) -> (u64, bool) {
+    match r["last_t"].as_u64().filter(|t| *t > 0) {
+        Some(t) => (t, true),
+        None => (r["h"].as_u64().unwrap_or(0), false),
+    }
+}
+
+/// How many times srv started again in the hours after `then_h`: those each rollup counted inside its hour, and
+/// those between two hours, where the uptime of the later hour's last line is less than the earlier one's plus the
+/// time between the two lines. Both lines' own times are used where the rollups have them (2 minutes of room); an
+/// older rollup has only its hour's start, which can be an hour from its last line, and gets 15 minutes.
+fn restarts_since(rolls: &[Value], then_h: u64) -> u64 {
+    let inside: u64 = rolls.iter().filter(|r| r["h"].as_u64().unwrap_or(0) > then_h).map(|r| r["restarts"].as_u64().unwrap_or(0)).sum();
+    let between = rolls
+        .windows(2)
+        .filter(|w| w[0]["h"].as_u64().unwrap_or(0) >= then_h)
+        // A restart inside the later hour is already counted by that hour, and it is also why its uptime fell short.
+        .filter(|w| w[1]["restarts"].as_u64().unwrap_or(0) == 0)
+        .filter(|w| {
+            let ((later, exact_later), (earlier, exact_earlier)) = (last_time(&w[1]), last_time(&w[0]));
+            let gap_s = later.saturating_sub(earlier) / 1000;
+            let room = if exact_later && exact_earlier { 120 } else { 900 };
+            w[1]["up_s"].as_u64().unwrap_or(0) + room < w[0]["up_s"].as_u64().unwrap_or(0) + gap_s
+        })
+        .count() as u64;
+    inside + between
+}
+
+/// The parts and rows whose median grew most between two hours. A row is compared only when both hours name it:
+/// a rollup keeps six rows, so one missing from the earlier hour may only have ranked lower, and is listed apart
+/// as having no known earlier size.
+fn grown(then: &Value, now: &Value) -> String {
+    let mut moves: Vec<(String, i64)> = Vec::new();
+    let mut entered: Vec<String> = Vec::new();
+    for list in ["parts", "rows"] {
+        for p in now[list].as_array().into_iter().flatten() {
+            let (Some(key), Some(b)) = (p[0].as_str(), stat(&p[1])) else { continue };
+            match keyed(then, list, key) {
+                Some(a) => moves.push((key.to_string(), b[1] as i64 - a[1] as i64)),
+                None if list == "rows" => entered.push(key.to_string()),
+                None => moves.push((key.to_string(), b[1] as i64)),
+            }
+        }
+    }
+    moves.retain(|(_, d)| *d > 0);
+    moves.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut out = if moves.is_empty() {
+        "\nNo part or row that was in the largest six both times grew.".to_string()
+    } else {
+        let list: Vec<String> = moves.iter().take(4).map(|(k, d)| format!("{k} +{}", mb(*d as u64))).collect();
+        format!("\nGrew most (median, same two hours): {}.", list.join(", "))
+    };
+    if !entered.is_empty() {
+        out.push_str(&format!(" Newly among the largest six, with no earlier size known: {}.", entered.join(", ")));
+    }
+    out
+}
+
+/// The stalls of the UI thread and of srv's runtime in the window, by kind: how many, the longest, the last.
+fn stalls(events: &[Value], matched: usize, now_ms: i64) -> String {
+    let mut out = String::from("Stalls in that time:");
+    if matched > events.len() {
+        out.push_str(&format!(" (the newest {} of {matched}: the counts and the longest below cover only those; view \"series\" with kind \"events\" and fewer hours shows the rest)", events.len()));
+    }
+    for (kind, what) in [("ui_stall", "the window host's UI thread did not run"), ("srv_stall", "srv's runtime stopped running tasks")] {
+        let mine: Vec<&Value> = events.iter().filter(|e| s(e, "kind") == kind).collect();
+        let Some(longest) = mine.iter().map(|e| e["ms"].as_u64().unwrap_or(0)).max() else {
+            out.push_str(&format!("
+- none where {what}."));
+            continue;
+        };
+        let last = mine.iter().filter_map(|e| e["t"].as_u64()).max().unwrap_or(0);
+        out.push_str(&format!("
+- {} where {what}; the longest {}, the last {} ago.", mine.len(), span(longest), ago(now_ms, &json!(last))));
+    }
+    out
+}
+
+/// `series`/`export` of kind events: each stall, oldest first.
+pub(super) fn describe_events(events: &[Value], matched: usize, now_ms: i64) -> String {
+    if events.is_empty() {
+        return "The record has no stall in that window.".to_string();
+    }
+    let mut out = String::from("Stalls, oldest first:");
+    for e in events {
+        let what = if s(e, "kind") == "ui_stall" {
+            let host = e["host_mb"].as_u64().map_or(String::new(), |mb| format!(" (host {mb} MB private)"));
+            format!("the window host's UI thread did not run for {}{host}", span(e["ms"].as_u64().unwrap_or(0)))
+        } else {
+            format!(
+                "srv's runtime stopped for {} (cause {}, worst {} late, {} merged)",
+                span(e["ms"].as_u64().unwrap_or(0)),
+                s(e, "cause"),
+                span(e["worst_ms"].as_u64().unwrap_or(0)),
+                e["n"]
+            )
+        };
+        out.push_str(&format!("
+- {} ago: {what}", ago(now_ms, &e["t"])));
+    }
+    if matched > events.len() {
+        out.push_str(&format!("
+This shows the newest {} of the {matched} in that window; ask for a shorter one to see the rest.", events.len()));
+    }
+    out
+}
+
+/// `summary`: what the record holds, the newest line, the trend, and the stalls.
+pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls: &[Value], events: &[Value], matched: usize, now_ms: i64) -> String {
+    let mut out = stored(inventory);
+    if let Some(line) = newest {
+        out.push('\n');
+        out.push_str(&latest(line, now_ms));
+    }
+    out.push('\n');
+    out.push_str(&trend(rolls, now_ms));
+    out.push('\n');
+    out.push_str(&stalls(events, matched, now_ms));
+    out.push_str("\nView \"series\" lists the hours or lines, \"export\" returns them as stored, to attach to a bug.");
+    out
+}
+
+/// `series`: one line per hour (or per five minutes with kind raw), oldest first.
+pub(super) fn describe_series(raw: bool, lines: &[Value], matched: usize, now_ms: i64) -> String {
+    if lines.is_empty() {
+        return "The record has nothing in that window yet.".to_string();
+    }
+    let mut out = String::from(if raw { "Five-minute lines, oldest first:" } else { "Hourly rollups (median, with min to max), oldest first:" });
+    for l in lines {
+        if raw {
+            out.push_str(&format!(
+                "\n- {} ago: AgentMux {} in {} processes; machine {} private; srv up {}",
+                ago(now_ms, &l["t"]),
+                mb(l["am"]["total"].as_u64().unwrap_or(0)),
+                l["am"]["procs"],
+                mb(l["machine"]["mem"].as_u64().unwrap_or(0)),
+                span(l["up_s"].as_u64().unwrap_or(0) * 1000)
+            ));
+        } else if let Some([min, med, _, max]) = stat(&l["am"]) {
+            let restarts = l["restarts"].as_u64().unwrap_or(0);
+            out.push_str(&format!(
+                "\n- {} ago: AgentMux {} ({} to {}); {}; srv up {}, {} line(s){}",
+                ago(now_ms, &l["h"]),
+                mb(med),
+                mb(min),
+                mb(max),
+                parts_of(l),
+                span(l["up_s"].as_u64().unwrap_or(0) * 1000),
+                l["n"],
+                if restarts > 0 { format!(", restarted {restarts}x") } else { String::new() }
+            ));
+        }
+    }
+    if matched > lines.len() {
+        out.push_str(&format!("\nThis shows the newest {} of the {matched} lines in that window (one answer holds a limited number); ask for a shorter window (hours or day) to see the rest.", lines.len()));
+    }
+    out
+}
+
+/// `export`: the lines as stored, one JSON object per line, cut to [`EXPORT_BYTES`] (the newest are kept).
+pub(super) fn describe_export(lines: &[Value], matched: usize) -> String {
+    if lines.is_empty() {
+        return "The record has nothing in that window yet.".to_string();
+    }
+    let texts: Vec<String> = lines.iter().map(Value::to_string).collect();
+    let mut kept = 0usize;
+    let mut bytes = 0usize;
+    for t in texts.iter().rev() {
+        if bytes + t.len() + 1 > EXPORT_BYTES {
+            break;
+        }
+        bytes += t.len() + 1;
+        kept += 1;
+    }
+    let cut = texts.len() - kept;
+    let mut note = String::new();
+    if matched > texts.len() {
+        note.push_str(&format!("The window holds {matched} lines and one answer holds {}: the older {} are not here. ", texts.len(), matched - texts.len()));
+    }
+    if cut > 0 {
+        note.push_str(&format!("{cut} older line(s) left out to fit {} KB. ", EXPORT_BYTES / 1000));
+    }
+    if !note.is_empty() {
+        note.push_str("Ask for a shorter window (hours or day) to get them.\n");
+    }
+    format!("{note}{kept} line(s), one JSON object each (numbers and stable keys only):\n{}", texts[cut..].join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const H: u64 = 3_600_000;
+
+    fn roll(h: u64, total: u64, core: u64, restarts: u64) -> Value {
+        json!({
+            "h": h, "n": 12, "v": "0.60.31", "up_s": 7_200, "restarts": restarts,
+            "am": [total - 10, total, total + 5, total + 10],
+            "parts": [["core", [core, core, core, core]], ["panes", [1, 1, 1, 1]], ["agents", [2, 2, 2, 2]], ["not_placed", [0, 0, 0, 0]]],
+            "rows": [["agent:b1", [core, core, core, core]]]
+        })
+    }
+
+    #[test]
+    fn each_stall_is_listed_with_how_long_it_lasted_and_what_was_seen() {
+        let now = 1_000 * H;
+        let events = vec![
+            json!({ "t": now - 5 * H, "kind": "ui_stall", "ms": 55_000, "host_mb": 310 }),
+            json!({ "t": now - H, "kind": "srv_stall", "ms": 5_300, "worst_ms": 5_200, "n": 2, "cause": "machine" }),
+        ];
+        let text = describe_events(&events, 2, now as i64);
+        assert!(text.contains("5 h 0 min ago: the window host's UI thread did not run for 55 s (host 310 MB private)"), "{text}");
+        assert!(text.contains("60 min ago: srv's runtime stopped for 5 s (cause machine, worst 5 s late, 2 merged)"), "{text}");
+        assert!(describe_events(&[], 0, 0).contains("no stall"));
+        assert!(describe_events(&events, 40, now as i64).contains("newest 2 of the 40"));
+    }
+
+    #[test]
+    fn the_newest_line_says_what_each_windows_page_holds() {
+        let newest = json!({ "t": 1_000, "v": "0.60.31", "up_s": 60, "am": { "total": 5, "procs": 1, "parts": [] },
+            "pages": [
+                { "w": "main", "heap": 310, "heap_limit": 4096, "dom": 18_200, "panes": 3, "rows": 4_100, "max_rows": 2_050, "searches": 1, "blocked": 2, "up_min": 90 },
+                { "w": "window-3", "dom": 900, "panes": 0, "rows": 0, "max_rows": 0, "searches": 0, "blocked": 0, "up_min": 5 }
+            ] });
+        let text = latest(&newest, 2_000);
+        assert!(text.contains("Window main (page up 90 min): JS heap 310 of 4096 MB, 18200 elements, 3 agent pane(s) with 4100 rows (largest 2050), 1 find bar(s) open, 2 thing(s) holding a recycle back."), "{text}");
+        assert!(text.contains("Window window-3 (page up 5 min): 900 elements, 0 agent pane(s) with 0 rows (largest 0)."), "{text}");
+    }
+
+    #[test]
+    fn an_empty_record_says_so_and_a_young_one_says_there_is_no_trend() {
+        let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &[], 0, 1_000);
+        assert!(text.contains("is empty") && text.contains("No hour has been rolled up yet"), "{text}");
+    }
+
+    #[test]
+    fn growth_over_a_day_is_named_with_the_rows_that_grew_and_a_restart_is_said() {
+        let now = 1_000 * H;
+        let mut rolls: Vec<Value> = (0..30).map(|i| roll(now - (31 - i) * H, 1_000_000_000 + i * 10_000_000, 400_000_000 + i * 8_000_000, 0)).collect();
+        // srv has been up all along: each hour's last line is an hour later in its uptime.
+        for (i, r) in rolls.iter_mut().enumerate() {
+            r["up_s"] = json!(100_000 + i as u64 * 3_600);
+        }
+        rolls[10]["restarts"] = json!(1);
+        let inv = json!({ "raw_days": 3, "raw_bytes": 3_000_000, "raw_first_day": "2026-11-14", "rollup_months": 1, "rollup_bytes": 50_000, "rollup_first_month": "2026-11" });
+        let newest = json!({ "t": now - 120_000, "v": "0.60.31", "up_s": 90_000, "am": { "total": 1_300_000_000u64, "procs": 41, "parts": [{ "k": "core", "mem": 600_000_000u64, "n": 3 }] }, "machine": { "mem": 12_000_000_000u64, "mem_total": 32_000_000_000u64, "disk": [200_000_000_000u64, 500_000_000_000u64] } });
+        let events = vec![
+            json!({ "t": now - 3 * H, "kind": "ui_stall", "ms": 55_000, "host_mb": 310 }),
+            json!({ "t": now - H, "kind": "ui_stall", "ms": 8_000 }),
+        ];
+        let text = describe_summary(&inv, Some(&newest), &rolls, &events, events.len(), now as i64);
+        assert!(text.contains("- 2 where the window host's UI thread did not run; the longest 55 s, the last 60 min ago."), "{text}");
+        assert!(text.contains("- none where srv's runtime stopped running tasks."), "{text}");
+        assert!(text.contains("five-minute lines for 3 day(s) since 2026-11-14") && text.contains("hourly rollups for 1 month(s)"), "{text}");
+        assert!(text.contains("Newest line, 2 min ago (srv 0.60.31, up 25 h 0 min): AgentMux 1239.8 MB in 41 processes"), "{text}");
+        assert!(text.contains("Over 24 h 0 min: +228.9 MB (+22.9%)"), "{text}");
+        assert!(text.contains("srv restarted 1 time(s)"), "{text}");
+        assert!(text.contains("Grew most") && text.contains("core +183.1 MB") && text.contains("agent:b1 +183.1 MB"), "{text}");
+    }
+
+    #[test]
+    fn stall_totals_say_when_the_window_held_more_stalls_than_were_read() {
+        let events = vec![json!({ "t": 5_000, "kind": "ui_stall", "ms": 9_000 })];
+        let cut = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &events, 1_200, 10_000);
+        assert!(cut.contains("Stalls in that time: (the newest 1 of 1200"), "{cut}");
+        assert!(cut.contains("cover only those"), "{cut}");
+        let whole = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &events, 1, 10_000);
+        assert!(whole.contains("Stalls in that time:\n- 1 where"), "{whole}");
+    }
+
+    #[test]
+    fn a_row_new_to_the_top_six_has_an_unknown_earlier_size_not_a_growth_from_zero() {
+        let mut then = roll(0, 1_000_000_000, 400_000_000, 0);
+        let mut now = roll(24 * H, 1_000_000_000, 400_000_000, 0);
+        then["rows"] = json!([["agent:b1", [100, 100, 100, 100]]]);
+        now["rows"] = json!([["agent:b1", [150, 150, 150, 150]], ["np:node-exe", [9_000_000, 9_000_000, 9_000_000, 9_000_000]]]);
+        let text = grown(&then, &now);
+        assert!(text.contains("agent:b1 +50 bytes") || text.contains("agent:b1 +0.0 MB"), "{text}");
+        assert!(text.contains("no earlier size known: np:node-exe"), "{text}");
+        assert!(!text.contains("np:node-exe +"), "{text}");
+    }
+
+    #[test]
+    fn a_restart_between_two_hours_is_found_by_the_uptime_that_did_not_keep_up() {
+        // Each hour's last line is taken 55 minutes into it.
+        let at = |h: u64, up_s: u64| {
+            let mut r = roll(h * H, 1_000_000_000, 400_000_000, 0);
+            r["up_s"] = json!(up_s);
+            r["last_t"] = json!(h * H + 55 * 60_000);
+            r
+        };
+        // Up 1 h 55 min at the end of hour 0; an hour later 2 h 55 min, as it should be: no restart.
+        let steady = vec![at(0, 6_900), at(1, 10_500), at(2, 14_100)];
+        assert_eq!(restarts_since(&steady, 0), 0);
+        // srv restarted after hour 1's last line: hour 2's last line is 50 min up, where 4 h was expected.
+        let restarted = vec![at(0, 6_900), at(1, 10_500), at(2, 3_000)];
+        assert_eq!(restarts_since(&restarted, 0), 1);
+        // One inside an hour is counted once, by the hour: its last line is low too, and that is not a second restart.
+        let mut inside = vec![at(0, 6_900), at(1, 10_500), at(2, 1_200)];
+        inside[2]["restarts"] = json!(1);
+        assert_eq!(restarts_since(&inside, 0), 1);
+        // ...and a restart between hours next to one inside another hour are two.
+        let mut two = vec![at(0, 6_900), at(1, 2_000), at(2, 5_600), at(3, 1_200)];
+        two[3]["restarts"] = json!(1);
+        assert_eq!(restarts_since(&two, 0), 2);
+        // Sparse hours (the machine slept): the last lines were only ten minutes apart, so 600 s of uptime growth is
+        // no restart, though the hours' starts are an hour apart.
+        let mut sparse = vec![at(0, 6_900), at(1, 7_500)];
+        sparse[1]["last_t"] = json!(55 * 60_000 + 10 * 60_000);
+        assert_eq!(restarts_since(&sparse, 0), 0);
+        // A rollup from before last_t was kept falls back to its hour's start, with 15 minutes of room.
+        let old = |h: u64, up_s: u64| json!({ "h": h * H, "up_s": up_s, "restarts": 0 });
+        assert_eq!(restarts_since(&[old(0, 6_900), old(1, 10_500)], 0), 0);
+        assert_eq!(restarts_since(&[old(0, 6_900), old(1, 2_000)], 0), 1);
+        // Before `then` nothing counts.
+        assert_eq!(restarts_since(&restarted, 2 * H), 0);
+    }
+
+    #[test]
+    fn a_series_lists_each_hour_with_its_parts_and_an_export_keeps_the_newest_lines_that_fit() {
+        let now = 100 * H;
+        let rolls = vec![roll(now - 2 * H, 1_000_000_000, 400_000_000, 0), roll(now - H, 1_010_000_000, 410_000_000, 2)];
+        let text = describe_series(false, &rolls, 2, now as i64);
+        assert!(!text.contains("of the 2 lines"), "{text}");
+        assert!(text.contains("2 h 0 min ago") && text.contains("core 381.5 MB") && text.contains("restarted 2x"), "{text}");
+        assert_eq!(describe_series(true, &[], 0, 0), "The record has nothing in that window yet.");
+        // A window the route cut says how many lines it holds.
+        let cut = describe_series(false, &rolls, 400, now as i64);
+        assert!(cut.contains("newest 2 of the 400 lines in that window"), "{cut}");
+
+        let big: Vec<Value> = (0..400).map(|i| json!({ "h": i, "pad": "x".repeat(1_000) })).collect();
+        let text = describe_export(&big, 400);
+        assert!(text.contains("older line(s) left out to fit 200 KB"), "{}", &text[..120]);
+        assert!(!text.contains("The window holds"), "the route cut nothing");
+        let cut_by_route = describe_export(&big[..3], 900);
+        assert!(cut_by_route.starts_with("The window holds 900 lines and one answer holds 3: the older 897 are not here."), "{cut_by_route}");
+        assert!(text.len() < EXPORT_BYTES + 400, "{}", text.len());
+        assert!(text.contains("\"h\":399") && !text.contains("\"h\":0,"), "the newest lines are kept");
+    }
+}

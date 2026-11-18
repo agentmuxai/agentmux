@@ -9,6 +9,7 @@ import { createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "so
 import { useTick } from "@/app/hook/useTick";
 
 import { Button, FilterInput, Select, SegmentedControl } from "@/app/element/ui";
+import { sharedAgentRuntime } from "@/app/store/agent-runtime-live";
 import { VaultSecrets } from "@/app/view/vault/vault-secrets";
 import { AuditFeed } from "./audit-feed";
 import { AuditKindChips } from "./audit-kind-chips";
@@ -33,6 +34,8 @@ import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./audit-manager.scss";
 
 const TYPING_PAUSE_MS = 250;
+/** The agent in a pane, by the name the status bar's last-sound line gives it. */
+const agentInPane = (blockId: string) => sharedAgentRuntime().rows().find((r) => r.block_id === blockId)?.name;
 
 export const AuditManager = (props: { paneBlockId: string; visible?: boolean; agent?: string; sound?: SoundRef; message?: MessageRef }): JSX.Element => {
     const [filter, setFilter] = createSignal<AuditFilter>(emptyFilter(props.agent ?? ""));
@@ -54,7 +57,7 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
     const set = (patch: Partial<AuditFilter>) => setFilter({ ...filter(), ...patch });
     const sounds = createAuditSoundsAt(list.entries, now, () => newestAsk(soundAsk(props.sound), messageAsk(props.message)), {
         showKind: revealSoundRow(filter, setFilter, () => (setAgentText(""), setSearchText("")), list.showNewest),
-        body: () => body, reachBack: list.reachBack,
+        body: () => body, reachBack: list.reachBack, agentIn: agentInPane,
     });
     const typed = () => {
         if (typing !== undefined) clearTimeout(typing);

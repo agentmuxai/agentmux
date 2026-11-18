@@ -379,6 +379,8 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     crate::backend::editor_probe::register(engine);
     // filesearchbytes → the hex viewer's find, read on srv.
     crate::backend::editor_search::register(engine);
+    // fileindexlines → the Large text viewer's line index, read on srv.
+    crate::backend::editor_lines::register(engine);
     register_fs_browsing(engine, state);
     register_fs_mutations(engine, state);
     register_fs_jobs(engine, state);

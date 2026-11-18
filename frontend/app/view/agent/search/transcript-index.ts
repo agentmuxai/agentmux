@@ -66,6 +66,8 @@ export const pageClock: PassClock = {
 interface Folded {
     ref: DocumentNode;
     text: string;
+    /** The last pass that read this row: a row no pass has read lately has left the document. */
+    pass: number;
 }
 
 export interface TranscriptIndex {
@@ -83,20 +85,26 @@ export interface TranscriptIndex {
 export function createTranscriptIndex(clock: PassClock = pageClock, sliceMs: number = SLICE_MS): TranscriptIndex {
     const cache = new Map<string, Folded>();
     let folds = 0;
+    let passes = 0;
 
-    const folded = (node: DocumentNode): string => {
+    const folded = (node: DocumentNode, pass: number): string => {
         const hit = cache.get(node.id);
-        if (hit && hit.ref === node) return hit.text;
+        if (hit && hit.ref === node) {
+            hit.pass = pass;
+            return hit.text;
+        }
         folds++;
         const text = searchableText(node).slice(0, FOLD_CAP).toLowerCase();
-        cache.set(node.id, { ref: node, text });
+        cache.set(node.id, { ref: node, text, pass });
         return text;
     };
 
     return {
         async search(nodes, query, cancelled) {
             const out: string[] = [];
-            const seen = new Set<string>();
+            // Rows are marked as they are read, so a pass allocates nothing per row (a Set of every id, five times a
+            // second while a streaming pane's bar is open, was megabytes of garbage a second on a long transcript).
+            const pass = ++passes;
             let sliceStart = clock.now();
             for (let i = 0; i < nodes.length; i++) {
                 if (i % CLOCK_EVERY === 0 && i > 0 && clock.now() - sliceStart >= sliceMs) {
@@ -105,12 +113,13 @@ export function createTranscriptIndex(clock: PassClock = pageClock, sliceMs: num
                     sliceStart = clock.now();
                 }
                 const node = nodes[i];
-                seen.add(node.id);
-                if (folded(node).includes(query)) out.push(node.id);
+                if (folded(node, pass).includes(query)) out.push(node.id);
             }
             if (cancelled()) return null;
             // Rows that left the document (a different slice loaded) stop costing memory.
-            for (const id of cache.keys()) if (!seen.has(id)) cache.delete(id);
+            // Only when the cache holds more rows than the document has: otherwise nothing has left, and the scan
+            // (and its entry arrays) is skipped on the passes of a steadily growing transcript.
+            if (cache.size > nodes.length) cache.forEach((row, id) => (row.pass === pass ? undefined : cache.delete(id)));
             return out;
         },
         folds: () => folds,

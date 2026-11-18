@@ -1,0 +1,596 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! `fileindexlines`: where the lines of a text file start, for the Large text viewer. The file is read here, in
+//! blocks, once per `(path, modified time)`: what is kept is the byte offset of every `STEP`-th line, so the
+//! viewer asks for "lines 5,000,000 to 5,000,100" and gets the byte range to fetch, and a file bigger than memory
+//! never leaves srv. A line ends at `\n` (so `\r\n` and `\n` files both work); in UTF-16 it ends at the two-byte
+//! `\n`. A final line with no newline is a line; a newline at the very end starts none.
+//!
+//! docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
+
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::backend::base::expand_home_dir_safe;
+use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::rpc_types::{FileIndexLinesReq, FileIndexLinesResult};
+
+/// One read.
+const BLOCK: usize = 1 << 20;
+/// The index keeps the offset of every this-many-th line.
+const STEP: u64 = 1024;
+/// The most lines one call may span, so an answer is a screenful, not a file.
+const MAX_COUNT: u64 = 100_000;
+/// The indexes kept (the most recently used).
+const CACHE_ENTRIES: usize = 6;
+/// How much of the start of a file says what encoding its text is in.
+const DETECT_BYTES: u64 = 256 * 1024;
+
+/// How a file's text marks the end of a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    /// One byte, `\n`: UTF-8, and the legacy single-byte encodings.
+    Byte,
+    /// Two bytes, `0A 00`.
+    Utf16Le,
+    /// Two bytes, `00 0A`.
+    Utf16Be,
+}
+
+impl Unit {
+    /// From a probe's `encoding`; anything else is an error naming it.
+    pub fn parse(encoding: &str) -> Result<Unit, String> {
+        match encoding {
+            "" | "utf-8" | "legacy" => Ok(Unit::Byte),
+            "utf-16le" => Ok(Unit::Utf16Le),
+            "utf-16be" => Ok(Unit::Utf16Be),
+            other => Err(format!("an encoding of utf-8, utf-16le or utf-16be, not {other:?}")),
+        }
+    }
+}
+
+/// Where the lines of one file start, as of one `(size, mtime)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineIndex {
+    pub size: u64,
+    pub mtime: i64,
+    pub total_lines: u64,
+    pub step: u64,
+    /// The start of line 0, `step`, `2 * step`, ...
+    pub checkpoints: Vec<u64>,
+    /// The text's encoding by its WHATWG name ("utf-8", "windows-1251", "utf-16le"...), found when the file was indexed.
+    pub encoding: String,
+}
+
+/// The offsets just after each line break in `block` (which starts at file offset `base`, an even number for UTF-16).
+fn breaks_in(block: &[u8], base: u64, unit: Unit, mut each: impl FnMut(u64)) {
+    match unit {
+        Unit::Byte => memchr::memchr_iter(b'\n', block).for_each(|i| each(base + i as u64 + 1)),
+        Unit::Utf16Le | Unit::Utf16Be => {
+            let (hi, lo) = if unit == Unit::Utf16Le { (1, 0) } else { (0, 1) };
+            for (i, pair) in block.chunks_exact(2).enumerate() {
+                if pair[lo] == b'\n' && pair[hi] == 0 {
+                    each(base + (i as u64) * 2 + 2);
+                }
+            }
+        }
+    }
+}
+
+/// A read size that is a whole number of code units.
+fn block_size(unit: Unit, block: usize) -> usize {
+    if unit == Unit::Byte {
+        block.max(1)
+    } else {
+        (block & !1).max(2)
+    }
+}
+
+/// Reads `file` (`size` bytes) front to back and notes where every `step`-th line starts.
+pub fn build_index<R: Read>(file: &mut R, size: u64, mtime: i64, unit: Unit, step: u64, block: usize) -> std::io::Result<LineIndex> {
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let mut checkpoints = Vec::new();
+    let mut lines = 0u64;
+    let mut note_line = |start: u64, lines: &mut u64| {
+        if *lines % step == 0 {
+            checkpoints.push(start);
+        }
+        *lines += 1;
+    };
+    if size > 0 {
+        note_line(0, &mut lines);
+    }
+    let mut at = 0u64;
+    while at < size {
+        let want = (size - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        // A line starts after a break unless the file ends there.
+        breaks_in(&buf[..want], at, unit, |end| {
+            if end < size {
+                note_line(end, &mut lines);
+            }
+        });
+        at += want as u64;
+    }
+    Ok(LineIndex { size, mtime, total_lines: lines, step, checkpoints, encoding: String::new() })
+}
+
+/// The WHATWG name of the encoding of the text that `file` holds, from its start: UTF-16 as the unit says, else a
+/// UTF-8 BOM, else valid UTF-8 (a character cut at the end of the sample is not an error), else the detector's guess,
+/// as the Editor's own reader makes it. The probe says only "legacy" for a file that isn't UTF-8.
+pub fn detect_encoding<R: Read>(file: &mut R, unit: Unit) -> std::io::Result<String> {
+    match unit {
+        Unit::Utf16Le => return Ok("utf-16le".into()),
+        Unit::Utf16Be => return Ok("utf-16be".into()),
+        Unit::Byte => {}
+    }
+    let mut head = Vec::new();
+    file.take(DETECT_BYTES).read_to_end(&mut head)?;
+    let utf8 = head.starts_with(b"\xEF\xBB\xBF") || std::str::from_utf8(&head).map_or_else(|e| e.error_len().is_none(), |_| true);
+    if utf8 {
+        return Ok("utf-8".into());
+    }
+    let mut det = chardetng::EncodingDetector::new();
+    det.feed(&head, true);
+    Ok(det.guess(None, false).name().to_string())
+}
+
+/// The offset `n` lines after the line that starts at `from` (the size, when the file has fewer lines).
+fn skip_lines<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, unit: Unit, block: usize) -> std::io::Result<u64> {
+    if n == 0 {
+        return Ok(from.min(size));
+    }
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let (mut at, mut left) = (from, n);
+    file.seek(SeekFrom::Start(from))?;
+    while at < size {
+        let want = (size - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        let mut found = None;
+        breaks_in(&buf[..want], at, unit, |end| {
+            if found.is_none() {
+                left -= 1;
+                if left == 0 {
+                    found = Some(end);
+                }
+            }
+        });
+        if let Some(end) = found {
+            return Ok(end.min(size));
+        }
+        at += want as u64;
+    }
+    Ok(size)
+}
+
+/// Where each of the `n` lines that begin at `from` starts (the first is `from`), and the offset just after the last
+/// of them (the size, when the file has fewer). One pass over the run, so a line of gigabytes is read once. When the
+/// run reaches the end of the file (`to_eof`) the last line is not read at all: its end is the size.
+fn starts_in<F: Read + Seek>(file: &mut F, from: u64, n: u64, size: u64, to_eof: bool, unit: Unit, block: usize) -> std::io::Result<(Vec<u64>, u64)> {
+    let mut starts = Vec::new();
+    if n == 0 || from >= size {
+        return Ok((starts, from.min(size)));
+    }
+    starts.push(from);
+    // The breaks to find: one after each line, except the last when it is known to end where the file does.
+    let need = if to_eof { n - 1 } else { n };
+    if need == 0 {
+        return Ok((starts, size));
+    }
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let (mut at, mut left) = (from, need);
+    file.seek(SeekFrom::Start(from))?;
+    while at < size {
+        let want = (size - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        let mut found = None;
+        breaks_in(&buf[..want], at, unit, |end| {
+            if found.is_some() {
+                return;
+            }
+            // A break starts the next line, unless the file ends there or the run is complete.
+            if (starts.len() as u64) < n && end < size {
+                starts.push(end);
+            }
+            left -= 1;
+            if left == 0 {
+                found = Some(end);
+            }
+        });
+        if let Some(end) = found {
+            return Ok((starts, if to_eof { size } else { end.min(size) }));
+        }
+        at += want as u64;
+    }
+    Ok((starts, size))
+}
+
+/// Where line `line` (0-based) starts; the size for a line past the last.
+pub fn line_start<F: Read + Seek>(file: &mut F, idx: &LineIndex, line: u64, unit: Unit, block: usize) -> std::io::Result<u64> {
+    if line >= idx.total_lines {
+        return Ok(idx.size);
+    }
+    let Some(&checkpoint) = idx.checkpoints.get((line / idx.step) as usize) else { return Ok(idx.size) };
+    skip_lines(file, checkpoint, line % idx.step, idx.size, unit, block)
+}
+
+/// The line (0-based) that holds byte `offset`: the last one that starts at or before it. An offset past the end is in
+/// the last line. Reads from the nearest checkpoint to `offset`, counting breaks, so at most `STEP` lines.
+pub fn line_of<F: Read + Seek>(file: &mut F, idx: &LineIndex, offset: u64, unit: Unit, block: usize) -> std::io::Result<u64> {
+    let Some(last) = idx.size.checked_sub(1).filter(|_| idx.total_lines > 0) else { return Ok(0) };
+    let offset = offset.min(last);
+    let k = idx.checkpoints.partition_point(|c| *c <= offset).saturating_sub(1);
+    let Some(&from) = idx.checkpoints.get(k) else { return Ok(0) };
+    let block = block_size(unit, block);
+    let mut buf = vec![0u8; block];
+    let (mut at, mut line) = (from, k as u64 * idx.step);
+    file.seek(SeekFrom::Start(from))?;
+    // A break whose last byte is before `offset` starts a line at or before it.
+    while at < offset {
+        let want = (offset - at).min(block as u64) as usize;
+        file.read_exact(&mut buf[..want])?;
+        breaks_in(&buf[..want], at, unit, |_| line += 1);
+        at += want as u64;
+    }
+    Ok(line)
+}
+
+type CacheKey = (PathBuf, u8);
+
+fn cache() -> &'static Mutex<Vec<(CacheKey, Arc<LineIndex>)>> {
+    static CACHE: OnceLock<Mutex<Vec<(CacheKey, Arc<LineIndex>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// The index of `path` as it is now: the one kept when the file has not changed, else a new one.
+fn index_of(path: &Path, unit: Unit) -> std::io::Result<Arc<LineIndex>> {
+    let meta = std::fs::metadata(path)?;
+    if meta.is_dir() {
+        return Err(std::io::Error::other("is a directory"));
+    }
+    let (size, mtime) = (meta.len(), mtime_ms(&meta));
+    let key: CacheKey = (path.to_path_buf(), unit as u8);
+    {
+        let mut kept = cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = kept.iter().position(|(k, v)| *k == key && v.size == size && v.mtime == mtime) {
+            let hit = kept.remove(i);
+            let idx = hit.1.clone();
+            kept.insert(0, hit);
+            return Ok(idx);
+        }
+    }
+    let mut file = std::fs::File::open(path)?;
+    let encoding = detect_encoding(&mut file, unit)?;
+    file.seek(SeekFrom::Start(0))?;
+    let built = Arc::new(LineIndex { encoding, ..build_index(&mut file, size, mtime, unit, STEP, BLOCK)? });
+    let mut kept = cache().lock().unwrap_or_else(|e| e.into_inner());
+    kept.retain(|(k, _)| *k != key);
+    kept.insert(0, (key, built.clone()));
+    kept.truncate(CACHE_ENTRIES);
+    Ok(built)
+}
+
+/// The answer for `count` lines from line `from_line` of `path`.
+fn lines_of(path: &Path, unit: Unit, from_line: u64, count: u64, with_starts: bool) -> std::io::Result<FileIndexLinesResult> {
+    let idx = index_of(path, unit)?;
+    let mut file = std::fs::File::open(path)?;
+    let start = line_start(&mut file, &idx, from_line, unit, BLOCK)?;
+    let wanted = count.min(idx.total_lines.saturating_sub(from_line));
+    let to_eof = from_line.saturating_add(count) >= idx.total_lines;
+    let (starts, end) = if with_starts {
+        starts_in(&mut file, start, wanted, idx.size, to_eof, unit, BLOCK)?
+    } else if to_eof {
+        (Vec::new(), idx.size)
+    } else {
+        (Vec::new(), skip_lines(&mut file, start, wanted, idx.size, unit, BLOCK)?)
+    };
+    Ok(FileIndexLinesResult { total_lines: idx.total_lines, size: idx.size, mtime: idx.mtime, start, end, encoding: idx.encoding.clone(), starts, line_at: None })
+}
+
+/// The answer for `count` lines from the line that holds byte `offset` of `path`, with that line's number in `line_at`.
+fn lines_at(path: &Path, unit: Unit, offset: u64, count: u64, with_starts: bool) -> std::io::Result<FileIndexLinesResult> {
+    let idx = index_of(path, unit)?;
+    let line = line_of(&mut std::fs::File::open(path)?, &idx, offset, unit, BLOCK)?;
+    Ok(FileIndexLinesResult { line_at: Some(line), ..lines_of(path, unit, line, count, with_starts)? })
+}
+
+/// `fileindexlines`. This computer's files only, like `fileprobe`.
+pub fn register(engine: &std::sync::Arc<WshRpcEngine>) {
+    engine.register_typed("fileindexlines", move |cmd: FileIndexLinesReq, _ctx| async move {
+        let unit = Unit::parse(cmd.encoding.as_deref().unwrap_or("")).map_err(|e| format!("fileindexlines: {e}"))?;
+        if cmd.count > MAX_COUNT {
+            return Err(format!("fileindexlines: at most {MAX_COUNT} lines a call"));
+        }
+        let path = expand_home_dir_safe(&cmd.path);
+        let with_starts = cmd.line_starts.unwrap_or(false);
+        tokio::task::spawn_blocking(move || {
+            match cmd.at_offset {
+                Some(offset) => lines_at(&path, unit, offset, cmd.count, with_starts),
+                None => lines_of(&path, unit, cmd.from_line, cmd.count, with_starts),
+            }
+            .map_err(|e| format!("fileindexlines: {e}"))
+        })
+        .await
+        .map_err(|e| format!("fileindexlines: {e}"))?
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    /// The index of `data` with a step of 3 and blocks of 5 bytes, so checkpoints and block edges both get crossed.
+    fn small(data: &[u8], unit: Unit) -> LineIndex {
+        build_index(&mut Cursor::new(data.to_vec()), data.len() as u64, 7, unit, 3, 5).unwrap()
+    }
+
+    fn start_of(data: &[u8], idx: &LineIndex, line: u64, unit: Unit) -> u64 {
+        line_start(&mut Cursor::new(data.to_vec()), idx, line, unit, 5).unwrap()
+    }
+
+    /// Every line's start, by walking the text the slow way.
+    fn starts(data: &[u8]) -> Vec<u64> {
+        let mut out = Vec::new();
+        if !data.is_empty() {
+            out.push(0);
+        }
+        for (i, b) in data.iter().enumerate() {
+            if *b == b'\n' && i + 1 < data.len() {
+                out.push(i as u64 + 1);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn counts_lines_of_lf_crlf_and_mixed_text_with_or_without_a_final_break() {
+        for text in ["a\nbb\nccc\ndddd\n", "a\nbb\nccc\ndddd", "a\r\nbb\r\nccc\r\ndddd\r\n", "a\nbb\r\nccc\ndddd\r\n", "\n\n\n", "one"] {
+            let data = text.as_bytes();
+            let idx = small(data, Unit::Byte);
+            assert_eq!(idx.total_lines, starts(data).len() as u64, "{text:?}");
+            for (n, want) in starts(data).into_iter().enumerate() {
+                assert_eq!(start_of(data, &idx, n as u64, Unit::Byte), want, "{text:?} line {n}");
+            }
+            assert_eq!(start_of(data, &idx, idx.total_lines, Unit::Byte), data.len() as u64, "{text:?} past the end");
+            assert_eq!(start_of(data, &idx, idx.total_lines + 50, Unit::Byte), data.len() as u64);
+        }
+    }
+
+    fn line_at(data: &[u8], idx: &LineIndex, offset: u64, unit: Unit) -> u64 {
+        line_of(&mut Cursor::new(data.to_vec()), idx, offset, unit, 5).unwrap()
+    }
+
+    #[test]
+    fn every_byte_is_in_the_line_that_starts_at_or_before_it() {
+        for text in ["a\nbb\nccc\ndddd\n", "a\nbb\nccc\ndddd", "a\r\nbb\r\nccc\r\ndddd\r\n", "\n\n\n\n\n\n\n\n", "one"] {
+            let data = text.as_bytes();
+            let idx = small(data, Unit::Byte);
+            let want = starts(data);
+            for offset in 0..data.len() as u64 {
+                let expect = want.iter().rposition(|s| *s <= offset).unwrap() as u64;
+                assert_eq!(line_at(data, &idx, offset, Unit::Byte), expect, "{text:?} byte {offset}");
+            }
+            // Past the end is the last line.
+            assert_eq!(line_at(data, &idx, data.len() as u64 + 99, Unit::Byte), idx.total_lines - 1, "{text:?} past the end");
+        }
+        assert_eq!(line_at(b"", &small(b"", Unit::Byte), 5, Unit::Byte), 0);
+    }
+
+    #[test]
+    fn finds_the_line_of_a_byte_in_utf16_text() {
+        let text = "ab\ncd\r\nef\n\u{0a0a}x\ng";
+        for (unit, bytes) in [
+            (Unit::Utf16Le, text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>()),
+            (Unit::Utf16Be, text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect::<Vec<u8>>()),
+        ] {
+            let idx = small(&bytes, unit);
+            // The first byte of each line is in it, and so is the byte before the next one.
+            let mut at = 0u64;
+            let units: Vec<u16> = text.encode_utf16().collect();
+            for (n, line) in units.split_inclusive(|u| *u == 10).enumerate() {
+                let len = line.len() as u64 * 2;
+                assert_eq!(line_at(&bytes, &idx, at, unit), n as u64, "{unit:?} start of line {n}");
+                assert_eq!(line_at(&bytes, &idx, at + len - 1, unit), n as u64, "{unit:?} end of line {n}");
+                at += len;
+            }
+        }
+    }
+
+    #[test]
+    fn answers_at_a_byte_with_the_run_from_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "zero\none\ntwo\nthree\n").unwrap();
+        // Byte 9 is the 't' that starts "two".
+        let r = lines_at(&path, Unit::Byte, 9, 2, true).unwrap();
+        assert_eq!((r.line_at, r.start, r.end, r.starts), (Some(2), 9, 19, vec![9, 13]));
+        assert_eq!(lines_of(&path, Unit::Byte, 2, 1, false).unwrap().line_at, None);
+    }
+
+    #[test]
+    fn an_empty_file_has_no_lines_and_a_lone_break_has_one() {
+        let idx = small(b"", Unit::Byte);
+        assert_eq!((idx.total_lines, idx.checkpoints.len()), (0, 0));
+        assert_eq!(start_of(b"", &idx, 0, Unit::Byte), 0);
+        assert_eq!(small(b"\n", Unit::Byte).total_lines, 1);
+    }
+
+    #[test]
+    fn keeps_the_start_of_every_stepth_line() {
+        let data = b"0\n1\n2\n3\n4\n5\n6\n7\n";
+        let idx = small(data, Unit::Byte);
+        assert_eq!(idx.total_lines, 8);
+        assert_eq!(idx.checkpoints, vec![0, 6, 12]);
+    }
+
+    #[test]
+    fn indexes_utf16_by_its_two_byte_breaks() {
+        let text = "ab\ncd\r\nef\n\u{0a0a}x";
+        for (unit, bytes) in [
+            (Unit::Utf16Le, text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>()),
+            (Unit::Utf16Be, text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect::<Vec<u8>>()),
+        ] {
+            let idx = small(&bytes, unit);
+            // The text has three breaks, so four lines; U+0A0A holds a 0A byte that is no break.
+            assert_eq!(idx.total_lines, 4, "{unit:?}");
+            let units: Vec<u64> = text.encode_utf16().scan(0u64, |at, u| { let here = *at; *at += 2; Some((here, u)) }).filter(|(_, u)| *u == 0x0a).map(|(at, _)| at + 2).collect();
+            assert_eq!(start_of(&bytes, &idx, 1, unit), units[0], "{unit:?}");
+            assert_eq!(start_of(&bytes, &idx, 3, unit), units[2], "{unit:?}");
+        }
+    }
+
+    #[test]
+    fn a_five_million_line_file_jumps_to_its_last_line() {
+        let data: Vec<u8> = b"x\n".repeat(5_000_000);
+        let idx = build_index(&mut Cursor::new(&data[..]), data.len() as u64, 0, Unit::Byte, STEP, BLOCK).unwrap();
+        assert_eq!(idx.total_lines, 5_000_000);
+        assert_eq!(idx.checkpoints.len(), 5_000_000usize.div_ceil(STEP as usize));
+        let at = |line| line_start(&mut Cursor::new(&data[..]), &idx, line, Unit::Byte, BLOCK).unwrap();
+        assert_eq!((at(0), at(1), at(4_999_999), at(2_500_000)), (0, 2, 9_999_998, 5_000_000));
+        assert_eq!(at(5_000_000), 10_000_000);
+    }
+
+    #[test]
+    fn the_answer_is_the_byte_range_of_the_lines_asked_for() {
+        let dir = std::env::temp_dir().join(format!("fileindexlines-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("log.txt");
+        std::fs::write(&path, "a\nbb\nccc\ndddd\n").unwrap();
+        let r = lines_of(&path, Unit::Byte, 1, 2, false).unwrap();
+        assert_eq!((r.total_lines, r.size, r.start, r.end), (4, 14, 2, 9));
+        // Past the last line: the rest of the file, then nothing.
+        let r = lines_of(&path, Unit::Byte, 3, 10, false).unwrap();
+        assert_eq!((r.start, r.end), (9, 14));
+        let r = lines_of(&path, Unit::Byte, 9, 10, false).unwrap();
+        assert_eq!((r.start, r.end), (14, 14));
+        let r = lines_of(&path, Unit::Byte, 0, 0, false).unwrap();
+        assert_eq!((r.start, r.end), (0, 0));
+        // The file grew: the kept index is not reused.
+        std::fs::write(&path, "a\nbb\nccc\ndddd\neeeee\nf").unwrap();
+        let r = lines_of(&path, Unit::Byte, 0, 100, false).unwrap();
+        assert_eq!((r.total_lines, r.size), (6, 21));
+        assert!(lines_of(&dir, Unit::Byte, 0, 1, false).is_err(), "a folder is no file");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn names_the_encoding_the_text_is_in() {
+        let name = |bytes: &[u8], unit| detect_encoding(&mut Cursor::new(bytes.to_vec()), unit).unwrap();
+        assert_eq!(name("plain ascii\n".as_bytes(), Unit::Byte), "utf-8");
+        assert_eq!(name("caf\u{e9} \u{4e2d}\n".as_bytes(), Unit::Byte), "utf-8");
+        assert_eq!(name(b"\xEF\xBB\xBFhello", Unit::Byte), "utf-8");
+        // A character cut at the end of the sample is still UTF-8.
+        assert_eq!(name(&"\u{4e2d}".as_bytes()[..2], Unit::Byte), "utf-8");
+        assert_eq!(name(b"", Unit::Utf16Le), "utf-16le");
+        assert_eq!(name(b"", Unit::Utf16Be), "utf-16be");
+        // Not UTF-8: what the detector says, not a fixed code page.
+        let (cyrillic, _, _) = encoding_rs::WINDOWS_1251.encode("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}, \u{43c}\u{438}\u{440}! \u{41a}\u{430}\u{43a} \u{434}\u{435}\u{43b}\u{430}?");
+        assert_eq!(name(&cyrillic, Unit::Byte), "windows-1251");
+        let (jis, _, _) = encoding_rs::SHIFT_JIS.encode("\u{3053}\u{3093}\u{306b}\u{3061}\u{306f}\u{4e16}\u{754c}\u{3001}\u{3053}\u{308c}\u{306f}\u{30c6}\u{30b9}\u{30c8}\u{3067}\u{3059}");
+        assert_eq!(name(&jis, Unit::Byte), "Shift_JIS");
+    }
+
+    #[test]
+    fn the_answer_names_the_encoding_of_the_file() {
+        let dir = std::env::temp_dir().join(format!("fileindexlines-enc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ru.txt");
+        let (cyrillic, _, _) = encoding_rs::WINDOWS_1251.encode("\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}, \u{43c}\u{438}\u{440}! \u{41a}\u{430}\u{43a} \u{434}\u{435}\u{43b}\u{430}?\n");
+        std::fs::write(&path, &cyrillic).unwrap();
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1, false).unwrap().encoding, "windows-1251");
+        std::fs::write(&path, "just ascii\n").unwrap();
+        assert_eq!(lines_of(&path, Unit::Byte, 0, 1, false).unwrap().encoding, "utf-8");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A file of a huge line (here 3 MB, bigger than a read block) between short ones.
+    #[test]
+    fn says_where_each_line_starts_with_the_one_pass_that_finds_the_end() {
+        let dir = std::env::temp_dir().join(format!("fileindexlines-starts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("huge.txt");
+        let mut data = b"first\n".to_vec();
+        data.extend(std::iter::repeat(b'x').take(3 << 20));
+        data.extend_from_slice(b"\nthird\r\nfourth");
+        std::fs::write(&path, &data).unwrap();
+        let want = starts(&data);
+        assert_eq!(want.len(), 4);
+
+        let r = lines_of(&path, Unit::Byte, 0, 4, true).unwrap();
+        assert_eq!(r.starts, want);
+        assert_eq!((r.start, r.end), (0, data.len() as u64));
+
+        // From the middle, and a run that stops short of the end of the file.
+        let r = lines_of(&path, Unit::Byte, 1, 2, true).unwrap();
+        assert_eq!(r.starts, want[1..3].to_vec());
+        assert_eq!((r.start, r.end), (want[1], want[3]));
+
+        // Past the end of the file: no lines.
+        let r = lines_of(&path, Unit::Byte, 9, 5, true).unwrap();
+        assert!(r.starts.is_empty());
+        assert_eq!((r.start, r.end), (data.len() as u64, data.len() as u64));
+
+        // Not asked for: not sent, and the range is the same.
+        let r = lines_of(&path, Unit::Byte, 0, 4, false).unwrap();
+        assert!(r.starts.is_empty());
+        assert_eq!(r.end, data.len() as u64);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn starts_in_a_run_of_utf16_and_a_file_that_ends_in_a_break() {
+        let utf16 = |t: &str| t.encode_utf16().flat_map(|u| u.to_le_bytes()).collect::<Vec<u8>>();
+        let data = utf16("ab\ncd\nef\n");
+        let (got, end) = starts_in(&mut Cursor::new(data.clone()), 0, 3, data.len() as u64, true, Unit::Utf16Le, 4).unwrap();
+        assert_eq!((got, end), (vec![0, 6, 12], data.len() as u64));
+        let text = b"a\nb\n";
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 2, 4, true, Unit::Byte, 3).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
+        // More lines asked for than there are: what there is.
+        let (got, end) = starts_in(&mut Cursor::new(text.to_vec()), 0, 9, 4, true, Unit::Byte, 3).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
+    }
+
+    /// A run that reaches the end of the file doesn't read its last line: a file of one gigantic line is not scanned
+    /// again for its starts, and the last page of any file doesn't read through a gigantic last line.
+    #[test]
+    fn a_run_to_the_end_of_the_file_does_not_read_its_last_line() {
+        let mut data = b"a
+b
+".to_vec();
+        data.extend(std::iter::repeat(b'x').take(1000));
+        let size = data.len() as u64;
+        let mut file = Cursor::new(data.clone());
+        let (got, end) = starts_in(&mut file, 0, 3, size, true, Unit::Byte, 4).unwrap();
+        assert_eq!((got, end), (vec![0, 2, 4], size));
+        assert!(file.position() <= 8, "read to {}", file.position());
+        // One line only: nothing is read.
+        let mut file = Cursor::new(data.clone());
+        let (got, end) = starts_in(&mut file, 4, 1, size, true, Unit::Byte, 4).unwrap();
+        assert_eq!((got, end, file.position()), (vec![4], size, 0));
+        // Not to the end: the run's own end is found, and the answer is the same as before.
+        let (got, end) = starts_in(&mut Cursor::new(data), 0, 2, size, false, Unit::Byte, 4).unwrap();
+        assert_eq!((got, end), (vec![0, 2], 4));
+    }
+
+    #[test]
+    fn names_an_encoding_it_cannot_index() {
+        assert_eq!(Unit::parse("utf-8"), Ok(Unit::Byte));
+        assert_eq!(Unit::parse("utf-16be"), Ok(Unit::Utf16Be));
+        assert!(Unit::parse("shift-jis").unwrap_err().contains("shift-jis"));
+    }
+}

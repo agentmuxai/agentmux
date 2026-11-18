@@ -8,6 +8,7 @@
  */
 
 import { fetchMediaBlob, fetchMediaRange } from "@/app/element/local-media";
+import { takeOpenPosition } from "../../open-position";
 import { loadRange } from "./pdf-range";
 import { RANGE_CHUNK, WHOLE_FILE_MAX_BYTES, type FindMatches } from "./pdf-viewer-model";
 import type { PdfViewerState } from "./pdf-viewer-state";
@@ -80,7 +81,10 @@ function createPageViewer(s: PdfViewerState, mods: PdfjsModules) {
     eventBus.on("pagesinit", () => {
         if (!s.viewer) return;
         fitToWidth(s);
-        if (s.keep) s.viewer.currentPageNumber = Math.min(s.keep.page, s.viewer.pagesCount);
+        // Opened at a page (pane.open's `page`) beats the page a reload keeps.
+        const asked = takeOpenPosition(s.props.blockId, s.props.path, "page");
+        const page = asked ?? s.keep?.page;
+        if (page !== undefined) s.viewer.currentPageNumber = Math.min(page, s.viewer.pagesCount);
         s.keep = null;
     });
     eventBus.on("pagechanging", (e: { pageNumber: number }) => s.setPage(e.pageNumber));
