@@ -248,8 +248,10 @@ export function Notices(props: Part): JSX.Element {
 }
 
 /**
- * Check for update, always: nothing checks on its own, and a new check replaces the release on offer (not
- * while a download or restart into it is under way). A `task dev` build, which doesn't upgrade, learns which
+ * Check for update, always: srv also checks on its own every few hours, and a check here replaces the release on
+ * offer (not while a download or restart into it is under way). A release it finds is downloaded at once when
+ * this install can (the Download button is then the way back after a failure, or when `update:autodownload` is
+ * off); the restart that installs it stays a click. A `task dev` build, which doesn't upgrade, learns which
  * release is latest.
  */
 export function CheckRow(props: Part): JSX.Element {

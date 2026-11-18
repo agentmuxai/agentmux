@@ -78,6 +78,22 @@ export async function checkForUpdate(): Promise<void> {
     if (viaStore()) await askStore();
 }
 
+/**
+ * Whether the person's Check for update, having found a release, goes on to download it: one click for "find it and
+ * fetch it"; the restart that installs it stays a click of its own. Only this window's click chains into the
+ * download: srv's check command stays read-only, so an agent asking for a check starts nothing. Not for a Store
+ * install (the Store downloads), an install that can't download itself or must install an earlier version first, a
+ * release that already has a download (running, staged or failed: the panel's Retry stays the way back), or when the
+ * person turned `update:autodownload` off, which keeps the Download button as the second step.
+ */
+export function downloadFollowsCheck(
+    s: AppUpdateStatus | null = appUpdate(),
+    autodownload: boolean = getSettingsKeyAtom("update:autodownload")() !== false,
+): boolean {
+    if (!autodownload || viaStore(s) || !s?.can_download || s.install_first) return false;
+    return availableRelease(s) !== null && releaseDownload(s) === null;
+}
+
 /** Ask srv for the status now (a window opened after the last event). */
 export async function loadAppUpdate(): Promise<void> {
     try {

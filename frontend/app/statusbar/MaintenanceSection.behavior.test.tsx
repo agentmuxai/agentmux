@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
     storeOffer: { state: "available", message: "", version: "0.59.27" } as any,
     storeResult: undefined as any,
     hostError: null as string | null,
+    autodownload: undefined as boolean | undefined,
     revealError: null as string | null,
     log: [] as string[],
 }));
@@ -71,7 +72,7 @@ vi.mock("@/store/global", () => ({
         listen: () => Promise.resolve(() => {}),
     }),
     openLink: (url: string) => void h.log.push(`openLink ${url}`),
-    getSettingsKeyAtom: () => () => undefined,
+    getSettingsKeyAtom: (key: string) => () => (key === "update:autodownload" ? h.autodownload : undefined),
 }));
 vi.mock("@/app/store/app-update", async (orig) => ({
     ...(await orig<typeof import("@/app/store/app-update")>()),
@@ -152,6 +153,7 @@ beforeEach(() => {
     h.storeOffer = { state: "available", message: "", version: "0.59.27" };
     h.storeResult = undefined;
     h.hostError = null;
+    h.autodownload = undefined;
     h.revealError = null;
     setStoreStayed(null);
     forgetStoreOffer();
@@ -392,5 +394,86 @@ describe("Check for update", () => {
         look("download under way");
         expect((screen.getByRole("button", { name: "Check again" }) as HTMLButtonElement).disabled).toBe(true);
         await snapshot("check-disabled");
+    });
+
+    describe("a release it finds is downloaded without a second click", () => {
+        const stood = { state: "up-to-date", current: "0.59.26", latest: "0.59.26", checked_ms: 1, install: "windows-portable", can_download: true };
+        const calls = () => T.filter((l) => l.startsWith("rpc AppUpdateCheck") || l.startsWith("host appUpdate"));
+
+        it("checks, then asks srv to download once and never asks to restart", async () => {
+            feed(stood);
+            await mount();
+            h.check = PORTABLE;
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck", "host appUpdate download"]);
+            // Restart stays a click of its own: nothing but the download was asked for.
+            expect(T.some((l) => l.includes("restart"))).toBe(false);
+        });
+
+        it("keeps today's two steps when update:autodownload is off", async () => {
+            h.autodownload = false;
+            feed(stood);
+            await mount();
+            h.check = PORTABLE;
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck"]);
+            expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+        });
+
+        it("downloads nothing for an install that cannot download itself, or that must install an earlier version first", async () => {
+            feed({ ...stood, install: "windows-setup", can_download: false });
+            await mount();
+            h.check = AVAILABLE;
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck"]);
+            cleanup();
+            T.length = 0;
+            feed(stood);
+            await mount();
+            h.check = { ...PORTABLE, install_first: "0.55.0" };
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck"]);
+        });
+
+        it("downloads nothing when it finds none, or for a Microsoft Store install", async () => {
+            feed(stood);
+            await mount();
+            h.check = stood;
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck"]);
+            cleanup();
+            T.length = 0;
+            feed(STORE);
+            forgetStoreOffer();
+            await mount();
+            fireEvent.click(screen.getByRole("button", { name: /Check (for update|again)/ }));
+            await flush();
+            expect(calls()).toEqual([]);
+        });
+
+        it("starts no second download when the release already has one", async () => {
+            feed(downloading("ready"));
+            h.check = downloading("ready");
+            await mount();
+            fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+            await flush();
+            expect(calls()).toEqual(["rpc AppUpdateCheck"]);
+        });
+
+        it("shows a download that could not start as a download failure, not a failed check", async () => {
+            h.hostError = "the disk is full";
+            feed(stood);
+            await mount();
+            h.check = PORTABLE;
+            fireEvent.click(screen.getByRole("button", { name: "Check for update" }));
+            await flush();
+            expect(screen.getByText("the disk is full")).toBeTruthy();
+            expect(calls()).toEqual(["rpc AppUpdateCheck", "host appUpdate download"]);
+        });
     });
 });
