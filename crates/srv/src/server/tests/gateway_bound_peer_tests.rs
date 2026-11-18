@@ -57,11 +57,14 @@ fn bound_agent(state: &AppState, name: &str, peer: Option<IpAddr>) -> String {
 
 /// One request through the router with the extras given: a stamp's headers, or the peer the container listener checked.
 async fn send(state: &AppState, token: &str, uri: &str, stamp: Option<(IpAddr, &str, &str)>, checked: Option<IpAddr>) -> (StatusCode, String) {
+    let headers = stamp.map(|(peer, method, target)| gateway_fwd::stamp_headers(peer, method, target));
+    send_with(state, token, uri, headers.unwrap_or_default(), checked).await
+}
+
+async fn send_with(state: &AppState, token: &str, uri: &str, stamp_headers: Vec<(&'static str, String)>, checked: Option<IpAddr>) -> (StatusCode, String) {
     let mut req = Request::builder().method(Method::POST).uri(uri).header("authorization", format!("Bearer {token}"));
-    if let Some((peer, method, target)) = stamp {
-        for (name, value) in gateway_fwd::stamp_headers(peer, method, target) {
-            req = req.header(name, value);
-        }
+    for (name, value) in stamp_headers {
+        req = req.header(name, value);
     }
     let mut req = req.body(Body::from("{}")).unwrap();
     if let Some(peer) = checked {
@@ -100,6 +103,25 @@ async fn a_stamp_for_the_tokens_own_container_is_accepted_and_one_for_another_is
     let (status, answer) = send(&state, &token, URI, Some((ip(10), "POST", URI)), None).await;
     assert_eq!((status, answer.contains(WRONG)), (StatusCode::FORBIDDEN, true), "another container's address: {answer}");
     assert_eq!(token::grant_for(&token), None, "and the token ends");
+}
+
+#[tokio::test]
+async fn a_stamp_from_a_forwarder_whose_clock_is_off_is_refused_with_the_reason_and_the_token_stays() {
+    let state = test_state();
+    let token = bound_agent(&state, "gwb-clock", Some(ip(9)));
+    let now = agentmux_common::time::now_secs_u64();
+    for ts in [now - 3600, now + 3600] {
+        let (status, answer) = send_with(&state, &token, URI, gateway_fwd::stamp_headers_at(ip(9), "POST", URI, ts), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
+        assert!(answer.contains("clock") && !answer.contains(WRONG), "says what is wrong, and is not a use by another container: {answer}");
+        assert!(token::grant_for(&token).is_some(), "a clock that is off is no stranger: the token stays");
+    }
+    // A made-up proof with an old time is a stranger's: that one ends the token.
+    let mut forged = gateway_fwd::stamp_headers_at(ip(9), "POST", URI, now - 3600);
+    forged[2].1 = "00".repeat(32);
+    let (status, answer) = send_with(&state, &token, URI, forged, None).await;
+    assert_eq!((status, answer.contains(WRONG)), (StatusCode::FORBIDDEN, true), "{answer}");
+    assert_eq!(token::grant_for(&token), None);
 }
 
 #[tokio::test]

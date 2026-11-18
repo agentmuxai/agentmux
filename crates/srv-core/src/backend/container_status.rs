@@ -141,7 +141,7 @@ pub struct Registry {
 
 /// What a container is when it is one of AgentMux's own helpers, by its name.
 fn helper_of(name: &str) -> Option<&'static str> {
-    (name == gateway_fwd::CONTAINER_NAME).then_some(gateway_fwd::HELPER_TEXT)
+    gateway_fwd::is_forwarder_name(name).then_some(gateway_fwd::HELPER_TEXT)
 }
 
 /// The agent id of a container name, when it is an agent container's.

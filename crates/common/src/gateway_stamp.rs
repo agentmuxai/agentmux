@@ -84,10 +84,12 @@ pub fn verify(secret: &[u8], peer: Option<&str>, ts: Option<&str>, proof: Option
     if !covered_target(target) {
         return Err(Refusal::OutsidePrefix);
     }
+    // The proof first: `Expired` then means a proof made with the secret whose time is off, never a guess.
+    mac(secret, peer, ts, method, target).verify_slice(&given).map_err(|_| Refusal::BadProof)?;
     if ts > now_secs.saturating_add(AHEAD_SECS) || now_secs.saturating_sub(ts) > WINDOW_SECS {
         return Err(Refusal::Expired);
     }
-    mac(secret, peer, ts, method, target).verify_slice(&given).map(|()| peer).map_err(|_| Refusal::BadProof)
+    Ok(peer)
 }
 
 #[cfg(test)]
@@ -135,6 +137,13 @@ mod tests {
         assert_eq!(check(&s, "POST", TARGET, 1000 + WINDOW_SECS + 1), Err(Refusal::Expired));
         assert_eq!(check(&s, "POST", TARGET, 1000 - 5), Ok(ip(9)), "a clock a few seconds behind");
         assert_eq!(check(&s, "POST", TARGET, 1000 - 6), Err(Refusal::Expired), "a time well ahead of this clock");
+    }
+
+    #[test]
+    fn only_a_real_proof_can_be_expired() {
+        let s = stamped(ip(9), 1000, "POST", TARGET);
+        let guessed = (s.0.clone(), s.1.clone(), "00".repeat(32));
+        assert_eq!(check(&guessed, "POST", TARGET, 1000 + WINDOW_SECS + 100), Err(Refusal::BadProof), "a guess with a stale time is a bad proof, not an expired one");
     }
 
     #[test]

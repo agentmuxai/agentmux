@@ -24,9 +24,9 @@ pub struct Grant {
     pub route: String,
     /// The API-key account the token spends, for the key route (`catalog::KEY_ROUTE_ID`); empty on a model route.
     pub account: String,
-    /// The one address the token may be used from: the container's own on the agents network (Linux), set at the start of
-    /// each container turn. `None` for a host agent's token, and for a container's on a platform where the container reaches
-    /// srv through Docker's own forwarding (Docker Desktop), where the token holds for this machine.
+    /// The one address the token may be used from: the container's own on the agents network, set at the start of each
+    /// container turn, on every platform (on Docker Desktop srv learns it from the gateway forwarder's stamp). `None` only
+    /// for a host agent's token.
     pub peer: Option<IpAddr>,
 }
 
@@ -75,7 +75,7 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     token
 }
 
-/// The key route's token for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
+/// A gateway route's token (the key route or a model route) for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
 /// working at once unless it already holds exactly this grant (the same agent, account and address): two panes of one
 /// container agent run turns that overlap, and the second must not end the token the first is running on. A container's
 /// token ends with the container ([`revoke_agent`]), so a recreated container, a new address or another account is always

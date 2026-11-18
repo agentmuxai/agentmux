@@ -23,7 +23,7 @@ const NO_PATH: &str = "This agent's model access can't be used in a container on
 /// The container has no address on the agents network yet.
 const NO_ADDRESS: &str = "This agent's container is not on the agents network yet, so its model access can't be tied to it. Send the message again; if it keeps failing, restart the agent.";
 /// The agent's token is gone (it was moved off the key, or the route was left, while the turn was starting).
-const GONE: &str = "This agent is no longer on its API key account. Send the message again.";
+const GONE: &str = "This agent's model access for this turn has ended. Send the message again.";
 
 /// Ends every gateway token of the agent whose container this is (named from its id, `container_name_for_slug`).
 /// Called when the container is stopped, recreated (which stops and removes it) or removed, whatever the daemon answers.

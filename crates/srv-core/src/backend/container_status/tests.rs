@@ -301,21 +301,21 @@ fn a_stop_event_for_a_container_not_known_to_be_running_ends_nothing() {
 
 #[test]
 fn the_gateway_forwarder_is_listed_as_a_helper_and_no_agent() {
-    use crate::backend::container::gateway_fwd::{CONTAINER_NAME, HELPER_TEXT};
+    use crate::backend::container::gateway_fwd::{container_name, HELPER_TEXT};
     let (hub, seen) = hub();
     for action in [Action::Create, Action::Start] {
-        hub.on_event(DockerEvent { action, name: CONTAINER_NAME.into(), image: "agentmux-agent:1".into(), labelled: false });
+        hub.on_event(DockerEvent { action, name: container_name().into(), image: "agentmux-agent:1".into(), labelled: false });
     }
     let listed: Vec<ContainerStatus> = hub.list().containers;
     assert_eq!(listed.len(), 1, "listed, though it carries no agent's label");
-    assert_eq!((listed[0].name.as_str(), listed[0].agent_id.clone(), listed[0].agent_name.clone(), listed[0].helper.as_deref()), (CONTAINER_NAME, None, None, Some(HELPER_TEXT)));
+    assert_eq!((listed[0].name.as_str(), listed[0].agent_id.clone(), listed[0].agent_name.clone(), listed[0].helper.as_deref()), (container_name(), None, None, Some(HELPER_TEXT)));
     assert_eq!(listed[0].state, ContainerState::Running);
     assert!(!seen.lock().unwrap().is_empty());
     // A stop of a helper ends no agent's token.
     let token = key_token("gateway-fwd");
     let ending = hub_ending_all_tokens();
-    ending.on_event(DockerEvent { action: Action::Start, name: CONTAINER_NAME.into(), image: String::new(), labelled: false });
-    ending.on_event(DockerEvent { action: Action::Die, name: CONTAINER_NAME.into(), image: String::new(), labelled: false });
+    ending.on_event(DockerEvent { action: Action::Start, name: container_name().into(), image: String::new(), labelled: false });
+    ending.on_event(DockerEvent { action: Action::Die, name: container_name().into(), image: String::new(), labelled: false });
     assert!(token::grant_for(&token).is_some());
     token::revoke("gateway-fwd", KEY_ROUTE_ID);
 }

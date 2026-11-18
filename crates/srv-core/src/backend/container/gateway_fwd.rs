@@ -4,7 +4,7 @@
 //! The gateway forwarder: how a container agent's model-gateway request is tied to its own container where srv cannot see
 //! which container it comes from (Docker Desktop: every container arrives from one address).
 //!
-//! A helper container, [`CONTAINER_NAME`], runs `agentmux-mcp gateway-fwd` on the agents network. Container agents are
+//! A helper container, [`container_name`], runs `agentmux-mcp gateway-fwd` on the agents network. Container agents are
 //! pointed at it (`key_route`); it sees each one's own address, puts it in a stamp
 //! ([`agentmux_common::gateway_stamp`]) on the request, and passes the request to srv. srv accepts the stamp only with the
 //! proof made from this launch's secret ([`verify_stamp`]), so the address in it is the one the forwarder saw.
@@ -26,8 +26,8 @@ use bollard::models::{ContainerInspectResponse, HostConfig, RestartPolicy, Resta
 
 use super::{ContainerManager, AGENTMUX_DOCKER_NETWORK};
 
-/// The helper's fixed name. Its address on the agents network is found by this name (Docker's own DNS on that network).
-pub const CONTAINER_NAME: &str = "agentmux-gateway-fwd";
+/// What every forwarder's name starts with.
+pub const CONTAINER_PREFIX: &str = "agentmux-gateway-fwd";
 /// The label that names the helper as AgentMux's, and what the container list says it is.
 pub const HELPER_LABEL: &str = "ai.agentmux.helper";
 pub const HELPER_TEXT: &str = "AgentMux gateway forwarder";
@@ -46,9 +46,28 @@ fn secret() -> &'static str {
     SECRET.get_or_init(|| format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()))
 }
 
+/// This srv instance's forwarder's name: the prefix and a short mark of its data directory. Two AgentMux instances on one
+/// machine (another channel, a dev build) share the Docker daemon and the agents network, and each has its own secret, so each
+/// has its own forwarder and neither replaces or removes the other's. The same instance makes the same name at every launch.
+/// Its address on the agents network is found by this name (Docker's own DNS on that network).
+pub fn container_name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        use sha2::{Digest, Sha256};
+        let seed = agentmux_common::data_paths::agentmux_root().ok().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| secret().to_string());
+        let d = Sha256::digest(seed.as_bytes());
+        format!("{CONTAINER_PREFIX}-{:02x}{:02x}{:02x}{:02x}", d[0], d[1], d[2], d[3])
+    })
+}
+
+/// Whether a container name is a gateway forwarder's, any instance's.
+pub fn is_forwarder_name(name: &str) -> bool {
+    name == CONTAINER_PREFIX || name.strip_prefix(CONTAINER_PREFIX).is_some_and(|rest| rest.starts_with('-'))
+}
+
 /// The forwarder's base URL, as a container on the agents network reaches it.
 pub fn url() -> String {
-    format!("http://{CONTAINER_NAME}:{PORT}")
+    format!("http://{}:{PORT}", container_name())
 }
 
 /// The container a request was stamped for, when its stamp is good for this request now.
@@ -65,7 +84,12 @@ fn verify_stamp_at(headers: &HeaderMap, method: &str, target: &str, now: u64) ->
 /// srv's side can send one: the real ones are made in the helper container, which has its own copy of the secret.
 #[doc(hidden)]
 pub fn stamp_headers(peer: IpAddr, method: &str, target: &str) -> Vec<(&'static str, String)> {
-    let ts = agentmux_common::time::now_secs_u64();
+    stamp_headers_at(peer, method, target, agentmux_common::time::now_secs_u64())
+}
+
+/// [`stamp_headers`] for a forwarder whose clock reads `ts`.
+#[doc(hidden)]
+pub fn stamp_headers_at(peer: IpAddr, method: &str, target: &str, ts: u64) -> Vec<(&'static str, String)> {
     vec![
         (gateway_stamp::HEADER_PEER, peer.to_string()),
         (gateway_stamp::HEADER_TS, ts.to_string()),
@@ -114,17 +138,17 @@ pub(super) async fn ensure(cm: &ContainerManager, agent_container: &str, env: &[
     let image = cm.inner.docker.inspect_container(agent_container, None).await.ok().and_then(|d| d.config).and_then(|c| c.image).ok_or_else(|| NOT_RUNNING.to_string())?;
     // One at a time, so two turns starting together make one forwarder.
     let _one = LOCK.lock().await;
-    if let Ok(existing) = cm.inner.docker.inspect_container(CONTAINER_NAME, None).await {
+    if let Ok(existing) = cm.inner.docker.inspect_container(container_name(), None).await {
         if is_current(&existing, &image, &upstream) {
             return Ok(url());
         }
         // Another launch's, another image, or not running.
-        let _ = cm.inner.docker.remove_container(CONTAINER_NAME, Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
+        let _ = cm.inner.docker.remove_container(container_name(), Some(RemoveContainerOptions { force: true, ..Default::default() })).await;
     }
     if !cm.ensure_network_exists().await {
         return Err(NOT_RUNNING.to_string());
     }
-    let created = cm.inner.docker.create_container(Some(CreateContainerOptions { name: CONTAINER_NAME, platform: None }), forwarder_config(&image, &upstream, secret())).await;
+    let created = cm.inner.docker.create_container(Some(CreateContainerOptions { name: container_name(), platform: None }), forwarder_config(&image, &upstream, secret())).await;
     let started = match created {
         Ok(c) if !c.id.is_empty() => cm.inner.docker.start_container(&c.id, None::<StartContainerOptions<String>>).await.is_ok(),
         _ => false,
@@ -133,7 +157,7 @@ pub(super) async fn ensure(cm: &ContainerManager, agent_container: &str, env: &[
         tracing::warn!(image = %image, "gateway forwarder: could not start; a container agent's model access is refused until it can");
         return Err(NOT_RUNNING.to_string());
     }
-    tracing::info!(container = CONTAINER_NAME, "gateway forwarder: started on the agents network");
+    tracing::info!(container = container_name(), "gateway forwarder: started on the agents network");
     Ok(url())
 }
 
@@ -142,7 +166,7 @@ pub(super) async fn ensure(cm: &ContainerManager, agent_container: &str, env: &[
 async fn stays_up(cm: &ContainerManager) -> bool {
     for _ in 0..2 {
         tokio::time::sleep(Duration::from_millis(700)).await;
-        let running = cm.inner.docker.inspect_container(CONTAINER_NAME, None).await.ok().and_then(|d| d.state).and_then(|s| s.running).unwrap_or(false);
+        let running = cm.inner.docker.inspect_container(container_name(), None).await.ok().and_then(|d| d.state).and_then(|s| s.running).unwrap_or(false);
         if !running {
             return false;
         }
@@ -153,8 +177,8 @@ async fn stays_up(cm: &ContainerManager) -> bool {
 /// Removes the forwarder, if there is one: when srv ends, and before a launch's own is made. Best effort.
 pub async fn remove(cm: &ContainerManager) {
     let _one = LOCK.lock().await;
-    if cm.inner.docker.remove_container(CONTAINER_NAME, Some(RemoveContainerOptions { force: true, ..Default::default() })).await.is_ok() {
-        tracing::info!(container = CONTAINER_NAME, "gateway forwarder: removed");
+    if cm.inner.docker.remove_container(container_name(), Some(RemoveContainerOptions { force: true, ..Default::default() })).await.is_ok() {
+        tracing::info!(container = container_name(), "gateway forwarder: removed");
     }
 }
 
@@ -231,7 +255,16 @@ mod tests {
 
     #[test]
     fn the_forwarder_is_found_by_its_name_on_the_agents_network() {
-        assert_eq!(url(), format!("http://agentmux-gateway-fwd:{PORT}"));
-        assert!(CONTAINER_NAME.starts_with("agentmux-"), "inside the names AgentMux's container list and cleanup already look at");
+        assert_eq!(url(), format!("http://{}:{PORT}", container_name()));
+        assert!(container_name().starts_with("agentmux-"), "inside the names AgentMux's container list and cleanup already look at");
+        assert!(is_forwarder_name(container_name()) && is_forwarder_name(CONTAINER_PREFIX));
+        assert!(!is_forwarder_name("agentmux-gateway-fwdx") && !is_forwarder_name("agentmux-boxy"));
+    }
+
+    #[test]
+    fn each_instance_has_its_own_forwarder_name_and_the_same_one_every_launch() {
+        assert_eq!(container_name(), container_name());
+        let mark = container_name().strip_prefix(CONTAINER_PREFIX).unwrap();
+        assert!(mark.len() == 9 && mark.starts_with('-') && mark[1..].chars().all(|c| c.is_ascii_hexdigit()), "{mark}");
     }
 }
