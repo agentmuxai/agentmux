@@ -18,10 +18,11 @@
 //!    ([`routes`](crate::backend::container::routes)): the operator RPCs, `/ws` and what runs
 //!    or writes on the host.
 //! 3. **Only from the agents subnet.** The peer address must be inside the network's subnet.
-//! 4. **A key account's token only from its own container.** The gateway token of an API-key account
-//!    (`model_gateway::catalog::KEY_ROUTE_ID`) is bound to the container's address on the network at the start of each
-//!    turn ([`bind_key_route`](crate::backend::container::key_route)); any other peer showing it is refused, the use is
-//!    reported ([`ForeignUse`]) and the token ends at once.
+//! 4. **A gateway token only from its own container.** The gateway token of a container agent (a model route's, or an
+//!    API-key account's, `model_gateway::catalog::KEY_ROUTE_ID`) is bound to the container's address on the network at the
+//!    start of each turn ([`bind`](crate::backend::container::key_route)); any other peer showing it is refused, the use
+//!    is reported ([`ForeignUse`]) and the token ends at once. (Docker Desktop has no such listener: there the forwarder
+//!    says which container a request came from, `container::gateway_fwd`.)
 //!
 //! The container's `AGENTMUX_LOCAL_URL` becomes `http://<gateway>:<port>`
 //! ([`url`], applied in `credential::container_exec_env`).
@@ -83,11 +84,20 @@ pub fn check(peer: IpAddr, subnet: Option<&Subnet>, token: Option<&str>, path: &
     Ok(())
 }
 
-/// A live key-route token shown by a peer that is not the container it was made for.
-pub fn foreign_key_use(peer: IpAddr, headers: &axum::http::HeaderMap) -> Option<crate::backend::model_gateway::token::Grant> {
+/// A live gateway token shown by a peer that is not the container it was made for. A key account's token is always bound to
+/// one, so one with no address is foreign here too; a model route's may be unbound (it is bound at the start of a container
+/// turn), and then holds for any container on the network.
+pub fn foreign_use(peer: IpAddr, headers: &axum::http::HeaderMap) -> Option<crate::backend::model_gateway::token::Grant> {
     let grant = crate::backend::model_gateway::request::bearer_token(headers).and_then(|t| crate::backend::model_gateway::token::grant_for(&t))?;
-    (grant.route == crate::backend::model_gateway::catalog::KEY_ROUTE_ID && grant.peer != Some(peer)).then_some(grant)
+    let key = grant.route == crate::backend::model_gateway::catalog::KEY_ROUTE_ID;
+    let foreign = if key { grant.peer != Some(peer) } else { grant.peer.is_some_and(|bound| bound != peer) };
+    foreign.then_some(grant)
 }
+
+/// The peer the container listener checked a request came from, added to the request once it has passed. It is the one thing
+/// besides a verified stamp (`container::gateway_fwd`) that proves which container a gateway request is from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentsNetworkPeer(pub IpAddr);
 
 /// What a refused use of a key account's token says: the same whatever was wrong, naming nothing.
 const FOREIGN_USE: &str = "this token is not for this container";
@@ -102,7 +112,7 @@ pub fn check_gateway(peer: IpAddr, subnet: Option<&Subnet>, headers: &axum::http
     if !subnet.contains(peer) {
         return Err((StatusCode::FORBIDDEN, "not from the agents network".to_string()));
     }
-    if foreign_key_use(peer, headers).is_some() {
+    if foreign_use(peer, headers).is_some() {
         return Err((StatusCode::FORBIDDEN, FOREIGN_USE.to_string()));
     }
     let granted = crate::backend::model_gateway::request::bearer_token(headers).is_some_and(|t| crate::backend::model_gateway::token::grant_for(&t).is_some());
@@ -121,7 +131,7 @@ pub fn layer(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send 
 /// subnet `subnet()` gives at that moment. A key account's token shown by another peer is refused, its token ends, and
 /// `foreign` is told.
 pub fn layer_reporting(router: Router, subnet: impl Fn() -> Option<Subnet> + Clone + Send + Sync + 'static, foreign: ForeignUse) -> Router {
-    router.layer(axum::middleware::from_fn(move |req: Request, next: Next| {
+    router.layer(axum::middleware::from_fn(move |mut req: Request, next: Next| {
         let subnet = subnet.clone();
         let foreign = foreign.clone();
         async move {
@@ -129,11 +139,11 @@ pub fn layer_reporting(router: Router, subnet: impl Fn() -> Option<Subnet> + Clo
             let token = req.headers().get(agentmux_common::AUTH_KEY_HEADER).and_then(|v| v.to_str().ok());
             let gateway = req.uri().path().starts_with(crate::backend::model_gateway::PATH_PREFIX);
             if let (true, Some(peer)) = (gateway, peer) {
-                if let Some(grant) = foreign_key_use(peer, req.headers()) {
+                if let Some(grant) = foreign_use(peer, req.headers()) {
                     // The token ends before anything else is said: it was shown to someone it is not for.
                     crate::backend::model_gateway::token::revoke(&grant.def_id, &grant.route);
                     foreign(&grant, peer);
-                    tracing::warn!(path = %req.uri().path(), peer = ?peer, "container listener refused a key account's token from another peer; the token is ended");
+                    tracing::warn!(path = %req.uri().path(), peer = ?peer, "container listener refused a gateway token from another peer; the token is ended");
                     return (StatusCode::FORBIDDEN, Json(json!({ "error": FOREIGN_USE }))).into_response();
                 }
             }
@@ -143,7 +153,13 @@ pub fn layer_reporting(router: Router, subnet: impl Fn() -> Option<Subnet> + Clo
                 None => Err((StatusCode::FORBIDDEN, "unknown peer".to_string())),
             };
             match verdict {
-                Ok(()) => next.run(req).await,
+                Ok(()) => {
+                    // Said to the handler, which holds a token bound to a container to this peer.
+                    if let Some(peer) = peer {
+                        req.extensions_mut().insert(AgentsNetworkPeer(peer));
+                    }
+                    next.run(req).await
+                }
                 Err((status, why)) => {
                     tracing::warn!(path = %req.uri().path(), peer = ?peer, %why, "container listener refused a request");
                     (status, Json(json!({ "error": why }))).into_response()

@@ -742,20 +742,10 @@ async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_
     ctrl.spawn_container_turn(fake.manager(), unique("c"), cli(), cfg).unwrap();
     let ended = wait_done(&ctrl).await;
 
-    if cfg!(target_os = "linux") {
-        // No listener on the agents network in a test: no way for the container to reach the gateway.
-        assert_eq!(ended, (STATUS_DONE.to_string(), 1));
-        assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
-        assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
-    } else {
-        assert_eq!(ended, (STATUS_DONE.to_string(), 0));
-        let env = &fake.execs(Kind::Turn)[0].1;
-        let given = env.iter().find_map(|e| e.strip_prefix("ANTHROPIC_AUTH_TOKEN=")).expect("the turn is given its token");
-        // Nothing to bind it to here, and the grant is the same: the agent's token holds, so a pane's other turn is not cut off.
-        assert_eq!(given, gate_token, "the agent's token for this machine");
-        let grant = token::grant_for(given).unwrap();
-        assert_eq!((grant.def_id.as_str(), grant.account.as_str(), grant.route.as_str()), ("kt-def", "kt-acct", KEY_ROUTE_ID));
-        assert!(env.iter().any(|e| e.starts_with("ANTHROPIC_BASE_URL=") && e.ends_with("/api/v1/model/anthropic")), "{env:?}");
-    }
+    // In a test there is no listener on the agents network and no forwarder container: no way for the container to reach the
+    // gateway, on any platform.
+    assert_eq!(ended, (STATUS_DONE.to_string(), 1));
+    assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
+    assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
     token::revoke("kt-def", KEY_ROUTE_ID);
 }

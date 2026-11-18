@@ -66,6 +66,7 @@ struct LoopEntry {
 type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
 mod desktop_input;
+mod gateway_fwd;
 mod doctor;
 mod heartbeat;
 mod self_keys;
@@ -98,6 +99,9 @@ fn main() {
 async fn run() {
     // `agentmux-mcp doctor [--heal]`, from the agent's shell: why its AgentMux
     // tools aren't connected, with no MCP session (doctor.rs).
+    if std::env::args().nth(1).as_deref() == Some("gateway-fwd") {
+        std::process::exit(gateway_fwd::run().await);
+    }
     if std::env::args().nth(1).as_deref() == Some("doctor") {
         std::process::exit(doctor::run(std::env::args().skip(2).collect()).await);
     }

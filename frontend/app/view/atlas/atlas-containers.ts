@@ -21,7 +21,7 @@ export function inContainer(agent: Pick<AtlasAgent, "runtime">): boolean {
 function containerOf(status: ContainerStatus): AtlasContainer | null {
     const { state } = status;
     if (state !== "starting" && state !== "running" && state !== "stopped") return null;
-    return { name: status.name, state, image: status.image, sinceMs: status.since_ms };
+    return { name: status.name, state, image: status.image, sinceMs: status.since_ms, ...(status.helper ? { helper: status.helper } : {}) };
 }
 
 /** Each agent's container, by the agent's id (the runtime's: `AtlasAgent.runtimeId`). */

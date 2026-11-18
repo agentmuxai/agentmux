@@ -24,9 +24,9 @@ pub struct Grant {
     pub route: String,
     /// The API-key account the token spends, for the key route (`catalog::KEY_ROUTE_ID`); empty on a model route.
     pub account: String,
-    /// The one address the token may be used from: the container's own on the agents network (Linux), set at the start of
-    /// each container turn. `None` for a host agent's token, and for a container's on a platform where the container reaches
-    /// srv through Docker's own forwarding (Docker Desktop), where the token holds for this machine.
+    /// The one address the token may be used from: the container's own on the agents network, set at the start of each
+    /// container turn, on every platform (on Docker Desktop srv learns it from the gateway forwarder's stamp). `None` only
+    /// for a host agent's token.
     pub peer: Option<IpAddr>,
 }
 
@@ -75,7 +75,7 @@ pub fn token_for_account(agent: &str, def_id: &str, route: &str, account: &str) 
     token
 }
 
-/// The key route's token for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
+/// A gateway route's token (the key route or a model route) for a container turn, accepted only from `peer` when there is one. The agent's earlier token stops
 /// working at once unless it already holds exactly this grant (the same agent, account and address): two panes of one
 /// container agent run turns that overlap, and the second must not end the token the first is running on. A container's
 /// token ends with the container ([`revoke_agent`]), so a recreated container, a new address or another account is always
@@ -134,11 +134,26 @@ pub fn revoke_agent(name: &str, route: &str) {
 /// [`revoke_agent`] for the tokens made at least `min_age` ago. A container that ended outside AgentMux is only heard of
 /// from Docker's event stream, which can run behind: a token made since (for the container that took its place) is left alone.
 pub fn revoke_agent_older_than(name: &str, route: &str, min_age: Duration) {
+    end_agent_tokens(name, Some(route), min_age);
+}
+
+/// [`revoke_agent`] for every route: a container's stop, recreation or removal ends all of its agent's gateway tokens.
+pub fn revoke_agent_everywhere(name: &str) {
+    end_agent_tokens(name, None, Duration::ZERO);
+}
+
+/// [`revoke_agent_older_than`] for every route: a container's stop ends all of its agent's gateway tokens, model routes
+/// and the key route alike.
+pub fn revoke_agent_everywhere_older_than(name: &str, min_age: Duration) {
+    end_agent_tokens(name, None, min_age);
+}
+
+fn end_agent_tokens(name: &str, route: Option<&str>, min_age: Duration) {
     let mut reg = registry().lock().unwrap();
     let ended: Vec<(String, String)> = reg
         .by_agent
         .iter()
-        .filter(|((_, r), _)| r == route)
+        .filter(|((_, r), _)| route.map_or(true, |route| r == route))
         .filter(|(_, token)| reg.by_digest.get(&digest(token)).is_some_and(|g| g.def_id == name || g.agent == name))
         .filter(|(_, token)| reg.minted.get(&digest(token)).map_or(true, |at| at.elapsed() >= min_age))
         .map(|(key, _)| key.clone())

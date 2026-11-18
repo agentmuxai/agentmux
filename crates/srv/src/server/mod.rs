@@ -224,6 +224,9 @@ mod model_gateway_tests;
 #[path = "tests/key_route_gateway_tests.rs"]
 mod key_route_gateway_tests;
 #[cfg(test)]
+#[path = "tests/gateway_bound_peer_tests.rs"]
+mod gateway_bound_peer_tests;
+#[cfg(test)]
 #[path = "tests/http_skill_tests.rs"]
 mod http_skill_tests;
 #[cfg(test)]
