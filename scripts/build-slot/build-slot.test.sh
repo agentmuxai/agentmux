@@ -21,6 +21,7 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL: $1"; }
 
 export AGENTMUX_AGENT_ID=test BUILD_SLOT_POLL=1 BUILD_SLOT_MAX_WAIT=120
 unset BUILD_SLOT_HELD BUILD_SLOT_MAX
+lines() { wc -l <"$1" | tr -d ' '; }   # macOS wc pads its count with spaces
 newroot() { export AGENTMUX_BUILD_SLOT_DIR="$TMP/locks-$1"; rm -rf "$AGENTMUX_BUILD_SLOT_DIR"; mkdir -p "$AGENTMUX_BUILD_SLOT_DIR"; }
 
 # A mkdir that always succeeds, like a caller that lost the race on uutils.
@@ -52,11 +53,11 @@ run_many() { # <n> [PATH prefix]  -> runs n jobs at once; sets OVERLAPS and DONE
 #    (The queue lets one waiter at a time try the slot, so these pass on the old claim too; test 2 is the
 #    one that needs the exclusive create.)
 newroot a; run_many 8
-[ "$(wc -l <"$OVERLAPS")" = 0 ] && ok || bad "8 simultaneous runs overlapped $(wc -l <"$OVERLAPS") times"
-[ "$(wc -l <"$DONE")" = 8 ] && ok || bad "8 simultaneous runs: only $(wc -l <"$DONE") finished"
+[ "$(lines "$OVERLAPS")" = 0 ] && ok || bad "8 simultaneous runs overlapped $(lines "$OVERLAPS") times"
+[ "$(lines "$DONE")" = 8 ] && ok || bad "8 simultaneous runs: only $(lines "$DONE") finished"
 newroot b; run_many 8 "$FAKE"
-[ "$(wc -l <"$OVERLAPS")" = 0 ] && ok || bad "with a mkdir that always succeeds, 8 simultaneous runs overlapped $(wc -l <"$OVERLAPS") times"
-[ "$(wc -l <"$DONE")" = 8 ] && ok || bad "with a mkdir that always succeeds, only $(wc -l <"$DONE") of 8 finished"
+[ "$(lines "$OVERLAPS")" = 0 ] && ok || bad "with a mkdir that always succeeds, 8 simultaneous runs overlapped $(lines "$OVERLAPS") times"
+[ "$(lines "$DONE")" = 8 ] && ok || bad "with a mkdir that always succeeds, only $(lines "$DONE") of 8 finished"
 
 # 2. A held slot is refused to a second run, which gives up (exit 75) instead of sharing it.
 newroot c
