@@ -17,7 +17,9 @@ import { openConfigFileOrTell } from "@/app/util/open-config-file";
 import { setAnimationPreset } from "@/app/store/animation-config";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { zoomPartCommands } from "@/app/store/zoom-part-commands";
-import { isSingletonView } from "@/app/store/widget-singleton";
+import { openPane } from "@/app/store/palette-open-pane";
+import { openWidgetCommands, widgetEntries } from "@/app/store/palette-open-commands";
+import { keyCommandEntries } from "@/app/store/palette-key-commands";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/store/section-panes";
@@ -67,6 +69,15 @@ export function isCommandAvailable(entry: CommandEntry): boolean {
 
 class CommandRegistry {
     private commands = new Map<string, CommandEntry>();
+    private providers: Array<() => CommandEntry[]> = [];
+
+    /** Adds entries computed each time the commands are listed (the widget bar's, which a person edits). A registered entry of the same id wins. */
+    addProvider(provider: () => CommandEntry[]): () => void {
+        if (!this.providers.includes(provider)) this.providers.push(provider);
+        return () => {
+            this.providers = this.providers.filter((p) => p !== provider);
+        };
+    }
 
     /** Adds or replaces `entry`; returns what removes it (only while it is
      *  still the entry registered under its id). */
@@ -78,15 +89,21 @@ class CommandRegistry {
     }
 
     get(id: string): CommandEntry | undefined {
-        return this.commands.get(id);
+        return this.commands.get(id) ?? this.provided().find((c) => c.id === id);
     }
 
     all(): CommandEntry[] {
-        return Array.from(this.commands.values());
+        const own = Array.from(this.commands.values());
+        const taken = new Set(own.map((c) => c.id));
+        return [...own, ...this.provided().filter((c) => !taken.has(c.id))];
+    }
+
+    private provided(): CommandEntry[] {
+        return this.providers.flatMap((provider) => provider());
     }
 
     run(id: string): boolean {
-        const cmd = this.commands.get(id);
+        const cmd = this.get(id);
         if (!cmd || !isCommandAvailable(cmd)) return false;
         fireAndForget(async () => {
             await cmd.execute();
@@ -132,16 +149,6 @@ function switchTab(offset: number) {
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
-
-/**
- * Open the pane `blockdef` describes: a singleton view (the widget config's `singleton`) brings back
- * the one already open, anything else, or `forceNew`, opens a new one. The same rule as the widget bar.
- */
-function openPane(blockdef: BlockDef, forceNew = false): Promise<unknown> {
-    const view = blockdef.meta?.["view"] as string | undefined;
-    if (view && !forceNew && isSingletonView(view)) return openOrFocusPaneByView(view, blockdef);
-    return createBlock(blockdef);
-}
 
 /** The "Open" commands for a terminal, an agent, system info, Tower and Kanban. */
 function registerOpenCommands(): void {
@@ -738,6 +745,12 @@ function registerAppCommands(): void {
     });
 }
 
+/** The entries that follow the widget bar and the shortcut table (palette-open-commands.ts, palette-key-commands.ts). */
+function registerBarAndKeyCommands(): void {
+    for (const entry of [...openWidgetCommands(), ...keyCommandEntries()]) commandRegistry.register(entry);
+    commandRegistry.addProvider(widgetEntries);
+}
+
 export function registerDefaultCommands(): void {
     registerOpenCommands();
     registerOpenViewCommands();
@@ -749,6 +762,7 @@ export function registerDefaultCommands(): void {
     registerDevCommands();
     registerViewCommands();
     registerAppCommands();
+    registerBarAndKeyCommands();
 }
 
 // ---------------------------------------------------------------------------
