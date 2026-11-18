@@ -93,6 +93,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
+# The streamed Browser pane's Chromium (docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md), only when asked:
+# `--build-arg STREAMED_BROWSER=1`. The pane itself is off until the server is started with
+# AGENTMUX_STREAMED_BROWSER=1, so an image built with this argument still does nothing by default.
+ARG STREAMED_BROWSER=
+RUN if [ -n "$STREAMED_BROWSER" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # node:24-slim ships a 'node' user at UID 1000; rename it rather than adding a
 # second UID-1000 user.
 RUN usermod -l agentmux -d /home/agentmux -m node \

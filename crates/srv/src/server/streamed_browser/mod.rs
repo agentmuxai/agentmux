@@ -8,6 +8,9 @@
 //!
 //! The route is behind the same layers as `/ws`: the key, or a signed-in browser's cookie and token.
 
+mod address_policy;
+#[cfg_attr(not(unix), allow(dead_code))]
+mod address_proxy;
 #[cfg_attr(not(unix), allow(dead_code))]
 mod cdp;
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -25,6 +28,11 @@ use serde::Deserialize;
 
 use super::local_session::SessionId;
 use super::local_session_routes::{session_ended, WS_PROTOCOL};
+
+/// Note a port this server listens on: a page in the browser may never connect to it (`address_policy`).
+pub fn note_own_port(port: u16) {
+    address_policy::note_own_port(port);
+}
 
 /// The route (the same literal is registered in `routes.rs`; a test holds them together).
 pub const ROUTE: &str = "/agentmux/streamed-browser";

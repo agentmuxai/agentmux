@@ -409,6 +409,15 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
 /// with `SO_EXCLUSIVEADDRUSE` the address is this server's alone and any other bind of it is refused, whatever it asks for.
 /// Elsewhere the system already refuses a second bind.
 pub(crate) async fn bind_exclusive(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
+    let listener = bind_exclusive_to(addr).await?;
+    // A page in the streamed browser may never connect to a port this server listens on.
+    if let Ok(local) = listener.local_addr() {
+        crate::server::streamed_browser::note_own_port(local.port());
+    }
+    Ok(listener)
+}
+
+async fn bind_exclusive_to(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;

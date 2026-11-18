@@ -4,6 +4,9 @@
 # trixie, because a srv built on a current Linux host needs its glibc. Build context is a folder holding: agentmux-srv (a Linux build), probe-entry.sh, streamed-browser-probe.mjs and
 # node_modules/ws (the `ws` package: `npm pack ws`, unpacked). Run with no published port:
 #   docker run --rm --cpus 1 agentmux-streamed-probe
+# The guard probe (spec section 12), with the build context also holding streamed-browser-guard-probe.mjs:
+#   docker run --rm -e GUARD=1 agentmux-streamed-probe
+# To try Chromium WITH its sandbox, add `-e AGENTMUX_STREAMED_BROWSER_NO_SANDBOX=0`; srv logs one line saying whether it started.
 # `--no-sandbox` is for this probe and the demo only (spec §2); the container is the boundary.
 FROM debian:trixie-slim
 RUN apt-get update \
@@ -13,6 +16,7 @@ RUN apt-get update \
 COPY agentmux-srv /usr/local/bin/agentmux-srv
 COPY probe-entry.sh /app/probe-entry.sh
 COPY streamed-browser-probe.mjs /app/probe.mjs
+COPY streamed-browser-guard-probe.mjs /app/guard-probe.mjs
 COPY node_modules /app/node_modules
 RUN chmod -R a+rX /app && chmod 755 /usr/local/bin/agentmux-srv /app/probe-entry.sh
 USER amx
