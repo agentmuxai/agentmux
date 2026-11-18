@@ -437,10 +437,11 @@ jobs:
   # list, so a tarball added after the signature would be an asset nobody can install. It stays buildable by hand (the
   # workflow's `legs: all`, from workflow_dispatch). `publish` says so in its summary.
   #
-  # Advisory for now: `sign-release` and `publish` wait for it but do not look at its result, so a new job on four legs
-  # cannot hold back a desktop release (its legs have their own time limits). The legs that built are published and
-  # signed; a platform that did not is absent from the manifest, and `install.sh --headless` says that version has no Headless
-  # package for it. It becomes required after the first release in which all four legs are green.
+  # Required: `sign-release` and `publish` run only when every leg of it succeeded, so a release never goes out missing a
+  # Headless package. A failed leg holds the release (nothing is signed or published); "Re-run failed jobs" on the run
+  # builds the leg again and the release goes on. (A release was once published without one package, and a published
+  # release can't take a file afterwards, which is why this is a requirement and not a warning.) The check is kept by
+  # scripts/release-publish-needs.test.mjs.
   build-server-package:
     name: Build — server package
     needs: gate
@@ -495,6 +496,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && needs.build-server-package.result == 'success'
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     environment: release-signing
@@ -633,6 +635,16 @@ jobs:
   # only covers the whole run. v0.59.37 shipped without macOS that way. So
   # publish needs build-macos to have succeeded, or to have been skipped
   # because macOS signing isn't set up (check-macos), never anything else.
+  #
+  # Everything a release ships is attached before it publishes: every package job below must have succeeded (the Headless
+  # server package too, as a whole: its four legs), or been skipped only where the line says why. The jobs this one does
+  # not require, and why a release may go out without each:
+  #   - container-image: the agent image is pushed to a registry, not attached to the release; the signed manifest names
+  #     it by digest when there is one, and without one the app pulls the image's version tag (see sign-release).
+  #   - linux-upgrade-check, publish-linux-repo, winget, ms-store: they run after publish and need it, so they can't hold it.
+  # Skipped is accepted only where a switch turns the job off on purpose: gate (a run that is not a release), check-macos,
+  # cef-runtime-pins, build-macos (no Apple identity set up) and sign-release (RELEASE_SIGNING_ENABLED is not 'true').
+  # scripts/release-publish-needs.test.mjs fails when a package job stops being required here.
   publish:
     name: Publish release
     needs: [gate, suite, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-server-package, sign-release]
@@ -644,6 +656,7 @@ jobs:
       && contains(fromJSON('["success","skipped"]'), needs.cef-runtime-pins.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-windows.result)
       && contains(fromJSON('["success","skipped"]'), needs.build-linux.result)
+      && needs.build-server-package.result == 'success'
       && contains(fromJSON('["success","skipped"]'), needs.sign-release.result)
       && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
@@ -662,16 +675,10 @@ jobs:
           node-version: '24'
 
       - name: Say which Headless packages this release has
-        env:
-          PACKAGE_RESULT: ${{ needs.build-server-package.result }}
         run: |
+          # This job runs only when every Headless leg succeeded (its condition above), so the line is always true.
           line="Release v${VERSION}: AgentMux Headless is built for Linux x64, Linux arm64, macOS arm64 and Windows x64; for macOS x64 the release has none, and install.sh --headless says so."
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PACKAGE_RESULT" != success ]; then
-            line="Release v${VERSION}: the AgentMux Headless package is incomplete (its build ended ${PACKAGE_RESULT}); the platforms that built are published, the others have no Headless package."
-            echo "::warning::$line"
-            echo "$line" >> "$GITHUB_STEP_SUMMARY"
-          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
