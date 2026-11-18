@@ -241,8 +241,8 @@ describe("the questions that make or change a linked entry", () => {
 
     it("says a batch of links records where keys live and reads nothing", async () => {
         const items = [
-            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "api.token", replaces: false, link: true },
-            { label: "Mail provider key", kind: "api-key", secret: "prod/mail", key: "", replaces: false, link: true },
+            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "api.token", user_key: "", replaces: false, link: true },
+            { label: "Mail provider key", kind: "api-key", secret: "prod/mail", key: "", user_key: "", replaces: false, link: true },
         ];
         const card = await shown({ entry_label: "invoice service keys", what: "secrets", batch: { name: "invoice service keys", service: "AWS Secrets Manager", region: "eu-west-1", profile: "work-read", grant: false, vault: "Fleet", agents: { mode: "all" }, vaults: [], items } });
         expect(card.textContent).toContain("Agent1 wants to record where 2 keys live: invoice service keys");
@@ -257,8 +257,8 @@ describe("the questions that make or change a linked entry", () => {
 
     it("keeps the copying words for a batch that mixes links and copies", async () => {
         const items = [
-            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "", replaces: false, link: true },
-            { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "", replaces: false, link: false },
+            { label: "Invoice provider key", kind: "api-key", secret: "prod/invoice-sync", key: "", user_key: "", replaces: false, link: true },
+            { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "", user_key: "", replaces: false, link: false },
         ];
         const card = await shown({ entry_label: "mixed", what: "secrets", batch: { name: "mixed", service: "AWS Secrets Manager", region: "", profile: "", grant: false, vault: "Personal", agents: { mode: "all" }, vaults: [], items } });
         expect(card.textContent).toContain("Agent1 wants to copy 2 secrets from AWS Secrets Manager into your Vault: mixed");
