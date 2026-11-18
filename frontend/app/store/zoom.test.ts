@@ -228,13 +228,15 @@ describe("zoomAllPanesIn/Out", () => {
             expect(zoomIndicatorTextAtom()).toBe("All panes: 105%");
         });
 
-        it("shows a range when panes land on different values", () => {
+        it("says which way it went, not a range, when panes land on different values", () => {
             setBlock("low", "term", 0.8);
             setBlock("high", "term", 1.5);
 
             zoomAllPanesIn();
 
-            expect(zoomIndicatorTextAtom()).toBe("All panes: 85%–155%");
+            expect(zoomIndicatorTextAtom()).toBe("All panes zoomed in");
+            zoomAllPanesOut();
+            expect(zoomIndicatorTextAtom()).toBe("All panes zoomed out");
         });
 
         // The bug this suppression fixes: N panes stepping in one gesture
