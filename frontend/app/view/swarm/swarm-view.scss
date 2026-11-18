@@ -578,6 +578,19 @@
     min-width: 0;
 }
 
+// The chip is a button when it opens the Spend cap panel: the kit's chrome button, which takes its look from the chip.
+.spend-chip-button {
+    display: inline-flex;
+    max-width: 100%;
+}
+
+// The Spend cap panel hung from the chip: as wide as its own text needs, and never wider than the window.
+.spend-chip-popover {
+    width: 22rem;
+    max-width: calc(100vw - 2rem);
+    padding: 0;
+}
+
 .swarm-current-tool-icon {
     font-size: var(--glyph-mark);
     color: var(--accent-color);
