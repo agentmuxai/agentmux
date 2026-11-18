@@ -238,15 +238,16 @@ const SECRET_CANDIDATES: &str = r#"((MAX, WITH_TEXT) => {
     }
   };
   visit(document);
-  // And every text that has no element inside it. One too long to send is boxed whole.
+  // And the text each element holds itself (its own text nodes, so a sentence with a link in it counts). One too long
+  // to send is boxed whole.
   const texts = [];
   const LONG = 16384;
   const visitText = (root) => {
     for (const el of root.querySelectorAll("*")) {
       if (texts.length >= MAX) { truncated = true; return; }
       if (el.shadowRoot) visitText(el.shadowRoot);
-      if (el.childElementCount !== 0 || el.localName === "script" || el.localName === "style") continue;
-      const t = String(el.textContent || "");
+      if (el.localName === "script" || el.localName === "style") continue;
+      const t = Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
       if (!t.trim()) continue;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
