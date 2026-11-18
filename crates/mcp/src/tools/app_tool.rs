@@ -34,7 +34,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Some("logs") => logs(arguments, cx).await,
             Some("disk") => disk(arguments, cx).await,
             Some("record") => super::app_record::record(arguments, cx).await,
-            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\", \"disk\" or \"record\""),
+            Some("workspace") => super::app_workspace::workspace(cx).await,
+            Some("keep_running") => super::app_workspace::keep_running(arguments, cx).await,
+            other => anyhow::bail!("App: unknown action {other:?}; use \"version\", \"health\", \"upgrade\", \"network\", \"history_reclaim\", \"logs\", \"disk\", \"record\", \"workspace\" or \"keep_running\""),
         },
         _ => Err(not_in_family()),
     }
