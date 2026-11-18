@@ -15,6 +15,7 @@ import { type Accessor, createComputed, createEffect, createMemo, createSignal, 
 import type { ViewerBarProps } from "../viewer-bar";
 import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
+import { takeOpenPosition, watchOpenPosition } from "../../open-position";
 import { LineSource, type LineText } from "./line-source";
 import { createLargeFind } from "./large-find-state";
 import { hitOrdinal } from "./large-find";
@@ -227,6 +228,26 @@ function createCurrentHit(feed: ReturnType<typeof createLineFeed>, needle: () =>
     };
 }
 
+/** Opened at a line (pane.open's `line`): once the line count is known, go there. Runs again for a request that arrives while this viewer already shows the file. */
+function useOpenLine(props: LargeTextProps, lines: Accessor<number>, goTo: (line: number) => void): void {
+    createEffect(() => {
+        watchOpenPosition();
+        const total = lines();
+        if (!total || !props.blockId || !props.path) return;
+        const at = takeOpenPosition(props.blockId, props.path, "line");
+        if (at !== undefined) untrack(() => goTo(Math.min(at, total)));
+    });
+}
+
+/** Keys in the viewer bar: the find strip opens from the line box too. */
+function openFindFromBar(e: KeyboardEvent, find: { openStrip: () => void }): void {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        e.stopPropagation();
+        find.openStrip();
+    }
+}
+
 export function createLargeText(props: LargeTextProps) {
     const feed = createLineFeed(props);
     const lines = createMemo(() => Math.max(0, feed.total()));
@@ -258,6 +279,7 @@ export function createLargeText(props: LargeTextProps) {
             scroll.focus();
         }
     };
+    useOpenLine(props, lines, goTo);
     const hit = createCurrentHit(feed, () => find.needle(), () => props.probe?.text?.encoding);
     const find = createLargeFind({
         path: () => props.path,
@@ -292,14 +314,7 @@ export function createLargeText(props: LargeTextProps) {
         else if (to === "find") find.openStrip();
         else scroll.showLine(to);
     };
-    /** Keys in the viewer bar: the find strip opens from the line box too. */
-    const onBarKeyDown = (e: KeyboardEvent): void => {
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
-            e.preventDefault();
-            e.stopPropagation();
-            find.openStrip();
-        }
-    };
+    const onBarKeyDown = (e: KeyboardEvent): void => openFindFromBar(e, find);
 
     const facts = () => {
         const out = lines() ? [`Line ${(scroll.first() + 1).toLocaleString("en-US")} of ${lines().toLocaleString("en-US")}`] : [];

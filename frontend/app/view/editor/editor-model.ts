@@ -592,7 +592,9 @@ export class EditorViewModel {
     /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
     private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
         if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
-        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        // A line goes to the Large text viewer by this note; the text viewer's is `_openAtLine`.
+        const forLarge = !opts.viewer || opts.viewer === "large";
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page, line: forLarge ? opts.line : undefined });
         if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
     }
 

@@ -11,6 +11,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearOpenPositions, setOpenPosition, takeOpenPosition } from "../../open-position";
 import { ROW_H } from "../hex/hex-layout";
 import { LargeTextViewer } from "./large-text-viewer";
 import { forgetLargeTextMemory, parseLine, revealSideways } from "./large-text-state";
@@ -60,11 +61,12 @@ async function settle() {
     await new Promise((r) => setTimeout(r, 0));
 }
 
-async function mount(props: { path?: string; revision?: number; size?: number; encoding?: string } = {}) {
+async function mount(props: { path?: string; revision?: number; size?: number; encoding?: string; blockId?: string } = {}) {
     const view = render(() => (
         <LargeTextViewer
             path={props.path ?? "C:/logs/big.log"}
             revision={props.revision ?? 0}
+            blockId={props.blockId}
             probe={{ size: props.size ?? FILE.length, mtime: 0, kind: "text", mime: "text/plain", read_only: false, text: { encoding: props.encoding ?? "utf-8", bom: "none" } }}
             bar={{ viewer: "large", options: ["large", "info", "hex"], onReopenWith: () => {} }}
         />
@@ -95,6 +97,7 @@ describe("the Large text viewer", () => {
 
     afterEach(() => {
         cleanup();
+        clearOpenPositions();
         if (clientHeight) Object.defineProperty(HTMLElement.prototype, "clientHeight", clientHeight);
     });
 
@@ -120,6 +123,28 @@ describe("the Large text viewer", () => {
         expect(facts()[0]).toBe("Line 698 of 1,000");
         // Only the pages it needed: the first, and the one holding line 700 (a little context above it).
         expect(indexLines.mock.calls.map((c) => c[1].from_line).sort((a, b) => a - b)).toEqual([0, 600]);
+    });
+
+    it("opens at the line pane.open asked for, once the line count is known, and only once", async () => {
+        setOpenPosition("b1", "C:/logs/big.log", { line: 700 });
+        await mount({ blockId: "b1" });
+        await settle();
+        expect(document.querySelector(".large-text-marked")?.getAttribute("data-line")).toBe("700");
+        expect(facts()[0]).toBe("Line 698 of 1,000");
+        // Taken: a later mount of the same file starts at the top again.
+        cleanup();
+        forgetLargeTextMemory();
+        await mount({ blockId: "b1" });
+        expect(facts()[0]).toBe("Line 1 of 1,000");
+    });
+
+    it("clamps a line past the end to the last line, and takes none meant for another file", async () => {
+        setOpenPosition("b1", "C:/logs/other.log", { line: 5 });
+        setOpenPosition("b1", "C:/logs/big.log", { line: 99999 });
+        await mount({ blockId: "b1" });
+        await settle();
+        expect(document.querySelector(".large-text-marked")?.getAttribute("data-line")).toBe("1000");
+        expect(takeOpenPosition("b1", "C:/logs/other.log", "line")).toBe(5);
     });
 
     it("says so when the line isn't one", async () => {
