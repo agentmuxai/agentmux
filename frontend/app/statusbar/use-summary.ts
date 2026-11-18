@@ -32,9 +32,11 @@ export function useSummary(props: SummaryStatusProps): Accessor<Summary> {
     const tasks = props.tasks ?? useKanbanNeeds();
     // The two minutes move on by themselves: a row of the ended list leaves when its time is up.
     const tick = useTick(5_000);
-    return createMemo(() =>
-        summarize({
-            running: runtimeCounts((props.rows ?? sharedAttentionRows)()).running,
+    return createMemo(() => {
+        const rows = (props.rows ?? sharedAttentionRows)();
+        return summarize({
+            running: runtimeCounts(rows).running,
+            agents: rows,
             items: (props.items ?? attentionItems)(),
             apps: (props.apps ?? waitingApps)(),
             // A reply that leaves a list out must not stop the summary: it is where a waiting request is found.
@@ -42,6 +44,6 @@ export function useSummary(props: SummaryStatusProps): Accessor<Summary> {
             requests: (props.requests ?? vaultRequests)() ?? [],
             tasks: tasks(),
             ended: props.ended ? props.ended() : endedAsks((tick(), Date.now())),
-        })
-    );
+        });
+    });
 }

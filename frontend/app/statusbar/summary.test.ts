@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AttentionItem } from "@/app/notification/attention-list";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
+import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { isVaultOnly, summarize, type SummaryInput } from "./summary";
@@ -23,10 +24,14 @@ const app = (key: string, kind: string, over: Partial<WaitingApp> = {}): Waiting
 const input = (over: Partial<SummaryInput> = {}): SummaryInput => ({ running: 0, items: [], apps: [], uses: [], requests: [], tasks: 0, ...over });
 const counts = (s: ReturnType<typeof summarize>) => Object.fromEntries(s.parts.map((p) => [p.id, p.count]));
 
+const agentRow = (id: string, state: AgentRuntime["state"], over: Partial<AgentRuntime> = {}): AgentRuntime => ({
+    agent_id: id, state, desired: "running", name: `Agent ${id}`, provider: "claude", icon: "", runtime: "host", block_id: `blk-${id}`, ...over,
+});
+
 describe("summarize", () => {
     it("is empty when nothing runs and nothing waits", () => {
         const s = summarize(input());
-        expect(counts(s)).toEqual({ agents: 0, asks: 0, browser: 0, vault: 0, tasks: 0 });
+        expect(counts(s)).toEqual({ agents: 0, asks: 0, browser: 0, vault: 0, signedout: 0, quota: 0, tasks: 0 });
         expect(s.waiting).toBe(0);
     });
 
@@ -93,6 +98,33 @@ describe("summarize", () => {
         expect(counts(s).tasks).toBe(4);
         expect(s.parts.find((p) => p.id === "tasks")!.rows).toHaveLength(1);
         expect(s.waiting).toBe(4);
+    });
+
+    it("lists an agent that is signed out and one that is out of quota, each in a part of its own, and counts them as waiting", () => {
+        const s = summarize(input({ agents: [agentRow("a", "signed_out"), agentRow("b", "limited"), agentRow("c", "working"), agentRow("d", "stopped")] }));
+        expect(counts(s)).toMatchObject({ signedout: 1, quota: 1, asks: 0 });
+        expect(s.waiting).toBe(2);
+        const signedOut = s.parts.find((p) => p.id === "signedout")!.rows[0];
+        expect(signedOut).toMatchObject({ name: "Agent a", what: "needs you to sign in again" });
+        expect(signedOut.click).toMatchObject({ to: "pane", item: { blockId: "blk-a", agentId: "a" } });
+        expect(s.parts.find((p) => p.id === "quota")!.rows[0].what).toBe("is out of quota");
+    });
+
+    it("says when the quota comes back", () => {
+        const at = new Date(2026, 10, 20, 19, 0).getTime();
+        const row = summarize(input({ agents: [agentRow("b", "limited", { resets_at: at })] })).parts.find((p) => p.id === "quota")!.rows[0];
+        expect(row.what).toMatch(/^is out of quota until .*7:00/);
+    });
+
+    it("sends an agent with no pane to the Swarm", () => {
+        const s = summarize(input({ agents: [agentRow("a", "signed_out", { block_id: undefined })] }));
+        expect(s.parts.find((p) => p.id === "signedout")!.rows[0].click).toEqual({ to: "swarm" });
+    });
+
+    it("does not list a signed-out agent twice when its pane already has a row as an ask", () => {
+        const s = summarize(input({ items: [item("blk-a")], agents: [agentRow("a", "signed_out")] }));
+        expect(counts(s)).toMatchObject({ asks: 1, signedout: 0 });
+        expect(s.waiting).toBe(1);
     });
 
     it("totals everything that waits and orders each part's rows oldest first", () => {

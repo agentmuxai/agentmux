@@ -9,7 +9,7 @@
  */
 
 /** The parts of the summary, left to right. */
-export type PartId = "agents" | "asks" | "browser" | "vault" | "tasks";
+export type PartId = "agents" | "asks" | "browser" | "vault" | "signedout" | "quota" | "tasks";
 
 /** Where a request with no pane of its own is answered. */
 export type AnswerPlace = "pane" | "connections" | "widgets" | "vault" | "upgrade" | "desktop";
