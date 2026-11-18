@@ -1165,6 +1165,15 @@
     }
   },
   {
+    "event": "workspace:stop",
+    "payloadTs": {
+      "imports": [
+        "WorkspaceStopView"
+      ],
+      "name": "WorkspaceStopView"
+    }
+  },
+  {
     "event": "ws:eventsdropped",
     "payloadTs": {
       "imports": [

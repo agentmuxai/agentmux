@@ -160,6 +160,26 @@ pub fn clean_reason(raw: &str) -> String {
     clean_line(first, REASON_MAX)
 }
 
+/// `workspace:stop` — a headless workspace is going to stop at a time, or is not any more
+/// (`server::host_control`, which the registered external host calls). It carries no words of a person's or an
+/// agent's: `reason` is one of a fixed set of phrases.
+pub const EVENT_WORKSPACE_STOP: &str = "workspace:stop";
+
+/// A workspace stop as the page shows it: `pending` with the stop time and why, or `cleared`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WorkspaceStopView {
+    #[ts(type = r#""pending" | "cleared""#)]
+    pub status: &'static str,
+    /// When the workspace stops (unix ms); 0 when `cleared`.
+    #[ts(type = "number")]
+    pub stop_at_ms: i64,
+    /// `person`, `timer`, `credit` or `cap`; empty when `cleared`.
+    pub reason_id: String,
+    /// The reason as a person reads it ("you asked", "nothing has happened for 50 minutes"); empty when `cleared`.
+    pub reason: String,
+}
+
 /// One line for display: bidi-override characters removed, control characters
 /// turned into spaces, whitespace collapsed, cut at `max` characters.
 pub fn clean_line(raw: &str, max: usize) -> String {
