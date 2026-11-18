@@ -578,17 +578,29 @@
     min-width: 0;
 }
 
-// The chip is a button when it opens the Spend cap panel: the kit's chrome button, which takes its look from the chip.
+// The chip is a button when it opens the Spend cap panel: the kit's chrome button, which takes its look from the chip. It
+// rests at full strength like the plain chip, and shows a focus ring (the kit's chrome button has none of its own).
 .spend-chip-button {
     display: inline-flex;
     max-width: 100%;
+    opacity: 1;
+    border-radius: var(--radius-sm);
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
 }
 
-// The Spend cap panel hung from the chip: as wide as its own text needs, and never wider than the window.
+// The Spend cap panel hung from the chip: as wide as its own text needs, never wider than the window, and its buttons
+// wrap onto a second row where the four do not fit in one.
 .spend-chip-popover {
     width: 22rem;
     max-width: calc(100vw - 2rem);
     padding: 0;
+
+    .agent-primitive-modal-actions {
+        flex-wrap: wrap;
+    }
 }
 
 .swarm-current-tool-icon {

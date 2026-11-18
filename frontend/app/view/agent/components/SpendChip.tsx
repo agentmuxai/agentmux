@@ -10,6 +10,7 @@
 import { createSignal, Show, type JSX } from "solid-js";
 import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import { isRouteCredits } from "@/app/store/agent-unavailable";
 import { Tag } from "../../../element/ui/Tag";
 import { readSpendToday, spendChipText, spendChipTitle, spendChipTone } from "../spend-stopped";
@@ -49,6 +50,8 @@ function Chip(props: { t: Today; meta: SpendChipProps["meta"]; editable: boolean
     );
 }
 
+const stop = (e: Event): void => e.stopPropagation();
+
 function EditableChip(props: { t: Today; meta: SpendChipProps["meta"]; blockId: string; agentName: string }): JSX.Element {
     const [open, setOpen] = createSignal(false);
     const [anchor, setAnchor] = createSignal<HTMLElement>();
@@ -62,7 +65,8 @@ function EditableChip(props: { t: Today; meta: SpendChipProps["meta"]; blockId: 
                 aria-expanded={open()}
                 data-testid="spend-chip-button"
                 onClick={(e) => {
-                    // The card under the chip selects its pane on a click; this one is only about the cap.
+                    // The card under the chip selects its pane on a click; this one is only about the cap. (A press on the
+                    // chip is already left alone by the card: it is a control inside it.)
                     e.stopPropagation();
                     setOpen((o) => !o);
                 }}
@@ -76,10 +80,20 @@ function EditableChip(props: { t: Today; meta: SpendChipProps["meta"]; blockId: 
                     shellClass="anchored-popover--menu"
                     class="menu spend-chip-popover"
                     role="dialog"
-                    aria-label="Spend cap"
+                    aria-label={t("agentSpend.subtitle")}
                     onDismiss={() => setOpen(false)}
                 >
-                    <AgentSpendPanel blockId={props.blockId} agentName={props.agentName} onClose={() => setOpen(false)} />
+                    {/* The panel is portaled to the body, but Solid's delegated events still bubble to its logical parent, the card:
+                        a press in the panel would select the agent's pane, and the card's mousedown would keep the field from focusing. */}
+                    <div
+                        onPointerDown={stop}
+                        onMouseDown={stop}
+                        onClick={stop}
+                        onKeyDown={stop}
+                        onContextMenu={stop}
+                    >
+                        <AgentSpendPanel blockId={props.blockId} agentName={props.agentName} onClose={() => setOpen(false)} />
+                    </div>
                 </AnchoredPopover>
             </Show>
         </>
