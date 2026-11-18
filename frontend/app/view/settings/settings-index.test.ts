@@ -57,7 +57,7 @@ describe("searchSettings", () => {
 
     it("finds the MuxBus Cloud status-bar toggle by its synonyms", () => {
         for (const q of ["muxbus", "cloud dot", "hide cloud"]) {
-            expect(labels(q)).toContain("Show MuxBus Cloud in the status bar");
+            expect(labels(q)).toContain("Show AgentMux Cloud in the status bar");
         }
     });
 

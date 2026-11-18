@@ -224,7 +224,7 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "name":         { "type": "string", "description": "board_create, board_edit: the board's display name" },
       "slug":         { "type": "string", "description": "board_create, board_edit: the board's slug, lowercase letters, digits and hyphens, up to 24 (made from the name when absent; a changed slug keeps the old one working for 90 days)" },
       "agents":       { "type": "array", "items": { "type": "string" }, "description": "board_create, board_edit: the agents (by id) that see the board; empty for all agents" },
-      "readable":     { "type": "boolean", "description": "board_create, board_edit: whether AgentMux Cloud may read the board (for boards shared through the cloud)" },
+      "readable":     { "type": "boolean", "description": "board_create, board_edit: whether AgentMux Cloud may read the board (for boards shared through AgentMux Cloud)" },
       "archived":     { "type": "boolean", "description": "boards: include the archived boards" },
       "drop_deps":    { "type": "boolean", "description": "move with board: remove the task's dependencies, which stay inside one board" },
       "host":         { "type": "string", "description": "enqueue, list: another machine, by the name Agents list shows (or name/channel when it runs several AgentMux instances), to file the task on its board or read its board, instead of this one. Named on each call, never remembered; the machine must be a LAN peer that has pinned your key. target_agent is an agent of that machine; for \"me\" and target_group don't apply there. The task is recorded as you, never as the operator. The answer says which machine gave it. Absent means this machine." }
