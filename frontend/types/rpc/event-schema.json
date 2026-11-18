@@ -670,6 +670,15 @@
     }
   },
   {
+    "event": "jektheld",
+    "payloadTs": {
+      "imports": [
+        "JektHeldEvent"
+      ],
+      "name": "JektHeldEvent"
+    }
+  },
+  {
     "event": "jobs:changed",
     "payloadTs": {
       "imports": [

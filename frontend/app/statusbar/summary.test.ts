@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { AttentionItem } from "@/app/notification/attention-list";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import type { JektHeldAgent } from "@/types/rpc/JektHeldAgent";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { isVaultOnly, summarize, type SummaryInput } from "./summary";
@@ -31,7 +32,7 @@ const agentRow = (id: string, state: AgentRuntime["state"], over: Partial<AgentR
 describe("summarize", () => {
     it("is empty when nothing runs and nothing waits", () => {
         const s = summarize(input());
-        expect(counts(s)).toEqual({ agents: 0, asks: 0, browser: 0, vault: 0, signedout: 0, quota: 0, tasks: 0 });
+        expect(counts(s)).toEqual({ agents: 0, asks: 0, browser: 0, vault: 0, signedout: 0, quota: 0, held: 0, tasks: 0 });
         expect(s.waiting).toBe(0);
     });
 
@@ -125,6 +126,16 @@ describe("summarize", () => {
         const s = summarize(input({ items: [item("blk-a")], agents: [agentRow("a", "signed_out")] }));
         expect(counts(s)).toMatchObject({ asks: 1, signedout: 0 });
         expect(s.waiting).toBe(1);
+    });
+
+    it("lists an agent that has messages held because it is not running, and no other reason", () => {
+        const h = (id: string, reason: string, count = 2): JektHeldAgent => ({ agent_id: id, agent_name: `Agent ${id}`, reason, count, since_ms: 500 });
+        const s = summarize(input({ held: [h("a", "not_running"), h("b", "idle"), h("c", "needs_login"), h("d", "usage_limit"), h("e", "starting"), h("f", "not_running", 1)] }));
+        expect(counts(s)).toMatchObject({ held: 2 });
+        expect(s.waiting).toBe(2);
+        const rows = s.parts.find((p) => p.id === "held")!.rows;
+        expect(rows.map((r) => r.what)).toEqual(["has 2 messages waiting: it is not running", "has 1 message waiting: it is not running"]);
+        expect(rows[0]).toMatchObject({ name: "Agent a", since: 500, click: { to: "swarm" } });
     });
 
     it("totals everything that waits and orders each part's rows oldest first", () => {

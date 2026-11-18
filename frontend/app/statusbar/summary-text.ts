@@ -17,6 +17,7 @@ export const PART_ICON: Record<PartId, string> = {
     vault: "vault",
     signedout: "right-to-bracket",
     quota: "hourglass-half",
+    held: "envelope",
     tasks: "list-check",
 };
 
@@ -30,6 +31,7 @@ export const SUMMARY_TEXT = {
         vault: "Vault",
         signedout: "Signed out",
         quota: "Out of quota",
+        held: "Messages waiting",
         tasks: "Tasks",
         agents: "Agents",
     } as Record<PartId, string>,
@@ -54,6 +56,8 @@ export function partTip(id: PartId, n: number): string {
             return `${plural(n, "agent is", "agents are")} signed out`;
         case "quota":
             return `${plural(n, "agent is", "agents are")} out of quota`;
+        case "held":
+            return `${plural(n, "stopped agent has", "stopped agents have")} messages waiting`;
         case "tasks":
             return `${plural(n, "Kanban task needs", "Kanban tasks need")} you`;
     }

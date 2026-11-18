@@ -679,6 +679,9 @@ pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
 /// The open account episodes: agents out of quota or signed out, grouped by
 /// account (`server::account_episodes`). The operator's window only.
 pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availability";
+/// The messages held for agents, by agent and reason, as counts (`server::jekt_held_summary`). The operator's window,
+/// and any registered agent: it names no sender and no body.
+pub const COMMAND_JEKT_HELD_SUMMARY: &str = "jekt.held.summary";
 /// Move an episode's idle agents to another signed-in account. The operator's
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";

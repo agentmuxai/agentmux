@@ -4,7 +4,7 @@
 /**
  * What waits on the person, as the parts of one summary (docs/specs/SPEC_STATUS_BAR_COMPACT_SUMMARY_AND_VAULT_REQUESTS_2026_11_15.md §2):
  * agents running, Asks (questions, tool permissions, consents, confirms, installs), Browser, Vault, agents signed out or
- * out of quota, and Kanban tasks.
+ * out of quota, agents with messages held for them, and Kanban tasks.
  * A pure function over what the window already knows, so each rule is a test and not a screenshot.
  *
  * Everything is counted once. A pane that waits only on a Vault request is the Vault's row, not also an ask; the Vault
@@ -16,6 +16,7 @@ import type { AttentionItem } from "@/app/notification/attention-list";
 import type { EndedAsk } from "@/app/notification/ended-asks";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import type { JektHeldAgent } from "@/types/rpc/JektHeldAgent";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { resetLabel } from "@/util/reset-label";
@@ -69,6 +70,8 @@ export interface SummaryInput {
     apps: WaitingApp[];
     /** srv's agent rows: the ones signed out or out of quota are parts of their own. */
     agents?: AgentRuntime[];
+    /** Messages srv holds for agents, as counts; the ones held for an agent that is not running are a part. */
+    held?: JektHeldAgent[];
     uses: UseRequest[];
     requests: VaultRequest[];
     /** Kanban tasks that need the person. */
@@ -164,12 +167,28 @@ function accountRows(agents: AgentRuntime[], items: AttentionItem[]): SummaryRow
     return rows;
 }
 
+/** The agents srv holds messages for because they are not running and could not be started: the person starts them. The other
+ *  reasons mend by themselves or are the signed-out and quota parts' own. */
+function heldRows(held: JektHeldAgent[]): SummaryRow[] {
+    return held
+        .filter((h) => h.reason === "not_running")
+        .map((h) => ({
+            key: `held:${h.agent_id}`,
+            part: "held" as const,
+            name: h.agent_name || "An agent",
+            what: h.count === 1 ? "has 1 message waiting: it is not running" : `has ${h.count} messages waiting: it is not running`,
+            since: h.since_ms,
+            click: { to: "swarm" } as SummaryClick,
+        }));
+}
+
 export function summarize(input: SummaryInput): Summary {
     const rows = [
         ...paneRows(input.items),
         ...appRows(input.apps),
         ...vaultRows(input.uses, input.requests, input.items),
         ...accountRows(input.agents ?? [], input.items),
+        ...heldRows(input.held ?? []),
     ];
     // Oldest wait first; the agents held by an account have no age, so they keep srv's order (a stable sort).
     const byPart = (part: SummaryRow["part"]) => rows.filter((r) => r.part === part).sort((a, b) => a.since - b.since);
@@ -184,6 +203,7 @@ export function summarize(input: SummaryInput): Summary {
         { id: "vault", count: byPart("vault").length, rows: byPart("vault") },
         { id: "signedout", count: byPart("signedout").length, rows: byPart("signedout") },
         { id: "quota", count: byPart("quota").length, rows: byPart("quota") },
+        { id: "held", count: byPart("held").length, rows: byPart("held") },
         // A task row stands for all of them; the count is the Kanban's own.
         { id: "tasks", count: input.tasks, rows: taskRows },
     ];
