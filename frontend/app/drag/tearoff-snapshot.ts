@@ -36,6 +36,7 @@
  */
 
 import { getApi, MOS } from "@/app/store/global";
+import { pressOnControl } from "@/app/util/press-on-control";
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 import { beginPaneCapture } from "./pane-capture-gate";
@@ -560,10 +561,16 @@ export async function takeTearOffSnapshot(blockId: string): Promise<string | und
 /**
  * The pane a pointerdown may be about to drag out of its window: a
  * pragmatic draggable (a pane header or a Pane Tab pill) inside a pane.
+ *
+ * Not a press that began on a control in it (close, minimise, a menu trigger, a tab's own close button): that
+ * is never a drag (`guardControlPress`), and the picture it would take holds the pane capture gate for up to
+ * 400 ms (pane-capture-gate.ts), which is longer than a click, so the pane that a click on its X closed went
+ * with no fade and no glide (#47934).
  */
 export function paneDragCandidate(target: EventTarget | null): string | null {
-    if (!(target instanceof Element) || !target.closest('[draggable="true"]')) return null;
-    return target.closest("[data-blockid]")?.getAttribute("data-blockid") ?? null;
+    const handle = target instanceof Element ? target.closest('[draggable="true"]') : null;
+    if (!handle || pressOnControl(target, handle)) return null;
+    return handle.closest("[data-blockid]")?.getAttribute("data-blockid") ?? null;
 }
 
 /**

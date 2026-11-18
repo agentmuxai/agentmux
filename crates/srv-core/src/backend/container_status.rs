@@ -14,6 +14,11 @@
 //! is no agent's is an orphan (`agent_id` null), because that is the one a person wants to see. Another
 //! container is never listed: a name must carry the label new containers get ([`AGENT_LABEL`]), or look like
 //! an agent id (a UUID), or be the id of a definition.
+//!
+//! A container that stopped, died or was removed ends its agent's API-key gateway token, whoever stopped it: AgentMux's
+//! own stops do it where they happen (`container::key_route`), and this is the one for a stop it did not make (Docker
+//! Desktop, a daemon restart), so the token does not outlive the container and is not given again to one that takes its
+//! place at the same address ([`end_key_tokens`]).
 
 pub(crate) mod docker_event;
 mod run;
@@ -21,8 +26,11 @@ mod source;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use serde::Serialize;
+
+use super::model_gateway::{catalog::KEY_ROUTE_ID, token};
 
 pub use docker_event::{Action, DockerEvent, Listed};
 pub use run::{run, Probe, Source};
@@ -35,6 +43,9 @@ pub const AGENT_LABEL: &str = "ai.agentmux.agent";
 /// How long a container srv is bringing up stays `starting` while Docker does not list it as running: long
 /// enough for a large image to download, short enough that a start that failed does not stay for good.
 const STARTING_GRACE_MS: u64 = 10 * 60_000;
+/// A key-route token made this recently is left alone by a stop event: Docker's events can run behind, and the token may be
+/// the one AgentMux made for the container that took the stopped one's place.
+const TOKEN_RECENT: Duration = Duration::from_secs(10);
 
 /// Where a container is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
@@ -125,6 +136,13 @@ fn agent_id_of(name: &str) -> Option<&str> {
     name.strip_prefix(NAME_PREFIX).filter(|id| !id.is_empty())
 }
 
+/// Ends the API-key gateway token of the agent whose container `name` is, unless it was made just now ([`TOKEN_RECENT`]).
+fn end_key_tokens(name: &str, recent: Duration) {
+    if let Some(agent) = agent_id_of(name) {
+        token::revoke_agent_older_than(agent, KEY_ROUTE_ID, recent);
+    }
+}
+
 /// Whether `id` is shaped like an agent's id (a UUID), as every definition's is.
 fn looks_like_agent_id(id: &str) -> bool {
     let groups: Vec<&str> = id.split('-').collect();
@@ -177,6 +195,18 @@ impl Registry {
             let state = if l.running { ContainerState::Running } else { ContainerState::Stopped };
             self.set(&l.name, state, &l.image, l.labelled, now_ms);
         }
+    }
+
+    /// The containers this registry had running that a full list shows to be not running or not there: a stop the event stream
+    /// missed. A container already known to be stopped is not one (a stopped container left over for an agent that now runs
+    /// locally has a token of its own), and nor is one srv is still bringing up.
+    fn stopped_unseen_by(&self, listed: &[Listed]) -> Vec<String> {
+        let running: std::collections::HashSet<&str> = listed.iter().filter(|l| l.running).map(|l| l.name.as_str()).collect();
+        self.raw.iter().filter(|(name, r)| r.state == ContainerState::Running && !running.contains(name.as_str())).map(|(name, _)| name.clone()).collect()
+    }
+
+    fn is_running(&self, name: &str) -> bool {
+        self.raw.get(name).is_some_and(|r| r.state == ContainerState::Running)
     }
 
     fn set(&mut self, name: &str, state: ContainerState, image: &str, labelled: bool, now_ms: u64) {
@@ -258,12 +288,14 @@ pub struct Hub {
     agents: AgentNames,
     sink: Sink,
     wake: tokio::sync::Notify,
+    /// How recent a key-route token must be to be left alone by a stop ([`TOKEN_RECENT`]; a test shortens it).
+    token_recent: Duration,
 }
 
 impl Hub {
     /// `agents` is each agent's name by id, read when a change is worked out; `sink` gets what changed.
     pub fn new(agents: impl Fn() -> HashMap<String, String> + Send + Sync + 'static, sink: impl Fn(Published) + Send + Sync + 'static) -> Self {
-        Self { registry: Default::default(), agents: Box::new(agents), sink: Box::new(sink), wake: tokio::sync::Notify::new() }
+        Self { registry: Default::default(), agents: Box::new(agents), sink: Box::new(sink), wake: tokio::sync::Notify::new(), token_recent: TOKEN_RECENT }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
@@ -285,10 +317,21 @@ impl Hub {
     }
 
     pub fn on_event(&self, event: DockerEvent) {
+        // Only a container that was running ends a token: a repeat (`die` then `stop`) or the end of one already stopped has nothing
+        // more to end, and a token made for the agent since is not that container's.
+        let ends = matches!(event.action, Action::Stop | Action::Die | Action::Destroy) && self.lock().is_running(&event.name);
+        if ends {
+            end_key_tokens(&event.name, self.token_recent);
+        }
         self.publish_after(|r, now| r.apply(event, now));
     }
 
     pub fn on_listed(&self, listed: Vec<Listed>) {
+        // A stop the event stream missed is found here, once: after it the registry has the container stopped.
+        let ended = self.lock().stopped_unseen_by(&listed);
+        for name in ended {
+            end_key_tokens(&name, self.token_recent);
+        }
         self.publish_after(|r, now| r.replace(listed, now));
     }
 

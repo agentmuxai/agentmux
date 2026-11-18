@@ -42,6 +42,7 @@ function renderBar(opts: { loading?: () => boolean; reload?: () => Promise<void>
         titleAtom: () => "Example",
         faviconUrlAtom: () => "",
         showControlsAtom: () => true,
+        pastDownloadsAtom: () => [],
         canGoBackAtom: () => false,
         canGoForwardAtom: () => false,
         meta: () => ({}),

@@ -42,6 +42,13 @@ export const BROWSER_SETTINGS = {
         section: "browser",
         keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
     }),
+    askDownloadLocation: settingEntry({
+        id: "browser.ask_download_location",
+        labelKey: "settings.browser.askDownloadLocation.label",
+        descriptionKey: "settings.browser.askDownloadLocation.description",
+        section: "browser",
+        keywords: ["download", "downloads", "save", "save as", "dialog", "folder", "location", "ask", "browser:askdownloadlocation"],
+    }),
     hibernate: settingEntry({
         id: "browser.hibernate",
         labelKey: "settings.browser.hibernate.label",
@@ -263,6 +270,33 @@ function AgentProfiles(): JSX.Element {
     );
 }
 
+/** The agent site grants, under their own heading. */
+function AgentSitesBlock(): JSX.Element {
+    return (
+        <>
+            <SectionHeader label={BROWSER_SETTINGS.agentSites.label} />
+            <AgentSiteGrants />
+        </>
+    );
+}
+
+/** Whether a download in a browser pane opens the Save As dialog (on unless the setting is false). */
+function AskDownloadLocationRow(): JSX.Element {
+    return (
+        <SettingRow
+            id={BROWSER_SETTINGS.askDownloadLocation.id}
+            label={BROWSER_SETTINGS.askDownloadLocation.label}
+            description={BROWSER_SETTINGS.askDownloadLocation.description}
+            control={
+                <ToggleControl
+                    checked={settingsAtom()?.["browser:askdownloadlocation"] !== false}
+                    onChange={(v) => set("browser:askdownloadlocation", v)}
+                />
+            }
+        />
+    );
+}
+
 export function BrowserSection(): JSX.Element {
     const [newName, setNewName] = createSignal("");
     const [error, setError] = createSignal<string | null>(null);
@@ -297,6 +331,7 @@ export function BrowserSection(): JSX.Element {
                     />
                 }
             />
+            <AskDownloadLocationRow />
             <SettingRow
                 id={BROWSER_SETTINGS.hibernate.id}
                 label={BROWSER_SETTINGS.hibernate.label}
@@ -378,8 +413,7 @@ export function BrowserSection(): JSX.Element {
                     />
                 }
             />
-            <SectionHeader label={BROWSER_SETTINGS.agentSites.label} />
-            <AgentSiteGrants />
+            <AgentSitesBlock />
         </div>
     );
 }

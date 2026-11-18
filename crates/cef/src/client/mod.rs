@@ -63,6 +63,7 @@ mod ipc_credentials;
 pub(crate) mod downloads;
 pub(crate) mod agent_notice;
 pub(crate) mod agent_downloads;
+pub(crate) mod download_place;
 pub(crate) mod agent_permission;
 pub(crate) mod chooser_hold;
 pub(crate) mod filedialog;

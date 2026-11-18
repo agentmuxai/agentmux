@@ -23,6 +23,8 @@ export function useField(): FieldContextValue | undefined {
 
 export interface FieldProps {
     label: JSX.Element;
+    /** Shown on the label's line, after it, outside the `<label>` (a status such as "Saved": the control's name stays the label). */
+    adornment?: JSX.Element;
     /** Shown under the label: what the setting does. */
     description?: JSX.Element;
     /** Shown under the control: a short note on the value. */
@@ -71,9 +73,21 @@ export function Field(props: FieldProps): JSX.Element {
     return (
         <div class={clsx("ui-field", `ui-field--${props.layout ?? "inline"}`, props.class)}>
             <div class="ui-field-text">
-                <label class="ui-field-label" id={labelId} for={id()}>
-                    {props.label}
-                </label>
+                <Show
+                    when={props.adornment != null}
+                    fallback={
+                        <label class="ui-field-label" id={labelId} for={id()}>
+                            {props.label}
+                        </label>
+                    }
+                >
+                    <div class="ui-field-label-row">
+                        <label class="ui-field-label" id={labelId} for={id()}>
+                            {props.label}
+                        </label>
+                        {props.adornment}
+                    </div>
+                </Show>
                 <Show when={props.description != null}>
                     <div class="ui-field-description" id={descriptionId}>
                         {props.description}
