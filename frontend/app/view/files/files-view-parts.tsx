@@ -13,8 +13,9 @@ import { endPathDrag } from "@/app/drag/file-drop";
 import { Button } from "@/app/element/ui";
 import { useWidthFit } from "@/app/element/width-fit";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
-import { readZoom } from "@/app/store/zoom-factor";
-import { For, Match, Show, Switch, type JSX } from "solid-js";
+import { paneZoom } from "@/app/store/pane-zoom-local";
+import { MAIN_PART, zoomPartAttrs } from "@/app/store/zoom-parts";
+import { For, Match, Show, Switch, type Accessor, type JSX } from "solid-js";
 import { ColumnResizer } from "./files-column-resizer";
 import { META_COLWIDTHS } from "./files-columns";
 import { FilesFooter } from "./FilesFooter";
@@ -22,6 +23,7 @@ import { FilesPlaces } from "./FilesPlaces";
 import { FilesToolbar } from "./FilesToolbar";
 import type { FilesModel } from "./files-model";
 import { openEntryWithOs } from "./files-open";
+import { useNarrowTiers, type NarrowTiers } from "./files-narrow";
 import { FilesPreview } from "./files-preview";
 import { FileRow, GridTile, ROW_HEIGHT, TILE_H, TILE_W } from "./files-rows";
 import { folderAt } from "./files-selection";
@@ -32,6 +34,7 @@ import type { FilesOpening } from "./files-view-opening";
 import type { useFilesPointer } from "./files-view-pointer";
 import type { FilesLocal } from "./files-view-state";
 import type { FilesWindow } from "./files-view-window";
+import { PLACES_PART, placesZoomOf } from "./files-zoom-parts";
 
 const COLUMNS: { key: SortKey; label: string; class: string }[] = [
     { key: "name", label: "Name", class: "files-col-name" },
@@ -59,58 +62,58 @@ export interface FilesViewParts {
 }
 
 export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
-    const { model, ctx, fv, win, opening, keys, pointer } = v;
+    const { model, ctx, fv, win, keys, pointer } = v;
     const { refs } = fv;
+    // The pane's parts zoom apart (files-zoom-parts.ts): the root is not zoomed. The toolbar, the list with
+    // the preview and the footer take the pane's own level (`term:zoom`), Places its own, each on a wrapper
+    // that marks its part. A part with no room, or hidden, is not drawn at all, so the indicator names
+    // Places and the rest only while both are on screen.
+    const mainZoom = () => paneZoom(model.blockId, ctx.meta());
+    const placesZoom = () => placesZoomOf(model.blockId, ctx.meta());
+    let root: HTMLDivElement | undefined;
+    const narrow = useNarrowTiers(() => root, mainZoom);
     return (
         <div
+            ref={root}
             class="files-view"
-            // CSS zoom from the shared `term:zoom`: everything scales together, and
-            // the @container on this element measures in zoomed pixels.
-            style={{ zoom: readZoom(ctx.meta()) }}
+            // What a narrow pane has no room for (files-narrow.ts), for the toolbar's buttons.
+            data-no-places={narrow().places ? "" : undefined}
+            data-no-preview={narrow().preview ? "" : undefined}
             // The folder shown, for tooling (verify-shortcuts.mjs's temp-tree guard).
             data-path={model.path()}
             data-connection={model.connection()}
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={keys.onPaneKeyDown}
         >
-            <FilesToolbar
-                model={model}
-                grid={win.grid}
-                editingPath={fv.editingPath}
-                filterOpen={fv.filterOpen}
-                startEditingPath={fv.startEditingPath}
-                commitPath={fv.commitPath}
-                onStopEditing={() => fv.setEditingPath(false)}
-                toggleFilter={fv.toggleFilter}
-                closeFilter={fv.closeFilter}
-                onToggleViewMode={pointer.toggleViewMode}
-                focusList={() => refs.list?.focus()}
-                pathInputRef={(el) => (refs.pathInput = el)}
-                crumbsRef={(el) => {
-                    refs.crumbs = el;
-                    refs.onCrumbs?.(el);
-                }}
-                filterRef={(el) => (refs.filterInput = el)}
-                filterButtonRef={(el) => (refs.filterButton = el)}
-                openMenu={fv.setMenu}
-            />
-
-            <div class="files-body">
-                <FilesPlaces model={model} />
-
-                <FilesList v={v} />
-                <Show when={model.showPreview()}>
-                    <FilesPreview
-                        entry={win.previewEntry()}
-                        pathOf={(name) => model.pathOf(name)}
-                        blockId={model.blockId}
-                        onOpen={opening.openEntry}
-                        onOpenWithOs={(entry) => openEntryWithOs(model, entry.name)}
-                    />
-                </Show>
+            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: mainZoom() }}>
+                <FilesToolbar
+                    model={model}
+                    grid={win.grid}
+                    editingPath={fv.editingPath}
+                    filterOpen={fv.filterOpen}
+                    startEditingPath={fv.startEditingPath}
+                    commitPath={fv.commitPath}
+                    onStopEditing={() => fv.setEditingPath(false)}
+                    toggleFilter={fv.toggleFilter}
+                    closeFilter={fv.closeFilter}
+                    onToggleViewMode={pointer.toggleViewMode}
+                    focusList={() => refs.list?.focus()}
+                    pathInputRef={(el) => (refs.pathInput = el)}
+                    crumbsRef={(el) => {
+                        refs.crumbs = el;
+                        refs.onCrumbs?.(el);
+                    }}
+                    filterRef={(el) => (refs.filterInput = el)}
+                    filterButtonRef={(el) => (refs.filterButton = el)}
+                    openMenu={fv.setMenu}
+                />
             </div>
 
-            <FilesFooter model={model} summary={pointer.summary} />
+            <FilesBody v={v} narrow={narrow} mainZoom={mainZoom} placesZoom={placesZoom} />
+
+            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: mainZoom() }}>
+                <FilesFooter model={model} summary={pointer.summary} />
+            </div>
 
             <Show when={fv.menu()}>
                 {(m) => <ContextMenu items={m().items} x={m().x} y={m().y} onClose={() => fv.setMenu(null)} />}
@@ -133,6 +136,41 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
                     />
                 )}
             </Show>
+        </div>
+    );
+}
+
+/**
+ * Places beside the list and the preview, each part on its own zoomed wrapper. Places is drawn only where it is
+ * shown and has room, so the wrapper that marks its part exists only then; the preview follows the list's level.
+ */
+function FilesBody(props: {
+    v: FilesViewParts;
+    narrow: Accessor<NarrowTiers>;
+    mainZoom: () => number;
+    placesZoom: () => number;
+}): JSX.Element {
+    const { model, win, opening } = props.v;
+    return (
+        <div class="files-body">
+            <Show when={model.showSidebar() && !props.narrow().places}>
+                <div class="files-zoom files-zoom-places" tabindex="-1" {...zoomPartAttrs(PLACES_PART)} data-zoom-scope="pane" style={{ zoom: props.placesZoom() }}>
+                    <FilesPlaces model={model} />
+                </div>
+            </Show>
+
+            <div class="files-zoom files-zoom-list" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: props.mainZoom() }}>
+                <FilesList v={props.v} />
+                <Show when={model.showPreview() && !props.narrow().preview}>
+                    <FilesPreview
+                        entry={win.previewEntry()}
+                        pathOf={(name) => model.pathOf(name)}
+                        blockId={model.blockId}
+                        onOpen={opening.openEntry}
+                        onOpenWithOs={(entry) => openEntryWithOs(model, entry.name)}
+                    />
+                </Show>
+            </div>
         </div>
     );
 }
@@ -214,7 +252,7 @@ function FilesColumnHeader(props: { model: FilesModel; fv: FilesLocal }): JSX.El
                             colKey={col.key}
                             label={col.label}
                             columns={props.fv.columns}
-                            zoom={() => readZoom(props.fv.ctx.meta())}
+                            zoom={() => paneZoom(model.blockId, props.fv.ctx.meta())}
                         />
                     </Button>
                 )}

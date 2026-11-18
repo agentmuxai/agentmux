@@ -9,11 +9,14 @@
 
 import { createEffect, on, onCleanup, onMount } from "solid-js";
 import type { FilesLocal } from "./files-view-state";
+import { focusIsInPlaces } from "./files-zoom-parts";
 
 export function useFilesLifecycle(fv: FilesLocal): void {
     const { model, ctx, refs, setViewHeight, setViewWidth, setScrollTop } = fv;
 
-    model.focusList = () => refs.list?.focus();
+    model.focusList = () => {
+        if (!focusIsInPlaces(refs.list)) refs.list?.focus();
+    };
     onCleanup(() => (model.focusList = null));
 
     onMount(() => {

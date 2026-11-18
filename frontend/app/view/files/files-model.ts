@@ -19,7 +19,8 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { readZoom } from "@/app/store/zoom-factor";
+import { paneZoom } from "@/app/store/pane-zoom-local";
+import { seedPlacesZoom } from "./files-zoom-parts";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsError } from "@/types/rpc/FsError";
 import type { FsOpResult } from "@/types/rpc/FsOpResult";
@@ -189,7 +190,7 @@ export class FilesModel {
     /** Whether rows show the system's own icons: setting `files:icons` (default "system") and a source on this computer. */
     readonly systemIcons = (): boolean => (getSettingsKeyAtom("files:icons")() ?? "system") === "system" && systemIconsAvailable();
     /** Display scale times this pane's zoom: an icon's CSS size times this picks its pixel size. */
-    readonly iconScale = (): number => (globalThis.window?.devicePixelRatio || 1) * readZoom(this.ctx.meta());
+    readonly iconScale = (): number => (globalThis.window?.devicePixelRatio || 1) * paneZoom(this.blockId, this.ctx.meta());
 
     readonly path: () => string;
     readonly setPath: (p: string) => void;
@@ -274,6 +275,8 @@ export class FilesModel {
     constructor(ctx: PaneTabHostContext) {
         this.ctx = ctx;
         this.blockId = ctx.blockId;
+        // Places gets a level of its own the first time: it keeps the size it has had, once.
+        seedPlacesZoom(ctx.meta(), (patch) => void ctx.setMeta(patch));
         [this.path, this.setPath] = createSignal("");
         [this.rawEntries, this.setRawEntries] = createSignal<FsEntry[]>([]);
         [this.phase, this.setPhase] = createSignal<Phase>("loading");
