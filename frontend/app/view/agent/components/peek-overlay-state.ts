@@ -33,6 +33,8 @@ export function createPeekState(props: PeekOverlayProps) {
         position: "fixed",
         left: "0px",
         top: "0px",
+        // Until the first placement says it is enterable, it takes no pointer events.
+        "pointer-events": "none",
     });
 
     // True when the panel reaches past the pane (wider than the row, or taller
