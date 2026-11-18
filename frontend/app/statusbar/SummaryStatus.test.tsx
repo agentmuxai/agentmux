@@ -5,6 +5,7 @@ import type { AttentionItem } from "@/app/notification/attention-list";
 import type { EndedAsk } from "@/app/notification/ended-asks";
 import type { WaitingApp } from "@/app/notification/waiting-for-you";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
+import type { JektHeldAgent } from "@/types/rpc/JektHeldAgent";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { cleanup, fireEvent, render, screen, within } from "@solidjs/testing-library";
@@ -66,7 +67,7 @@ const use = (id: string, over: Partial<UseRequest> = {}): UseRequest =>
 const request = (id: string): VaultRequest => ({ id, agent: "builder", block_id: "", label: "", requested_ms: Date.now() - 60_000 }) as VaultRequest;
 
 /** The live inputs, empty unless a test says so. */
-const base = { rows: () => [] as AgentRuntime[], items: () => [] as AttentionItem[], apps: () => [] as WaitingApp[], uses: () => [] as UseRequest[], requests: () => [] as VaultRequest[], tasks: () => 0, ended: () => [] as EndedAsk[] };
+const base = { rows: () => [] as AgentRuntime[], items: () => [] as AttentionItem[], apps: () => [] as WaitingApp[], uses: () => [] as UseRequest[], requests: () => [] as VaultRequest[], tasks: () => 0, ended: () => [] as EndedAsk[], held: () => [] as JektHeldAgent[] };
 const part = (c: HTMLElement, id: string) => c.querySelector(`[data-part="${id}"]`) as HTMLElement | null;
 
 const gone = (key: string, over: Partial<EndedAsk> = {}): EndedAsk => ({
@@ -108,6 +109,24 @@ describe("SummaryStatus", () => {
         expect(within(list).getByText("is out of quota")).toBeTruthy();
         fireEvent.click(within(list).getByRole("button", { name: "Go to a" }));
         expect(goTo).toHaveBeenCalledWith(expect.objectContaining({ blockId: "a", agentId: "a" }));
+    });
+
+    it("shows the stopped agents that have messages waiting, lists each with its count, and opens the Swarm from its button", () => {
+        const held = (): JektHeldAgent[] => [
+            { agent_id: "a", agent_name: "Korp", reason: "not_running", count: 3, since_ms: Date.now() - 125_000 },
+            { agent_id: "b", agent_name: "Clare", reason: "idle", count: 1, since_ms: Date.now() - 5_000 },
+        ];
+        const { container } = render(() => <SummaryStatus {...base} held={held} />);
+        expect(part(container, "held")?.textContent).toBe("1");
+        expect(part(container, "held")?.getAttribute("data-tip")).toBe("1 stopped agent has messages waiting");
+        fireEvent.click(part(container, "held")!);
+        const list = screen.getByRole("dialog", { name: "Waiting on you" });
+        expect(within(list).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Messages waiting"]);
+        expect(within(list).getByText("Korp")).toBeTruthy();
+        expect(within(list).getByText("has 3 messages waiting: it is not running")).toBeTruthy();
+        expect(within(list).queryByText("Clare")).toBeNull();
+        fireEvent.click(within(list).getByRole("button", { name: "Open Korp in the Swarm" }));
+        expect(open).toHaveBeenCalledWith("swarm");
     });
 
     it("opens the list, not the Swarm, when only an agent out of quota waits", () => {

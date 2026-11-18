@@ -240,6 +240,7 @@ export const WpsEvent = {
     /** An account episode opened, changed or closed: agents out of quota or signed out on one account
      *  (crates/srv/src/server/account_episodes/mod.rs). */
     AccountAvailability: "accountavailability",
+    JektHeld: "jektheld",
     AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",

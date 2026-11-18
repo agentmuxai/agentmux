@@ -14,6 +14,8 @@ describe("summary text", () => {
         expect(partTip("vault", 1)).toBe("1 Vault request waits on you");
         expect(partTip("signedout", 1)).toBe("1 agent is signed out");
         expect(partTip("quota", 3)).toBe("3 agents are out of quota");
+        expect(partTip("held", 1)).toBe("1 stopped agent has messages waiting");
+        expect(partTip("held", 3)).toBe("3 stopped agents have messages waiting");
         expect(partTip("tasks", 4)).toBe("4 Kanban tasks need you");
     });
 

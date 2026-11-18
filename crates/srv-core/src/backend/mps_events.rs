@@ -258,6 +258,8 @@ events! {
     AppUpdateStatusChanged: crate::backend::update::check::EVENT_APP_UPDATE_STATUS => crate::backend::update::check::AppUpdateStatus,
     /// An account episode opened, changed or closed (`server::account_episodes`).
     AccountAvailability: crate::backend::account_availability::EVENT_ACCOUNT_AVAILABILITY => crate::backend::account_availability::AccountAvailabilityEvent,
+    /// The messages held for agents changed in count (`server::jekt_held_summary`).
+    JektHeld: crate::backend::jekt_held_summary::EVENT_JEKT_HELD => crate::backend::jekt_held_summary::JektHeldEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
     /// An agent opened a pane; the person's active window offers to show it (`http_open`).

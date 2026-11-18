@@ -60,6 +60,7 @@ pub(crate) mod startup_refresh;
 mod container_tool_chunk;
 mod container_compaction_started;
 pub(crate) mod jekt_held;
+pub(crate) mod jekt_held_summary;
 pub(crate) mod jekt_hold;
 pub(crate) mod jekt_start;
 pub(crate) mod controller_backstop;

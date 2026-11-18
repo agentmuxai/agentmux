@@ -205,6 +205,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     jobs::register(engine, state);
     jobs_edit::register(engine, state);
     crate::server::account_episodes::register(engine, state);
+    crate::server::jekt_held_summary::register(engine, state);
     crate::server::prep::register(engine, state);
     agent_model::register(engine, state);
     agent_spend::register(engine, state);

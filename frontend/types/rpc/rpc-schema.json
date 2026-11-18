@@ -4633,6 +4633,25 @@
     }
   },
   {
+    "command": "jekt.held.summary",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv_core::backend::jekt_held_summary::JektHeldSummaryResult",
+    "responseName": "JektHeldSummaryResult",
+    "responseTs": {
+      "imports": [
+        "JektHeldSummaryResult"
+      ],
+      "name": "JektHeldSummaryResult"
+    }
+  },
+  {
     "command": "jobs.act",
     "request": "agentmux_srv::server::app_api::jobs::JobsActRequest",
     "requestName": "JobsActRequest",
