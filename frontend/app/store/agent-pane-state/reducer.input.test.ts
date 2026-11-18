@@ -171,6 +171,26 @@ describe("agent-pane-state reducer", () => {
             expect(r.events[0]).toMatchObject({ type: "pending-waiting", id: "m1", ahead: 2 });
         });
 
+        it("PendingMessageAccepted of a queued message takes one off the ahead of each message still waiting behind it", () => {
+            let s = mk();
+            for (const id of ["m1", "m2", "m3"]) s = update(s, { type: "PendingMessageQueued", enqueuedWhileBusy: true, id, text: id, at: 150 }).state;
+            s = update(s, { type: "PendingMessageWaiting", id: "m1", ahead: 0 }).state;
+            s = update(s, { type: "PendingMessageWaiting", id: "m2", ahead: 1 }).state;
+            s = update(s, { type: "PendingMessageWaiting", id: "m3", ahead: 2 }).state;
+            s = update(s, { type: "PendingMessageAccepted", id: "m1" }).state;
+            expect(s.pending.map((m) => [m.id, m.waiting?.ahead])).toEqual([["m2", 0], ["m3", 1]]);
+            s = update(s, { type: "PendingMessageAccepted", id: "m2" }).state;
+            expect(s.pending.map((m) => [m.id, m.waiting?.ahead])).toEqual([["m3", 0]]);
+        });
+
+        it("PendingMessageAccepted of a message that was not queued behind a process leaves the others' ahead alone", () => {
+            let s = mk();
+            for (const id of ["m1", "m2"]) s = update(s, { type: "PendingMessageQueued", enqueuedWhileBusy: true, id, text: id, at: 150 }).state;
+            s = update(s, { type: "PendingMessageWaiting", id: "m2", ahead: 1 }).state;
+            s = update(s, { type: "PendingMessageAccepted", id: "m1" }).state;
+            expect(s.pending.map((m) => [m.id, m.waiting?.ahead])).toEqual([["m2", 1]]);
+        });
+
         it("PendingMessageWaiting for an unknown id, or the same count again, is a same-ref no-op", () => {
             const s0 = update(mk(), { type: "PendingMessageQueued", enqueuedWhileBusy: true, id: "m1", text: "hi", at: 150 }).state;
             expect(update(s0, { type: "PendingMessageWaiting", id: "ghost", ahead: 1 }).state).toBe(s0);

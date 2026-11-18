@@ -379,21 +379,22 @@ impl SubprocessController {
     /// Queue `config` behind the running process, and tell the pane what it waits for (`what` names the path in
     /// the log).
     fn queue_behind_running_process(&self, config: SubprocessSpawnConfig, what: &str) {
+        let message_id = config.message_id.clone();
         let ahead = {
             let mut inner = self.inner.lock().unwrap();
             let ahead = inner.pending_messages.len();
             tracing::info!(block_id = %self.block_id, queue_depth = ahead + 1, "{what} — message queued");
-            inner.pending_messages.push_back(config.clone());
+            inner.pending_messages.push_back(config);
             ahead
         };
-        self.emit_message_queued(&config, ahead);
+        self.emit_message_queued(message_id.as_deref(), ahead);
     }
 
     /// Emit `agent-message-queued` for a message that has to wait for the running process, if it carries a
     /// `message_id`: the pane says what it waits for and how many are ahead of it. `ahead` is the number of messages
     /// already queued in front of it.
-    fn emit_message_queued(&self, config: &SubprocessSpawnConfig, ahead: usize) {
-        let Some(id) = config.message_id.as_deref() else { return };
+    fn emit_message_queued(&self, message_id: Option<&str>, ahead: usize) {
+        let Some(id) = message_id else { return };
         let Some(ref broker) = self.broker else { return };
         super::publish_message_queued(broker, &self.block_id, id, ahead);
     }

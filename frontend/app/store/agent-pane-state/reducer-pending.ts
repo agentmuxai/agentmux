@@ -74,10 +74,15 @@ export function onPendingMessageAccepted(state: AgentPaneState, command: Extract
             events: [{ type: "pending-accepted", id: command.id, wasPresent: false }],
         };
     }
+    // srv sends `ahead` once, when it queues a message. A queued message that is accepted left the queue, so each
+    // message still waiting behind it has one fewer ahead.
+    const leftTheQueue = !!state.pending.find((m) => m.id === command.id)?.waiting;
     return {
         state: {
             ...state,
-            pending: state.pending.filter((m) => m.id !== command.id),
+            pending: state.pending
+                .filter((m) => m.id !== command.id)
+                .map((m) => (leftTheQueue && m.waiting && m.waiting.ahead > 0 ? { ...m, waiting: { ahead: m.waiting.ahead - 1 } } : m)),
         },
         events: [{ type: "pending-accepted", id: command.id, wasPresent: true }],
     };

@@ -74,11 +74,15 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                                         </>
                                     }
                                 >
-                                    {(held) =>
-                                        held().ahead > 0
-                                            ? t("pendingPanel.waitingAhead", { count: queuedMessages().length, ahead: held().ahead })
-                                            : t("pendingPanel.waiting", { count: queuedMessages().length })
-                                    }
+                                    {(held) => (
+                                        // A JSX expression, so the text follows the count and `ahead` while the panel stays in
+                                        // this state (a bare ternary in the callback would be read once).
+                                        <>
+                                            {held().ahead > 0
+                                                ? t("pendingPanel.waitingAhead", { count: queuedMessages().length, ahead: held().ahead })
+                                                : t("pendingPanel.waiting", { count: queuedMessages().length })}
+                                        </>
+                                    )}
                                 </Show>
                             }
                         >

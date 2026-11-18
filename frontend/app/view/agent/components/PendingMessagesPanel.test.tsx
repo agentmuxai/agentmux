@@ -84,6 +84,24 @@ describe("PendingMessagesPanel — flushing copy split", () => {
         expect(screen.getByText(/Waiting \(2 messages, 2 ahead\) — the agent's command is still running/)).toBeTruthy();
     });
 
+    // The header must follow the count and `ahead` while the panel stays in the waiting state (no clearing between).
+    it("updates the waiting header when the count and ahead change while it stays waiting", () => {
+        const [pending, setPending] = createSignal<PendingMessage[]>([msg({ id: "a", flushing: true, waiting: { ahead: 0 } })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.getByText(/Waiting \(1 message\) — /)).toBeTruthy();
+        setPending([
+            msg({ id: "a", flushing: true, waiting: { ahead: 0 } }),
+            msg({ id: "b", flushing: true, waiting: { ahead: 1 } }),
+            msg({ id: "c", flushing: true, waiting: { ahead: 2 } }),
+        ]);
+        expect(screen.getByText(/Waiting \(3 messages\) — /)).toBeTruthy();
+        setPending([
+            msg({ id: "b", flushing: true, waiting: { ahead: 1 } }),
+            msg({ id: "c", flushing: true, waiting: { ahead: 2 } }),
+        ]);
+        expect(screen.getByText(/Waiting \(2 messages, 1 ahead\) — /)).toBeTruthy();
+    });
+
     it("keeps 'any moment' for a flushing message srv did not report as waiting", () => {
         const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true })]);
         render(() => <PendingMessagesPanel pendingMessages={pending} />);
