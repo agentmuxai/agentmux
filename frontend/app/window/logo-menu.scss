@@ -76,5 +76,7 @@
         display: block;
         width: calc(5 * var(--mark-cell));
         height: calc(5 * var(--mark-cell));
+        // Lower than the band's centre, by whole device pixels so no edge lands on a half pixel.
+        transform: translateY(calc(2 * var(--snap-chrome)));
     }
 }
