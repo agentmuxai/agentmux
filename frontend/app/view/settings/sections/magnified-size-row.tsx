@@ -4,7 +4,7 @@
 /**
  * The magnified pane's size, a share of the layout area it opens over (layout/lib/magnified-size.ts): the field takes
  * any number, writes it held to that range, and says so when it moved it, putting the corrected number back in the
- * box, as the Animations numbers do. A value from an old config shows as the layout reads it.
+ * box, as the Animations numbers do (when the field is left, if it is being typed in). A value from an old config shows as the layout reads it.
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
@@ -24,6 +24,8 @@ export function MagnifiedSizeRow(props: {
     const [snapped, setSnapped] = createSignal<string | null>(null);
     // Bumped when an entry was corrected back to the stored number: the box then shows it again, in place.
     const [corrected, setCorrected] = createSignal(0);
+    // What the person typed, kept in the box while they are still in it (see showStored).
+    const [held, setHeld] = createSignal<number | null>(null);
     const edit = (raw: number) => {
         const next = clampMagnifiedSize(raw);
         const moved = next !== raw;
@@ -37,8 +39,28 @@ export function MagnifiedSizeRow(props: {
                   })
                 : null
         );
-        if (moved) setCorrected((n) => n + 1);
+        if (moved) showStored(raw);
+        else setHeld(null);
         set(KEY, next);
+    };
+    // The corrected number goes back in the box. Not while the person is still typing in it: a pause after
+    // "0" would turn it into 0.5 under the caret, and the ".75" that follows would land after it (0.575).
+    // The message already says what was used; the box shows it when the field is left.
+    const showStored = (raw: number) => {
+        const box = document.getElementById(`setting-${props.row.id}`)?.querySelector("input");
+        if (box && box === document.activeElement) {
+            setHeld(raw);
+            box.addEventListener(
+                "focusout",
+                () => {
+                    setHeld(null);
+                    setCorrected((n) => n + 1);
+                },
+                { once: true }
+            );
+        } else {
+            setCorrected((n) => n + 1);
+        }
     };
     return (
         <>
@@ -53,7 +75,7 @@ export function MagnifiedSizeRow(props: {
                         min={-MAX_ENTRY}
                         max={MAX_ENTRY}
                         step={0.05}
-                        value={clampMagnifiedSize((props.s()["window:magnifiedblocksize"] as number) ?? 0.9)}
+                        value={held() ?? clampMagnifiedSize((props.s()["window:magnifiedblocksize"] as number) ?? 0.9)}
                         resyncKey={corrected()}
                         onChange={edit}
                     />

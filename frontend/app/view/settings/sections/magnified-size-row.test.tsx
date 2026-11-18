@@ -79,6 +79,22 @@ describe("the magnified size field", () => {
         expect(queryByTestId("magnified-size-snap")).toBeNull();
     });
 
+    it("leaves the box alone while it is being typed in, and shows the used number when it is left", async () => {
+        const { input, getByTestId } = setup(0.9);
+        input.focus();
+        await type(input, "0");
+        expect(getByTestId("magnified-size-snap").textContent).toContain("using 0.5");
+        expect(input.value, "a pause after 0 must not turn it into 0.5 under the caret").toBe("0");
+        await type(input, "0.75");
+        expect(input.value).toBe("0.75");
+        expect(h.setConfig).toHaveBeenLastCalledWith({}, { [KEY]: 0.75 });
+        await type(input, "3");
+        expect(input.value).toBe("3");
+        input.blur();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(input.value, "left: the box shows what was used").toBe("1");
+    });
+
     it("shows a stored size from an old config as the layout reads it, and an unset one as the default", () => {
         expect(setup(3).input.value).toBe("1");
         cleanup();
