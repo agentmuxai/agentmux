@@ -286,6 +286,23 @@ pub struct Named {
     pub kind: Option<TowerProcessKind>,
 }
 
+/// The most one process can hold: the biggest adapter's dedicated memory and the most shared memory the OS lets the GPU
+/// have. `None` where the adapters said nothing, so nothing is dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct MemoryLimits {
+    pub dedicated: Option<u64>,
+    pub shared: Option<u64>,
+}
+
+impl MemoryLimits {
+    pub fn of(adapters: &[crate::backend::rpc_types::GpuAdapter]) -> Self {
+        Self {
+            dedicated: adapters.iter().filter_map(|a| a.dedicated_total).max(),
+            shared: adapters.iter().filter_map(|a| a.shared_total).max(),
+        }
+    }
+}
+
 /// Whether a process is worth a row: it uses the GPU, or holds a megabyte of its memory.
 fn active(f: &ProcessFigures) -> bool {
     const MEMORY: u64 = 1 << 20;
@@ -295,14 +312,23 @@ fn active(f: &ProcessFigures) -> bool {
 /// The rows of the panel: AgentMux's own processes and the biggest [`OTHERS_LISTED`] others, sorted by use and then
 /// memory (AgentMux's first where those are equal), and the rest of the others added up.
 ///
-/// A row's memory is what it holds on the card, and only where it holds none there, what it holds of the machine's
-/// (`shared_limit` is the most the OS lets the GPU have): a process's shared figure is often a mapping, far more than
-/// the machine has (a compositor's, 105 GB), and is not shown as a number.
+/// A row's memory is what it holds on the card, and only where it holds none there, what it holds of the machine's.
+/// A figure over what the adapters have is the OS's own mistake (it reports 113 GB for a compositor on a 12 GB card, and
+/// 23 TB for another process), and is not shown as a number: see [`MemoryLimits`].
 pub fn shape_processes(
     figures: &[ProcessFigures],
-    shared_limit: Option<u64>,
+    limits: MemoryLimits,
     name_of: impl Fn(u32) -> Option<Named>,
 ) -> (Vec<GpuProcess>, Option<GpuOthers>) {
+    let sane = |v: Option<u64>, limit: Option<u64>| v.filter(|v| limit.is_none_or(|l| *v <= l));
+    let figures: Vec<ProcessFigures> = figures
+        .iter()
+        .map(|f| ProcessFigures {
+            dedicated: sane(f.dedicated, limits.dedicated),
+            shared: sane(f.shared, limits.shared),
+            ..f.clone()
+        })
+        .collect();
     let row = |f: &ProcessFigures| {
         let n = name_of(f.pid);
         GpuProcess {
@@ -312,10 +338,7 @@ pub fn shape_processes(
             kind: n.as_ref().and_then(|n| n.kind),
             use_pct: f.use_pct,
             dedicated: f.dedicated,
-            shared: f
-                .shared
-                .filter(|_| f.dedicated.unwrap_or(0) == 0)
-                .filter(|s| shared_limit.is_none_or(|limit| *s <= limit)),
+            shared: f.shared.filter(|_| f.dedicated.unwrap_or(0) == 0),
         }
     };
     let (mut own, mut others): (Vec<GpuProcess>, Vec<GpuProcess>) =

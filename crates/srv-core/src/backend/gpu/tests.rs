@@ -77,7 +77,7 @@ fn names(pid: u32) -> Option<Named> {
 fn the_panel_lists_agentmux_and_the_biggest_five_others_and_adds_up_the_rest() {
     let mut all: Vec<ProcessFigures> = (10..18).map(|p| figures(p, (p - 9) as f64 * 10.0, 100)).collect();
     all.push(figures(2, 5.0, 300));
-    let (rows, others) = shape_processes(&all, None, names);
+    let (rows, others) = shape_processes(&all, MemoryLimits::default(), names);
     assert_eq!(rows.len(), 1 + OTHERS_LISTED);
     // By use first: app17 at 80%, then app16 at 70%, ... AgentMux's 5% row last of those listed.
     assert_eq!(rows.iter().map(|r| r.pid).collect::<Vec<_>>(), [17, 16, 15, 14, 13, 2]);
@@ -90,20 +90,20 @@ fn the_panel_lists_agentmux_and_the_biggest_five_others_and_adds_up_the_rest() {
 #[test]
 fn agentmuxs_own_row_comes_first_in_a_tie() {
     let all = vec![figures(10, 20.0, 100), figures(3, 20.4, 100)];
-    let (rows, _) = shape_processes(&all, None, names);
+    let (rows, _) = shape_processes(&all, MemoryLimits::default(), names);
     assert_eq!(rows.iter().map(|r| r.pid).collect::<Vec<_>>(), [3, 10]);
 }
 
 #[test]
 fn a_tie_in_use_goes_to_the_one_with_more_memory() {
     let all = vec![figures(10, 20.0, 100), figures(11, 20.0, 400)];
-    let (rows, _) = shape_processes(&all, None, names);
+    let (rows, _) = shape_processes(&all, MemoryLimits::default(), names);
     assert_eq!(rows[0].pid, 11);
 }
 
 #[test]
 fn a_process_is_named_by_its_image_and_an_unknown_one_by_its_number() {
-    let (rows, _) = shape_processes(&[figures(11, 5.0, 1), figures(500, 5.0, 1)], None, names);
+    let (rows, _) = shape_processes(&[figures(11, 5.0, 1), figures(500, 5.0, 1)], MemoryLimits::default(), names);
     assert_eq!(rows.iter().find(|r| r.pid == 11).unwrap().name, "app11.exe");
     assert_eq!(rows.iter().find(|r| r.pid == 500).unwrap().name, "pid 500");
 }
@@ -112,7 +112,7 @@ fn a_process_is_named_by_its_image_and_an_unknown_one_by_its_number() {
 fn a_process_that_uses_nothing_has_no_row_and_one_that_only_holds_memory_has() {
     let idle = ProcessFigures { pid: 10, use_pct: Some(0.0), dedicated: Some(0), shared: Some(0) };
     let holds = ProcessFigures { pid: 11, use_pct: Some(0.0), dedicated: Some(64 << 20), shared: Some(0) };
-    let (rows, others) = shape_processes(&[idle, holds], None, names);
+    let (rows, others) = shape_processes(&[idle, holds], MemoryLimits::default(), names);
     assert_eq!(rows.iter().map(|r| r.pid).collect::<Vec<_>>(), [11]);
     assert!(others.is_none());
 }
@@ -122,11 +122,28 @@ fn a_shared_figure_that_is_more_than_the_machine_has_is_not_a_number() {
     let mapped = ProcessFigures { pid: 10, use_pct: Some(12.0), dedicated: Some(0), shared: Some(105 << 30) };
     let real = ProcessFigures { pid: 11, use_pct: Some(10.0), dedicated: Some(0), shared: Some(300 << 20) };
     let on_card = ProcessFigures { pid: 12, use_pct: Some(9.0), dedicated: Some(64 << 20), shared: Some(1 << 30) };
-    let (rows, _) = shape_processes(&[mapped, real, on_card], Some(46 << 30), names);
+    let limits = MemoryLimits { dedicated: Some(12 << 30), shared: Some(46 << 30) };
+    let (rows, _) = shape_processes(&[mapped, real, on_card], limits, names);
     let get = |pid| rows.iter().find(|r| r.pid == pid).unwrap();
     assert_eq!(get(10).shared, None, "over what the OS lets the GPU have");
     assert_eq!(get(11).shared, Some(300 << 20), "nothing on the card: the machine's memory is what it holds");
     assert_eq!(get(12).shared, None, "on the card: that is the figure");
+}
+
+#[test]
+fn a_dedicated_figure_that_is_more_than_the_card_has_is_not_a_number() {
+    // Seen on a real machine: the OS reports 113 GB for the compositor and 23 TB for another process, on a 12 GB card.
+    let compositor = ProcessFigures { pid: 10, use_pct: Some(11.0), dedicated: Some(113_412_096_000), shared: Some(8 << 20) };
+    let absurd = ProcessFigures { pid: 11, use_pct: Some(0.0), dedicated: Some(23_246_544_527_360), shared: Some(0) };
+    let real = ProcessFigures { pid: 12, use_pct: Some(9.0), dedicated: Some(2 << 30), shared: Some(0) };
+    let limits = MemoryLimits { dedicated: Some(12 << 30), shared: Some(46 << 30) };
+    let (rows, others) = shape_processes(&[compositor, absurd, real], limits, names);
+    let get = |pid| rows.iter().find(|r| r.pid == pid).unwrap();
+    assert_eq!(get(10).dedicated, None);
+    assert_eq!(get(10).shared, Some(8 << 20), "with nothing believable on the card, the machine's memory is the figure");
+    assert_eq!(get(12).dedicated, Some(2 << 30));
+    assert!(rows.iter().all(|r| r.pid != 11), "nothing believable and no use: not a row");
+    assert!(others.is_none());
 }
 
 #[cfg(not(windows))]

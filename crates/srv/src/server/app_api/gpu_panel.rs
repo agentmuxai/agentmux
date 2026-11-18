@@ -10,7 +10,7 @@
 
 use super::tower_pane::{not_an_agent_api, sample_local};
 use super::*;
-use crate::backend::gpu::{shape_processes, GpuSampler, Named};
+use crate::backend::gpu::{shape_processes, GpuSampler, MemoryLimits, Named};
 use std::collections::HashMap;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -48,8 +48,8 @@ async fn sample(state: &AppState) -> Result<GpuSampleResult, String> {
             }
         }
     };
-    let shared_limit = sample.reading.adapters.iter().filter_map(|a| a.shared_total).max();
-    let (processes, others) = shape_processes(&sample.reading.processes, shared_limit, |pid| names.get(&pid).cloned());
+    let limits = MemoryLimits::of(&sample.reading.adapters);
+    let (processes, others) = shape_processes(&sample.reading.processes, limits, |pid| names.get(&pid).cloned());
     Ok(GpuSampleResult {
         ts_ms: agentmux_common::time::now_ms_u64(),
         os: std::env::consts::OS.to_string(),
