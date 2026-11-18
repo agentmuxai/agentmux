@@ -38,6 +38,16 @@ struct Page {
     resized_at: Option<Instant>,
 }
 
+/// URL patterns no page may load (`Network.setBlockedURLs`): local files and the browser's own internal pages.
+pub(super) const BLOCKED_URLS: &[&str] = &[
+    "file:*",
+    "chrome:*",
+    "chrome-untrusted:*",
+    "chrome-extension:*",
+    "devtools:*",
+    "view-source:*",
+];
+
 fn screencast(w: u32, h: u32) -> Value {
     json!({ "format": "jpeg", "quality": JPEG_QUALITY, "maxWidth": w, "maxHeight": h, "everyNthFrame": 1 })
 }
@@ -78,6 +88,10 @@ async fn prepare(page: &Page, start: &Start) -> Result<(), String> {
     cdp.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }), s).await?;
     // A page's file chooser is intercepted and never answered: nothing on the server's disks is offered to a page.
     cdp.call("Page.setInterceptFileChooserDialog", json!({ "enabled": true }), s).await?;
+    // No page loads, or navigates to, the server's own files or the browser's internal pages, in the top frame, in a
+    // frame, or as a script, image or request of a page. (The address bar already takes only http and https.)
+    cdp.call("Network.enable", json!({ "maxTotalBufferSize": 0, "maxResourceBufferSize": 0 }), s).await?;
+    cdp.call("Network.setBlockedURLs", json!({ "urls": BLOCKED_URLS }), s).await?;
     cdp.call("Page.startScreencast", screencast(start.w, start.h), s).await?;
     if start.url != "about:blank" {
         nav::go(cdp, &page.session, protocol::Go::Url, &start.url).await?;
@@ -221,4 +235,16 @@ pub async fn run(mut socket: WebSocket, lease: Lease, start: Start, ended: impl 
     }
     page.close().await;
     drop(lease);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_page_may_load_a_local_file_or_a_browser_internal_page() {
+        for scheme in ["file", "chrome", "chrome-untrusted", "chrome-extension", "devtools", "view-source"] {
+            assert!(BLOCKED_URLS.iter().any(|p| p == &format!("{scheme}:*")), "{scheme}");
+        }
+    }
 }

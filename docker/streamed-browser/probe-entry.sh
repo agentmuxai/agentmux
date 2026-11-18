@@ -10,7 +10,12 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 set +e
-node /app/probe.mjs --port 8190 --key-file "$KEY" --runs "${RUNS:-5}"
+if [ "${GUARD:-}" = "1" ]; then
+  # The address proxy and the blocked destinations (spec section 12), instead of the timing probe.
+  node /app/guard-probe.mjs --port 8190 --ws-port 8191 --key-file "$KEY" ${EXTRA_DENIED:+--extra-denied "$EXTRA_DENIED"}
+else
+  node /app/probe.mjs --port 8190 --key-file "$KEY" --runs "${RUNS:-5}"
+fi
 CODE=$?
 # One Chromium serves every pane: its main process is the one with the pipe and no `--type=`.
 echo "chromium main processes: $(ps -eo args | grep -- '--remote-debugging-pipe' | grep -v -- '--type=' | grep -vc grep)" >&2
