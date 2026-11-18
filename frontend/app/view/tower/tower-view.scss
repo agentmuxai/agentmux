@@ -1158,6 +1158,26 @@ th[aria-sort="descending"] .tower-sort {
     gap: var(--space-2);
 }
 
+// The record's line over days, under the hour's chart.
+.tower-memory-long {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+}
+
+.tower-memory-long-note {
+    margin: 0;
+}
+
+.tower-memory-long-facts,
+.tower-memory-long-page {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--space-3);
+    font-size: 0.9em;
+}
+
 .tower-memory-note {
     display: flex;
     flex-direction: column;
@@ -1176,7 +1196,8 @@ th[aria-sort="descending"] .tower-sort {
 // Narrowest: the bar and its legend say it, and nothing opens.
 @container (max-width: 240px) {
     .tower-memory-table,
-    .tower-memory-chart {
+    .tower-memory-chart,
+    .tower-memory-long {
         display: none;
     }
 }
