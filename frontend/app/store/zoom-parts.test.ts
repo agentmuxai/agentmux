@@ -38,7 +38,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetMetaCommand: (...args: unkn
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
-import { EDITOR_ZOOM } from "@/app/view/editor/editor-zoom-parts";
+import { EDITOR_ZOOM, treeHasFocus } from "@/app/view/editor/editor-zoom-parts";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { setPlatform } from "@/util/platformutil";
 import { paneZoom, resetPaneZoomForTests } from "./pane-zoom-local";
@@ -56,6 +56,7 @@ import {
 } from "./zoom";
 import { paneZoomPatch, setZoomMax } from "./zoom-factor";
 import {
+    focusIsInPart,
     resetZoomPartFocusForTests,
     splitSubject,
     subjectId,
@@ -199,6 +200,21 @@ describe("which part the keys zoom", () => {
         expect(level("e1")).toBe(1.2);
         zoomOut();
         expect(level("e1", "editor:tree_zoom")).toBeLessThan(1);
+    });
+
+    it("tells whether the keyboard is in a part, so a pane that takes focus on a click can leave it there", () => {
+        setBlock("e1", "editor");
+        const { tree, main } = mountPane("e1");
+        const button = tree!.querySelector("button")!;
+        button.focus();
+        expect(focusIsInPart("e1", "tree")).toBe(true);
+        expect(treeHasFocus("e1")).toBe(true);
+        main.querySelector("textarea")!.focus();
+        expect(focusIsInPart("e1", "tree")).toBe(false);
+        expect(focusIsInPart("e1", "main")).toBe(true);
+        // A part that is not on screen has nothing in it.
+        tree!.remove();
+        expect(treeHasFocus("e1")).toBe(false);
     });
 
     it("zooms a named part from the palette whatever has the keyboard, and resets both together", () => {

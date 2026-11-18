@@ -41,6 +41,12 @@
     height: 100%;
     min-height: 0;
     min-width: 0;
+
+
+    // Focusable so a click on the toolbar or blank space keeps the keyboard in the tree (the zoom keys follow it).
+    &:focus {
+        outline: none;
+    }
 }
 
 // The document's part: the pane's own zoom (`term:zoom`) around the tab strip, toolbar and body.
