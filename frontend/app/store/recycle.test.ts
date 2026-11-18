@@ -43,6 +43,9 @@ beforeEach(() => {
     saved.attachments = true;
     sessionStorage.clear();
     Object.assign(idle, { sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false });
+    // A reason an earlier test left blocking is forgotten once it is looked at with nothing blocking, so its
+    // real-clock start doesn't leak into a test that fakes the clock.
+    recycleBlockers(0, true);
     order.length = 0;
     unregister.push(
         registerReloadSaver(() => {
