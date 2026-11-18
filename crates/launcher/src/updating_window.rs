@@ -161,7 +161,7 @@ mod win {
     }
 
     /// At start: remove the folders of hand-offs long over (a running copy can't delete itself).
-    pub fn clean_stale() {
+    fn clean_stale() {
         let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
         for e in entries.flatten() {
             let stale = e.file_name().to_string_lossy().starts_with(DIR_PREFIX)
@@ -172,8 +172,8 @@ mod win {
         }
     }
 
-    /// `main`'s first look at the arguments: this launcher is the window's copy. `Some(exit code)` when it was.
-    pub fn run_if_requested(args: &[String]) -> Option<i32> {
+    /// This launcher is the window's copy: `Some(exit code)` when it was.
+    fn run_if_requested(args: &[String]) -> Option<i32> {
         if args.get(1).map(String::as_str) != Some(ARG) {
             return None;
         }
@@ -186,10 +186,27 @@ mod win {
         crate::splash::run_updating_window(version, pid, Path::new(dir));
         Some(0)
     }
+
+    /// `main`'s first look at the arguments: `Some(exit code)` when this launcher is the window's copy, which shows
+    /// the window and nothing else; otherwise the folders of earlier upgrades' windows are tidied (a running copy
+    /// can't delete its own folder) and the start goes on.
+    pub fn early(args: &[String]) -> Option<i32> {
+        if let Some(code) = run_if_requested(args) {
+            return Some(code);
+        }
+        clean_stale();
+        None
+    }
 }
 
 #[cfg(windows)]
-pub use win::{clean_stale, run_if_requested, signal_new_splash, start};
+pub use win::{early, signal_new_splash, start};
+
+/// Nothing to do away from Windows.
+#[cfg(not(windows))]
+pub fn early(_args: &[String]) -> Option<i32> {
+    None
+}
 
 #[cfg(test)]
 mod tests {

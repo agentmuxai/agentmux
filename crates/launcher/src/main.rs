@@ -136,15 +136,9 @@ fn suppress_os_crash_dialogs() {}
 /// Windows crash modal either. Spec:
 /// docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md.
 fn main() {
-    // `--updating-window`: this is the copy of the old launcher that shows "Updating to <version>" while an
-    // in-app upgrade's installer runs (`updating_window`). It shows that and nothing else starts.
-    #[cfg(windows)]
-    if let Some(code) = updating_window::run_if_requested(&std::env::args().collect::<Vec<_>>()) {
-        std::process::exit(code);
-    }
     // `--version`/`-V` prints the version; `--verify-update`: the root helper of a .deb/.rpm upgrade
-    // asks for a downloaded package to be checked against the release's signed manifest. Nothing else starts.
-    if let Some(code) = version_flag::run_if_requested(&std::env::args().collect::<Vec<_>>()).or_else(|| verify_update::run_if_requested(&std::env::args().collect::<Vec<_>>())) {
+    // asks for a package to be checked against the signed manifest; `--updating-window`: see `updating_window`. Nothing else starts.
+    if let Some(code) = version_flag::run_if_requested(&std::env::args().collect::<Vec<_>>()).or_else(|| verify_update::run_if_requested(&std::env::args().collect::<Vec<_>>())).or_else(|| updating_window::early(&std::env::args().collect::<Vec<_>>())) {
         std::process::exit(code);
     }
     agentmux_common::dev_home_guard::refuse_or_continue_current_exe(); // a dev build by hand has no isolated home
@@ -154,9 +148,6 @@ fn main() {
     agentmux_common::secret_env::discard_startup_secrets();
     suppress_os_crash_dialogs();
     logging::install_panic_hook();
-    // The folders of earlier upgrades' "Updating to" windows (a running copy can't delete its own folder).
-    #[cfg(windows)]
-    updating_window::clean_stale();
 
     // Dev/demo affordance: `--splash-selftest` shows the splash in isolation
     // (no srv/host), holds it briefly, then exits — for eyeballing the footer +

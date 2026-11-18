@@ -251,6 +251,16 @@ pub fn dismiss_splash(event_name: &str) {
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
+/// Said in place of the first stage row on a crash-restart's splash.
+const RESTORING_HEADLINE: &str = "Restoring session...";
+
+/// Show the splash window, and tell an "Updating to <version>" window of an upgrade hand-off, if one is up, that
+/// the new version's own splash is here: its job is done.
+unsafe fn show_and_announce(hwnd: HWND) {
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    crate::updating_window::signal_new_splash();
+}
+
 unsafe fn run_splash(
     dismiss_ev: HANDLE,
     class_name: String,
@@ -326,14 +336,11 @@ unsafe fn run_splash(
         (SPLASH_W * SPLASH_H * 4) as usize,
     );
 
-    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-    // An "Updating to <version>" window of the upgrade hand-off, if one is up, has done its job.
-    crate::updating_window::signal_new_splash();
+    show_and_announce(hwnd);
 
     let info = crate::splash_info::SplashInfo::gather_and_log(if restoring { "restart" } else { "start" });
     let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
     let footer = info.footer_lines(max_chars);
-    let headline = restoring.then_some("Restoring session...");
 
     let start = Instant::now();
     let splash_start = Instant::now();
@@ -365,7 +372,7 @@ unsafe fn run_splash(
             // fires. (codex P2 on PR #3222.)
             if deferred_this_tick {
                 let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
-                composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, headline);
+                composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring.then_some(RESTORING_HEADLINE));
                 push_layered(hwnd, mem_dc, 255);
             }
 
@@ -407,7 +414,7 @@ unsafe fn run_splash(
             timeline.finalize_running(Instant::now());
 
             // Freeze: render final state with brain steady.
-            composite(dib_pixels, 200u8, &timeline.stages, Some(total_ms), &footer, headline);
+            composite(dib_pixels, 200u8, &timeline.stages, Some(total_ms), &footer, restoring.then_some(RESTORING_HEADLINE));
             push_layered(hwnd, mem_dc, 255);
 
             // Summary hold — 2 s default, shortened for very fast starts.
@@ -423,7 +430,7 @@ unsafe fn run_splash(
         // Animate brain alpha: fade-in over 200 ms, then sine pulse.
         let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
 
-        composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, headline);
+        composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring.then_some(RESTORING_HEADLINE));
         push_layered(hwnd, mem_dc, 255);
 
         std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 fps
@@ -714,6 +721,34 @@ unsafe fn fade_out(hwnd: HWND, mem_dc: HDC, _dib: &mut [u8]) {
 }
 
 
+/// Draw the "Updating to <version>" card until `updating_window::phase` says the window is done. `script` is the
+/// hand-off script's process (null once it can't be watched: then it counts as ended), `new_splash_ev` the event
+/// the new launcher's splash sets.
+unsafe fn show_updating(hwnd: HWND, mem_dc: HDC, pixels: &mut [u8], version: &str, dir: &std::path::Path, script: HANDLE, new_splash_ev: HANDLE) {
+    use crate::updating_window as uw;
+    let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
+    let started = Instant::now();
+    let mut script_ended_at: Option<Instant> = None;
+    loop {
+        if script_ended_at.is_none() && (script.is_null() || WaitForSingleObject(script, 0) == WAIT_OBJECT_0) {
+            script_ended_at = Some(Instant::now());
+        }
+        let p = uw::phase(&uw::Inputs {
+            elapsed: started.elapsed(),
+            script_ended_for: script_ended_at.map(|t| t.elapsed()),
+            new_splash: !new_splash_ev.is_null() && WaitForSingleObject(new_splash_ev, 0) == WAIT_OBJECT_0,
+            failed: script_ended_at.is_some() && uw::failed_marker(dir).exists(),
+        });
+        if p == uw::Phase::Close {
+            return;
+        }
+        let footer: Vec<String> = uw::footer(version, p).iter().map(|l| crate::splash_info::ellipsize(l, max_chars)).collect();
+        composite(pixels, brain_pulse_alpha(started.elapsed().as_secs_f32()), &[], None, &footer, Some(uw::headline(p)));
+        push_layered(hwnd, mem_dc, 255);
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+}
+
 /// The window of an in-app upgrade's hand-off (`updating_window`): the splash's card, with "Updating to
 /// <version>" in its footer, from the moment the old launcher is gone until the new launcher's splash is up. It
 /// runs in a copy of the old launcher (`--updating-window`) and ends by what `updating_window::phase` decides, so
@@ -784,28 +819,7 @@ pub fn run_updating_window(version: &str, script_pid: u32, dir: &std::path::Path
         let script = OpenProcess(PROCESS_SYNCHRONIZE, 0, script_pid);
 
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
-        let started = Instant::now();
-        let mut script_ended_at: Option<Instant> = None;
-        loop {
-            if script_ended_at.is_none() && (script.is_null() || WaitForSingleObject(script, 0) == WAIT_OBJECT_0) {
-                script_ended_at = Some(Instant::now());
-            }
-            let ended = script_ended_at.is_some();
-            let p = uw::phase(&uw::Inputs {
-                elapsed: started.elapsed(),
-                script_ended_for: script_ended_at.map(|t| t.elapsed()),
-                new_splash: !new_splash_ev.is_null() && WaitForSingleObject(new_splash_ev, 0) == WAIT_OBJECT_0,
-                failed: ended && uw::failed_marker(dir).exists(),
-            });
-            if p == uw::Phase::Close {
-                break;
-            }
-            let footer: Vec<String> = uw::footer(version, p).iter().map(|l| crate::splash_info::ellipsize(l, max_chars)).collect();
-            composite(pixels, brain_pulse_alpha(started.elapsed().as_secs_f32()), &[], None, &footer, Some(uw::headline(p)));
-            push_layered(hwnd, mem_dc, 255);
-            std::thread::sleep(std::time::Duration::from_millis(16));
-        }
+        show_updating(hwnd, mem_dc, pixels, version, dir, script, new_splash_ev);
         fade_out(hwnd, mem_dc, pixels);
         SelectObject(mem_dc, old_obj);
         DeleteObject(dib as _);
