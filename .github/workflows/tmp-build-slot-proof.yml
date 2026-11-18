@@ -1,0 +1,31 @@
+name: tmp build-slot runner proof (removed before merge)
+on:
+  pull_request:
+    paths:
+      - .github/workflows/tmp-build-slot-proof.yml
+permissions:
+  contents: read
+jobs:
+  proof:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Which runner, which mkdir
+        run: |
+          uname -sr; grep PRETTY_NAME /etc/os-release 2>/dev/null || sw_vers
+          mkdir --version 2>/dev/null | head -1 || echo "BSD mkdir"
+      - name: The new test on this branch's build-slot.sh, three runs
+        run: |
+          for n in 1 2 3; do echo "new script, run $n: $(bash scripts/build-slot/build-slot.test.sh 2>&1 | grep -E '^FAIL|passed' | tr '\n' ' ')"; done
+      - name: The same test on the old build-slot.sh (expect the held-slot case to fail on a mkdir that says yes)
+        run: |
+          base=$(git merge-base origin/main HEAD)
+          mkdir -p /tmp/old && git show "$base:scripts/build-slot/build-slot.sh" > /tmp/old/build-slot.sh && cp scripts/build-slot/build-slot.test.sh /tmp/old/
+          for n in 1 2 3; do echo "old script, run $n: $(bash /tmp/old/build-slot.test.sh 2>&1 | grep -E '^FAIL|passed' | tr '\n' ' ')"; done
