@@ -63,10 +63,15 @@ describe("one entry for each widget no other entry opens", () => {
             "defwidget@browser": { label: "Browser", blockdef: { meta: { view: "browser" } } },
             "mytool": { label: "Build", icon: "hammer", blockdef: { meta: { view: "term", cmd: "npm run build" } } },
             "ext": { label: "Chart", blockdef: { meta: { view: "ext:acme.chart/main" } } },
+            // The built-in Agent widget: an empty command is no command, and its view has its own entry.
+            "defwidget@agent": {
+                label: "Agent",
+                blockdef: { meta: { view: "agent", controller: "cmd", cmd: "", "cmd:args": [], "cmd:interactive": true } },
+            },
         };
     });
 
-    it("lists a site, a command and a pane of another kind, and nothing the palette already opens", () => {
+    it("lists a site, a command and a pane of another kind, and nothing the palette already opens (not Agent twice)", () => {
         expect(widgetEntries().map((e) => e.id)).toEqual(["open:widget:discord", "open:widget:mytool", "open:widget:ext"]);
     });
 

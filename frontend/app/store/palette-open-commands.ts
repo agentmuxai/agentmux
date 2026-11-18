@@ -102,12 +102,16 @@ const COVERED_VIEWS: ReadonlySet<string> = new Set(Object.keys(OPEN_COMMAND_FOR_
 /** A brand or namespaced icon name ("brands@discord") is not a solid icon the palette can draw. */
 const plainIcon = (icon: string | undefined): string => (icon && /^[a-z0-9-]+$/.test(icon) ? icon : "up-right-from-square");
 
-/** Whether a widget needs an entry of its own: a site or a command, or a view with no "Open" entry. */
+/**
+ * Whether a widget needs an entry of its own: a site, a terminal command, or a view with no "Open" entry.
+ * The Agent widget carries `cmd: ""` (no command), so an empty `cmd` is not a command.
+ */
 function needsEntry(widget: WidgetConfigType): boolean {
     const meta = widget.blockdef?.meta as Record<string, unknown> | undefined;
     if (!meta) return false;
-    if (typeof meta["url"] === "string" || typeof meta["cmd"] === "string") return true;
     const view = meta["view"];
+    if (typeof meta["url"] === "string" && meta["url"] !== "") return true;
+    if (view === "term" && typeof meta["cmd"] === "string" && meta["cmd"] !== "") return true;
     return typeof view === "string" && !COVERED_VIEWS.has(view);
 }
 

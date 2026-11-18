@@ -1,6 +1,9 @@
 # Command palette audit: what it lists, what it misses (task #47920)
 
-Date: 2026-11-18. Author: Agent2@narko. Status: research report, not committed.
+Date: 2026-11-18. Author: Agent2@narko.
+
+**Status:** implemented in #7713 (the entries and the two guards this report asks for).
+
 Measured on a `task dev` build of main at `c0ea72cf47`, in its own isolated home, with made-up agents. Palette entries were read from the open palette (Ctrl+P) with dev mode on (the build's default) and with `app:devmode` set to `false`; the list again with an agent pane focused. Script: `scratch/palette-enum.mjs` (and `palette-enum2.mjs`) in the author's workspace.
 
 ## 1. What the palette lists today
