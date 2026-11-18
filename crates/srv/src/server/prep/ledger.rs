@@ -117,12 +117,21 @@ pub(super) fn clear_meta(state: &AppState, prep: &Prep) {
 /// same target changes nothing; for another one replaces the closure and keeps the window and its
 /// deadline. BLOCKING (store writes); needs a tokio runtime for the window's task.
 pub fn open(state: &AppState, prep: Prep, proceed: Proceed) -> Opened {
+    open_with(state, prep, proceed, || {})
+}
+
+/// [`open`], running `record` (the choice the closure acts on) before the window can end: with the window
+/// already open it runs under the ledger lock, so the window cannot end between the two, and for a new
+/// window it runs before the window's task starts. The closure therefore always finds `record`'s write
+/// already made, never one that outlives it.
+pub fn open_with(state: &AppState, prep: Prep, proceed: Proceed, record: impl FnOnce()) -> Opened {
     let mut guard = ledger();
     if let Some(e) = guard.get_mut(&prep.def_id) {
         if e.prep.target != prep.target {
             e.prep = prep;
             e.proceed = Some(proceed);
         }
+        record();
         return Opened { id: e.id.clone(), until_ms: e.until_ms() };
     }
     let id = format!("p-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
@@ -147,6 +156,7 @@ pub fn open(state: &AppState, prep: Prep, proceed: Proceed) -> Opened {
     drop(guard);
     set_block_meta(state, &refs(&prep.blocks), &[(META_PREP, meta)]);
     audit(state, &prep, &id, &prep.actor, AUDIT_REQUESTED, &format!("{}: {}", prep.action, prep.what));
+    record();
     tokio::spawn(window::run(state.clone(), prep.def_id.clone(), id));
     opened
 }

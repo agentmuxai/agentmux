@@ -164,6 +164,8 @@ fn apply(state: &AppState, actor: &str, def_id: &str, to: &IdentityAccount, prov
         }
     }
     tell_signed_out(actor, signed_out, &restarted_ok);
+    // A pane whose controller has no spawn step reading the handoff gets it as a held note.
+    crate::server::prep::hold_for_other_panes(def_id, &restarted_ok);
     if blocks.is_empty() {
         if let Err(e) = linked {
             result.failed.push(e);
@@ -331,9 +333,12 @@ pub(super) fn switch_to(state: &AppState, actor: &str, def_id: &str, to: &Identi
         let (s, actor_c, def, to_id) = (state.clone(), actor.to_string(), def_id.to_string(), to.id.clone());
         let now = when == AccountSwitchWhen::Now;
         // The window first, then the choice it waits on: `apply_pending` skips an agent in a window, so
-        // a refresh between the two can't apply the choice before the agent was asked.
-        crate::server::prep::open(state, prep, Box::new(move |how| settle(&s, &actor_c, &def, &to_id, now || how == crate::server::prep::How::PersonSaidNow)));
-        set_pending(state, &blocks, Some((&to.id, actor)));
+        // a refresh between the two can't apply the choice before the agent was asked. The choice is
+        // written inside `open_with`, before the window can end: written after, it could outlive a window
+        // that had already settled and be applied a second time.
+        crate::server::prep::open_with(state, prep, Box::new(move |how| settle(&s, &actor_c, &def, &to_id, now || how == crate::server::prep::How::PersonSaidNow)), || {
+            set_pending(state, &blocks, Some((&to.id, actor)));
+        });
         return Ok(result(AccountSwitchStatus::Preparing));
     }
     if when == AccountSwitchWhen::AfterTurn && blocks.iter().any(|b| busy(state, &b.oid)) {
