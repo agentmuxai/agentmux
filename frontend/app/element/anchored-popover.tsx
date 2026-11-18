@@ -80,6 +80,8 @@ export interface AnchoredPopoverProps {
     alignToAnchorSide?: boolean;
     /** Cap the body at the room the window leaves and scroll inside it, instead of running off the window. */
     fitHeight?: boolean;
+    /** With `containWithin`: tell the body how wide its container is, as `--popover-room-width` (in the body's own zoomed pixels), so its style can keep it inside a narrow pane. */
+    fitWidth?: boolean;
     /** Classes for the body: the panel's own styling. */
     class?: string;
     /** Inline style for the body (e.g. a fixed width, which then scales too). */
@@ -165,6 +167,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let body: HTMLDivElement | undefined;
     let entered = false;
     const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
+    const [roomWidth, setRoomWidth] = createSignal<number | undefined>();
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE);
     /** The first time the panel is shown, in place: play its entrance. */
     const shown = () => {
@@ -177,6 +180,16 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;
     let disposed = false;
+    const bodyStyle = (): JSX.CSSProperties | undefined => {
+        const height = roomHeight();
+        const width = roomWidth();
+        if (height === undefined && width === undefined) return props.style;
+        return {
+            ...props.style,
+            ...(height === undefined ? {} : { "max-height": `calc(${height}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }),
+            ...(width === undefined ? {} : { "--popover-room-width": `calc(${width}px / var(--zoomfactor, 1))` }),
+        };
+    };
     const stopScope = usePaneScope(props, () => shell);
     // A dismissible popover takes Escape; a passive one (a tooltip) does not.
     usePaneOverlay(() => shell, { keys: props.overlayKeys ?? !!props.onDismiss });
@@ -212,6 +225,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 if (disposed) return;
                 setShellStyle(holdBottomEdge(pos, el.getBoundingClientRect().height, window.innerHeight));
                 if (untrack(() => props.fitHeight) && Number.isFinite(pos.maxHeight)) setRoomHeight(pos.maxHeight);
+                if (container && untrack(() => props.fitWidth)) setRoomWidth(Math.floor(Math.min(container.getBoundingClientRect().width, window.innerWidth)));
                 shown();
             };
             stopAutoUpdate?.();
@@ -258,7 +272,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     // `class` would wipe what classList added.
                     class={bodyClass(props)}
                     // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
-                    style={roomHeight() === undefined ? props.style : { ...props.style, "max-height": `calc(${roomHeight()}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }}
+                    style={bodyStyle()}
                     role={props.role}
                     aria-label={props["aria-label"]}
                 >

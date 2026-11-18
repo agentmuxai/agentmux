@@ -188,4 +188,29 @@ describe("AnchoredPopover", () => {
         await (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => Promise<void>)();
         expect(plain.body.style.maxHeight).toBe("");
     });
+
+    it("tells its body how wide its container is only when asked to fit the width", async () => {
+        const pane = document.createElement("div");
+        pane.getBoundingClientRect = () => new DOMRect(0, 0, 200, 300);
+        const anchor = document.createElement("button");
+        document.body.appendChild(anchor);
+        render(() => (
+            <AnchoredPopover anchor={anchor} containWithin={() => pane} fitWidth class="narrow-panel">
+                content
+            </AnchoredPopover>
+        ));
+        flushFrames();
+        await (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => Promise<void>)();
+        const body = document.querySelector<HTMLElement>(".narrow-panel")!;
+        expect(body.style.getPropertyValue("--popover-room-width")).toBe("calc(200px / var(--zoomfactor, 1))");
+        cleanup();
+        render(() => (
+            <AnchoredPopover anchor={anchor} containWithin={() => pane} class="plain-panel">
+                content
+            </AnchoredPopover>
+        ));
+        flushFrames();
+        await (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => Promise<void>)();
+        expect(document.querySelector<HTMLElement>(".plain-panel")!.style.getPropertyValue("--popover-room-width")).toBe("");
+    });
 });

@@ -20,6 +20,8 @@ export interface AgentViewPopoverProps {
     controls: AgentViewControls;
     /** The element the panel hangs from: the eye in the composer's control row, or the strip itself when the eye is not drawn. */
     anchor: Element | undefined;
+    /** The agent pane: the panel stays inside it, narrowing to it when the pane is narrower than the panel. */
+    pane?: HTMLElement | undefined;
 }
 
 export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
@@ -33,6 +35,8 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            containWithin={() => props.pane}
+            fitWidth
             shellClass="anchored-popover--menu"
             class="menu agent-view-popover"
             role="dialog"

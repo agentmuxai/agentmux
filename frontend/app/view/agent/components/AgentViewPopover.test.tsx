@@ -4,6 +4,8 @@
 // The View popover: presets, one control per switch, Follow default and Make this the default.
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentViewControls } from "../agent-view-controls";
@@ -36,6 +38,17 @@ const radio = (name: string, group?: string) => {
 };
 
 afterEach(cleanup);
+
+describe("AgentViewPopover in a narrow pane", () => {
+    const scss = readFileSync(resolve(__dirname, "AgentViewPopover.scss"), "utf8");
+
+    it("is 280px wide, or as wide as its pane when the pane is narrower, and scrolls rather than overflows", () => {
+        const rule = scss.slice(scss.indexOf("menu.agent-view-popover"), scss.indexOf("}", scss.indexOf("menu.agent-view-popover")));
+        expect(rule).toContain("min-width: min(280px, var(--popover-room-width, 280px))");
+        expect(rule).toContain("max-width: var(--popover-room-width, none)");
+        expect(rule).toContain("overflow-x: auto");
+    });
+});
 
 describe("AgentViewPopover", () => {
     it("lights the preset the five switches make, and Custom when they match none", () => {
