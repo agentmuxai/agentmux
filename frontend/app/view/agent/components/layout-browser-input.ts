@@ -144,6 +144,10 @@ export async function withInputPage<T>(
             if (await page.evaluate<boolean>("location.protocol === 'file:' && document.readyState === 'complete'")) break;
             await sleep(25);
         }
+        // Loaded is not yet drawn: input sent before the page's first frames reaches a page whose scroller the
+        // compositor does not know yet, and a wheel notch then does nothing (seen once on CI, a cold browser
+        // start). Two animation frames in the page mean it has been drawn.
+        await page.evaluate<boolean>("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))");
         return await fn(page);
     } finally {
         socket?.close();
