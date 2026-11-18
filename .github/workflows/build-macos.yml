@@ -233,11 +233,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: github.ref_type != 'tag'
 
+      # The ref above can be older than the CI helper scripts (a tag rebuilt by hand, a dispatch for an old SHA),
+      # so they come from the revision this workflow file is at, not from the tree being built.
+      - name: Fetch the CI helpers from the workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-helper
+          sparse-checkout: |
+            scripts/ci-apt.sh
+            scripts/ci-install-go-task.sh
+            scripts/ci-require-tools.sh
+            scripts/go-task.pins
+          sparse-checkout-cone-mode: false
+
       - name: Install frontend dependencies
         run: npm install
 
+      # The release pinned in scripts/go-task.pins, hash-checked, with retries; not Homebrew's formula.
       - name: Install go-task
-        run: brew install go-task
+        run: |
+          bash .ci-helper/scripts/ci-install-go-task.sh "$RUNNER_TEMP/go-task"
+          export PATH="$RUNNER_TEMP/go-task:$PATH"
+          bash .ci-helper/scripts/ci-require-tools.sh task
 
       # ── Patched CEF framework ─────────────────────────────────────────────
       # The upstream cef-dll-sys framework lacks CefWindow::BeginWindowDrag, so

@@ -218,15 +218,39 @@ jobs:
           echo "value=$value" >> "$GITHUB_OUTPUT"
 
 
+      # The ref above can be older than the CI helper scripts (a tag rebuilt by hand, a dispatch for an old SHA),
+      # so they come from the revision this workflow file is at, not from the tree being built.
+      - name: Fetch the CI helpers from the workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-helper
+          sparse-checkout: |
+            scripts/ci-apt.sh
+            scripts/ci-install-go-task.sh
+            scripts/ci-require-tools.sh
+            scripts/go-task.pins
+          sparse-checkout-cone-mode: false
+
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy, rustfmt
 
       - run: npm install
 
+      # Ninja and Inno Setup come with the runner image; Chocolatey only tops them up. Its feed answered 504 once
+      # and the step passed with nothing installed (0.60.34), so a Chocolatey failure is not the verdict: the check
+      # below is. go-task is not on Chocolatey's path at all: scripts/ci-install-go-task.sh takes the release
+      # pinned in scripts/go-task.pins from GitHub, checks its SHA-256 and retries a failed download.
       - name: Install build tools (Ninja, go-task, Inno Setup)
-        shell: pwsh
-        run: choco install ninja go-task innosetup -y
+        shell: bash
+        run: |
+          if ! { command -v ninja > /dev/null && bash .ci-helper/scripts/ci-require-tools.sh iscc > /dev/null 2>&1; }; then
+            choco install ninja innosetup -y || echo "::warning::choco could not install ninja or innosetup; the check below decides"
+          fi
+          bash .ci-helper/scripts/ci-install-go-task.sh "$RUNNER_TEMP/go-task"
+          export PATH="$(cygpath -u "$RUNNER_TEMP")/go-task:$PATH"
+          bash .ci-helper/scripts/ci-require-tools.sh task ninja iscc
 
       # The portable ships as a .7z (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
       # The runner image has 7-Zip on PATH; checking here fails a changed
