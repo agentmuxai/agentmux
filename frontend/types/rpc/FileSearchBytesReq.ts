@@ -15,4 +15,9 @@ pattern: string,
  * Forward: the first match that starts at or after this offset.
  * Backward: the last match that starts at or before it.
  */
-from: number, backward: boolean, };
+from: number, backward: boolean, 
+/**
+ * A match must start at a multiple of this many bytes: 2 for UTF-16 text,
+ * whose matches begin on a code unit. 0 or absent: anywhere.
+ */
+align?: number, };
