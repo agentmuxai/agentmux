@@ -26,8 +26,10 @@ for spec in "$@"; do
     if [ "$name" = iscc ]; then
         found="$(command -v iscc 2> /dev/null || command -v ISCC 2> /dev/null || true)"
         if [ -z "$found" ]; then
-            for f in "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/c/Program Files/Inno Setup 6/ISCC.exe" \
-                "${LOCALAPPDATA:-/nonexistent}/Programs/Inno Setup 6/ISCC.exe"; do
+            # CI_ISCC_PATHS (separated by `|`) replaces the install folders; the tests use it so a runner that
+            # really has Inno Setup does not change what they expect.
+            IFS='|' read -r -a iscc_paths <<< "${CI_ISCC_PATHS:-/c/Program Files (x86)/Inno Setup 6/ISCC.exe|/c/Program Files/Inno Setup 6/ISCC.exe|${LOCALAPPDATA:-/nonexistent}/Programs/Inno Setup 6/ISCC.exe}"
+            for f in "${iscc_paths[@]}"; do
                 if [ -f "$f" ]; then found="$f"; break; fi
             done
         fi

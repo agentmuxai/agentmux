@@ -110,7 +110,7 @@ echo "ci-require-tools.sh"
 mkdir -p "$TMP/tools"
 printf '#!/usr/bin/env bash\necho "tool 1.2.3"\n' > "$TMP/tools/good"; chmod +x "$TMP/tools/good"
 printf '#!/usr/bin/env bash\necho broken >&2; exit 3\n' > "$TMP/tools/broken"; chmod +x "$TMP/tools/broken"
-req() { OUT="$(env PATH="$TMP/tools:/usr/bin:/bin" LOCALAPPDATA=/nonexistent bash "$REQUIRE" "$@" 2>&1)"; RC=$?; }
+req() { OUT="$(env PATH="$TMP/tools:/usr/bin:/bin" LOCALAPPDATA=/nonexistent CI_ISCC_PATHS="$TMP/no/ISCC.exe" bash "$REQUIRE" "$@" 2>&1)"; RC=$?; }
 
 req good
 check "a tool that starts passes" "$([ "$RC" -eq 0 ] && echo "$OUT" | grep -q 'OK   good' && echo 0 || echo 1)" "rc=$RC $OUT"
@@ -124,6 +124,9 @@ req broken=
 check "an empty version argument only looks the tool up" "$([ "$RC" -eq 0 ] && echo 0 || echo 1)" "$OUT"
 req iscc
 check "iscc is reported missing when it is nowhere" "$([ "$RC" -ne 0 ] && echo "$OUT" | grep -q 'MISSING  iscc' && echo 0 || echo 1)" "$OUT"
+mkdir -p "$TMP/inno"; : > "$TMP/inno/ISCC.exe"; rm -f "$TMP/tools/iscc"
+OUT="$(env PATH="$TMP/tools:/usr/bin:/bin" CI_ISCC_PATHS="$TMP/no/ISCC.exe|$TMP/inno/ISCC.exe" bash "$REQUIRE" iscc 2>&1)"; RC=$?
+check "iscc is found in an install folder when it is not on PATH" "$([ "$RC" -eq 0 ] && echo "$OUT" | grep -q "inno/ISCC.exe" && echo 0 || echo 1)" "$OUT"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/tools/iscc"; chmod +x "$TMP/tools/iscc"
 req iscc
 check "iscc on PATH passes without being run" "$([ "$RC" -eq 0 ] && echo 0 || echo 1)" "$OUT"
