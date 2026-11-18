@@ -1080,6 +1080,7 @@ $tool-name-colors: (
         // Memory items, one row each, under the title (always shown).
         .agent-context-delivery-rows {
             flex-basis: 100%;
+            min-width: 0;
             padding-left: var(--space-4);
         }
 
@@ -1121,14 +1122,24 @@ $tool-name-colors: (
             cursor: default;
         }
 
+        // One row per item. In a narrow pane the chips, the mark and the size drop under the name instead of being cut at
+        // the card's edge: the name takes what is left and shows an ellipsis (its full path is on hover), and each
+        // of the others keeps its own width.
         .agent-context-delivery-item-head {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
-            gap: var(--space-1-5);
+            gap: 0 var(--space-1-5);
             padding: 2px 0;
 
+            > * {
+                flex-shrink: 0;
+            }
+
             .agent-context-delivery-item-name {
-                flex: 1;
+                flex: 1 1 6em;
+                min-width: 0;
+                @include mixins.truncate;
                 @include meta-row-text;
             }
 
