@@ -134,11 +134,26 @@ pub fn revoke_agent(name: &str, route: &str) {
 /// [`revoke_agent`] for the tokens made at least `min_age` ago. A container that ended outside AgentMux is only heard of
 /// from Docker's event stream, which can run behind: a token made since (for the container that took its place) is left alone.
 pub fn revoke_agent_older_than(name: &str, route: &str, min_age: Duration) {
+    end_agent_tokens(name, Some(route), min_age);
+}
+
+/// [`revoke_agent`] for every route: a container's stop, recreation or removal ends all of its agent's gateway tokens.
+pub fn revoke_agent_everywhere(name: &str) {
+    end_agent_tokens(name, None, Duration::ZERO);
+}
+
+/// [`revoke_agent_older_than`] for every route: a container's stop ends all of its agent's gateway tokens, model routes
+/// and the key route alike.
+pub fn revoke_agent_everywhere_older_than(name: &str, min_age: Duration) {
+    end_agent_tokens(name, None, min_age);
+}
+
+fn end_agent_tokens(name: &str, route: Option<&str>, min_age: Duration) {
     let mut reg = registry().lock().unwrap();
     let ended: Vec<(String, String)> = reg
         .by_agent
         .iter()
-        .filter(|((_, r), _)| r == route)
+        .filter(|((_, r), _)| route.map_or(true, |route| r == route))
         .filter(|(_, token)| reg.by_digest.get(&digest(token)).is_some_and(|g| g.def_id == name || g.agent == name))
         .filter(|(_, token)| reg.minted.get(&digest(token)).map_or(true, |at| at.elapsed() >= min_age))
         .map(|(key, _)| key.clone())

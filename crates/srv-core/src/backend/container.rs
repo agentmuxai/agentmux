@@ -36,6 +36,7 @@ pub mod credential;
 pub mod image;
 mod image_tools;
 mod agent_caps;
+pub mod gateway_fwd;
 pub mod key_route;
 pub mod listener;
 pub mod routes;
@@ -1338,21 +1339,9 @@ impl ContainerManager {
         Ok(())
     }
 
-    /// Best-effort: create the shared [`AGENTMUX_DOCKER_NETWORK`] (if it
-    /// doesn't already exist) and attach `container_name` to it, additive
-    /// to whatever `network_mode`/`extra_hosts` `create_and_start` already
-    /// set up (container→host reachability via `host.docker.internal`,
-    /// entirely unaffected). Never fails `ensure_running` — this is purely
-    /// in service of dev-proxy routing
-    /// (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1), not
-    /// required for a container agent's core turn-execution path. Called
-    /// on every `ensure_running`, not just at creation, so an
-    /// already-running container from before this feature shipped is
-    /// picked up too, and so a network deleted out-of-band (`docker
-    /// network rm`) is recreated automatically.
-    async fn ensure_agent_network(&self, container_name: &str) {
-        use bollard::models::EndpointSettings;
-        use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
+    /// Creates the shared [`AGENTMUX_DOCKER_NETWORK`] if it does not exist; whether it exists now.
+    pub(super) async fn ensure_network_exists(&self) -> bool {
+        use bollard::network::CreateNetworkOptions;
 
         let create_opts = CreateNetworkOptions {
             name: AGENTMUX_DOCKER_NETWORK,
@@ -1371,8 +1360,30 @@ impl ContainerManager {
                     error = %e,
                     "dev-proxy: failed to create shared Docker network — dev-server routing unavailable this run"
                 );
-                return;
+                return false;
             }
+        }
+        true
+    }
+
+    /// Best-effort: create the shared [`AGENTMUX_DOCKER_NETWORK`] (if it
+    /// doesn't already exist) and attach `container_name` to it, additive
+    /// to whatever `network_mode`/`extra_hosts` `create_and_start` already
+    /// set up (container→host reachability via `host.docker.internal`,
+    /// entirely unaffected). Never fails `ensure_running` — this is purely
+    /// in service of dev-proxy routing
+    /// (docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md §3.1), not
+    /// required for a container agent's core turn-execution path. Called
+    /// on every `ensure_running`, not just at creation, so an
+    /// already-running container from before this feature shipped is
+    /// picked up too, and so a network deleted out-of-band (`docker
+    /// network rm`) is recreated automatically.
+    async fn ensure_agent_network(&self, container_name: &str) {
+        use bollard::models::EndpointSettings;
+        use bollard::network::ConnectNetworkOptions;
+
+        if !self.ensure_network_exists().await {
+            return;
         }
         let connect_opts = ConnectNetworkOptions {
             container: container_name,

@@ -69,14 +69,14 @@ function OrphanNode(props: { orphan: AtlasOrphan; at: Placed; selected: boolean;
             classList={{ "atlas-node--selected": props.selected }}
             data-testid="atlas-orphan"
             data-container={o().state}
-            aria-label={`${o().name}, a container no agent uses, ${o().state}`}
-            {...tip(`A container no agent uses, ${containerLine(o())}`)}
+            aria-label={`${o().name}, ${o().helper ?? "a container no agent uses"}, ${o().state}`}
+            {...tip(`${o().helper ?? "A container no agent uses"}, ${containerLine(o())}`)}
         >
             <span class="atlas-node__top">
                 <i class="fa-solid fa-box atlas-node__kind" aria-hidden="true" />
                 <span class="atlas-node__name">{o().name}</span>
             </span>
-            <span class="atlas-node__sub">No agent · {o().state}</span>
+            <span class="atlas-node__sub">{o().helper ?? "No agent"} · {o().state}</span>
         </div>
     );
 }
@@ -162,7 +162,7 @@ function OrphanRows(props: { orphan: AtlasOrphan }): JSX.Element {
             <dt>Image</dt>
             <dd>{props.orphan.image}</dd>
             <dt>Agent</dt>
-            <dd>None: no agent of this machine uses it.</dd>
+            <dd>{props.orphan.helper ?? "None: no agent of this machine uses it."}</dd>
         </>
     );
 }

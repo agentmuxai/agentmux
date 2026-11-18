@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::backend::model_gateway::catalog::KEY_ROUTE_ID;
 
 const ANN: &str = "6b6e9e6a-125d-47de-9594-0123456789ab";
 const ORPHAN: &str = "0c1d2e3f-4a5b-4c6d-8e7f-a1b2c3d4e5f6";
@@ -208,7 +209,7 @@ fn key_token(id: &str) -> String {
 }
 
 #[test]
-fn a_container_stopped_outside_agentmux_ends_its_agents_key_token_and_only_that() {
+fn a_container_stopped_outside_agentmux_ends_its_agents_gateway_tokens_and_no_other_agents() {
     let id = "11111111-1111-4111-8111-000000000001";
     let hub = hub_ending_all_tokens();
     let key = key_token(id);
@@ -220,7 +221,7 @@ fn a_container_stopped_outside_agentmux_ends_its_agents_key_token_and_only_that(
     assert!(token::grant_for(&key).is_some(), "a running container keeps its token");
     hub.on_event(event(Action::Die, id));
     assert_eq!(token::grant_for(&key), None, "the token ends with the container");
-    assert!(token::grant_for(&model).is_some(), "another route's token stays");
+    assert_eq!(token::grant_for(&model), None, "a model route's token ends with it");
     assert!(token::grant_for(&other).is_some(), "another agent's token stays");
     // The next turn gets a new token, never the one that ended.
     assert_ne!(key_token(id), key);
@@ -296,4 +297,25 @@ fn a_stop_event_for_a_container_not_known_to_be_running_ends_nothing() {
     hub.on_event(event(Action::Die, id));
     assert!(token::grant_for(&token).is_some());
     token::revoke(id, KEY_ROUTE_ID);
+}
+
+#[test]
+fn the_gateway_forwarder_is_listed_as_a_helper_and_no_agent() {
+    use crate::backend::container::gateway_fwd::{CONTAINER_NAME, HELPER_TEXT};
+    let (hub, seen) = hub();
+    for action in [Action::Create, Action::Start] {
+        hub.on_event(DockerEvent { action, name: CONTAINER_NAME.into(), image: "agentmux-agent:1".into(), labelled: false });
+    }
+    let listed: Vec<ContainerStatus> = hub.list().containers;
+    assert_eq!(listed.len(), 1, "listed, though it carries no agent's label");
+    assert_eq!((listed[0].name.as_str(), listed[0].agent_id.clone(), listed[0].agent_name.clone(), listed[0].helper.as_deref()), (CONTAINER_NAME, None, None, Some(HELPER_TEXT)));
+    assert_eq!(listed[0].state, ContainerState::Running);
+    assert!(!seen.lock().unwrap().is_empty());
+    // A stop of a helper ends no agent's token.
+    let token = key_token("gateway-fwd");
+    let ending = hub_ending_all_tokens();
+    ending.on_event(DockerEvent { action: Action::Start, name: CONTAINER_NAME.into(), image: String::new(), labelled: false });
+    ending.on_event(DockerEvent { action: Action::Die, name: CONTAINER_NAME.into(), image: String::new(), labelled: false });
+    assert!(token::grant_for(&token).is_some());
+    token::revoke("gateway-fwd", KEY_ROUTE_ID);
 }

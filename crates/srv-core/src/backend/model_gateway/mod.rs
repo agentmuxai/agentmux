@@ -20,4 +20,4 @@ pub mod trial;
 pub mod usage;
 
 /// The path prefix the gateway is served under; the route id and the harness's own path follow.
-pub const PATH_PREFIX: &str = "/api/v1/model/";
+pub const PATH_PREFIX: &str = agentmux_common::gateway_stamp::PATH_PREFIX;
