@@ -28,4 +28,16 @@ vault: string,
 /**
  * It replaces the value of the entry (`entry_id`), the old one kept as a version.
  */
-replaces: boolean, };
+replaces: boolean, 
+/**
+ * A new login's user name is read from this field of the same secret; empty when the import makes no login.
+ */
+user_key: string, 
+/**
+ * The site the new login is saved for; empty for none.
+ */
+site: string, 
+/**
+ * The agent asked for the new login to be shared with it: the card says so, with a tick the person can remove.
+ */
+share: boolean, };

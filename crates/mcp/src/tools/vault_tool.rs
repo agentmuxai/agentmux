@@ -140,6 +140,7 @@ async fn import(arguments: &Value, cx: &ToolCtx<'_>, base: &str) -> Result<Strin
         "vault": arguments.get("vault").and_then(Value::as_str),
         "reason": arguments.get("reason").and_then(Value::as_str),
         "refs": arguments.get("refs").cloned().unwrap_or_else(|| json!([])),
+        "share": arguments.get("share").and_then(Value::as_bool).unwrap_or(false),
         "wait_secs": wait,
         "auth": crate::identity::sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("Vault import needs this agent's signed identity: {e}"))?,
     });
