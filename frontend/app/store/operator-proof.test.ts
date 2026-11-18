@@ -214,6 +214,34 @@ describe("operator proof", () => {
         expect(other).toHaveBeenCalledTimes(1);
     });
 
+    it("proves a lapsed connection again for an unlisted command too, though it was proven before", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        let calls = 0;
+        const send = vi.fn(async () => {
+            calls++;
+            if (calls === 1) throw new Error(UNPROVEN);
+            return "ok";
+        });
+        await expect(sendRetryingUnproven(send)).resolves.toBe("ok");
+        expect(attest).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not prove again with an earlier connection's host while a new connection's proof is expected", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        expectOperatorProof();
+        vi.useFakeTimers();
+        const send = vi.fn(async () => {
+            throw new Error(UNPROVEN);
+        });
+        const result = sendAsOperator(send);
+        const settled = expect(result).rejects.toThrow(UNPROVEN);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await settled;
+        expect(attest).toHaveBeenCalledTimes(1);
+    });
+
     it("names the commands srv keeps for the operator, and only those", () => {
         for (const c of [
             "kanban.act",

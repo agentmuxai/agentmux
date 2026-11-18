@@ -133,7 +133,9 @@ export function operatorProofReady(): Promise<boolean> {
  *  there is no host to vouch or it would not. */
 function reprove(): Promise<boolean> {
     const deps = lastDeps;
-    if (!deps?.attest) return Promise.resolve(false);
+    // While a new connection's first proof is still expected, `lastDeps` is the previous connection's: proving with
+    // them would settle the new connection's expectation with the old one's result.
+    if (!deps?.attest || settleExpected) return Promise.resolve(false);
     reproving ??= proveOperatorConnection(deps).finally(() => (reproving = null));
     return reproving;
 }
@@ -176,12 +178,15 @@ export async function sendAsOperator<T>(send: () => Promise<T>): Promise<T> {
  *  it is proven, send it once more. srv refuses before acting, so the second
  *  send can't repeat an action; the list only saves that first round trip. */
 export async function sendRetryingUnproven<T>(send: () => Promise<T>): Promise<T> {
+    const sentAt = generation;
     try {
         return await send();
     } catch (e) {
         if (!isUnproven(e)) throw e;
         try {
-            if (!(await operatorProofReady()) && !(await reprove())) throw e;
+            // A reconnect since the send: wait for its proof. The same connection: its proof lapsed, so prove it again.
+            const proven = generation !== sentAt ? await operatorProofReady() : await reprove();
+            if (!proven) throw e;
             return await send();
         } catch (final) {
             refuse(final);
