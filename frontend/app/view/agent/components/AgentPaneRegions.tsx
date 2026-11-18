@@ -77,6 +77,7 @@ export function AgentViewPopoverHost(props: { controls: ReturnType<typeof create
         <Show when={props.controls.popoverOpen()}>
             <AgentViewPopover
                 controls={props.controls}
+                pane={props.rootEl()}
                 anchor={
                     props.rootEl()?.querySelector("[data-agent-view-chip]") ?? props.rootEl()?.querySelector(".agent-composer-strip") ?? undefined
                 }
