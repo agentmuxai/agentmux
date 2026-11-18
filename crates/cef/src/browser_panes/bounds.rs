@@ -28,10 +28,12 @@
 //! - A pane is moved only while it is live and still in the window that sent
 //!   the batch: a rect from a window a pane was torn off from is dropped.
 //! - The host also moves shown panes itself when their window resizes, ahead
-//!   of the page (`LayoutBase`): Windows child-window panes `follow_window_resize`
-//!   (from the window's `WM_SIZE`), macOS `follow_window_resize`, Linux
+//!   of the page (`LayoutBase`): macOS `follow_window_resize`, Linux
 //!   `window_resized`. Not Windows Views panes: they wait for the page's rects
-//!   (`window_resized` says why).
+//!   (`window_resized` says why). Windows child-window panes do the same wait:
+//!   `follow_window_resize` (from the window's `WM_SIZE`) holds each at the
+//!   page's last rect, inside the window, until the page lays out for the new
+//!   size (`HOLD_MAX` bounds the wait), so a view never floats off its frame.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
@@ -304,6 +306,58 @@ fn follow_rect(base: &LayoutBase, rect: &Rect, client: (i32, i32), offset: (i32,
     base.predict(rect, width, height)
 }
 
+/// How long a window's panes are held at the page's last rects after the window
+/// changes size, waiting for the page to lay out for the new size. A page that
+/// has not answered by then (it is stuck or gone) must not leave the panes
+/// frozen: they are stretched to the window as the Linux and macOS hosts do.
+/// A busy page answers in 100 to 400 ms; this is well past that.
+#[cfg(any(target_os = "windows", test))]
+const HOLD_MAX: Duration = Duration::from_millis(1000);
+
+/// Whether a hold that has lasted `held` is over.
+#[cfg(any(target_os = "windows", test))]
+fn hold_expired(held: Duration) -> bool {
+    held >= HOLD_MAX
+}
+
+/// Whether a rect laid out against `viewport` is for the window's size now
+/// (`client`), within the rounding of a fractional display scale: the page has
+/// answered the window's last size change.
+#[cfg(any(target_os = "windows", test))]
+fn page_caught_up(viewport: (i32, i32), client: (i32, i32)) -> bool {
+    (client.0 - viewport.0).abs() <= MAX_OFFSET_PX && (client.1 - viewport.1).abs() <= MAX_OFFSET_PX
+}
+
+/// `rect` cut to the window's client area `(0, 0, client)`: a pane is never
+/// drawn outside the window, which is what a pane held at its old rect while
+/// the window shrinks would be. A rect wholly outside becomes empty, at the
+/// nearest edge.
+#[cfg(any(target_os = "windows", test))]
+fn clip_to_client(rect: &Rect, client: (i32, i32)) -> Rect {
+    let left = rect.x.clamp(0, client.0);
+    let top = rect.y.clamp(0, client.1);
+    let right = (rect.x + rect.width).clamp(left, client.0);
+    let bottom = (rect.y + rect.height).clamp(top, client.1);
+    Rect { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+/// Where each of `window_label`'s shown panes goes while the window's client
+/// area is `client` and the page has not laid out for it: its last rect, clipped
+/// to the window, by label. A grown window leaves every rect as it is. A pane
+/// with no page rect yet is not in `rects` and is not planned.
+#[cfg(any(target_os = "windows", test))]
+fn plan_hold(rects: &PageRects, window_label: &str, client: (i32, i32)) -> Vec<(String, Rect)> {
+    let mut plan: Vec<(String, Rect)> = rects
+        .iter()
+        .filter(|(_, (w, (_, _, width, height)))| w == window_label && *width > 0 && *height > 0)
+        .map(|(label, (_, (x, y, width, height)))| {
+            (label.clone(), clip_to_client(&Rect { x: *x, y: *y, width: *width, height: *height }, client))
+        })
+        .collect();
+    plan.sort_by(|a, b| a.0.cmp(&b.0));
+    plan
+}
+
 /// Each pane's rect as the page last sent it (Windows), by pane label, with the
 /// window it sits in: what `follow_window_resize` stretches. macOS and Linux
 /// read `browser_pane_physical_rects`, which is `cfg(not(windows))`.
@@ -345,6 +399,11 @@ struct WindowSize {
     /// The client area minus the page's viewport, as of the last time the page
     /// had caught up with the window.
     offset: (i32, i32),
+    /// When the window's size first changed with no page rect for a size near it
+    /// since (`page_caught_up`): how long its panes have been held.
+    unanswered_since: Option<std::time::Instant>,
+    /// A `HoldTask` is waiting to stretch the panes if the page never answers.
+    timer_armed: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -362,21 +421,64 @@ fn client_size(parent: isize) -> Option<(i32, i32)> {
     (ok != 0 && w > 0 && h > 0).then_some((w, h))
 }
 
-/// The window `window_label` changed size: move its shown panes to where the
-/// page will put them, without waiting for the page. The page's own rects for
-/// the new size replace the guess (`apply`). UI thread only (the window's
-/// `WM_SIZE`, after CEF has handled it).
+/// The window `window_label` changed size. Its shown panes stay where the page
+/// last put them, held inside the window (`clip_to_client`), so each view keeps
+/// agreeing with its frame while the page lays out for the new size; the page's
+/// own rects then move them (`apply`). A page that has not answered after
+/// `HOLD_MAX` is stretched instead, as the Linux and macOS hosts do from the
+/// first change: a `HoldTask` makes sure that happens even when the window has
+/// stopped changing. UI thread only (the window's `WM_SIZE`, after CEF has
+/// handled it).
+///
+/// Only the panes that have a page rect are held: a pane with no rect yet has
+/// nowhere to be held at and is not touched. Floating panes and popups are
+/// windows of their own and not part of this.
 #[cfg(target_os = "windows")]
 pub(crate) fn follow_window_resize(window_label: &str) {
+    let now = std::time::Instant::now();
+    let (offset, stretch, arm) = {
+        let mut sizes = WINDOW_SIZES.lock();
+        let size = sizes.entry(window_label.to_string()).or_default();
+        size.changed = Some(now);
+        let since = *size.unanswered_since.get_or_insert(now);
+        let arm = !std::mem::replace(&mut size.timer_armed, true);
+        (size.offset, hold_expired(now.duration_since(since)), arm)
+    };
+    if arm {
+        hold_task::arm(window_label, HOLD_MAX);
+    }
+    move_held_panes(window_label, offset, stretch);
+}
+
+/// A `HoldTask` ran: stretch the window's panes if the page still has not
+/// answered the last size change after `HOLD_MAX`, else wait for what is left.
+#[cfg(target_os = "windows")]
+fn hold_timeout(window_label: &str) {
+    let (offset, left) = {
+        let mut sizes = WINDOW_SIZES.lock();
+        let Some(size) = sizes.get_mut(window_label) else { return };
+        size.timer_armed = false;
+        let Some(since) = size.unanswered_since else { return };
+        let left = HOLD_MAX.saturating_sub(since.elapsed());
+        if !left.is_zero() {
+            size.timer_armed = true;
+        }
+        (size.offset, left)
+    };
+    if left.is_zero() {
+        move_held_panes(window_label, offset, true);
+    } else {
+        hold_task::arm(window_label, left);
+    }
+}
+
+/// Move the shown panes of `window_label` that have a page rect: to that rect
+/// clipped to the window, or with `stretch` to where the page will put it.
+#[cfg(target_os = "windows")]
+fn move_held_panes(window_label: &str, offset: (i32, i32), stretch: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, SWP_NOACTIVATE, SWP_NOZORDER};
 
     let started = std::time::Instant::now();
-    let offset = {
-        let mut sizes = WINDOW_SIZES.lock();
-        let size = sizes.entry(window_label.to_string()).or_default();
-        size.changed = Some(started);
-        size.offset
-    };
     let rects: PageRects =
         PAGE_RECTS.lock().iter().filter(|(_, (w, _))| w == window_label).map(|(l, v)| (l.clone(), v.clone())).collect();
     let mut by_parent: Vec<(isize, Vec<(isize, Rect)>)> = Vec::new();
@@ -391,9 +493,12 @@ pub(crate) fn follow_window_resize(window_label: &str) {
         let parent = unsafe { GetParent(wrapper as *mut std::ffi::c_void) } as isize;
         let Some(client) = client_size(parent) else { continue };
         let one: PageRects = rects.iter().filter(|(l, _)| *l == label).map(|(l, v)| (l.clone(), v.clone())).collect();
-        let Some((_, to)) = plan_follow(&one, window_label, layout_base, client, offset).into_iter().next() else {
-            continue;
+        let planned = if stretch {
+            plan_follow(&one, window_label, layout_base, client, offset)
+        } else {
+            plan_hold(&one, window_label, client)
         };
+        let Some((_, to)) = planned.into_iter().next() else { continue };
         match by_parent.iter_mut().find(|(p, _)| *p == parent) {
             Some((_, v)) => v.push((wrapper, to)),
             None => by_parent.push((parent, vec![(wrapper, to)])),
@@ -702,10 +807,10 @@ pub(crate) fn forget_hidden(browser_id: i32) {
 /// top, so a moved pane is raised as before). Each wrapper's own `WM_SIZE`
 /// then sizes CEF's HWND inside it.
 ///
-/// A rect the page laid out for an older window size is stretched to the
-/// window's size now (`follow_rect`), so a late batch for the old size doesn't
-/// pull a pane back after `follow_window_resize` moved it. The page's rect is
-/// also kept for the next resize.
+/// The page's rect is placed as sent, clipped to the window (`clip_to_client`):
+/// it is the layout the page's frame is drawn in, so a view and its frame agree
+/// whatever size the rect was laid out for. It is also kept for the next resize
+/// (`follow_window_resize`). A rect for the window's size now ends the hold.
 #[cfg(target_os = "windows")]
 fn apply_windows(state: &Arc<AppState>, window_label: &str, live: &[(&PaneBounds, String)]) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetParent, SWP_NOACTIVATE};
@@ -719,13 +824,20 @@ fn apply_windows(state: &Arc<AppState>, window_label: &str, live: &[(&PaneBounds
             kept.insert(label.clone(), (window_label.to_string(), (r.x, r.y, r.width, r.height)));
         }
     }
+    let mut caught_up = false;
     for (r, label) in live {
         let Some(wrapper) = crate::browser_pane::wrapper::peek_wrapper_hwnd(label) else { continue };
         let parent = unsafe { GetParent(wrapper as *mut std::ffi::c_void) } as isize;
-        let rect = match (r.width > 0 && r.height > 0, layout_base(label), client_size(parent)) {
-            (true, Some(base), Some(client)) => {
-                let offset = window_offset(window_label, &base, client);
-                follow_rect(&base, &r.rect(), client, offset)
+        let rect = match (r.width > 0 && r.height > 0, client_size(parent)) {
+            (true, Some(client)) => {
+                if let Some(base) = layout_base(label) {
+                    window_offset(window_label, &base, client);
+                    caught_up |= page_caught_up(base.viewport, client);
+                }
+                // The page's rect is its own layout, which its frame is drawn in: placed as
+                // sent, never stretched (that is `follow_window_resize`'s guess after
+                // `HOLD_MAX`), and never past the window's edge.
+                clip_to_client(&r.rect(), client)
             }
             _ => r.rect(),
         };
@@ -734,6 +846,12 @@ fn apply_windows(state: &Arc<AppState>, window_label: &str, live: &[(&PaneBounds
             None => by_parent.push((parent, vec![(wrapper, rect)])),
         }
         moved.push(label);
+    }
+    if caught_up {
+        // The page has laid out for the window's size: the next size change starts a new wait.
+        if let Some(size) = WINDOW_SIZES.lock().get_mut(window_label) {
+            size.unanswered_since = None;
+        }
     }
 
     for (_, wrappers) in &by_parent {
@@ -793,6 +911,32 @@ fn defer_move(wrappers: &[(isize, Rect)], flags: u32) {
         for (hwnd, rect) in wrappers {
             crate::browser_pane::wrapper::resize_wrapper(*hwnd as *mut std::ffi::c_void, rect);
         }
+    }
+}
+
+/// The UI-thread task that ends a hold nobody answered (`hold_timeout`).
+#[cfg(target_os = "windows")]
+mod hold_task {
+    use std::time::Duration;
+
+    use cef::*;
+
+    wrap_task! {
+        struct HoldTask {
+            label: String,
+        }
+
+        impl Task {
+            fn execute(&self) {
+                super::hold_timeout(&self.label);
+            }
+        }
+    }
+
+    /// Run `hold_timeout` for `label` in `after` (at least 1 ms).
+    pub(super) fn arm(label: &str, after: Duration) {
+        let mut task = HoldTask::new(label.to_string());
+        post_delayed_task(ThreadId::UI, Some(&mut task), after.as_millis().max(1) as i64);
     }
 }
 
@@ -954,6 +1098,95 @@ mod tests {
         // And a client area that is always 3 px wider than the page's viewport is the offset.
         assert_eq!(t(follow_rect(&base(), &r, (1003, 800), (3, 0))), same);
         assert_eq!(t(follow_rect(&base(), &r, (803, 800), (3, 0))), (400, 100, 400, 300));
+    }
+
+    fn hold(client: (i32, i32)) -> Vec<(String, (i32, i32, i32, i32))> {
+        plan_hold(&page_rects(), "main", client).into_iter().map(|(l, r)| (l, t(r))).collect()
+    }
+
+    #[test]
+    fn a_shrinking_window_holds_every_pane_at_the_pages_rect_not_stretched() {
+        // The window is 40 px narrower than the page's layout: the left pane is untouched, and the
+        // right one (500..1000) is cut at the window's edge, not moved or scaled with it.
+        assert_eq!(
+            hold((960, 800)),
+            vec![("left".to_string(), (0, 100, 500, 300)), ("right".to_string(), (500, 100, 460, 300))]
+        );
+    }
+
+    #[test]
+    fn a_pane_is_never_drawn_outside_the_window() {
+        let rects = [
+            (500, 100, 500, 300),
+            (-20, -10, 300, 200),
+            (900, 700, 400, 400),
+            (0, 0, 5000, 5000),
+            (3000, 3000, 10, 10),
+            (100, 100, 1, 1),
+        ];
+        for client in [(960, 800), (300, 200), (1, 1), (2000, 1500), (0, 0)] {
+            for (x, y, w, h) in rects {
+                let r = clip_to_client(&Rect { x, y, width: w, height: h }, client);
+                let got = t(r);
+                assert!(got.0 >= 0 && got.1 >= 0, "{got:?} in {client:?}");
+                assert!(got.2 >= 0 && got.3 >= 0, "{got:?} in {client:?}");
+                assert!(got.0 + got.2 <= client.0 && got.1 + got.3 <= client.1, "{got:?} in {client:?}");
+                // A rect that was inside the window is not changed.
+                if x >= 0 && y >= 0 && x + w <= client.0 && y + h <= client.1 {
+                    assert_eq!(got, (x, y, w, h));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_pane_the_window_has_left_behind_is_empty_at_its_edge() {
+        let r = clip_to_client(&Rect { x: 900, y: 100, width: 100, height: 300 }, (800, 800));
+        assert_eq!(t(r), (800, 100, 0, 300));
+    }
+
+    #[test]
+    fn a_growing_window_keeps_each_pane_at_its_old_size_until_the_page_lays_out() {
+        assert_eq!(
+            hold((1400, 1000)),
+            vec![("left".to_string(), (0, 100, 500, 300)), ("right".to_string(), (500, 100, 500, 300))]
+        );
+    }
+
+    #[test]
+    fn a_pane_with_no_rect_yet_and_a_collapsed_or_other_window_s_pane_are_not_moved() {
+        // `page_rects` has no entry for a pane that never got a rect ("new"): there is nothing to hold.
+        let planned = hold((960, 800));
+        assert!(planned.iter().all(|(l, _)| l != "new" && l != "hidden" && l != "elsewhere"));
+        assert_eq!(planned.len(), 2);
+    }
+
+    #[test]
+    fn a_late_rect_for_an_older_size_is_placed_as_the_page_sent_it() {
+        // The page laid out for 1000 wide; the window is 800 now. Its frame is drawn at 500..1000
+        // until it catches up, so the view is too (cut at the window), where stretching would
+        // have put it at 400..800.
+        let r = Rect { x: 500, y: 100, width: 500, height: 300 };
+        assert_eq!(t(clip_to_client(&r, (800, 800))), (500, 100, 300, 300));
+        assert_eq!(t(follow_rect(&base(), &r, (800, 800), (0, 0))), (400, 100, 400, 300));
+    }
+
+    #[test]
+    fn a_hold_ends_after_a_stated_time_and_not_before() {
+        assert!(!hold_expired(Duration::ZERO));
+        assert!(!hold_expired(HOLD_MAX - Duration::from_millis(1)));
+        assert!(hold_expired(HOLD_MAX));
+        assert!(hold_expired(HOLD_MAX * 5));
+    }
+
+    #[test]
+    fn the_page_has_answered_once_its_rects_are_for_the_window_s_size() {
+        assert!(page_caught_up((1000, 800), (1000, 800)));
+        // A fractional display scale: a pixel or two either way.
+        assert!(page_caught_up((1000, 800), (1002, 799)));
+        // A busy page's rect for a size 200 px behind, or a different height only.
+        assert!(!page_caught_up((800, 800), (1000, 800)));
+        assert!(!page_caught_up((1000, 700), (1000, 800)));
     }
 
     fn order(epoch: u64, seq: u64) -> Option<RectsOrder> {
