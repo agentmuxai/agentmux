@@ -159,7 +159,7 @@
 162 crates/srv-core/src/backend/blockcontroller/shell/indexing.rs::build_output_idx_from
 145 crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs::ShellController::start
 147 crates/srv-core/src/backend/blockcontroller/shell/lifecycle.rs::run_pty_output_flusher
-211 crates/srv-core/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
+205 crates/srv-core/src/backend/blockcontroller/subprocess/host_spawn.rs::SubprocessController::spawn_turn
 210 crates/srv-core/src/backend/bundle_export.rs::export_bundle
 130 crates/srv-core/src/backend/bundle_import.rs::unzip_bundle_import_with_budget
 115 crates/srv-core/src/backend/cron/mod.rs::CronScheduler::schedule_job_inner
@@ -249,7 +249,7 @@
 143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 155 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
-243 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
+242 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
 103 crates/srv/src/server/app_api/bundle/export_for_agent.rs::build_export_for_agent
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
@@ -416,7 +416,6 @@
 102 frontend/app/view/toolchain/SystemToolInstallInline.tsx::SystemToolInstallInline
 105 frontend/app/view/tower/tower-agents.tsx::Detail
 127 frontend/app/view/tower/tower-model.ts::TowerViewModel::constructor
-116 frontend/app/view/vault/vault-entries.tsx::VaultEntries
 136 frontend/app/view/vault/vault-reveal.tsx::VaultRevealDialog
 104 frontend/app/view/vault/vault-secrets.tsx::VaultSecrets
 105 frontend/app/view/warden-jobs/job-dry-run.tsx::JobDryRun

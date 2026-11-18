@@ -81,6 +81,8 @@ interface ChunkHold {
 const CHUNK_HOLD_MAX = 1024;
 /** A pane stops holding this long after it mounted, if its history load has not ended first. */
 const CHUNK_HOLD_TIMEOUT_MS = 10_000;
+/** A pane that never says its history load ended (a path that does not read the transcript) stops counting as restoring after this. */
+const RESTORING_MAX_MS = 60_000;
 
 interface Slot {
     state: AgentDocumentState;
@@ -93,6 +95,9 @@ interface Slot {
      */
     nodes: Accessor<DocumentNode[]>;
     setNodes: Setter<DocumentNode[]>;
+    /** True from the pane's registration until its history load ended (`endHistoryLoad`), it closed, or `RESTORING_MAX_MS` passed. */
+    restoring: Accessor<boolean>;
+    setRestoring: Setter<boolean>;
 }
 
 const slots = new Map<string, Slot>();
@@ -210,7 +215,11 @@ export function registerPane(blockId: string): void {
     hold.timer = setTimeout(() => endChunkHold(blockId), CHUNK_HOLD_TIMEOUT_MS);
     // Node's timers keep a process alive; a unit test must not wait for this one.
     (hold.timer as { unref?: () => void }).unref?.();
-    slots.set(blockId, { state, hold, nodes, setNodes });
+    const [restoring, setRestoring] = createSignal(true);
+    const slot: Slot = { state, hold, nodes, setNodes, restoring, setRestoring };
+    slots.set(blockId, slot);
+    const giveUp = setTimeout(() => setRestoring(false), RESTORING_MAX_MS);
+    (giveUp as { unref?: () => void }).unref?.();
 }
 
 /**
@@ -221,6 +230,12 @@ export function registerPane(blockId: string): void {
  */
 export function endHistoryLoad(blockId: string): void {
     endChunkHold(blockId);
+    slots.get(blockId)?.setRestoring(false);
+}
+
+/** Whether the pane's history is still being brought in: the first screen, then the rest of the restore window below it. Reactive. */
+export function historyRestoring(blockId: string): boolean {
+    return slots.get(blockId)?.restoring() ?? false;
 }
 
 function endChunkHold(blockId: string): void {
@@ -272,6 +287,7 @@ export function documentNodes(blockId: string): Accessor<DocumentNode[]> | null 
  */
 export function unregisterPane(blockId: string): void {
     endChunkHold(blockId);
+    slots.get(blockId)?.setRestoring(false);
     slots.delete(blockId);
     flushDropBurst(blockId);
 }

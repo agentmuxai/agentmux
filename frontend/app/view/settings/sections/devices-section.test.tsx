@@ -194,14 +194,14 @@ describe("DevicesSection", () => {
     it("offers the MuxBus Cloud status-bar toggle, on when the setting is absent", async () => {
         listDevices.mockResolvedValue({ devices: [] });
         render(() => <DevicesSection />);
-        const toggle = await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" });
+        const toggle = await screen.findByRole("switch", { name: "Show AgentMux Cloud in the status bar" });
         expect(toggle).toHaveAttribute("aria-checked", "true");
     });
 
     it("turning it off writes statusbar:showmuxbuscloud = false", async () => {
         listDevices.mockResolvedValue({ devices: [] });
         render(() => <DevicesSection />);
-        fireEvent.click(await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" }));
+        fireEvent.click(await screen.findByRole("switch", { name: "Show AgentMux Cloud in the status bar" }));
         expect(setConfig).toHaveBeenCalledWith({}, { "statusbar:showmuxbuscloud": false });
     });
 
@@ -209,7 +209,7 @@ describe("DevicesSection", () => {
         settings = { "statusbar:showmuxbuscloud": false };
         listDevices.mockResolvedValue({ devices: [] });
         render(() => <DevicesSection />);
-        const toggle = await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" });
+        const toggle = await screen.findByRole("switch", { name: "Show AgentMux Cloud in the status bar" });
         expect(toggle).toHaveAttribute("aria-checked", "false");
     });
 

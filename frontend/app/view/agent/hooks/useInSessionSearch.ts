@@ -35,7 +35,7 @@
  * `jumpTo(nodeId)` callback that gets invoked on every navigation.
  */
 
-import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor, type Setter } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor, type Setter } from "solid-js";
 import type { DocumentNode } from "../../../agent-model/types";
 import { registerSearchForReload, takeStoredSearch, type StoredSearch } from "../search/search-reload";
 import { createTranscriptIndex, firstMatchFrom, type PassClock } from "../search/transcript-index";
@@ -66,6 +66,9 @@ export interface UseInSessionSearchOptions {
     jumpTo?: (nodeId: string) => void;
     /** Called when the search ends (the bar closes), after its matches are cleared. */
     onClose?: () => void;
+    /** True while the pane is still bringing its history in. A restored bar keeps its saved current match until that
+     *  row has arrived or this turns false. Reactive. */
+    restoring?: () => boolean;
     /** The row at the top of the screen: a new query starts at the first match from there. */
     topNodeId?: () => string | null;
     /** The search has no current match any more (an empty query, or none found). */
@@ -145,11 +148,17 @@ function applyFound(
     opts.jumpTo?.(found[start]);
 }
 
-/** One try at the match a brought-back bar had: it becomes current when this pass has it. Spent either way. */
-function takeSeed(view: SearchView, found: string[], seed: string): null {
+/**
+ * One try at the match a brought-back bar had: it becomes current when this pass has it. Kept for the next pass while
+ * the pane is still bringing its history in (the row may be in rows that have not arrived), spent otherwise.
+ */
+function takeSeed(view: SearchView, found: string[], seed: string, restoring: boolean): string | null {
     const at = found.indexOf(seed);
-    if (at >= 0) view.setCurrentIndex(at);
-    return null;
+    if (at >= 0) {
+        view.setCurrentIndex(at);
+        return null;
+    }
+    return restoring ? seed : null;
 }
 
 /**
@@ -188,7 +197,8 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
     const index = createTranscriptIndex(opts.clock);
     /** The query as searched (lower case); empty when there is none. */
     let query = "";
-    /** The current match of a bar brought back after a recycle: taken up by the first pass that finds anything. */
+    /** The current match of a bar brought back after a recycle: taken up by the first pass that has its row, or the
+     *  last one after the pane's history is in; any search typed or step taken drops it. */
     let seed: string | null = null;
     /** Bumped by every pass and by the search ending: a pass that finds it changed is stale and stops. */
     let pass = 0;
@@ -220,9 +230,17 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         typedPending = false;
         setSearched(query);
         applyFound(opts, view, found, owed, nodes);
-        // Rows that load later do not pull the bar's old current match back.
-        if (seed !== null && found.length > 0) seed = takeSeed(view, found, seed);
+        // Rows that load later do not pull the bar's old current match back, once the history is in.
+        if (seed !== null) seed = takeSeed(view, found, seed, opts.restoring?.() ?? false);
     };
+
+    // The history's last rows are in: one more pass gives the saved match its last try, and spends it.
+    let wasRestoring = opts.restoring?.() ?? false;
+    createEffect(() => {
+        const restoring = opts.restoring?.() ?? false;
+        if (wasRestoring && !restoring && seed !== null && query) untrack(() => void run(false));
+        wasRestoring = restoring;
+    });
 
     const performSearch = (text: string) => {
         seed = null;
@@ -272,7 +290,7 @@ function createSearchPasses(opts: UseInSessionSearchOptions, view: SearchView) {
         setText(undefined);
     };
 
-    return { performSearch, restore, flushTyping, stop, clearIndex: index.clear };
+    return { performSearch, restore, flushTyping, stop, clearIndex: index.clear, dropSeed: () => void (seed = null) };
 }
 
 export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessionSearch {
@@ -296,7 +314,7 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
 
     const matchSet = createMemo<ReadonlySet<string>>(() => new Set(matches()));
 
-    const { performSearch, restore, flushTyping, stop, clearIndex } = createSearchPasses(opts, {
+    const { performSearch, restore, flushTyping, stop, clearIndex, dropSeed } = createSearchPasses(opts, {
         visible,
         highlightId,
         setMatches,
@@ -318,6 +336,7 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
 
     const next = () => {
         if (flushTyping()) return;
+        dropSeed();
         const m = matches();
         if (m.length === 0) return;
         const n = (currentIndex() + 1) % m.length;
@@ -327,6 +346,7 @@ export function useInSessionSearch(opts: UseInSessionSearchOptions): UseInSessio
 
     const prev = () => {
         if (flushTyping()) return;
+        dropSeed();
         const m = matches();
         if (m.length === 0) return;
         const p = currentIndex() < 0 ? m.length - 1 : (currentIndex() - 1 + m.length) % m.length;

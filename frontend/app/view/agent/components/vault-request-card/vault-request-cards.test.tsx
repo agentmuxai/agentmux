@@ -57,6 +57,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "C:/work",
     replaces: false,
     signin: false,
+    share: false,
     account: false,
     change: false,
     requested_ms: Date.now(),
@@ -192,7 +193,7 @@ describe("an agent's Vault requests as cards in its pane", () => {
     });
 
     it("lists a batch's rows before its account and Vault in the pane, and after them in the Vault pane's list", async () => {
-        const items = ["Alpha", "Beta"].map((label, i) => ({ label, kind: "login", secret: `hosts/${label.toLowerCase()}`, key: "", replaces: false, link: i === 1 }));
+        const items = ["Alpha", "Beta"].map((label, i) => ({ label, kind: "login", secret: `hosts/${label.toLowerCase()}`, key: "", user_key: "", replaces: false, link: i === 1 }));
         const batch = { name: "host passwords", service: "AWS Secrets Manager", region: "eu-west-1", profile: "work-read", grant: false, vault: "Fleet", agents: { mode: "all" as const }, vaults: [], items };
         const asked = (block_id: string) => use({ block_id, entry_id: "", entry_label: "host passwords", what: "secrets", command: "", offer_always: false, goes_ahead: false, batch });
         // The rows, the count of what is ticked and the paragraph that names the account, in the order the page reads them.

@@ -27,6 +27,8 @@ export interface AtlasContainer {
     image: string;
     /** When it entered `state`, in ms since 1970. */
     sinceMs: number;
+    /** What an AgentMux helper container is, as srv names it; absent for an agent's container or an orphan. */
+    helper?: string;
 }
 
 /** A container of a machine that no agent uses: a node in that machine's region. */

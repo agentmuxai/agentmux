@@ -27,8 +27,8 @@ export interface LargeFindParts {
     topOffset: () => Promise<number>;
     /** The 0-based line that holds a byte. */
     lineOf: (offset: number) => Promise<number>;
-    /** Show a line (1-based) and mark it. */
-    show: (line: number) => void;
+    /** Show a line (1-based) and mark it, with the match at byte `offset` of the file as the current one in it. */
+    show: (line: number, offset: number) => void;
     /** Take the mark off the line: nothing is found. */
     unmark: () => void;
     /** Back to the lines. */
@@ -108,7 +108,7 @@ export function createLargeFind(o: LargeFindParts) {
             }
             at = { offset: r.offset, text: text() };
             setNeedle(text());
-            o.show(r.line + 1);
+            o.show(r.line + 1, r.offset);
             setStatus(`Line ${(r.line + 1).toLocaleString("en-US")}${r.wrapped ? ", from the other end of the file" : ""}`);
         } catch (e) {
             if (mine === run) setStatus(`Couldn't search: ${e instanceof Error ? e.message : String(e)}`);

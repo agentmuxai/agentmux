@@ -27,6 +27,12 @@ export interface RecycleBlockerOptions {
      * it says it does.
      */
     idleLimitMs?: number;
+    /**
+     * Held back only the governor's idle recycle, not a recycle the person asked for: an open dialog or a waiting
+     * agent means they are at the window, and the palette that runs the command is itself a dialog. The state line and
+     * the decline text still name it, with how long it has held.
+     */
+    governorOnly?: boolean;
 }
 
 /** A place in a pane (scrolled up into older rows): worth keeping for an hour, not for a day. */
@@ -50,18 +56,25 @@ export function registerRecycleBlocker(check: RecycleBlocker, options: RecycleBl
 /** When each distinct reason was first seen blocking, until it stops. */
 const heldSince = new Map<string, number>();
 
-/** Why the window can't be recycled now, one entry per distinct reason; empty when it can. */
-export function recycleBlockers(now = Date.now()): string[] {
-    const reasons = new Set<string>();
+/**
+ * Why the window can't be recycled now, one entry per distinct reason; empty when it can. A recycle the person asked
+ * for leaves out the governor-only reasons; `forGovernor` adds them. How long each has held is tracked for all of
+ * them, whichever way it is asked.
+ */
+export function recycleBlockers(now = Date.now(), forGovernor = false): string[] {
+    const all = new Set<string>();
+    const shown = new Set<string>();
     const idleMs = msSinceLastInput();
-    for (const [check, { idleLimitMs }] of blockers) {
+    for (const [check, { idleLimitMs, governorOnly }] of blockers) {
         if (idleLimitMs !== undefined && idleMs >= idleLimitMs) continue;
         const reason = check();
-        if (reason) reasons.add(reason);
+        if (!reason) continue;
+        all.add(reason);
+        if (forGovernor || !governorOnly) shown.add(reason);
     }
-    for (const reason of heldSince.keys()) if (!reasons.has(reason)) heldSince.delete(reason);
-    for (const reason of reasons) if (!heldSince.has(reason)) heldSince.set(reason, now);
-    return [...reasons];
+    for (const reason of heldSince.keys()) if (!all.has(reason)) heldSince.delete(reason);
+    for (const reason of all) if (!heldSince.has(reason)) heldSince.set(reason, now);
+    return [...shown];
 }
 
 export interface BlockerHold {
@@ -70,9 +83,9 @@ export interface BlockerHold {
     heldMs: number;
 }
 
-/** What blocks a recycle now and since when. */
+/** What blocks the governor's recycle now (what the window would decline for, but for its own idle time) and since when. */
 export function recycleBlockerHolds(now = Date.now()): BlockerHold[] {
-    return recycleBlockers(now).map((reason) => ({ reason, heldMs: now - (heldSince.get(reason) ?? now) }));
+    return recycleBlockers(now, true).map((reason) => ({ reason, heldMs: now - (heldSince.get(reason) ?? now) }));
 }
 
 /** A reason with how long it has held, for the line the host logs when a window declines: "..." or "... (held 3h 10m)". */

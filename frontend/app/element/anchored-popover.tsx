@@ -80,6 +80,8 @@ export interface AnchoredPopoverProps {
     alignToAnchorSide?: boolean;
     /** Cap the body at the room the window leaves and scroll inside it, instead of running off the window. */
     fitHeight?: boolean;
+    /** With `containWithin`: tell the body how wide its container is, as `--popover-room-width` (in the body's own zoomed pixels), so its style can keep it inside a narrow pane. */
+    fitWidth?: boolean;
     /** Classes for the body: the panel's own styling. */
     class?: string;
     /** Inline style for the body (e.g. a fixed width, which then scales too). */
@@ -96,6 +98,35 @@ export interface AnchoredPopoverProps {
 const IDLE_STYLE: JSX.CSSProperties = { position: "fixed", left: "0px", top: "0px" };
 // A panel that animates in waits, unseen, for its first placement, so it does not fade in at the corner.
 const WAITING_STYLE: JSX.CSSProperties = { ...IDLE_STYLE, visibility: "hidden" };
+
+const ROOM_GUTTER = 8;
+const MIN_ROOM_HEIGHT = 96;
+
+/** The room a panel is asked to fit in, in screen pixels: the height the window leaves, and the width of its container. */
+interface Room {
+    height?: number;
+    width?: number;
+}
+
+/** `anchorTop`: where the anchor is, for a panel opening upward. With `fitWidth` the panel also stays under its container's top edge. */
+function roomFor(maxHeight: number, container: HTMLElement | undefined, fitHeight?: boolean, fitWidth?: boolean, anchorTop?: number): Room {
+    const own = fitHeight && Number.isFinite(maxHeight) ? maxHeight : undefined;
+    const underTop = own !== undefined && fitWidth && container && anchorTop !== undefined ? anchorTop - container.getBoundingClientRect().top - ROOM_GUTTER : undefined;
+    return {
+        height: underTop === undefined ? own : Math.max(MIN_ROOM_HEIGHT, Math.min(own!, underTop)),
+        width: fitWidth && container ? Math.floor(Math.min(container.getBoundingClientRect().width, window.innerWidth)) : undefined,
+    };
+}
+
+/** The body's own style with its room: the room is in screen pixels and the body is zoomed, so each is divided by the zoom. */
+function roomStyle(base: JSX.CSSProperties | undefined, room: Room): JSX.CSSProperties | undefined {
+    if (room.height === undefined && room.width === undefined) return base;
+    return {
+        ...base,
+        ...(room.height === undefined ? {} : { "max-height": `calc(${room.height}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }),
+        ...(room.width === undefined ? {} : { "--popover-room-width": `calc(${room.width}px / var(--zoomfactor, 1))` }),
+    };
+}
 
 /** A floating-ui reference that keeps reading the anchor captured at mount. */
 function referenceFor(anchor: Element | DOMRect) {
@@ -164,7 +195,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let shell: HTMLDivElement | undefined;
     let body: HTMLDivElement | undefined;
     let entered = false;
-    const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
+    const [room, setRoom] = createSignal<Room>({});
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE);
     /** The first time the panel is shown, in place: play its entrance. */
     const shown = () => {
@@ -211,7 +242,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 );
                 if (disposed) return;
                 setShellStyle(holdBottomEdge(pos, el.getBoundingClientRect().height, window.innerHeight));
-                if (untrack(() => props.fitHeight) && Number.isFinite(pos.maxHeight)) setRoomHeight(pos.maxHeight);
+                setRoom(roomFor(pos.maxHeight, container, untrack(() => props.fitHeight), untrack(() => props.fitWidth), placement.startsWith("top") ? reference.getBoundingClientRect().top : undefined));
                 shown();
             };
             stopAutoUpdate?.();
@@ -258,7 +289,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     // `class` would wipe what classList added.
                     class={bodyClass(props)}
                     // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
-                    style={roomHeight() === undefined ? props.style : { ...props.style, "max-height": `calc(${roomHeight()}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }}
+                    style={roomStyle(props.style, room())}
                     role={props.role}
                     aria-label={props["aria-label"]}
                 >

@@ -63,6 +63,10 @@ pub const EVENT_USER_INPUT: &str = "userinput";
 /// promote pending `PendingMessage` entries into the conversation
 /// document. Payload: `{ block_id, message_id }`.
 pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
+/// Fired when a message reaches srv while the agent's process is still alive (a turn running, or only a command the
+/// model sent to the background), so the message waits for that process to end. Lets the pane say so, and how many
+/// messages are ahead, instead of "reaching the agent any moment". Payload: `{ block_id, message_id, ahead }`.
+pub const EVENT_AGENT_MESSAGE_QUEUED: &str = "agent-message-queued";
 /// One message between two agents was handled by this srv: ids and times only, never its text
 /// (`message_flow`). Not scoped: any window may subscribe. Payload: `MessageFlowEvent`.
 pub const EVENT_MESSAGE_FLOW: &str = "message-flow";

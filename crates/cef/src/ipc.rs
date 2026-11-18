@@ -86,7 +86,7 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
         .route("/health", get(health));
     // Browser DOM API routes (`/agentmux/browser/*`). Token auth is
     // enforced inside each handler — same bearer scheme as /ipc.
-    app = crate::browser_api::register_routes(app);
+    app = crate::browser_api::register_routes(app, state.clone());
     // srv asks the user about an agent's SSH access, or an agent's ssh asks
     // its own prompt (`ssh_approval`). Token auth inside the handler, as above.
     app = crate::ssh_approval::register_routes(app);

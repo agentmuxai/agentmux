@@ -1,0 +1,56 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A coloured section: a bordered box with its own colour as a bar over its head and a dot before its
+// name, and rows under the head. The Kanban's columns are these (view/kanban/kanban.scss), and so are
+// the Vault's sections (view/vault/vault-view.scss). Line style: borders, no fills; the colour marks the
+// section, its name carries the meaning.
+//
+// `$color` is any CSS colour value, usually a custom property with a fallback:
+//   @include color-section.box(var(--kanban-stage, var(--border-color)));
+
+/// The section's box, with its colour as a 3px bar over it.
+@mixin box($color) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--border-color);
+    border-top: 3px solid $color;
+    border-radius: var(--radius-sm);
+}
+
+/// The head row: the name at the start, what follows it (a count, a control) at the end.
+@mixin head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0 var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/// The section's name, with a dot of its colour before it.
+@mixin label($color) {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-weight: 600;
+    font-size: var(--text-sm);
+
+    &::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: $color;
+    }
+}
+
+/// A head that stays at the top of a list of sections while its rows scroll under it.
+@mixin sticky-head {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-tab-name);
+    background: var(--main-bg-color);
+}

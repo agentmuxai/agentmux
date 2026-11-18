@@ -131,7 +131,7 @@ impl Link {
     /// What an import-style read of it takes, for an AWS secret.
     pub(super) fn aws(&self) -> Option<Source> {
         let some = |s: &String| (!s.is_empty()).then(|| s.clone());
-        (self.kind == AWS_SECRET).then(|| Source { aws_secret_id: self.location.clone(), key: some(&self.key), region: some(&self.region), profile: some(&self.profile) })
+        (self.kind == AWS_SECRET).then(|| Source { aws_secret_id: self.location.clone(), key: some(&self.key), user_key: None, region: some(&self.region), profile: some(&self.profile) })
     }
 }
 
@@ -265,9 +265,14 @@ pub struct AgentLink {
     pub copies: Vec<String>,
 }
 
-/// An entry's plain fields as an agent is given them: all of them but the login its machine copy is read under.
+/// An entry's plain fields as an agent is given them: all of them but the login its machine copy is read under, and a
+/// login's user name only masked (its first two characters and `***`, as `Browser` `signin` names it): an agent can set
+/// a user name, and sign in with it, and can't read one back.
 pub fn fields_for_agent(mut fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
     fields.remove(PROFILE);
+    if let Some(user) = fields.get_mut(super::signins::USERNAME) {
+        *user = super::signins::mask(user);
+    }
     // Who else a login is shared with is the person's business; the agent is told only whether it is (`shared_with_you`).
     fields.remove(super::shares::SHARED);
     fields

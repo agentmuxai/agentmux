@@ -241,6 +241,41 @@ async fn a_message_sent_while_a_turn_runs_is_queued_and_runs_after_it_with_its_o
     assert_eq!(&fake.execs(Kind::Turn)[1].0[5..], ["claude", "-p", "--resume", "sid-one"], "the queued turn resumes what the first captured");
 }
 
+fn queued_events(seen: &Mutex<Vec<(String, serde_json::Value)>>) -> Vec<(String, u64)> {
+    let all = seen.lock().unwrap();
+    all.iter()
+        .filter(|(name, _)| name == crate::backend::mps::EVENT_AGENT_MESSAGE_QUEUED)
+        .map(|(_, data)| (data["message_id"].as_str().unwrap_or_default().to_string(), data["ahead"].as_u64().unwrap_or(u64::MAX)))
+        .collect()
+}
+
+/// A turn whose process outlives the CLI's result (a command the model sent to the background keeps it alive) holds
+/// the container for everything behind it. The pane has to be told what each message waits for, and how many are
+/// ahead of it, because the process ending is the only thing that frees it.
+#[tokio::test]
+async fn a_message_waiting_for_a_process_that_outlives_the_result_is_announced_with_how_many_are_ahead() {
+    let fake = FakeDocker::start().await;
+    let broker = Arc::new(Broker::new());
+    let seen = watch(&broker);
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT, RESULT_OK], 0) }]);
+    let ctrl = controller(&unique("blk"), Some(broker));
+    let (cm, name) = (fake.manager(), unique("c"));
+    let with_id = |text: &str, id: &str| SubprocessSpawnConfig { message_id: Some(id.to_string()), ..config(text) };
+
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("running", "m-run")).unwrap();
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    assert!(queued_events(&seen).is_empty(), "the message that starts the turn waits for nothing");
+
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("first behind", "m-1")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("second behind", "m-2")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), config("no id, so nothing to tell")).unwrap();
+    assert_eq!(queued_events(&seen), [("m-1".to_string(), 0), ("m-2".to_string(), 1)], "each one says how many are ahead of it");
+    assert_eq!(ctrl.inner.lock().unwrap().pending_messages.len(), 3);
+
+    Controller::stop(ctrl.as_ref(), true, STATUS_DONE).expect("the stop is accepted");
+    wait_done(&ctrl).await;
+}
+
 #[tokio::test]
 async fn a_failed_turn_still_hands_the_container_to_the_message_queued_behind_it() {
     let fake = FakeDocker::start().await;
@@ -742,20 +777,10 @@ async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_
     ctrl.spawn_container_turn(fake.manager(), unique("c"), cli(), cfg).unwrap();
     let ended = wait_done(&ctrl).await;
 
-    if cfg!(target_os = "linux") {
-        // No listener on the agents network in a test: no way for the container to reach the gateway.
-        assert_eq!(ended, (STATUS_DONE.to_string(), 1));
-        assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
-        assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
-    } else {
-        assert_eq!(ended, (STATUS_DONE.to_string(), 0));
-        let env = &fake.execs(Kind::Turn)[0].1;
-        let given = env.iter().find_map(|e| e.strip_prefix("ANTHROPIC_AUTH_TOKEN=")).expect("the turn is given its token");
-        // Nothing to bind it to here, and the grant is the same: the agent's token holds, so a pane's other turn is not cut off.
-        assert_eq!(given, gate_token, "the agent's token for this machine");
-        let grant = token::grant_for(given).unwrap();
-        assert_eq!((grant.def_id.as_str(), grant.account.as_str(), grant.route.as_str()), ("kt-def", "kt-acct", KEY_ROUTE_ID));
-        assert!(env.iter().any(|e| e.starts_with("ANTHROPIC_BASE_URL=") && e.ends_with("/api/v1/model/anthropic")), "{env:?}");
-    }
+    // In a test there is no listener on the agents network and no forwarder container: no way for the container to reach the
+    // gateway, on any platform.
+    assert_eq!(ended, (STATUS_DONE.to_string(), 1));
+    assert!(fake.execs(Kind::Turn).is_empty(), "nothing ran in the container");
+    assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
     token::revoke("kt-def", KEY_ROUTE_ID);
 }

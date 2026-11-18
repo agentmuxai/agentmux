@@ -27,7 +27,7 @@ vi.mock("@/app/drag/drag-session", () => ({ ALL_DRAG_KINDS: [], isAnyUnderway: (
 const showTearOffSnapshot = vi.fn();
 vi.mock("@/app/init/startup-splash", () => ({ showTearOffSnapshot: (j: string) => showTearOffSnapshot(j) }));
 
-import { IN_FLIGHT_IDLE_LIMIT_MS, PLACE_IDLE_LIMIT_MS, recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
+import { IN_FLIGHT_IDLE_LIMIT_MS, PLACE_IDLE_LIMIT_MS, recycleBlockerHolds, recycleBlockers, registerRecycleBlocker } from "./recycle-blockers";
 import { registerSearchForReload, takeStoredSearch } from "@/app/view/agent/search/search-reload";
 import { registerReloadSaver } from "./recycle-savers";
 import { answerRecycleRequest, recycleWindow, resetRecycleForTests, showReloadCover } from "./recycle";
@@ -43,6 +43,9 @@ beforeEach(() => {
     saved.attachments = true;
     sessionStorage.clear();
     Object.assign(idle, { sinceInputMs: 60 * 60_000, waiting: false, modal: false, declarativeModal: false, drag: false });
+    // A reason an earlier test left blocking is forgotten once it is looked at with nothing blocking, so its
+    // real-clock start doesn't leak into a test that fakes the clock.
+    recycleBlockers(0, true);
     order.length = 0;
     unregister.push(
         registerReloadSaver(() => {
@@ -216,6 +219,42 @@ describe("answerRecycleRequest (the governor's request)", () => {
         expect(api.windows.recycleDeclined).toHaveBeenCalledWith("main", "a dialog is open");
         expect(api.windows.recycleCancel).toHaveBeenCalledWith("main");
         expect(api.reloadWindow).not.toHaveBeenCalled();
+    });
+
+    it("says how long a dialog or a waiting agent has held the window, in the decline and in the state line's holds", async () => {
+        vi.useFakeTimers();
+        try {
+            idle.modal = true;
+            idle.waiting = true;
+            await expect(answerRecycleRequest()).resolves.toBe(false);
+            expect(api.windows.recycleDeclined).toHaveBeenLastCalledWith("main", "an agent is waiting for an answer; a dialog is open");
+            vi.advanceTimersByTime(65 * 60_000);
+            resetRecycleForTests();
+            await expect(answerRecycleRequest()).resolves.toBe(false);
+            expect(api.windows.recycleDeclined).toHaveBeenLastCalledWith(
+                "main",
+                "an agent is waiting for an answer (held 1h 5m); a dialog is open (held 1h 5m)"
+            );
+            expect(recycleBlockerHolds().map((h) => [h.reason, h.heldMs])).toEqual([
+                ["an agent is waiting for an answer", 65 * 60_000],
+                ["a dialog is open", 65 * 60_000],
+            ]);
+            // The hold ends when the dialog closes.
+            idle.modal = false;
+            expect(recycleBlockerHolds().map((h) => h.reason)).toEqual(["an agent is waiting for an answer"]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("a recycle the person asks for is not held back by a dialog (the command palette is one)", async () => {
+        await answerRecycleRequest();
+        resetRecycleForTests();
+        idle.modal = true;
+        idle.waiting = true;
+        expect(recycleBlockers()).toEqual([]);
+        await expect(recycleWindow()).resolves.toBe(true);
+        expect(api.reloadWindow).toHaveBeenCalled();
     });
 
     it("a recycle blocker declines to the host instead of showing a toast", async () => {

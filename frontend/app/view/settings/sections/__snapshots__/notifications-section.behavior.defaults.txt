@@ -102,7 +102,7 @@ getAutostartStatus
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
           <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Signed out of MuxBus"
+            "Signed out of AgentMux Cloud"
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once, when agents stop getting messages from other computers and GitHub until you sign in"
         <div class="ui-field-control">

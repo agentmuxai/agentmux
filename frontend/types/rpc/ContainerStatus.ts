@@ -12,4 +12,8 @@ image: string,
 /**
  * When it entered `state`, in milliseconds since 1970.
  */
-since_ms: number, };
+since_ms: number, 
+/**
+ * What an AgentMux helper container is (`AgentMux gateway forwarder`); null for an agent's container or an orphan.
+ */
+helper?: string, };

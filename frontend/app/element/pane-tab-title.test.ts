@@ -36,7 +36,8 @@ describe("a restored tab that has not mounted", () => {
     });
 
     it("names the other sectioned panes the way their mounted view does", () => {
-        expect(describePaneTab(restored("vault", { "vault:section": "cards" })).label).toBe("Vault · Cards and banks");
+        // The Vault is one list: its title is the same whichever section it was opened on.
+        expect(describePaneTab(restored("vault", { "vault:section": "cards" })).label).toBe("Vault");
         expect(describePaneTab(restored("swarm", { "swarm:section": "broadcast" })).label).toBe("Swarm");
         expect(describePaneTab(restored("swarm", {})).label).toBe("Swarm");
         expect(describePaneTab(restored("connectors", { "connectors:section": "mcp" })).label).toBe("Connectors · MCP servers");

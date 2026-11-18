@@ -18,6 +18,7 @@ use futures_util::Stream;
 use std::pin::Pin;
 use std::sync::OnceLock;
 use std::task::{Context, Poll};
+use std::net::IpAddr;
 use std::time::Duration;
 
 /// The largest request body forwarded; a conversation is far below it.
@@ -58,11 +59,49 @@ fn sensitive(key: &str) -> header::HeaderValue {
     value
 }
 
+/// Which container a gateway request is from, when it can be shown: the peer the container listener checked, or the one a
+/// forwarder's stamp names with a proof made from this launch's secret (`container::gateway_fwd`).
+fn verified_peer(parts: &axum::http::request::Parts) -> Result<IpAddr, agentmux_common::gateway_stamp::Refusal> {
+    use crate::backend::container::{gateway_fwd, listener::AgentsNetworkPeer};
+    if let Some(AgentsNetworkPeer(peer)) = parts.extensions.get::<AgentsNetworkPeer>() {
+        return Ok(*peer);
+    }
+    let target = parts.uri.path_and_query().map_or_else(|| parts.uri.path().to_string(), |p| p.as_str().to_string());
+    gateway_fwd::verify_stamp(&parts.headers, parts.method.as_str(), &target)
+}
+
+const CLOCKS_DIFFER: &str = "the clock in Docker Desktop and this machine's clock differ by more than the gateway allows, so this request cannot be tied to its container; restart Docker Desktop to set its clock right, then send the message again";
+
+/// A token bound to a container's address (a container agent's turn) is used only from that container. Anything else showing
+/// it, including a request straight to srv with no proof of where it is from, is refused and the token ends. A token with no
+/// address (a host agent's) is not asked for one.
+fn check_bound_peer(state: &AppState, grant: &token::Grant, parts: &axum::http::request::Parts) -> Result<(), Response> {
+    let Some(bound) = grant.peer else { return Ok(()) };
+    let from = match verified_peer(parts) {
+        Ok(peer) if peer == bound => return Ok(()),
+        Ok(peer) => Some(peer),
+        // A proof made with this launch's secret whose time is off: the forwarder's clock and this one disagree. That is no
+        // stranger, so the token stays; the request is refused with the reason.
+        Err(agentmux_common::gateway_stamp::Refusal::Expired) => {
+            tracing::warn!(route = %grant.route, "model gateway: a forwarder's stamp is outside the time window; its clock and this machine's differ");
+            return Err(refuse(StatusCode::FORBIDDEN, "permission_error", CLOCKS_DIFFER));
+        }
+        Err(_) => None,
+    };
+    token::revoke(&grant.def_id, &grant.route);
+    super::model_gateway_key::audit_foreign_use(state, grant, from);
+    tracing::warn!(route = %grant.route, "model gateway: a token bound to a container was shown without proof it came from that container; the token is ended");
+    Err(refuse(StatusCode::FORBIDDEN, "permission_error", "this token is not for this container"))
+}
+
 pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((route_id, tail)): Path<(String, String)>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let Some(grant) = gw::bearer_token(&parts.headers).and_then(|t| token::grant_for(&t)) else {
         return refuse(StatusCode::UNAUTHORIZED, "authentication_error", "the model gateway needs the agent's gateway token");
     };
+    if let Err(refused) = check_bound_peer(&state, &grant, &parts) {
+        return refused;
+    }
     let Some(route) = catalog::gateway_route(&route_id).filter(|r| r.id == grant.route) else {
         return refuse(StatusCode::FORBIDDEN, "permission_error", "this token is not for that model route");
     };

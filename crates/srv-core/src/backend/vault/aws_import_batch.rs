@@ -58,6 +58,9 @@ pub struct BatchItem {
     pub aws_secret_id: String,
     #[serde(default)]
     pub key: Option<String>,
+    /// For a new login: the field of the same secret that holds its user name (`key` is the password's).
+    #[serde(default)]
+    pub user_key: Option<String>,
     #[serde(default)]
     pub kind: String,
     #[serde(default)]
@@ -256,7 +259,7 @@ impl BatchPlan {
             return self.link_item(item);
         }
         let request = ImportRequest {
-            source: Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), region: self.region.clone(), profile: self.profile.clone() },
+            source: Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), user_key: item.user_key.clone(), region: self.region.clone(), profile: self.profile.clone() },
             kind: item.kind.clone(),
             label: item.label.clone(),
             fields: item.fields.clone(),
@@ -264,6 +267,7 @@ impl BatchPlan {
             id: item.id.clone(),
             reason: Some(self.reason.clone()),
             refs: self.refs.clone(),
+            share: false,
         };
         let plan = aws_import::check(store, &request, agent)?;
         match &plan.target {
@@ -278,7 +282,10 @@ impl BatchPlan {
         if named(&item.id).is_some() {
             return Err(LINK_IS_NEW.into());
         }
-        let source = aws_import::check_source(&Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), region: self.region.clone(), profile: self.profile.clone() })?;
+        if named(&item.user_key).is_some() {
+            return Err("a link reads no value, so it has no user_key: leave it out".into());
+        }
+        let source = aws_import::check_source(&Source { aws_secret_id: item.aws_secret_id.clone(), key: item.key.clone(), user_key: None, region: self.region.clone(), profile: self.profile.clone() })?;
         let kind = kinds::kind(named(&Some(item.kind.clone())).unwrap_or(LINK_KIND)).ok_or_else(|| {
             let names: Vec<&str> = kinds::KINDS.iter().map(|k| k.name).collect();
             format!("a link is an entry of a kind, {LINK_KIND} when left out: one of {}", names.join(", "))
@@ -287,7 +294,7 @@ impl BatchPlan {
         let fields = linked::fields_for(&source, &item.fields);
         super::validate(kind, &label, &fields, &[], &Parts::default())?;
         let target = Target::Link { kind: kind.name, label, fields, vault_id: self.vault_id.clone() };
-        Ok(Plan { source, target, vault_name: self.vault_name.clone(), reason: self.reason.clone(), refs: self.refs.clone() })
+        Ok(Plan { source, target, vault_name: self.vault_name.clone(), reason: self.reason.clone(), refs: self.refs.clone(), share: false })
     }
 
     /// No entry twice and no secret (with its key) twice: a row the person ticks is one copy into one entry.

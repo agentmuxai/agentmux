@@ -206,11 +206,12 @@ fn generate_fills_a_logins_password_and_keeps_its_site_and_username() {
     let mut req = gen("login", "Example shop");
     req.fields = [("site".to_string(), "https://shop.example.com".to_string()), ("username".to_string(), "alex@example.com".to_string())].into();
     req.rules.passwordrules = Some("minlength: 24; required: lower; required: digit; allowed: upper".into());
-    let made = generate_entry(&s, req, "Agent2-6").unwrap();
+    let made = generate_entry_in(&s, req, "Agent2-6", Some("profile:agent-pulp-0123abcd")).unwrap();
     let pw = reveal(&s, &made.id, "password", "revealed").unwrap();
     assert_eq!(pw.chars().count(), 24);
     let (entries, _) = list_for_pane(&s).unwrap();
     assert_eq!(entries[0].fields.get("username").map(String::as_str), Some("alex@example.com"));
+    assert_eq!(entries[0].fields.get("profile").map(String::as_str), Some("profile:agent-pulp-0123abcd"), "made for the agent's own profile");
 }
 
 #[test]

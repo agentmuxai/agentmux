@@ -193,9 +193,9 @@ export async function copyVaultPart(id: string, part: string, label: string): Pr
 export type UseDecision = "once" | "always" | "deny";
 
 /** The person's answer to an agent's use of an entry; srv takes it only from the host. `rows` are the rows of a
- *  batch left ticked, by their place in its list. */
-export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, rows?: number[], vault?: string) =>
-    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(rows ? { rows } : {}), ...(vault ? { vault } : {}) });
+ *  batch left ticked, by their place in its list; `share` is whether an import's share was left ticked. */
+export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, rows?: number[], vault?: string, share?: boolean) =>
+    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(rows ? { rows } : {}), ...(vault ? { vault } : {}), ...(share === undefined ? {} : { share }) });
 /** The person is reading or acting in use `id`'s prompt: srv holds its countdown. */
 export const holdUse = (id: string) => call<unknown>("hold_use", { id });
 /** Stops an agent filling an entry on a site without asking. */
@@ -321,6 +321,27 @@ export const updateVault = (id: string, name: string, agents: VaultAgents) => ca
 export const deleteVault = (id: string) => call<unknown>("vault_delete", { id });
 /** Puts an entry in another Vault. Only the person does this: a move can open a value to more agents. */
 export const moveEntry = (id: string, vaultId: string) => call<unknown>("move_entry", { id, vault_id: vaultId });
+
+/** One share of a login, as the person reads it: `agent` is the agent's permanent uid, or `*` for every agent. */
+export interface LoginShare {
+    agent: string;
+    name: string;
+    uses: number;
+    last_used_ms: number;
+}
+
+/** An agent a login could be shared with. */
+export interface ShareableAgent {
+    uid: string;
+    name: string;
+}
+
+/** Who a login is shared with, and the agents it could still be shared with. */
+export const loadShares = (id: string) => call<{ shares: LoginShare[]; agents: ShareableAgent[] }>("share_list", { id });
+/** Shares a login with an agent (its uid), or `*` for every agent. Only the person does this. */
+export const shareLogin = (id: string, agent: string) => call<{ changed: boolean }>("share_add", { id, agent });
+/** Stops sharing a login with an agent: the agent's own "Always" for it ends with the share. */
+export const unshareLogin = (id: string, agent: string) => call<{ changed: boolean }>("share_remove", { id, agent });
 
 /** What a check of an entry's machine copy found: `same`, `different` or `could not read` with why. No value. */
 export interface SourceChecked {

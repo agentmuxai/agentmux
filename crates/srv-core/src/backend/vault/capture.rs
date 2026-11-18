@@ -546,9 +546,9 @@ impl Capture {
                     // The whole entry as it was, whichever part this replaces: the person was
                     // told the old value is kept for 7 days.
                     let kept = Some(versions::of(&row, &self.agent, CAPTURED));
-                    let was = row.sealed.clone();
+                    let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
                     let changed = VaultRow { sealed: seal::seal(&key, &row.id, &parts)?, fields: fields_text, updated_at: now, ..row };
-                    writes.push(CaptureWrite::Replace { row: changed, was, kept });
+                    writes.push(CaptureWrite::Replace { row: changed, was, was_fields, kept });
                     made.push((id.clone(), label.clone()));
                 }
             }

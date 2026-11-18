@@ -18,6 +18,11 @@
 # still consumed and listed in VERSION_HISTORY, just under the forced version.
 # The script warns loudly when the override is lower than the computed type.
 #
+# After the release PR merges the release workflow builds every package and publishes only when ALL of them succeeded
+# (the desktop installers and the Headless server package for every platform). If a package job fails, for example on a
+# registry or network error, nothing is published: open the run and use "Re-run failed jobs", and the release publishes
+# when every job passes. The tag stays; no new version is needed for it.
+#
 # RFC #857 Phase 2 / spec docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md.
 
 set -euo pipefail
@@ -30,6 +35,10 @@ FORCE_SET=0   # whether --as/--bump was passed (so an empty value still errors)
 # (the in-branch shift empties $@, then a second shift fails).
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            sed -n '2,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed -e 's/^# //' -e 's/^#$//'
+            exit 0
+            ;;
         --dry-run)
             DRY_RUN=1
             shift

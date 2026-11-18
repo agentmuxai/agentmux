@@ -141,7 +141,7 @@ fn an_edit_from_a_stale_read_saves_nothing_and_keeps_no_stray_version() {
     set(&s, &id, Some("sk_live_captured_value"), "");
     let edited = crate::backend::storage::vault::VaultRow { label: "Renamed".into(), updated_at: read.updated_at + 1, ..read.clone() };
     let kept = of(&read, "you", "replaced");
-    assert!(!s.vault_update_kept(&edited, &read.sealed, Some(&kept)).unwrap());
+    assert!(!s.vault_update_kept(&edited, &read.sealed, &read.fields, Some(&kept)).unwrap());
     assert_eq!(current(&s, &id), "sk_live_captured_value");
     assert_eq!(s.vault_get(&id).unwrap().unwrap().label, "Stripe");
     assert_eq!(list(&s, &id).unwrap().len(), 1, "only the write that went through kept a version");

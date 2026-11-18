@@ -316,6 +316,8 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         Some("origin") => return Err(format!("the field is no longer in {}, so nothing was typed", req.expect_origin)),
         Some(_) => return Err("the field changed when it took the focus, so nothing was typed; ask again to show the person what it is now".to_string()),
     }
+    // It is in the page now: no answer to an agent holds it from here on, wherever the page shows it.
+    super::typed_value::note_typed(state, root, &req.block_id, &typed).await;
     // A payment provider's field can ignore a value set from outside (its own handlers never see a typed key): it
     // is typed key by key, in its own frame's session. Left empty after both, it is the person's to type.
     if seen.get("empty").and_then(Value::as_bool) == Some(true) && in_another_sites_frame(&located.origin, &located.page, &frame) {

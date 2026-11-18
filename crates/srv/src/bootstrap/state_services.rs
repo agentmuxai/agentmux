@@ -505,6 +505,10 @@ pub async fn shut_down(
         crate::muxbus::wan_presence::goodbye_on_shutdown(),
     );
     tracing::info!(agents = closed, "shutdown: agents closed");
+    // The helper container of Docker Desktop's gateway forwarder ends with this srv: its secret was made for this launch.
+    if let Some(cm) = state.container_manager.get().await {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), backend::container::gateway_fwd::remove(&cm)).await;
+    }
     #[cfg(unix)]
     backend::process_tracker::roots_file::finish();
 }

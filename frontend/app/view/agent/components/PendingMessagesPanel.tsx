@@ -26,6 +26,7 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { t } from "@/app/i18n/i18n";
 import type { PendingMessage } from "../../../agent-model/state";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
@@ -51,6 +52,9 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     const stillQueuedCount = createMemo(
         () => queuedMessages().filter((m) => !m.flushing).length,
     );
+    // srv has the message but holds it behind the agent's live process (`agent-message-queued`): "reaching the
+    // agent any moment" is not true then. The first such message is the one that goes next.
+    const waiting = createMemo(() => queuedMessages().find((m) => m.flushing && m.waiting)?.waiting);
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
@@ -60,11 +64,26 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                         <Show
                             when={stillQueuedCount() > 0}
                             fallback={
-                                <>
-                                    Sending — reaching the agent any moment (
-                                    {queuedMessages().length}
-                                    {queuedMessages().length === 1 ? " message" : " messages"})
-                                </>
+                                <Show
+                                    when={waiting()}
+                                    fallback={
+                                        <>
+                                            Sending — reaching the agent any moment (
+                                            {queuedMessages().length}
+                                            {queuedMessages().length === 1 ? " message" : " messages"})
+                                        </>
+                                    }
+                                >
+                                    {(held) => (
+                                        // A JSX expression, so the text follows the count and `ahead` while the panel stays in
+                                        // this state (a bare ternary in the callback would be read once).
+                                        <>
+                                            {held().ahead > 0
+                                                ? t("pendingPanel.waitingAhead", { count: queuedMessages().length, ahead: held().ahead })
+                                                : t("pendingPanel.waiting", { count: queuedMessages().length })}
+                                        </>
+                                    )}
+                                </Show>
                             }
                         >
                             Queued — sends at the agent's next step; ↑ to edit, Esc to send now (

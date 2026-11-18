@@ -749,7 +749,7 @@ async fn removing_a_container_ends_its_agents_key_token() {
 }
 
 #[test]
-fn only_the_named_agents_key_token_ends() {
+fn only_the_named_agents_gateway_tokens_end() {
     use crate::backend::model_gateway::{catalog::KEY_ROUTE_ID, token};
     let mine = key_token_for("kr-mine");
     let theirs = key_token_for("kr-theirs");
@@ -757,9 +757,8 @@ fn only_the_named_agents_key_token_ends() {
     key_route::revoke_container_tokens("agentmux-kr-mine");
     assert_eq!(token::grant_for(&mine), None);
     assert!(token::grant_for(&theirs).is_some(), "another agent's token stays");
-    assert!(token::grant_for(&model).is_some(), "a model route is not a key account");
+    assert_eq!(token::grant_for(&model), None, "a model route's token ends with the container too");
     key_route::revoke_container_tokens("not-an-agent-container");
     assert!(token::grant_for(&theirs).is_some(), "a name that is no agent's container ends nothing");
     token::revoke("kr-theirs", KEY_ROUTE_ID);
-    token::revoke("kr-mine", "openrouter");
 }

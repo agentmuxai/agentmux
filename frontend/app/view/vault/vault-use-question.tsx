@@ -13,6 +13,7 @@ import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
+import { ImportLogin } from "./vault-import-login";
 import { CardTyped } from "./vault-use-card";
 import { answerUse, currentVaults, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
@@ -94,6 +95,7 @@ export function promptTitle(u: UseRequest, short = false): string {
         if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
         return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
     }
+    if (u.share) return t("vault.shareCard.title", { agent, site: siteOf(u.origin), label });
     if (u.account && u.change) return `${agent} wants to change your password on ${siteOf(u.origin)}`;
     if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
@@ -110,6 +112,7 @@ function promptNote(u: UseRequest): string {
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
+    if (u.share) return t("vault.shareCard.note");
     if (u.account && u.change) return "The Vault makes the new password. The agent never sees it. The old one is kept for 7 days, and you can put it back. Check the site is the one you expect.";
     if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
@@ -128,6 +131,14 @@ function alwaysLabel(u: UseRequest): string {
 /** Where a fill or a sign-in goes, for a use that runs no command. */
 function UseTarget(props: { use: UseRequest }): JSX.Element {
     const u = props.use;
+    if (u.share) {
+        const params = { field: clip(u.field, CLIP.label), site: siteOf(u.origin), origin: u.origin, agent: clip(u.agent, CLIP.name) };
+        return (
+            <p>
+                <Rich k="vault.shareCard.target" params={params} />
+            </p>
+        );
+    }
     return (
         <Show
             when={u.signin || u.account}
@@ -231,7 +242,7 @@ function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["
 }
 
 /** The secret an import copies, and where it goes: the secret, its key and region, the Vault, and what happens to a value it replaces. */
-function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]> }): JSX.Element {
+function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]>; answer: UseAnswerState }): JSX.Element {
     const i = props.import;
     return (
         <>
@@ -260,9 +271,18 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
             <Show
                 when={i.replaces}
                 fallback={
-                    <p>
-                        It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
-                    </p>
+                    <>
+                        <p>
+                            It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
+                        </p>
+                        <ImportLogin
+                            import={i}
+                            names={{ userKey: clip(i.user_key, CLIP.label), site: siteOf(i.site), agent: clip(props.use.agent, CLIP.name) }}
+                            share={props.answer.share()}
+                            onShare={props.answer.setShare}
+                            disabled={props.answer.busy()}
+                        />
+                    </>
                 }
             >
                 <p>
@@ -297,7 +317,7 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
     // "The key is", "It is read": one row is said as one.
     const count = b.items.length;
     // The Vault the rows go into as the card stands: the one asked for, or the one the person chose. Who may use it
-    // is read from the person's Vaults while that list is current, so a change made in the Vaults dialog shows on a
+    // is read from the person's Vaults while that list is current, so a change made in the Vaults row's form shows on a
     // card that is already open; otherwise it is what srv said when it asked.
     const into = () => {
         const asked = b.vaults.find((v) => v.name === a.vault()) ?? { name: b.vault, agents: b.agents };
@@ -365,7 +385,11 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                                     <ClippedId text={item.secret} max={CLIP.secret} />
                                     <Show when={item.key}>
                                         {" "}
-                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />)
+                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />
+                                        <Show when={item.user_key}>
+                                            {t("vault.batchCard.userKey")} <ClippedId text={item.user_key} max={CLIP.label} />
+                                        </Show>
+                                        )
                                     </Show>
                                 </span>
                             </label>
@@ -441,7 +465,7 @@ function UseDeadline(props: { use: UseRequest }): JSX.Element {
             fallback={
                 <Show when={!props.use.needs_value}>
                     <p class="vault-use-deadline">
-                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
+                        <strong>Waiting for you</strong>: {props.use.batch && linksOnly(props.use.batch) ? t("vault.batchCard.needsYesLinks") : props.use.import || props.use.batch ? "nothing is copied without a yes." : props.use.share ? t("vault.shareCard.needsYes") : props.use.link ? t(props.use.link.only || props.use.link.from === props.use.link.to ? "vault.linkCard.needsYesAbout" : "vault.linkCard.needsYes") : "ID and card details are never used without a yes."}
                     </p>
                 </Show>
             }
@@ -518,6 +542,8 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [busy, setBusy] = createSignal(false);
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
+    // An import's share, ticked as the card shows it: the person can remove it.
+    const [share, setShare] = createSignal(true);
     // Set once the answer is sent: what the person typed is cleared from the form itself, not only from the answer.
     const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
@@ -532,7 +558,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined, u.import?.share && decision !== "deny" ? share() : undefined);
             // The typed value doesn't outlive the answer, and neither does what was chosen on a batch's card.
             setTyped("");
             batchChoices.delete(u.id);
@@ -549,7 +575,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered, rows, tickRow, vault, setVault };
+    return { decide, busy, error, typed, setTyped, save, setSave, share, setShare, card, setCard, answered, rows, tickRow, vault, setVault };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -717,7 +743,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 >
                     {(i) => (
                         <>
-                            <UseImportSubject use={u} import={i()} />
+                            <UseImportSubject use={u} import={i()} answer={a} />
                             <UseSays use={u} />
                             <UseDeadline use={u} />
                         </>
@@ -737,7 +763,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 {/* The yeses wrap as one group, so a narrow card never puts Always beside Deny. */}
                 <span class="vault-use-allow">
                     <Button tone={u.needs_value ? "accent" : "neutral"} disabled={a.busy() || (u.needs_value && !a.typed()) || (!!u.choices?.length && !a.card()) || (!!u.batch && a.rows().length === 0)} onClick={() => void a.decide("once")}>
-                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : "Allow once"}
+                        {u.batch ? t("vault.batchCard.allow", { count: a.rows().length }) : u.needs_value ? "Fill it in" : u.share ? t("vault.shareCard.allow") : "Allow once"}
                     </Button>
                     <Show when={u.offer_always && !pickedExpired(u, a)}>
                         <Button tone="attention" disabled={a.busy() || (!!u.choices?.length && !a.card())} onClick={() => void a.decide("always")}>

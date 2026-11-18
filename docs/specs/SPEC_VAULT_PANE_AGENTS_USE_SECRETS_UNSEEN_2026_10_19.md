@@ -85,7 +85,7 @@ Settings holds how AgentMux behaves; the Vault holds things the person owns, wit
 
 ### 5.2 Layout
 
-A new view, `vault`, with a manifest in the block registry, a `lock` icon, opened from the widget bar, the command palette and `openOrFocusPaneByView("vault")`. *(Since 2026-10-21 it is Warden's Vault section instead, §5.6.)* Like Warden, a rail of sections:
+A new view, `vault`, with a manifest in the block registry, a `lock` icon, opened from the widget bar, the command palette and `openOrFocusPaneByView("vault")`. *(Since 2026-10-21 it is Warden's Vault section instead, §5.6.)* Like Warden, a rail of sections *(since 2026-11-17 one list of the same sections, §5.8)*:
 
 | Section | Entry kinds | Fields of an entry |
 |---|---|---|
@@ -157,6 +157,21 @@ The operator asked on 2026-10-20 that people know before they're asked. The Vaul
 | An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
 | An agent runs a command with an entry | AgentMux's own prompt in every window: the command, where it runs, Allow once, Always for that agent, or Deny | the same | the same | P7 |
 | Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
+
+### 5.8 One list of coloured sections, under one filter (2026-11-17)
+
+Asked for by the operator on 2026-11-17: a design inspired by the Kanban's look, with one coloured section per credential type in one long list, without the Kanban's oversized text, and one filter at the top that covers every type. This replaces the rail of §5.2. What an entry holds, who may use it, approvals, Reveal and Copy are unchanged.
+
+- **One list.** The pane is one scrolling list of sections, in the rail's old order: Personal data, Cards and banks, API keys, Logins, Notes, then Kept by AgentMux and Activity. A type's section holds that type's entries as rows (the row is unchanged). The pane is titled "Vault", whichever section is in view.
+- **A section** is a box with its type's colour as a bar over it and a dot before its name; its head has the name, how many entries it holds and its own **Add**. The head stays at the top of the list while its rows scroll under it, and folds or unfolds the section. The look is the Kanban column's, from one shared stylesheet (`frontend/app/element/ui/_color-section.scss`), at the app's normal text sizes.
+- **Colours** are the theme's five process-kind colours, which every theme keeps apart and readable; Kept by AgentMux and Activity, which are not types of entry, have the quiet text colour. Colour never carries meaning alone: the head names the type.
+- **An empty type** is its head alone, with its Add. An empty Vault says so once, over the heads.
+- **One filter**, at the top, narrows every section at once: by an entry's label, id, kind, its type's name, its plain details, where its machine copy is, its expiry and its tags; never by a value. While something is typed, a section with no match is left out, a folded section with a match is shown open, and when nothing matches in any section, an open Kept by AgentMux or Activity included, the list says "No entry matches." Clearing the filter brings every section back as it was. **Expiring soon** sits beside the filter while any entry has a date, and narrows every section the same way.
+- **Kept by AgentMux and Activity** are folded until opened, and read nothing until then; Kept is read again each time it is opened. An open one is narrowed by the filter too (Kept by name, what it is and where it is managed; Activity by who, what, which entry, where and why).
+- **Columns.** The rows' column names are kept for a screen reader and not drawn: every section would repeat them. A section of one kind (API keys, Logins, Notes) has no Kind column, since its name says it. In a wide pane the columns have the same widths in every section; in a narrow one a row stacks, as before.
+- **`vault:section`** keeps its ids. It no longer picks a tab: opening the Vault on a section (a pin, a palette command, the Audit's link, an agent's request being filled) opens that section and scrolls to it, and the request is then taken off the pane, so the same section can be asked for again.
+- **The Vaults row** is the first row of the pane, over the filter (the operator's change of 2026-11-17: the Vaults button is gone, and its dropdown and New button are in the pane's top level). There is no Vaults button and no Vaults dialog. The row has a dropdown that narrows the list to one Vault ("All Vaults" is a choice once there is more than one; the only Vault there is, is the chosen one), which agents the chosen Vault is for, **Change** and **Delete** for it (Personal can't be deleted; Delete asks first), and **New Vault**. New Vault and Change open their form in the pane, under the row, not in a dialog; a new Vault becomes the chosen one. Which Vault each browser profile saves its sign-ins to is in a Vault's Change form, once there is more than one Vault.
+- **Not built:** which sections are folded is not remembered when the pane is closed.
 
 ## 6. Agents fill browser fields from the Vault
 

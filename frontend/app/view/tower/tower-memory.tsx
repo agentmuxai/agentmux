@@ -20,6 +20,7 @@ import { type Accessor, createEffect, createMemo, For, type JSX, Show } from "so
 import { Chart } from "./tower-history";
 import { KindIcon } from "./tower-kind-ui";
 import type { HistoryPoint, TowerViewModel } from "./tower-model";
+import { LongRun } from "./tower-record";
 import { count, formatClock, formatMem, growthText } from "./tower-util";
 import { tip } from "@/app/element/tip";
 
@@ -156,6 +157,7 @@ export function MemoryView(props: { model: TowerViewModel }): JSX.Element {
                     <PartsBar model={m} memory={v()} />
                     <PartsTable model={m} memory={v()} shared={shared} />
                     <MemoryChart model={m} memory={v()} trend={shared.trend()} />
+                    <LongRun />
                     <Footnote memory={v()} />
                 </div>
             )}

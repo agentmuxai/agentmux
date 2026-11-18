@@ -123,7 +123,8 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         updated_at: d.updated_at,
         user_hidden: d.user_hidden,
         container_image: d.container_image.clone(),
-        container_volumes: d.container_volumes.clone(),
+        // From another channel's registry: nothing a container may not mount comes in with it.
+        container_volumes: crate::backend::container::runtime_socket::without_refused(&d.container_volumes),
         container_name: d.container_name.clone(),
         use_ambient_login: d.use_ambient_login,
         // Deliberately not carried by DefinitionRecordV1 (see its module
@@ -574,6 +575,20 @@ mod tests {
             found.memory_id, "bundle-123",
             "the global overlay must not wipe a same-channel agent's bundle binding"
         );
+    }
+
+    /// A definition from another channel's registry comes in without a mount a container may not have.
+    #[test]
+    fn a_definition_from_the_shared_registry_comes_in_without_a_runtime_socket_mount() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        let mut record = global_user_agent("agent-from-elsewhere", "Elsewhere");
+        record.data.container_volumes = r#"["data:/d","/var/run/docker.sock:/var/run/docker.sock"]"#.to_string();
+        def_store.upsert(&record).unwrap();
+        store.set_def_registry(def_store);
+        let found = store.agent_def_list().unwrap().into_iter().find(|d| d.id == "agent-from-elsewhere").expect("listed");
+        assert_eq!(found.container_volumes, r#"["data:/d"]"#);
     }
 
     fn seat(role: &str) -> crate::registry::AgentSeat {

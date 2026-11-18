@@ -12,6 +12,7 @@ use super::act::{isolated_context, redact_secret};
 use super::cdp::CdpSession;
 use super::frames;
 use super::snapshot::{self, DomFacts};
+use super::typed_value::TypedFilter;
 
 /// The focused element's state, for the read-back after `key` (the same
 /// fields as a fill's). Descends shadow roots and same-origin frames, as the
@@ -214,7 +215,7 @@ const MAX_SECRET_CANDIDATES: usize = 2000;
 
 /// Lists the fields that could hold a secret, with their facts and boxes in
 /// this document's viewport. Descends open shadow roots.
-const SECRET_CANDIDATES: &str = r#"((MAX) => {
+const SECRET_CANDIDATES: &str = r#"((MAX, WITH_TEXT) => {
   const out = [];
   let truncated = false;
   const visit = (root) => {
@@ -231,10 +232,29 @@ const SECRET_CANDIDATES: &str = r#"((MAX) => {
       const label = ((el.labels ? Array.from(el.labels).map(l => l.textContent).join(" ") : "") + " " + byIds).replace(/\s+/g, " ").trim();
       // A read-only field's value: where a page shows a secret once (spec §15.1).
       const value = el.readOnly ? String(el.value == null ? "" : el.value) : "";
-      out.push({ localName: tag, attributes: attrs, label, value, x: r.left, y: r.top, w: r.width, h: r.height });
+      // Once a Vault value was typed into the page, every field's text, to be checked against it on the host.
+      const typed = WITH_TEXT ? String(tag === "input" || tag === "textarea" ? el.value : el.textContent || "") : "";
+      out.push({ localName: tag, attributes: attrs, label, value, typed, x: r.left, y: r.top, w: r.width, h: r.height });
     }
   };
   visit(document);
+  // And the text each element holds itself (its own text nodes, so a sentence with a link in it counts). One too long
+  // to send is boxed whole.
+  const texts = [];
+  const LONG = 16384;
+  const visitText = (root) => {
+    for (const el of root.querySelectorAll("*")) {
+      if (texts.length >= MAX) { truncated = true; return; }
+      if (el.shadowRoot) visitText(el.shadowRoot);
+      if (el.localName === "script" || el.localName === "style") continue;
+      const t = Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join("");
+      if (!t.trim()) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      texts.push({ text: t.length > LONG ? "" : t, long: t.length > LONG, x: r.left, y: r.top, w: r.width, h: r.height });
+    }
+  };
+  if (WITH_TEXT) visitText(document);
   // Text where a page shows a secret once: code, pre, kbd and samp, and the
   // nearest container of a button named like "Copy"; and any element holding a
   // captured Vault value. Only words that could be one leave the page (the host
@@ -261,14 +281,14 @@ const SECRET_CANDIDATES: &str = r#"((MAX) => {
     for (let i = 0; c && c.children.length <= 1 && i < 4; i++) c = c.parentElement;
     if (c) box(c, false);
   }
-  return { fields: out, shown, width: window.innerWidth, truncated };
+  return { fields: out, shown, texts, width: window.innerWidth, truncated };
 })"#;
 
 /// The secret fields' boxes in one document (`frame_id`, or the main frame),
 /// in that document's viewport. `None`: it couldn't be read completely.
-async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option<(Vec<[f64; 4]>, Option<f64>, usize)> {
+async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>, typed: Option<&TypedFilter<'_>>) -> Option<(Vec<[f64; 4]>, Option<f64>, usize)> {
     let ctx = isolated_context(cdp, frame_id).await.ok()?;
-    let expression = format!("{SECRET_CANDIDATES}({MAX_SECRET_CANDIDATES})");
+    let expression = format!("{SECRET_CANDIDATES}({MAX_SECRET_CANDIDATES}, {})", typed.is_some());
     let v = cdp
         .call("Runtime.evaluate", json!({ "expression": expression, "contextId": ctx, "returnByValue": true }))
         .await
@@ -296,6 +316,12 @@ async fn secret_boxes_in(cdp: &mut CdpSession, frame_id: Option<&str>) -> Option
             boxes.extend(rect(f));
             vault_values += usize::from(filled || once);
         }
+    }
+    if let Some(typed) = typed {
+        let held = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).is_some_and(|t| typed.hides(t));
+        boxes.extend(fields.iter().filter(|f| held(f, "typed")).filter_map(rect));
+        let texts = result.get("texts").and_then(Value::as_array).into_iter().flatten();
+        boxes.extend(texts.filter(|t| held(t, "text") || t.get("long").and_then(Value::as_bool) == Some(true)).filter_map(rect));
     }
     for s in &shown {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -348,9 +374,9 @@ async fn has_unseen_fields(cdp: &mut CdpSession) -> Option<bool> {
 }
 
 /// [`SecretBoxes`] for the whole pane: the top frame and every iframe.
-pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
+pub async fn secret_boxes(root: &mut CdpSession, typed: Option<&TypedFilter<'_>>) -> SecretBoxes {
     let mut out = SecretBoxes { boxes: Vec::new(), css_width: None, complete: true, vault_values: 0, read_all: true };
-    match secret_boxes_in(root, None).await {
+    match secret_boxes_in(root, None, typed).await {
         Some((boxes, width, vault)) => {
             out.boxes.extend(boxes);
             out.css_width = width;
@@ -390,7 +416,7 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
             // can appear in the image, but it may still hold a Vault value.
             frames::Placement::NotRendered if fl.placeable => {
                 let mut on = root.in_session(fl.raw.session.as_deref());
-                match secret_boxes_in(&mut on, Some(&fl.raw.id)).await {
+                match secret_boxes_in(&mut on, Some(&fl.raw.id), typed).await {
                     Some((_, _, vault)) => out.vault_values += vault,
                     None => out.read_all = false,
                 }
@@ -405,7 +431,7 @@ pub async fn secret_boxes(root: &mut CdpSession) -> SecretBoxes {
         if fl.is_session_root && has_unseen_fields(&mut on).await != Some(false) {
             out.complete = false;
         }
-        let scan = secret_boxes_in(&mut on, Some(&fl.raw.id)).await;
+        let scan = secret_boxes_in(&mut on, Some(&fl.raw.id), typed).await;
         add_frame(&mut out, scan, geometry.plain, geometry.offset, geometry.bounds);
     }
     out

@@ -92,6 +92,8 @@ events! {
     AgentContextUsageChanged: super::mps::EVENT_AGENT_CONTEXT_USAGE => crate::backend::agent_context_usage::AgentContextUsageEvent,
     /// A queued message reached the agent.
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
+    /// A message reached srv while the agent's process was still alive, so it waits for it to end.
+    AgentMessageQueued: super::mps::EVENT_AGENT_MESSAGE_QUEUED => crate::backend::blockcontroller::MessageQueuedEvent,
     /// A message between two agents was handled by this srv (`message_flow`): ids and times, never its text.
     MessageFlow: super::mps::EVENT_MESSAGE_FLOW => crate::backend::message_flow::MessageFlowEvent,
     /// One of this machine's agent containers changed (`container_status`): names and states, nothing from inside it.
