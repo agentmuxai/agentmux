@@ -24,7 +24,7 @@ pub struct JektHeldAgent {
     /// The agent's UID: `AgentRuntime.agent_id`.
     pub agent_id: String,
     pub agent_name: String,
-    /// `not_running`, `starting`, `needs_login`, `usage_limit`, `idle`, `quota`, `api_offline` or `peer_offline`.
+    /// `not_running`, `starting`, `needs_login`, `usage_limit`, `idle`, `quota` or `peer_offline`.
     pub reason: String,
     #[ts(type = "number")]
     pub count: u32,

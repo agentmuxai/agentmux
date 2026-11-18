@@ -43,12 +43,16 @@ export function useHeldMessages(): Accessor<JektHeldAgent[]> {
     }
     // An agent stopping, signing out or running again changes why its messages are held.
     let seen = "";
+    let first = true;
     createEffect(() => {
         const sig = sharedAgentRuntime()
             .rows()
             .map((r) => `${r.agent_id}:${r.state}`)
             .join(",");
-        if (seen !== "" && sig !== seen) refreshSoon();
+        // The first look sets the baseline (the first read is already out); every later difference is a change, including
+        // the first agent appearing in an empty list.
+        if (!first && sig !== seen) refreshSoon();
+        first = false;
         seen = sig;
     });
     onCleanup(() => {

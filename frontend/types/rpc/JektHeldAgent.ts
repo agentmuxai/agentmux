@@ -9,7 +9,7 @@ export type JektHeldAgent = {
  */
 agent_id: string, agent_name: string, 
 /**
- * `not_running`, `starting`, `needs_login`, `usage_limit`, `idle`, `quota`, `api_offline` or `peer_offline`.
+ * `not_running`, `starting`, `needs_login`, `usage_limit`, `idle`, `quota` or `peer_offline`.
  */
 reason: string, count: number, 
 /**

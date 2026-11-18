@@ -89,12 +89,18 @@ fn read(state: &AppState) -> JektHeldSummaryResult {
 }
 
 /// `jekt.held.summary`: the operator's window and any registered agent may read it: it names agents and counts, never a
-/// sender, a body or an id.
+/// sender, a body or an id. A connection that is neither (it holds only the instance key) is refused, as for
+/// `identity.account.availability`.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
-    engine.register_typed(COMMAND_JEKT_HELD_SUMMARY, move |_req: Option<NoArgsReq>, _ctx| {
+    engine.register_typed(COMMAND_JEKT_HELD_SUMMARY, move |_req: Option<NoArgsReq>, ctx| {
         let s = s.clone();
-        async move { tokio::task::spawn_blocking(move || read(&s)).await.map_err(|e| e.to_string()) }
+        async move {
+            if ctx.agent_id.is_empty() {
+                ctx.operator_only("only the AgentMux window or an agent sees which agents have messages held")?;
+            }
+            tokio::task::spawn_blocking(move || read(&s)).await.map_err(|e| e.to_string())
+        }
     });
 }
 
@@ -194,6 +200,7 @@ mod tests {
     async fn the_rpc_answers_counts_and_reasons_and_never_a_body_a_sender_or_an_id() {
         let state = crate::server::tests::test_state();
         assert_eq!(call(&state, RpcContext::operator_for_tests()).await.unwrap(), serde_json::json!({"agents": []}));
+        assert!(call(&state, RpcContext::default()).await.is_err(), "a connection that is neither the window nor an agent is refused");
         let req = crate::backend::reactive::types::InjectionRequest {
             target_agent: "ghost".to_string(),
             message: "a secret body".to_string(),
