@@ -159,7 +159,9 @@ impl PersistentSubprocessController {
         // is right about "in flight" even when the summary is old or was never made.
         let now_ms = agentmux_common::time::now_ms();
         let facts_text = self.mstore.as_deref().map(|mstore| {
-            let facts = crate::backend::continuity_facts::collect(mstore, self.identity_store.as_deref(), &self.block_id);
+            // The claimed tasks are on the work store: the identity store, unless the build has its own.
+            let work_store = crate::backend::work_store_handle::get().or_else(|| self.identity_store.clone());
+            let facts = crate::backend::continuity_facts::collect(mstore, work_store.as_deref(), &self.block_id);
             crate::backend::continuity_facts::render(&facts, now_ms)
         });
         crate::backend::continuity::build_continuation_packet(

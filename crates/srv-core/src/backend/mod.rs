@@ -27,6 +27,7 @@ pub mod agent_registry_lookup;
 pub mod agent_resolve;
 pub mod name_resolution;
 pub mod identity_spawn;
+pub mod work_store_handle;
 pub mod agent_session;
 pub mod blockcontroller;
 pub mod bash_background;
