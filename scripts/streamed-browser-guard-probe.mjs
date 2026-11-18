@@ -73,6 +73,20 @@ const cases = ${JSON.stringify(CASES)}.map((c) => ({ ...c, url: c.url.replace('O
       out[c.label] = { reached: false, ms: Math.round(performance.now() - t0), err: String(e) };
     }
   }));
+  // WebRTC may not send a packet anywhere but through the proxy: with a STUN server named, no server-reflexive
+  // candidate (one learned from outside) and no candidate with a literal address may come out.
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    pc.createDataChannel('x');
+    const cands = [];
+    pc.onicecandidate = (e) => { if (e.candidate) cands.push(e.candidate.candidate); };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((r) => { pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && r(); setTimeout(r, 7000); });
+    pc.close();
+    out['webrtc'] = { candidates: cands };
+  } catch (e) {
+    out['webrtc'] = { candidates: [], err: String(e) };
+  }
   navigator.sendBeacon('/report', JSON.stringify(out));
 })();
 </script>`;
@@ -122,6 +136,13 @@ else {
         else if (!c.reach && r.reached) violations.push(`${c.label}: REACHED, must be refused`);
         else if (!c.reach && r.ms > 3000) violations.push(`${c.label}: failed only after ${r.ms} ms (a timeout, not the proxy's refusal)`);
     }
+}
+// A candidate is "typ host" with an address, or "srflx"/"relay"; a name ending in .local (mDNS) leaks no address.
+const rtc = report?.webrtc;
+if (report && !rtc) violations.push("webrtc: no result");
+for (const c of rtc?.candidates ?? []) {
+    const literal = /candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (\S+)/.exec(c);
+    if (literal && (literal[2] !== "host" || !literal[1].endsWith(".local"))) violations.push(`webrtc: candidate leaves the proxy: ${c}`);
 }
 console.log(JSON.stringify({ ok: violations.length === 0, violations, report }, null, 2));
 process.exit(violations.length ? 1 : 0);
