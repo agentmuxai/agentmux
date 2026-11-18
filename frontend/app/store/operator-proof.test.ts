@@ -28,6 +28,7 @@ import {
     proveOperatorConnection,
     resetOperatorProofForTests,
     sendAsOperator,
+    setOperatorRefusalHandler,
     sendRetryingUnproven,
 } from "./operator-proof";
 import { RpcClient } from "./rpc-client";
@@ -119,13 +120,81 @@ describe("operator proof", () => {
         expect(calls).toBe(2);
     });
 
-    it("doesn't resend when the same connection is refused", async () => {
+    it("proves the same connection again when its proof lapsed, and sends once more, once", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        let calls = 0;
+        const send = vi.fn(async () => {
+            calls++;
+            if (calls === 1) throw new Error(UNPROVEN);
+            return "ok";
+        });
+        await expect(sendAsOperator(send)).resolves.toBe("ok");
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(attest).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends no more than once more when the refusal stands, and tells the person", async () => {
+        const seen: string[] = [];
+        setOperatorRefusalHandler((r) => seen.push(`${r.unproven}:${r.message}`));
         await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest: async () => {} });
         const send = vi.fn(async () => {
             throw new Error(UNPROVEN);
         });
         await expect(sendAsOperator(send)).rejects.toThrow(UNPROVEN);
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(seen).toEqual([`true:${UNPROVEN}`]);
+    });
+
+    it("tells the person when the proof cannot be made again, without sending twice", async () => {
+        const seen: string[] = [];
+        setOperatorRefusalHandler((r) => seen.push(r.message));
+        let ok = true;
+        await proveOperatorConnection({
+            challenge: async () => ({ nonce: "a" }),
+            attest: async () => {
+                if (!ok) throw new Error("signed out");
+            },
+        });
+        ok = false;
+        const send = vi.fn(async () => {
+            throw new Error(UNPROVEN);
+        });
+        await expect(sendAsOperator(send)).rejects.toThrow(UNPROVEN);
         expect(send).toHaveBeenCalledTimes(1);
+        expect(seen).toHaveLength(1);
+    });
+
+    it("hands any operator-only refusal to the handler, and no other error", async () => {
+        const seen: string[] = [];
+        setOperatorRefusalHandler((r) => seen.push(`${r.unproven}:${r.message}`));
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest: async () => {} });
+        await expect(
+            sendAsOperator(async () => {
+                throw new Error("FORBIDDEN: change the seat");
+            })
+        ).rejects.toThrow("change the seat");
+        await expect(
+            sendAsOperator(async () => {
+                throw new Error("timeout");
+            })
+        ).rejects.toThrow("timeout");
+        expect(seen).toEqual(["false:FORBIDDEN: change the seat"]);
+    });
+
+    it("proves a lapsed connection again once when several sends are refused together", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        const make = () => {
+            let calls = 0;
+            return vi.fn(async () => {
+                calls++;
+                if (calls === 1) throw new Error(UNPROVEN);
+                return "ok";
+            });
+        };
+        await expect(Promise.all([sendAsOperator(make()), sendAsOperator(make()), sendAsOperator(make())])).resolves.toEqual(["ok", "ok", "ok"]);
+        expect(attest).toHaveBeenCalledTimes(2);
     });
 
     it("resends an unlisted command once srv says the connection is unproven and it is then proven", async () => {
@@ -143,6 +212,34 @@ describe("operator proof", () => {
         });
         await expect(sendRetryingUnproven(other)).rejects.toThrow("something else");
         expect(other).toHaveBeenCalledTimes(1);
+    });
+
+    it("proves a lapsed connection again for an unlisted command too, though it was proven before", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        let calls = 0;
+        const send = vi.fn(async () => {
+            calls++;
+            if (calls === 1) throw new Error(UNPROVEN);
+            return "ok";
+        });
+        await expect(sendRetryingUnproven(send)).resolves.toBe("ok");
+        expect(attest).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not prove again with an earlier connection's host while a new connection's proof is expected", async () => {
+        const attest = vi.fn(async (_nonce: string) => {});
+        await proveOperatorConnection({ challenge: async () => ({ nonce: "a" }), attest });
+        expectOperatorProof();
+        vi.useFakeTimers();
+        const send = vi.fn(async () => {
+            throw new Error(UNPROVEN);
+        });
+        const result = sendAsOperator(send);
+        const settled = expect(result).rejects.toThrow(UNPROVEN);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await settled;
+        expect(attest).toHaveBeenCalledTimes(1);
     });
 
     it("names the commands srv keeps for the operator, and only those", () => {

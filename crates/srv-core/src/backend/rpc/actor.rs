@@ -18,6 +18,9 @@ pub enum Actor {
     Agent(String),
     /// A connection the host proved is the AgentMux window.
     Operator,
+    /// A connection a registered external host vouched for as this person's window (a headless server
+    /// reached through that host): the person's id, so the record names who acted.
+    Person(String),
     /// Neither: a socket that holds the instance key and has proved nothing more.
     Unproven,
     /// AgentMux itself, doing its own housekeeping (no caller asked for it).
@@ -25,12 +28,18 @@ pub enum Actor {
 }
 
 impl Actor {
+    /// The person's window, however it was proven: the operator or a person an external host vouched for.
+    pub fn is_operator(&self) -> bool {
+        matches!(self, Actor::Operator | Actor::Person(_))
+    }
+
     /// How the record names the actor. An agent is `agent:<id>`, so no agent id can
     /// read as `operator` or `unproven`.
     pub fn label(&self) -> String {
         match self {
             Actor::Agent(id) => format!("agent:{id}"),
             Actor::Operator => "operator".to_string(),
+            Actor::Person(id) => format!("person:{id} (AgentMux Web)"),
             Actor::Unproven => "unproven".to_string(),
             Actor::Srv => "agentmux".to_string(),
         }
@@ -42,8 +51,11 @@ impl Actor {
 pub fn actor_of(ctx: &RpcContext) -> Actor {
     if !ctx.agent_id.is_empty() {
         Actor::Agent(ctx.agent_id.clone())
-    } else if ctx.operator_proven {
-        Actor::Operator
+    } else if ctx.operator_proven_now() {
+        match &ctx.operator_person {
+            Some(person) => Actor::Person(person.clone()),
+            None => Actor::Operator,
+        }
     } else {
         Actor::Unproven
     }

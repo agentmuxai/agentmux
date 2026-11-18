@@ -57,15 +57,16 @@ fn srv_info_event(info: crate::srv_info::SrvInfo) -> serde_json::Value {
 pub(super) async fn handle_ws(
     State(state): State<AppState>,
     session: Option<Extension<super::local_session::SessionId>>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     let session = session.map(|Extension(s)| s);
     // A signed-in browser offers its session token as a second protocol (it can't set a header on a
     // WebSocket); srv selects only the fixed name, never the token.
-    ws.protocols([super::local_session_routes::WS_PROTOCOL]).on_upgrade(move |socket| handle_ws_connection(socket, state, session))
+    ws.protocols([super::local_session_routes::WS_PROTOCOL]).on_upgrade(move |socket| handle_ws_connection(socket, state, session, headers))
 }
 
-async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: Option<super::local_session::SessionId>) {
+async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: Option<super::local_session::SessionId>, headers: axum::http::HeaderMap) {
     let ws_start = std::time::Instant::now();
     let conn_id = uuid::Uuid::new_v4().to_string();
     let tab_id = String::new();
@@ -115,6 +116,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState, session: O
     // Create RPC engine for this connection
     let t = std::time::Instant::now();
     let (engine, mut rpc_output_rx) = WshRpcEngine::new();
+
+    let _external_conn = super::external_host::claim_connection(&headers, &engine); // held until this ends
 
     // Register handlers
     register_handlers(&engine, state.clone(), conn_id.clone());

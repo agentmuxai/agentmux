@@ -76,6 +76,7 @@ pub(super) const PLUMBING: &[&str] = &[
     "POST /api/v1/host/browser_navigation", "POST /api/v1/host/browser_permission", "POST /api/v1/host/browser_pause", "POST /api/v1/host/browser_popup",
     "POST /api/v1/host/browser_popup_window", "POST /api/v1/host/desktop_request", "POST /api/v1/host/desktop_stop",
     "POST /api/v1/host/google", "POST /api/v1/host/job_templates", "POST /api/v1/host/jobs", "POST /api/v1/host/operator_attest",
+    "POST /api/v1/host/external_attest", "POST /api/v1/host/external_nonce", "POST /api/v1/host/external_revoke",
     "POST /api/v1/host/upgrade_request", "POST /api/v1/host/vault", "POST /api/v1/host/widget_approval",
     "POST /api/v1/voice/transcribe",
 ];

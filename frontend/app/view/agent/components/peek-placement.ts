@@ -237,11 +237,16 @@ export function computePeekVertical(input: PeekVerticalInput): PeekVertical {
 
     // Leaves the container: above the pointer if it fits there whole, else the side of the pointer with more
     // room, height cut to that room so it cannot reach the pointer.
-    const roomBelow = Math.max(0, windowBottom - belowTop);
-    const roomAbove = Math.max(0, aboveBottom - VIEWPORT_MARGIN_PX);
+    // Both edges are held inside the window: a pinned panel follows its row as the transcript scrolls, and a row
+    // that has gone past the window's bottom (or top) must not take the panel with it, or all the room "above" a row
+    // below the window grew the panel with every notch until it hung over the composer.
+    const nearEdge = Math.max(belowTop, VIEWPORT_MARGIN_PX);
+    const farEdge = Math.min(aboveBottom, windowBottom);
+    const roomBelow = Math.max(0, windowBottom - nearEdge);
+    const roomAbove = Math.max(0, farEdge - VIEWPORT_MARGIN_PX);
     const useBelow = h > roomAbove && (h <= roomBelow || roomBelow >= roomAbove);
     const maxHeight = Math.min(h, useBelow ? roomBelow : roomAbove);
-    const top = useBelow ? belowTop : aboveBottom - maxHeight;
+    const top = useBelow ? nearEdge : farEdge - maxHeight;
     return {
         top,
         maxHeight,

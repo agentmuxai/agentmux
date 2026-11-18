@@ -192,6 +192,36 @@ describe("computePeekVertical", () => {
         expect(v.scrolls).toBe(false);
     });
 
+    // A pinned panel follows its row when the transcript scrolls under it. The row can end up below the window's
+    // bottom or above its top; the panel keeps to the window either way (it used to hang below the window,
+    // taking all the room above a row that had gone past the bottom).
+    describe("a pinned panel whose row has scrolled out of the window", () => {
+        const input = { ...base, naturalHeight: 5000, flushToRow: true };
+
+        it("stays inside the window when its row is below the window's bottom", () => {
+            const row = { left: 400, right: 900, top: 1200, bottom: 1230 };
+            const v = computePeekVertical({ ...input, row, mouseY: 1215 });
+            expect(v.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX);
+            expect(v.top + v.maxHeight).toBeLessThanOrEqual(VIEWPORT.height - VIEWPORT_MARGIN_PX);
+            expect(v.scrolls).toBe(true);
+        });
+
+        it("stays inside the window when its row is above the window's top", () => {
+            const row = { left: 400, right: 900, top: -300, bottom: -270 };
+            const v = computePeekVertical({ ...input, row, mouseY: -285 });
+            expect(v.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX);
+            expect(v.top + v.maxHeight).toBeLessThanOrEqual(VIEWPORT.height - VIEWPORT_MARGIN_PX);
+        });
+
+        it("does not grow as the row moves further down", () => {
+            const heights = [1000, 1100, 1300].map((top) => {
+                const row = { left: 400, right: 900, top, bottom: top + 30 };
+                return computePeekVertical({ ...input, row, mouseY: top + 15 }).maxHeight;
+            });
+            expect(new Set(heights).size).toBe(1);
+        });
+    });
+
     it("when neither side fits the container, goes above the pointer if it fits there whole in the window", () => {
         const v = computePeekVertical({
             ...base,
