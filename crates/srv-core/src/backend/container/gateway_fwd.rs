@@ -51,13 +51,9 @@ pub fn url() -> String {
     format!("http://{CONTAINER_NAME}:{PORT}")
 }
 
-fn now_secs() -> u64 {
-    agentmux_common::time::now_ms_u64() / 1000
-}
-
 /// The container a request was stamped for, when its stamp is good for this request now.
 pub fn verify_stamp(headers: &HeaderMap, method: &str, target: &str) -> Result<IpAddr, Refusal> {
-    verify_stamp_at(headers, method, target, now_secs())
+    verify_stamp_at(headers, method, target, agentmux_common::time::now_secs_u64())
 }
 
 fn verify_stamp_at(headers: &HeaderMap, method: &str, target: &str, now: u64) -> Result<IpAddr, Refusal> {
@@ -69,7 +65,7 @@ fn verify_stamp_at(headers: &HeaderMap, method: &str, target: &str, now: u64) ->
 /// srv's side can send one: the real ones are made in the helper container, which has its own copy of the secret.
 #[doc(hidden)]
 pub fn stamp_headers(peer: IpAddr, method: &str, target: &str) -> Vec<(&'static str, String)> {
-    let ts = now_secs();
+    let ts = agentmux_common::time::now_secs_u64();
     vec![
         (gateway_stamp::HEADER_PEER, peer.to_string()),
         (gateway_stamp::HEADER_TS, ts.to_string()),

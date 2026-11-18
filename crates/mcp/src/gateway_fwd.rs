@@ -66,8 +66,7 @@ async fn forward(State(fwd): State<Forwarder>, ConnectInfo(from): ConnectInfo<So
     if !gateway_stamp::covered_target(&target) {
         return plain(StatusCode::NOT_FOUND, "not a model gateway path");
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let headers = upstream_headers(&parts.headers, &fwd.secret, from.ip(), now, parts.method.as_str(), &target);
+    let headers = upstream_headers(&parts.headers, &fwd.secret, from.ip(), agentmux_common::time::now_secs_u64(), parts.method.as_str(), &target);
     let sent = fwd.client.request(parts.method, format!("{}{}", fwd.upstream, target)).headers(headers).body(reqwest::Body::wrap_stream(body.into_data_stream())).send().await;
     let Ok(answer) = sent else {
         return plain(StatusCode::BAD_GATEWAY, "AgentMux could not be reached");
@@ -217,7 +216,7 @@ mod tests {
         assert_eq!(body, b"{\"model\":\"m\"}");
         assert_eq!(headers.get("authorization").unwrap(), "Bearer amxg_t");
         let get = |n: &str| headers.get(n).and_then(|v| v.to_str().ok());
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let now = agentmux_common::time::now_secs_u64();
         let named = gateway_stamp::verify(SECRET, get(HEADER_PEER), get(HEADER_TS), get(HEADER_PROOF), "POST", "/api/v1/model/anthropic/v1/messages?beta=true", now);
         assert_eq!(named, Ok(IpAddr::from([127, 0, 0, 1])), "the address of the connection, never the one the client wrote");
 
