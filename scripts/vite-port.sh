@@ -22,9 +22,12 @@
 #
 # CLAIMS: a free port is not a reserved port. `task dev` can wait most of an hour
 # for the shared build slot between choosing its port and binding it, and runs that
-# wait together all start Vite in the same second. A claim is a directory made with
-# mkdir (atomic), under AGENTMUX_DEV_PORT_CLAIMS (default ~/.agentmux/dev-port-claims),
-# holding the clone that took it. One that nobody has renewed for
+# wait together all start Vite in the same second. A claim is a directory under
+# AGENTMUX_DEV_PORT_CLAIMS (default ~/.agentmux/dev-port-claims) holding a `claim` file
+# with the clone that took it. The file is created with the shell's own exclusive
+# create (`set -C`, open with O_EXCL), so exactly one creator wins. `mkdir` is not the
+# arbiter: uutils coreutils' mkdir (Ubuntu 26.04) can report success to two callers that
+# race on one path, which handed one port to several picks. One nobody has renewed for
 # AGENTMUX_DEV_PORT_CLAIM_TTL seconds (default 7200) is taken over.
 # docs/retro/RETRO_DEV_VITE_PORT_RACE_COUPLED_INSTANCES_2026_11_06.md
 
@@ -109,15 +112,21 @@ claim_owner() {
 
 claim_field() { sed -n "s/^$2=//p" "$1/claim" 2>/dev/null | head -1; }
 
-# Written whole and renamed into place, so a reader never sees half a claim.
+claim_text() { # <since>
+  printf 'owner=%s\nby=%s\nsince=%s\nseen=%s\n' "$(claim_owner)" "${AGENTMUX_AGENT_ID:-${USER:-unknown}}" "$1" "$(date +%s)"
+}
+
+# A renewal: written whole and renamed into place, so a reader never sees half a claim.
 write_claim() { # <dir> <since>
   local tmp="$1/claim.tmp.$$"
-  {
-    echo "owner=$(claim_owner)"
-    echo "by=${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
-    echo "since=$2"
-    echo "seen=$(date +%s)"
-  } >"$tmp" && mv -f "$tmp" "$1/claim"
+  claim_text "$2" >"$tmp" && mv -f "$tmp" "$1/claim"
+}
+
+# The claim itself: create `claim` only if it does not exist. With noclobber the shell opens it
+# O_CREAT|O_EXCL, which the kernel arbitrates for every contender, whatever mkdir does. The text is
+# one write, so a reader that finds the file waits for its first line (see cmd_claim).
+create_claim() { # <dir> <since>
+  ( set -C; claim_text "$2" >"$1/claim" ) 2>/dev/null
 }
 
 cmd_claim() {
@@ -126,13 +135,14 @@ cmd_claim() {
   mkdir -p "$CLAIMS_DIR" 2>/dev/null || { echo "vite-port.sh: cannot create $CLAIMS_DIR" >&2; return 2; }
   d="$CLAIMS_DIR/$port"
   now="$(date +%s)"
-  if mkdir "$d" 2>/dev/null; then
-    write_claim "$d" "$now"
+  # Several contenders may all get past this mkdir; only one can create the claim file.
+  mkdir -p "$d" 2>/dev/null
+  if create_claim "$d" "$now"; then
     return 0
   fi
   # Someone made it first; they may not have written their name yet.
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    [ -f "$d/claim" ] && break
+    [ -n "$(claim_field "$d" seen)" ] && break
     sleep 0.1
   done
   owner="$(claim_field "$d" owner)"
@@ -148,15 +158,15 @@ cmd_claim() {
     # cannot each delete the other's fresh claim. The lock is dropped on every way out,
     # and one a killed taker left (older than a minute) is cleared, or the port would
     # stay refused for good.
-    [ -n "$(find "$d.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$d.lock" 2>/dev/null
-    if mkdir "$d.lock" 2>/dev/null; then
+    [ -n "$(find "$d.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$d.lock" 2>/dev/null
+    if ( set -C; : >"$d.lock" ) 2>/dev/null; then
       taken=1
       seen="$(claim_field "$d" seen)"
       if [ -z "$seen" ] || [ $((now - seen)) -gt "$CLAIM_TTL" ]; then
         rm -rf "$d"
-        if mkdir "$d" 2>/dev/null && write_claim "$d" "$now"; then taken=0; fi
+        if mkdir -p "$d" 2>/dev/null && create_claim "$d" "$now"; then taken=0; fi
       fi
-      rmdir "$d.lock" 2>/dev/null
+      rm -rf "$d.lock" 2>/dev/null
       [ "$taken" = 0 ] && return 0
     fi
   fi
