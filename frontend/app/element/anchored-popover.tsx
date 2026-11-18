@@ -99,6 +99,29 @@ const IDLE_STYLE: JSX.CSSProperties = { position: "fixed", left: "0px", top: "0p
 // A panel that animates in waits, unseen, for its first placement, so it does not fade in at the corner.
 const WAITING_STYLE: JSX.CSSProperties = { ...IDLE_STYLE, visibility: "hidden" };
 
+/** The room a panel is asked to fit in, in screen pixels: the height the window leaves, and the width of its container. */
+interface Room {
+    height?: number;
+    width?: number;
+}
+
+function roomFor(maxHeight: number, container: HTMLElement | undefined, fitHeight?: boolean, fitWidth?: boolean): Room {
+    return {
+        height: fitHeight && Number.isFinite(maxHeight) ? maxHeight : undefined,
+        width: fitWidth && container ? Math.floor(Math.min(container.getBoundingClientRect().width, window.innerWidth)) : undefined,
+    };
+}
+
+/** The body's own style with its room: the room is in screen pixels and the body is zoomed, so each is divided by the zoom. */
+function roomStyle(base: JSX.CSSProperties | undefined, room: Room): JSX.CSSProperties | undefined {
+    if (room.height === undefined && room.width === undefined) return base;
+    return {
+        ...base,
+        ...(room.height === undefined ? {} : { "max-height": `calc(${room.height}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }),
+        ...(room.width === undefined ? {} : { "--popover-room-width": `calc(${room.width}px / var(--zoomfactor, 1))` }),
+    };
+}
+
 /** A floating-ui reference that keeps reading the anchor captured at mount. */
 function referenceFor(anchor: Element | DOMRect) {
     if (anchor instanceof Element) {
@@ -166,8 +189,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let shell: HTMLDivElement | undefined;
     let body: HTMLDivElement | undefined;
     let entered = false;
-    const [roomHeight, setRoomHeight] = createSignal<number | undefined>();
-    const [roomWidth, setRoomWidth] = createSignal<number | undefined>();
+    const [room, setRoom] = createSignal<Room>({});
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(untrack(() => props.motion || props.hideUntilPlaced) ? WAITING_STYLE : IDLE_STYLE);
     /** The first time the panel is shown, in place: play its entrance. */
     const shown = () => {
@@ -180,16 +202,6 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
     let stopAutoUpdate: (() => void) | null = null;
     let frame: number | undefined;
     let disposed = false;
-    const bodyStyle = (): JSX.CSSProperties | undefined => {
-        const height = roomHeight();
-        const width = roomWidth();
-        if (height === undefined && width === undefined) return props.style;
-        return {
-            ...props.style,
-            ...(height === undefined ? {} : { "max-height": `calc(${height}px / var(--zoomfactor, 1))`, "overflow-y": "auto" }),
-            ...(width === undefined ? {} : { "--popover-room-width": `calc(${width}px / var(--zoomfactor, 1))` }),
-        };
-    };
     const stopScope = usePaneScope(props, () => shell);
     // A dismissible popover takes Escape; a passive one (a tooltip) does not.
     usePaneOverlay(() => shell, { keys: props.overlayKeys ?? !!props.onDismiss });
@@ -224,8 +236,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 );
                 if (disposed) return;
                 setShellStyle(holdBottomEdge(pos, el.getBoundingClientRect().height, window.innerHeight));
-                if (untrack(() => props.fitHeight) && Number.isFinite(pos.maxHeight)) setRoomHeight(pos.maxHeight);
-                if (container && untrack(() => props.fitWidth)) setRoomWidth(Math.floor(Math.min(container.getBoundingClientRect().width, window.innerWidth)));
+                setRoom(roomFor(pos.maxHeight, container, untrack(() => props.fitHeight), untrack(() => props.fitWidth)));
                 shown();
             };
             stopAutoUpdate?.();
@@ -272,7 +283,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                     // `class` would wipe what classList added.
                     class={bodyClass(props)}
                     // The room is in screen pixels and the body is zoomed, so its own max-height is the room over the zoom.
-                    style={bodyStyle()}
+                    style={roomStyle(props.style, room())}
                     role={props.role}
                     aria-label={props["aria-label"]}
                 >
