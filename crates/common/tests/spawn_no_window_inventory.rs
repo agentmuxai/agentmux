@@ -292,6 +292,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/upgrade_restart.rs", "powershell_exe(", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/launcher/src/updating_window.rs", "&copy", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/autostart/mod.rs", "\"schtasks\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/crash_monitor.rs", "&exe", 1,
