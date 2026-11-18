@@ -49,6 +49,7 @@ describe("AgentViewPopover in a narrow pane", () => {
         expect(rule).toContain("overflow-x: auto");
         const foot = scss.slice(scss.indexOf(".agent-view-popover-foot"), scss.indexOf("}", scss.indexOf(".agent-view-popover-foot")));
         expect(foot, "the footer's two links wrap rather than push the panel sideways").toContain("flex-wrap: wrap");
+        expect(foot, "and a link's own label may break").toContain("white-space: normal");
     });
 });
 
