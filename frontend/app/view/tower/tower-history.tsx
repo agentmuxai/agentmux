@@ -74,6 +74,13 @@ export function HistoryCharts(props: {
     );
 }
 
+/** Where the tooltip sits: on the pointer's line, its own edge meeting the plot's edge at each end (the label is as far
+ *  along itself as the line is along the plot), so it is never cut off, and it is centred on the line in the middle. */
+function tipStyle(at: number): { left: string; transform: string } {
+    const along = Math.min(1, Math.max(0, at / W));
+    return { left: `${along * 100}%`, transform: `translate(-${along * 100}%, -100%)` };
+}
+
 /** The faint area under a line: the line closed down to the floor of the plot. */
 function areaPath(pts: readonly { t: number }[], line: string, x: (t: number) => number): string {
     if (!pts.length) return "";
@@ -163,7 +170,7 @@ export function Chart(props: {
                         <div
                             class="tower-chart-tip"
                             data-testid="tower-chart-tip"
-                            style={{ left: `${(x(h().t) / W) * 100}%` }}
+                            style={tipStyle(x(h().t))}
                         >
                             {props.axis ? props.axis.at(h().t, end()) : formatAgo(h().t, end())} · {props.series.format(h().v)}
                         </div>
