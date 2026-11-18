@@ -52,6 +52,7 @@ pub mod test_offscreen;
 mod test_offscreen_macos;
 pub mod capture_shape;
 pub mod secret_shape;
+pub mod typed_secrets;
 pub mod shown_once;
 pub mod secret_eq;
 pub mod secret_env;

@@ -71,6 +71,7 @@ pub mod signup_probe;
 pub mod snapshot;
 pub mod terminal;
 pub mod text_read;
+pub mod typed_value;
 pub mod types;
 pub mod visibility;
 pub mod choice_facts;
@@ -83,8 +84,9 @@ pub mod zoom;
 /// Register `/agentmux/browser/*` routes on the given axum Router.
 /// Called from `ipc::start_ipc_server` alongside the existing
 /// `/ipc` + `/health` routes.
-pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
-    router
+pub fn register_routes(router: Router<Arc<AppState>>, state: Arc<AppState>) -> Router<Arc<AppState>> {
+    // Every answer below leaves out a value the host typed from the Vault into the pane's page (`typed_value`).
+    let guarded = Router::new()
         .route("/agentmux/browser/query", post(routes::query))
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
@@ -93,12 +95,6 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/find", post(act::find_route))
         .route("/agentmux/browser/act", post(act::act_route))
-        // Uploads carry the files' bytes (base64 in JSON): up to 25 MB of
-        // files, so well past axum's 2 MiB default body limit.
-        .route(
-            "/agentmux/browser/set_files",
-            post(act::set_files_route).layer(act::set_files_body_limit()),
-        )
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
         .route("/agentmux/browser/locate", post(locate::locate_route))
         .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
@@ -117,7 +113,6 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
         .route("/agentmux/browser/dispatch_key", post(routes::dispatch_key))
         .route("/agentmux/browser/press", post(press::press_route))
-        .route("/agentmux/browser/chooser_files", post(chooser_files::chooser_files_route).layer(act::set_files_body_limit()))
         .route("/agentmux/browser/terminal_state", post(terminal::terminal_state))
         .route("/agentmux/browser/terminal_keys", post(terminal::terminal_keys))
         .route("/agentmux/browser/navigate", post(routes::navigate))
@@ -133,6 +128,13 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/press_keys", post(shortcuts::press_keys))
         .route("/agentmux/browser/set_shortcut", post(shortcuts::set_shortcut))
         .route("/agentmux/browser/reset_shortcuts", post(shortcuts::reset_shortcuts))
+        .layer(axum::middleware::from_fn_with_state(state, typed_value::withhold_typed));
+    // Uploads carry the files' bytes (base64 in JSON): up to 25 MB of files, past axum's 2 MiB default body limit, and
+    // an answer that holds none of a page's text.
+    router
+        .merge(guarded)
+        .route("/agentmux/browser/set_files", post(act::set_files_route).layer(act::set_files_body_limit()))
+        .route("/agentmux/browser/chooser_files", post(chooser_files::chooser_files_route).layer(act::set_files_body_limit()))
 }
 
 /// Shared state for the browser API — primarily the resolver's
@@ -142,13 +144,22 @@ pub struct BrowserApiState {
     pub target_cache: resolver::TargetCache,
     /// Each pane's latest snapshot references (`act::RefTable`).
     pub ref_tables: act::RefTables,
+    /// The values typed from the Vault into each pane's page, as digests (`typed_value`).
+    pub typed: agentmux_common::typed_secrets::TypedSecrets,
 }
 
 impl BrowserApiState {
+    /// The pane's page is going: its references and the values typed into it end with it.
+    pub fn forget_pane(&self, block_id: &str) {
+        self.ref_tables.forget(block_id);
+        self.typed.forget(block_id);
+    }
+
     pub fn new() -> Self {
         Self {
             target_cache: resolver::TargetCache::new(),
             ref_tables: act::RefTables::default(),
+            typed: typed_value::new_registry(),
         }
     }
 }
