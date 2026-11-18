@@ -261,7 +261,7 @@ impl RpcContext {
     /// Is the operator's proof in force right now: given, and not past its lease. A proof from an external
     /// host lapses at `operator_proof_until`; the CEF host's and a local session's have no lease.
     pub fn operator_proven_now(&self) -> bool {
-        self.operator_proven && self.operator_proof_until.is_none_or(|until| unix_now() < until)
+        self.operator_proven && self.operator_proof_until.is_none_or(|until| agentmux_common::time::now_secs_u64() < until)
     }
 
     /// The operator's window, proven: what tests hand an operator-only
@@ -270,10 +270,6 @@ impl RpcContext {
     pub fn operator_for_tests() -> Self {
         Self { operator_proven: true, ..Default::default() }
     }
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Matches Go's `CommandVarData`

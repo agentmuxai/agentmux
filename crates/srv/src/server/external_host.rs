@@ -29,7 +29,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -76,10 +75,6 @@ pub(crate) fn register_from_file(path: &Path) -> Result<(), String> {
 
 fn set_once(cell: &OnceLock<Host>, host: Host) -> Result<(), String> {
     cell.set(host).map_err(|_| "an external host is already registered".to_string())
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 fn plain(s: &str, min: usize, max: usize, extra: &str) -> bool {
@@ -286,7 +281,7 @@ pub(crate) async fn handle_nonce(Json(req): Json<NonceRequest>) -> Response {
 /// `POST /api/v1/host/external_attest`: the registered host vouches for one connection.
 pub(crate) async fn handle_attest(Json(req): Json<AttestRequest>) -> Response {
     let Some(host) = host() else { return not_registered() };
-    match host.attest(&req, unix_now()) {
+    match host.attest(&req, agentmux_common::time::now_secs_u64()) {
         Ok(person) => {
             tracing::info!(person = %person, conn = %req.conn, "external host attested a connection");
             Json(json!({ "ok": true, "valid_until": req.valid_until })).into_response()
@@ -298,7 +293,7 @@ pub(crate) async fn handle_attest(Json(req): Json<AttestRequest>) -> Response {
 /// `POST /api/v1/host/external_revoke`: the registered host ends one connection's proof.
 pub(crate) async fn handle_revoke(Json(req): Json<RevokeRequest>) -> Response {
     let Some(host) = host() else { return not_registered() };
-    match host.revoke(&req, unix_now()) {
+    match host.revoke(&req, agentmux_common::time::now_secs_u64()) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(r) => refused(r),
     }
