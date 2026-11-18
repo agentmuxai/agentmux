@@ -168,7 +168,7 @@ fn spend_plan(state: &AppState, actor_uid: &str, target_uid: &str, req: &UpdateR
     let mut plan = SpendPlan { cap: None, reset: false };
     if let Some(value) = req.spend_cap_usd.as_ref().filter(|v| !v.is_null()) {
         let to = cap::parse_request(value).map_err(bad)?;
-        let from = cap::agent_cap(&state.mstore, target_uid);
+        let from = cap::agent_cap(&state.mstore, &state.config_watcher.get_settings().extra, target_uid);
         if own {
             if !to.is_some_and(|to| from.is_none_or(|from| to <= from)) {
                 return Err(refuse(StatusCode::FORBIDDEN, "an agent may lower its own spend cap, not raise or lift it; its leader or the person can"));

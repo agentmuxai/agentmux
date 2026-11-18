@@ -160,18 +160,19 @@ async fn an_agent_that_has_used_its_days_cap_is_refused_with_a_402_before_anythi
     let uri = "/api/v1/model/openrouter/v1/messages";
 
     let used = crate::agents::types::TokenCounts { input: 10, ..Default::default() };
-    spend::record("gw-capped", "openrouter", model, &used, Some(19.0), agentmux_common::time::now_ms());
+    let cap = crate::backend::model_gateway::cap::DEFAULT_AGENT_CAP_USD;
+    spend::record("gw-capped", "openrouter", model, &used, Some(cap - 1.0), agentmux_common::time::now_ms());
     let (status, _) = call(&state, Some(&token), uri, body.clone()).await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "$19 of $20: let through, as far as the missing key");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "$1 under the default cap: let through, as far as the missing key");
 
     spend::record("gw-capped", "openrouter", model, &used, Some(1.0), agentmux_common::time::now_ms());
     let (status, answer) = call(&state, Some(&token), uri, body.clone()).await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{answer}");
-    assert!(answer.contains("spend cap: this agent has used $20."), "the harness is told why: {answer}");
+    assert!(answer.contains(&format!("spend cap: this agent has used ${cap:.0}.")), "the harness is told why: {answer}");
     assert!(answer.contains("billing_error"), "{answer}");
 
     // A raised cap lets the next request through; no restart needed.
-    crate::backend::model_gateway::cap::set_agent_cap(&state.mstore, &uid, Some(40.0)).unwrap();
+    crate::backend::model_gateway::cap::set_agent_cap(&state.mstore, &uid, Some(cap * 2.0)).unwrap();
     let (status, _) = call(&state, Some(&token), uri, body).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }
