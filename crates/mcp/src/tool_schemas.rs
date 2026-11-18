@@ -437,7 +437,7 @@ pub(crate) const APP_TOOL: &str = r#"{
       "contains":         { "type": "string", "description": "logs: only lines containing this text (plain text, any case, up to 200 characters), applied before the last lines are taken" },
       "clean":            { "type": "boolean", "description": "disk with host: ask for the cleanup instead of reading the report; needs a reason" },
       "view":             { "type": "string", "enum": ["summary", "series", "export"], "description": "record: what to read (default summary)" },
-      "kind":             { "type": "string", "enum": ["rollup", "raw"], "description": "record series, export: the hourly rollups (default, a year) or the five-minute lines (14 days)" },
+      "kind":             { "type": "string", "enum": ["rollup", "raw", "events"], "description": "record series, export: the hourly rollups (default, a year), the five-minute lines (14 days), or the stalls of the window host and srv, each one, newest 500" },
       "hours":            { "type": "integer", "description": "record series, export: how far back, 1 to 336 hours (default 24)" },
       "day":              { "type": "string", "description": "record series, export: one UTC day, 2026-11-16, instead of hours" }
     },
