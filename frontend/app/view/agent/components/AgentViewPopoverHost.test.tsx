@@ -10,10 +10,10 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mounted: { anchor: Element | undefined }[] = [];
+const mounted: { anchor: Element | undefined; pane: HTMLElement | undefined }[] = [];
 vi.mock("./AgentViewPopover", () => ({
-    AgentViewPopover: (props: { anchor: Element | undefined }) => {
-        mounted.push({ anchor: props.anchor });
+    AgentViewPopover: (props: { anchor: Element | undefined; pane?: HTMLElement }) => {
+        mounted.push({ anchor: props.anchor, pane: props.pane });
         return <div data-testid="popover" />;
     },
 }));
@@ -40,6 +40,7 @@ describe("AgentViewPopoverHost", () => {
         render(() => <AgentViewPopoverHost controls={controlsOf(() => true, () => ({ view: {}, source: "default" }))} rootEl={() => root} />);
         expect(mounted).toHaveLength(1);
         expect(mounted[0].anchor).toBe(root.querySelector("[data-agent-view-chip]"));
+        expect(mounted[0].pane, "the panel is kept inside its own pane").toBe(root);
     });
 
     it("hangs from the strip when the eye is not drawn", () => {
