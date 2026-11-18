@@ -32,14 +32,14 @@ function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
 function PaletteRow(props: {
     cmd: CommandEntry;
     selected: boolean;
-    onHover: () => void;
+    onHover: (e: MouseEvent) => void;
     onPick: (e: MouseEvent) => void;
 }): JSX.Element {
     return (
         <div
             class={`command-palette-item${props.selected ? " selected" : ""}`}
             onClick={(e) => props.onPick(e)}
-            onMouseEnter={() => props.onHover()}
+            onMouseMove={(e) => props.onHover(e)}
         >
             {props.cmd.icon && (
                 <i
@@ -59,14 +59,31 @@ function PaletteRow(props: {
     );
 }
 
-const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
-    const [query, setQuery] = createSignal("");
-    const [selectedIdx, setSelectedIdx] = createSignal(0);
-    let inputRef!: HTMLInputElement;
-    let listRef!: HTMLDivElement;
+/**
+ * A pointer over the list selects the row it moves onto, and only a real move does: the list scrolling under a
+ * pointer at rest (a key move) puts another row under it, and that must not take the selection. The first
+ * event only records where the pointer is.
+ */
+function createPointerGate(): (e: MouseEvent) => boolean {
+    let at: string | null = null;
+    return (e) => {
+        const here = `${e.clientX},${e.clientY}`;
+        const moved = at != null && at !== here;
+        at = here;
+        return moved;
+    };
+}
+
+/** After a key move: the selected row in view (the first row: the list's top, padding included). */
+function keepRowInView(list: HTMLElement, idx: number) {
+    if (idx === 0) list.scrollTop = 0;
+    else list.querySelector(".command-palette-item.selected")?.scrollIntoView?.({ block: "nearest" });
+}
+
+/** What the palette lists for `query`, and which row is selected (held to the list when it shrinks). */
+function usePaletteResults(query: () => string, selectedIdx: () => number) {
     // The agents AgentMux knows, listed after the commands and found by name, seat or state.
     const agents = usePaletteAgents();
-
     const filtered = createMemo(() => {
         const q = query().trim();
         const all = sortCommands([...commandRegistry.all(), ...agents()].filter((c) => !c.hidden && isCommandAvailable(c)));
@@ -76,13 +93,16 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         // equals); fuzzy only for a typo. See command-palette-search.ts.
         return searchCommands(all, q);
     });
+    const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
+    return { filtered, clampedIdx };
+}
 
-    // Clamp selectedIdx when results change
-    const clampedIdx = createMemo(() => {
-        const len = filtered().length;
-        if (len === 0) return 0;
-        return Math.min(selectedIdx(), len - 1);
-    });
+const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
+    const [query, setQuery] = createSignal("");
+    const [selectedIdx, setSelectedIdx] = createSignal(0);
+    let inputRef!: HTMLInputElement;
+    let listRef!: HTMLDivElement;
+    const { filtered, clampedIdx } = usePaletteResults(query, selectedIdx);
 
     onMount(() => {
         disableGlobalKeybindings();
@@ -112,11 +132,12 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         }, 0);
     }
 
-    // A keyboard move keeps the selected row in view. Only the keys do it: a pointer resting on a row
-    // selects it (mouseenter), and scrolling that row into view would move the list under the pointer.
+    const pointerMoved = createPointerGate();
+
     function moveSelection(next: (i: number) => number) {
-        setSelectedIdx(next(clampedIdx()));
-        listRef.querySelector(".command-palette-item.selected")?.scrollIntoView?.({ block: "nearest" });
+        const idx = next(clampedIdx());
+        setSelectedIdx(idx);
+        keepRowInView(listRef, idx);
     }
 
     // Arrow keys + Enter are palette-specific navigation. ESC and
@@ -174,7 +195,9 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                             <PaletteRow
                                 cmd={cmd}
                                 selected={i() === clampedIdx()}
-                                onHover={() => setSelectedIdx(i())}
+                                onHover={(e) => {
+                                    if (pointerMoved(e)) setSelectedIdx(i());
+                                }}
                                 onPick={(e) => {
                                     setSelectedIdx(i());
                                     executeSelected(e.shiftKey);

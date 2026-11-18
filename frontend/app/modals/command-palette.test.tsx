@@ -151,14 +151,40 @@ describe("CommandPaletteModal keyboard scroll", () => {
         const input = open();
         fireEvent.keyDown(input, { key: "ArrowDown" });
         expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Window"), { block: "nearest" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
         fireEvent.keyDown(input, { key: "ArrowUp" });
-        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Split Right"), { block: "nearest" });
+        expect(scrolled).toHaveBeenLastCalledWith(expect.stringContaining("Close Window"), { block: "nearest" });
     });
 
     it("does not scroll when the pointer selects a row", () => {
         open();
-        fireEvent.mouseEnter(document.querySelectorAll(".command-palette-item")[2]);
+        const row = document.querySelectorAll(".command-palette-item")[2];
+        fireEvent.mouseMove(row, { clientX: 10, clientY: 10 });
+        fireEvent.mouseMove(row, { clientX: 12, clientY: 10 });
+        expect(row.classList.contains("selected")).toBe(true);
         expect(scrolled).not.toHaveBeenCalled();
+    });
+
+    it("keeps the keyboard's row when the list scrolls a different row under a pointer at rest", () => {
+        const input = open();
+        const rows = () => document.querySelectorAll(".command-palette-item");
+        fireEvent.mouseMove(rows()[3], { clientX: 50, clientY: 90 });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        // The list scrolled: the browser reports the same pointer position over another row (no new position).
+        fireEvent.mouseMove(rows()[4], { clientX: 50, clientY: 90 });
+        fireEvent.mouseEnter(rows()[4]);
+        expect(rows()[2].classList.contains("selected")).toBe(true);
+        expect(rows()[4].classList.contains("selected")).toBe(false);
+    });
+
+    it("shows the very top of the list when Up reaches the first row", () => {
+        const input = open();
+        const list = document.querySelector(".command-palette-list") as HTMLElement;
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        list.scrollTop = 4;
+        fireEvent.keyDown(input, { key: "ArrowUp" });
+        expect(list.scrollTop).toBe(0);
     });
 
     it("shows the top of the list again when the search changes", () => {
