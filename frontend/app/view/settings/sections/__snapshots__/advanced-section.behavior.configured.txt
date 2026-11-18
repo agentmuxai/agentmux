@@ -266,8 +266,10 @@
     <div class="setting-row" id="setting-advanced.dev_mode">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Dev mode"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Dev mode"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Shows DevTools in the menu, Inspect Element and View Page Source in right-click menus, and other developer tools. Off by default in the installed app; on by default in a task dev or debug build"
         <div class="ui-field-control">

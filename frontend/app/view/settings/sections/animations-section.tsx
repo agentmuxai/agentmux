@@ -23,6 +23,7 @@ import { settingsAtom } from "@/app/store/global";
 import { createSignal, Show, type JSX } from "solid-js";
 import { NumberControl, SectionHeader, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
 import { settingEntry, type SettingsIndexEntry } from "../settings-model";
+import { trackSave } from "../settings-saved";
 import { AnimationsPreview } from "./animations-preview";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
@@ -127,7 +128,7 @@ export function AnimationsSection(): JSX.Element {
         const moved = next !== raw;
         setSnapped(moved ? t("settings.animations.snapped", { raw: String(raw), next: String(next), min: String(SPEED_MIN), max: String(SPEED_MAX), step: String(SPEED_STEP) }) : null);
         if (moved) setCorrected((n) => n + 1);
-        editAnimation(s(), { [key]: next });
+        trackSave([`animation:${key}`], editAnimation(s(), { [key]: next }));
     };
 
     const reset = () => {
@@ -139,6 +140,7 @@ export function AnimationsSection(): JSX.Element {
     return (
         <div class="settings-section-body animations-section">
             <SettingRow
+                settingKey="animation:preset"
                 id={ANIMATIONS_SETTINGS.preset.id}
                 label={ANIMATIONS_SETTINGS.preset.label}
                 description={ANIMATIONS_SETTINGS.preset.description}
@@ -148,7 +150,7 @@ export function AnimationsSection(): JSX.Element {
                         <SegmentedControl
                             options={options()}
                             value={preset()}
-                            onChange={setAnimationPreset}
+                            onChange={(choice) => trackSave(["animation:preset"], setAnimationPreset(choice))}
                             ariaLabel={t("settings.animations.aria.group")}
                         />
                         <p class="animations-help" data-testid="animations-help">
@@ -182,6 +184,7 @@ export function AnimationsSection(): JSX.Element {
                 <p class="animations-help">{t("settings.animations.advancedHelp")}</p>
             </Show>
             <SettingRow
+                settingKey="animation:speed"
                 id={ANIMATIONS_SETTINGS.speed.id}
                 label={ANIMATIONS_SETTINGS.speed.label}
                 description={ANIMATIONS_SETTINGS.speed.description}
@@ -195,6 +198,7 @@ export function AnimationsSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="animation:polish"
                 id={ANIMATIONS_SETTINGS.polish.id}
                 label={ANIMATIONS_SETTINGS.polish.label}
                 description={ANIMATIONS_SETTINGS.polish.description}
@@ -208,12 +212,13 @@ export function AnimationsSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="animation:reducemovement"
                 id={ANIMATIONS_SETTINGS.reduceMovement.id}
                 label={ANIMATIONS_SETTINGS.reduceMovement.label}
                 description={ANIMATIONS_SETTINGS.reduceMovement.description}
                 control={
                     <Show when={!readOnly()} fallback={<span class="animations-fixed">{values().reduceMovement ? t("settings.animations.on") : t("settings.animations.preset.off")}</span>}>
-                        <ToggleControl checked={values().reduceMovement} onChange={(v) => editAnimation(s(), { reduceMovement: v })} />
+                        <ToggleControl checked={values().reduceMovement} onChange={(v) => trackSave(["animation:reducemovement"], editAnimation(s(), { reduceMovement: v }))} />
                     </Show>
                 }
             />

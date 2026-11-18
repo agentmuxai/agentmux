@@ -4,8 +4,10 @@
     <div class="setting-row" id="setting-sounds.notifications_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Notification sounds"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Notification sounds"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Master enable for notification sounds"
         <div class="ui-field-control">
@@ -15,8 +17,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.volume">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Volume"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Volume"
+            <span class="setting-saved" role="status" aria-live="polite">
         <div class="ui-field-control">
           <div data-stand="SliderControl" data-props="{\"max\":\"1\",\"min\":\"0\",\"step\":\"0.05\",\"value\":\"0.6\"}">
             <span data-cb="onChange">
@@ -24,8 +28,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.suppress_when_focused">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Suppress when focused"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Suppress when focused"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Don't play a pane's sound when it's already focused and visible"
         <div class="ui-field-control">
@@ -35,8 +41,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.tool_tones_flash">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Flash the tab and pane when a sound plays"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Flash the tab and pane when a sound plays"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Pulse the pane tab each sound came from, in that pane's color, and subtly its window tab — one pulse per knock, in time with the sound"
         <div class="ui-field-control">
@@ -46,8 +54,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.turn_complete">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Turn complete"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Turn complete"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a sound when an agent turn completes normally"
         <div class="ui-field-control">
@@ -57,8 +67,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.turn_error">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Turn error"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Turn error"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a sound when an agent turn ends with an error"
         <div class="ui-field-control">
@@ -68,8 +80,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.turn_interrupted">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Turn interrupted"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Turn interrupted"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a sound when an agent turn is stopped or interrupted"
         <div class="ui-field-control">
@@ -79,8 +93,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.message_accepted">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Message accepted"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Message accepted"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a sound when a queued pending message is accepted"
         <div class="ui-field-control">
@@ -90,8 +106,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.message_rejected">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Message rejected"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Message rejected"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a sound when a queued pending message is rejected"
         <div class="ui-field-control">
@@ -103,8 +121,10 @@
     <div class="setting-row" id="setting-sounds.tool_tones_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Enable"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Enable"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a subliminal synth tone for every agent tool call"
         <div class="ui-field-control">
@@ -114,8 +134,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.tool_tones_volume">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Volume"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Volume"
+            <span class="setting-saved" role="status" aria-live="polite">
         <div class="ui-field-control">
           <div data-stand="SliderControl" data-props="{\"max\":\"1\",\"min\":\"0\",\"step\":\"0.05\",\"value\":\"0.25\"}">
             <span data-cb="onChange">
@@ -123,8 +145,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.tool_tones_scope">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Scope"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Scope"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Which panes play tool-call tones"
         <div class="ui-field-control">
@@ -140,8 +164,10 @@
     <div class="setting-row" id="setting-sounds.waiting_tone_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Enable"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Enable"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a looping tone while an agent waits for you: a question, a tool permission, a browser hand-off or approval, an SSH consent or a widget install"
         <div class="ui-field-control">
@@ -151,8 +177,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.waiting_tone_volume">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Volume"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Volume"
+            <span class="setting-saved" role="status" aria-live="polite">
         <div class="ui-field-control">
           <div data-stand="SliderControl" data-props="{\"max\":\"1\",\"min\":\"0\",\"step\":\"0.05\",\"value\":\"0.25\"}">
             <span data-cb="onChange">
@@ -160,8 +188,10 @@
     <div class="setting-row setting-row--indent" id="setting-sounds.waiting_browser">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Browser hand-offs and approvals"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Browser hand-offs and approvals"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Also when an agent hands you a browser pane or asks to approve something in it"
         <div class="ui-field-control">
@@ -171,8 +201,10 @@
     <div class="setting-row" id="setting-sounds.waiting_toast">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Toast when an agent waits"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Toast when an agent waits"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a toast that names the agent waiting on you, with a link that takes you to it. Stays on when sounds are muted"
         <div class="ui-field-control">
@@ -184,8 +216,10 @@
     <div class="setting-row" id="setting-sounds.shutdown_tone_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Shutdown warning chime"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Shutdown warning chime"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Play a falling chime when something other than you asks to shut an agent down, at the start of the window to keep it and again with 5 seconds left"
         <div class="ui-field-control">

@@ -52,6 +52,7 @@ export function LanguageRow(): JSX.Element {
     return (
         <Show when={SHIPPED_LOCALES.length > 0 || devModeOn()}>
             <SettingRow
+                settingKey="app:locale"
                 id={LANGUAGE_SETTINGS.language.id}
                 label={LANGUAGE_SETTINGS.language.label}
                 description={LANGUAGE_SETTINGS.language.description}

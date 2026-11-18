@@ -22,6 +22,7 @@ export function ShellAndTextGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:localshellpath"
                 id={TERMINAL_SETTINGS.defaultShell.id}
                 label={TERMINAL_SETTINGS.defaultShell.label}
                 description={TERMINAL_SETTINGS.defaultShell.description}
@@ -29,6 +30,7 @@ export function ShellAndTextGroup(): JSX.Element {
                 control={<DefaultShellSetting />}
             />
             <SettingRow
+                settingKey="term:fontsize"
                 id={TERMINAL_SETTINGS.fontSize.id}
                 label={TERMINAL_SETTINGS.fontSize.label}
                 description={TERMINAL_SETTINGS.fontSize.description}
@@ -42,6 +44,7 @@ export function ShellAndTextGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:fontfamily"
                 id={TERMINAL_SETTINGS.fontFamily.id}
                 label={TERMINAL_SETTINGS.fontFamily.label}
                 description={TERMINAL_SETTINGS.fontFamily.description}
@@ -57,6 +60,7 @@ export function ShellAndTextGroup(): JSX.Element {
             />
             <Show when={termThemes().length > 0}>
                 <SettingRow
+                    settingKey="term:theme"
                     id={TERMINAL_SETTINGS.terminalTheme.id}
                     label={TERMINAL_SETTINGS.terminalTheme.label}
                     control={
@@ -74,6 +78,7 @@ export function ShellAndTextGroup(): JSX.Element {
                 />
             </Show>
             <SettingRow
+                settingKey="term:scrollback"
                 id={TERMINAL_SETTINGS.scrollback.id}
                 label={TERMINAL_SETTINGS.scrollback.label}
                 description={TERMINAL_SETTINGS.scrollback.description}
@@ -95,6 +100,7 @@ export function KeysGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:copyonselect"
                 id={TERMINAL_SETTINGS.copyOnSelect.id}
                 label={TERMINAL_SETTINGS.copyOnSelect.label}
                 description={TERMINAL_SETTINGS.copyOnSelect.description}
@@ -106,6 +112,7 @@ export function KeysGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:shiftenternewline"
                 id={TERMINAL_SETTINGS.shiftEnterNewline.id}
                 label={TERMINAL_SETTINGS.shiftEnterNewline.label}
                 description={TERMINAL_SETTINGS.shiftEnterNewline.description}
@@ -125,6 +132,7 @@ export function SshGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:durable"
                 id={TERMINAL_SETTINGS.durableSsh.id}
                 label={TERMINAL_SETTINGS.durableSsh.label}
                 description={TERMINAL_SETTINGS.durableSsh.description}
@@ -146,6 +154,7 @@ export function SshGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="conn:helper"
                 id={TERMINAL_SETTINGS.helperInstall.id}
                 label={TERMINAL_SETTINGS.helperInstall.label}
                 description={TERMINAL_SETTINGS.helperInstall.description}
@@ -173,6 +182,7 @@ export function DisplayGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:allowbracketedpaste"
                 id={TERMINAL_SETTINGS.bracketedPaste.id}
                 label={TERMINAL_SETTINGS.bracketedPaste.label}
                 description={TERMINAL_SETTINGS.bracketedPaste.description}
@@ -184,6 +194,7 @@ export function DisplayGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:transparency"
                 id={TERMINAL_SETTINGS.terminalTransparency.id}
                 label={TERMINAL_SETTINGS.terminalTransparency.label}
                 description={TERMINAL_SETTINGS.terminalTransparency.description}
@@ -196,6 +207,7 @@ export function DisplayGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:scrollsensitivity"
                 id={TERMINAL_SETTINGS.scrollSensitivity.id}
                 label={TERMINAL_SETTINGS.scrollSensitivity.label}
                 description={TERMINAL_SETTINGS.scrollSensitivity.description}
@@ -209,6 +221,7 @@ export function DisplayGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:showstatsbadge"
                 id={TERMINAL_SETTINGS.cpuMemBadge.id}
                 label={TERMINAL_SETTINGS.cpuMemBadge.label}
                 description={TERMINAL_SETTINGS.cpuMemBadge.description}
@@ -228,6 +241,7 @@ export function EchoGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:predictiveecho"
                 id={TERMINAL_SETTINGS.predictiveEcho.id}
                 label={TERMINAL_SETTINGS.predictiveEcho.label}
                 description={TERMINAL_SETTINGS.predictiveEcho.description}
@@ -240,6 +254,7 @@ export function EchoGroup(): JSX.Element {
             />
             <Show when={s()["term:predictiveecho"] !== false}>
                 <SettingRow
+                    settingKey="term:predictiveecho:thresholdms"
                     id={TERMINAL_SETTINGS.predictiveEchoThreshold.id}
                     indent
                     label={TERMINAL_SETTINGS.predictiveEchoThreshold.label}
@@ -263,6 +278,7 @@ export function WatchdogGroup(): JSX.Element {
     return (
         <>
             <SettingRow
+                settingKey="term:agentmaxruntimehours"
                 id={TERMINAL_SETTINGS.agentMaxRuntime.id}
                 label={TERMINAL_SETTINGS.agentMaxRuntime.label}
                 description={TERMINAL_SETTINGS.agentMaxRuntime.description}
@@ -276,6 +292,7 @@ export function WatchdogGroup(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="term:agentidletimeoutmins"
                 id={TERMINAL_SETTINGS.agentIdleTimeout.id}
                 label={TERMINAL_SETTINGS.agentIdleTimeout.label}
                 description={TERMINAL_SETTINGS.agentIdleTimeout.description}

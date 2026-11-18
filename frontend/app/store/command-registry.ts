@@ -617,7 +617,7 @@ function registerViewCommands(): void {
             category: "View",
             icon: "wand-magic-sparkles",
             keywords: "animation motion speed reduce disable transitions animation:preset",
-            execute: () => setAnimationPreset(preset),
+            execute: () => void setAnimationPreset(preset),
         });
     }
     commandRegistry.register({

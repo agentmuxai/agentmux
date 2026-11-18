@@ -16,20 +16,22 @@ import {
 import { RpcApi } from "./rpc-api";
 import { TabRpcClient } from "./rpc-util";
 
-const write = (values: Record<string, unknown>) => void RpcApi.SetConfigCommand(TabRpcClient, values as any);
+/** Each writer hands back its write, for the Settings row that shows whether it was saved; the palette ignores it. */
+const write = (values: Record<string, unknown>): Promise<unknown> =>
+    Promise.resolve(RpcApi.SetConfigCommand(TabRpcClient, values as any));
 
 /** Choose a preset. The custom numbers stay stored, so "Use my custom values" brings them back. */
-export function setAnimationPreset(preset: AnimationPreset): void {
-    write({ "animation:preset": preset });
+export function setAnimationPreset(preset: AnimationPreset): Promise<unknown> {
+    return write({ "animation:preset": preset });
 }
 
 /**
  * Edit one or more numbers. The choice becomes Custom, starting from the numbers the page shows now
  * (so editing Quick's duration keeps Quick's other numbers), each clamped and snapped.
  */
-export function editAnimation(current: AnimationSettings, patch: Partial<AnimationValues>): void {
+export function editAnimation(current: AnimationSettings, patch: Partial<AnimationValues>): Promise<unknown> {
     const next = { ...effectiveValues(current), ...patch };
-    write({
+    return write({
         "animation:preset": "custom",
         "animation:speed": clampPercent(next.speed, DEFAULT_VALUES.speed),
         "animation:polish": clampPercent(next.polish, DEFAULT_VALUES.polish),
@@ -38,8 +40,8 @@ export function editAnimation(current: AnimationSettings, patch: Partial<Animati
 }
 
 /** Smooth, 100, 100, off. */
-export function resetAnimation(): void {
-    write({
+export function resetAnimation(): Promise<unknown> {
+    return write({
         "animation:preset": DEFAULT_PRESET,
         "animation:speed": DEFAULT_VALUES.speed,
         "animation:polish": DEFAULT_VALUES.polish,
