@@ -180,6 +180,11 @@
 .files-zoom-places {
     flex-direction: column;
     flex-shrink: 0;
+
+    // Focusable so a click on its blank space or heading keeps the keyboard in Places (the zoom keys follow it).
+    &:focus {
+        outline: none;
+    }
 }
 
 .files-places {

@@ -311,6 +311,19 @@ describe("the Files pane: zoom", () => {
         expect(places(v)!.style.zoom).toBe("1.3");
     });
 
+    it("keeps the keyboard in Places when the pane takes focus after a click there, so the zoom keys stay on Places", async () => {
+        const v = mount();
+        const p = places(v)!;
+        expect(p.getAttribute("tabindex")).toBe("-1");
+        p.focus();
+        v.model.focusList!();
+        expect(document.activeElement).toBe(p);
+        // From anywhere else the pane still hands focus to the list.
+        (document.activeElement as HTMLElement).blur();
+        v.model.focusList!();
+        expect(document.activeElement).toBe(v.list());
+    });
+
     it("draws no Places part when the sidebar is hidden, so no part is named that is not there", () => {
         const v = mount({ "files:sidebar": false });
         expect(places(v)).toBeNull();

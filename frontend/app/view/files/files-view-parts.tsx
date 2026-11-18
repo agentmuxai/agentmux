@@ -154,7 +154,7 @@ function FilesBody(props: {
     return (
         <div class="files-body">
             <Show when={model.showSidebar() && !props.narrow().places}>
-                <div class="files-zoom files-zoom-places" {...zoomPartAttrs(PLACES_PART)} data-zoom-scope="pane" style={{ zoom: props.placesZoom() }}>
+                <div class="files-zoom files-zoom-places" tabindex="-1" {...zoomPartAttrs(PLACES_PART)} data-zoom-scope="pane" style={{ zoom: props.placesZoom() }}>
                     <FilesPlaces model={model} />
                 </div>
             </Show>
