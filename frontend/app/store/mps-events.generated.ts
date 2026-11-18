@@ -111,6 +111,7 @@ import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
 import type { WidgetRequestsEvent } from "@/types/rpc/WidgetRequestsEvent";
 import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
+import type { WorkspaceStopView } from "@/types/rpc/WorkspaceStopView";
 
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
@@ -242,6 +243,7 @@ export type MuxEventPayloads = {
   widgetrequests: WidgetRequestsEvent;
   widgetstorage: WidgetStorageEvent;
   "workqueue:changed": null;
+  "workspace:stop": WorkspaceStopView;
   "ws:eventsdropped": EventsDroppedEvent;
   [event: `agent:memory:changed:${string}`]: null;
   [event: `agent_event:${string}`]: AgentEvent;
@@ -381,6 +383,7 @@ export const TYPED_MUX_EVENTS = [
   "widgetrequests",
   "widgetstorage",
   "workqueue:changed",
+  "workspace:stop",
   "ws:eventsdropped",
 ] as const;
 

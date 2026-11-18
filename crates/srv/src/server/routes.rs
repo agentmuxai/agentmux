@@ -787,6 +787,10 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/external_nonce", post(super::external_host::handle_nonce))
         .route("/api/v1/host/external_attest", post(super::external_host::handle_attest))
         .route("/api/v1/host/external_revoke", post(super::external_host::handle_revoke))
+        // The registered external host's own calls (answer 404 unless one is registered): what the workspace is doing, a graceful shutdown, a stop notice.
+        .route("/api/v1/host/activity", post(super::host_control::handle_activity))
+        .route("/api/v1/host/shutdown", post(super::host_control::handle_shutdown))
+        .route("/api/v1/host/notice", post(super::host_control::handle_notice))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))

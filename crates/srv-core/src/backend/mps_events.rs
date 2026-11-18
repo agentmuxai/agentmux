@@ -209,6 +209,8 @@ events! {
     /// A shutdown waiting for the user to keep the agent, and its end (`sagas::pending_shutdown`).
     AgentShutdownPending: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING => crate::backend::shutdown_events::PendingView,
     AgentShutdownPendingCleared: crate::backend::shutdown_events::EVENT_SHUTDOWN_PENDING_CLEARED => crate::backend::shutdown_events::PendingClearedEvent,
+    /// A headless workspace will stop at a time, or will not after all (`server::host_control`).
+    WorkspaceStop: crate::backend::shutdown_events::EVENT_WORKSPACE_STOP => crate::backend::shutdown_events::WorkspaceStopView,
     /// A sensitive request's countdown, and its end (`sagas::sensitive_window`).
     SensitivePending: crate::backend::prompt_events::EVENT_SENSITIVE_PENDING => crate::backend::prompt_events::SensitiveView,
     SensitiveCleared: crate::backend::prompt_events::EVENT_SENSITIVE_CLEARED => crate::backend::prompt_events::SensitiveClearedEvent,

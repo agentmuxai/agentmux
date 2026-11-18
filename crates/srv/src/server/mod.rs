@@ -179,6 +179,7 @@ pub(crate) mod browser_terminal_line;
 pub(crate) mod browser_uploads;
 pub(crate) mod host_http;
 pub(crate) mod external_host;
+pub(crate) mod host_control;
 pub(crate) mod operator_proof;
 pub(crate) mod screenshot_redact;
 pub(crate) mod ui_handlers;
