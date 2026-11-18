@@ -33,6 +33,15 @@ pub(crate) fn validate_vendor_base_url(provider_id: &str, base_url: &str) -> Res
 /// The lock moved here from the agent's bundle
 /// (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). An empty stored
 /// provider can still be set once.
+/// A definition's volumes list may not name a mount a container may not have (a container runtime's socket or a folder
+/// holding one): saved with one, it is refused with the reason a start would give.
+pub(crate) fn check_volumes(container_volumes: &str) -> Result<(), String> {
+    match crate::backend::container::runtime_socket::refused_in_json(container_volumes) {
+        Some(path) => Err(crate::backend::container::ContainerError::VolumeRefused { path }.user_message()),
+        None => Ok(()),
+    }
+}
+
 pub(crate) fn check_provider_unchanged(agent_id: &str, existing: &str, incoming: &str) -> Result<(), String> {
     if existing.is_empty() || existing == incoming {
         return Ok(());
@@ -208,6 +217,23 @@ mod agent_define_core_vendor_tests {
 
     fn cmd(value: serde_json::Value) -> CommandAgentDefineData {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_definition_is_not_saved_with_a_container_runtime_socket_in_its_volumes() {
+        let state = test_state();
+        let refused = agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "socket-agent",
+            "provider": "claude",
+            "container_volumes": r#"["/var/run/docker.sock:/var/run/docker.sock"]"#,
+        }))).await.unwrap_err();
+        assert!(refused.contains("/var/run/docker.sock") && refused.contains("remove it from the agent's volumes"), "{refused}");
+        assert!(state.mstore.agent_def_list().unwrap().iter().all(|d| d.name != "socket-agent"), "nothing was saved");
+        agent_define_core(state.mstore.clone(), state.broker.clone(), cmd(json!({
+            "name": "plain-volume-agent",
+            "provider": "claude",
+            "container_volumes": r#"["data:/data"]"#,
+        }))).await.unwrap();
     }
 
     #[tokio::test]
@@ -399,9 +425,8 @@ pub(crate) async fn agent_define_core(
     broker: Arc<crate::backend::mps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
-    if cmd.name.trim().is_empty() {
-        return Err("agent.define: name is required".to_string());
-    }
+    check_volumes(&cmd.container_volumes).map_err(|e| format!("agent.define: {e}"))?;
+    if cmd.name.trim().is_empty() { return Err("agent.define: name is required".to_string()); }
 
     // Validate if_exists early so a typo is caught even for new definitions,
     // not only when a matching definition already exists.

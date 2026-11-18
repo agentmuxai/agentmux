@@ -38,6 +38,7 @@ mod image_tools;
 mod agent_caps;
 pub mod gateway_fwd;
 pub mod key_route;
+pub mod runtime_socket;
 pub mod listener;
 pub mod routes;
 pub mod runtime;
@@ -338,8 +339,8 @@ pub enum ContainerError {
     /// The provider CLI could not be installed in the container.
     #[error("could not install {command} in the container: {detail}")]
     CliInstall { command: String, detail: String },
-    /// A `container_volumes` entry whose source is the host's CLI session folder.
-    #[error("the volume source {path} is a host folder the container may not mount")]
+    /// A `container_volumes` entry whose source is a CLI session folder or a container runtime's socket or folder.
+    #[error("the volume source {path} is one a container may not mount")]
     VolumeRefused { path: String },
     /// The macOS Keychain login couldn't be given to the container (plain reason); raised before the image is pulled.
     #[error("no login for the container: {0}")]
@@ -380,7 +381,7 @@ impl ContainerError {
             ),
             Self::KeyRoute(reason) => reason.clone(),
             Self::VolumeRefused { path } => format!(
-                "This agent's volumes list a host folder a container may not mount ({path}): remove it from the agent's volumes."
+                "This agent's volumes list {path}, which a container may not mount (a container runtime's socket or pipe or a folder holding one, or a folder the CLI keeps its sessions in): remove it from the agent's volumes. An agent that needs to run containers has to run on this machine, not in a container."
             ),
         }
     }
@@ -534,7 +535,7 @@ impl ContainerManager {
         observe: StartObserver<'_>,
     ) -> Result<(), ContainerError> {
         // Before the container is reused or made: an existing one is refused as well.
-        if let Some(path) = crate::backend::cli_messaging::refused_volume_source(volumes.iter().filter_map(|v| parse_volume_spec(v)).map(|(s, _, _)| s)) {
+        if let Some(path) = runtime_socket::refused_mount(volumes, spec.workspace_host_dir.as_deref()) {
             return Err(ContainerError::VolumeRefused { path });
         }
         // Always query Docker — do not rely on an in-memory cache. The container
