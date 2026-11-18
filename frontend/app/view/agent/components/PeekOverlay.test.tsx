@@ -252,6 +252,20 @@ describe("PeekOverlay", () => {
                 }
             });
 
+            it("prefers the pointer the document sees now over the row's own older move", () => {
+                vi.useFakeTimers();
+                try {
+                    setup({ panelHeight: 40, mouseY: 205 }); // the row heard a move at 205
+                    expect(topOf()).toBe(205 - 12 - 40);
+                    // a wheel notch scrolls the row back under the pointer, now at 222: no move on the row
+                    document.dispatchEvent(new WheelEvent("wheel", { clientX: 300, clientY: 222 }));
+                    (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)();
+                    expect(topOf()).toBe(222 - 12 - 40);
+                } finally {
+                    vi.useRealTimers();
+                }
+            });
+
             it("counts a pointer a fraction of a pixel past the row's edge as on the row, as the browser's hit test does", () => {
                 vi.useFakeTimers();
                 try {

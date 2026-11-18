@@ -46,9 +46,10 @@ export function createPeekPlacement(s: PeekState, m: PeekMeasure) {
         if (s.pinnedOffsetY != null) {
             vt = computePeekVertical({ ...placeAt, mouseY: rect.top + s.pinnedOffsetY, flushToRow: true });
         } else {
-            // A row that scrolled under a still pointer (a wheel notch) never heard it move: the app's last
-            // known pointer position stands in, when it is over this row.
-            const mouseY = s.lastMouseY ?? pointerYWithin(rect.top, rect.bottom);
+            // Where the pointer is now: the app's last known position, when it is over this row. The row's own
+            // last move can be older (a row that heard the pointer once, then a wheel notch scrolled it back under
+            // the still pointer), so it is the fallback, for a pointer that is off the row (crossing to the panel).
+            const mouseY = pointerYWithin(rect.top, rect.bottom) ?? s.lastMouseY;
             vt = computePeekVertical({ ...placeAt, mouseY });
             // Enterable: pin it, and keep its near edge on the row so the way to
             // it does not cross another row. Decided on the unpinned placement
