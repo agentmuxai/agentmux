@@ -31,6 +31,7 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     cwd: "",
     replaces: false,
     signin: false,
+    share: false,
     account: false,
     change: false,
     requested_ms: 1,

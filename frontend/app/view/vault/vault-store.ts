@@ -322,6 +322,27 @@ export const deleteVault = (id: string) => call<unknown>("vault_delete", { id })
 /** Puts an entry in another Vault. Only the person does this: a move can open a value to more agents. */
 export const moveEntry = (id: string, vaultId: string) => call<unknown>("move_entry", { id, vault_id: vaultId });
 
+/** One share of a login, as the person reads it: `agent` is the agent's permanent uid, or `*` for every agent. */
+export interface LoginShare {
+    agent: string;
+    name: string;
+    uses: number;
+    last_used_ms: number;
+}
+
+/** An agent a login could be shared with. */
+export interface ShareableAgent {
+    uid: string;
+    name: string;
+}
+
+/** Who a login is shared with, and the agents it could still be shared with. */
+export const loadShares = (id: string) => call<{ shares: LoginShare[]; agents: ShareableAgent[] }>("share_list", { id });
+/** Shares a login with an agent (its uid), or `*` for every agent. Only the person does this. */
+export const shareLogin = (id: string, agent: string) => call<{ changed: boolean }>("share_add", { id, agent });
+/** Stops sharing a login with an agent: the agent's own "Always" for it ends with the share. */
+export const unshareLogin = (id: string, agent: string) => call<{ changed: boolean }>("share_remove", { id, agent });
+
 /** What a check of an entry's machine copy found: `same`, `different` or `could not read` with why. No value. */
 export interface SourceChecked {
     id: string;

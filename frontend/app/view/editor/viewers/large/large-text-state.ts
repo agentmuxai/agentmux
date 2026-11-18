@@ -17,6 +17,7 @@ import type { FileProbe } from "../viewer-choice";
 import { rangeReaderOf } from "../hex/hex-chunks";
 import { LineSource, type LineText } from "./line-source";
 import { createLargeFind } from "./large-find-state";
+import { hitOrdinal } from "./large-find";
 import { createLineScroll } from "./line-scroll";
 
 export interface LargeTextProps {
@@ -116,9 +117,13 @@ function createLineFeed(props: LargeTextProps) {
     return { source, total, loaded, error, want, lineAt, retry, lineOf };
 }
 
-/** The match marked in the drawn line `line` (1-based), null while that line is not drawn: not another line's match. */
+/**
+ * The match to show in the drawn line `line` (1-based): the current one, else the first marked; null while that line
+ * is not drawn (not another line's match).
+ */
 export function hitInLine(grid: HTMLElement | undefined, line: number): Element | null {
-    return grid?.querySelector(`.large-text-line[data-line="${line}"] .large-text-hit`) ?? null;
+    const row = grid?.querySelector(`.large-text-line[data-line="${line}"]`);
+    return row?.querySelector(".large-text-hit-current") ?? row?.querySelector(".large-text-hit") ?? null;
 }
 
 /** Scroll `grid` sideways, as little as the find needs, so that `hit` (a match in a line) shows in the middle. */
@@ -160,6 +165,7 @@ export function keyTarget(key: string, mod: boolean, at: { first: number; fits: 
  * changes, and a frame at a time for a short while after `want`.
  */
 function createSidewaysReveal(grid: () => HTMLElement | undefined, mark: Accessor<number | null>, watch: () => unknown) {
+    // `watch` includes which match is current, so a Next within one line, which changes nothing else, reveals it.
     let wanted = 0; // the line (1-based) to show the match of; 0 for none
     const tryReveal = (): boolean => {
         const hit = wanted && wanted === untrack(mark) ? hitInLine(grid(), wanted) : null;
@@ -181,6 +187,43 @@ function createSidewaysReveal(grid: () => HTMLElement | undefined, mark: Accesso
             wanted = line;
         },
         poll,
+    };
+}
+
+/**
+ * The match on show among those a line holds. A find hands over where in the file the match starts; this works out how
+ * far into its line that is, so the line's own matches can tell which one it is (`at`) and the reveal go to that one.
+ */
+function createCurrentHit(feed: ReturnType<typeof createLineFeed>, needle: () => string, encoding: () => string | undefined) {
+    /** The match on show: its line (1-based) and how many bytes into that line it starts. */
+    const [current, setCurrent] = createSignal<{ line: number; byte: number } | null>(null);
+    let newest = 0; // the newest find; an older one still working out its place gives up
+    return {
+        current,
+        /** Make the match at byte `offset` of the file, in `line` (1-based), the current one, then run `then`. */
+        place: async (line: number, offset: number, then: () => void): Promise<void> => {
+            const mine = ++newest;
+            let byte = -1;
+            try {
+                byte = offset - ((await untrack(feed.source)?.startOf(line - 1)) ?? offset);
+            } catch {
+                // No place in the line: its first match is shown.
+            }
+            if (mine !== newest) return;
+            setCurrent(byte >= 0 ? { line, byte } : null);
+            then();
+        },
+        /** Nothing is on show. */
+        clear: () => {
+            newest++;
+            setCurrent(null);
+        },
+        /** Which match of drawn line `n` (0-based) is the current one (0 for the first); -1 when it is another line's or not drawn. */
+        at: (n: number): number => {
+            const c = current();
+            const text = c && c.line === n + 1 ? feed.lineAt(n)?.text : undefined;
+            return c && text != null ? hitOrdinal(text, needle(), c.byte, encoding()) : -1;
+        },
     };
 }
 
@@ -215,6 +258,7 @@ export function createLargeText(props: LargeTextProps) {
             scroll.focus();
         }
     };
+    const hit = createCurrentHit(feed, () => find.needle(), () => props.probe?.text?.encoding);
     const find = createLargeFind({
         path: () => props.path,
         size: () => props.probe?.size ?? 0,
@@ -222,18 +266,21 @@ export function createLargeText(props: LargeTextProps) {
         revision: () => props.revision,
         topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
         lineOf: feed.lineOf,
-        show: (line) => {
-            reveal.want(line);
-            goTo(line);
-            reveal.poll();
-        },
+        // Mark the line and bring its current match, not only its first, into view.
+        show: (line, offset) =>
+            void hit.place(line, offset, () => {
+                reveal.want(line);
+                goTo(line);
+                reveal.poll();
+            }),
         unmark: () => {
+            hit.clear();
             reveal.want(0);
             setMark(null);
         },
         focusGrid: scroll.focus,
     });
-    reveal = createSidewaysReveal(() => gridEl, mark, () => [feed.loaded(), find.needle(), scroll.first()]);
+    reveal = createSidewaysReveal(() => gridEl, mark, () => [feed.loaded(), find.needle(), scroll.first(), hit.current()]);
     const onKeyDown = (e: KeyboardEvent): void => {
         if (e.altKey) return;
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -268,6 +315,7 @@ export function createLargeText(props: LargeTextProps) {
         },
         lines,
         mark,
+        currentHit: hit.at,
         badLine,
         goTo,
         goToTyped,

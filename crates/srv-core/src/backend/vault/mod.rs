@@ -500,22 +500,39 @@ pub struct Generated {
 }
 
 /// Creates an entry whose main value the Vault makes, for `actor` (the agent that
-/// asked). The value goes from the generator into the sealed row and nowhere else.
+/// asked). The value goes from the generator into the sealed row and nowhere else. A login with a site is made for no
+/// browser profile ([`generate_entry_in`] says which).
 pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Result<Generated, String> {
+    generate_entry_in(store, req, actor, None)
+}
+
+/// [`generate_entry`] for an agent whose own browser profile is `own_profile` (`profile:<id>`). A login it makes with
+/// a site belongs to that profile, and goes in the Vault the profile keeps its sign-ins in when the agent may use it:
+/// never Personal's or another profile's, which are the person's. The site and the user name are the agent's to give; where
+/// the sign-in is offered (a realm, a proxy, a profile) is the person's.
+pub fn generate_entry_in(store: &Store, req: GenerateRequest, actor: &str, own_profile: Option<&str>) -> Result<Generated, String> {
     let reason = history::require_reason(req.reason.as_deref().filter(|r| !r.trim().is_empty()).or(Some(req.why.as_str())))?;
     let Some((kind, part)) = GENERATED_KINDS.iter().find(|(k, _)| *k == req.kind) else {
         let names: Vec<&str> = GENERATED_KINDS.iter().map(|(k, _)| *k).collect();
         return Err(format!("generate makes {} entries, not {:?}: an ID number or a card is the person's, so ask for it with request", names.join(", "), req.kind));
     };
-    if req.fields.contains_key(shares::SHARED) {
-        return Err(inspect::person_only_refusal(shares::SHARED));
+    if let Some(name) = [shares::SHARED, signins::REALM, signins::PROXY, signins::PROFILE].into_iter().find(|f| req.fields.contains_key(*f)) {
+        return Err(inspect::person_only_refusal(name));
     }
+    let signin_profile = match (*kind == "login" && req.fields.get(signins::SITE).is_some_and(|s| !s.trim().is_empty()), own_profile) {
+        (false, _) => None,
+        (true, Some(profile)) => Some(profile.to_string()),
+        (true, None) => return Err("a login for a site is made for your own browser profile, and this call doesn't name one: sign in to AgentMux as the agent, or leave the site out".into()),
+    };
     let rules = generate::rules(&req.rules)?;
     let value = generate::generate(&rules)?;
     let mut parts = Parts::default();
     parts.0.insert(part.to_string(), value.to_string());
     let target = generate::describe(&rules);
     let mut fields = req.fields;
+    if let Some(profile) = &signin_profile {
+        fields.insert(signins::PROFILE.to_string(), profile.clone());
+    }
     if let Some(date) = req.expires.filter(|d| !d.trim().is_empty()) {
         fields.insert(expiry::FIELD.to_string(), date);
     }
@@ -523,7 +540,18 @@ pub fn generate_entry(store: &Store, req: GenerateRequest, actor: &str) -> Resul
     let label = entry.label.trim().to_string();
     let vault_id = match req.vault.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         Some(which) => vaults::resolve(store, which, Some(Some(actor)))?.id,
-        None => vaults::default_for(store, Some(actor))?,
+        None => match &signin_profile {
+            // Offered only from the Vault its profile keeps its sign-ins in.
+            Some(profile) => {
+                let kept = signins::vault_for(store, profile)?;
+                if vaults::entry_row_usable(store, &kept, Some(actor))? {
+                    kept
+                } else {
+                    vaults::default_for(store, Some(actor))?
+                }
+            }
+            None => vaults::default_for(store, Some(actor))?,
+        },
     };
     let id = insert_in_why(store, entry, actor, "generated", &target, &vault_id, &reason)?;
     Ok(Generated { id, label, kind: kind.to_string(), made: generate::describe(&rules) })
@@ -563,7 +591,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     if replaced {
         versions::prune(store);
     }
-    let was = row.sealed.clone();
+    let (was, was_fields) = (row.sealed.clone(), row.fields.clone());
     for (k, v) in std::mem::take(&mut change.parts.0) {
         if let Some(mut old) = parts.0.insert(k, v) {
             zeroize::Zeroize::zeroize(&mut old);
@@ -586,7 +614,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     };
     // Only over the value read above, and keeping the one it replaces in the same
     // transaction: a capture or restore that landed meanwhile is never lost.
-    if !store.vault_update_kept(&changed, &was, kept.as_ref()).map_err(|e| e.to_string())? {
+    if !store.vault_update_kept(&changed, &was, &was_fields, kept.as_ref()).map_err(|e| e.to_string())? {
         return Err(format!("{label} changed while you were editing it, so nothing was saved: open it again"));
     }
     if let Err(e) = keep_one_default(store, kind.name, &changed.vault_id, &changed.id, &fields) {
