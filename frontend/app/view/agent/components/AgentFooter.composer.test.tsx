@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const hub = vi.hoisted(() => ({
     listening: false,
     target: null as string | null,
-    container: false,
     attachmentsEnabled: undefined as boolean | undefined,
     copy: vi.fn(),
     menu: vi.fn(),
@@ -29,7 +28,7 @@ vi.mock("@/app/store/global", async (orig) => {
 });
 vi.mock("@/app/store/contextmenu", () => ({ showTextInputContextMenu: (...a: unknown[]) => hub.menu(...a) }));
 vi.mock("@/app/drag/file-drop-actions", () => ({ copyIntoWorkdir: (...a: unknown[]) => hub.copy(...a) }));
-vi.mock("../hooks/useAgentDropAttach", () => ({ isContainerPane: () => hub.container, spliceComposerTokens: () => {} }));
+vi.mock("../hooks/useAgentDropAttach", () => ({ spliceComposerTokens: () => {} }));
 vi.mock("@/app/store/focusManager", () => ({ focusManager: { claimFocusOnMount: (...a: unknown[]) => hub.claim(...a), refocusNode: () => {} } }));
 
 import { AgentFooter } from "./AgentFooter";
@@ -41,7 +40,6 @@ afterEach(() => cleanup());
 beforeEach(() => {
     hub.listening = false;
     hub.target = null;
-    hub.container = false;
     hub.attachmentsEnabled = undefined;
     hub.copy.mockReset();
     hub.copy.mockResolvedValue([]);
@@ -174,22 +172,16 @@ describe("paste from the right-click menu", () => {
         expect(hub.copy).not.toHaveBeenCalled();
     });
 
-    it("copies them into the working folder instead in a container pane or with attachments off", () => {
-        hub.container = true;
+    it("copies them into the working folder instead with attachments off", () => {
         const { ta, blockId } = setup();
         const ingest = vi.spyOn(getAttachmentDraft(blockId), "ingestPaths").mockResolvedValue(undefined as never);
-        openMenu(ta).options!.onPasteAttachments(["/tmp/a.png"]);
+        hub.attachmentsEnabled = false;
+        openMenu(ta).options!.onPasteAttachments(["/tmp/b.png"]);
         expect(hub.copy).toHaveBeenCalledTimes(1);
         expect(hub.copy.mock.calls[0][0]).toBe(blockId);
-        expect(hub.copy.mock.calls[0][1]).toEqual({ paths: ["/tmp/a.png"] });
+        expect(hub.copy.mock.calls[0][1]).toEqual({ paths: ["/tmp/b.png"] });
         expect(hub.copy.mock.calls[0][2]).toMatchObject({ paneKind: "agent pane" });
         expect(ingest).not.toHaveBeenCalled();
-
-        hub.container = false;
-        hub.attachmentsEnabled = false;
-        hub.copy.mockClear();
-        openMenu(ta).options!.onPasteAttachments(["/tmp/b.png"]);
-        expect(hub.copy.mock.calls[0][1]).toEqual({ paths: ["/tmp/b.png"] });
     });
 
     it("offers no paste option to a composer without a pane to attach to", () => {

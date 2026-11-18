@@ -9,8 +9,8 @@
  *
  * Files go to the composer's attachment tray: the backend copies and
  * processes them, and they're sent with the next message
- * (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md). Container agents can't
- * see the attachment store, and attachments can be turned off: then each file
+ * (SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md). A container pane's drop goes there too: srv copies
+ * what is sent into the pane's workspace folder. Attachments can be turned off: then each file
  * is copied into the agent's working folder and an `@filename` token is
  * spliced into the composer (SPEC_PANE_FILE_DROP_2026_05_30.md §3.1, §3.6).
  * Without host paths (virtual files, a host without native file drop) the
@@ -20,9 +20,9 @@
 import { onCleanup, onMount } from "solid-js";
 import { copyIntoWorkdir, fileCount, notifyDrop, paneWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import { registerFileDropTarget, type FileDropHook } from "@/app/drag/file-drop";
-import { getSettingsKeyAtom, MOS } from "@/app/store/global";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { getAttachmentDraft, type AttachmentDraft } from "../attachments/attachment-draft";
-import { isContainerAgentMode } from "@/util/runtime-kind";
+
 
 interface Opts {
     blockId: string;
@@ -62,12 +62,6 @@ export function spliceComposerTokens(root: HTMLElement, tokens: string[]): boole
     return true;
 }
 
-/** A container agent's pane: its agent sees only the bind-mounted working folder. */
-export function isContainerPane(blockId: string): boolean {
-    const block = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId));
-    return isContainerAgentMode(block?.meta?.["agentMode"]);
-}
-
 /**
  * What the drop overlay says over the composer when files go to the tray: how many are coming, and how many
  * of them the message has room for. A message carries at most `maxFiles` attachments; the rest of a drop
@@ -103,8 +97,7 @@ export function useAgentDropAttach(opts: Opts): void {
         const v = concurrencyAtom();
         return typeof v === "number" && v > 0 ? v : undefined;
     };
-    // Container panes copy into the working folder (bind-mounted at /workspace).
-    const toTray = () => (attachmentsAtom() ?? true) !== false && !isContainerPane(opts.blockId);
+    const toTray = () => (attachmentsAtom() ?? true) !== false;
 
     const copy = (source: CopySource) =>
         copyIntoWorkdir(opts.blockId, source, {

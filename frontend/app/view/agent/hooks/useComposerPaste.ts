@@ -3,15 +3,15 @@
 
 /**
  * Files into the agent composer: Ctrl/Cmd+V with files, and Paste from the right-click menu. They go to the
- * attachment tray, or, in a container pane or with `attachments:enabled` off, into the working folder as
- * `@name` mentions (the same copy a drop makes).
+ * attachment tray (a container pane's too: srv copies what is sent into the pane's workspace folder), or, with
+ * `attachments:enabled` off, into the working folder as `@name` mentions (the same copy a drop makes).
  */
 
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import { getSettingsKeyAtom, pushNotification } from "@/app/store/global";
 import type { AttachmentDraft } from "../attachments/attachment-draft";
 import { rememberPastedCopies } from "./pasted-copies";
-import { isContainerPane, spliceComposerTokens } from "./useAgentDropAttach";
+import { spliceComposerTokens } from "./useAgentDropAttach";
 
 export function useComposerPaste(opts: {
     blockId: string | undefined;
@@ -40,11 +40,10 @@ export function useComposerPaste(opts: {
             expiration: Date.now() + 8000,
         });
     };
-    const inContainer = () => !!blockId && isContainerPane(blockId);
     // `attachments:enabled` off means files go to the working folder instead
     // of the tray, for a paste exactly as for a drop (useAgentDropAttach).
     const attachmentsSetting = getSettingsKeyAtom("attachments:enabled");
-    const pasteToWorkdir = () => inContainer() || attachmentsSetting() === false;
+    const pasteToWorkdir = () => attachmentsSetting() === false;
     // The same copy a drop makes, notices and @mentions included. Paste
     // ignores `dnd:*`.
     const pasteIntoWorkdir = async (source: CopySource) => {
