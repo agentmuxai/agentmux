@@ -144,8 +144,18 @@ pub(crate) async fn handle_shutdown(State(state): State<AppState>, Json(req): Js
         return refused(r);
     }
     tracing::info!(deadline_seconds = req.deadline_seconds, "the external host asked for a graceful shutdown");
-    match tokio::time::timeout(Duration::from_secs(req.deadline_seconds), crate::sagas::agent_teardown::app_exit(&state)).await {
-        Ok(closed) => Json(json!({ "ok": true, "done": true, "closed": closed })).into_response(),
+    // The teardown runs in a task of its own, so a deadline that passes first leaves it running (dropping the future
+    // would cancel it at its next await and lose the state it has yet to record): only the wait for it is cut short.
+    let mut teardown = tokio::spawn({
+        let state = state.clone();
+        async move { crate::sagas::agent_teardown::app_exit(&state).await }
+    });
+    match tokio::time::timeout(Duration::from_secs(req.deadline_seconds), &mut teardown).await {
+        Ok(Ok(closed)) => Json(json!({ "ok": true, "done": true, "closed": closed })).into_response(),
+        Ok(Err(e)) => {
+            tracing::warn!("the graceful shutdown task ended abnormally: {e}");
+            refused((StatusCode::INTERNAL_SERVER_ERROR, "the shutdown did not complete"))
+        }
         Err(_) => Json(json!({ "ok": true, "done": false })).into_response(),
     }
 }
@@ -257,11 +267,6 @@ pub(crate) const CANCEL_NOTE: &str = "The workspace's stop was cancelled; it kee
 
 /// The notice srv holds, and a counter that tells a reminder task whether it is still the current one.
 static HELD: Mutex<(Option<Stop>, u64)> = Mutex::new((None, 0));
-
-/// The stop srv holds now, for what tells the agents.
-pub(crate) fn held_stop() -> Option<Stop> {
-    HELD.lock().unwrap_or_else(|e| e.into_inner()).0
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
