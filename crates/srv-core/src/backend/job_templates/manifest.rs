@@ -32,7 +32,7 @@ const ACTION_KINDS: &[&str] = &["message", "task", "spawn"];
 /// Outputs that stay inside AgentMux or with the job's owner.
 const INSIDE_OUTPUTS: &[&str] = &["report_file", "kanban_task", "message:owner"];
 /// Outputs that write outside: to a repository, another agent, or a deployment.
-pub const OUTSIDE_OUTPUTS: &[&str] = &["pull_request", "comment", "message:others", "deploy"];
+pub const OUTSIDE_OUTPUTS: &[&str] = &["pull_request", "comment", "message:others", "deploy", "ci_rerun"];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]

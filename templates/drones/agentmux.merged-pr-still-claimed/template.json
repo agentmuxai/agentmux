@@ -1,0 +1,65 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.merged-pr-still-claimed",
+  "name": "A merged pull request whose task is still claimed",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "Every 10 minutes it looks at the repository's recently closed pull requests. Thirty minutes after one was merged, if a Kanban task with that pull request's link is still claimed, the steward gets one line naming the task and who holds it. It catches an agent left on work that is already done.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "title": "Repository",
+        "description": "The GitHub repository to watch, as owner/name."
+      },
+      "credential": {
+        "type": "string",
+        "title": "Vault entry",
+        "description": "The id of the Vault entry that holds a GitHub token that can read the repository. The first call asks you once; the token goes only to api.github.com.",
+        "default": "api-key-github"
+      },
+      "steward": {
+        "type": "string",
+        "title": "Who to tell",
+        "description": "The id of the agent that gets the line about the task that is still claimed."
+      }
+    },
+    "required": [
+      "repo",
+      "steward"
+    ]
+  },
+  "trigger": {
+    "kind": "event",
+    "source": "poll",
+    "filter": {
+      "query": "api",
+      "every_minutes": 10,
+      "url": "https://api.github.com/repos/{{param.repo}}/pulls?state=closed&sort=updated&direction=desc&per_page=30",
+      "auth": {
+        "vault": "{{param.credential}}",
+        "as": "bearer"
+      },
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "AgentMux-Drone"
+      },
+      "id": "number"
+    },
+    "delay": 30,
+    "max_per_hour": 12
+  },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "skip",
+    "caps": {
+      "run_usd": 1
+    }
+  },
+  "outputs": [
+    "message:owner"
+  ],
+  "secrets": []
+}

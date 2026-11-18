@@ -77,7 +77,15 @@ macro_rules! builtin_drone {
 }
 
 /// The Drone templates AgentMux ships: graphs that run on the blocks this build has, each easy to build off.
-pub static DRONE_BUILTINS: &[Builtin] = &[builtin_drone!("scheduled-report"), builtin_drone!("check-and-file-task"), builtin_drone!("two-agent-handoff"), builtin_drone!("after-upgrade-check")];
+pub static DRONE_BUILTINS: &[Builtin] = &[
+    builtin_drone!("scheduled-report"),
+    builtin_drone!("check-and-file-task"),
+    builtin_drone!("two-agent-handoff"),
+    builtin_drone!("after-upgrade-check"),
+    builtin_drone!("triage-failed-nightly"),
+    builtin_drone!("rerun-flaky-job"),
+    builtin_drone!("merged-pr-still-claimed"),
+];
 
 /// Every template AgentMux ships: the job templates, then the Drone ones.
 fn all_builtins() -> &'static [Builtin] {

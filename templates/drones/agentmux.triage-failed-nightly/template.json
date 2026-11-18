@@ -1,0 +1,72 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.triage-failed-nightly",
+  "name": "Triage a failed nightly",
+  "version": "1.0.0",
+  "kind": "drone",
+  "description": "Every 15 minutes it looks at the repository's scheduled workflow runs. For each new failed run it reads the failed job's log and has an agent name the cause, the suspect commit and how sure it is. Unless it is unsure, a Kanban task goes to the triager (one task for the same workflow, with a line for each red night) and the leader gets one line. Polling spends no agent tokens: the agent runs only on a failure.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": {
+        "type": "string",
+        "title": "Repository",
+        "description": "The GitHub repository to watch, as owner/name."
+      },
+      "credential": {
+        "type": "string",
+        "title": "Vault entry",
+        "description": "The id of the Vault entry that holds a GitHub token that can read the repository. The first call asks you once; the token goes only to api.github.com.",
+        "default": "api-key-github"
+      },
+      "triager": {
+        "type": "string",
+        "title": "Who gets the task",
+        "description": "The id of the agent that gets the triage task. Leave it empty to put the task in the backlog.",
+        "default": ""
+      },
+      "leader": {
+        "type": "string",
+        "title": "Who to tell",
+        "description": "The id of the agent that gets a one-line message for each new failure."
+      }
+    },
+    "required": [
+      "repo",
+      "leader"
+    ]
+  },
+  "trigger": {
+    "kind": "event",
+    "source": "poll",
+    "filter": {
+      "query": "api",
+      "every_minutes": 15,
+      "url": "https://api.github.com/repos/{{param.repo}}/actions/runs?event=schedule&status=failure&per_page=10",
+      "auth": {
+        "vault": "{{param.credential}}",
+        "as": "bearer"
+      },
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "AgentMux-Drone"
+      },
+      "items": "workflow_runs",
+      "id": "id"
+    },
+    "max_per_hour": 6
+  },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "skip",
+    "caps": {
+      "run_usd": 1
+    }
+  },
+  "outputs": [
+    "message:owner",
+    "kanban_task"
+  ],
+  "secrets": []
+}
