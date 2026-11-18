@@ -108,7 +108,7 @@ fn only_the_hosts_signature_gives_a_connection_an_id() {
 fn a_connection_the_host_proxied_is_attested_for_the_person() {
     let h = host();
     let (engine, nonce) = proxied(&h, CONN);
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let until = now + 300;
     let person = h.attest(&attest_req(&signer(), CONN, &nonce, PERSON, until), now).expect("attested");
     assert_eq!(person, PERSON);
@@ -129,7 +129,7 @@ fn a_connection_opened_on_loopback_is_never_attested() {
     let nonce = super::super::operator_proof::issue(&engine);
     // Even a correctly signed attestation, naming an id the host really issued to someone else, is refused.
     let (_person_engine, _their_nonce) = proxied(&h, CONN);
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     assert_eq!(status(h.attest(&attest_req(&signer(), CONN, &nonce, PERSON, now + 300), now)), 403);
     assert!(!engine.rpc_context().operator_proven_now());
     // The lookup the host makes before it signs says the connection has no id, so it never signs.
@@ -141,7 +141,7 @@ fn a_page_tricked_into_posting_another_connections_nonce_does_not_attest_it() {
     let h = host();
     let (mine, my_nonce) = proxied(&h, CONN);
     let (theirs, their_nonce) = proxied(&h, OTHER_CONN);
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     // The host signed for my connection but with the other connection's nonce: the nonce's connection is not CONN.
     assert_eq!(status(h.attest(&attest_req(&signer(), CONN, &their_nonce, PERSON, now + 300), now)), 403);
     assert!(!theirs.rpc_context().operator_proven_now());
@@ -154,7 +154,7 @@ fn a_page_tricked_into_posting_another_connections_nonce_does_not_attest_it() {
 fn a_nonce_works_once() {
     let h = host();
     let (_engine, nonce) = proxied(&h, CONN);
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let req = attest_req(&signer(), CONN, &nonce, PERSON, now + 300);
     assert!(h.attest(&req, now).is_ok());
     assert_eq!(status(h.attest(&req, now)), 409, "the same signed message again");
@@ -164,7 +164,7 @@ fn a_nonce_works_once() {
 fn a_bad_attestation_is_refused_and_leaves_the_nonce_for_the_real_one() {
     let h = host();
     let (engine, nonce) = proxied(&h, CONN);
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let stranger = SigningKey::from_bytes(&[2u8; 32]);
     assert_eq!(status(h.attest(&attest_req(&stranger, CONN, &nonce, PERSON, now + 300), now)), 403, "another key");
     let mut other_workspace = attest_req(&signer(), CONN, &nonce, PERSON, now + 300);
@@ -187,7 +187,7 @@ fn a_bad_attestation_is_refused_and_leaves_the_nonce_for_the_real_one() {
 #[test]
 fn the_lease_is_short_and_lapses() {
     let h = host();
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let (_e1, n1) = proxied(&h, CONN);
     assert_eq!(status(h.attest(&attest_req(&signer(), CONN, &n1, PERSON, now), now)), 403, "already over");
     let (_e2, n2) = proxied(&h, OTHER_CONN);
@@ -196,20 +196,20 @@ fn the_lease_is_short_and_lapses() {
     let lapsed = RpcContext {
         operator_proven: true,
         operator_person: Some(PERSON.to_string()),
-        operator_proof_until: Some(unix_now().saturating_sub(1)),
+        operator_proof_until: Some(agentmux_common::time::now_secs_u64().saturating_sub(1)),
         ..Default::default()
     };
     assert!(!lapsed.operator_proven_now());
     assert!(lapsed.operator_only("probe").is_err());
     assert_eq!(actor_of(&lapsed), Actor::Unproven);
-    let live = RpcContext { operator_proof_until: Some(unix_now() + 60), ..lapsed };
+    let live = RpcContext { operator_proof_until: Some(agentmux_common::time::now_secs_u64() + 60), ..lapsed };
     assert!(live.operator_only("probe").is_ok());
 }
 
 #[test]
 fn a_connection_that_registers_as_an_agent_is_not_attested_and_loses_the_proof() {
     let h = host();
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let (engine, nonce) = proxied(&h, CONN);
     engine.set_rpc_context(RpcContext { agent_id: "worker".to_string(), ..Default::default() });
     assert_eq!(status(h.attest(&attest_req(&signer(), CONN, &nonce, PERSON, now + 300), now)), 409);
@@ -235,7 +235,7 @@ fn an_id_held_by_an_open_connection_cannot_be_taken() {
 #[test]
 fn a_signed_revocation_ends_the_proof_and_only_a_fresh_one_does() {
     let h = host();
-    let now = unix_now();
+    let now = agentmux_common::time::now_secs_u64();
     let (engine, nonce) = proxied(&h, CONN);
     assert!(h.attest(&attest_req(&signer(), CONN, &nonce, PERSON, now + 300), now).is_ok());
     let revoke = |key: &SigningKey, issued_at: u64| RevokeRequest {
@@ -257,7 +257,7 @@ fn a_signed_revocation_ends_the_proof_and_only_a_fresh_one_does() {
 async fn the_routes_answer_404_when_no_host_is_registered() {
     // This test binary never registers the global host, so a srv started without the flag has no such routes' effect.
     assert!(host_registered_globally().not());
-    let r = handle_attest(Json(attest_req(&signer(), CONN, "00000000-0000-0000-0000-000000000000", PERSON, unix_now() + 60))).await;
+    let r = handle_attest(Json(attest_req(&signer(), CONN, "00000000-0000-0000-0000-000000000000", PERSON, agentmux_common::time::now_secs_u64() + 60))).await;
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
     let r = handle_nonce(Json(NonceRequest { nonce: "00000000-0000-0000-0000-000000000000".to_string() })).await;
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
