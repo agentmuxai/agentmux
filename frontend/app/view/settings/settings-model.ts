@@ -159,6 +159,8 @@ export class SettingsViewModel {
     zoom: () => number;
     /** The board the Kanban section was asked to show (`settings:kanban-board`, a slug), from the cog on a Kanban pane. */
     kanbanBoard: () => string | null;
+    /** Which click of the cog asked (`settings:kanban-ask`): a second click on the same board is a new ask. */
+    kanbanAsk: () => number;
 
     // Search query — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
     // Same plain-createSignal treatment as activeSection (no blockAtom; see
@@ -191,6 +193,10 @@ export class SettingsViewModel {
         }
         this.viewName = () => SETTINGS_SECTION_LABELS[this.activeSection()];
         this.zoom = () => readZoom(block?.meta());
+        this.kanbanAsk = () => {
+            const ask = block?.meta()?.["settings:kanban-ask"];
+            return typeof ask === "number" ? ask : 0;
+        };
         this.kanbanBoard = () => {
             const board = block?.meta()?.["settings:kanban-board"];
             return typeof board === "string" && board ? board : null;

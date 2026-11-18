@@ -205,7 +205,7 @@ export function Notices(props: Part): JSX.Element {
             <Show when={s.refused() ?? s.model.error()}>
                 {(why) => (
                     <Notice tone="danger" onDismiss={s.dismissRefused}>
-                        {why()}
+                        {why().charAt(0).toUpperCase() + why().slice(1)}
                     </Notice>
                 )}
             </Show>

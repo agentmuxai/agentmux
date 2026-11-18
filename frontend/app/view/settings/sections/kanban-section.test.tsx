@@ -9,6 +9,7 @@
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultStages, toStageSet } from "@/app/view/kanban/kanban-stages";
@@ -155,10 +156,10 @@ describe("Settings → Kanban", () => {
         h.actFails = "the stages changed since you read them (now revision 2)";
         fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
         fireEvent.click(apply());
-        await screen.findByText("the stages changed since you read them (now revision 2)");
+        await screen.findByText("The stages changed since you read them (now revision 2)");
         // The board is read again after a refusal; the reason stays on screen when that answer arrives.
         await new Promise((r) => setTimeout(r, 100));
-        expect(screen.getByText("the stages changed since you read them (now revision 2)")).toBeTruthy();
+        expect(screen.getByText("The stages changed since you read them (now revision 2)")).toBeTruthy();
         expect(names()[0]).toBe("Waiting");
         await waitFor(() => expect(apply().disabled).toBe(false));
     });
@@ -187,6 +188,29 @@ describe("Settings → Kanban", () => {
         fireEvent.click(apply());
         await waitFor(() => expect(h.acts).toHaveLength(1));
         expect(h.acts[0].stages.stages.map((s: any) => s.takes)).toContainEqual(["merged"]);
+    });
+
+    it("lets Reset repair a board whose stored stages can't be used, by sending the reset", async () => {
+        h.board = boardOf([info("main", { stages_error: "version 9 is not one this AgentMux reads", stages_rev: 4, stages_default: false })]);
+        render(() => <KanbanSection />);
+        await screen.findByText(/can't be used/);
+        expect(apply().disabled).toBe(true);
+        fireEvent.click(screen.getAllByRole("button", { name: "Reset to default" })[0]);
+        expect(apply().disabled).toBe(false);
+        fireEvent.click(apply());
+        await waitFor(() => expect(h.acts).toHaveLength(1));
+        expect(h.acts[0]).toMatchObject({ action: "board_edit", board: "main", stages_reset: true, stages_rev: 4 });
+    });
+
+    it("goes back to the cog's board on a second ask for it, after another board was picked", async () => {
+        const [ask, setAsk] = createSignal(1);
+        render(() => <KanbanSection model={{ kanbanBoard: () => "main", kanbanAsk: ask } as never} />);
+        await screen.findByDisplayValue("Backlog");
+        const board = () => screen.getByLabelText("Board") as HTMLSelectElement;
+        fireEvent.change(board(), { target: { value: "work" } });
+        await waitFor(() => expect(board().value).toBe("work"));
+        setAsk(2);
+        await waitFor(() => expect(board().value).toBe("main"));
     });
 
     it("says an archived board's stages can't be changed", async () => {

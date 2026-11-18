@@ -32,7 +32,10 @@ export const KANBAN_SETTINGS = {
 };
 
 export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element {
-    const s = createKanbanStagesState(() => props.model?.kanbanBoard() ?? null);
+    const s = createKanbanStagesState(
+        () => props.model?.kanbanBoard() ?? null,
+        () => props.model?.kanbanAsk?.() ?? 0
+    );
     return (
         <div class="settings-section-body kanban-stages" id={`setting-${KANBAN_SETTINGS.stages.id}`}>
             <SectionHeader label={t("settings.kanban.group.stages")} />

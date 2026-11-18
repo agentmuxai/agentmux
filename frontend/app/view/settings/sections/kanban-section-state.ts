@@ -40,10 +40,12 @@ export interface CopyResult {
 
 /** The board whose stages are edited, and what srv says its stages are. `requested`: the board the pane was asked to
  *  show (the cog on a Kanban pane names it), by slug. */
-function useStagedBoard(requested: () => string | null) {
+function useStagedBoard(requested: () => string | null, asked: () => number) {
     const [chosen, setChosen] = createSignal<string | null>(null);
-    // A new ask (the cog on a Kanban pane) wins over a board picked here before it.
-    createEffect(on(requested, (r) => r && setChosen(r), { defer: true }));
+    // A new ask (the cog on a Kanban pane, each click with its own `asked`) wins over a board picked here before it. The
+    // key is a memo, so a change to the pane's meta that isn't an ask leaves the pick alone.
+    const ask = createMemo(() => `${requested() ?? ""}|${asked()}`);
+    createEffect(on(ask, () => requested() && setChosen(requested()), { defer: true }));
     const model = new KanbanModel(() => chosen() ?? requested());
     model.setVisible(true);
     onCleanup(() => model.dispose());
@@ -70,7 +72,8 @@ function useDraft(b: ReturnType<typeof useStagedBoard>, onSwitch: () => void) {
         }, { defer: true })
     );
     const stages = () => draft() ?? b.stored();
-    const dirty = () => draft() !== null && !sameStages(draft() as KanbanStage[], b.stored());
+    // A board whose stored stages can't be used shows the default: applying the default is what repairs it.
+    const dirty = () => draft() !== null && (!sameStages(draft() as KanbanStage[], b.stored()) || !!b.info()?.stages_error);
     const problems = createMemo(() => validateStages(stages()));
     const changedMeanwhile = () => dirty() && (b.info()?.stages_rev ?? 0) !== baseRev();
     const start = () => {
@@ -104,8 +107,8 @@ function stageEdits(edit: (f: (s: readonly KanbanStage[]) => KanbanStage[]) => v
 }
 
 /** `requested`: the board the pane was asked to show (the cog on a Kanban pane names it), by slug. */
-export function createKanbanStagesState(requested: () => string | null) {
-    const b = useStagedBoard(requested);
+export function createKanbanStagesState(requested: () => string | null, asked: () => number = () => 0) {
+    const b = useStagedBoard(requested, asked);
     const { model } = b;
     const [busy, setBusy] = createSignal(false);
     const [copy, setCopy] = createSignal<CopyResult | null>(null);

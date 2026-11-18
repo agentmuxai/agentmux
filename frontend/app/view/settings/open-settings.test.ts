@@ -30,8 +30,8 @@ describe("openSettingsAt", () => {
         await openSettingsAt("kanban", "client-x");
         expect(h.open).toHaveBeenCalledWith(
             "settings",
-            { meta: { view: "settings", "settings:section": "kanban", "settings:kanban-board": "client-x" } },
-            { "settings:section": "kanban", "settings:kanban-board": "client-x" },
+            { meta: { view: "settings", "settings:section": "kanban", "settings:kanban-board": "client-x", "settings:kanban-ask": expect.any(Number) } },
+            { "settings:section": "kanban", "settings:kanban-board": "client-x", "settings:kanban-ask": expect.any(Number) },
         );
     });
 
@@ -40,7 +40,7 @@ describe("openSettingsAt", () => {
         expect(h.open).toHaveBeenCalledWith(
             "settings",
             { meta: { view: "settings", "settings:section": "kanban" } },
-            { "settings:section": "kanban", "settings:kanban-board": null },
+            { "settings:section": "kanban", "settings:kanban-board": null, "settings:kanban-ask": null },
         );
     });
 
