@@ -10,6 +10,7 @@
 @use "./instance-panel";
 @use "./cpu-cores-popover";
 @use "./disk-volumes-popover";
+@use "./gpu-panel";
 @use "./maintenance-section";
 @use "./health-notices";
 @use "./ambient-purposes";
@@ -109,7 +110,10 @@
     &[data-fit="3"],
     &[data-fit="4"] {
         .stat-commit,
-        .stat-separator:has(+ .stat-commit) {
+        .stat-separator:has(+ .stat-commit),
+        // The GPU meter goes with the GFX item (tier 2): the panel is still one click away on the item while it stays.
+        .stat-gpu,
+        .stat-separator:has(+ .stat-gpu) {
             display: none;
         }
 
@@ -123,7 +127,9 @@
     &[data-fit="3"],
     &[data-fit="4"] {
         .stat-watch-disk,
-        .stat-separator:has(+ .stat-watch-disk) {
+        .stat-separator:has(+ .stat-watch-disk),
+        .stat-ui,
+        .stat-separator:has(+ .stat-ui) {
             display: none;
         }
     }
@@ -205,6 +211,10 @@
 
     .stat-gpu {
         min-width: 8ch; // fits "GPU 100%"
+    }
+
+    .stat-ui {
+        min-width: 7ch; // fits "UI 100%"
     }
 
     .stat-mem {

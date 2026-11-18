@@ -375,6 +375,8 @@ import type { GlobalMemoryReachListResult } from "@/types/rpc/GlobalMemoryReachL
 import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
+import type { GpuSampleReq } from "@/types/rpc/GpuSampleReq";
+import type { GpuSampleResult } from "@/types/rpc/GpuSampleResult";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
 import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
 import type { HistoryAgentSessionsReq } from "@/types/rpc/HistoryAgentSessionsReq";
@@ -1694,6 +1696,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<GlobalMemorySection>> {
     return client.rpcCall("globalmemory:sections", data ?? {}, opts);
+  },
+  // command "gpu.sample"
+  GpuSampleCommand(client: RpcClient, data: GpuSampleReq, opts?: RpcOpts): Promise<GpuSampleResult> {
+    return client.rpcCall("gpu.sample", data, opts);
   },
   // command "hidenamedagent"
   HideNamedAgentCommand(

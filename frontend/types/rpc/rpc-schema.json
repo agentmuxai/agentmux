@@ -4215,6 +4215,25 @@
     }
   },
   {
+    "command": "gpu.sample",
+    "request": "agentmux_srv_core::backend::rpc_types::gpu::GpuSampleReq",
+    "requestName": "GpuSampleReq",
+    "requestTs": {
+      "imports": [
+        "GpuSampleReq"
+      ],
+      "name": "GpuSampleReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::gpu::GpuSampleResult",
+    "responseName": "GpuSampleResult",
+    "responseTs": {
+      "imports": [
+        "GpuSampleResult"
+      ],
+      "name": "GpuSampleResult"
+    }
+  },
+  {
     "command": "hidenamedagent",
     "request": "agentmux_srv_core::backend::rpc_types::instance::CommandHideNamedAgentData",
     "requestName": "CommandHideNamedAgentData",

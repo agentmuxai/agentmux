@@ -4,9 +4,13 @@
 // The status bar's system readouts, the views: the GPU, memory, page file, network and disk I/O readouts of a
 // reading from SystemStatsState.ts. (The CPU and Disk buttons, which open the panels, stay in SystemStats.tsx.)
 
+import { t } from "@/app/i18n/i18n";
 import { Show, type JSX } from "solid-js";
-import { cpuColor } from "./cpu-color";
+import { gpuColor } from "./gpu-format";
+import { closeGpuPanel, gpuPanelAnchor, toggleGpuPanel } from "./gpu-panel-state";
+import { GpuPanel } from "./GpuPanel";
 import type { SysStats } from "./SystemStatsState";
+import { sharedUiBusy, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
 
 function formatMemBytes(gb: number): string {
     if (gb >= 1) return `${gb.toFixed(1)}G`;
@@ -38,19 +42,51 @@ function commitColor(used: number, total: number): string {
 
 type Reading = { s: () => SysStats };
 
-/** The GPU usage, with its separator, while there is a GPU reading. */
+/**
+ * The GPU's use, as a meter beside CPU and Mem, with its separator: the busiest adapter's, from srv's one GPU sampler
+ * (`gpu` and `gpu:mem` of the sysinfo event). It is absent while nothing can be read, never 0%. A click opens the
+ * GPU panel; the label turns the warning colour at 90% use or 90% memory.
+ */
 export function GpuReadout(props: Reading): JSX.Element {
     const s = props.s;
+    let ref: HTMLButtonElement | undefined;
+    const open = () => ref != null && gpuPanelAnchor() === ref;
     return (
         <Show when={s().gpu != null}>
             <span class="stat-separator">|</span>
-            <span
-                class="stat-mono stat-gpu"
-                style={{ color: cpuColor(s().gpu!) }}
-                data-tip="GPU usage"
-                aria-label="GPU usage"
+            <button
+                type="button"
+                ref={ref}
+                class="stat-mono stat-gpu stat-gpu-button"
+                style={{ color: gpuColor(s().gpu, s().gpuMem) }}
+                data-tip={s().gpuMem != null ? t("gpuMeter.tip", { mem: Math.round(s().gpuMem!) }) : t("gpuMeter.tipNoMem")}
+                aria-label={t("gpuMeter.aria")}
+                aria-haspopup="dialog"
+                aria-expanded={open()}
+                onClick={() => ref && toggleGpuPanel(ref)}
             >
-                GPU {Math.round(s().gpu!)}%
+                {t("gpuMeter.label")} {Math.round(s().gpu!)}%
+            </button>
+            <Show when={open()}>
+                <GpuPanel anchor={ref} uiBusy={sharedUiBusy()()} onClose={closeGpuPanel} />
+            </Show>
+        </Show>
+    );
+}
+
+/** The page's busy share ("UI n%"), with its separator; absent while this window is in the background. */
+export function UiBusyReadout(): JSX.Element {
+    const busy = sharedUiBusy();
+    return (
+        <Show when={busy() != null}>
+            <span class="stat-separator">|</span>
+            <span
+                class="stat-mono stat-ui"
+                style={{ color: uiBusyColor(busy()!) }}
+                data-tip={t("uiBusy.tip", { warn: UI_BUSY_WARN_PCT })}
+                aria-label={t("uiBusy.aria")}
+            >
+                {t("uiBusy.label")} {busy()}%
             </span>
         </Show>
     );

@@ -251,6 +251,7 @@ describe("operator proof", () => {
             "agent.setSeat",
             "identity.account.move_agents",
             "tower.sample",
+            "gpu.sample",
             "jobs.templates.install",
             "jobs.templates.uninstall",
             "jobs.templates.catalog",

@@ -2,7 +2,7 @@
 
 **Goal:** Add GPU utilization/memory/temperature to the status bar and sysinfo view, plus expose additional system metrics (per-core CPU, disk I/O, temperatures, swap, battery) for the sysinfo pane plots.
 
-**Status:** proposed — Design phase. Ready for implementation after review.
+**Status:** superseded — the GPU use and memory half is replaced by `SPEC_STATUS_BAR_GPU_PANEL_2026_11_15.md` (built as the status bar's GPU meter and panel); the extended metrics here (temperatures, swap, battery) were not taken up.
 
 ---
 

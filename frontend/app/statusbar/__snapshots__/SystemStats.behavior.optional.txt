@@ -44,7 +44,7 @@ parseDiskVolumes 0
       "%"
     <span class="stat-separator">
       "|"
-    <span class="stat-mono stat-gpu" data-tip="GPU usage" aria-label="GPU usage" style="color: var(--cpu-0);">
+    <button type="button" class="stat-mono stat-gpu stat-gpu-button" aria-haspopup="dialog" style="color: var(--secondary-text-color);" data-tip="GPU use of the busiest adapter. Click for use and memory per adapter and per process." aria-label="GPU use, click for the GPU panel" aria-expanded="false">
       "GPU"
       "0"
       "%"
