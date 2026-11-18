@@ -37,6 +37,7 @@ export function AgentViewPopover(props: AgentViewPopoverProps): JSX.Element {
             placement="top-end"
             containWithin={() => props.pane}
             fitWidth
+            fitHeight
             shellClass="anchored-popover--menu"
             class="menu agent-view-popover"
             role="dialog"

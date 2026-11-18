@@ -33,8 +33,9 @@
 .agent-view-popover-foot {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     justify-content: space-between;
-    gap: var(--space-3);
+    gap: var(--space-1) var(--space-3);
     padding-top: var(--space-1);
     border-top: 1px solid var(--border-color);
 }

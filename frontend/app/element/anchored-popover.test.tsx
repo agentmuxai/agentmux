@@ -189,6 +189,24 @@ describe("AnchoredPopover", () => {
         expect(plain.body.style.maxHeight).toBe("");
     });
 
+    it("keeps an upward panel under its container's top edge when it is asked to fit the width", async () => {
+        const pane = document.createElement("div");
+        pane.getBoundingClientRect = () => new DOMRect(0, 100, 200, 400);
+        const anchor = document.createElement("button");
+        anchor.getBoundingClientRect = () => new DOMRect(10, 250, 16, 16);
+        document.body.appendChild(anchor);
+        vi.mocked(computeMenuPosition).mockResolvedValueOnce({ style: { position: "fixed", left: "0px", top: "0px" }, maxHeight: 900 } as never);
+        render(() => (
+            <AnchoredPopover anchor={anchor} placement="top-end" containWithin={() => pane} fitWidth fitHeight class="up-panel">
+                content
+            </AnchoredPopover>
+        ));
+        flushFrames();
+        await (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => Promise<void>)();
+        // 250 (the anchor's top) less 100 (the pane's top) less the 8 px gap.
+        expect(document.querySelector<HTMLElement>(".up-panel")!.style.maxHeight).toBe("calc(142px / var(--zoomfactor, 1))");
+    });
+
     it("tells its body how wide its container is only when asked to fit the width", async () => {
         const pane = document.createElement("div");
         pane.getBoundingClientRect = () => new DOMRect(0, 0, 200, 300);

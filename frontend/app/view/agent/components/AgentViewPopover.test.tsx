@@ -47,6 +47,8 @@ describe("AgentViewPopover in a narrow pane", () => {
         expect(rule).toContain("min-width: min(280px, var(--popover-room-width, 280px))");
         expect(rule).toContain("max-width: var(--popover-room-width, none)");
         expect(rule).toContain("overflow-x: auto");
+        const foot = scss.slice(scss.indexOf(".agent-view-popover-foot"), scss.indexOf("}", scss.indexOf(".agent-view-popover-foot")));
+        expect(foot, "the footer's two links wrap rather than push the panel sideways").toContain("flex-wrap: wrap");
     });
 });
 

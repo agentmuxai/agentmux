@@ -99,15 +99,21 @@ const IDLE_STYLE: JSX.CSSProperties = { position: "fixed", left: "0px", top: "0p
 // A panel that animates in waits, unseen, for its first placement, so it does not fade in at the corner.
 const WAITING_STYLE: JSX.CSSProperties = { ...IDLE_STYLE, visibility: "hidden" };
 
+const ROOM_GUTTER = 8;
+const MIN_ROOM_HEIGHT = 96;
+
 /** The room a panel is asked to fit in, in screen pixels: the height the window leaves, and the width of its container. */
 interface Room {
     height?: number;
     width?: number;
 }
 
-function roomFor(maxHeight: number, container: HTMLElement | undefined, fitHeight?: boolean, fitWidth?: boolean): Room {
+/** `anchorTop`: where the anchor is, for a panel opening upward. With `fitWidth` the panel also stays under its container's top edge. */
+function roomFor(maxHeight: number, container: HTMLElement | undefined, fitHeight?: boolean, fitWidth?: boolean, anchorTop?: number): Room {
+    const own = fitHeight && Number.isFinite(maxHeight) ? maxHeight : undefined;
+    const underTop = own !== undefined && fitWidth && container && anchorTop !== undefined ? anchorTop - container.getBoundingClientRect().top - ROOM_GUTTER : undefined;
     return {
-        height: fitHeight && Number.isFinite(maxHeight) ? maxHeight : undefined,
+        height: underTop === undefined ? own : Math.max(MIN_ROOM_HEIGHT, Math.min(own!, underTop)),
         width: fitWidth && container ? Math.floor(Math.min(container.getBoundingClientRect().width, window.innerWidth)) : undefined,
     };
 }
@@ -236,7 +242,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 );
                 if (disposed) return;
                 setShellStyle(holdBottomEdge(pos, el.getBoundingClientRect().height, window.innerHeight));
-                setRoom(roomFor(pos.maxHeight, container, untrack(() => props.fitHeight), untrack(() => props.fitWidth)));
+                setRoom(roomFor(pos.maxHeight, container, untrack(() => props.fitHeight), untrack(() => props.fitWidth), placement.startsWith("top") ? reference.getBoundingClientRect().top : undefined));
                 shown();
             };
             stopAutoUpdate?.();
