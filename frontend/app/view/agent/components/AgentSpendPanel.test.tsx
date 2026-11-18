@@ -52,6 +52,18 @@ describe("AgentSpendPanel", () => {
         expect(button("Use the default ($50)").disabled).toBe(true);
     });
 
+    it("reads and sets by the pane when it is given one (the chip on a Swarm card)", async () => {
+        spend.mockResolvedValueOnce(answer());
+        render(() => <AgentSpendPanel blockId="blk-1" agentName="AgentY" />);
+        await waitFor(() => expect(box().value).toBe("50"));
+        expect(spend).toHaveBeenCalledWith({}, { blockid: "blk-1", agent: null, action: "get", cap_usd: null });
+        spend.mockResolvedValueOnce(answer({ cap_usd: 100, own_cap: true }));
+        fireEvent.input(box(), { target: { value: "100" } });
+        fireEvent.click(button("Set cap"));
+        await waitFor(() => expect(calls("set")).toHaveLength(1));
+        expect(calls("set")[0][1]).toEqual({ blockid: "blk-1", agent: null, action: "set", cap_usd: 100 });
+    });
+
     it("says in one line each of the four ways a cap can stand", () => {
         const line = (r: Parameters<typeof capLine>[0]) => capLine(r);
         expect(line(answer({ own_cap: true, cap_usd: 100 }))).toBe("Used today: $4.5. Its cap is $100 a day, set for it.");

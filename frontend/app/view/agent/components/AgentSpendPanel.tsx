@@ -4,8 +4,8 @@
 /**
  * AgentSpendPanel: the "Spend cap…" view of My Agents' row panel. What the agent has used today and its daily cap, and
  * the person's choices at any time: a number of dollars, no cap, or the default every agent without a cap of its own has
- * (a setting). One `agent.spend` call each, by the agent's id, so it works for an agent with no
- * pane open. An agent can only lower its own cap (`Agents update spend_cap_usd`); this is the person's.
+ * (a setting). One `agent.spend` call each, by the agent's id (so it works for an agent with no pane open) or by its
+ * pane (the spend chip on a Swarm card). An agent can only lower its own cap (`Agents update spend_cap_usd`); this is the person's.
  */
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -30,8 +30,14 @@ export function capLine(r: AgentSpendResult): string {
     return t(r.own_cap ? "agentSpend.line.own" : "agentSpend.line.default", { spent, cap: cents(r.cap_usd) });
 }
 
+/** Which agent the panel is about: by its id (My Agents, a row with no pane open), or by the pane it runs in (the chip on a Swarm card). */
+export interface SpendTarget {
+    agentId?: string;
+    blockId?: string;
+}
+
 /** The panel's state: the agent's cap as srv last said it, the box a person types in, and the calls that change it. */
-function createSpendCap(agentId: string) {
+function createSpendCap(target: SpendTarget) {
     const [state, setState] = createSignal<AgentSpendResult | null>(null);
     const [draft, setDraft] = createSignal("");
     const [busy, setBusy] = createSignal(false);
@@ -41,7 +47,7 @@ function createSpendCap(agentId: string) {
     let shownText = "";
 
     const call = (action: string, capUsd: number | null): Promise<AgentSpendResult> =>
-        RpcApi.AgentSpendCommand(TabRpcClient, { blockid: "", agent: agentId, action, cap_usd: capUsd });
+        RpcApi.AgentSpendCommand(TabRpcClient, { blockid: target.blockId ?? "", agent: target.blockId ? null : (target.agentId ?? null), action, cap_usd: capUsd });
     const load = async (): Promise<void> => {
         try {
             const r = await call("get", null);
@@ -140,15 +146,14 @@ function CapActions(props: { c: SpendCap; r: AgentSpendResult }): JSX.Element {
     );
 }
 
-interface AgentSpendPanelProps {
-    agentId: string;
+interface AgentSpendPanelProps extends SpendTarget {
     agentName: string;
     /** Given when hosted in the row panel: shows a Close button. */
     onClose?: () => void;
 }
 
 export const AgentSpendPanel = (props: AgentSpendPanelProps): JSX.Element => {
-    const c = createSpendCap(props.agentId);
+    const c = createSpendCap({ agentId: props.agentId, blockId: props.blockId });
     return (
         <div class="agent-primitive-modal-detail agent-spend-panel" data-testid="agent-spend-panel">
             <div class="agent-primitive-modal-readonly">
