@@ -30,6 +30,7 @@ pub(super) async fn record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
                 raw["lines"].get(0),
                 rolls["lines"].as_array().unwrap_or(&empty),
                 events["lines"].as_array().unwrap_or(&empty),
+                events["matched"].as_u64().map_or(0, |m| m as usize),
                 now_ms,
             ))
         }
@@ -273,8 +274,11 @@ fn grown(then: &Value, now: &Value) -> String {
 }
 
 /// The stalls of the UI thread and of srv's runtime in the window, by kind: how many, the longest, the last.
-fn stalls(events: &[Value], now_ms: i64) -> String {
+fn stalls(events: &[Value], matched: usize, now_ms: i64) -> String {
     let mut out = String::from("Stalls in that time:");
+    if matched > events.len() {
+        out.push_str(&format!(" (the newest {} of {matched}: the counts and the longest below cover only those; view \"series\" with kind \"events\" and fewer hours shows the rest)", events.len()));
+    }
     for (kind, what) in [("ui_stall", "the window host's UI thread did not run"), ("srv_stall", "srv's runtime stopped running tasks")] {
         let mine: Vec<&Value> = events.iter().filter(|e| s(e, "kind") == kind).collect();
         let Some(longest) = mine.iter().map(|e| e["ms"].as_u64().unwrap_or(0)).max() else {
@@ -319,7 +323,7 @@ This shows the newest {} of the {matched} in that window; ask for a shorter one 
 }
 
 /// `summary`: what the record holds, the newest line, the trend, and the stalls.
-pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls: &[Value], events: &[Value], now_ms: i64) -> String {
+pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls: &[Value], events: &[Value], matched: usize, now_ms: i64) -> String {
     let mut out = stored(inventory);
     if let Some(line) = newest {
         out.push('\n');
@@ -328,7 +332,7 @@ pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls:
     out.push('\n');
     out.push_str(&trend(rolls, now_ms));
     out.push('\n');
-    out.push_str(&stalls(events, now_ms));
+    out.push_str(&stalls(events, matched, now_ms));
     out.push_str("\nView \"series\" lists the hours or lines, \"export\" returns them as stored, to attach to a bug.");
     out
 }
@@ -442,7 +446,7 @@ mod tests {
 
     #[test]
     fn an_empty_record_says_so_and_a_young_one_says_there_is_no_trend() {
-        let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &[], 1_000);
+        let text = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &[], 0, 1_000);
         assert!(text.contains("is empty") && text.contains("No hour has been rolled up yet"), "{text}");
     }
 
@@ -461,7 +465,7 @@ mod tests {
             json!({ "t": now - 3 * H, "kind": "ui_stall", "ms": 55_000, "host_mb": 310 }),
             json!({ "t": now - H, "kind": "ui_stall", "ms": 8_000 }),
         ];
-        let text = describe_summary(&inv, Some(&newest), &rolls, &events, now as i64);
+        let text = describe_summary(&inv, Some(&newest), &rolls, &events, events.len(), now as i64);
         assert!(text.contains("- 2 where the window host's UI thread did not run; the longest 55 s, the last 60 min ago."), "{text}");
         assert!(text.contains("- none where srv's runtime stopped running tasks."), "{text}");
         assert!(text.contains("five-minute lines for 3 day(s) since 2026-11-14") && text.contains("hourly rollups for 1 month(s)"), "{text}");
@@ -469,6 +473,16 @@ mod tests {
         assert!(text.contains("Over 24 h 0 min: +228.9 MB (+22.9%)"), "{text}");
         assert!(text.contains("srv restarted 1 time(s)"), "{text}");
         assert!(text.contains("Grew most") && text.contains("core +183.1 MB") && text.contains("agent:b1 +183.1 MB"), "{text}");
+    }
+
+    #[test]
+    fn stall_totals_say_when_the_window_held_more_stalls_than_were_read() {
+        let events = vec![json!({ "t": 5_000, "kind": "ui_stall", "ms": 9_000 })];
+        let cut = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &events, 1_200, 10_000);
+        assert!(cut.contains("Stalls in that time: (the newest 1 of 1200"), "{cut}");
+        assert!(cut.contains("cover only those"), "{cut}");
+        let whole = describe_summary(&json!({ "raw_days": 0, "rollup_months": 0 }), None, &[], &events, 1, 10_000);
+        assert!(whole.contains("Stalls in that time:\n- 1 where"), "{whole}");
     }
 
     #[test]
