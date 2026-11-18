@@ -160,6 +160,10 @@ pub async fn signin_fill_route(State(state): State<Arc<AppState>>, headers: Head
         crate::browser_pane::signin_list::clear(id).await;
     }
     let result = fill(&mut cdp, &req).await;
+    // The password is typed once the fill is done; the user name is not a secret.
+    if result.is_ok() {
+        super::typed_value::note_typed(&state, &mut cdp, &req.block_id, &req.password).await;
+    }
     let _ = cdp.close().await;
     match result {
         Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),

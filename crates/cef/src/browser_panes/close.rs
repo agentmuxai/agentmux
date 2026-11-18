@@ -97,7 +97,7 @@ impl BrowserPaneManager {
         crate::browser_panes::media_prompt::cancel_pane_any_thread(block_id);
         crate::client::downloads::forget_pane(block_id);
         // The page is going: its references (and a Vault fill's, which rides on them) end with it.
-        state.browser_api.ref_tables.forget(block_id);
+        state.browser_api.forget_pane(block_id);
         let views = crate::pane_backend::label_is_views(&label);
         #[cfg(target_os = "windows")]
         if !views {
@@ -222,7 +222,7 @@ impl BrowserPaneManager {
             state.media_grants.lock().clear_pane(&block_id);
             crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
             crate::client::downloads::forget_pane(&block_id);
-            state.browser_api.ref_tables.forget(&block_id);
+            state.browser_api.forget_pane(&block_id);
             // As in close(): the async on_before_close drain also destroys the pane HWND.
             if crate::pane_backend::label_is_views(label) {
                 crate::input_owner::views::pane_gone(state, &block_id);

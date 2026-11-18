@@ -232,9 +232,17 @@ pub async fn eval(
         let _ = cdp.close().await;
         return ok_body(ApiResponse::err(e));
     }
+    // Once a Vault value was typed into the page, no script runs in it, whatever the page did to the field's mark
+    // since: the value could be read back from wherever the page put it (spec G4).
+    if super::typed_value::typed_into_now(&state, &mut cdp, &req.block_id).await {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(
+            "eval is refused on this tab: a Vault value was typed into this page, and a script could read it back from wherever the page shows it; use snapshot or find to read the page, or navigate the tab away (eval is allowed again then)".to_string(),
+        ));
+    }
     // A script could read a Vault value filled into the page, or a secret the
     // page shows once, which every other read hides (spec §10.1, §15.1).
-    let scan = super::page_state::secret_boxes(&mut cdp).await;
+    let scan = super::page_state::secret_boxes(&mut cdp, None).await;
     if scan.vault_values > 0 || !scan.complete || !scan.read_all {
         let _ = cdp.close().await;
         let why = if scan.vault_values > 0 {
@@ -418,8 +426,8 @@ pub async fn screenshot(
     // A pane screenshot is clipped to the caller's pane, but anything drawn
     // over it is in the clip: the Vault pane, magnified or floating there,
     // is blacked out the same way, found just before and just after.
-    let mut secrets = None;
-    let mut cap = serde_json::Value::Null;
+    let (mut secrets, mut cap) = (None, serde_json::Value::Null);
+    let typed = super::typed_value::TypedFilter::of(&state, &mut cdp, &req.block_id).await;
     for _attempt in 0..2 {
         if let Some(width) = clip_width {
             let before = hidden_boxes(&mut cdp, &clip).await;
@@ -440,7 +448,7 @@ pub async fn screenshot(
             });
             break;
         }
-        let before = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp).await) };
+        let before = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp, typed.as_ref()).await) };
         cap = match cdp.call("Page.captureScreenshot", params.clone()).await {
             Ok(v) => v,
             Err(e) => {
@@ -449,7 +457,7 @@ pub async fn screenshot(
             }
         };
         let Some(before) = before else { break };
-        let after = super::page_state::secret_boxes(&mut cdp).await;
+        let after = super::page_state::secret_boxes(&mut cdp, typed.as_ref()).await;
         let merged = super::page_state::merge_scans(before, after);
         let done = merged.complete;
         secrets = Some(merged);

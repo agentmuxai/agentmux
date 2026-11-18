@@ -127,7 +127,11 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
     if let Some(id) = cdp.browser_id() {
         crate::browser_pane::signin_list::clear(id).await;
     }
-    let result = fill(&mut cdp, &req).await;
+    let mut typed = false;
+    let result = fill(&mut cdp, &req, &mut typed).await;
+    if typed {
+        super::typed_value::note_typed(&state, &mut cdp, &req.block_id, &req.password).await;
+    }
     let _ = cdp.close().await;
     match result {
         Ok(data) => (StatusCode::OK, Json(ApiResponse::ok(data))),
@@ -135,7 +139,8 @@ pub async fn signup_fill_route(State(state): State<Arc<AppState>>, headers: Head
     }
 }
 
-async fn fill(root: &mut CdpSession, req: &SignupFillReq) -> Result<SignupFillData, String> {
+/// `typed` is set once the password is in the first field.
+async fn fill(root: &mut CdpSession, req: &SignupFillReq, typed: &mut bool) -> Result<SignupFillData, String> {
     if req.field.is_empty() || req.field.len() > 64 || !req.field.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("no field was offered for this password, so nothing was filled".to_string());
     }
@@ -148,6 +153,7 @@ async fn fill(root: &mut CdpSession, req: &SignupFillReq) -> Result<SignupFillDa
             let confirm = call_on_object(&mut cdp, &field, &confirm_for()).await?;
             let focused = if req.keep_focus { focused_element(&mut cdp, ctx).await } else { None };
             type_into(&mut cdp, &field, &req.password, &req.origin, "password").await?;
+            *typed = true;
             let mut fields = 1;
             if let Some(confirm) = confirm {
                 type_into(&mut cdp, &confirm, &req.password, &req.origin, "password").await?;
