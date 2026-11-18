@@ -80,6 +80,7 @@ export function DevicesSection(): JSX.Element {
                 description={DEVICES_SETTINGS.pairedDevices.description}
             />
             <SettingRow
+                settingKey="viewer:shareterminals"
                 id={DEVICES_SETTINGS.shareTerminals.id}
                 label={DEVICES_SETTINGS.shareTerminals.label}
                 description={DEVICES_SETTINGS.shareTerminals.description}
@@ -100,6 +101,7 @@ export function DevicesSection(): JSX.Element {
             <SectionHeader label={DEVICES_SETTINGS.pinnedSenders.label} />
             <PinnedSenders />
             <SettingRow
+                settingKey="cloud:publishpresence"
                 id={DEVICES_SETTINGS.publishPresence.id}
                 label={DEVICES_SETTINGS.publishPresence.label}
                 description={DEVICES_SETTINGS.publishPresence.description}
@@ -111,6 +113,7 @@ export function DevicesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="swarm:sharesummaries"
                 id={DEVICES_SETTINGS.shareSummaries.id}
                 label={DEVICES_SETTINGS.shareSummaries.label}
                 description={DEVICES_SETTINGS.shareSummaries.description}
@@ -122,6 +125,7 @@ export function DevicesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="statusbar:showmuxbuscloud"
                 id={DEVICES_SETTINGS.statusbarMuxbusCloud.id}
                 label={DEVICES_SETTINGS.statusbarMuxbusCloud.label}
                 description={DEVICES_SETTINGS.statusbarMuxbusCloud.description}

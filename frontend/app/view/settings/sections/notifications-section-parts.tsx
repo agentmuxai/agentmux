@@ -18,6 +18,7 @@ import { s, type AutostartState } from "./notifications-section-state";
 
 const kindRow = (entry: SettingsIndexEntry, key: string, fallback = true) => (
     <SettingRow
+        settingKey={key}
         id={entry.id}
         indent
         label={entry.label}
@@ -35,6 +36,7 @@ export function OsNotificationsGroup(): JSX.Element {
         <>
             <SectionHeader label={t("settings.notifications.group.notifications")} />
             <SettingRow
+                settingKey="notify:os:enabled"
                 id={NOTIFICATIONS_SETTINGS.osEnabled.id}
                 label={NOTIFICATIONS_SETTINGS.osEnabled.label}
                 description={NOTIFICATIONS_SETTINGS.osEnabled.description}
@@ -42,6 +44,7 @@ export function OsNotificationsGroup(): JSX.Element {
             />
             <Show when={osOn()}>
                 <SettingRow
+                    settingKey="notify:os:when"
                     id={NOTIFICATIONS_SETTINGS.osWhen.id}
                     indent
                     label={NOTIFICATIONS_SETTINGS.osWhen.label}
@@ -71,6 +74,7 @@ export function OsNotificationsGroup(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow
+                    settingKey="notify:quiethours"
                     id={NOTIFICATIONS_SETTINGS.quietHours.id}
                     indent
                     label={NOTIFICATIONS_SETTINGS.quietHours.label}
@@ -86,6 +90,7 @@ export function OsNotificationsGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="notify:pause:allowattention"
                     id={NOTIFICATIONS_SETTINGS.pauseAllowAttention.id}
                     indent
                     label={NOTIFICATIONS_SETTINGS.pauseAllowAttention.label}
@@ -98,6 +103,7 @@ export function OsNotificationsGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="notify:os:preview"
                     id={NOTIFICATIONS_SETTINGS.osPreview.id}
                     indent
                     label={NOTIFICATIONS_SETTINGS.osPreview.label}
@@ -149,6 +155,7 @@ export function TrayGroup(): JSX.Element {
             </Show>
             <Show when={hostHas("tray")}>
                 <SettingRow
+                    settingKey="app:showtray"
                     id={NOTIFICATIONS_SETTINGS.showTray.id}
                     label={NOTIFICATIONS_SETTINGS.showTray.label}
                     description={NOTIFICATIONS_SETTINGS.showTray.description}
@@ -160,6 +167,7 @@ export function TrayGroup(): JSX.Element {
                     }
                 />
                 <SettingRow
+                    settingKey="app:runinbackground"
                     id={NOTIFICATIONS_SETTINGS.runInBackground.id}
                     label={NOTIFICATIONS_SETTINGS.runInBackground.label}
                     description={NOTIFICATIONS_SETTINGS.runInBackground.description}
@@ -181,6 +189,7 @@ export function StartAtLoginRow({ a }: { a: AutostartState }): JSX.Element {
         <>
             <Show when={hostHas("autostart")}>
                 <SettingRow
+                    settingKey="app:startatlogin"
                     id={NOTIFICATIONS_SETTINGS.autostart.id}
                     label={NOTIFICATIONS_SETTINGS.autostart.label}
                     description={a.autostartDescription()}

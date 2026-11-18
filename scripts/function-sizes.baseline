@@ -398,10 +398,10 @@
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
-128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
-120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
+132 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
+124 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
-114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
+115 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList

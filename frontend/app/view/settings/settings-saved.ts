@@ -50,6 +50,18 @@ export function reportSave(key: string, ok: boolean): void {
     if (ok) timers.set(key, setTimeout(() => clear(key), DURATION_LINGER_MS));
 }
 
+/**
+ * For a setting written by something other than `set` (a store function the command palette shares, which hands back
+ * its write): report `write`'s outcome under `keys`, the keys of the rows that changed. A row's `settingKey` is only
+ * the name its flag is shown under, so a row can use one of its own (a widget's colour) when the setting is shared.
+ */
+export function trackSave(keys: readonly string[], write: Promise<unknown>): void {
+    void Promise.resolve(write).then(
+        () => keys.forEach((key) => reportSave(key, true)),
+        () => keys.forEach((key) => reportSave(key, false))
+    );
+}
+
 /** For tests: forget every result and timer. */
 export function resetSaveResults(): void {
     for (const timer of timers.values()) clearTimeout(timer);

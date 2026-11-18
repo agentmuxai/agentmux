@@ -15,7 +15,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
 import { set, SettingRow } from "./settings-controls";
-import { resetSaveResults } from "./settings-saved";
+import { resetSaveResults, trackSave } from "./settings-saved";
 
 const KEY = "model:spend_cap_usd:anthropic";
 
@@ -123,5 +123,40 @@ describe("the Saved flag", () => {
         await flush();
         expect(getByText("Daily cap").tagName).toBe("LABEL");
         expect(getByText("Daily cap").textContent).toBe("Daily cap");
+    });
+});
+
+
+describe("trackSave, for a setting a store function writes", () => {
+    /** A row named for its own flag, with a button that writes through a function of the store's, not through `set`. */
+    function SharedRow(p: { flag: string; write: () => Promise<unknown> }) {
+        return <SettingRow id="y" settingKey={p.flag} label="Colour" control={<button onClick={() => trackSave([p.flag], p.write())}>write</button>} />;
+    }
+
+    it("shows Saved on the row that changed, once its write has succeeded, and on no other row", async () => {
+        let done: () => void = () => {};
+        const write = () => new Promise<void>((resolve) => (done = resolve));
+        const { getAllByRole, getAllByText, queryAllByText } = render(() => (
+            <>
+                <SharedRow flag="pane:colors:agent" write={write} />
+                <SharedRow flag="pane:colors:terminal" write={write} />
+            </>
+        ));
+        fireEvent.click(getAllByRole("button")[0]);
+        await flush();
+        expect(queryAllByText("Saved"), "still writing").toHaveLength(0);
+        done();
+        await flush();
+        expect(getAllByText("Saved")).toHaveLength(1);
+        expect(getAllByRole("status")[0].textContent).toBe("Saved");
+        expect(getAllByRole("status")[1].textContent).toBe("");
+    });
+
+    it("shows that the setting was not saved when the write fails", async () => {
+        const { getByRole, queryByText } = render(() => <SharedRow flag="app:devmode" write={() => Promise.reject(new Error("no"))} />);
+        fireEvent.click(getByRole("button"));
+        await flush();
+        expect(queryByText("Saved")).toBeNull();
+        expect(queryByText("Not saved: the setting could not be written")).not.toBeNull();
     });
 });
