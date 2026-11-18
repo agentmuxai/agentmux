@@ -197,7 +197,7 @@ function EditorTreeColumn(props: {
                 }}
             >
                 {/* The tree's part of the pane: its own zoom (`editor:tree_zoom`), never the chrome's. */}
-                <div class="editor-tree-zoom" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom() }}>
+                <div class="editor-tree-zoom" tabindex="-1" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom() }}>
                 <FileTree
                     model={model.treeModel}
                     activeFilePath={model.filePathAtom()}
