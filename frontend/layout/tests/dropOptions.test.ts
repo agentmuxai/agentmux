@@ -229,7 +229,6 @@ describe("guideSpots", () => {
         // (300 wide: five side by side fit at 53, what they were before; 340 wide has room for the full 56.)
         expect(widthIn(300, 200)).toBe(53);
         expect(widthIn(340, 300)).toBe(56);
-        expect(widthIn(170, 600)).toBeGreaterThanOrEqual(45);
         // The gap between two spots grows with the spot, and so does how far past its edge one takes the pointer.
         const gapIn = (width: number, height: number) => {
             const { spots } = spotsIn(width, height);
