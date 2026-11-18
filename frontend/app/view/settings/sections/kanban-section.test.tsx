@@ -13,19 +13,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { defaultStages, toStageSet } from "@/app/view/kanban/kanban-stages";
 
-const h = vi.hoisted(() => ({ acts: [] as any[], board: null as any }));
+const h = vi.hoisted(() => ({ acts: [] as any[], board: null as any, actFails: "", onQueue: null as null | (() => void) }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         KanbanListCommand: async () => h.board,
         KanbanActCommand: async (_c: unknown, req: unknown) => {
             h.acts.push(req);
+            if (h.actFails) throw new Error(h.actFails);
             return { ok: true };
         },
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (_e: unknown, f: () => void) => {
+        h.onQueue = f;
+        return () => {};
+    },
+}));
 
 import { KanbanSection } from "./kanban-section";
 
@@ -63,6 +69,8 @@ async function shown() {
 
 beforeEach(() => {
     h.acts = [];
+    h.actFails = "";
+    h.onQueue = null;
     h.board = boardOf([info("main"), info("work")]);
 });
 afterEach(cleanup);
@@ -97,9 +105,10 @@ describe("Settings → Kanban", () => {
         expect(screen.getAllByText("Another stage has this name").length).toBeGreaterThan(0);
     });
 
-    it("never offers to remove the stage that shows what needs you, and marks it required", async () => {
+    it("never offers to remove the stage that shows what needs you, and says why", async () => {
         await shown();
-        expect(screen.getByText("Required")).toBeTruthy();
+        expect((screen.getByRole("button", { name: "Can't be removed" }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByText("Shows what needs you, so it always stays a stage of its own.")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Remove Needs you" })).toBeNull();
         expect(screen.getByRole("button", { name: "Remove Backlog" })).toBeTruthy();
     });
@@ -139,6 +148,42 @@ describe("Settings → Kanban", () => {
         await waitFor(() => expect(h.acts).toHaveLength(1));
         expect(h.acts[0]).toMatchObject({ action: "board_edit", board: "main", stages_reset: true, stages_rev: 3 });
         expect(h.acts[0].stages).toBeUndefined();
+    });
+
+    it("shows why Apply was refused and keeps the draft", async () => {
+        await shown();
+        h.actFails = "the stages changed since you read them (now revision 2)";
+        fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
+        fireEvent.click(apply());
+        await screen.findByText("the stages changed since you read them (now revision 2)");
+        expect(names()[0]).toBe("Waiting");
+        await waitFor(() => expect(apply().disabled).toBe(false));
+    });
+
+    it("keeps the draft when the board is read again with nothing changed", async () => {
+        await shown();
+        fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
+        // The queue changed (or the poll ran): srv answers with a fresh object for the same boards.
+        h.board = { ...boardOf([info("main"), info("work")]), stamp: 2, now: 2 };
+        h.onQueue?.();
+        await new Promise((r) => setTimeout(r, 400));
+        expect(names()[0]).toBe("Waiting");
+        expect(apply().disabled).toBe(false);
+    });
+
+    it("lets a new stage take a source by its chip, and sends it", async () => {
+        await shown();
+        fireEvent.click(screen.getByRole("button", { name: "Remove Released" }));
+        fireEvent.click(screen.getByRole("button", { name: "Remove stage" }));
+        fireEvent.click(screen.getByRole("button", { name: "Add stage" }));
+        expect(apply().disabled).toBe(true);
+        const rows = screen.getAllByRole("listitem");
+        const chip = Array.from(rows[rows.length - 1].querySelectorAll("button")).find((b) => b.textContent === "Merged") as HTMLElement;
+        fireEvent.click(chip);
+        expect(apply().disabled).toBe(false);
+        fireEvent.click(apply());
+        await waitFor(() => expect(h.acts).toHaveLength(1));
+        expect(h.acts[0].stages.stages.map((s: any) => s.takes)).toContainEqual(["merged"]);
     });
 
     it("says an archived board's stages can't be changed", async () => {

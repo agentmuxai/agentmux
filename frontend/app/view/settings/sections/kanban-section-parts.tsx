@@ -6,7 +6,7 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button, IconButton, Notice, Select, TextInput } from "@/app/element/ui";
+import { Button, FilterChip, FilterChips, IconButton, Notice, Select, TextInput } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import { COLUMNS, type ColumnId } from "@/app/view/kanban/kanban-columns";
@@ -22,24 +22,24 @@ type Part = { s: KanbanStagesState };
 
 const colourOptions = () => STAGE_PALETTE.map((p) => ({ value: p.id, label: t(`settings.kanban.colour.${p.id}`) }));
 
-/** The sources a stage may show, as toggles: what it shows is what its stage holds. */
+/** The sources a stage may show, as toggle chips: what it shows is what its stage holds. */
 function SourceToggles(props: Part & { stage: KanbanStage }): JSX.Element {
+    // The chips report the whole set they would leave; the one that differs is the one clicked.
+    const onChange = (next: string[]) => {
+        const now = props.stage.takes as string[];
+        const id = next.find((x) => !now.includes(x)) ?? now.find((x) => !next.includes(x));
+        if (id) props.s.toggle(props.stage.id, id as ColumnId, next.includes(id));
+    };
     return (
-        <div class="kanban-stages__shows" role="group" aria-label={t("settings.kanban.shows")}>
+        <FilterChips class="kanban-stages__shows" aria-label={t("settings.kanban.shows")} value={props.stage.takes} onChange={onChange}>
             <For each={COLUMNS.filter((c) => canShow(props.stage, c.id))}>
                 {(c) => (
-                    <Button
-                        density="compact"
-                        tone="quiet"
-                        pressed={props.stage.takes.includes(c.id)}
-                        disabled={!props.s.editable()}
-                        onClick={() => props.s.toggle(props.stage.id, c.id as ColumnId, !props.stage.takes.includes(c.id))}
-                    >
+                    <FilterChip id={c.id} disabled={!props.s.editable()}>
                         {t(`settings.kanban.source.${c.id}`)}
-                    </Button>
+                    </FilterChip>
                 )}
             </For>
-        </div>
+        </FilterChips>
     );
 }
 
@@ -122,7 +122,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
                 />
                 <Show
                     when={!needs()}
-                    fallback={<span class="kanban-stages__required">{t("settings.kanban.required")}</span>}
+                    fallback={<IconButton icon="lock" label={t("settings.kanban.cantRemove")} disabled />}
                 >
                     <IconButton
                         icon="trash-can"
@@ -132,7 +132,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
                     />
                 </Show>
             </div>
-            <Show when={!needs()}>
+            <Show when={!needs()} fallback={<p class="kanban-stages__note">{t("settings.kanban.needsNote")}</p>}>
                 <SourceToggles s={s} stage={stage()} />
             </Show>
             <Show when={here().length > 0}>
@@ -192,7 +192,7 @@ export function Problems(props: Part): JSX.Element {
     return (
         <Show when={props.s.dirty() && props.s.problems().length > 0}>
             <p class="kanban-stages__problems" role="status" aria-live="polite">
-                {props.s.problems().map((p) => p.message).join(". ")}
+                {[...new Set(props.s.problems().map((p) => p.message))].join(". ")}
             </p>
         </Show>
     );
@@ -202,6 +202,13 @@ export function Notices(props: Part): JSX.Element {
     const s = props.s;
     return (
         <>
+            <Show when={s.model.error()}>
+                {(why) => (
+                    <Notice tone="danger" onDismiss={() => s.model.dismissError()}>
+                        {why()}
+                    </Notice>
+                )}
+            </Show>
             <Show when={!s.supported()}>
                 <Notice tone="warning">{t("settings.kanban.unsupported")}</Notice>
             </Show>

@@ -48,9 +48,11 @@ function useStagedBoard(requested: () => string | null) {
     model.setVisible(true);
     onCleanup(() => model.dispose());
     const boards = () => model.everything()?.boards ?? [];
-    const selected = () => resolveBoard(boards(), chosen() ?? requested(), defaultSlugOf(model.everything()));
+    // A memo: the board's slug is the same on every poll, so nothing that reads it (the draft's reset) re-runs.
+    const selected = createMemo(() => resolveBoard(boards(), chosen() ?? requested(), defaultSlugOf(model.everything())));
     const info = (): KanbanBoardInfo | undefined => infoOf(boards(), selected());
-    const stored = createMemo(() => stagesOfBoard(info()));
+    // Likewise the stored stages: a poll that brings the same stages leaves the same array.
+    const stored = createMemo(() => stagesOfBoard(info()), undefined, { equals: sameStages });
     // An older srv sends no stages: the editor says so and keeps Apply off.
     const supported = () => !model.everything() || !!info()?.stages;
     return { model, boards, selected, select: setChosen, info, stored, supported };
@@ -113,6 +115,9 @@ export function createKanbanStagesState(requested: () => string | null) {
         const ok = await send(b.selected(), stages(), d.baseRev());
         setBusy(false);
         if (ok) d.setDraft(null);
+        // A refusal (a stale revision, a rule srv checks, a network failure) is shown by the section; read the board
+        // again now, so a change made meanwhile shows as "Load theirs" or "Apply mine" at once.
+        else await model.refresh();
     };
 
     /** Apply after a change made meanwhile, on top of it. */
@@ -135,6 +140,7 @@ export function createKanbanStagesState(requested: () => string | null) {
         if (dirty() && (await send(b.selected(), stages(), d.baseRev()))) d.setDraft(null);
         setBusy(false);
         setCopy(result);
+        await model.refresh();
     };
 
     return {
