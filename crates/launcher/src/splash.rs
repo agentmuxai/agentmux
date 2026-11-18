@@ -328,7 +328,7 @@ unsafe fn run_splash(
 
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
-    let info = crate::splash_info::SplashInfo::gather();
+    let info = crate::splash_info::SplashInfo::gather_and_log(if restoring { "restart" } else { "start" });
     let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
     let footer = info.footer_lines(max_chars);
 
