@@ -31,9 +31,9 @@ type Source = "template" | "ui" | "app" | "srv";
 // Each needs a decision about which value is right; until then it is listed
 // here. The test also fails when a listed key agrees again, so this only shrinks.
 const KNOWN_MISMATCHES: Record<string, string> = {
-    // TODO: pick one. The template says 0.9 and the pane 1.5, and the layout
-    // itself disagrees: 0.8 in layoutGeometry.ts, 1.0 in tilelayout-shared.tsx.
-    "window:magnifiedblocksize": "template 0.9, pane 1.5, layout 0.8 or 1.0",
+    // TODO: pick one. The template and the pane say 0.9, and the layout itself
+    // disagrees: 0.8 in layoutGeometry.ts, 1.0 in tilelayout-shared.tsx.
+    "window:magnifiedblocksize": "template 0.9, pane 0.9, layout 0.8 or 1.0",
 };
 
 // ── Defaults stated in one place only ───────────────────────────────────────

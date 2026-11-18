@@ -13,6 +13,7 @@
 // createTileLayout(), so there is no single importable implementation.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
+import { getMagnifiedSizeAtom } from "./magnified-size";
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { pointerOverOwnPane, selfReleasePayload } from "@/app/drag/pane-self-release";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -190,7 +191,7 @@ export function NodeBackdrops(props: { layoutModel: LayoutModel }) {
  */
 export const MagnifiedPaneOverlay = (props: { layoutModel: LayoutModel }) => {
     const magnifiedNodeId = () => props.layoutModel.magnifiedNodeIdAtom();
-    const magnifiedBlockSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
+    const magnifiedBlockSizeAtom = getMagnifiedSizeAtom();
     const magnifiedNodeSize = () => magnifiedBlockSizeAtom() ?? 1.0;
 
     // Find the leaf node matching the magnified node ID
