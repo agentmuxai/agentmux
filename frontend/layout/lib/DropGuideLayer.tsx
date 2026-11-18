@@ -32,6 +32,8 @@ export function DropGuides(props: { layoutModel: LayoutModel }) {
                                 transform: `translate3d(${Math.round(spot.x - spot.width / 2)}px, ${Math.round(spot.y - spot.height / 2)}px, 0)`,
                                 width: `${spot.width}px`,
                                 height: `${spot.height}px`,
+                                // The picture's inset grows with the spot (3px on the smallest).
+                                padding: `${Math.max(3, Math.round(spot.width * 0.06))}px`,
                             }}
                         >
                             <div class="drop-guide-map">

@@ -93,7 +93,8 @@ const own = (m: LayoutModel, id: string) => shownPx(m.additionalProps()[id].rect
 const blocksOf = (m: LayoutModel) => m.leafs().map((n) => n.data?.blockId);
 /**
  * The spots of pane b's guide (dropGuides.ts) a tab is placed from, and the middle one, where it joins b. Pane b
- * is 600 by 400 at 600,0: its middle is 900,200, and a spot is 56 wide with 5 between two.
+ * is 600 by 400 at 600,0: its middle is 900,200, and a spot is a share of the pane wide (dropGuides.ts): the
+ * points below are inside the left and the right spot, a little way from the middle.
  */
 const LEFT_OF_B = { x: 839, y: 200 };
 const MIDDLE_OF_B = { x: 900, y: 200 };
