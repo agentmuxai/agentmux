@@ -260,6 +260,11 @@ pub struct FileSearchBytesReq {
     pub from: u64,
     #[serde(default)]
     pub backward: bool,
+    /// A match must start at a multiple of this many bytes: 2 for UTF-16 text,
+    /// whose matches begin on a code unit. 0 or absent: anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub align: Option<u64>,
 }
 
 /// Response for `filesearchbytes`. A search is bounded in work per call: when

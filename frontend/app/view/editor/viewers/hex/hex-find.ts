@@ -60,15 +60,15 @@ export interface SearchStep {
     next_from: number;
 }
 
-export type SearchCall = (req: { path: string; pattern: string; from: number; backward: boolean }) => Promise<SearchStep>;
+export type SearchCall = (req: { path: string; pattern: string; from: number; backward: boolean; align?: number }) => Promise<SearchStep>;
 
 export type FindResult = { found: true; offset: number; length: number; wrapped: boolean } | { found: false };
 
 /** A search that goes on, call after call, until a match, the end of the file, or `cancelled`. */
-async function sweep(call: SearchCall, path: string, pattern: string, from: number, backward: boolean, cancelled: () => boolean): Promise<SearchStep | null> {
+async function sweep(call: SearchCall, path: string, pattern: string, from: number, backward: boolean, align: number | undefined, cancelled: () => boolean): Promise<SearchStep | null> {
     let at = from;
     for (;;) {
-        const step = await call({ path, pattern, from: at, backward });
+        const step = await call(align && align > 1 ? { path, pattern, from: at, backward, align } : { path, pattern, from: at, backward });
         if (cancelled()) return null;
         if (step.found || step.done) return step;
         at = step.next_from;
@@ -88,17 +88,19 @@ export async function findMatch(o: {
     /** Where the cursor is: the search starts just past it. */
     cursor: number;
     backward: boolean;
+    /** Matches must start at a multiple of this many bytes (2 for UTF-16 text); srv skips the others. */
+    align?: number;
     cancelled: () => boolean;
 }): Promise<FindResult | null> {
     const first = o.backward ? o.cursor - 1 : o.cursor + 1;
     const edge = o.backward ? first < 0 : first >= o.size;
     if (!edge) {
-        const step = await sweep(o.call, o.path, o.hex, first, o.backward, o.cancelled);
+        const step = await sweep(o.call, o.path, o.hex, first, o.backward, o.align, o.cancelled);
         if (!step) return null;
         if (step.found) return { found: true, offset: step.offset, length: step.length, wrapped: false };
     }
     // Round to the other end.
-    const step = await sweep(o.call, o.path, o.hex, o.backward ? Math.max(0, o.size - 1) : 0, o.backward, o.cancelled);
+    const step = await sweep(o.call, o.path, o.hex, o.backward ? Math.max(0, o.size - 1) : 0, o.backward, o.align, o.cancelled);
     if (!step) return null;
     return step.found ? { found: true, offset: step.offset, length: step.length, wrapped: true } : { found: false };
 }

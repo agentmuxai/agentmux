@@ -43,6 +43,8 @@ export async function goToSummaryRow(click: SummaryClick): Promise<void> {
             return goToAttention(click.item);
         case "vault":
             return openVaultAt(click.id);
+        case "swarm":
+            return openOrFocusPaneByView("swarm");
         case "kanban":
             return openOrFocusPaneByView("kanban");
         case "app":

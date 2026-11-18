@@ -7,6 +7,22 @@ import { SPEND_STOPPED_META_KEY, SPEND_TODAY_META_KEY, readSpendStopped, type Sp
 import { AgentSpendCard } from "./AgentSpendCard";
 import { SpendChip } from "./SpendChip";
 
+// The popover's placement and the panel's own calls are tested apart; here only that the chip opens and closes it.
+vi.mock("@/app/element/anchored-popover", () => ({
+    AnchoredPopover: (p: { children: unknown; onDismiss?: () => void; "aria-label"?: string }) => (
+        <div role="dialog" aria-label={p["aria-label"]} data-testid="chip-popover">
+            {p.children as never}
+        </div>
+    ),
+}));
+vi.mock("./AgentSpendPanel", () => ({
+    AgentSpendPanel: (p: { blockId?: string; agentName: string; onClose?: () => void }) => (
+        <div data-testid="chip-panel" data-block={p.blockId} data-name={p.agentName}>
+            <button onClick={() => p.onClose?.()}>Close</button>
+        </div>
+    ),
+}));
+
 afterEach(cleanup);
 
 const card = (over: Record<string, unknown> = {}): SpendCard =>
@@ -79,5 +95,42 @@ describe("SpendChip", () => {
         cleanup();
         const old = render(() => <SpendChip meta={{ [SPEND_TODAY_META_KEY]: { day: 1, spent: 4, cap: 20 } }} now={now} />);
         expect(old.container.textContent).toBe("");
+    });
+
+    it("is only a figure with no pane, and a button that opens the Spend cap panel with one", () => {
+        const plain = render(() => <SpendChip meta={meta(4.2, 50)} now={now} />);
+        expect(plain.container.querySelector("[data-testid=spend-chip-button]")).toBeNull();
+        expect(plain.container.querySelector("[title]")?.getAttribute("title")).not.toContain("Click");
+        cleanup();
+
+        const { container } = render(() => <SpendChip meta={meta(4.2, 50)} now={now} blockId="blk-1" agentName="AgentY" />);
+        const chip = container.querySelector("[data-testid=spend-chip-button]") as HTMLButtonElement;
+        expect(chip.getAttribute("aria-expanded")).toBe("false");
+        expect(container.querySelector("[title]")?.getAttribute("title")).toContain("model route or an API key");
+        expect(container.querySelector("[title]")?.getAttribute("title")).toContain("Click to change its cap.");
+        expect(document.querySelector("[data-testid=chip-panel]")).toBeNull();
+
+        fireEvent.click(chip);
+        const panel = document.querySelector("[data-testid=chip-panel]") as HTMLElement;
+        expect(panel.dataset.block).toBe("blk-1");
+        expect(panel.dataset.name).toBe("AgentY");
+        expect(chip.getAttribute("aria-expanded")).toBe("true");
+
+        fireEvent.click(chip);
+        expect(document.querySelector("[data-testid=chip-panel]")).toBeNull();
+        fireEvent.click(chip);
+        fireEvent.click(document.querySelector("[data-testid=chip-panel] button") as HTMLButtonElement);
+        expect(document.querySelector("[data-testid=chip-panel]")).toBeNull();
+    });
+
+    it("does not pass the click on to the card under it", () => {
+        const onCard = vi.fn();
+        const { container } = render(() => (
+            <div onClick={onCard}>
+                <SpendChip meta={meta(4.2, 50)} now={now} blockId="blk-1" agentName="AgentY" />
+            </div>
+        ));
+        fireEvent.click(container.querySelector("[data-testid=spend-chip-button]") as HTMLElement);
+        expect(onCard).not.toHaveBeenCalled();
     });
 });

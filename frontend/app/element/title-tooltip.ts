@@ -119,6 +119,8 @@ interface TipState {
     showTimer: ReturnType<typeof setTimeout> | null;
     hideTimer: ReturnType<typeof setTimeout> | null;
     stopAutoUpdate: (() => void) | null;
+    /** Watches the open tooltip's element for a label that changes under a still pointer. */
+    watcher: MutationObserver | null;
     /** Takes the pane's colours off the shell again (a tooltip for an element in a pane with a backdrop). */
     stopScope: (() => void) | null;
     // After a click, a key or a wheel turn the tooltip goes but the pointer is still on the element:
@@ -138,6 +140,7 @@ function createTipState(doc: Document): TipState {
         showTimer: null,
         hideTimer: null,
         stopAutoUpdate: null,
+        watcher: null,
         stopScope: null,
         held: null,
         self: { close: () => closeNow(t) },
@@ -170,10 +173,24 @@ async function place(t: TipState): Promise<void> {
     paint(t);
 }
 
+/**
+ * Show the label as it is now: the text moves on to the open panel, and a label that has gone closes the tooltip.
+ * Read on a pointer move onto the element, and by the watcher when the label changes with the pointer still.
+ */
+function refreshLabel(t: TipState): void {
+    const el = t.current;
+    if (!el) return;
+    const text = takeTitle(el);
+    if (!text) return closeNow(t);
+    if (t.panel && t.panel.textContent !== text) t.panel.textContent = text;
+}
+
 function closeNow(t: TipState, keepTitle = false): void {
     clearTimers(t);
     t.stopAutoUpdate?.();
     t.stopAutoUpdate = null;
+    t.watcher?.disconnect();
+    t.watcher = null;
     if (t.current) {
         releaseOpen(t.self);
         if (keepTitle) t.held = t.current;
@@ -193,6 +210,7 @@ function openFor(t: TipState, el: HTMLElement, text: string): void {
     if (t.current && t.current !== el) giveTitleBack(t.current);
     clearTimers(t);
     t.stopAutoUpdate?.();
+    t.watcher?.disconnect();
     claimOpen(t.self);
     t.current = el;
     t.visible = false;
@@ -204,6 +222,11 @@ function openFor(t: TipState, el: HTMLElement, text: string): void {
     t.stopScope = carryPaneScope(t.shell, el) ?? null;
     t.doc.body.append(t.shell);
     t.stopAutoUpdate = autoUpdate(el, t.shell, () => void place(t));
+    // A label that changes with the pointer resting (a live update) shows without a pointer move.
+    if (typeof MutationObserver !== "undefined") {
+        t.watcher = new MutationObserver(() => refreshLabel(t));
+        t.watcher.observe(el, { attributes: true, attributeFilter: ["title", "data-hover-tip"] });
+    }
     void place(t);
     const delay = handOver || isWarm(t.self) ? 0 : SHOW_DELAY_MS;
     const show = () => {
@@ -239,10 +262,7 @@ function onPointerOver(t: TipState, e: Event): void {
             t.hideTimer = null;
         }
         // A reactive label may have changed while it is open.
-        const text = takeTitle(el);
-        if (!text) return closeNow(t);
-        if (t.panel && t.panel.textContent !== text) t.panel.textContent = text;
-        return;
+        return refreshLabel(t);
     }
     if (isPrimaryButtonDown()) return;
     const text = takeTitle(el);

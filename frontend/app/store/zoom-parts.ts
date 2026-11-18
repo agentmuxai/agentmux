@@ -75,6 +75,12 @@ export function zoomPartElement(blockId: string, partId: string): Element | null
 }
 const partIsShown = (blockId: string, partId: string): boolean => zoomPartElement(blockId, partId) != null;
 
+/** Is the keyboard inside this pane's part? (A pane that takes focus when it is clicked leaves it there.) */
+export function focusIsInPart(blockId: string, partId: string): boolean {
+    const active = document.activeElement;
+    return !!active && !!zoomPartElement(blockId, partId)?.contains(active);
+}
+
 /**
  * Which level a pointer over `target` zooms: the declared part whose element holds it, else the pane's
  * main level. A wheel over the pane header or a dialog outside every part is the main part's.

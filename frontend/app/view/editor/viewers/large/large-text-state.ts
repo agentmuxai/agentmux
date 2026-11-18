@@ -262,7 +262,7 @@ export function createLargeText(props: LargeTextProps) {
     const find = createLargeFind({
         path: () => props.path,
         size: () => props.probe?.size ?? 0,
-        encoding: () => props.probe?.text?.encoding,
+        encoding: () => (void feed.loaded(), feed.source()?.encodingName() ?? props.probe?.text?.encoding),
         revision: () => props.revision,
         topOffset: async () => (await untrack(feed.source)?.startOf(scroll.first())) ?? 0,
         lineOf: feed.lineOf,

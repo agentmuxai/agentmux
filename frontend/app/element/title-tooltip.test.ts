@@ -340,6 +340,60 @@ describe("data-hover-tip (tip.ts)", () => {
         expect(panel()).toBeNull();
     });
 
+    it("follows a label that changes under a still pointer, with no pointer event", async () => {
+        const el = add('<div data-hover-tip="Step one">x</div>');
+        over(el);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Step one");
+        el.setAttribute("data-hover-tip", "Step two");
+        await settle(0);
+        expect(panel()!.textContent).toBe("Step two");
+        el.setAttribute("data-hover-tip", "Step three");
+        el.setAttribute("data-hover-tip", "Step four");
+        await settle(0);
+        expect(panel()!.textContent).toBe("Step four");
+        el.removeAttribute("data-hover-tip");
+        await settle(0);
+        expect(panel()).toBeNull();
+    });
+
+    it("follows a title that the application changes under a still pointer, and keeps it taken", async () => {
+        const el = add('<button title="Sending">x</button>');
+        over(el);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Sending");
+        el.setAttribute("title", "Sent");
+        await settle(0);
+        expect(panel()!.textContent).toBe("Sent");
+        expect(el.getAttribute("title")).toBe("");
+        expect(el.dataset.titleTip).toBe("Sent");
+        expect(el.getAttribute("aria-description")).toBe("Sent");
+        el.removeAttribute("title");
+        await settle(0);
+        expect(panel()).toBeNull();
+    });
+
+    it("stops watching once it has closed, and watches the next element it opens for", async () => {
+        const first = add('<div data-hover-tip="First">x</div>');
+        const second = add('<div data-hover-tip="Second">y</div>');
+        over(first);
+        await settle(100);
+        over(second);
+        await settle(100);
+        expect(panel()!.textContent).toBe("Second");
+        first.setAttribute("data-hover-tip", "First changed");
+        await settle(0);
+        expect(panel()!.textContent).toBe("Second");
+        second.setAttribute("data-hover-tip", "Second changed");
+        await settle(0);
+        expect(panel()!.textContent).toBe("Second changed");
+        document.dispatchEvent(new Event("pointerdown"));
+        expect(panel()).toBeNull();
+        second.setAttribute("data-hover-tip", "Second again");
+        await settle(0);
+        expect(panel()).toBeNull();
+    });
+
     it("closes when the pointer moves to an element with no label, and an empty tip shows nothing", async () => {
         const el = add('<span data-hover-tip="Name">x</span>');
         const empty = add('<span data-hover-tip="">y</span>');

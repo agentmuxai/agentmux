@@ -305,10 +305,11 @@ function stepAllPanes(step: number, direction: 1 | -1, anchor: ZoomPoint | null 
 
     if (minZoom === Infinity) return; // no zoomable pane in this window
 
+    // Panes that stepped from different levels have no one figure: say what was done, not a range of unrelated numbers.
     const label =
         Math.abs(minZoom - maxZoom) < 0.01
             ? `All panes: ${Math.round(minZoom * 100)}%`
-            : `All panes: ${Math.round(minZoom * 100)}%–${Math.round(maxZoom * 100)}%`;
+            : `All panes zoomed ${direction > 0 ? "in" : "out"}`;
     showZoomIndicator(label);
 }
 

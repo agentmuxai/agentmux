@@ -1798,6 +1798,10 @@
             "method": "IdentityAccountAvailabilityCommand"
         },
         {
+            "command": "jekt.held.summary",
+            "method": "JektHeldSummaryCommand"
+        },
+        {
             "command": "agent.account.switch",
             "method": "AgentAccountSwitchCommand",
             "opts": "{ timeout: 120000, ...opts }"
