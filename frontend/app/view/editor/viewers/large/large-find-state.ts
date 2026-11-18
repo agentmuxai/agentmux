@@ -11,8 +11,8 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
-import type { SearchCall } from "../hex/hex-find";
-import { findAligned, largePatternFor } from "./large-find";
+import { findMatch, type SearchCall } from "../hex/hex-find";
+import { largePatternFor } from "./large-find";
 
 const searchOnSrv: SearchCall = (req) => RpcApi.FileSearchBytesCommand(TabRpcClient, req);
 
@@ -45,7 +45,7 @@ async function searchFrom(
     backward: boolean,
     cancelled: () => boolean
 ): Promise<{ offset: number; line: number; wrapped: boolean } | "none" | "changed" | null> {
-    const r = await findAligned({ call: o.call ?? searchOnSrv, path: o.path(), hex: p.hex, size: o.size(), cursor, backward, align: p.align, cancelled });
+    const r = await findMatch({ call: o.call ?? searchOnSrv, path: o.path(), hex: p.hex, size: o.size(), cursor, backward, align: p.align, cancelled });
     if (!r) return null;
     if (!r.found) return "none";
     if (r.offset >= o.size()) return "changed";

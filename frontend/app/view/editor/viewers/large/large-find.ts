@@ -8,7 +8,7 @@
  * is of bytes. docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
  */
 
-import { findMatch, hexOfBytes, MAX_PATTERN_BYTES, type FindResult } from "../hex/hex-find";
+import { hexOfBytes, MAX_PATTERN_BYTES } from "../hex/hex-find";
 
 export type LargePattern = { hex: string; length: number; align: 1 | 2 } | { error: string } | null;
 
@@ -44,25 +44,6 @@ export function largePatternFor(encoding: string | undefined, text: string): Lar
     }
     if (bytes.length > MAX_PATTERN_BYTES) return { error: `At most ${MAX_PATTERN_BYTES} bytes` };
     return { hex: hexOfBytes(bytes), length: bytes.length, align };
-}
-
-/** What `findMatch` takes, less what a search over this file fills in. */
-export type AlignedFind = Parameters<typeof findMatch>[0] & { align: 1 | 2 };
-
-/**
- * `findMatch`, skipping the matches that start in the middle of a UTF-16 unit (the bytes of one character's end and
- * the next one's start can spell the text). Stops at the first such match it sees again, so it ends.
- */
-export async function findAligned(o: AlignedFind): Promise<FindResult | null> {
-    let cursor = o.cursor;
-    let first = -1;
-    for (;;) {
-        const r = await findMatch({ ...o, cursor });
-        if (!r || !r.found || r.offset % o.align === 0) return r;
-        if (r.offset === first) return { found: false };
-        if (first < 0) first = r.offset;
-        cursor = r.offset;
-    }
 }
 
 export interface TextPart {
