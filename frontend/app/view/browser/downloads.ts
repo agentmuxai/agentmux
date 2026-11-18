@@ -104,12 +104,16 @@ const isFinal = (state: DownloadRow["state"] | undefined): boolean =>
     state === "done" || state === "failed" || state === "cancelled";
 
 /** The row a host update just finished, or null when it finished nothing: a progress update, the flood line, a
- *  repeat of an end already seen, or a late update for a row that was folded away. `before` is the rows ahead of
- *  the update and `after` the rows once it was applied. */
+ *  repeat of an end already seen, or a Save As dialog the person cancelled (a "cancelled" with no row before it).
+ *  `before` is the rows ahead of the update and `after` the rows once it was applied. */
 export function justFinished(before: DownloadRow[], after: DownloadRow[], u: DownloadUpdate): DownloadRow | null {
     if (u.download_id == null || !isFinal(u.state as DownloadRow["state"])) return null;
     const key = String(u.download_id);
-    if (isFinal(before.find((r) => r.key === key)?.state)) return null;
+    const prev = before.find((r) => r.key === key);
+    if (isFinal(prev?.state)) return null;
+    // Cancelled with nothing seen before it: the person closed the Save As dialog, so no download ever started and
+    // there is nothing to look up later.
+    if (u.state === "cancelled" && !prev) return null;
     const row = after.find((r) => r.key === key);
     return row && isFinal(row.state) ? row : null;
 }
@@ -118,6 +122,19 @@ export function justFinished(before: DownloadRow[], after: DownloadRow[], u: Dow
  *  its key is a number the pane counts up (the host's id repeats when a pane changes profile). */
 export function rememberPast(past: DownloadRow[], row: DownloadRow, seq: number): DownloadRow[] {
     return [{ ...row, key: `past-${seq}` }, ...past].slice(0, PAST_MAX);
+}
+
+/** The most characters of a file name a Downloads menu line shows. The menu is as wide as its widest line, and a
+ *  long name made it wider than a narrow pane and squeezed the size to "3...". */
+export const MENU_NAME_MAX = 22;
+
+/** `name` cut to `max` characters with an ellipsis in the middle of the stem, keeping the extension, so the
+ *  kind of file still shows: `a-very-long-download-name.pdf` becomes `a-very-long-downl….pdf`. */
+export function shortName(name: string, max = MENU_NAME_MAX): string {
+    if (name.length <= max) return name;
+    const ext = /\.[A-Za-z0-9]{1,8}$/.exec(name)?.[0] ?? "";
+    const head = Math.max(1, max - ext.length - 1);
+    return `${name.slice(0, head)}…${ext}`;
 }
 
 /** What a past download's line says after its name: the size saved, `cancelled`, or why it failed. */

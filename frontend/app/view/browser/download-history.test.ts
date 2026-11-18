@@ -7,9 +7,11 @@ import { createDownloadHistory } from "./download-history";
 import {
     applyDownloadUpdate,
     justFinished,
+    MENU_NAME_MAX,
     PAST_MAX,
     pastStatus,
     rememberPast,
+    shortName,
     type DownloadRow,
     type DownloadUpdate,
 } from "./downloads";
@@ -52,6 +54,9 @@ describe("justFinished", () => {
         expect(justFinished(before, applyDownloadUpdate(before, next), next)).toBeNull();
         const flood = upd({ download_id: null, state: "ignored", reason: "This page tried to start more downloads. Ignored." });
         expect(justFinished(before, applyDownloadUpdate(before, flood), flood)).toBeNull();
+        // A Save As dialog the person cancelled: "cancelled" with no running row before it is no download.
+        const dialogCancelled = upd({ download_id: 9, name: undefined, state: "cancelled" });
+        expect(justFinished([], applyDownloadUpdate([], dialogCancelled), dialogCancelled)).toBeNull();
         // A download whose first update is already its end (a failure before any progress) did finish.
         const failed = upd({ download_id: 5, state: "failed", reason: "The disk is full." });
         expect(justFinished([], applyDownloadUpdate([], failed), failed)).toMatchObject({ state: "failed", reason: "The disk is full." });
@@ -101,6 +106,19 @@ describe("the past downloads", () => {
         expect(history.past()[0].reason).toBe("Couldn't open the folder.");
         history.clear();
         expect(history.past()).toEqual([]);
+    });
+});
+
+describe("shortName", () => {
+    it("leaves a short name alone and cuts a long one in the middle, keeping the extension", () => {
+        expect(shortName("report.pdf")).toBe("report.pdf");
+        const cut = shortName("a-very-long-download-name-that-goes-on-and-on-for-quite-a-while.pdf");
+        expect(cut).toBe("a-very-long-downl….pdf");
+        expect(cut.length).toBeLessThanOrEqual(MENU_NAME_MAX);
+        // No extension: the stem is cut at the end.
+        expect(shortName("x".repeat(60))).toBe(`${"x".repeat(21)}…`);
+        // An extension that is itself long is not kept whole, so the line can't outgrow the limit.
+        expect(shortName("name.verylongextension").length).toBeLessThanOrEqual(MENU_NAME_MAX);
     });
 });
 

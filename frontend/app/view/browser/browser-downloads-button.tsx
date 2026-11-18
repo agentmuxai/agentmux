@@ -10,15 +10,17 @@
 import { Button, type MenuEntry, MenuTrigger } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 import type { BrowserViewModel } from "./browser-model";
-import { pastStatus, type DownloadRow } from "./downloads";
+import { pastStatus, shortName, type DownloadRow } from "./downloads";
 
 /** One finished download as a menu line: its name, what became of it, and, when it was saved, a click that shows it. */
 export function pastEntry(row: DownloadRow, reveal: (path: string) => void): MenuEntry {
     const path = row.state === "done" ? row.path : undefined;
+    // Every line has an icon, so the names line up: a folder for a saved file, a stop for a cancelled one, a warning for a failure.
+    const icon = path ? "folder-open" : row.state === "cancelled" ? "ban" : "triangle-exclamation";
     return {
-        label: row.name,
+        label: shortName(row.name),
         sublabel: pastStatus(row),
-        icon: path ? "folder-open" : undefined,
+        icon,
         disabled: !path,
         onSelect: path ? () => reveal(path) : undefined,
         testId: "browser-past-download",

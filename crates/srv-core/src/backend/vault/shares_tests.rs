@@ -110,7 +110,7 @@ fn a4_a_share_is_for_the_page_it_is_saved_for_and_not_a_refused_or_unconfirmed_l
     assert!(signins::offered_for_agent(&s, PULP_PROFILE, &["https://elsewhere.example.net".to_string()], "pulp", Some(PULP)).unwrap().is_empty());
     let row = s.vault_get(&id).unwrap().unwrap();
     let refused = VaultRow { tags: serde_json::to_string(&[signins::REFUSED]).unwrap(), ..row.clone() };
-    assert!(s.vault_update_kept(&refused, &row.sealed, None).unwrap());
+    assert!(s.vault_update_kept(&refused, &row.sealed, &row.fields, None).unwrap());
     assert!(offered(&s, "pulp", Some(PULP)).is_empty(), "the site refused it");
 }
 
@@ -346,7 +346,7 @@ fn with_realm(s: &Store, id: &str) {
     let mut f = fields_of(&row);
     f.insert("realm".into(), "Admin".into());
     let changed = VaultRow { fields: serde_json::to_string(&f).unwrap(), ..row.clone() };
-    assert!(s.vault_update_kept(&changed, &row.sealed, None).unwrap());
+    assert!(s.vault_update_kept(&changed, &row.sealed, &row.fields, None).unwrap());
 }
 
 #[test]
@@ -438,4 +438,91 @@ fn a9_deleting_the_agents_own_browser_profile_removes_its_shares_and_always() {
     assert!(!s.vault_grant_check(&two, &always_key(PULP)).unwrap());
     // The profile made for it next starts with nothing shared.
     assert!(offered(&s, PULP, Some(PULP)).is_empty());
+}
+
+/// Runs `writer` (something else that writes a login) and the removal of PULP's share of it at the same time, over
+/// 40 fresh logins: whichever lands first, the share and its Always stay gone. `in_profile` makes each login one of
+/// a browser profile's own, as the sign-ins of a deleted profile are.
+fn a_removed_share_stays_removed_beside(in_profile: bool, writer: impl Fn(&Store, &str, usize) + Sync) {
+    let s = store();
+    for round in 0..40 {
+        let site = format!("https://race{round}.example.com");
+        let profile = format!("profile:p-{round:012x}");
+        let mut extra = vec![("site", site.as_str())];
+        if in_profile {
+            extra.push(("profile", profile.as_str()));
+        }
+        let id = login_in(&s, "personal", &extra);
+        add(&s, &id, PULP).unwrap();
+        grant(&s, &id, &always_key(PULP));
+        std::thread::scope(|t| {
+            let w = t.spawn(|| writer(&s, &id, round));
+            let r = t.spawn(|| remove(&s, &id, PULP));
+            w.join().unwrap();
+            assert!(r.join().unwrap().unwrap(), "round {round}: the share was there to remove");
+        });
+        let list = listed(&fields(&s, &id));
+        assert!(!list.contains(&PULP.to_string()), "round {round}: the removed share came back: {list:?}");
+        assert!(!s.vault_grant_check(&id, &always_key(PULP)).unwrap(), "round {round}: its Always is gone");
+    }
+}
+
+#[test]
+fn a7_an_edit_beside_a_removal_leaves_the_share_removed() {
+    use crate::backend::vault::{update, EntryChange};
+    a_removed_share_stays_removed_beside(false, |s, id, round| {
+        let row = s.vault_get(id).unwrap().unwrap();
+        let parts = Parts([("password".to_string(), format!("pw-{round}"))].into());
+        // Refused with "changed while you were editing it" or saved: never a save that brings the share back.
+        let _ = update(s, EntryChange { id: id.to_string(), label: "Renamed".into(), fields: fields_of(&row), tags: vec![], parts, clear: vec![] });
+    });
+}
+
+#[test]
+fn a7_the_site_refusing_a_sign_in_beside_a_removal_leaves_the_share_removed() {
+    a_removed_share_stays_removed_beside(false, |s, id, round| {
+        let space = signins::Space { profile: signins::PERSONAL.to_string(), origin: format!("https://race{round}.example.com"), realm: String::new(), proxy: false };
+        assert!(signins::find(s, &space).unwrap().is_some_and(|(r, _)| r.id == id), "the sign-in is the one found");
+        signins::refused(s, &space).unwrap();
+    });
+}
+
+#[test]
+fn a7_moving_a_sign_in_to_personal_beside_a_removal_leaves_the_share_removed() {
+    a_removed_share_stays_removed_beside(true, |s, id, round| {
+        signins::profile_deleted(s, &format!("p-{round:012x}"), "Work", true, None).unwrap();
+        assert_eq!(fields(s, id).get("profile").map(String::as_str), Some(signins::PERSONAL), "the sign-in moved");
+    });
+}
+
+#[test]
+fn a7_an_agents_edit_of_the_details_beside_a_removal_leaves_the_share_removed() {
+    use crate::backend::vault::inspect::{update_details, UpdateRequest};
+    let ask = |id: &str, label: String| UpdateRequest { id: id.to_string(), label: Some(label), fields: BTreeMap::new(), tags: None, reason: Some("rename it".into()) };
+    // On its own the agent's edit goes through, so the race below is a real one.
+    let s = store();
+    assert!(update_details(&s, &ask(&login(&s), "Intranet again".into()), "builder").is_ok());
+    a_removed_share_stays_removed_beside(false, |s, id, round| {
+        let _ = update_details(s, &ask(id, format!("Intranet {round}")), "builder");
+    });
+}
+
+/// Every write of an entry's fields from an older read is refused once the fields changed, so none of the writers
+/// above (and a capture or an import's replacement, which write through these) can bring a removed share back.
+#[test]
+fn a7_each_write_path_refuses_what_was_read_before_the_share_was_removed() {
+    use crate::backend::storage::vault_versions::CaptureWrite;
+    let s = store();
+    let id = login(&s);
+    add(&s, &id, PULP).unwrap();
+    let stale = s.vault_get(&id).unwrap().unwrap();
+    assert!(remove(&s, &id, PULP).unwrap());
+    let edited = VaultRow { label: "Edited".into(), updated_at: stale.updated_at + 1, ..stale.clone() };
+    assert!(!s.vault_update_kept(&edited, &stale.sealed, &stale.fields, None).unwrap(), "an edit");
+    let replaced = CaptureWrite::Replace { row: VaultRow { updated_at: stale.updated_at + 1, ..stale.clone() }, was: stale.sealed.clone(), was_fields: stale.fields.clone(), kept: None };
+    assert!(!s.vault_capture_commit(&[replaced]).unwrap(), "a capture's replacement");
+    assert!(listed(&fields(&s, &id)).is_empty(), "the removed share stayed removed");
+    // Written from the fields as they are now, the same writes land.
+    let now = s.vault_get(&id).unwrap().unwrap();
+    assert!(s.vault_update_kept(&VaultRow { label: "Edited".into(), updated_at: now.updated_at + 1, ..now.clone() }, &now.sealed, &now.fields, None).unwrap());
 }
