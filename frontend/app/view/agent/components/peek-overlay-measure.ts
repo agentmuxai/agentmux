@@ -16,12 +16,17 @@ export function createPeekMeasure(s: PeekState) {
     // does not depend on the layout it is currently in. Then the height at the
     // width the horizontal placement chose. Measuring at fixed inputs means the
     // placement never depends on the placement chosen last time.
+    //
+    // A panel the person has scrolled keeps its place: laid out at its full height it has nothing to scroll, so the
+    // browser clamps its scroll offset to 0, and the offset is put back once the caps are (placement reruns on every
+    // scroll of the transcript, and sent a panel being read back to its top).
     const withCapsLifted = <T,>(maxWidth: string, minWidth: string, read: (el: HTMLElement) => T, fallback: T): T => {
         const el = s.floatingEl;
         if (!el) return fallback;
         const prevW = el.style.maxWidth;
         const prevMin = el.style.minWidth;
         const prevH = el.style.maxHeight;
+        const prevTop = el.scrollTop;
         el.style.maxWidth = maxWidth;
         el.style.minWidth = minWidth;
         el.style.maxHeight = "none";
@@ -29,6 +34,7 @@ export function createPeekMeasure(s: PeekState) {
         el.style.maxWidth = prevW;
         el.style.minWidth = prevMin;
         el.style.maxHeight = prevH;
+        if (prevTop !== 0) el.scrollTop = prevTop;
         return out;
     };
     // The content's own width: no cap and no minimum.

@@ -30,6 +30,7 @@ export const EXEMPT = {
     "frontend/app/view/agent/components/tool-overlay-log-state.ts": "a tool preview box",
     "frontend/app/view/agent/history/history-paging.ts": "the History tab's own list",
     "frontend/app/view/agent/components/SlashCommandPicker.tsx": "the slash-command picker's list",
+    "frontend/app/view/agent/components/peek-overlay-measure.ts": "the hover panel's own box (puts its offset back after measuring)",
 };
 
 const WRITE = /\.scrollTop\s*[-+]?=(?!=)|\.scroll(?:To|By|IntoView)\s*\(/;
