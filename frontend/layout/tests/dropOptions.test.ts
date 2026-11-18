@@ -204,7 +204,7 @@ describe("guideSpots", () => {
 
     it("keeps every spot inside the pane at any size, none over another: the part over the next pane can not be chosen", () => {
         // 174 by 162 and 291 wide are the panes the macOS look check measured edge spots outside of.
-        for (const [width, height] of [[174, 162], [291, 347], [320, 200], [387, 347], [900, 600], [120, 500], [500, 90], [100, 100]]) {
+        for (const [width, height] of [[174, 162], [291, 347], [320, 200], [387, 347], [900, 600], [120, 500], [500, 90], [100, 100], [1200, 800], [3800, 2000], [700, 1500]]) {
             const { rect, spots } = spotsIn(width, height);
             for (const spot of spots) expect(isInside(spot, rect), `${DropDirection[spot.direction]} in ${width}x${height}`).toBe(true);
             for (const a of spots) {
@@ -216,18 +216,46 @@ describe("guideSpots", () => {
         }
     });
 
+    it("sizes a spot by the pane it is over: larger on a larger pane, never past the ceiling or under the floor, with the gap and the slop growing with it", () => {
+        const widthIn = (width: number, height: number) => spotsIn(width, height).spots.find((s) => s.direction === DropDirection.Center)!.width;
+        const [small, medium, large] = [widthIn(300, 200), widthIn(600, 400), widthIn(1200, 800)];
+        expect(small).toBeLessThan(medium);
+        expect(medium).toBeLessThan(large);
+        // Pane to pane, the spot is the same share of it, until the ceiling.
+        expect(Math.abs(medium / 600 - large / 1200)).toBeLessThan(0.01);
+        expect(widthIn(4000, 2400)).toBe(180);
+        expect(widthIn(60, 60)).toBe(28);
+        // The gap between two spots grows with the spot, and so does how far past its edge one takes the pointer.
+        const gapIn = (width: number, height: number) => {
+            const { spots } = spotsIn(width, height);
+            const [centre, right] = [DropDirection.Center, DropDirection.Right].map((d) => spots.find((s) => s.direction === d)!);
+            return right.x - centre.x - centre.width;
+        };
+        expect(gapIn(300, 200)).toBe(5);
+        expect(gapIn(1200, 800)).toBeGreaterThan(gapIn(300, 200));
+        const big = spotsIn(1200, 800).spots.find((s) => s.direction === DropDirection.Center)!;
+        const edge = big.x + big.width / 2;
+        expect(spotAt([big], { x: edge + 8, y: big.y })).toBe(big);
+        const tiny = spotsIn(100, 100).spots.find((s) => s.direction === DropDirection.Center)!;
+        expect(spotAt([tiny], { x: tiny.x + tiny.width / 2 + 8, y: tiny.y })).toBeUndefined();
+    });
+
     it("shrinks the spots for one beside the compass, and leaves that one out only where five of the smallest do not fit", () => {
         const directions = (width: number, height: number) => spotsIn(width, height).spots.map((s) => s.direction);
         // Room at the edges: full size, the outer spots at the pane's edges.
         const roomy = spotsIn(900, 600).spots;
         expect(roomy).toHaveLength(ALL_AROUND.length);
-        expect(roomy[0].width).toBe(56);
-        expect(roomy.find((s) => s.direction === DropDirection.OuterRight)!.x).toBe(400 + 900 - 12 - 28);
-        // 291 wide: five across, a little smaller, the outer spot next to the compass.
-        const narrow = spotsIn(291, 600).spots;
+        // 15% of the pane's width (the layout is twice as wide as high, so its height allows more).
+        expect(roomy[0].width).toBe(135);
+        // The edge spot stands in from the pane's edge by a share of the spot (28 px here), not a fixed 12.
+        expect(roomy.find((s) => s.direction === DropDirection.OuterRight)!.x).toBeCloseTo(400 + 900 - 28 - 135 / 2, 5);
+        // 200 wide: the edges are not clear of the compass, so five across, the outer spot next to the compass.
+        const narrow = spotsIn(200, 600).spots;
         expect(narrow).toHaveLength(ALL_AROUND.length);
-        expect(narrow[0].width).toBeLessThan(56);
-        expect(narrow[0].width).toBeGreaterThan(28);
+        expect(narrow[0].width).toBeLessThanOrEqual(Math.ceil(0.15 * 200));
+        expect(narrow[0].width).toBeGreaterThanOrEqual(28);
+        const outer = narrow.find((s) => s.direction === DropDirection.OuterRight)!;
+        expect(outer.x - narrow[0].x).toBe(2 * (narrow[0].width + 5));
         // Too narrow for five of the smallest: no spot beside the compass across, the ones above and below stay.
         expect(directions(120, 500)).not.toContain(DropDirection.OuterLeft);
         expect(directions(120, 500)).not.toContain(DropDirection.OuterRight);
