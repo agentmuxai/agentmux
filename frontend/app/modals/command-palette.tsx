@@ -29,6 +29,36 @@ function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
     });
 }
 
+function PaletteRow(props: {
+    cmd: CommandEntry;
+    selected: boolean;
+    onHover: () => void;
+    onPick: (e: MouseEvent) => void;
+}): JSX.Element {
+    return (
+        <div
+            class={`command-palette-item${props.selected ? " selected" : ""}`}
+            onClick={(e) => props.onPick(e)}
+            onMouseEnter={() => props.onHover()}
+        >
+            {props.cmd.icon && (
+                <i
+                    class={`fa-solid fa-${props.cmd.icon} command-palette-item-icon`}
+                    style={props.cmd.iconColor ? { color: props.cmd.iconColor } : {}}
+                />
+            )}
+            <span class="command-palette-item-text">
+                <span class="command-palette-item-label">{props.cmd.label}</span>
+                <Show when={props.cmd.detail}>
+                    <span class="command-palette-item-detail">{props.cmd.detail}</span>
+                </Show>
+            </span>
+            <span class="command-palette-item-category">{props.cmd.category}</span>
+            <Show when={shortcutFor(props.cmd.id)}>{(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}</Show>
+        </div>
+    );
+}
+
 const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [query, setQuery] = createSignal("");
     const [selectedIdx, setSelectedIdx] = createSignal(0);
@@ -141,31 +171,15 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                 <div class="command-palette-list" ref={listRef}>
                     <For each={filtered()}>
                         {(cmd, i) => (
-                            <div
-                                class={`command-palette-item${i() === clampedIdx() ? " selected" : ""}`}
-                                onClick={(e) => {
+                            <PaletteRow
+                                cmd={cmd}
+                                selected={i() === clampedIdx()}
+                                onHover={() => setSelectedIdx(i())}
+                                onPick={(e) => {
                                     setSelectedIdx(i());
                                     executeSelected(e.shiftKey);
                                 }}
-                                onMouseEnter={() => setSelectedIdx(i())}
-                            >
-                                {cmd.icon && (
-                                    <i
-                                        class={`fa-solid fa-${cmd.icon} command-palette-item-icon`}
-                                        style={cmd.iconColor ? { color: cmd.iconColor } : {}}
-                                    />
-                                )}
-                                <span class="command-palette-item-text">
-                                    <span class="command-palette-item-label">{cmd.label}</span>
-                                    <Show when={cmd.detail}>
-                                        <span class="command-palette-item-detail">{cmd.detail}</span>
-                                    </Show>
-                                </span>
-                                <span class="command-palette-item-category">{cmd.category}</span>
-                                <Show when={shortcutFor(cmd.id)}>
-                                    {(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}
-                                </Show>
-                            </div>
+                            />
                         )}
                     </For>
                     {filtered().length === 0 && (
