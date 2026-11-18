@@ -299,6 +299,48 @@ describe("the Large text viewer", () => {
         }
     });
 
+    it("goes through the matches of one line one at a time: the current one is marked and scrolled to, not the first again", async () => {
+        const text = "é err y err z err w\nline 2\nline 3\n";
+        serve(text);
+        // jsdom has no layout: the hits of a line sit 300 px apart along a grid that is 371 px wide.
+        const was = HTMLElement.prototype.getBoundingClientRect;
+        HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+            const hits = Array.from(this.parentElement?.querySelectorAll(".large-text-hit") ?? []);
+            const [left, right] = this.classList.contains("large-text-hit") ? [300 * (hits.indexOf(this) + 1), 300 * (hits.indexOf(this) + 1) + 60] : [0, 371];
+            return { left, right, width: right - left, x: left, top: 0, bottom: 0, height: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+        };
+        try {
+            await mount({ size: new TextEncoder().encode(text).length });
+            key("f", { ctrlKey: true });
+            await settle();
+            fireEvent.input(findBox(), { target: { value: "err" } });
+            const hitsInLine = () => Array.from(document.querySelectorAll('[data-line="1"] .large-text-hit'));
+            const currentHit = () => hitsInLine().findIndex((h) => h.classList.contains("large-text-hit-current"));
+            const step = async (init: KeyboardEventInit) => {
+                grid().scrollLeft = 0;
+                fireEvent.keyDown(findBox(), { key: "Enter", ...init });
+                await settle();
+                await new Promise((r) => setTimeout(r, 80));
+                expect(markedLine()).toBe("1");
+                expect(hitsInLine()).toHaveLength(3);
+                expect(document.querySelectorAll(".large-text-hit-current")).toHaveLength(1);
+            };
+            await step({});
+            expect(currentHit()).toBe(0);
+            expect(grid().scrollLeft).toBe(0); // the first is on screen already
+            await step({});
+            expect(currentHit()).toBe(1);
+            expect(grid().scrollLeft).toBeGreaterThan(0); // the second is off screen: the same line, and it is revealed
+            await step({});
+            expect(currentHit()).toBe(2);
+            expect(grid().scrollLeft).toBeGreaterThan(0);
+            await step({ shiftKey: true });
+            expect(currentHit()).toBe(1);
+        } finally {
+            HTMLElement.prototype.getBoundingClientRect = was;
+        }
+    });
+
     it("says there is no match, and refuses text it cannot search in the file's encoding without asking srv", async () => {
         await mount();
         key("f", { ctrlKey: true });

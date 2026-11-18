@@ -96,11 +96,15 @@
     background: var(--accent-bg-heavy);
 }
 
-// The text a find matched, in the line it was found in.
+// The text a find matched, in the line it was found in; the one on show, when a line holds several, is the stronger.
 .large-text-hit {
     color: inherit;
-    background: var(--search-mark-current-bg);
+    background: var(--search-mark-bg);
     border-radius: var(--radius-sm);
+}
+
+.large-text-hit-current {
+    background: var(--search-mark-current-bg);
 }
 
 .large-text-find {
