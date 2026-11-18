@@ -70,20 +70,20 @@ pub(super) fn asker(
     Ok(Who { agent, pane, slug: def.slug.clone(), uid: uid.unwrap_or_default(), container: def.runtime().is_container() })
 }
 
-/// Whether the person left an import's share ticked: `None` for a use with no share on it, and for a no. A card
-/// that doesn't send the tick leaves it ticked, as it is shown.
+/// Whether the person left an import's share ticked: `None` for a use with no share on it, and for a no. The card
+/// sends the tick explicitly; an approval that sends none (a surface that doesn't draw the share line) shares nothing.
 pub(super) fn ticked_share(request: &UseRequest, share: Option<&Value>, decision: Decision) -> Option<bool> {
     if decision == Decision::Deny || !request.import.as_ref().is_some_and(|i| i.share) {
         return None;
     }
-    Some(share.and_then(Value::as_bool).unwrap_or(true))
+    Some(share.and_then(Value::as_bool).unwrap_or(false))
 }
 
 /// What became of the share an import asked for: whether it was made, and what the agent is told. The login is saved
 /// either way.
 pub(super) async fn share_made(state: &AppState, who: &Who, id: &str, ticked: bool) -> (bool, String) {
     if !ticked {
-        return (false, "the person left the share unticked: the login is saved and not shared with you".into());
+        return (false, "the share was not ticked (left unticked, or the approval sent no tick): the login is saved and not shared with you".into());
     }
     let (store, id, uid) = (state.identity_store.clone(), id.to_string(), who.uid.clone());
     match tokio::task::spawn_blocking(move || crate::backend::vault::shares::add(&store, &id, &uid)).await {
@@ -203,7 +203,7 @@ pub(crate) async fn handle_vault_import(State(state): State<AppState>, caller: O
         Ok(done) => {
             let mut out = json!({ "status": "imported", "id": done.id, "label": done.label, "vault": done.vault });
             if plan.share {
-                let ticked = answer.as_ref().and_then(|a| a.share) != Some(false);
+                let ticked = answer.as_ref().and_then(|a| a.share) == Some(true);
                 let (shared, said) = share_made(&state, &who, &done.id, ticked).await;
                 out["shared"] = json!(shared);
                 out["share_note"] = json!(said);
@@ -266,7 +266,8 @@ mod tests {
         let import = card.import.as_ref().unwrap();
         assert_eq!((import.user_key.as_str(), import.site.as_str(), import.share), ("db.user", "https://intranet.example.com", true));
         let tick = |card: &UseRequest, share: Option<bool>, decision| ticked_share(card, share.map(|s| json!(s)).as_ref(), decision);
-        assert_eq!(tick(&card, None, Decision::Once), Some(true), "a card that sends no tick leaves it as shown");
+        assert_eq!(tick(&card, None, Decision::Once), Some(false), "an approval that sends no tick shares nothing");
+        assert_eq!(tick(&card, Some(true), Decision::Once), Some(true));
         assert_eq!(tick(&card, Some(false), Decision::Once), Some(false));
         assert_eq!(tick(&card, Some(false), Decision::Deny), None, "a no shares nothing and has no tick");
         let plain = super::card(&plan(false), &who());
