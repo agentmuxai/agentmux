@@ -325,6 +325,14 @@
     overflow-wrap: normal;
 }
 
+// The details (owner, when it expires) wrap between words and keep room for a few of them. With `anywhere` above the
+// table could take the cell down to a letter's width, and in a list 600 to 900px wide it gave "Test Perso / n" and
+// "expire / s in 1870 days" (macOS look). A long word with no break in it still wraps, as `break-word` does last.
+.vault-table td.vault-details {
+    overflow-wrap: break-word;
+    min-width: 8rem;
+}
+
 .vault-actions {
     white-space: nowrap;
     text-align: right;
