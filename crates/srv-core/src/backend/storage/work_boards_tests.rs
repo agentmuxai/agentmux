@@ -381,3 +381,106 @@ fn waiting_tasks_leave_out_boards_the_agent_cannot_see_and_archived_ones() {
     s.work_board_archive("work", true, 10).unwrap();
     assert_eq!(ids(&s, "naki-2"), ["m"], "an archived board's tasks can't be claimed, so no reminder names them");
 }
+
+
+fn merged_set() -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "stages": [
+            { "id": "backlog", "name": "Backlog", "colour": "grey", "takes": ["backlog", "specd"] },
+            { "id": "doing", "name": "  Doing ", "colour": "magenta", "takes": ["research", "progress"] },
+            { "id": "needs", "name": "Needs you", "colour": "amber", "takes": ["needs"] },
+            { "id": "review", "name": "Review", "colour": "yellow", "takes": ["review"] },
+            { "id": "done", "name": "Done", "colour": "green", "takes": ["merged", "released"] }
+        ]
+    })
+}
+
+fn stages_edit(set: serde_json::Value) -> BoardEdit {
+    BoardEdit { stages: Some(set), ..Default::default() }
+}
+
+#[test]
+fn a_board_starts_with_the_default_stages() {
+    let (s, _d) = store();
+    let main = s.work_board_resolve(Some("main"), 1).unwrap();
+    assert_eq!((main.stages.as_str(), main.stages_rev), ("", 0));
+}
+
+#[test]
+fn a_stage_set_is_kept_cleaned_and_survives_a_reopen() {
+    let (s, d) = store();
+    let b = s.work_board_edit("main", &stages_edit(merged_set()), 5).unwrap();
+    assert_eq!(b.stages_rev, 1);
+    let set = crate::backend::storage::work_board_stages::parse_stored(&b.stages).unwrap();
+    assert_eq!(set.stages.len(), 5);
+    assert_eq!(set.stages[1].name, "Doing", "names are trimmed");
+    drop(s);
+    let s = Store::open_identity_store(&d.path().join("identity-store.db")).unwrap();
+    let again = s.work_board_resolve(Some("main"), 6).unwrap();
+    assert_eq!((again.stages, again.stages_rev), (b.stages, 1));
+}
+
+#[test]
+fn a_set_that_breaks_a_rule_is_refused_with_the_reasons_and_nothing_is_written() {
+    let (s, _d) = store();
+    let mut bad = merged_set();
+    bad["stages"][4]["takes"] = serde_json::json!(["merged"]);
+    let Err(BoardError::Refused(why)) = s.work_board_edit("main", &stages_edit(bad), 5) else { panic!("should be refused") };
+    assert!(why.contains("no stage shows released"), "{why}");
+    let main = s.work_board_resolve(Some("main"), 6).unwrap();
+    assert_eq!((main.stages.as_str(), main.stages_rev), ("", 0));
+    let Err(BoardError::Refused(why)) = s.work_board_edit("main", &stages_edit(serde_json::json!({ "stages": "x" })), 7) else { panic!("should be refused") };
+    assert!(why.contains("not a stage set"), "{why}");
+}
+
+#[test]
+fn a_stale_revision_is_refused_and_the_current_one_is_accepted() {
+    let (s, _d) = store();
+    s.work_board_edit("main", &stages_edit(merged_set()), 5).unwrap();
+    let stale = BoardEdit { stages_rev: Some(0), ..stages_edit(merged_set()) };
+    let Err(BoardError::Refused(why)) = s.work_board_edit("main", &stale, 6) else { panic!("should be refused") };
+    assert!(why.contains("changed since you read them (now revision 1)"), "{why}");
+    let current = BoardEdit { stages_rev: Some(1), ..stages_edit(merged_set()) };
+    assert_eq!(s.work_board_edit("main", &current, 7).unwrap().stages_rev, 2);
+}
+
+#[test]
+fn a_reset_clears_the_stages_and_counts_as_a_change() {
+    let (s, _d) = store();
+    s.work_board_edit("main", &stages_edit(merged_set()), 5).unwrap();
+    let b = s.work_board_edit("main", &BoardEdit { stages_reset: true, ..Default::default() }, 6).unwrap();
+    assert_eq!((b.stages.as_str(), b.stages_rev), ("", 2));
+    let both = BoardEdit { stages_reset: true, ..stages_edit(merged_set()) };
+    assert!(matches!(s.work_board_edit("main", &both, 7), Err(BoardError::Refused(_))));
+}
+
+#[test]
+fn an_edit_that_names_no_stages_leaves_them_and_their_revision() {
+    let (s, _d) = store();
+    s.work_board_edit("main", &stages_edit(merged_set()), 5).unwrap();
+    let b = s.work_board_edit("main", &edit("Everything"), 6).unwrap();
+    assert_eq!((b.name.as_str(), b.stages_rev), ("Everything", 1));
+    assert!(!b.stages.is_empty());
+}
+
+#[test]
+fn an_archived_board_keeps_its_stages_and_refuses_to_change_them() {
+    let (s, _d) = store();
+    s.work_board_create(&edit("Old"), "t", 1).unwrap();
+    s.work_board_edit("old", &stages_edit(merged_set()), 2).unwrap();
+    s.work_board_archive("old", true, 3).unwrap();
+    let Err(BoardError::Refused(why)) = s.work_board_edit("old", &stages_edit(merged_set()), 4) else { panic!("should be refused") };
+    assert!(why.contains("archived"), "{why}");
+    assert!(s.work_board_edit("old", &BoardEdit { stages_reset: true, ..Default::default() }, 5).is_err());
+    assert!(!s.work_board_resolve(Some("old"), 6).unwrap().stages.is_empty());
+}
+
+#[test]
+fn each_board_has_its_own_stages() {
+    let (s, _d) = store();
+    s.work_board_create(&edit("Client"), "t", 1).unwrap();
+    s.work_board_edit("client", &stages_edit(merged_set()), 2).unwrap();
+    assert!(s.work_board_resolve(Some("main"), 3).unwrap().stages.is_empty());
+    assert!(!s.work_board_resolve(Some("client"), 3).unwrap().stages.is_empty());
+}

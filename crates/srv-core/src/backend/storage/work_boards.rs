@@ -16,6 +16,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::store::Store;
+use super::work_board_stages::{self as stages, StageSet};
 use super::work_queue::{insert_item, row_to_item, work_state, WorkItem, COLS};
 use super::StoreError;
 
@@ -51,6 +52,13 @@ pub(crate) const SCHEMA: &str = "
         updated_at        INTEGER NOT NULL DEFAULT 0
     );";
 
+/// Columns added to a boards table that older builds created: the stages (JSON text, empty for the
+/// default set) and the counter that goes up with each change of them.
+const BOARD_COLUMNS: [&str; 2] = [
+    "ALTER TABLE db_boards ADD COLUMN stages TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE db_boards ADD COLUMN stages_rev INTEGER NOT NULL DEFAULT 0",
+];
+
 /// Columns added to a cards table that older builds created.
 const CARD_COLUMNS: [&str; 2] = [
     "ALTER TABLE db_work_cards ADD COLUMN board_id TEXT NOT NULL DEFAULT ''",
@@ -62,6 +70,7 @@ const CARD_COLUMNS: [&str; 2] = [
 pub(crate) fn apply_schema(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(super::work_board::SCHEMA)?;
     conn.execute_batch(SCHEMA)?;
+    super::migrations::apply_additive_columns(conn, BOARD_COLUMNS)?;
     super::migrations::apply_additive_columns(conn, CARD_COLUMNS)?;
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_work_cards_board_num
@@ -149,6 +158,12 @@ pub struct Board {
     pub created_by: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The stages the person set, as JSON text; empty is the default set (see `work_board_stages`).
+    #[serde(default)]
+    pub stages: String,
+    /// Goes up with each change of the stages, so an editor can tell its copy is old.
+    #[serde(default)]
+    pub stages_rev: i64,
     /// Tasks not finished, and all tasks, on this board (filled by [`Store::work_boards_list`]).
     #[serde(default)]
     pub open: i64,
@@ -175,7 +190,7 @@ impl Board {
 }
 
 const BOARD_COLS: &str = "id, slug, name, tier, readable, agents, is_default, archived, aliases, pending_delete_at, \
-                          created_by, created_at, updated_at";
+                          created_by, created_at, updated_at, stages, stages_rev";
 
 fn row_to_board(r: &rusqlite::Row) -> rusqlite::Result<Board> {
     let agents: String = r.get("agents")?;
@@ -194,6 +209,8 @@ fn row_to_board(r: &rusqlite::Row) -> rusqlite::Result<Board> {
         created_by: r.get("created_by")?,
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
+        stages: r.get("stages")?,
+        stages_rev: r.get("stages_rev")?,
         open: 0,
         total: 0,
     })
@@ -365,6 +382,12 @@ pub struct BoardEdit {
     pub readable: Option<bool>,
     /// The agents that see it; an empty list means all.
     pub agents: Option<Vec<String>>,
+    /// The whole new stage set (a `StageSet` as JSON). Checked against every rule, never repaired.
+    pub stages: Option<serde_json::Value>,
+    /// Clear the stages back to the default set.
+    pub stages_reset: bool,
+    /// The revision the caller read; when it is not the board's now, the change is refused.
+    pub stages_rev: Option<i64>,
 }
 
 /// What a move did.
@@ -387,6 +410,41 @@ pub enum Deletion {
     Deleted,
     /// A board with tasks waits out a visible countdown, with a veto; it goes at this time (ms).
     Pending(i64),
+}
+
+/// The stages text and revision a board edit leaves: unchanged unless it sets or resets them. A
+/// set is checked against every rule and refused with the reasons, never repaired (spec §7); an
+/// archived board is read-only; a caller's stale revision is refused.
+fn next_stages(board: &Board, edit: &BoardEdit) -> Result<(String, i64), BoardError> {
+    if edit.stages.is_none() && !edit.stages_reset {
+        return Ok((board.stages.clone(), board.stages_rev));
+    }
+    if edit.stages.is_some() && edit.stages_reset {
+        return refused("set the stages or reset them, not both");
+    }
+    if board.archived {
+        return refused(format!("board {} is archived, so its stages can't be changed; unarchive it first", board.slug));
+    }
+    if edit.stages_rev.is_some_and(|rev| rev != board.stages_rev) {
+        return refused(format!(
+            "the stages changed since you read them (now revision {}); read the board again and apply your change to that",
+            board.stages_rev
+        ));
+    }
+    let text = match &edit.stages {
+        None => String::new(),
+        Some(value) => {
+            let set: StageSet = serde_json::from_value(value.clone())
+                .map_err(|e| BoardError::Refused(format!("the stages are not a stage set ({{version, stages: [{{id, name, colour, takes}}]}}): {e}")))?;
+            let set = stages::clean(set);
+            let why = stages::validate(&set);
+            if !why.is_empty() {
+                return refused(format!("the stages break the rules: {}", why.join("; ")));
+            }
+            serde_json::to_string(&set).unwrap_or_default()
+        }
+    };
+    Ok((text, board.stages_rev + 1))
 }
 
 fn check_tier(tier: &str) -> Result<String, BoardError> {
@@ -564,10 +622,12 @@ impl Store {
             Some(a) => agents_json(a),
             None => agents_json(&board.agents),
         };
+        let (stages, stages_rev) = next_stages(&board, edit)?;
         conn.execute(
-            "UPDATE db_boards SET name = ?2, slug = ?3, tier = ?4, readable = ?5, agents = ?6, aliases = ?7, updated_at = ?8
+            "UPDATE db_boards SET name = ?2, slug = ?3, tier = ?4, readable = ?5, agents = ?6, aliases = ?7, updated_at = ?8,
+                    stages = ?9, stages_rev = ?10
               WHERE id = ?1",
-            params![board.id, name, slug, tier, readable, agents, serde_json::to_string(&aliases).unwrap_or_default(), now_ms],
+            params![board.id, name, slug, tier, readable, agents, serde_json::to_string(&aliases).unwrap_or_default(), now_ms, stages, stages_rev],
         )?;
         Ok(find(&conn, &board.id, now_ms)?.ok_or(StoreError::NotFound)?)
     }

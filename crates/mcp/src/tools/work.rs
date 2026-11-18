@@ -296,7 +296,7 @@ async fn run_work_update(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let attached = attached_text(&v);
     Ok(match segment {
         "ask" => format!(
-            "Asked: task {id} now waits in the operator's Needs you column, and stays yours. \
+            "Asked: task {id} now waits for the operator, and stays yours. \
              Their answer comes to you as a message."
         ),
         "submit" => format!("{}{attached}", finished_text(id, &v)),
@@ -790,7 +790,7 @@ async fn run_work_boards(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         client.get(&url).query(&[("archived", archived.to_string())]).header(AUTH_KEY_HEADER, auth_key).send().await
     } else {
         let mut body = serde_json::json!({ "action": action });
-        for key in ["board", "name", "slug", "readable", "agents"] {
+        for key in ["board", "name", "slug", "readable", "agents", "stages", "stages_reset", "stages_rev"] {
             if let Some(v) = arguments.get(key).filter(|v| !v.is_null()) {
                 body[key] = v.clone();
             }
@@ -808,6 +808,23 @@ async fn run_work_boards(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     Ok(boards_text(action, &v))
 }
 
+/// ", stages (rev 2): Needs you [amber: needs] | Done [green: merged+released]" for a board with its own
+/// stage set; nothing for the default eight (so the list stays short). An agent reads this to know
+/// what to send back with `stages` and `stages_rev`.
+fn stages_text(b: &Value) -> String {
+    if b.get("stages_default").and_then(Value::as_bool).unwrap_or(true) {
+        return String::new();
+    }
+    let Some(list) = b.get("stages").and_then(|s| s.get("stages")).and_then(Value::as_array) else { return String::new() };
+    let one = |st: &Value| {
+        let s = |k: &str| st.get(k).and_then(Value::as_str).unwrap_or("");
+        let takes: Vec<&str> = st.get("takes").and_then(Value::as_array).map(|t| t.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        format!("{} [{}: {}]", s("name"), s("colour"), takes.join("+"))
+    };
+    let rev = b.get("stages_rev").and_then(Value::as_i64).unwrap_or(0);
+    format!(", stages (rev {rev}): {}", list.iter().map(one).collect::<Vec<_>>().join(" | "))
+}
+
 /// What the boards answers say: the list, or the board a change left.
 fn boards_text(action: &str, v: &Value) -> String {
     let line = |b: &Value| {
@@ -818,7 +835,7 @@ fn boards_text(action: &str, v: &Value) -> String {
             format!(", agents: {}", a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
         });
         format!(
-            "{} ({}){}{}{}: {} open of {} task(s){}",
+            "{} ({}){}{}{}: {} open of {} task(s){}{}",
             s("slug"),
             s("name"),
             if flag("default") { " [default]" } else { "" },
@@ -827,6 +844,7 @@ fn boards_text(action: &str, v: &Value) -> String {
             n("open"),
             n("total"),
             agents.unwrap_or_default(),
+            stages_text(b),
         )
     };
     match action {
