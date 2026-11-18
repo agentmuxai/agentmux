@@ -182,6 +182,9 @@ struct EngineInner {
     #[allow(dead_code)]
     auth_token: String,
     rpc_context: Option<RpcContext>,
+    /// The id a registered external host gave this connection when it proxied it (verified by srv),
+    /// kept beside the context because registering as an agent replaces the whole context.
+    gateway_conn: Option<String>,
     /// Request/response types of every command registered through
     /// [`WshRpcEngine::register_typed`]. Lives beside `handlers` so the
     /// mapping is a side effect of registration and cannot drift from it.
@@ -217,6 +220,7 @@ impl WshRpcEngine {
                 active_handlers: HashMap::new(),
                 auth_token: String::new(),
                 rpc_context: None,
+                gateway_conn: None,
                 schema: RpcSchema::new(),
             }),
             output_tx,
@@ -382,6 +386,41 @@ impl WshRpcEngine {
         }
         ctx.operator_proven = true;
         true
+    }
+
+    /// Record that a registered external host vouched for this connection as `person`'s window until the
+    /// unix second `until` (`server::external_host`). Refused, returning false, once the connection has
+    /// registered as an agent; registering afterwards drops the proof, as for the CEF host's.
+    pub fn mark_operator_proven_for(&self, person: &str, until: u64) -> bool {
+        let mut inner = self.lock_inner();
+        let ctx = inner.rpc_context.get_or_insert_with(RpcContext::default);
+        if !ctx.agent_id.is_empty() {
+            return false;
+        }
+        ctx.operator_proven = true;
+        ctx.operator_person = Some(person.to_string());
+        ctx.operator_proof_until = Some(until);
+        true
+    }
+
+    /// Drop any operator proof this connection holds (an external host's lease that was ended).
+    pub fn clear_operator_proof(&self) {
+        let mut inner = self.lock_inner();
+        if let Some(ctx) = inner.rpc_context.as_mut() {
+            ctx.operator_proven = false;
+            ctx.operator_person = None;
+            ctx.operator_proof_until = None;
+        }
+    }
+
+    /// Remember the id an external host gave this connection (set once, when it connects).
+    pub fn set_gateway_conn(&self, id: String) {
+        self.lock_inner().gateway_conn = Some(id);
+    }
+
+    /// The id an external host gave this connection, if it came through one and srv verified it.
+    pub fn gateway_conn(&self) -> Option<String> {
+        self.lock_inner().gateway_conn.clone()
     }
 
     /// Process an incoming message (from the transport layer).

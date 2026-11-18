@@ -45,6 +45,12 @@ pub struct CliArgs {
     #[arg(long = "allowed-origin")]
     pub allowed_origins: Vec<String>,
 
+    /// Headless: the key file of an external host whose attestations srv accepts (the person's window,
+    /// vouched for by a separate host process). Read once at boot; there is no way to register another
+    /// later. Without it srv accepts no external attestation.
+    #[arg(long = "external-host-key-file")]
+    pub external_host_key_file: Option<PathBuf>,
+
     /// Headless, with `--frontend-dir`: the one origin a browser reaches the UI on when it is not
     /// srv's own port, e.g. through `ssh -L 8080:127.0.0.1:7380`. Must be `http://127.0.0.1:<port>`.
     #[arg(long = "public-origin")]

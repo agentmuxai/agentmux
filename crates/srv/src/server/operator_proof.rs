@@ -91,6 +91,18 @@ impl Challenges {
     }
 }
 
+impl Challenges {
+    /// The connection `nonce` was issued to, if it is still waiting, unexpired and open. The nonce
+    /// is not spent.
+    fn peek(&self, nonce: &str, now: Instant) -> Option<Arc<WshRpcEngine>> {
+        let p = self.pending.get(nonce)?;
+        if now.duration_since(p.issued) >= TTL {
+            return None;
+        }
+        p.engine.upgrade()
+    }
+}
+
 static CHALLENGES: LazyLock<Mutex<Challenges>> = LazyLock::new(Default::default);
 
 fn challenges() -> std::sync::MutexGuard<'static, Challenges> {
@@ -100,6 +112,18 @@ fn challenges() -> std::sync::MutexGuard<'static, Challenges> {
 /// A fresh single-use nonce bound to `engine`'s connection.
 pub fn issue(engine: &Arc<WshRpcEngine>) -> String {
     challenges().issue(engine, Instant::now())
+}
+
+/// The connection `nonce` was issued to, without spending it (a registered external host asks which
+/// connection a challenge belongs to before it signs: `server::external_host`).
+pub(super) fn peek_engine(nonce: &str) -> Option<Arc<WshRpcEngine>> {
+    challenges().peek(nonce, Instant::now())
+}
+
+/// Spend `nonce` and hand back the connection it was issued to, for a caller that decides whether to
+/// mark it (`server::external_host`). The nonce is spent either way.
+pub(super) fn take_engine(nonce: &str) -> Option<Arc<WshRpcEngine>> {
+    challenges().take(nonce, Instant::now())
 }
 
 /// Spend `nonce` and mark the connection it was issued to as the operator's.

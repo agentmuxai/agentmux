@@ -232,6 +232,14 @@ pub struct RpcContext {
     /// read from the wire, and dropped when the connection registers as an agent.
     #[serde(skip)]
     pub operator_proven: bool,
+    /// Set with `operator_proven` when a registered external host attested the connection (a headless
+    /// server's host vouching for the person who signed in to it): that person's id. `None` for the
+    /// CEF host's proof and a local browser session. Set only by srv.
+    #[serde(skip)]
+    pub operator_person: Option<String>,
+    /// The unix second an external host's proof lapses; `None` for a proof that has no lease. Set only by srv.
+    #[serde(skip)]
+    pub operator_proof_until: Option<u64>,
 }
 
 impl RpcContext {
@@ -243,11 +251,17 @@ impl RpcContext {
     pub fn operator_only(&self, why: &str) -> Result<(), String> {
         if !self.agent_id.is_empty() {
             Err(format!("FORBIDDEN: {why}"))
-        } else if !self.operator_proven {
+        } else if !self.operator_proven_now() {
             Err(format!("FORBIDDEN: {why} (this connection isn't the AgentMux window)"))
         } else {
             Ok(())
         }
+    }
+
+    /// Is the operator's proof in force right now: given, and not past its lease. A proof from an external
+    /// host lapses at `operator_proof_until`; the CEF host's and a local session's have no lease.
+    pub fn operator_proven_now(&self) -> bool {
+        self.operator_proven && self.operator_proof_until.is_none_or(|until| agentmux_common::time::now_secs_u64() < until)
     }
 
     /// The operator's window, proven: what tests hand an operator-only
