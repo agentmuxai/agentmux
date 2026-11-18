@@ -7,8 +7,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.os_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Desktop notifications"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Desktop notifications"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a system notification when an agent needs you or finishes while you're not looking at it."
         <div class="ui-field-control">
@@ -18,8 +20,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_when">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "When to notify"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "When to notify"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "“When AgentMux isn't focused” still alerts you if an agent needs input in a pane you aren't looking at."
         <div class="ui-field-control">
@@ -35,8 +39,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_input_waiting">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent has a question"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent has a question"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent asked a question and is waiting for your answer"
         <div class="ui-field-control">
@@ -46,8 +52,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent finished"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent finished"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn completed"
         <div class="ui-field-control">
@@ -57,8 +65,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed_external">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Also for turns you didn't start"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Also for turns you didn't start"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "A turn another agent's message, a service notice, a scheduled run or a finished background task started. Off: it ends quietly unless it needs you"
         <div class="ui-field-control">
@@ -68,8 +78,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_errored">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped with an error"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped with an error"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn ended with an error"
         <div class="ui-field-control">
@@ -79,8 +91,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_agent_crashed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped unexpectedly"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped unexpectedly"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Sign-in expired, usage limit, crash — not when you stop it yourself"
         <div class="ui-field-control">
@@ -90,8 +104,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_needs_review">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Message needs your review"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Message needs your review"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent received a message it must not act on without you. The notification never shows the message."
         <div class="ui-field-control">
@@ -101,8 +117,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_cloud_signed_out">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Signed out of AgentMux Cloud"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Signed out of AgentMux Cloud"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once, when agents stop getting messages from other computers and GitHub until you sign in"
         <div class="ui-field-control">
@@ -112,8 +130,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_account_unavailable">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agents out of quota or signed out"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agents out of quota or signed out"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once per account, when its agents hit a weekly limit or need you to sign in again (not for a session limit)"
         <div class="ui-field-control">
@@ -123,8 +143,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_job_failed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A job failed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A job failed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once when a scheduled job starts failing, not for every failed run; the job's Kanban task collects the rest"
         <div class="ui-field-control">
@@ -134,8 +156,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_vault_expiring">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A Vault entry is expiring"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A Vault entry is expiring"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "14 days before an entry's expiry date, 3 days before and on the day, once each"
         <div class="ui-field-control">
@@ -145,8 +169,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_summary">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show what the agent is working on"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show what the agent is working on"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Add the agent's current session summary as a small line under the notification"
         <div class="ui-field-control">
@@ -156,8 +182,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.taskbar_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Badge the taskbar button"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Badge the taskbar button"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a dot on AgentMux's taskbar button, and flash it once, while an agent needs you (Windows)"
         <div class="ui-field-control">
@@ -167,8 +195,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.quiet_hours">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Quiet hours"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Quiet hours"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none."
         <div class="ui-field-control">
@@ -176,8 +206,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.pause_allow_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "While paused, still alert when an agent needs me"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "While paused, still alert when an agent needs me"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Pause from the tray icon's menu. Input requests and review requests still get through."
         <div class="ui-field-control">
@@ -187,8 +219,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_preview">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Notification content"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Notification content"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "How much of an agent's question to show. Credentials and sensitive terms are always hidden."
         <div class="ui-field-control">
@@ -216,8 +250,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.show_tray">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show icon in the system tray"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show icon in the system tray"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible."
         <div class="ui-field-control">
@@ -227,8 +263,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.run_in_background">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Keep running after all windows are closed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Keep running after all windows are closed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch."
         <div class="ui-field-control">
@@ -238,8 +276,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.autostart">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Start at login"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Start at login"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Unavailable in this build (not started by the AgentMux launcher)."
         <div class="ui-field-control">
@@ -255,8 +295,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.os_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Desktop notifications"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Desktop notifications"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a system notification when an agent needs you or finishes while you're not looking at it."
         <div class="ui-field-control">
@@ -266,8 +308,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_when">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "When to notify"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "When to notify"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "“When AgentMux isn't focused” still alerts you if an agent needs input in a pane you aren't looking at."
         <div class="ui-field-control">
@@ -283,8 +327,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_input_waiting">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent has a question"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent has a question"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent asked a question and is waiting for your answer"
         <div class="ui-field-control">
@@ -294,8 +340,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent finished"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent finished"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn completed"
         <div class="ui-field-control">
@@ -305,8 +353,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed_external">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Also for turns you didn't start"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Also for turns you didn't start"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "A turn another agent's message, a service notice, a scheduled run or a finished background task started. Off: it ends quietly unless it needs you"
         <div class="ui-field-control">
@@ -316,8 +366,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_errored">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped with an error"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped with an error"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn ended with an error"
         <div class="ui-field-control">
@@ -327,8 +379,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_agent_crashed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped unexpectedly"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped unexpectedly"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Sign-in expired, usage limit, crash — not when you stop it yourself"
         <div class="ui-field-control">
@@ -338,8 +392,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_needs_review">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Message needs your review"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Message needs your review"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent received a message it must not act on without you. The notification never shows the message."
         <div class="ui-field-control">
@@ -349,8 +405,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_cloud_signed_out">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Signed out of AgentMux Cloud"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Signed out of AgentMux Cloud"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once, when agents stop getting messages from other computers and GitHub until you sign in"
         <div class="ui-field-control">
@@ -360,8 +418,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_account_unavailable">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agents out of quota or signed out"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agents out of quota or signed out"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once per account, when its agents hit a weekly limit or need you to sign in again (not for a session limit)"
         <div class="ui-field-control">
@@ -371,8 +431,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_job_failed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A job failed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A job failed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once when a scheduled job starts failing, not for every failed run; the job's Kanban task collects the rest"
         <div class="ui-field-control">
@@ -382,8 +444,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_vault_expiring">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A Vault entry is expiring"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A Vault entry is expiring"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "14 days before an entry's expiry date, 3 days before and on the day, once each"
         <div class="ui-field-control">
@@ -393,8 +457,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_summary">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show what the agent is working on"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show what the agent is working on"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Add the agent's current session summary as a small line under the notification"
         <div class="ui-field-control">
@@ -404,8 +470,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.taskbar_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Badge the taskbar button"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Badge the taskbar button"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a dot on AgentMux's taskbar button, and flash it once, while an agent needs you (Windows)"
         <div class="ui-field-control">
@@ -415,8 +483,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.quiet_hours">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Quiet hours"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Quiet hours"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none."
         <div class="ui-field-control">
@@ -424,8 +494,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.pause_allow_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "While paused, still alert when an agent needs me"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "While paused, still alert when an agent needs me"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Pause from the tray icon's menu. Input requests and review requests still get through."
         <div class="ui-field-control">
@@ -435,8 +507,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_preview">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Notification content"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Notification content"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "How much of an agent's question to show. Credentials and sensitive terms are always hidden."
         <div class="ui-field-control">
@@ -464,8 +538,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.show_tray">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show icon in the system tray"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show icon in the system tray"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible."
         <div class="ui-field-control">
@@ -475,8 +551,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.run_in_background">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Keep running after all windows are closed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Keep running after all windows are closed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch."
         <div class="ui-field-control">
@@ -486,8 +564,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.autostart">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Start at login"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Start at login"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "On, but not registered with the system yet. If this persists, see the launcher log."
         <div class="ui-field-control">
@@ -503,8 +583,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.os_enabled">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Desktop notifications"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Desktop notifications"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a system notification when an agent needs you or finishes while you're not looking at it."
         <div class="ui-field-control">
@@ -514,8 +596,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_when">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "When to notify"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "When to notify"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "“When AgentMux isn't focused” still alerts you if an agent needs input in a pane you aren't looking at."
         <div class="ui-field-control">
@@ -531,8 +615,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_input_waiting">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent has a question"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent has a question"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent asked a question and is waiting for your answer"
         <div class="ui-field-control">
@@ -542,8 +628,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent finished"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent finished"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn completed"
         <div class="ui-field-control">
@@ -553,8 +641,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_completed_external">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Also for turns you didn't start"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Also for turns you didn't start"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "A turn another agent's message, a service notice, a scheduled run or a finished background task started. Off: it ends quietly unless it needs you"
         <div class="ui-field-control">
@@ -564,8 +654,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_turn_errored">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped with an error"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped with an error"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent's turn ended with an error"
         <div class="ui-field-control">
@@ -575,8 +667,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_agent_crashed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agent stopped unexpectedly"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agent stopped unexpectedly"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Sign-in expired, usage limit, crash — not when you stop it yourself"
         <div class="ui-field-control">
@@ -586,8 +680,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_needs_review">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Message needs your review"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Message needs your review"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "An agent received a message it must not act on without you. The notification never shows the message."
         <div class="ui-field-control">
@@ -597,8 +693,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_cloud_signed_out">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Signed out of AgentMux Cloud"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Signed out of AgentMux Cloud"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once, when agents stop getting messages from other computers and GitHub until you sign in"
         <div class="ui-field-control">
@@ -608,8 +706,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_account_unavailable">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Agents out of quota or signed out"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Agents out of quota or signed out"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once per account, when its agents hit a weekly limit or need you to sign in again (not for a session limit)"
         <div class="ui-field-control">
@@ -619,8 +719,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_job_failed">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A job failed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A job failed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Once when a scheduled job starts failing, not for every failed run; the job's Kanban task collects the rest"
         <div class="ui-field-control">
@@ -630,8 +732,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_vault_expiring">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "A Vault entry is expiring"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "A Vault entry is expiring"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "14 days before an entry's expiry date, 3 days before and on the day, once each"
         <div class="ui-field-control">
@@ -641,8 +745,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_summary">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show what the agent is working on"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show what the agent is working on"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Add the agent's current session summary as a small line under the notification"
         <div class="ui-field-control">
@@ -652,8 +758,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.taskbar_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Badge the taskbar button"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Badge the taskbar button"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show a dot on AgentMux's taskbar button, and flash it once, while an agent needs you (Windows)"
         <div class="ui-field-control">
@@ -663,8 +771,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.quiet_hours">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Quiet hours"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Quiet hours"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Hold notifications back every day during these hours (local time), e.g. 22:00-08:00. Leave empty for none."
         <div class="ui-field-control">
@@ -672,8 +782,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.pause_allow_attention">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "While paused, still alert when an agent needs me"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "While paused, still alert when an agent needs me"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Pause from the tray icon's menu. Input requests and review requests still get through."
         <div class="ui-field-control">
@@ -683,8 +795,10 @@ getAutostartStatus
     <div class="setting-row setting-row--indent" id="setting-notifications.os_preview">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Notification content"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Notification content"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "How much of an agent's question to show. Credentials and sensitive terms are always hidden."
         <div class="ui-field-control">
@@ -712,8 +826,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.show_tray">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Show icon in the system tray"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Show icon in the system tray"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Show an AgentMux icon in the system tray (the menu bar on macOS) while AgentMux is running. Always shown while “Keep running after all windows are closed” is on. Applies at the next launch. On Windows 11 new tray icons start in the overflow (^) area — drag it onto the taskbar to keep it visible."
         <div class="ui-field-control">
@@ -723,8 +839,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.run_in_background">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Keep running after all windows are closed"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Keep running after all windows are closed"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch."
         <div class="ui-field-control">
@@ -734,8 +852,10 @@ getAutostartStatus
     <div class="setting-row" id="setting-notifications.autostart">
       <div class="ui-field ui-field--inline">
         <div class="ui-field-text">
-          <label class="ui-field-label" id="ui-field-label-cl-N">
-            "Start at login"
+          <div class="ui-field-label-row">
+            <label class="ui-field-label" id="ui-field-label-cl-N">
+              "Start at login"
+            <span class="setting-saved" role="status" aria-live="polite">
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Unavailable in this build (not started by the AgentMux launcher)."
         <div class="ui-field-control">

@@ -115,6 +115,8 @@ describe("the Vault pane", () => {
         await screen.findByText("Alex");
         expect(screen.getByText("•••• 6789")).toBeInTheDocument();
         expect(screen.getByText("Alex Doe")).toBeInTheDocument();
+        // The details cell carries the class that keeps it from being squeezed to a letter's width (vault-view.scss).
+        expect(screen.getByText("Alex Doe").closest("td")?.classList.contains("vault-details")).toBe(true);
         expect(container.querySelector('[data-agent-hidden="vault"]')).not.toBeNull();
         // Shown: srv is told, so agents' whole-window captures of AgentMux are refused.
         await waitFor(() => expect(calls("on_screen")[0]).toEqual({ pane: "vault-block", on: true }));

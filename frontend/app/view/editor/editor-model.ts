@@ -60,7 +60,7 @@ import { chooseViewer, isBinaryProbe, isViewerId, viewerForDropped, type FilePro
 import { droppedFileOf, isDroppedPath, rememberDropped, ViewerTabs } from "./viewers/viewer-tabs";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { paneZoom } from "@/app/store/pane-zoom-local";
-import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeZoomOf } from "./editor-zoom-parts";
+import { clampTreeWidth, seedTreeZoom, TREE_WIDTH_DEFAULT, treeHasFocus, treeZoomOf } from "./editor-zoom-parts";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
@@ -592,7 +592,9 @@ export class EditorViewModel {
     /** Remembers where `opts` asks the file to open, for the viewer that reads it (a hex offset, a PDF page, a text line). */
     private noteOpenPosition(filePath: string, opts?: OpenFileOpts): void {
         if (opts?.offset === undefined && opts?.page === undefined && !opts?.line) return;
-        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page });
+        // A line goes to the Large text viewer by this note; the text viewer's is `_openAtLine`.
+        const forLarge = !opts.viewer || opts.viewer === "large";
+        setOpenPosition(this.blockId, filePath, { offset: opts.offset, page: opts.page, line: forLarge ? opts.line : undefined });
         if (opts.line && (!opts.viewer || opts.viewer === "text")) this._openAtLine = { path: canonicalizePath(filePath), line: opts.line };
     }
 
@@ -1464,7 +1466,8 @@ export class EditorViewModel {
     giveFocus(): boolean {
         const cm = this.cmViewRef.current;
         if (cm == null) return false;
-        cm.focus();
+        // The pane takes focus when it is clicked: after a click on the tree's toolbar or blank space the keyboard stays there.
+        if (!treeHasFocus(this.blockId)) cm.focus();
         return true;
     }
 

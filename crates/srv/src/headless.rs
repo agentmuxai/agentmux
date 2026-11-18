@@ -114,6 +114,10 @@ pub fn prepare_env() -> Result<Option<PathBuf>, String> {
     let cli = <CliArgs as clap::Parser>::try_parse_from(std::env::args_os()).map_err(|e| e.to_string())?;
     // Checked before anything is written, so a typo leaves no lock or key behind.
     let web = web_options(cli.frontend_dir.clone(), &cli.allowed_origins, cli.public_origin.as_deref())?;
+    // The external host, if there is one, is registered here: once, before srv serves a connection or starts an agent.
+    if let Some(file) = &cli.external_host_key_file {
+        crate::server::external_host::register_from_file(file)?;
+    }
     // A key srv did not generate is held to a floor when a browser can sign in: checked before anything is written.
     let serves_ui = web.frontend_dir.is_some();
     check_env_key(env_key().as_deref(), serves_ui)?;
@@ -409,6 +413,15 @@ fn write_generated_key(dir: &Path) -> Result<(String, PathBuf), String> {
 /// with `SO_EXCLUSIVEADDRUSE` the address is this server's alone and any other bind of it is refused, whatever it asks for.
 /// Elsewhere the system already refuses a second bind.
 pub(crate) async fn bind_exclusive(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
+    let listener = bind_exclusive_to(addr).await?;
+    // A page in the streamed browser may never connect to a port this server listens on.
+    if let Ok(local) = listener.local_addr() {
+        crate::server::streamed_browser::note_own_port(local.port());
+    }
+    Ok(listener)
+}
+
+async fn bind_exclusive_to(addr: &str) -> std::io::Result<tokio::net::TcpListener> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;

@@ -124,8 +124,11 @@ describe("LineSource", () => {
         const bytes = Uint8Array.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x0a]);
         const index = vi.fn(async () => ({ total_lines: 1, size: bytes.length, mtime: 1, start: 0, end: bytes.length, encoding: "windows-1251", starts: [0] }));
         const s = new LineSource(index, async (a, b) => bytes.slice(a, b + 1), "legacy");
+        expect(s.encodingName()).toBe("legacy");
         await s.ensure(0, 0);
         expect(s.lineAt(0)?.text).toBe("Привет");
+        // The find asks for the name, to refuse a multibyte one.
+        expect(s.encodingName()).toBe("windows-1251");
     });
 
     it("falls back to UTF-8 for an encoding name the browser doesn't know", () => {

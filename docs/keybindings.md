@@ -163,7 +163,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Rename its file in place; an untitled document is saved under the name (Enter renames, Esc or a click elsewhere cancels) | on a document tab in the editor | double-click | double-click |
 | A click opens a preview tab, a double-click a tab that stays; F2 renames | on a file in the editor's file tree | click or double-click | click or double-click |
 | Previous / next row, previewing a file / open the file in a tab that stays and go to the editor / keep its tab / go to the editor; ← → close and open folders, Home, End and the Page keys jump, typing a name jumps to it | in the editor's file tree | ↑ or ↓ or Enter or Space or Escape | ↑ or ↓ or Enter or Space or Escape |
-| Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or the pointer | over the editor's file tree | ⌘ + scroll | Ctrl + scroll |
+| Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or a click | over the editor's file tree | ⌘ + scroll | Ctrl + scroll |
 | Add another cursor | in an editor | ⌘ + click | Ctrl + click |
 | Make a column (block) selection | in an editor | ⌥ + drag | Alt + drag |
 | Select the next match of the selected text | in an editor | ⌘ + D | Ctrl + D |
@@ -193,6 +193,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Type a path | on the Files pane's folder path | double-click | double-click |
 | Send files to an agent, editor or terminal pane; dropping copies here, or into the folder under the pointer | Files rows onto a pane, or files onto the list | drag or drop | drag or drop |
 | Drag to resize that column; double-click to give it its default width back | on the right edge of a column header | drag or double-click | drag or double-click |
+| Zoom Places on its own, apart from the rest of the pane; the zoom keys zoom whichever of the two last had the keyboard or a click | over the Files pane's Places list | ⌘ + scroll | Ctrl + scroll |
 
 ### Agent
 

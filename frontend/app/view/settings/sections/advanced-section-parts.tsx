@@ -8,18 +8,19 @@ import { t } from "@/app/i18n/i18n";
 import { TextInput } from "@/app/element/ui";
 import { For, type JSX } from "solid-js";
 
-import { devModeOn, setDevMode } from "@/app/store/dev-mode";
+import { DEV_MODE_KEY, devModeOn, setDevMode } from "@/app/store/dev-mode";
 import { settingsAtom } from "@/app/store/global";
 import { KANBAN_REMINDERS_SETTING, kanbanRemindersOn } from "@/app/view/kanban/kanban-reminders";
 import { resolveSkidNotches, SKID_NOTCHES_MAX, SKID_NOTCHES_SETTING } from "@/app/view/agent/components/scroll-handoff";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { trackSave } from "../settings-saved";
 import { ADVANCED_SETTINGS } from "./advanced-settings-index";
 
 const s = () => settingsAtom() ?? ({} as any);
 
 /** The setting a gateway route's daily spend cap is kept under (the gateway reads it at each request). */
 const routeCapSetting = (route: string) => `model:spend_cap_usd:${route}`;
-const DEFAULT_ROUTE_CAP_USD = 100;
+const DEFAULT_ROUTE_CAP_USD = 500;
 
 /**
  * The gateway's routes, each with its own cap: OpenRouter, and the Anthropic key route that agents bound to an API-key
@@ -383,10 +384,11 @@ export function DeveloperGroup(): JSX.Element {
         <>
             <SectionHeader label={t("settings.advanced.group.developer")} />
             <SettingRow
+                settingKey={DEV_MODE_KEY}
                 id={ADVANCED_SETTINGS.devMode.id}
                 label={ADVANCED_SETTINGS.devMode.label}
                 description={ADVANCED_SETTINGS.devMode.description}
-                control={<ToggleControl checked={devModeOn()} onChange={setDevMode} />}
+                control={<ToggleControl checked={devModeOn()} onChange={(on) => trackSave([DEV_MODE_KEY], setDevMode(on))} />}
             />
         </>
     );

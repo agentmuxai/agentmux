@@ -783,6 +783,10 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
         // The host vouches for the AgentMux window's websocket connection.
         .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
+        // A headless server's registered external host vouches for a connection (answers 404 unless one is registered).
+        .route("/api/v1/host/external_nonce", post(super::external_host::handle_nonce))
+        .route("/api/v1/host/external_attest", post(super::external_host::handle_attest))
+        .route("/api/v1/host/external_revoke", post(super::external_host::handle_revoke))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))

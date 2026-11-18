@@ -411,6 +411,7 @@ import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolReq } from "@/types/rpc/InstallSystemToolReq";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JektHeldSummaryResult } from "@/types/rpc/JektHeldSummaryResult";
 import type { JobReporterAddReq } from "@/types/rpc/JobReporterAddReq";
 import type { JobReporterForgetReq } from "@/types/rpc/JobReporterForgetReq";
 import type { JobReportersResult } from "@/types/rpc/JobReportersResult";
@@ -3173,6 +3174,10 @@ export const GeneratedApi = {
   // command "identity.account.availability"
   IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
     return client.rpcCall("identity.account.availability", {}, opts);
+  },
+  // command "jekt.held.summary"
+  JektHeldSummaryCommand(client: RpcClient, opts?: RpcOpts): Promise<JektHeldSummaryResult> {
+    return client.rpcCall("jekt.held.summary", {}, opts);
   },
   // command "agent.account.switch"
   AgentAccountSwitchCommand(

@@ -64,11 +64,11 @@ const SystemStatus = (): JSX.Element => {
     return (
         <div class="system-status" {...dragProps}>
             <ActionWidgets />
-            {/* The window's grip, between the widgets and the window controls
-                (the AgentMux logo follows it on macOS). */}
-            <WindowGrip />
-            {/* Caption buttons for the host's own window; a host without one (a browser tab) has none. */}
+            {/* A host with a window of its own (the desktop) has its grip and its caption buttons; a host without
+                one (a browser tab) has neither: there is no window to drag. The grip sits between the widgets and
+                the window controls (the AgentMux logo follows it on macOS). */}
             <Show when={hostHas("nativeWindowChrome")}>
+                <WindowGrip />
                 <WindowControlsRight />
             </Show>
         </div>

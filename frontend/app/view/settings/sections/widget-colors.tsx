@@ -18,6 +18,7 @@ import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { makeIconClass } from "@/util/util";
 import { set, SettingRow } from "../settings-controls";
+import { trackSave } from "../settings-saved";
 
 /** One row per registered widget, so a widget added later gets one too. */
 export function WidgetColorsSettings(p: { id: string; label: string; description: string }): JSX.Element {
@@ -26,6 +27,7 @@ export function WidgetColorsSettings(p: { id: string; label: string; description
     return (
         <>
             <SettingRow
+                settingKey="pane:colors"
                 id={p.id}
                 label={p.label}
                 description={p.description}
@@ -50,10 +52,14 @@ function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
     // Picking the built-in color stores nothing, so the widget keeps following it.
     const pick = (slot: PaletteSlot | null) => {
         const id = slot ? slot.id : null;
-        setWidgetColor(view(), id === (slotOf(builtIn())?.id ?? null) ? undefined : id);
+        change(id === (slotOf(builtIn())?.id ?? null) ? undefined : id);
     };
+    // The widgets share the one `pane:colors` setting: each row's flag is named for its own widget.
+    const flagKey = () => `pane:colors:${view()}`;
+    const change = (id: string | null | undefined) => trackSave([flagKey()], setWidgetColor(view(), id));
     return (
         <SettingRow
+            settingKey={flagKey()}
             indent
             label={p.manifest.label}
             control={
@@ -77,7 +83,7 @@ function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
                     <Button
                         // Kept in the layout when hidden, so the swatches don't shift.
                         style={{ visibility: stored() === undefined ? "hidden" : "visible" }}
-                        onClick={() => setWidgetColor(view(), undefined)}
+                        onClick={() => change(undefined)}
                     >
                         Reset
                     </Button>

@@ -24,6 +24,7 @@ export function DesktopDriving(): JSX.Element {
     const settings = () => settingsAtom() ?? ({} as Record<string, unknown>);
     return (
         <SettingRow
+            settingKey="desktop:enabled"
             id={DESKTOP_DRIVING_SETTING.id}
             label={DESKTOP_DRIVING_SETTING.label}
             description={DESKTOP_DRIVING_SETTING.description}

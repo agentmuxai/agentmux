@@ -25,6 +25,7 @@ export function StartAgents(): JSX.Element {
     const settings = () => settingsAtom() ?? ({} as Record<string, unknown>);
     return (
         <SettingRow
+            settingKey="agent:maystartagents"
             id={START_AGENTS_SETTING.id}
             label={START_AGENTS_SETTING.label}
             description={START_AGENTS_SETTING.description}

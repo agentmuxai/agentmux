@@ -254,7 +254,7 @@ pub(super) async fn prepare_attachments(
 /// rehome — the host path already means something to it); `Ok(Some(cwd))` for a container agent with a
 /// working folder to copy into; `Err` for a runtime that refuses attachments and isn't a container (none
 /// does today; kept so a future one still refuses cleanly), or a container with no working folder yet.
-fn attachment_destination(block: &Block) -> Result<Option<String>, &'static str> {
+pub(crate) fn attachment_destination(block: &Block) -> Result<Option<String>, &'static str> {
     let runtime = RuntimeKind::of_block_meta(&block.meta);
     if !runtime.adapter().accepts_attachments() && !runtime.is_container() {
         return Err("Attachments aren't supported for this agent yet.");
@@ -300,7 +300,7 @@ const CONTAINER_ATTACHMENTS_SUBDIR: &str = ".agentmux-attachments";
 /// could open the one file this leaves pointed at a host path but not the other (#7434). If the
 /// companion can't be rehomed, that part of the note is dropped rather than leaving a host path the
 /// container never gets.
-fn rehome_for_container(
+pub(crate) fn rehome_for_container(
     found: Vec<crate::backend::attachments::prompt::Resolved>,
     mut missing: Vec<String>,
     host_cwd: &str,

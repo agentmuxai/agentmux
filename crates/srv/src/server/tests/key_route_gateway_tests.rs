@@ -147,7 +147,8 @@ async fn the_key_route_stops_at_the_agents_daily_cap_with_a_billing_message() {
     let state = test_state();
     let (token, _) = agent_on_key(&state, "gw-key-cap", "acct-gw-6", Some(&made_up_key()));
     let used = crate::agents::types::TokenCounts { input: 10, ..Default::default() };
-    spend::record("gw-key-cap", catalog::KEY_ROUTE_ID, catalog::key_route_price("opus"), &used, Some(25.0), agentmux_common::time::now_ms());
+    let over_the_default_cap = crate::backend::model_gateway::cap::DEFAULT_AGENT_CAP_USD + 5.0;
+    spend::record("gw-key-cap", catalog::KEY_ROUTE_ID, catalog::key_route_price("opus"), &used, Some(over_the_default_cap), agentmux_common::time::now_ms());
     let (status, answer) = call(&state, Some(&token), URI, json!({ "model": "claude-opus-5-5" })).await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{answer}");
     assert!(answer.contains("billing_error") && answer.contains("spend cap"), "{answer}");

@@ -212,7 +212,19 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts: { confirm
         nodeId: nodeId,
     };
 
-    model.treeReducer(deleteAction);
+    // The reducer takes the pane out of the tree and then commits the tree, which runs every computation that
+    // reads it. One of those throwing leaves the reducer's caller with an error and the tree already changed:
+    // stopping here would close the pane on this page and never tell the backend. So the close is judged by where
+    // the pane is, not by whether the commit was clean: gone from the tree means it goes on to the backend and
+    // reports the error after; still in the tree means nothing changed and the error is the close's own.
+    let commitError: unknown;
+    try {
+        model.treeReducer(deleteAction);
+    } catch (err) {
+        if (findNode(model.treeState.rootNode, nodeId)) throw err;
+        commitError = err;
+        console.error(`[layout] a binding threw while pane ${nodeId.slice(0, 4)} left the tree; closing it in the backend anyway`, err);
+    }
     trace.mark("reducer");
     afterFrame(() => trace.mark("gone"));
     // Drop any leaf reveal-gate bookkeeping keyed on this now-gone node id
@@ -227,6 +239,7 @@ async function closeNodeOnce(model: LayoutModel, nodeId: string, opts: { confirm
         trace.mark("failed");
         throw err;
     }
+    if (commitError !== undefined) throw commitError;
 }
 
 /**

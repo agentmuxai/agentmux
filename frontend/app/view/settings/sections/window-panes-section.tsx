@@ -73,6 +73,7 @@ export function WindowPanesSection(): JSX.Element {
         <div class="settings-section-body">
             <Show when={devModeOn()}>
                 <SettingRow
+                    settingKey="blockheader:showblockids"
                     id={WINDOW_SETTINGS.showBlockIds.id}
                     label={WINDOW_SETTINGS.showBlockIds.label}
                     description={WINDOW_SETTINGS.showBlockIds.description}
@@ -85,6 +86,7 @@ export function WindowPanesSection(): JSX.Element {
                 />
             </Show>
             <SettingRow
+                settingKey="app:defaultnewblock"
                 id={WINDOW_SETTINGS.defaultNewBlock.id}
                 label={WINDOW_SETTINGS.defaultNewBlock.label}
                 description={WINDOW_SETTINGS.defaultNewBlock.description}
@@ -99,6 +101,7 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="app:showoverlayblocknums"
                 id={WINDOW_SETTINGS.showPaneNumberOverlay.id}
                 label={WINDOW_SETTINGS.showPaneNumberOverlay.label}
                 description={WINDOW_SETTINGS.showPaneNumberOverlay.description}
@@ -110,6 +113,7 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="mouse:sidebuttons"
                 id={WINDOW_SETTINGS.mouseSideButtons.id}
                 label={WINDOW_SETTINGS.mouseSideButtons.label}
                 description={WINDOW_SETTINGS.mouseSideButtons.description}
@@ -121,6 +125,7 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="window:showstatusbar"
                 id={WINDOW_SETTINGS.showStatusBar.id}
                 label={WINDOW_SETTINGS.showStatusBar.label}
                 description={WINDOW_SETTINGS.showStatusBar.description}
@@ -132,6 +137,7 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="tab:confirmclose"
                 id={WINDOW_SETTINGS.confirmTabClose.id}
                 label={WINDOW_SETTINGS.confirmTabClose.label}
                 description={WINDOW_SETTINGS.confirmTabClose.description}
@@ -143,6 +149,7 @@ export function WindowPanesSection(): JSX.Element {
                 }
             />
             <SettingRow
+                settingKey="window:confirmcloseworking"
                 id={WINDOW_SETTINGS.confirmCloseWorking.id}
                 label={WINDOW_SETTINGS.confirmCloseWorking.label}
                 description={WINDOW_SETTINGS.confirmCloseWorking.description}

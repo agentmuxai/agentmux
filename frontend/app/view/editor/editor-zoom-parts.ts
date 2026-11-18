@@ -9,7 +9,7 @@
 
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import type { PaneZoomCapability } from "@/app/store/pane-tab-registry";
-import { subjectId, zoomPartsSeed } from "@/app/store/zoom-parts";
+import { focusIsInPart, subjectId, zoomPartsSeed } from "@/app/store/zoom-parts";
 
 export const TREE_PART = "tree";
 /** Block meta: the file tree's zoom level (`term:zoom` is the document's). */
@@ -24,6 +24,9 @@ export const EDITOR_ZOOM: PaneZoomCapability = {
 /** The file tree's level for a pane's meta (reactive where `meta` is). */
 export const treeZoomOf = (blockId: string, meta: object | null | undefined): number =>
     paneZoom(subjectId(blockId, TREE_PART), meta, TREE_ZOOM_KEY);
+
+/** Is the keyboard in the file tree (a row, its toolbar or its blank space)? */
+export const treeHasFocus = (blockId: string): boolean => focusIsInPart(blockId, TREE_PART);
 
 export const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;

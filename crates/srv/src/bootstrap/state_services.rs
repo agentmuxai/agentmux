@@ -37,6 +37,8 @@ pub fn install_state_hooks(state: &AppState) {
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     crate::server::jekt_held::install(state);
+    // The status bar learns of a change in the messages held for agents without asking (`jekt.held.summary`).
+    crate::server::jekt_held_summary::install(state);
     // A routine message that came by the relay waits for a session gone cold, as a local one does (#2263).
     crate::server::jekt_cold::install(state);
     // A parked agent no pane shows is sent the input held for it while its model API was out.

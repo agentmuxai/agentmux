@@ -31,6 +31,9 @@ pub struct Pattern {
     bytes: Vec<u8>,
     /// Per byte: it must match (false for `??`).
     literal: Vec<bool>,
+    /// A match starts at a multiple of this (1: anywhere; 2: UTF-16 text, whose
+    /// matches begin on a code unit).
+    align: u64,
 }
 
 impl Pattern {
@@ -64,7 +67,13 @@ impl Pattern {
         if !literal.iter().any(|l| *l) {
             return Err("a pattern of only ?? matches everywhere".into());
         }
-        Ok(Pattern { bytes, literal })
+        Ok(Pattern { bytes, literal, align: 1 })
+    }
+
+    /// The same pattern, matching only at offsets that are a multiple of `align` (0 and 1 mean anywhere).
+    pub fn aligned(mut self, align: u64) -> Pattern {
+        self.align = align.max(1);
+        self
     }
 
     pub fn len(&self) -> usize {
@@ -86,13 +95,14 @@ impl Pattern {
     }
 }
 
-/// Every start in `buf[..starts]` where the pattern matches, first or last
-/// of them. `buf` holds at least `starts - 1 + pattern.len()` bytes.
-fn scan(buf: &[u8], starts: usize, pat: &Pattern, last: bool) -> Option<usize> {
+/// Every start in `buf[..starts]` where the pattern matches (at an offset its
+/// alignment allows; `base` is the file offset of `buf[0]`), first or last of
+/// them. `buf` holds at least `starts - 1 + pattern.len()` bytes.
+fn scan(buf: &[u8], starts: usize, pat: &Pattern, last: bool, base: u64) -> Option<usize> {
     let k = pat.anchor();
     let lit = pat.bytes[k];
     let hay = &buf[k..k + starts];
-    let hit = |i: &usize| pat.matches(&buf[*i..*i + pat.len()]);
+    let hit = |i: &usize| (base + *i as u64) % pat.align == 0 && pat.matches(&buf[*i..*i + pat.len()]);
     if last {
         memchr::memrchr_iter(lit, hay).find(hit)
     } else {
@@ -130,7 +140,7 @@ pub fn search<F: Read + Seek>(
             buf.resize(want, 0);
             file.seek(SeekFrom::Start(at))?;
             file.read_exact(&mut buf)?;
-            if let Some(i) = scan(&buf, starts as usize, pat, false) {
+            if let Some(i) = scan(&buf, starts as usize, pat, false, at) {
                 return Ok(FileSearchBytesResult { found: true, offset: at + i as u64, length, done: false, next_from: 0 });
             }
             at += starts;
@@ -150,7 +160,7 @@ pub fn search<F: Read + Seek>(
         buf.resize(want, 0);
         file.seek(SeekFrom::Start(lo))?;
         file.read_exact(&mut buf)?;
-        if let Some(i) = scan(&buf, starts as usize, pat, true) {
+        if let Some(i) = scan(&buf, starts as usize, pat, true, lo) {
             return Ok(FileSearchBytesResult { found: true, offset: lo + i as u64, length, done: false, next_from: 0 });
         }
         if lo == 0 {
@@ -167,7 +177,7 @@ pub fn search<F: Read + Seek>(
 /// `filesearchbytes`. This computer's files only, like `fileprobe`.
 pub fn register(engine: &std::sync::Arc<WshRpcEngine>) {
     engine.register_typed("filesearchbytes", move |cmd: FileSearchBytesReq, _ctx| async move {
-        let pattern = Pattern::parse(&cmd.pattern).map_err(|e| format!("filesearchbytes: {e}"))?;
+        let pattern = Pattern::parse(&cmd.pattern).map_err(|e| format!("filesearchbytes: {e}"))?.aligned(cmd.align.unwrap_or(1));
         let path = expand_home_dir_safe(&cmd.path);
         tokio::task::spawn_blocking(move || search_path(&path, &pattern, cmd.from, cmd.backward).map_err(|e| format!("filesearchbytes: {e}")))
             .await
@@ -239,6 +249,49 @@ mod tests {
         assert_eq!(find(&data, "09 08 07", 0, false).offset, (end - 3) as u64);
         assert_eq!(find(&data, "09 08 07", end as u64, true).offset, (end - 3) as u64);
         assert!(!find(&data, "09 08 06", 0, false).found);
+    }
+
+    /// `00 62` repeated: "b" is 62 00, and it starts at every odd offset, between two code units.
+    fn utf16_with_misaligned_hits(units: usize) -> Vec<u8> {
+        let mut data = Vec::new();
+        for _ in 0..units {
+            data.extend_from_slice(&[0x00, 0x62]);
+        }
+        data
+    }
+
+    #[test]
+    fn an_alignment_skips_matches_between_code_units_forward_and_backward() {
+        let mut data = utf16_with_misaligned_hits(5);
+        data.extend_from_slice(&[0x62, 0x00]); // a real "b", at an even offset
+        let at = (data.len() - 2) as u64;
+        assert_eq!(at % 2, 0);
+        let pat = Pattern::parse("62 00").unwrap();
+        let run = |pat: &Pattern, from: u64, backward: bool| search(&mut Cursor::new(data.clone()), data.len() as u64, pat, from, backward, u64::MAX, Duration::from_secs(60)).unwrap();
+        // Unaligned: the first stray pair, at offset 1.
+        assert_eq!(run(&pat, 0, false).offset, 1);
+        // Aligned to 2: every stray pair is skipped in the scan, in one call, to the real one.
+        let aligned = pat.clone().aligned(2);
+        assert_eq!(run(&aligned, 0, false).offset, at);
+        assert_eq!(run(&aligned, data.len() as u64, true).offset, at);
+        // Nothing aligned before the real one, going back from just ahead of it.
+        let r = run(&aligned, at - 1, true);
+        assert!(!r.found && r.done);
+    }
+
+    #[test]
+    fn an_alignment_holds_across_a_block_edge() {
+        let edge = BLOCK as usize;
+        // The block edge is even: a match one byte before it is misaligned, the next block's start is not.
+        let mut data = vec![0xAAu8; edge * 2 + 8];
+        data[edge - 1..edge + 1].copy_from_slice(&[0x62, 0x00]);
+        data[edge + 4..edge + 6].copy_from_slice(&[0x62, 0x00]);
+        let pat = Pattern::parse("62 00").unwrap().aligned(2);
+        let size = data.len() as u64;
+        let run = |from: u64, backward: bool| search(&mut Cursor::new(data.clone()), size, &pat, from, backward, u64::MAX, Duration::from_secs(60)).unwrap();
+        assert_eq!(run(0, false).offset, (edge + 4) as u64);
+        assert_eq!(run(size, true).offset, (edge + 4) as u64);
+        assert!(!run(edge as u64 + 3, true).found);
     }
 
     #[test]

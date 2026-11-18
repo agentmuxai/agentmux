@@ -92,6 +92,7 @@ export function KeyboardSection(): JSX.Element {
     return (
         <div ref={body} class="settings-section-body kb-section" onKeyDown={onKeyDown}>
             <SettingRow
+                settingKey="keybindings"
                 id={KEYBOARD_SETTINGS.shortcuts.id}
                 stacked
                 label={KEYBOARD_SETTINGS.shortcuts.label}

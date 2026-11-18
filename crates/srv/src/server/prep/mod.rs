@@ -12,6 +12,7 @@
 //! "Switch now", or when the window runs out. A window, never a gate: nothing waits for an agent that
 //! cannot answer, and the closure runs exactly once.
 
+mod carry;
 mod decide;
 mod handlers;
 mod ledger;
@@ -19,9 +20,10 @@ mod meta;
 mod note;
 mod window;
 
+pub use carry::hold_for_other_panes;
 pub use decide::{decide, Decision};
 pub use handlers::{handle_ready_self, register};
-pub use ledger::{cancel, is_open, open};
+pub use ledger::{cancel, is_open, open, open_with};
 pub(crate) use meta::set_block_meta;
 
 use std::time::Duration;

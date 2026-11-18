@@ -294,7 +294,7 @@
 188 crates/srv/src/server/vault_handlers.rs::handle_host_vault
 120 crates/srv/src/server/vault_rotate.rs::handle_vault_rotate
 210 crates/srv/src/server/websocket.rs::handle_incoming_text
-231 crates/srv/src/server/websocket.rs::handle_ws_connection
+233 crates/srv/src/server/websocket.rs::handle_ws_connection
 111 crates/srv/src/server/widget_agent_handlers.rs::handle_widgets_install
 104 crates/srv/src/server/work_queue.rs::enqueue_core
 120 crates/srv/src/server/work_queue.rs::handle_work_claim
@@ -398,10 +398,10 @@
 143 frontend/app/view/memory-editor/MemoryHistory.tsx::MemoryHistory
 122 frontend/app/view/native-memory/MemoryAdoptionPanel.tsx::MemoryAdoptionPanel
 112 frontend/app/view/native-memory/NativeMemoryCreate.tsx::NativeMemoryCreate
-128 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
-120 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
+132 frontend/app/view/settings/sections/animations-section.tsx::AnimationsSection
+124 frontend/app/view/settings/sections/browser-section.tsx::BrowserSection
 102 frontend/app/view/settings/sections/pinned-senders.tsx::PinnedSenders
-114 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
+115 frontend/app/view/settings/sections/widget-bar-settings.tsx::WidgetBarSettings
 104 frontend/app/view/settings/sections/widget-catalog.tsx::WidgetCatalog
 137 frontend/app/view/shortcuts/shortcuts.tsx::ShortcutsView
 111 frontend/app/view/swarm/swarm-agent-list.tsx::SwarmAgentList

@@ -14,7 +14,7 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_OPEN, move |mut cmd: CommandPaneOpenData, ctx| {
         let state = state.clone();
         async move {
-            if ctx.operator_proven {
+            if ctx.operator_proven_now() {
                 super::pane_open_tab::window_open_names_a_tab(&cmd)?;
             }
             if let Some(meta) = cmd.meta.as_mut() {

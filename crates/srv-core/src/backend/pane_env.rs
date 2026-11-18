@@ -361,8 +361,9 @@ mod spawn_site_coverage {
     const SPAWN_MARKERS: &[&str] = &["CommandBuilder::new", "process::Command::new", "Command::new("];
 
     /// Recognised classifications. The prefix is load-bearing: `sanitized:`
-    /// entries are cross-checked against the file actually calling a sanitizer.
-    const CLASSES: &[&str] = &["sanitized:", "probe:", "test:", "own-exe:", "not a spawn:", "mixed:"];
+    /// entries are cross-checked against the file actually calling a sanitizer, and `allowlisted:` ones (the
+    /// environment is cleared and only a named list is passed) against the file calling `env_clear()`.
+    const CLASSES: &[&str] = &["sanitized:", "allowlisted:", "probe:", "test:", "own-exe:", "not a spawn:", "mixed:"];
 
     /// Every process spawn in srv: `(file, program, count, classification)`.
     ///
@@ -564,7 +565,7 @@ mod spawn_site_coverage {
         ("src/backend/fs_watch/pool.rs", "\"wsl.exe\"", 2,
          "test: an ignored test writes and removes a file inside a WSL distro"),
         ("src/server/streamed_browser/chromium.rs", "&binary", 1,
-         "sanitized: the streamed Browser pane's Chromium (unix only), sanitize_external_command: it opens pages from the web and gets none of srv's AGENTMUX_ environment"),
+         "allowlisted: the streamed Browser pane's Chromium (unix only): it opens pages from the web, so its environment is cleared and only a short named list (chromium.rs ENV_KEEP) is passed, never srv's own"),
         ("src/server/editor_handlers/file_io.rs", "\"explorer.exe\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/editor_handlers/file_io.rs", "\"open\"", 1,
@@ -732,6 +733,17 @@ mod spawn_site_coverage {
                 assert!(
                     SANITIZERS_FOR_AUDIT.iter().any(|s| src.contains(s)),
                     "{file} -> {program} is classified `sanitized:` but the file calls no sanitizer"
+                );
+            }
+            // A row claiming an allow-list must be in a file that clears the environment first.
+            if reason.starts_with("allowlisted:") {
+                let src = packages
+                    .iter()
+                    .find_map(|root| std::fs::read_to_string(root.join(file)).ok())
+                    .expect("read inventory file");
+                assert!(
+                    src.contains(".env_clear()"),
+                    "{file} -> {program} is classified `allowlisted:` but the file does not clear the environment"
                 );
             }
         }

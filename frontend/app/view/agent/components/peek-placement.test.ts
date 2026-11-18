@@ -177,18 +177,63 @@ describe("computePeekHorizontal: minimum width", () => {
 describe("computePeekVertical", () => {
     const base = { row: ROW, container: CONTAINER, viewport: VIEWPORT };
 
-    it("places a short panel below the pointer, inside the container", () => {
+    it("places a short panel above the pointer, inside the container", () => {
         const v = computePeekVertical({ ...base, mouseY: 315, naturalHeight: 60 });
-        expect(v.top).toBe(315 + CURSOR_GAP_PX);
+        expect(v.top + 60).toBe(315 - CURSOR_GAP_PX);
         expect(v.leavesContainer).toBe(false);
         expect(v.scrolls).toBe(false);
     });
 
-    it("flips above the pointer when it only fits there", () => {
-        const row = { left: 400, right: 900, top: 840, bottom: 870 };
-        const v = computePeekVertical({ ...base, row, mouseY: 850, naturalHeight: 200 });
-        expect(v.top + 200).toBe(850 - CURSOR_GAP_PX);
+    it("flips below the pointer when there is no room above it in the container", () => {
+        const row = { left: 400, right: 900, top: 110, bottom: 140 };
+        const v = computePeekVertical({ ...base, row, mouseY: 120, naturalHeight: 200 });
+        expect(v.top).toBe(120 + CURSOR_GAP_PX);
         expect(v.leavesContainer).toBe(false);
+        expect(v.scrolls).toBe(false);
+    });
+
+    // A pinned panel follows its row when the transcript scrolls under it. The row can end up below the window's
+    // bottom or above its top; the panel keeps to the window either way (it used to hang below the window,
+    // taking all the room above a row that had gone past the bottom).
+    describe("a pinned panel whose row has scrolled out of the window", () => {
+        const input = { ...base, naturalHeight: 5000, flushToRow: true };
+
+        it("stays inside the window when its row is below the window's bottom", () => {
+            const row = { left: 400, right: 900, top: 1200, bottom: 1230 };
+            const v = computePeekVertical({ ...input, row, mouseY: 1215 });
+            expect(v.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX);
+            expect(v.top + v.maxHeight).toBeLessThanOrEqual(VIEWPORT.height - VIEWPORT_MARGIN_PX);
+            expect(v.scrolls).toBe(true);
+        });
+
+        it("stays inside the window when its row is above the window's top", () => {
+            const row = { left: 400, right: 900, top: -300, bottom: -270 };
+            const v = computePeekVertical({ ...input, row, mouseY: -285 });
+            expect(v.top).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_PX);
+            expect(v.top + v.maxHeight).toBeLessThanOrEqual(VIEWPORT.height - VIEWPORT_MARGIN_PX);
+        });
+
+        it("does not grow as the row moves further down", () => {
+            const heights = [1000, 1100, 1300].map((top) => {
+                const row = { left: 400, right: 900, top, bottom: top + 30 };
+                return computePeekVertical({ ...input, row, mouseY: top + 15 }).maxHeight;
+            });
+            expect(new Set(heights).size).toBe(1);
+        });
+    });
+
+    it("when neither side fits the container, goes above the pointer if it fits there whole in the window", () => {
+        const v = computePeekVertical({
+            ...base,
+            container: { top: 400, bottom: 500 },
+            row: { left: 400, right: 900, top: 410, bottom: 440 },
+            mouseY: 420,
+            naturalHeight: 400,
+        });
+        // Below has more room (560), above exactly enough (400): above wins, leaving the container.
+        expect(v.top + 400).toBe(420 - CURSOR_GAP_PX);
+        expect(v.scrolls).toBe(false);
+        expect(v.leavesContainer).toBe(true);
     });
 
     it("stays near the pointer when too tall for the container: leaves the pane, never covers the pointer", () => {

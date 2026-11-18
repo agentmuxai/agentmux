@@ -92,6 +92,17 @@ pub struct ReplayGate {
     pub active_at_ms: i64,
 }
 
+/// One agent's held messages, counted by why they are held, with when the oldest was sent. Counts only: no body, no sender.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldSummaryRow {
+    pub target_uid: String,
+    pub target_agent: String,
+    /// The reason stored with the hold (`idle`, `quota`), or empty for the rest: the agent's state names it then.
+    pub hold_reason: String,
+    pub count: i64,
+    pub oldest_sent_at_ms: i64,
+}
+
 /// What [`Store::jekt_held_insert`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoldOutcome {
@@ -238,6 +249,26 @@ impl Store {
         )?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<Result<Vec<String>, _>>()?)
+    }
+
+    /// Every agent's held messages as counts: per target and stored reason, how many and since when the oldest. Reads no
+    /// message body. The agent with the oldest message first.
+    pub fn jekt_held_summary(&self) -> Result<Vec<HeldSummaryRow>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT target_uid, MAX(target_agent), hold_reason, COUNT(*), MIN(sent_at_ms)
+               FROM db_jekt_held GROUP BY target_uid, hold_reason ORDER BY MIN(sent_at_ms)",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(HeldSummaryRow {
+                target_uid: r.get(0)?,
+                target_agent: r.get(1)?,
+                hold_reason: r.get(2)?,
+                count: r.get(3)?,
+                oldest_sent_at_ms: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// One target's held messages, oldest first, at most `limit`.
@@ -451,6 +482,27 @@ mod idle_tests {
 
     fn idle(id: &str, target: &str, sent_at_ms: i64) -> HeldJekt {
         HeldJekt { hold_reason: REASON_IDLE.into(), ..held(id, target, sent_at_ms) }
+    }
+
+    #[test]
+    fn the_summary_counts_by_agent_and_reason_and_names_the_oldest() {
+        let s = Store::open_in_memory().unwrap();
+        s.jekt_held_insert(&held("a1", "uid-y", 300)).unwrap();
+        s.jekt_held_insert(&held("a2", "uid-y", 200)).unwrap();
+        s.jekt_held_insert(&idle("i1", "uid-y", 500)).unwrap();
+        s.jekt_held_insert(&held("b1", "uid-z", 100)).unwrap();
+        let rows = s.jekt_held_summary().unwrap();
+        let key = |r: &HeldSummaryRow| (r.target_uid.clone(), r.hold_reason.clone(), r.count, r.oldest_sent_at_ms);
+        assert_eq!(
+            rows.iter().map(key).collect::<Vec<_>>(),
+            vec![
+                ("uid-z".into(), String::new(), 1, 100),
+                ("uid-y".into(), String::new(), 2, 200),
+                ("uid-y".into(), REASON_IDLE.into(), 1, 500),
+            ]
+        );
+        s.jekt_held_delete("b1").unwrap();
+        assert_eq!(s.jekt_held_summary().unwrap().len(), 2);
     }
 
     #[test]

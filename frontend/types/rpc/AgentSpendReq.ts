@@ -2,10 +2,15 @@
 
 export type AgentSpendReq = { 
 /**
- * The agent pane.
+ * The agent pane. Empty when `agent` names the agent instead.
  */
 blockid: string, 
 /**
- * `set` the day's cap to `cap_usd` (absent: no cap), or `reset` today's figure to zero.
+ * An agent by its id or slug, for one with no pane open (My Agents). Used when `blockid` is empty.
+ */
+agent: string | null, 
+/**
+ * `get` the cap and today's figure, `set` the day's cap to `cap_usd` (absent: no cap), `default` to take the agent's
+ * own cap away so it has the default, or `reset` today's figure to zero.
  */
 action: string, cap_usd: number | null, };

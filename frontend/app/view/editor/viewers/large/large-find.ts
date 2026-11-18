@@ -8,9 +8,15 @@
  * is of bytes. docs/specs/SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.4.6.
  */
 
-import { findMatch, hexOfBytes, MAX_PATTERN_BYTES, type FindResult } from "../hex/hex-find";
+import { hexOfBytes, MAX_PATTERN_BYTES } from "../hex/hex-find";
 
 export type LargePattern = { hex: string; length: number; align: 1 | 2 } | { error: string } | null;
+
+/**
+ * The legacy encodings whose trail bytes can equal an ASCII byte (Shift_JIS 83 5C is one katakana; a search for a
+ * backslash would match its 5C): a byte search finds characters that are not there. Names as srv gives them (WHATWG).
+ */
+const MULTIBYTE = /^(shift[_-]?jis|windows-31j|ms932|euc-jp|euc-kr|iso-2022-jp|gbk|gb2312|gb18030|big5|big5-hkscs)$/i;
 
 /** The UTF-16 bytes of `text`, little or big end first. */
 function utf16(text: string, little: boolean): number[] {
@@ -26,6 +32,7 @@ function utf16(text: string, little: boolean): number[] {
  * What `text` is as bytes in a file of `encoding` (the probe's or srv's name for it): null for nothing typed, an error
  * to show, or the hex srv takes with the alignment a match must have (a UTF-16 match is on a two-byte boundary).
  * A single-byte encoding other than UTF-8 is searched for plain ASCII only: those bytes mean the same in all of them.
+ * A multibyte legacy encoding (Shift_JIS, GBK, Big5, EUC) is refused: an ASCII byte can sit inside one of its characters.
  */
 export function largePatternFor(encoding: string | undefined, text: string): LargePattern {
     if (!text) return null;
@@ -37,6 +44,8 @@ export function largePatternFor(encoding: string | undefined, text: string): Lar
         align = 2;
     } else if (enc === "utf-8" || enc === "utf8") {
         bytes = Array.from(new TextEncoder().encode(text));
+    } else if (MULTIBYTE.test(enc)) {
+        return { error: `This file is in ${encoding}, which spells some characters with several bytes: it can't be searched yet` };
     } else if (Array.from(text).every((c) => c.charCodeAt(0) < 128)) {
         bytes = Array.from(text, (c) => c.charCodeAt(0));
     } else {
@@ -44,25 +53,6 @@ export function largePatternFor(encoding: string | undefined, text: string): Lar
     }
     if (bytes.length > MAX_PATTERN_BYTES) return { error: `At most ${MAX_PATTERN_BYTES} bytes` };
     return { hex: hexOfBytes(bytes), length: bytes.length, align };
-}
-
-/** What `findMatch` takes, less what a search over this file fills in. */
-export type AlignedFind = Parameters<typeof findMatch>[0] & { align: 1 | 2 };
-
-/**
- * `findMatch`, skipping the matches that start in the middle of a UTF-16 unit (the bytes of one character's end and
- * the next one's start can spell the text). Stops at the first such match it sees again, so it ends.
- */
-export async function findAligned(o: AlignedFind): Promise<FindResult | null> {
-    let cursor = o.cursor;
-    let first = -1;
-    for (;;) {
-        const r = await findMatch({ ...o, cursor });
-        if (!r || !r.found || r.offset % o.align === 0) return r;
-        if (r.offset === first) return { found: false };
-        if (first < 0) first = r.offset;
-        cursor = r.offset;
-    }
 }
 
 export interface TextPart {

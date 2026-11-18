@@ -296,7 +296,7 @@ function EntryTable(props: { s: EntriesState; section: VaultSection; showVault: 
                             <Show when={kinds()}>
                                 <td class="vault-kind">{vaultKind(e.kind)?.label ?? e.kind}</td>
                             </Show>
-                            <td class="warden-manager-dim">
+                            <td class="warden-manager-dim vault-details">
                                 <EntryDetails entry={e} showVault={props.showVault} onError={s.setError} />
                             </td>
                             <EntryValue entry={e} />
