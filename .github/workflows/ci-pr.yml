@@ -144,6 +144,8 @@ jobs:
       frontend_build: ${{ steps.classify.outputs.frontend_build }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
+      # The agentmux-cef crate's tests (the `cef-crate` job): a PR that changes what the crate is built from (R10).
+      cef: ${{ steps.classify.outputs.cef }}
       version_only: ${{ steps.classify.outputs.version_only }}
       # Set only in a merge queue (below); every other run uses the defaults
       # each job's matrix falls back to.
@@ -172,8 +174,10 @@ jobs:
         # dependents skipped — i.e. green — which is the exact outcome this
         # whole design exists to prevent.
         run: |
+          # $2 is whether the agentmux-cef crate's check runs too: yes unless a caller says no (a push to main,
+          # where the nightly owns that crate's tests).
           run_everything() {
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=%s\n' "${2:-true}" >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -184,7 +188,7 @@ jobs:
           # vitest). The rest of the Rust tests ran on each PR and run again on the push
           # to main.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\nfrontend_build=true\ndocs_only=false\ndocs_index=true\nversion_only=false\ncef=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
             printf 'rust_os=["ubuntu-latest"]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
             echo "::notice::merge queue: fast gates and the tests that read the tree"
             exit 0
@@ -193,7 +197,7 @@ jobs:
           # R4: only pull requests are eligible. Post-merge runs on main always
           # do the full job — low volume, and the last gate before a release.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            run_everything "not a pull_request (R4)"
+            run_everything "not a pull_request (R4)" false
             exit 0
           fi
 
@@ -740,6 +744,47 @@ jobs:
         uses: taiki-e/install-action@nextest
       - name: cargo nextest (CEF-free crates but srv)
         run: cargo nextest run --profile ci -p agentmux-common -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+
+  # The agentmux-cef crate's own tests on a PR that changes what the crate is built from (the classifier's R10).
+  # Until now they ran only in the nightly, so a break in the page wiring merged with nothing run against it and
+  # surfaced a day later on main. The whole set is 1,295 tests; on the nightly's Ubuntu run they take about 4 seconds
+  # and the build about 2 minutes on top of the workspace's, no browser or display needed, so nothing is split off:
+  # the full `cargo test -p agentmux-cef --features test-authfile`, the nightly's own command. Linux only: a
+  # Windows-only `cfg` break in the crate is still the nightly's to catch.
+  #
+  # Reports, blocks nothing: `continue-on-error`, and not in `CI required`'s `needs` (the same stance as `rust-macos`).
+  # It becomes a required check once it has been green and stable for a few days. A job of its own, so the `rust`
+  # job's required path (which leaves this crate out for its build time) is unchanged.
+  cef-crate:
+    name: agentmux-cef tests (ubuntu-latest)
+    needs: changes
+    # `!= 'false'` and `!cancelled()` for the reasons given on `rust`: a failed or skipped `changes` job runs it.
+    if: ${{ !cancelled() && needs.changes.outputs.cef != 'false' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - name: Install build deps (Linux — CEF)
+        timeout-minutes: 20
+        env:
+          CI_APT_BUDGET: 600
+          CI_APT_DNS_WAIT: 180
+          CI_APT_UPDATE_LIMIT: 120
+          CI_APT_INSTALL_LIMIT: 240
+        run: |
+          # The same list and steps as the nightly's "Install build deps (Linux — CEF + launcher Wayland/GTK)".
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          bash scripts/ci-apt.sh update --strict
+          bash scripts/ci-apt.sh install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+      - name: Check the build tools are on PATH
+        run: bash scripts/ci-require-tools.sh ninja cmake
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test -p agentmux-cef
+        run: cargo test -p agentmux-cef --features test-authfile --no-fail-fast -- --test-threads=1
 
   docs:
     name: doc status + grep gates

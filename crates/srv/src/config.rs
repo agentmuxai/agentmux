@@ -41,7 +41,9 @@ pub struct CliArgs {
     pub frontend_dir: Option<PathBuf>,
 
     /// Headless: also accept this browser origin (e.g. https://app.example.com)
-    /// for CORS and the /ws check, beside loopback. Repeatable.
+    /// for CORS and the /ws check, beside loopback. Repeatable. A launcher that
+    /// starts srv per run can give the one origin as `AGENTMUX_ALLOWED_ORIGIN`
+    /// instead (https, nothing else allowed); if both are given they must agree.
     #[arg(long = "allowed-origin")]
     pub allowed_origins: Vec<String>,
 
