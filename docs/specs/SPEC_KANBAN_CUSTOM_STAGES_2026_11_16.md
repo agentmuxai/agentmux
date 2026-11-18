@@ -1,6 +1,6 @@
 # Spec: the person sets their own Kanban stages (number, names, colour) in Settings, opened from a cog on the board
 
-**Status:** draft, for the operator's "looks good". Kanban tasks #47816 (this spec) and #47817 (its build).
+**Status:** active. Approved by the operator (relayed by AgentY, 2026-11-18); decisions D1 to D7 stand as recommended. Kanban tasks #47816 (this spec) and #47817 (its build); build PRs #7729 (data and API), the editor PR follows.
 **Date:** 2026-11-16
 **Author:** Naki-2@narko (Kanban's owner; lead AgentX). Filed by Agent2 and moved to AgentY, who gave it to me.
 **Verified against:** `agentmux` `main` @ `6de8ace3fb` (2026-11-16), by reading code. Nothing here has been run.
