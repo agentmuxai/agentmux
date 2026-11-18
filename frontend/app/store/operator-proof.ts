@@ -66,6 +66,28 @@ type OperatorProofDeps = {
 let generation = 0;
 let current: Promise<boolean> = Promise.resolve(false);
 let settleExpected: ((proven: boolean) => void) | null = null;
+/** The last connection's proof deps, to prove it again when its proof lapses (a host that vouches for a lease). */
+let lastDeps: OperatorProofDeps | null = null;
+let reproving: Promise<boolean> | null = null;
+let refusalHandler: ((refusal: OperatorRefusal) => void) | null = null;
+
+/** An operator-only action srv refused that the app could not put right: the person must be told. */
+export type OperatorRefusal = {
+    /** srv's words, "FORBIDDEN: ..." */
+    message: string;
+    /** The connection's proof is missing or lapsed and proving it again did not help. */
+    unproven: boolean;
+};
+
+/** Where a final refusal goes so the person sees it, not only the console (the web host shows a line). */
+export function setOperatorRefusalHandler(handler: ((refusal: OperatorRefusal) => void) | null): void {
+    refusalHandler = handler;
+}
+
+function refuse(e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("FORBIDDEN") || message.includes(UNPROVEN)) refusalHandler?.({ message, unproven: message.includes(UNPROVEN) });
+}
 
 /** The window's connection is about to open and can be proven: operator RPCs
  *  made before then wait for that first proof. */
@@ -78,6 +100,7 @@ export function expectOperatorProof(): void {
  *  connection starts unproven. Without a host it does nothing. */
 export function proveOperatorConnection(deps: OperatorProofDeps): Promise<boolean> {
     generation++;
+    lastDeps = deps;
     const attest = deps.attest;
     const attempt = attest
         ? (async () => {
@@ -106,6 +129,15 @@ export function operatorProofReady(): Promise<boolean> {
     return Promise.race([current, timeout]).finally(() => clearTimeout(timer));
 }
 
+/** This connection's proof lapsed (a host that vouches for a lease): prove it again, once at a time. False when
+ *  there is no host to vouch or it would not. */
+function reprove(): Promise<boolean> {
+    const deps = lastDeps;
+    if (!deps?.attest) return Promise.resolve(false);
+    reproving ??= proveOperatorConnection(deps).finally(() => (reproving = null));
+    return reproving;
+}
+
 export function isOperatorCommand(command: string): boolean {
     return OPERATOR_COMMANDS.has(command);
 }
@@ -116,18 +148,26 @@ function isUnproven(e: unknown): boolean {
 }
 
 /** Send an operator-only RPC once the connection's proof has settled. When srv
- *  answers that the connection isn't proven because a reconnect started a new
- *  one meanwhile, it waits for that connection's proof and sends once more.
- *  srv refuses before acting, so the second send can't repeat an action. */
+ *  answers that the connection isn't proven, either a reconnect started a new
+ *  one meanwhile (it waits for that connection's proof) or this one's proof
+ *  lapsed (it proves it again), and it sends once more. srv refuses before
+ *  acting, so the second send can't repeat an action. A refusal that stands is
+ *  handed to the refusal handler so the person sees it. */
 export async function sendAsOperator<T>(send: () => Promise<T>): Promise<T> {
     await operatorProofReady();
     const sentAt = generation;
     try {
         return await send();
     } catch (e) {
-        if (!isUnproven(e) || generation === sentAt) throw e;
-        await operatorProofReady();
-        return await send();
+        try {
+            if (!isUnproven(e)) throw e;
+            if (generation !== sentAt) await operatorProofReady();
+            else if (!(await reprove())) throw e;
+            return await send();
+        } catch (final) {
+            refuse(final);
+            throw final;
+        }
     }
 }
 
@@ -140,8 +180,13 @@ export async function sendRetryingUnproven<T>(send: () => Promise<T>): Promise<T
         return await send();
     } catch (e) {
         if (!isUnproven(e)) throw e;
-        if (!(await operatorProofReady())) throw e;
-        return await send();
+        try {
+            if (!(await operatorProofReady()) && !(await reprove())) throw e;
+            return await send();
+        } catch (final) {
+            refuse(final);
+            throw final;
+        }
     }
 }
 
@@ -150,4 +195,7 @@ export function resetOperatorProofForTests(): void {
     generation = 0;
     current = Promise.resolve(false);
     settleExpected = null;
+    lastDeps = null;
+    reproving = null;
+    refusalHandler = null;
 }
