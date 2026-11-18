@@ -144,4 +144,12 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
             }
         }, MOS.makeORef("block", opts.blockId));
     onCleanup(() => acceptedUnsub());
+
+    // srv holds a message while the agent's process is alive (a turn running, or only a command the model sent to
+    // the background): it says so, and how many messages are ahead, so the panel doesn't promise "any moment".
+    const queuedUnsub = onMuxEvent(WpsEvent.AgentMessageQueued, (data) => {
+        if (!data.message_id || !getPending().some((m) => m.id === data.message_id)) return;
+        opts.model.dispatchPane({ type: "PendingMessageWaiting", id: data.message_id, ahead: data.ahead });
+    }, MOS.makeORef("block", opts.blockId));
+    onCleanup(() => queuedUnsub());
 }
