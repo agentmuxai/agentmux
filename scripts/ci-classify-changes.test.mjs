@@ -12,11 +12,13 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
     classifyChanges,
     classifyPullFiles,
+    isCefInput,
     isDocsOnlyPath,
     isFrontendOnlyPath,
     isRustOnlyPath,
@@ -321,8 +323,12 @@ describe("R7 — version-only release PRs", () => {
             frontend: false,
             docs_index: false,
             docs_only: false,
+            // The release moves the version in Cargo.toml and Cargo.lock, which the agentmux-cef crate is built from (R10).
+            cef: false,
             version_only: true,
         });
+        // ... but a release that also changes a crate's code does run it.
+        expect(classifyPullFiles([...release(), { filename: "crates/cef/src/ipc.rs", patch: "@@ -1 +1 @@\n-a\n+b" }]).cef).toBe(true);
     });
 
     it("runs everything when the release also changes code or CI", () => {
@@ -580,5 +586,115 @@ describe("R9 — the production frontend build runs unless only Rust files chang
         expect(files.length).toBeGreaterThan(500);
         const reaching = files.filter((file) => /(?:\.\.\/)+crates\//.test(readFileSync(file, "utf8")));
         expect(reaching, "the build reads these out of crates/: take crates/ out of BUILD_NEVER_READS, or list what is read").toEqual([]);
+    });
+});
+
+describe("R10 — the agentmux-cef crate's tests run when what it is built from changes", () => {
+    const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+    it("runs for the crate, its two path dependencies, the workspace manifests and the files it includes", () => {
+        for (const p of [
+            "crates/cef/src/browser_api/routes.rs",
+            "crates/cef/Cargo.toml",
+            "crates/common/src/lib.rs",
+            "crates/procstats/src/lib.rs",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            ".cargo/config.toml",
+            "settings-template.jsonc",
+            "assets/linux/icons/hicolor/512x512/apps/agentmux.png",
+            "frontend/app/keybindings/host-keys.json",
+            ".github/workflows/ci-pr.yml",
+            "scripts/ci-apt.sh",
+            "scripts/ci-classify-changes.mjs",
+        ]) {
+            expect(classifyChanges([p]).cef, p).toBe(true);
+            expect(isCefInput(p), p).toBe(true);
+        }
+    });
+
+    it("does not run for what the crate is not built from, however close the name", () => {
+        for (const p of [
+            "crates/srv/src/lib.rs",
+            "crates/srv-core/src/lib.rs",
+            "crates/launcher/src/main.rs",
+            "crates/cefx/src/lib.rs",
+            "crates/common-extra/src/lib.rs",
+            "frontend/app/app.tsx",
+            "docs/specs/SPEC_FOO_2026_11_18.md",
+            "scripts/check-audio-creators.mjs",
+            "Cargo.toml.bak",
+            "assets/macos/x.png",
+        ]) {
+            expect(classifyChanges([p]).cef, p).toBe(false);
+        }
+    });
+
+    it("runs when one file of a larger PR qualifies, and for a Windows path", () => {
+        expect(classifyChanges(["frontend/app/app.tsx", "docs/a.md", "crates/cef/src/ipc.rs"]).cef).toBe(true);
+        expect(classifyChanges(["crates\\cef\\src\\ipc.rs"]).cef).toBe(true);
+    });
+
+    it("R2: runs on an empty, missing or malformed list", () => {
+        expect(classifyChanges([]).cef).toBe(true);
+        expect(classifyChanges(undefined).cef).toBe(true);
+        expect(classifyChanges(["frontend/app/app.tsx", 7]).cef).toBe(true);
+        expect(classifyPullFiles([{ filename: "docs/a.md" }, { nothing: true }]).cef).toBe(true);
+    });
+
+    it("counts a renamed file under its old name too", () => {
+        const moved = classifyPullFiles([{ filename: "crates/srv/src/x.rs", previous_filename: "crates/cef/src/x.rs", patch: "" }]);
+        expect(moved.cef).toBe(true);
+    });
+
+    it("runs for a manifest change that is not only the version (the release case is in R7's tests)", () => {
+        expect(classifyPullFiles([{ filename: "Cargo.toml", patch: "@@ -1 +1 @@\n-x = 1\n+x = 2" }]).cef).toBe(true);
+    });
+
+    it("prints the output the workflow reads", () => {
+        const out = spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), "crates/cef/src/ipc.rs"], { encoding: "utf8" });
+        expect(out.stdout).toContain("cef=true\n");
+        const none = spawnSync(process.execPath, [join(repo, "scripts", "ci-classify-changes.mjs"), "crates/srv/src/lib.rs"], { encoding: "utf8" });
+        expect(none.stdout).toContain("cef=false\n");
+    });
+
+    it("lists every file outside the crate that its sources include at compile time", () => {
+        const crate = join(repo, "crates", "cef");
+        const sources = (dir) =>
+            readdirSync(dir).flatMap((name) => {
+                const full = join(dir, name);
+                if (name === "target") return [];
+                return statSync(full).isDirectory() ? sources(full) : name.endsWith(".rs") ? [full] : [];
+            });
+        const outside = new Map();
+        for (const file of [...sources(join(crate, "src")), join(crate, "build.rs")]) {
+            const text = readFileSync(file, "utf8");
+            for (const m of text.matchAll(/include_(?:str|bytes)!\(\s*"([^"]+)"/g)) {
+                const target = relative(repo, resolve(dirname(file), m[1])).replaceAll("\\", "/");
+                if (!target.startsWith("crates/cef/")) outside.set(target, file);
+            }
+        }
+        // The key table, the settings template and the Linux icon at the time of writing.
+        expect(outside.size).toBeGreaterThanOrEqual(3);
+        const unlisted = [...outside].filter(([path]) => !isCefInput(path)).map(([path, file]) => `${path} (${file})`);
+        expect(unlisted, "add these to CEF_BUILT_FROM in scripts/ci-classify-changes.mjs").toEqual([]);
+    });
+
+    it("lists every crate the agentmux-cef crate depends on by path, directly or through another", () => {
+        const wanted = new Map();
+        const walk = (name) => {
+            const toml = readFileSync(join(repo, "crates", name, "Cargo.toml"), "utf8");
+            for (const m of toml.matchAll(/path\s*=\s*"\.\.\/([A-Za-z0-9_-]+)"/g)) {
+                if (!wanted.has(m[1])) {
+                    wanted.set(m[1], name);
+                    walk(m[1]);
+                }
+            }
+        };
+        walk("cef");
+        expect([...wanted.keys()].sort()).toEqual(expect.arrayContaining(["common", "procstats"]));
+        const unlisted = [...wanted].filter(([crate]) => !isCefInput(`crates/${crate}/src/lib.rs`)).map(([crate, from]) => `${crate} (from ${from})`);
+        expect(unlisted, "add these crates to CEF_BUILT_FROM in scripts/ci-classify-changes.mjs").toEqual([]);
     });
 });
