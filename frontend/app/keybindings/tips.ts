@@ -275,7 +275,7 @@ export const TIPS: TipRow[] = [
         area: "Editor",
         gesture: "mod+wheel",
         where: "over the editor's file tree",
-        label: "Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or the pointer",
+        label: "Zoom the file tree on its own, apart from the document; the zoom keys zoom whichever of the two last had the keyboard or a click",
         source: { file: "frontend/app/view/editor/editor-view.tsx", anchor: 'class="editor-tree-zoom"' },
     },
 
@@ -372,7 +372,7 @@ export const TIPS: TipRow[] = [
         area: "Files",
         gesture: "mod+wheel",
         where: "over the Files pane's Places list",
-        label: "Zoom Places on its own, apart from the rest of the pane; the zoom keys zoom whichever of the two last had the keyboard or the pointer",
+        label: "Zoom Places on its own, apart from the rest of the pane; the zoom keys zoom whichever of the two last had the keyboard or a click",
         source: { file: "frontend/app/view/files/files-view-parts.tsx", anchor: 'class="files-zoom files-zoom-places"' },
     },
 
