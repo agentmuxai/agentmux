@@ -87,9 +87,34 @@ describe("SummaryStatus", () => {
         expect(container.querySelector(".status-summary")).toBeNull();
     });
 
-    it("counts an agent held by a sign-in or a limit as running: it has a process", () => {
-        const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("a", "signed_out"), agent("b", "limited")]} />);
-        expect(part(container, "agents")?.textContent).toBe("2");
+    it("counts an agent held by a sign-in or a limit as running, and shows each in a part of its own", () => {
+        const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("a", "signed_out"), agent("b", "limited"), agent("c", "limited")]} />);
+        expect(part(container, "agents")?.textContent).toBe("3");
+        expect(part(container, "signedout")?.textContent).toBe("1");
+        expect(part(container, "signedout")?.getAttribute("data-tip")).toBe("1 agent is signed out");
+        expect(part(container, "quota")?.textContent).toBe("2");
+        expect(part(container, "quota")?.getAttribute("data-tip")).toBe("2 agents are out of quota");
+        // They wait on the person, so the one badge counts them and the narrow bar keeps the item.
+        expect(container.querySelector(".status-summary__badge")?.textContent).toBe("3");
+        expect(container.querySelector(".status-summary")?.hasAttribute("data-core")).toBe(true);
+    });
+
+    it("lists a signed-out agent and one out of quota with a button to its pane, and the part that was clicked first", () => {
+        const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("a", "signed_out"), agent("b", "limited")]} tasks={() => 1} />);
+        fireEvent.click(part(container, "quota")!);
+        const list = screen.getByRole("dialog", { name: "Waiting on you" });
+        expect(within(list).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Out of quota", "Signed out", "Tasks"]);
+        expect(within(list).getByText("needs you to sign in again")).toBeTruthy();
+        expect(within(list).getByText("is out of quota")).toBeTruthy();
+        fireEvent.click(within(list).getByRole("button", { name: "Go to a" }));
+        expect(goTo).toHaveBeenCalledWith(expect.objectContaining({ blockId: "a", agentId: "a" }));
+    });
+
+    it("opens the list, not the Swarm, when only an agent out of quota waits", () => {
+        const { container } = render(() => <SummaryStatus {...base} rows={() => [agent("b", "limited")]} />);
+        fireEvent.click(part(container, "quota")!);
+        expect(screen.getByRole("dialog", { name: "Waiting on you" })).toBeTruthy();
+        expect(open).not.toHaveBeenCalled();
     });
 
     it("shows a part for each count, none for a zero, and says each in words in its tooltip", () => {

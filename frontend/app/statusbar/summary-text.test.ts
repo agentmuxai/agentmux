@@ -12,6 +12,8 @@ describe("summary text", () => {
         expect(partTip("asks", 1)).toBe("1 agent asks you something");
         expect(partTip("browser", 2)).toBe("2 browser panes need you");
         expect(partTip("vault", 1)).toBe("1 Vault request waits on you");
+        expect(partTip("signedout", 1)).toBe("1 agent is signed out");
+        expect(partTip("quota", 3)).toBe("3 agents are out of quota");
         expect(partTip("tasks", 4)).toBe("4 Kanban tasks need you");
     });
 
@@ -31,6 +33,8 @@ describe("summary text", () => {
         expect(rowButton({ to: "vault", id: "u" }, false)).toBe("Answer");
         expect(rowButtonLabel({ to: "vault", id: "u" }, "Clare", false)).toBe("Answer Clare");
         expect(rowButtonLabel({ to: "kanban" }, "Kanban", false)).toBe("Open the Kanban");
+        expect(rowButton({ to: "swarm" }, false)).toBe("Open");
+        expect(rowButtonLabel({ to: "swarm" }, "Clare", false)).toBe("Open Clare in the Swarm");
     });
 
     it("counts a countdown down to zero", () => {
