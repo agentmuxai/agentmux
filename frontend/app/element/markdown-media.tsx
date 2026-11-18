@@ -11,6 +11,7 @@ import {
     MediaTooLargeError,
     resolveMediaPath,
 } from "@/app/element/local-media";
+import { t } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
 import { createBlock } from "@/app/store/block-layout-actions";
@@ -365,7 +366,7 @@ function VideoStage(props: { s: LocalAvState; path: string; openGallery?: Markdo
                 <IconButton
                     class="am-media-enlarge"
                     icon="expand"
-                    label={`Enlarge ${basenameOf(props.path)}`}
+                    label={t("mediaPreview.enlarge", { name: basenameOf(props.path) })}
                     tooltip={false}
                     {...tip("Enlarge")}
                     onClick={() => enlargeVideo(stage, props.path, props.openGallery!)}

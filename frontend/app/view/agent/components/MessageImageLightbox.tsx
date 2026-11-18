@@ -10,6 +10,7 @@
  */
 
 import { Modal } from "@/app/element/modal";
+import { t } from "@/app/i18n/i18n";
 import { tip } from "@/app/element/tip";
 import { Button, CloseButton, IconButton } from "@/app/element/ui";
 import { formatBytes } from "@/util/format-bytes";
@@ -27,7 +28,9 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
             fallback={
                 <span class={`${BLOCK}__missing`}>
                     {s.entry()?.kind === "missing" || s.entry()?.kind === "too-large"
-                        ? `This ${s.isVideo() ? "video" : "image"} is no longer available.`
+                        ? s.isVideo()
+                            ? t("mediaPreview.videoGone")
+                            : t("mediaPreview.imageGone")
                         : "Loading…"}
                 </span>
             }
@@ -51,7 +54,7 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                         src={src()}
                         controls
                         playsinline
-                        aria-label={s.item()?.alt || s.item()?.name || "Video"}
+                        aria-label={s.item()?.alt || s.item()?.name}
                         onLoadedMetadata={(e) =>
                             s.setSize(s.item()!.path, e.currentTarget.videoWidth, e.currentTarget.videoHeight)
                         }
