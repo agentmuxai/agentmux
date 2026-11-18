@@ -100,8 +100,10 @@ pub enum Staged {
     /// again. The installer keeps the install's own mode (all users or the
     /// current one): Inno Setup's default `UsePreviousPrivileges` reads it
     /// from the previous install, which the folder alone can't tell.
-    /// `sha256` is the release's digest, checked again as it runs.
-    Installer { installer: PathBuf, sha256: String, own_dir: PathBuf },
+    /// `sha256` is the release's digest, checked again as it runs. `version`
+    /// is the release, for the "Updating to <version>" window that is on
+    /// screen while the installer runs ([`crate::updating_window`]).
+    Installer { installer: PathBuf, sha256: String, own_dir: PathBuf, version: String },
     /// A macOS `.app`: replace it from the release's `.dmg` once this
     /// launcher has exited (`upgrade_macos`).
     MacDmg(crate::upgrade_macos::MacUpgrade),
@@ -203,7 +205,7 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
             if !is_sha256_hex(sha256) || file_sha256(installer).as_deref() != Some(sha256.as_str()) {
                 return Err(format!("{} isn't the AgentMux {} release; download it again", installer.display(), req.version));
             }
-            Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf() })
+            Ok(Staged::Installer { installer: installer.clone(), sha256: sha256.clone(), own_dir: own_dir.to_path_buf(), version: req.version.clone() })
         }
     }
 }
@@ -502,21 +504,30 @@ fn ps_quote(path: &Path) -> String {
 /// write, rename or delete; hashes it through that handle; and runs it only
 /// if it is `sha256`, holding the handle until the installer exits. The file
 /// that runs is the file that was checked.
-fn installer_script(installer: &Path, sha256: &str, own_dir: &Path) -> String {
+///
+/// An install that did not succeed (the installer's exit code was not 0, or it
+/// was not the file that was checked) leaves `failed_marker` before AgentMux
+/// starts again, so the "Updating to <version>" window can say so
+/// ([`crate::updating_window`]). Writing it is best effort and changes nothing else.
+fn installer_script(installer: &Path, sha256: &str, own_dir: &Path, failed_marker: &Path) -> String {
     debug_assert!(is_sha256_hex(sha256));
     let installer = ps_quote(installer);
     format!(
         "Start-Sleep -Seconds 3; \
+         $ok = $false; \
          $f = $null; \
          try {{ \
          $f = [System.IO.File]::Open({installer}, 'Open', 'Read', 'Read'); \
          $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($f)).Replace('-', ''); \
          if ($h -eq '{sha256}') {{ \
-         Start-Process -FilePath {installer} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait \
+         $p = Start-Process -FilePath {installer} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru; \
+         if ($p.ExitCode -eq 0) {{ $ok = $true }} \
          }} \
          }} catch {{ }} finally {{ if ($f) {{ $f.Dispose() }} }}; \
-         Start-Process -FilePath {}",
-        ps_quote(&own_dir.join("agentmux.exe"))
+         if (-not $ok) {{ try {{ New-Item -ItemType File -Force -Path {marker} | Out-Null }} catch {{ }} }}; \
+         Start-Process -FilePath {restart}",
+        marker = ps_quote(failed_marker),
+        restart = ps_quote(&own_dir.join("agentmux.exe")),
     )
 }
 
@@ -600,10 +611,11 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
         }
         // The swap runs after this launcher exits; it opens the new app itself.
         Staged::MacDmg(up) => crate::upgrade_macos::apply_command(up, std::process::id()),
-        Staged::Installer { installer, sha256, own_dir } => {
+        Staged::Installer { installer, sha256, own_dir, .. } => {
+            let marker = crate::updating_window::failed_marker(&crate::updating_window::dir());
             let mut c = std::process::Command::new(powershell_exe());
             c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"])
-                .arg(encoded_command(&installer_script(installer, sha256, own_dir)));
+                .arg(encoded_command(&installer_script(installer, sha256, own_dir, &marker)));
             c
         }
         // Already running: the install helper's waiter, started when the user agreed, starts AgentMux.
@@ -618,12 +630,23 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
         // this one's group never reaches it.
         cmd.process_group(0);
     }
-    cmd.stdin(std::process::Stdio::null())
+    let child = cmd
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .no_window()
-        .spawn()
-        .map(|_| ())
+        .spawn()?;
+    // A `setup.exe` install: nothing of AgentMux is on screen while the script waits for this launcher to be
+    // gone and runs the installer, so a window says which version is coming. The upgrade doesn't depend on it.
+    #[cfg(windows)]
+    if let Staged::Installer { version, .. } = staged {
+        if let Err(e) = crate::updating_window::start(version, child.id(), &crate::updating_window::dir()) {
+            crate::log(&format!("upgrade: no updating window ({e}); the upgrade goes on without it"));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = child;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -774,12 +797,12 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         std::fs::create_dir_all(&updates).unwrap();
         let installer = updates.join("AgentMux-0.59.27-x64-setup.exe");
         std::fs::write(&installer, b"").unwrap();
-        let Staged::Installer { installer: got, sha256, own_dir } =
+        let Staged::Installer { installer: got, sha256, own_dir, version } =
             staged(&setup_req("0.59.27", &installer), &own, &data, &data, "0.59.26").unwrap()
         else {
             panic!("expected the installer")
         };
-        assert_eq!((got, sha256.as_str(), own_dir), (installer.clone(), EMPTY_SHA256, own.clone()));
+        assert_eq!((got, sha256.as_str(), own_dir, version.as_str()), (installer.clone(), EMPTY_SHA256, own.clone(), "0.59.27"));
 
         // Changed since srv checked it, or no proper digest to check against.
         std::fs::write(&installer, b"not the release").unwrap();
@@ -823,8 +846,14 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
     #[test]
     fn the_installer_script_runs_silently_then_always_starts_agentmux_again() {
         let path = "C:/Users/A %TEMP% $x/AgentMux-0.59.27-x64-setup.exe";
-        let script = installer_script(Path::new(path), EMPTY_SHA256, Path::new("C:/Apps/O'Neil"));
+        let marker = "C:/Users/A %TEMP%/agentmux-updating-1/failed";
+        let script = installer_script(Path::new(path), EMPTY_SHA256, Path::new("C:/Apps/O'Neil"), Path::new(marker));
         assert!(script.starts_with("Start-Sleep -Seconds 3; "), "{script}");
+        // The updating window is told when the install did not succeed: only a zero exit code of the checked
+        // installer is a success, and the marker is written after the install and before AgentMux starts again.
+        let ok = script.find("if ($p.ExitCode -eq 0) { $ok = $true }").expect(&script);
+        let leave = script.find(&format!("if (-not $ok) {{ try {{ New-Item -ItemType File -Force -Path '{marker}'")).expect(&script);
+        assert!(script.find("$ok = $false").unwrap() < ok && ok < leave, "{script}");
         // Opened so nothing else can change it, hashed through that handle,
         // and run only on a match, before the handle is let go.
         let open = script.find(&format!("[System.IO.File]::Open('{path}', 'Open', 'Read', 'Read')")).expect(&script);
@@ -837,7 +866,7 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
         assert!(open < check && check < run && run < release, "{script}");
         // AgentMux starts again whatever happened, last.
         let restart = script.rfind("Start-Process -FilePath 'C:/Apps/O''Neil").expect(&script);
-        assert!(restart > release, "{script}");
+        assert!(restart > release && restart > leave, "{script}");
         // Typographic quotes close a PowerShell string too: doubled as well.
         assert_eq!(ps_quote(Path::new("C:/Users/O\u{2019}Neil")), "'C:/Users/O\u{2019}\u{2019}Neil'");
         assert_eq!(ps_quote(Path::new("a\u{2018}b\u{201A}c\u{201B}")), "'a\u{2018}\u{2018}b\u{201A}\u{201A}c\u{201B}\u{201B}'");

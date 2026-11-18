@@ -149,7 +149,7 @@ fn short_host(s: &str) -> String {
 }
 
 /// Middle-ellipsize `s` to at most `max` chars so the footer never widens the card.
-fn ellipsize(s: &str, max: usize) -> String {
+pub(crate) fn ellipsize(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         return s.to_string();
