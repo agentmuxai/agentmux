@@ -77,3 +77,29 @@ describe("Use for all <Label> panes", () => {
         expect(useForAll({ view: "t-term", "frame:color": "violet", agentId: "agent-1" })).toBeUndefined();
     });
 });
+
+describe("the Pane Color menu stays open on a pick", () => {
+    const live = (meta: Record<string, unknown>) => {
+        const now = block(meta);
+        const items = (buildPaneColorSubmenu(now, () => now).find((i) => i.label === "Pane Color")?.submenu ?? []) as ContextMenuItem[];
+        return { now, items };
+    };
+
+    it("keeps it open on every colour, Default and Use for all included", () => {
+        const { items } = live({ view: "t-term", "frame:color": "violet" });
+        for (const item of items.filter((i) => i.type !== "separator")) expect(item.keepOpen, item.label).toBe(true);
+    });
+
+    it("moves the check with a pick, and offers Use for all once there is one", () => {
+        const { now, items } = live({ view: "t-term" });
+        const checked = () => items.filter((i) => i.live?.().checked).map((i) => i.label);
+        const all = items.find((i) => i.label?.startsWith("Use for all"))!;
+        expect(checked()).toEqual(["Default"]);
+        expect(all.live!().enabled).toBe(false);
+        (now.meta as Record<string, unknown>)["frame:color"] = "blue";
+        expect(checked()).toEqual(["Blue"]);
+        expect(all.live!().enabled).toBe(true);
+        all.click!();
+        expect(applyColorToAllPanes).toHaveBeenCalledWith("block-1", "t-term", "blue");
+    });
+});
