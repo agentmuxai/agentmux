@@ -1,7 +1,7 @@
 # Spec: the status bar's "GFX HW" item opens a GPU panel (use and memory, total and per process)
 
 **Date:** 2026-11-15
-**Status:** active. Approved; phase 1 (Windows) is built in PR #PR_NUMBER, phases 2 and 3 (Linux, macOS) are not. Decisions in section 9.
+**Status:** active. Approved; phase 1 (Windows) is built in PR #7731, phases 2 and 3 (Linux, macOS) are not. Decisions in section 9.
 **Task:** #47726 (build: #47727). Written against `origin/main` 0b31efac3.
 **Neighbours:** Masty's compact summary (starpower #44) replaces only `agentmux:agent-counts` and `agentmux:vault-requests`; GFX HW stays its own item (`gpu`, `GpuStatus.tsx`, `DROP_AT` gpu: 2). No collision. The panel builds on `AnchoredPopover` and the `popover-frame` readout mixins, as `CpuCoresPopover` and `DiskVolumesPopover` do.
 
