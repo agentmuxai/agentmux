@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn windows_data_folders_of_docker_are_refused() {
         let data = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(data.path().join("Docker")).unwrap();
+        std::fs::create_dir_all(data.path().join("docker")).unwrap();
         let dir = data.path().to_string_lossy().to_string();
         assert!(refused_in(&[format!("{dir}/Docker/x:/x")], &[], &[data.path().to_path_buf()]).is_some());
         assert!(refused_in(&[format!("{dir}:/x")], &[], &[data.path().to_path_buf()]).is_some(), "the folder holding it");
