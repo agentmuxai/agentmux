@@ -36,6 +36,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -61,6 +62,9 @@ const MAX_RUNS: u64 = 100;
 pub const MAX_NEW_PER_POLL: usize = 20;
 /// How often the poller looks at which jobs are due.
 const TICK: Duration = Duration::from_secs(30);
+/// How many `api` questions one pass asks at once. Each may wait out its own timeout on a site that is down, so they
+/// are asked together, but not without a bound: a pass of dozens of jobs must not open dozens of connections.
+pub const API_ASKS_AT_ONCE: usize = 4;
 
 const COMMON_KEYS: [&str; 3] = ["query", "every_minutes", "include_existing"];
 
@@ -283,17 +287,49 @@ pub struct PollState {
     jobs: HashMap<String, JobPoll>,
 }
 
+/// Which poll jobs a pass looks at. The `api` questions go out over the network and can take their whole timeout each,
+/// so they are a pass of their own (see [`spawn`]): an outage on an external site must not hold up the local polls and
+/// the `expect` checks (the dead-man's switch) that run beside them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollKind {
+    /// Every poll job, asked one after another: the pass a test steps.
+    All,
+    /// Everything but `api`: questions of AgentMux's own state, quick.
+    Local,
+    /// Only `api`: asked [`API_ASKS_AT_ONCE`] at a time.
+    Api,
+}
+
+impl PollKind {
+    fn takes(self, query: &str) -> bool {
+        match self {
+            PollKind::All => true,
+            PollKind::Local => query != "api",
+            PollKind::Api => query == "api",
+        }
+    }
+}
+
 /// Asks the question of every poll job that is due and starts a run for each new item. Returns how many runs it
 /// started or queued. `now` is a parameter so a test can step the clock.
 pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check, state: &mut PollState, now: i64) -> usize {
+    poll_due_of(PollKind::All, scheduler, all, check, state, now).await
+}
+
+/// [`poll_due`] for the jobs of one [`PollKind`]. The due questions are asked first, the `api` ones a few at a time
+/// and the rest one after another, and the answers are then handled in the jobs' order.
+pub async fn poll_due_of(kind: PollKind, scheduler: &CronScheduler, all: &[CronJob], check: &Check, state: &mut PollState, now: i64) -> usize {
     // The job's event ids live with the run ledger (what the scheduler admits events against), which is not always the
     // store the jobs are listed from: the baseline and the items are claimed where `fire_event` looks.
     let Some(ledger) = scheduler.runs().cloned() else { return 0 };
     let store = ledger.store().clone();
-    let polling: Vec<(&CronJob, Plan)> = all.iter().filter_map(|j| plan_of(j).map(|p| (j, p))).collect();
+    let polling: Vec<(&CronJob, Plan)> = all.iter().filter_map(|j| plan_of(j).map(|p| (j, p))).filter(|(_, p)| kind.takes(&p.query)).collect();
+    // Each kind of pass keeps its own jobs' memory, so one pass does not forget what the other remembers.
     state.jobs.retain(|id, _| polling.iter().any(|(j, _)| &j.id == id));
     let mut offered = 0;
-    for (job, plan) in &polling {
+    // The questions that are due, in the jobs' order.
+    let mut due: Vec<(usize, Map<String, Value>)> = Vec::new();
+    for (idx, (job, plan)) in polling.iter().enumerate() {
         let st = state.jobs.entry(job.id.clone()).or_insert_with(|| JobPoll { signature: plan.signature.clone(), next_due_ms: now, seen: HashSet::new(), baselined: false });
         if st.signature != plan.signature {
             *st = JobPoll { signature: plan.signature.clone(), next_due_ms: now, seen: HashSet::new(), baselined: false };
@@ -308,7 +344,21 @@ pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check,
             let drone = (job.action_kind == super::definition::action_kind::DRONE).then(|| job.action.get("drone_id").and_then(Value::as_str)).flatten();
             question.insert("drone_id".to_string(), json!(drone.unwrap_or("")));
         }
-        let answer = match check(question).await {
+        due.push((idx, question));
+    }
+    let at_once = if kind == PollKind::Api { API_ASKS_AT_ONCE } else { 1 };
+    let answers: Vec<(usize, Result<Value, String>)> = futures_util::stream::iter(due)
+        .map(|(idx, question)| {
+            let asking = check(question);
+            async move { (idx, asking.await) }
+        })
+        .buffered(at_once)
+        .collect()
+        .await;
+    for (idx, answer) in answers {
+        let (job, plan) = &polling[idx];
+        let Some(st) = state.jobs.get_mut(&job.id) else { continue };
+        let answer = match answer {
             Ok(answer) => answer,
             Err(e) => {
                 tracing::warn!(job_id = %job.id, query = %plan.query, error = %e, "jobs: a poll's question failed; asking again next time");
@@ -364,21 +414,37 @@ pub async fn poll_due(scheduler: &CronScheduler, all: &[CronJob], check: &Check,
     offered
 }
 
-/// Start the poller, which also looks after the `expect` jobs. `check` answers the App query.
+/// Start the poller, which also looks after the `expect` jobs. `check` answers the App query. The `api` polls run in a
+/// task of their own, so a site that does not answer holds up nothing else.
 pub fn spawn(jobs: Arc<Store>, scheduler: Arc<CronScheduler>, check: Check) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
+    {
+        let (jobs, scheduler, check) = (jobs.clone(), scheduler.clone(), check.clone());
+        tokio::spawn(async move {
+            let mut state = PollState::default();
+            let mut expects = super::expect::ExpectState::default();
+            loop {
+                tokio::time::sleep(TICK).await;
+                let all = enabled_jobs(&jobs).await;
+                let now = agentmux_common::time::now_ms();
+                poll_due_of(PollKind::Local, &scheduler, &all, &check, &mut state, now).await;
+                super::expect::expect_due(&scheduler, &all, &check, &mut expects, now).await;
+            }
+        });
+    }
     tokio::spawn(async move {
         let mut state = PollState::default();
-        let mut expects = super::expect::ExpectState::default();
         loop {
             tokio::time::sleep(TICK).await;
-            let listing = jobs.clone();
-            let all = tokio::task::spawn_blocking(move || listing.cron_list_enabled()).await.ok().and_then(Result::ok).unwrap_or_default();
-            let now = agentmux_common::time::now_ms();
-            poll_due(&scheduler, &all, &check, &mut state, now).await;
-            super::expect::expect_due(&scheduler, &all, &check, &mut expects, now).await;
+            let all = enabled_jobs(&jobs).await;
+            poll_due_of(PollKind::Api, &scheduler, &all, &check, &mut state, agentmux_common::time::now_ms()).await;
         }
     });
+}
+
+async fn enabled_jobs(jobs: &Arc<Store>) -> Vec<CronJob> {
+    let listing = jobs.clone();
+    tokio::task::spawn_blocking(move || listing.cron_list_enabled()).await.ok().and_then(Result::ok).unwrap_or_default()
 }

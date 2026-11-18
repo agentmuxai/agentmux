@@ -308,3 +308,81 @@ async fn a_poll_of_api_for_a_job_that_is_not_a_drone_is_asked_with_no_drone() {
     poll::poll_due(&rig.sched, &[job], &check, &mut state, agentmux_common::time::now_ms()).await;
     assert_eq!(asked.lock().unwrap()[0]["drone_id"], "", "no drone: the check refuses a credential for it");
 }
+
+fn api_job(rig: &Rig, id: &str, n: u32) -> CronJob {
+    poll_job(rig, id, json!({ "query": "api", "every_minutes": 15, "url": format!("https://example.org/list-{n}") }))
+}
+
+/// Ten sites that are slow to answer are asked a few at a time: together, not one after another (ten times a timeout), and
+/// never all at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn api_questions_are_asked_together_but_only_a_few_at_once() {
+    let rig = rig();
+    allow_runs(&rig);
+    let all: Vec<CronJob> = (0..10).map(|n| api_job(&rig, &format!("j-api-{n}"), n)).collect();
+    let (now, peak, asked) = (Arc::new(std::sync::atomic::AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let check: Check = {
+        let (now, peak, asked) = (now.clone(), peak.clone(), asked.clone());
+        Arc::new(move |_| {
+            let (now, peak, asked) = (now.clone(), peak.clone(), asked.clone());
+            Box::pin(async move {
+                use std::sync::atomic::Ordering::SeqCst;
+                asked.fetch_add(1, SeqCst);
+                peak.fetch_max(now.fetch_add(1, SeqCst) + 1, SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                now.fetch_sub(1, SeqCst);
+                Ok(json!({ "items": [] }))
+            })
+        })
+    };
+    let mut state = PollState::default();
+    let t0 = agentmux_common::time::now_ms();
+    let started = std::time::Instant::now();
+    poll::poll_due_of(poll::PollKind::Api, &rig.sched, &all, &check, &mut state, t0).await;
+    let took = started.elapsed();
+    use std::sync::atomic::Ordering::SeqCst;
+    assert_eq!(asked.load(SeqCst), 10, "every due question is asked");
+    assert_eq!(peak.load(SeqCst), poll::API_ASKS_AT_ONCE, "a few at once, and no more than the bound");
+    assert!(took < std::time::Duration::from_millis(40 * 10), "ten answers of 40 ms took {took:?}: asked one after another");
+}
+
+/// A site that never answers does not hold up a local poll due in the same moment: the `api` pass is its own, so the local
+/// pass finishes while the api question is still out.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_api_question_holds_up_no_local_poll() {
+    let rig = rig();
+    allow_runs(&rig);
+    let local = poll_job(&rig, "j-local", json!({ "query": "tasks", "every_minutes": 5 }));
+    let api = api_job(&rig, "j-api", 1);
+    let all = [local, api];
+    let release = Arc::new(tokio::sync::Notify::new());
+    let order: Arc<Mutex<Vec<&'static str>>> = Arc::default();
+    let check: Check = {
+        let (release, order) = (release.clone(), order.clone());
+        Arc::new(move |ask| {
+            let (release, order) = (release.clone(), order.clone());
+            Box::pin(async move {
+                if ask.get("query").and_then(|q| q.as_str()) == Some("api") {
+                    release.notified().await;
+                    order.lock().unwrap().push("api answered");
+                    Ok(json!({ "items": [] }))
+                } else {
+                    order.lock().unwrap().push("local answered");
+                    Ok(tasks(&[1]))
+                }
+            })
+        })
+    };
+    let (mut api_state, mut local_state) = (PollState::default(), PollState::default());
+    let t0 = agentmux_common::time::now_ms();
+    let api_pass = poll::poll_due_of(poll::PollKind::Api, &rig.sched, &all, &check, &mut api_state, t0);
+    let local_pass = async {
+        let n = poll::poll_due_of(poll::PollKind::Local, &rig.sched, &all, &check, &mut local_state, t0).await;
+        // The local pass is done: only now does the slow site answer.
+        release.notify_one();
+        n
+    };
+    let both = tokio::time::timeout(std::time::Duration::from_secs(10), async { tokio::join!(api_pass, local_pass) }).await;
+    assert!(both.is_ok(), "the local pass waited for the api question");
+    assert_eq!(*order.lock().unwrap(), ["local answered", "api answered"]);
+}
