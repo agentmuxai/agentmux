@@ -50,8 +50,8 @@ run_many() { # <n> [PATH prefix]  -> runs n jobs at once; sets OVERLAPS and DONE
 }
 
 # 1. Runs started together hold the slot one at a time, with a normal mkdir and with one that always says yes.
-#    (The queue lets one waiter at a time try the slot, so these pass on the old claim too; test 2 is the
-#    one that needs the exclusive create.)
+#    (The queue lets one waiter at a time try the slot, so with a normal mkdir the old claim passes too. With
+#    the mkdir that always says yes the old claim overlaps on the CI runners, and test 2 fails on it everywhere.)
 newroot a; run_many 8
 [ "$(lines "$OVERLAPS")" = 0 ] && ok || bad "8 simultaneous runs overlapped $(lines "$OVERLAPS") times"
 [ "$(lines "$DONE")" = 8 ] && ok || bad "8 simultaneous runs: only $(lines "$DONE") finished"
