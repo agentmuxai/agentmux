@@ -3,6 +3,8 @@
 
 /** The GPU panel's views: the notice for what the counters said, the adapters, the processes, and the footer. */
 
+import { tip } from "@/app/element/tip";
+import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { GpuAdapter } from "@/types/rpc/GpuAdapter";
 import type { GpuProcess } from "@/types/rpc/GpuProcess";
@@ -128,9 +130,14 @@ function ProcessRow(props: { p: GpuProcess; onOpenTower: () => void }): JSX.Elem
     // AgentMux's own processes open Tower, where they are named the same way.
     return (
         <Show when={p().label} fallback={<div class="gpu-process">{body}</div>}>
-            <button type="button" class="gpu-process gpu-process-own" onClick={props.onOpenTower} title={t("gpuPanel.openTower")}>
+            <Button
+                variant="row"
+                class="gpu-process gpu-process-own"
+                onClick={props.onOpenTower}
+                {...tip(t("gpuPanel.openTower"))}
+            >
                 {body}
-            </button>
+            </Button>
         </Show>
     );
 }
@@ -196,7 +203,7 @@ export function GpuFooter(props: { sample: GpuSampleResult | null; uiBusy: numbe
             <span
                 class="gpu-footer-ui"
                 style={{ color: props.uiBusy != null ? uiBusyColor(props.uiBusy) : undefined }}
-                title={t("uiBusy.tip", { warn: UI_BUSY_WARN_PCT })}
+                {...tip(t("uiBusy.tip", { warn: UI_BUSY_WARN_PCT }))}
             >
                 {props.uiBusy != null ? t("uiBusy.value", { pct: props.uiBusy }) : t("uiBusy.hidden")}
             </span>

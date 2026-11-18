@@ -135,11 +135,9 @@
         color: var(--secondary-text-color);
     }
 
-    // AgentMux's own rows are buttons that open Tower: plain until hovered, like the status bar's readouts.
+    // AgentMux's own rows are the kit's row buttons (they open Tower): the grid above is the layout.
     .gpu-process-own {
-        @include statButton.stat-button($padding: 2px var(--space-3));
         text-align: left;
-        cursor: pointer;
     }
 
     .gpu-process-name {

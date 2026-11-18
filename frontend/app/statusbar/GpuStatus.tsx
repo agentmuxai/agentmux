@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { termRendererAtom } from "@/store/global";
 import { getGpuInfo, gpuClassBadge } from "@/util/gpuutil";
@@ -45,8 +46,8 @@ const GpuStatus = (): JSX.Element => {
     // "GPU {n}%" (utilization) sitting in the same bar.
     return (
         <>
-            <button
-                type="button"
+            <Button
+                variant="chrome"
                 ref={ref}
                 class="stat-mono stat-gpu-mode stat-gfx-button"
                 style={{ color: color() }}
@@ -57,7 +58,7 @@ const GpuStatus = (): JSX.Element => {
                 onClick={() => ref && toggleGpuPanel(ref)}
             >
                 GFX {gpuClassBadge(info.classification)}
-            </button>
+            </Button>
             <Show when={ref != null && gpuPanelAnchor() === ref}>
                 <GpuPanel anchor={ref} uiBusy={sharedUiBusy()()} onClose={closeGpuPanel} />
             </Show>

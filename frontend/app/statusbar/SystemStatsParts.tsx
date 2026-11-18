@@ -4,6 +4,7 @@
 // The status bar's system readouts, the views: the GPU, memory, page file, network and disk I/O readouts of a
 // reading from SystemStatsState.ts. (The CPU and Disk buttons, which open the panels, stay in SystemStats.tsx.)
 
+import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Show, type JSX } from "solid-js";
 import { gpuColor } from "./gpu-format";
@@ -54,8 +55,8 @@ export function GpuReadout(props: Reading): JSX.Element {
     return (
         <Show when={s().gpu != null}>
             <span class="stat-separator">|</span>
-            <button
-                type="button"
+            <Button
+                variant="chrome"
                 ref={ref}
                 class="stat-mono stat-gpu stat-gpu-button"
                 style={{ color: gpuColor(s().gpu, s().gpuMem) }}
@@ -66,7 +67,7 @@ export function GpuReadout(props: Reading): JSX.Element {
                 onClick={() => ref && toggleGpuPanel(ref)}
             >
                 {t("gpuMeter.label")} {Math.round(s().gpu!)}%
-            </button>
+            </Button>
             <Show when={open()}>
                 <GpuPanel anchor={ref} uiBusy={sharedUiBusy()()} onClose={closeGpuPanel} />
             </Show>
