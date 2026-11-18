@@ -10,12 +10,15 @@
 
 import { canonicalizePath } from "@/app/store/editor-pane-state-store";
 import { createSignal } from "solid-js";
+import { META_OPEN_AT_LINE } from "./open-at-line";
 
 export interface OpenPosition {
     /** The byte the hex viewer puts its cursor on. */
     offset?: number;
     /** The 1-based page the PDF viewer shows. */
     page?: number;
+    /** The 1-based line the Large text viewer shows (the text viewer's own is open-at-line.ts). */
+    line?: number;
 }
 
 /** A new pane's meta: where its initial `file` opens (pane.open's `offset`, `page`), cleared once used. */
@@ -25,7 +28,7 @@ export const POSITION_META_CLEARED = { [META_OFFSET]: null, [META_PAGE]: null };
 
 /** The offset and page a new pane's meta asks its initial file to open at. */
 export function readPositionMeta(meta: Record<string, unknown> | undefined): OpenPosition {
-    return { offset: whole(meta?.[META_OFFSET], 0), page: whole(meta?.[META_PAGE], 1) };
+    return { offset: whole(meta?.[META_OFFSET], 0), page: whole(meta?.[META_PAGE], 1), line: whole(meta?.[META_OPEN_AT_LINE], 1) };
 }
 
 /** How long a request waits for its viewer. */
@@ -49,12 +52,13 @@ export function whole(n: unknown, min: number): number | undefined {
 export function setOpenPosition(blockId: string, path: string, at: OpenPosition, now = Date.now()): void {
     const offset = whole(at.offset, 0);
     const page = whole(at.page, 1);
+    const line = whole(at.line, 1);
     const key = keyOf(blockId, path);
-    if (offset === undefined && page === undefined) {
+    if (offset === undefined && page === undefined && line === undefined) {
         if (waiting.delete(key)) setChanged((n) => n + 1);
         return;
     }
-    waiting.set(key, { offset, page, expires: now + OPEN_POSITION_TTL_MS });
+    waiting.set(key, { offset, page, line, expires: now + OPEN_POSITION_TTL_MS });
     setChanged((n) => n + 1);
 }
 
@@ -74,7 +78,7 @@ export function takeOpenPosition<K extends keyof OpenPosition>(blockId: string, 
     }
     const value = entry[field];
     delete entry[field];
-    if (entry.offset === undefined && entry.page === undefined) waiting.delete(key);
+    if (entry.offset === undefined && entry.page === undefined && entry.line === undefined) waiting.delete(key);
     return value;
 }
 
