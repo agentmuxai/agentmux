@@ -70,7 +70,9 @@ run_install
 check "installs the pinned release and checks it runs" "$([ "$RC" -eq 0 ] && [ -x "$TMP/dest/task" ] && echo 0 || echo 1)" "rc=$RC $OUT"
 check "downloads from the GitHub release URL of the pinned version" \
     "$(grep -q '^https://github.com/go-task/task/releases/download/v3.99.0/task_linux_amd64.tar.gz$' "$STUB/curl-urls" && echo 0 || echo 1)" "$(cat "$STUB/curl-urls")"
-check "puts the install dir on the later steps' PATH" "$(grep -qx "$TMP/dest" "$TMP/gh-path" && echo 0 || echo 1)" "$(cat "$TMP/gh-path")"
+# On Windows the runner reads GITHUB_PATH in its native form (C:\...), so that is what the script writes there.
+want_path="$TMP/dest"; if command -v cygpath > /dev/null 2>&1; then want_path="$(cygpath -w "$TMP/dest")"; fi
+check "puts the install dir on the later steps' PATH" "$(grep -qxF "$want_path" "$TMP/gh-path" && echo 0 || echo 1)" "$(cat "$TMP/gh-path")"
 
 run_install FAKE_CURL_FAILS=2
 check "two failed downloads are retried and the third succeeds" "$([ "$RC" -eq 0 ] && [ "$(calls)" -eq 3 ] && echo 0 || echo 1)" "rc=$RC calls=$(calls) $OUT"
