@@ -186,6 +186,8 @@ pub struct UseBatchItem {
     pub secret: String,
     /// The field of a JSON secret, when one is picked; empty for the whole secret.
     pub key: String,
+    /// A new login's user name is read from this field of the same secret; empty for none.
+    pub user_key: String,
     /// It replaces the value of an entry that exists, the old one kept as a version.
     pub replaces: bool,
     /// The row makes a linked entry: where the key lives is recorded, and no value is read.
@@ -211,6 +213,12 @@ pub struct UseImport {
     pub vault: String,
     /// It replaces the value of the entry (`entry_id`), the old one kept as a version.
     pub replaces: bool,
+    /// A new login's user name is read from this field of the same secret; empty when the import makes no login.
+    pub user_key: String,
+    /// The site the new login is saved for; empty for none.
+    pub site: String,
+    /// The agent asked for the new login to be shared with it: the card says so, with a tick the person can remove.
+    pub share: bool,
 }
 
 /// How long a use that may go ahead on silence waits for a Deny.
@@ -284,11 +292,13 @@ pub struct UseAnswer {
     pub rows: Option<Vec<usize>>,
     /// The Vault the person chose for a batch's rows, one of the request's `vaults`; none when they left it as asked.
     pub vault: Option<String>,
+    /// Whether the person left the share of an import's new login ticked; none for any other use.
+    pub share: Option<bool>,
 }
 
 impl UseAnswer {
     pub fn of(decision: Decision) -> Self {
-        Self { decision, value: None, save: false, by: By::Person, choice: None, rows: None, vault: None }
+        Self { decision, value: None, save: false, by: By::Person, choice: None, rows: None, vault: None, share: None }
     }
 
     fn by(decision: Decision, by: By) -> Self {

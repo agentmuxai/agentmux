@@ -74,12 +74,33 @@ export function HistoryCharts(props: {
     );
 }
 
+/** Where the tooltip sits: on the pointer's line, its own edge meeting the plot's edge at each end (the label is as far
+ *  along itself as the line is along the plot), so it is never cut off, and it is centred on the line in the middle. */
+function tipStyle(at: number): { left: string; transform: string } {
+    const along = Math.min(1, Math.max(0, at / W));
+    return { left: `${along * 100}%`, transform: `translate(-${along * 100}%, -100%)` };
+}
+
+/** The faint area under a line: the line closed down to the floor of the plot. */
+function areaPath(pts: readonly { t: number }[], line: string, x: (t: number) => number): string {
+    if (!pts.length) return "";
+    return `${line}L${x(pts[pts.length - 1].t).toFixed(1)},${H}L${x(pts[0].t).toFixed(1)},${H}Z`;
+}
+
 export function Chart(props: {
     points: readonly HistoryPoint[];
     series: Series;
     /** How much of the points to draw, ending at the latest; the default is
      *  the Agents view's 10 minutes. */
     windowMs?: number;
+    /** The long views' words: where the axis starts and ends, how a time reads in the tooltip, and the chart's
+     *  description for a screen reader, given the latest and the peak as the series formats them. */
+    axis?: {
+        start: string;
+        end: string;
+        at: (t: number, end: number) => string;
+        describe: (latest: string, peak: string) => string;
+    };
 }) {
     const windowMs = () => props.windowMs ?? WINDOW_MS;
     const end = () => props.points[props.points.length - 1]?.t ?? 0;
@@ -95,12 +116,7 @@ export function Chart(props: {
         known()
             .map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`)
             .join("");
-    const area = () => {
-        const pts = known();
-        return pts.length
-            ? `${line()}L${x(pts[pts.length - 1].t).toFixed(1)},${H}L${x(pts[0].t).toFixed(1)},${H}Z`
-            : "";
-    };
+    const area = () => areaPath(known(), line(), x);
     const latest = () => known()[known().length - 1]?.v;
     const peak = () => (known().length ? Math.max(...known().map((p) => p.v)) : undefined);
     const [hover, setHover] = createSignal<{ t: number; v: number } | null>(null);
@@ -121,7 +137,10 @@ export function Chart(props: {
             <div
                 class="tower-chart-plot"
                 role="img"
-                aria-label={`${props.series.label} over the last ${windowWords(windowMs())}: now ${props.series.format(latest())}, peak ${props.series.format(peak())}`}
+                aria-label={
+                    props.axis?.describe(props.series.format(latest()), props.series.format(peak())) ??
+                    `${props.series.label} over the last ${windowWords(windowMs())}: now ${props.series.format(latest())}, peak ${props.series.format(peak())}`
+                }
                 onPointerMove={onMove}
                 onPointerLeave={() => setHover(null)}
             >
@@ -151,16 +170,16 @@ export function Chart(props: {
                         <div
                             class="tower-chart-tip"
                             data-testid="tower-chart-tip"
-                            style={{ left: `${(x(h().t) / W) * 100}%` }}
+                            style={tipStyle(x(h().t))}
                         >
-                            {formatAgo(h().t, end())} · {props.series.format(h().v)}
+                            {props.axis ? props.axis.at(h().t, end()) : formatAgo(h().t, end())} · {props.series.format(h().v)}
                         </div>
                     )}
                 </Show>
             </div>
             <div class="tower-chart-axis tower-muted">
-                <span>{windowLabel(windowMs())} ago</span>
-                <span>now</span>
+                <span>{props.axis?.start ?? `${windowLabel(windowMs())} ago`}</span>
+                <span>{props.axis?.end ?? "now"}</span>
             </div>
         </div>
     );

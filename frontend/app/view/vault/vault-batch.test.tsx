@@ -25,9 +25,9 @@ const batch = (over: Partial<UseBatch> = {}): UseBatch => ({
     agents: { mode: "named", agents: ["agent1", "loap"] },
     vaults: [],
     items: [
-        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", replaces: false, link: false },
-        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", replaces: false, link: false },
-        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", replaces: true, link: false },
+        { label: "Alpha", kind: "login", secret: "hosts/alpha", key: "password", user_key: "", replaces: false, link: false },
+        { label: "Beta", kind: "login", secret: "hosts/beta", key: "", user_key: "", replaces: false, link: false },
+        { label: "Stripe", kind: "api-key", secret: "pay/stripe", key: "", user_key: "", replaces: true, link: false },
     ],
     ...over,
 });
@@ -109,6 +109,16 @@ describe("the approval of a batch import", () => {
         expect(within(dialog).getByRole("button", { name: "Allow these 3" })).toBeTruthy();
         expect(within(dialog).queryByRole("button", { name: /Always|Allow once/ })).toBeNull();
         expect(within(dialog).queryByRole("timer")).toBeNull();
+    });
+
+    it("says a login row's user name key beside its password key", async () => {
+        const items = [{ label: "Alpha", kind: "login", secret: "hosts/alpha", key: "creds.password", user_key: "creds.user", replaces: false, link: false }];
+        uses = [use({ batch: batch({ items }) })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={() => {}} />);
+        const dialog = await screen.findByRole("group");
+        const rows = within(within(dialog).getByRole("list", { name: "The secrets to copy" })).getAllByRole("listitem");
+        expect(rows.map((r) => r.textContent)).toEqual(["Alphanew login entryhosts/alpha (key creds.password, user name creds.user)"]);
     });
 
     it("says who may use the Vault the rows go into", async () => {

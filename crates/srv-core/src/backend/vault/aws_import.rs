@@ -41,6 +41,10 @@ pub struct Source {
     /// A field of a JSON secret, as a dotted path (`db.password`); the whole secret when left out.
     #[serde(default)]
     pub key: Option<String>,
+    /// For a new login: the field of the same secret that holds its user name, as a dotted path. `key` is then the
+    /// password's field.
+    #[serde(default)]
+    pub user_key: Option<String>,
     #[serde(default)]
     pub region: Option<String>,
     /// A container agent: the AWS grant to read under. A native agent: the host's AWS profile (its default when left out).
@@ -70,6 +74,9 @@ pub struct ImportRequest {
     /// Task numbers, PRs and the like, kept with the history row.
     #[serde(default)]
     pub refs: Vec<String>,
+    /// For a new login saved for a site: share it with the agent that asks, if the person leaves that ticked.
+    #[serde(default)]
+    pub share: bool,
 }
 
 /// Where the value goes.
@@ -89,15 +96,27 @@ pub struct Plan {
     pub vault_name: String,
     pub reason: String,
     pub refs: Vec<String>,
+    /// The new login is shared with the agent that asked, unless the person unticks it on the card.
+    pub share: bool,
 }
 
 impl Plan {
-    /// The Activity line's target: `aws-secret:<id>` and `#<key>` when a field is picked, as a link's line and a
-    /// check's line name an AWS place (`source_link`), so the history's Where column names it one way.
+    /// The Activity line's target: `aws-secret:<id>` and `#<key>` when a field is picked (`#<key>+<user_key>` for a login's
+    /// two), as a link's line and a check's line name an AWS place (`source_link`), so the history's Where column names
+    /// it one way.
     pub fn from_text(&self) -> String {
-        match &self.source.key {
-            Some(key) => format!("{AWS_SECRET}:{}#{key}", self.source.aws_secret_id),
-            None => format!("{AWS_SECRET}:{}", self.source.aws_secret_id),
+        match (&self.source.key, &self.source.user_key) {
+            (Some(key), Some(user)) => format!("{AWS_SECRET}:{}#{key}+{user}", self.source.aws_secret_id),
+            (Some(key), None) => format!("{AWS_SECRET}:{}#{key}", self.source.aws_secret_id),
+            _ => format!("{AWS_SECRET}:{}", self.source.aws_secret_id),
+        }
+    }
+
+    /// The site of the new login, when it has one.
+    pub fn site(&self) -> &str {
+        match &self.target {
+            Target::New { fields, .. } => fields.get(super::signins::SITE).map_or("", String::as_str),
+            _ => "",
         }
     }
 
@@ -150,14 +169,28 @@ pub fn check_source(source: &Source) -> Result<Source, String> {
         return Err("aws_secret_id is the secret's name or ARN: letters, digits and /_+=.@:- only, at most 512 characters".into());
     }
     let key = clean(&source.key);
-    if let Some(k) = &key {
-        let dotted = k.split('.').all(|seg| plain(seg, MAX_KEY, |c| c.is_ascii_alphanumeric() || c == '_' || c == '-')) && k.chars().count() <= MAX_KEY;
-        if !dotted {
-            return Err("key is a field of a JSON secret, as a dotted path (db.password): letters, digits, _ and - only".into());
+    if key.as_deref().is_some_and(|k| !is_dotted(k)) {
+        return Err("key is a field of a JSON secret, as a dotted path (db.password): letters, digits, _ and - only".into());
+    }
+    let user_key = clean(&source.user_key);
+    if let Some(user) = &user_key {
+        if !is_dotted(user) {
+            return Err("user_key is the field of a JSON secret that holds the user name, as a dotted path (db.user): letters, digits, _ and - only".into());
+        }
+        if key.is_none() {
+            return Err("user_key picks the user name out of a JSON secret: name key too, the field that holds the password".into());
+        }
+        if key.as_deref() == Some(user.as_str()) {
+            return Err("key and user_key are the same field: the password and the user name are two fields of the secret".into());
         }
     }
     let (region, profile) = check_place(&source.region, &source.profile)?;
-    Ok(Source { aws_secret_id: id.to_string(), key, region, profile })
+    Ok(Source { aws_secret_id: id.to_string(), key, user_key, region, profile })
+}
+
+/// A field of a JSON secret named by a dotted path.
+fn is_dotted(k: &str) -> bool {
+    k.split('.').all(|seg| plain(seg, MAX_KEY, |c| c.is_ascii_alphanumeric() || c == '_' || c == '-')) && k.chars().count() <= MAX_KEY
 }
 
 /// The region and the profile a read runs under, trimmed, or why one can't be used.
@@ -185,8 +218,30 @@ pub fn check(store: &Store, req: &ImportRequest, agent: &str) -> Result<Plan, St
         Some(id) => replace_target(store, id, &req.kind, agent)?,
         None => new_target(store, req, agent)?,
     };
+    if source.user_key.is_some() || req.share {
+        check_login_import(&target, &source, req.share)?;
+    }
     let vault_name = store.vault_info(&vault_id).map_err(|e| e.to_string())?.map(|v| v.name).unwrap_or_default();
-    Ok(Plan { source, target, vault_name, reason, refs })
+    Ok(Plan { source, target, vault_name, reason, refs, share: req.share })
+}
+
+/// What a login import asks beyond any other: a new login (not a replacement, not another kind), a user name that comes
+/// from `user_key` and not from the fields, and for a share a login saved for an exact https site that can be shared.
+fn check_login_import(target: &Target, source: &Source, share: bool) -> Result<(), String> {
+    let Target::New { kind: "login", fields, .. } = target else {
+        return Err("user_key and share are for a new login: give kind login and leave id out".into());
+    };
+    if source.user_key.is_some() && fields.contains_key(super::signins::USERNAME) {
+        return Err("the user name comes from user_key: leave fields.username out".into());
+    }
+    if share {
+        super::shares::check_shareable("login", fields)?;
+        let site = fields.get(super::signins::SITE).map_or("", String::as_str);
+        if !agentmux_common::allowed_origins::target_origin(site).is_some_and(|o| o == site && o.starts_with("https://")) {
+            return Err("a login to share names its site as an exact https origin, such as https://example.com".into());
+        }
+    }
+    Ok(())
 }
 
 fn replace_target(store: &Store, id: &str, kind: &str, agent: &str) -> Result<(Target, String), String> {
@@ -429,6 +484,42 @@ pub fn pick(secret: Zeroizing<String>, key: Option<&str>) -> Result<Zeroizing<St
     Ok(value)
 }
 
+/// A login's two values out of one JSON secret: the password at `key` and the user name at `user_key`. Both are picked
+/// before anything is written, and a key that is missing, holds no text or holds nothing is refused by name. What is
+/// parsed and not kept is wiped. With no `user_key` this is [`pick`].
+pub fn pick_both(secret: Zeroizing<String>, key: Option<&str>, user_key: Option<&str>) -> Result<(Zeroizing<String>, Option<Zeroizing<String>>), String> {
+    let Some(user_key) = user_key else { return Ok((pick(secret, key)?, None)) };
+    let key = key.ok_or("user_key needs key, the field that holds the password")?;
+    let mut json: serde_json::Value = serde_json::from_str(&secret).map_err(|_| "that secret isn't JSON, so keys can't be picked from it".to_string())?;
+    let picked = at_key(&json, key).and_then(|password| password_at(password, key)).and_then(|password| at_key(&json, user_key).and_then(|user| user_name_at(user, user_key)).map(|user| (password, Some(user))));
+    wipe(&mut json);
+    picked
+}
+
+fn password_at(value: Zeroizing<String>, key: &str) -> Result<Zeroizing<String>, String> {
+    if value.trim().is_empty() {
+        return Err(format!("{key} is empty"));
+    }
+    if value.len() > super::MAX_PART {
+        return Err(format!("{key} is longer than 1 MiB, which a Vault entry can't hold"));
+    }
+    Ok(value)
+}
+
+fn user_name_at(value: Zeroizing<String>, key: &str) -> Result<Zeroizing<String>, String> {
+    let user = Zeroizing::new(value.trim().to_string());
+    if user.is_empty() {
+        return Err(format!("{key} is empty: a login needs a user name"));
+    }
+    if user.len() > super::MAX_FIELD {
+        return Err(format!("{key} is longer than {} bytes, which a user name can't be", super::MAX_FIELD));
+    }
+    if user.chars().any(char::is_control) {
+        return Err(format!("{key} holds a control character, which a user name can't"));
+    }
+    Ok(user)
+}
+
 /// What an import made or changed.
 #[derive(Debug, PartialEq, serde::Serialize)]
 pub struct Imported {
@@ -439,12 +530,17 @@ pub struct Imported {
 
 /// Puts `value` in: a new entry, or the main value of the one named, whose old value is kept 7 days as a version. The
 /// `imported` line goes in with the agent's reason and references; it holds no value.
-pub fn store_value(store: &Store, plan: &Plan, value: &Zeroizing<String>, agent: &str) -> Result<Imported, String> {
+pub fn store_value(store: &Store, plan: &Plan, value: &Zeroizing<String>, username: Option<&Zeroizing<String>>, agent: &str) -> Result<Imported, String> {
     let (id, label) = match &plan.target {
         Target::New { kind, part, label, fields, vault_id } => {
             let mut parts = Parts::default();
             parts.0.insert(part.to_string(), value.to_string());
-            let entry = NewEntry { kind: kind.to_string(), label: label.clone(), fields: fields.clone(), tags: Vec::new(), parts };
+            let mut fields = fields.clone();
+            // A login's user name is a plain field of the entry, the one the Vault pane shows to the person.
+            if let Some(user) = username {
+                fields.insert(super::signins::USERNAME.to_string(), user.to_string());
+            }
+            let entry = NewEntry { kind: kind.to_string(), label: label.clone(), fields, tags: Vec::new(), parts };
             super::insert_unrecorded(store, entry, vault_id)?
         }
         Target::Replace { id, created_at, part, label, .. } => {
@@ -496,9 +592,9 @@ pub fn note(store: &Store, plan: &Plan, id: &str, label: &str, agent: &str, outc
 /// Reads the secret, picks the value and keeps it. The store is written on the blocking pool.
 pub async fn perform<R: Runner>(store: &Arc<Store>, runner: &R, plan: &Plan, via: Via<'_>, agent: &str) -> Result<Imported, String> {
     let secret = read_secret(runner, &plan.source, via).await?;
-    let value = pick(secret, plan.source.key.as_deref())?;
+    let (value, username) = pick_both(secret, plan.source.key.as_deref(), plan.source.user_key.as_deref())?;
     let (store, plan, agent) = (Arc::clone(store), plan.clone(), agent.to_string());
-    tokio::task::spawn_blocking(move || store_value(&store, &plan, &value, &agent)).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || store_value(&store, &plan, &value, username.as_ref(), &agent)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

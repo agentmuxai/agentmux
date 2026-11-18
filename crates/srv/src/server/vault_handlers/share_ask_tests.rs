@@ -57,6 +57,22 @@ async fn host(app: &axum::Router, body: Value) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
+async fn b3_an_unticked_share_makes_none_and_a_ticked_one_shares_with_the_agent() {
+    use crate::server::vault_import::{share_made, Who};
+    let (app, state) = setup().await;
+    let _token = agent(&state, "vid-imp-a");
+    let id = login(&app).await;
+    let who = Who { agent: "vid-imp-a".into(), pane: String::new(), slug: "vid-imp-a".into(), uid: "uid-vid-imp-a".into(), container: false };
+    let (made, said) = share_made(&state, &who, &id, false).await;
+    assert!(!made && said.contains("unticked"), "{said}");
+    assert_eq!(shared_of(&state, &id), None, "an unticked share makes none");
+    let (made, said) = share_made(&state, &who, &id, true).await;
+    assert!(made, "{said}");
+    assert_eq!(shared_of(&state, &id).as_deref(), Some("uid-vid-imp-a"));
+    assert!(lines_of(&state, &id).iter().any(|l| l.action == "shared"), "the share is in the history");
+}
+
+#[tokio::test]
 async fn a2_an_agents_request_shows_the_person_the_login_and_only_their_yes_makes_the_share() {
     let (app, state) = setup().await;
     let token = agent(&state, "vid-ask-a");

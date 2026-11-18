@@ -47,6 +47,7 @@ fn card(plan: &BatchPlan, who: &Who, into: &Into) -> UseRequest {
             kind: p.kind().to_string(),
             secret: p.source.aws_secret_id.clone(),
             key: p.source.key.clone().unwrap_or_default(),
+            user_key: p.source.user_key.clone().unwrap_or_default(),
             replaces: matches!(p.target, Target::Replace { .. }),
             link: p.is_link(),
         })
@@ -267,11 +268,12 @@ mod tests {
             Target::New { kind: "login", part: "password", label: label.into(), fields: Default::default(), vault_id: "fleet".into() }
         };
         Plan {
-            source: Source { aws_secret_id: secret.into(), key: key.map(String::from), region: Some("eu-west-1".into()), profile: Some("work-read".into()) },
+            source: Source { aws_secret_id: secret.into(), key: key.map(String::from), user_key: None, region: Some("eu-west-1".into()), profile: Some("work-read".into()) },
             target,
             vault_name: "Fleet".into(),
             reason: "copy the build hosts' passwords for task 31007".into(),
             refs: vec!["batch:0123456789ab".into()],
+            share: false,
         }
     }
 

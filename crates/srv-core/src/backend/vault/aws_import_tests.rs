@@ -19,6 +19,7 @@ use crate::identity::aws_broker::mint::{RunOutput, RunError};
 
 const VALUE: &str = "imported-sentinel-8841-pq";
 const REASON: &str = "copy the staging database password for task 28071";
+const USER: &str = "svc-intranet-user";
 
 fn store() -> Arc<Store> {
     seal::use_test_key();
@@ -28,11 +29,11 @@ fn store() -> Arc<Store> {
 }
 
 fn source(id: &str, key: Option<&str>) -> Source {
-    Source { aws_secret_id: id.into(), key: key.map(String::from), region: Some("eu-west-1".into()), profile: None }
+    Source { aws_secret_id: id.into(), key: key.map(String::from), user_key: None, region: Some("eu-west-1".into()), profile: None }
 }
 
 fn request(src: Source) -> ImportRequest {
-    ImportRequest { source: src, kind: "api-key".into(), label: "Staging database".into(), fields: Default::default(), vault: None, id: None, reason: Some(REASON.into()), refs: vec!["task 28071".into()] }
+    ImportRequest { source: src, kind: "api-key".into(), label: "Staging database".into(), fields: Default::default(), vault: None, id: None, reason: Some(REASON.into()), refs: vec!["task 28071".into()], share: false }
 }
 
 fn plan(s: &Store, req: &ImportRequest) -> Plan {
@@ -64,7 +65,7 @@ fn nothing_leaked(s: &Store, texts: &[&str]) {
 
 #[test]
 fn the_source_is_held_to_a_narrow_character_set() {
-    let ok = check_source(&Source { aws_secret_id: " staging/db-creds ".into(), key: Some(" db.password ".into()), region: Some("us-gov-west-1".into()), profile: Some("work-read".into()) }).unwrap();
+    let ok = check_source(&Source { aws_secret_id: " staging/db-creds ".into(), key: Some(" db.password ".into()), user_key: None, region: Some("us-gov-west-1".into()), profile: Some("work-read".into()) }).unwrap();
     assert_eq!((ok.aws_secret_id.as_str(), ok.key.as_deref(), ok.region.as_deref()), ("staging/db-creds", Some("db.password"), Some("us-gov-west-1")));
     let full = "staging/db-AbCdEf:with:colons";
     assert!(check_source(&source(full, None)).is_ok(), "a secret's full name (an ARN has colons) is a secret id");
@@ -359,4 +360,99 @@ fn a_replaced_secret_beside_a_share_removal_leaves_the_share_removed() {
     let id = create_in(&s, NewEntry { kind: "login".into(), label: "Alone".into(), fields: [("site".to_string(), "https://alone.example.com".to_string())].into(), tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) }, "personal").unwrap();
     let created = s.vault_get(&id).unwrap().unwrap().created_at;
     replace_main(&s, &id, created, "password", &Zeroizing::new("pw-new".to_string()), "builder").unwrap();
+}
+
+
+fn login_secret() -> String {
+    serde_json::to_string(&format!(r#"{{"creds":{{"user":" {USER} ","password":"{VALUE}"}},"empty":{{"user":" "}},"list":["a"]}}"#)).unwrap()
+}
+
+fn login_request(key: &str, user_key: Option<&str>) -> ImportRequest {
+    let mut src = source("staging/intranet", Some(key));
+    src.user_key = user_key.map(String::from);
+    ImportRequest { kind: "login".into(), label: "Intranet".into(), fields: [("site".to_string(), "https://intranet.example.com".to_string())].into(), ..request(src) }
+}
+
+#[tokio::test]
+async fn a_login_import_takes_its_password_and_its_user_name_from_one_secret() {
+    let s = store();
+    let plan = plan(&s, &login_request("creds.password", Some("creds.user")));
+    let cli = Fake::ok(login_secret());
+    let done = perform(&s, &cli, &plan, Via::Host, "builder").await.unwrap();
+    let row = s.vault_get(&done.id).unwrap().unwrap();
+    let fields = crate::backend::vault::signins::fields_of(&row);
+    assert_eq!(fields.get("username").map(String::as_str), Some(USER), "the user name is a plain field, trimmed");
+    assert_eq!(fields.get("site").map(String::as_str), Some("https://intranet.example.com"));
+    assert_eq!(reveal(&s, &done.id, "password", "revealed").unwrap().as_str(), VALUE, "the other key is the password");
+    let answer = serde_json::to_string(&done).unwrap();
+    let history = history::history_for(&s, &done.id, Asker::Person, 10).unwrap();
+    let imported = history.iter().find(|r| r.action == IMPORTED).expect("an imported line");
+    assert_eq!(imported.target, "aws-secret:staging/intranet#creds.password+creds.user", "the line names the secret and both keys");
+    assert_eq!((imported.actor.as_str(), imported.reason.as_str()), ("builder", REASON));
+    nothing_leaked(&s, &[&answer, &format!("{imported:?}")]);
+    assert!(!answer.contains(USER) && rows(&s).iter().all(|r| !format!("{r:?}").contains(USER)), "neither the user name is in the answer or a history row");
+}
+
+#[test]
+fn the_two_key_rules_are_checked_before_the_person_is_asked() {
+    let s = store();
+    let refused = |req: ImportRequest| check(&s, &req, "builder").unwrap_err();
+    let mut no_key = login_request("creds.password", Some("creds.user"));
+    no_key.source.key = None;
+    assert!(refused(no_key).contains("name key too"));
+    assert!(refused(login_request("creds.password", Some("creds.password"))).contains("same field"));
+    assert!(refused(login_request("creds.password", Some("a b"))).contains("user_key is the field"));
+    assert!(refused(ImportRequest { kind: "api-key".into(), fields: Default::default(), ..login_request("creds.password", Some("creds.user")) }).contains("new login"));
+    let existing = create_in(&s, NewEntry { kind: "login".into(), label: "Old".into(), fields: Default::default(), tags: vec![], parts: Parts([("password".to_string(), "pw".to_string())].into()) }, "personal").unwrap();
+    let replacing = ImportRequest { id: Some(existing), kind: String::new(), label: String::new(), ..login_request("creds.password", Some("creds.user")) };
+    assert!(refused(replacing).contains("new login"), "a login's user name is only set when the login is made");
+    let mut twice = login_request("creds.password", Some("creds.user"));
+    twice.fields.insert("username".into(), "someone".into());
+    assert!(refused(twice).contains("leave fields.username out"));
+    let ok = plan(&s, &login_request("creds.password", Some("creds.user")));
+    assert_eq!((ok.source.user_key.as_deref(), ok.share), (Some("creds.user"), false));
+}
+
+#[test]
+fn a_share_is_asked_only_for_a_new_login_saved_for_an_exact_https_site() {
+    let s = store();
+    let share = |req: ImportRequest| ImportRequest { share: true, ..req };
+    let refused = |req: ImportRequest| check(&s, &req, "builder").unwrap_err();
+    assert!(check(&s, &share(login_request("creds.password", None)), "builder").unwrap().share, "a share needs no user_key");
+    assert!(check(&s, &share(login_request("creds.password", Some("creds.user"))), "builder").unwrap().share);
+    assert!(refused(share(ImportRequest { kind: "api-key".into(), ..request(source("staging/db", Some("a"))) })).contains("new login"));
+    let mut no_site = login_request("creds.password", None);
+    no_site.fields.clear();
+    assert!(refused(share(no_site)).contains("saved for a site"));
+    let site = |text: &str| {
+        let mut r = login_request("creds.password", None);
+        r.fields.insert("site".into(), text.into());
+        share(r)
+    };
+    for bad in ["http://intranet.example.com", "https://intranet.example.com/login", "intranet.example.com", "https://intranet.example.com/"] {
+        assert!(refused(site(bad)).contains("exact https origin"), "{bad}");
+    }
+    let mut realm = login_request("creds.password", None);
+    realm.fields.insert("realm".into(), "Staging".into());
+    assert!(refused(share(realm)).contains("can't be shared"));
+}
+
+#[tokio::test]
+async fn a_key_that_is_missing_or_holds_no_text_refuses_the_whole_login_before_anything_is_written() {
+    let s = store();
+    for (key, user, said) in [
+        ("creds.password", "creds.nobody", "no key creds.nobody"),
+        ("creds.nobody", "creds.user", "no key creds.nobody"),
+        ("creds.password", "list", "list is not a string or a number"),
+        ("list", "creds.user", "list is not a string or a number"),
+        ("creds.password", "empty.user", "empty.user is empty"),
+    ] {
+        let plan = plan(&s, &login_request(key, Some(user)));
+        let err = perform(&s, &Fake::ok(login_secret()), &plan, Via::Host, "builder").await.unwrap_err();
+        assert!(err.contains(said), "{key} / {user}: {err}");
+        assert!(!err.contains(VALUE) && !err.contains(USER), "{err}");
+    }
+    let whole = Zeroizing::new("not json".to_string());
+    assert!(pick_both(whole, Some("a"), Some("b")).unwrap_err().contains("isn't JSON"));
+    assert!(s.vault_list().unwrap().is_empty(), "nothing was written");
 }
