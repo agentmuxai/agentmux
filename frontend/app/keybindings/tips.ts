@@ -367,6 +367,14 @@ export const TIPS: TipRow[] = [
         label: "Drag to resize that column; double-click to give it its default width back",
         source: { file: "frontend/app/view/files/files-column-resizer.tsx", anchor: "props.columns.reset(props.colKey)" },
     },
+    {
+        id: "files:places:zoom",
+        area: "Files",
+        gesture: "mod+wheel",
+        where: "over the Files pane's Places list",
+        label: "Zoom Places on its own, apart from the rest of the pane; the zoom keys zoom whichever of the two last had the keyboard or the pointer",
+        source: { file: "frontend/app/view/files/files-view-parts.tsx", anchor: 'class="files-zoom files-zoom-places"' },
+    },
 
     // ── Editor viewers ──
     {

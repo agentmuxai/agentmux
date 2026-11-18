@@ -4,6 +4,7 @@
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 import { getObjectValue, makeORef } from "@/app/store/mos";
 import { baseName, META_PATH } from "./files-path";
+import { FILES_ZOOM } from "./files-zoom-parts";
 
 /** The pane's title: the folder's name, or "Files" before one is shown. */
 export function filesTitle(meta: MetaType | undefined): string {
@@ -26,8 +27,9 @@ export const filesPaneTab = lazyPaneTab({
     icon: "folder-open",
     defaultColor: "teal",
     // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes
-    // gesture); 12 px is the Files pane's font size. SPEC_FILES_ZOOM_2026_10_08.md.
-    capabilities: { lifecycle: "keepAlive", noPadding: true, paneZoom: { baseFontSize: 12 } },
+    // gesture); 12 px is the Files pane's font size, and Places zooms apart from the rest
+    // (files-zoom-parts.ts). SPEC_FILES_ZOOM_2026_10_08.md.
+    capabilities: { lifecycle: "keepAlive", noPadding: true, paneZoom: FILES_ZOOM },
     // A Files tab added with the pane's "+" starts in the folder the tab in
     // front shows, as a terminal's new tab starts in its directory.
     chrome: (_anchor, nodeModel) => ({
