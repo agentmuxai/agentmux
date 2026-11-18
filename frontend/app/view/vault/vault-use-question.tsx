@@ -13,6 +13,7 @@ import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultAgents } from "@/types/rpc/VaultAgents";
+import { ImportLogin } from "./vault-import-login";
 import { CardTyped } from "./vault-use-card";
 import { answerUse, currentVaults, holdUse, vaultUses, type UseDecision } from "./vault-store";
 // The question's styles, loaded with it: a card in an agent's pane is drawn
@@ -241,7 +242,7 @@ function UseLinkSubject(props: { use: UseRequest; link: NonNullable<UseRequest["
 }
 
 /** The secret an import copies, and where it goes: the secret, its key and region, the Vault, and what happens to a value it replaces. */
-function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]> }): JSX.Element {
+function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseRequest["import"]>; answer: UseAnswerState }): JSX.Element {
     const i = props.import;
     return (
         <>
@@ -270,9 +271,18 @@ function UseImportSubject(props: { use: UseRequest; import: NonNullable<UseReque
             <Show
                 when={i.replaces}
                 fallback={
-                    <p>
-                        It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
-                    </p>
+                    <>
+                        <p>
+                            It is saved to the Vault <strong><Clipped text={i.vault} max={CLIP.label} /></strong> as a new {props.use.kind} entry, <strong><Clipped text={props.use.entry_label} max={CLIP.label} /></strong>.
+                        </p>
+                        <ImportLogin
+                            import={i}
+                            names={{ userKey: clip(i.user_key, CLIP.label), site: siteOf(i.site), agent: clip(props.use.agent, CLIP.name) }}
+                            share={props.answer.share()}
+                            onShare={props.answer.setShare}
+                            disabled={props.answer.busy()}
+                        />
+                    </>
                 }
             >
                 <p>
@@ -375,7 +385,11 @@ function UseBatchSubject(props: { batch: NonNullable<UseRequest["batch"]>; answe
                                     <ClippedId text={item.secret} max={CLIP.secret} />
                                     <Show when={item.key}>
                                         {" "}
-                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />)
+                                        ({t("vault.batchCard.key")} <ClippedId text={item.key} max={CLIP.label} />
+                                        <Show when={item.user_key}>
+                                            {t("vault.batchCard.userKey")} <ClippedId text={item.user_key} max={CLIP.label} />
+                                        </Show>
+                                        )
                                     </Show>
                                 </span>
                             </label>
@@ -528,6 +542,8 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const [busy, setBusy] = createSignal(false);
     const [typed, setTyped] = createSignal("");
     const [save, setSave] = createSignal(false);
+    // An import's share, ticked as the card shows it: the person can remove it.
+    const [share, setShare] = createSignal(true);
     // Set once the answer is sent: what the person typed is cleared from the form itself, not only from the answer.
     const [answered, setAnswered] = createSignal(false);
     // The card the person picks for a whole-card fill: the agent's own, or the default, to begin with; none otherwise.
@@ -542,7 +558,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined, u.choices?.length && decision !== "deny" ? card() : undefined, u.batch && decision !== "deny" ? rows() : undefined, u.batch && decision !== "deny" && vault() !== u.batch.vault ? vault() : undefined, u.import?.share && decision !== "deny" ? share() : undefined);
             // The typed value doesn't outlive the answer, and neither does what was chosen on a batch's card.
             setTyped("");
             batchChoices.delete(u.id);
@@ -559,7 +575,7 @@ export function createUseAnswer(u: UseRequest, done: () => void) {
             setBusy(false);
         }
     };
-    return { decide, busy, error, typed, setTyped, save, setSave, card, setCard, answered, rows, tickRow, vault, setVault };
+    return { decide, busy, error, typed, setTyped, save, setSave, share, setShare, card, setCard, answered, rows, tickRow, vault, setVault };
 }
 
 export type UseAnswerState = ReturnType<typeof createUseAnswer>;
@@ -727,7 +743,7 @@ export function UseQuestion(props: { use: UseRequest; answer: UseAnswerState; Bo
                 >
                     {(i) => (
                         <>
-                            <UseImportSubject use={u} import={i()} />
+                            <UseImportSubject use={u} import={i()} answer={a} />
                             <UseSays use={u} />
                             <UseDeadline use={u} />
                         </>

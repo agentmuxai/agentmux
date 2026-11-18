@@ -178,6 +178,7 @@ fn an_agent_is_refused_a_linked_entrys_value_in_one_sentence() {
         id: Some(id.clone()),
         reason: Some(REASON.into()),
         refs: vec![],
+        share: false,
     };
     assert_eq!(aws_import::check(&s, &import, "builder").unwrap_err(), "Invoice provider key is a linked entry, which holds no value: import the value as a new entry");
     // Nothing was asked of the person and nothing was recorded as a use.

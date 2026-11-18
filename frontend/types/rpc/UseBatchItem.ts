@@ -13,6 +13,10 @@ label: string, kind: string, secret: string,
  */
 key: string, 
 /**
+ * A new login's user name is read from this field of the same secret; empty for none.
+ */
+user_key: string, 
+/**
  * It replaces the value of an entry that exists, the old one kept as a version.
  */
 replaces: boolean, 

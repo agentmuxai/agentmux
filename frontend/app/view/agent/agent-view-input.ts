@@ -9,6 +9,7 @@
  */
 
 import { registerPaneStats, searchState } from "@/app/diag/pane-stats";
+import { historyRestoring } from "@/app/store/agent-document-store";
 import { snapshot as layoutSnapshot } from "@/app/store/agent-pane-layout-store";
 import { paneZoom } from "@/app/store/pane-zoom-local";
 import { createMemo, onCleanup } from "solid-js";
@@ -55,6 +56,7 @@ export function usePaneInput(p: { found: PaneFoundation; model: AgentViewModel; 
     const search = useInSessionSearch({
         blockId: model.blockId,
         document: paneModel.document,
+        restoring: () => historyRestoring(model.blockId),
         // A match inside a message only the Messages panel holds opens it there: the conversation has no row for it.
         jumpTo: (id) => void (showInPanelIfHeld(model.blockId, paneModel.document(), id) || reveal.jumpTo(id)),
         onClose: () => {

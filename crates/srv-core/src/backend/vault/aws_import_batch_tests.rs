@@ -123,6 +123,24 @@ fn each_item_is_checked_as_an_import_is_and_the_refusal_names_it() {
 }
 
 #[test]
+fn a_login_item_may_name_the_field_of_its_user_name_and_a_link_may_not() {
+    let s = store();
+    let mut req = three();
+    req.items[0].key = Some("password".into());
+    req.items[0].user_key = Some("user".into());
+    let plan = check(&s, &req, "builder").unwrap();
+    assert_eq!((plan.items[0].source.key.as_deref(), plan.items[0].source.user_key.as_deref()), (Some("password"), Some("user")));
+    assert_eq!(plan.items[0].from_text(), "aws-secret:hosts/alpha#password+user");
+    assert!(plan.items[1].source.user_key.is_none() && !plan.items[0].share, "a batch makes no share");
+    let mut api = three();
+    api.items[0] = BatchItem { kind: "api-key".into(), key: Some("password".into()), user_key: Some("user".into()), ..item("hosts/alpha", "Alpha") };
+    assert!(refused(&s, &api).contains("new login"), "{}", refused(&s, &api));
+    let mut link = three();
+    link.items[1] = BatchItem { aws_secret_id: "prod/invoice-sync".into(), key: Some("api.token".into()), user_key: Some("api.user".into()), label: "Invoice provider key".into(), link: true, ..Default::default() };
+    assert!(refused(&s, &link).contains("a link reads no value"));
+}
+
+#[test]
 fn a_batch_is_one_account_and_region() {
     let s = store();
     let mut req = three();
