@@ -182,3 +182,49 @@ fn a_field_with_a_separator_in_it_is_refused_before_any_signature_is_looked_at()
     assert_eq!(host.check_call("shut|down", WORKSPACE, T, "30", "sig", T).unwrap_err().0, StatusCode::BAD_REQUEST);
     assert_eq!(host.check_call("shutdown", "ws|1", T, "30", "sig", T).unwrap_err().0, StatusCode::BAD_REQUEST);
 }
+
+fn stop_at(plus_minutes: i64, reason: Reason) -> Stop {
+    Stop { at_ms: (NOW + plus_minutes * MIN) as u64, reason }
+}
+
+#[test]
+fn an_agent_may_put_a_pending_stop_back_by_one_to_two_hundred_forty_minutes_and_not_otherwise() {
+    let mut held = Held::default();
+    assert_eq!(held.ask_keep_running(30, "agent:a", NOW as u64), Err(KeepRefusal::NoStop), "nothing pending, nothing to put back");
+    held.take(Notice::Set(stop_at(10, Reason::Person)));
+    let k = held.ask_keep_running(30, "agent:a", NOW as u64).expect("a stop is pending");
+    assert_eq!((k.minutes, k.by.as_str()), (30, "agent:a"));
+    assert_eq!(held.ask_keep_running(240, "agent:a", NOW as u64).map(|k| k.minutes), Ok(240));
+    for bad in [0, 241, u32::MAX] {
+        assert_eq!(held.ask_keep_running(bad, "agent:a", NOW as u64), Err(KeepRefusal::Minutes), "{bad}");
+    }
+}
+
+#[test]
+fn the_last_request_stands_and_is_recorded_as_whoever_made_it() {
+    let mut held = Held::default();
+    held.take(Notice::Set(stop_at(10, Reason::Timer { idle_minutes: 50 })));
+    held.ask_keep_running(30, "agent:a", NOW as u64).unwrap();
+    held.ask_keep_running(60, "agent:b", NOW as u64 + 1).unwrap();
+    assert_eq!(held.keep, Some(KeepRunning { minutes: 60, by: "agent:b".to_string(), at_ms: NOW as u64 + 1 }));
+}
+
+#[test]
+fn a_new_or_cancelled_stop_ends_what_was_asked_of_the_one_before_and_the_same_notice_does_not() {
+    let mut held = Held::default();
+    let a = stop_at(10, Reason::Person);
+    held.take(Notice::Set(a));
+    held.ask_keep_running(30, "agent:a", NOW as u64).unwrap();
+    assert!(held.take(Notice::Set(a)).is_none(), "the same notice again");
+    assert!(held.keep.is_some(), "and what was asked stands");
+    let (plan, generation) = held.take(Notice::Set(stop_at(40, Reason::Person))).expect("a moved stop");
+    assert_eq!(plan, Plan::Announce(stop_at(40, Reason::Person)));
+    assert_eq!(held.keep, None, "the timer answered with a new stop");
+    held.ask_keep_running(15, "agent:a", NOW as u64).unwrap();
+    let (cancelled, later) = held.take(Notice::Clear).expect("a stop to cancel");
+    assert_eq!(cancelled, Plan::Cancel);
+    assert!(later > generation, "a reminder task for the old stop sees it is no longer current");
+    assert_eq!(held.stop, None);
+    assert_eq!(held.keep, None);
+    assert!(held.take(Notice::Clear).is_none());
+}

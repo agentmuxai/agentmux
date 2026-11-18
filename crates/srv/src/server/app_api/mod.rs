@@ -59,6 +59,7 @@ mod agent_runtime_pick;
 pub(crate) mod agent_spend;
 pub(crate) mod agent_routes;
 pub(crate) mod agent_history_reclaim;
+pub(crate) mod workspace_stop;
 pub(crate) mod agent_spawn;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
 // cross-channel bulk-stop forward target,

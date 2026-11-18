@@ -11,7 +11,8 @@
 //! arguments, and answers 404 when no host is registered, so a desktop or a plain headless srv has none of
 //! these routes.
 //!
-//! - `POST /api/v1/host/activity`: `{ busy, agentsWorking, lastOutputAt }`. A turn counts only while its pane
+//! - `POST /api/v1/host/activity`: `{ busy, agentsWorking, lastOutputAt, keepRunning }`; `keepRunning` is the last
+//!   thing an agent asked for (`app_api::workspace_stop`), for the host to honour or not. A turn counts only while its pane
 //!   has written output in the last ten minutes (`ACTIVE_WINDOW_MS`), so a hung turn cannot keep a workspace
 //!   up for ever; a pane process that wrote that recently counts as busy too.
 //! - `POST /api/v1/host/shutdown`: srv's own graceful teardown (the one SIGTERM runs: interrupt turns, save
@@ -119,7 +120,8 @@ pub(crate) async fn handle_activity(Json(req): Json<ActivityRequest>) -> Respons
     }
     let now = current_ms() as i64;
     let a = summarize(&running_panes(now), now);
-    Json(json!({ "ok": true, "busy": a.busy, "agentsWorking": a.agents_working, "lastOutputAt": a.last_output_at })).into_response()
+    let keep = current().1.map(|k| json!({ "minutes": k.minutes, "by": k.by, "atMs": k.at_ms }));
+    Json(json!({ "ok": true, "busy": a.busy, "agentsWorking": a.agents_working, "lastOutputAt": a.last_output_at, "keepRunning": keep })).into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,8 +267,88 @@ pub(crate) fn remind_note(stop: Stop) -> String {
 /// The note when a stop is cancelled.
 pub(crate) const CANCEL_NOTE: &str = "The workspace's stop was cancelled; it keeps running.";
 
-/// The notice srv holds, and a counter that tells a reminder task whether it is still the current one.
-static HELD: Mutex<(Option<Stop>, u64)> = Mutex::new((None, 0));
+/// What an agent has asked for: the stop pushed back by `minutes`, recorded as the agent that asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeepRunning {
+    pub minutes: u32,
+    pub by: String,
+    pub at_ms: u64,
+}
+
+/// The most an agent may ask to push a stop back at a time.
+pub(crate) const MAX_KEEP_MINUTES: u32 = 240;
+
+/// Why a keep-running request was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeepRefusal {
+    Minutes,
+    NoStop,
+}
+
+impl KeepRefusal {
+    pub(crate) fn message(self) -> &'static str {
+        match self {
+            KeepRefusal::Minutes => "minutes is a whole number from 1 to 240",
+            KeepRefusal::NoStop => "the workspace has no stop pending, so there is nothing to put back",
+        }
+    }
+}
+
+/// The notice srv holds, what an agent has asked for since, and a counter that tells a reminder task whether
+/// it is still the current one.
+#[derive(Debug, Default)]
+pub(crate) struct Held {
+    stop: Option<Stop>,
+    keep: Option<KeepRunning>,
+    generation: u64,
+}
+
+impl Held {
+    /// Take a notice in. `None` when there was nothing to do (the same stop again, or a cancel with none held). A
+    /// changed or cancelled stop ends what an agent asked of the one before: its answer is the timer's to give again.
+    fn take(&mut self, notice: Notice) -> Option<(Plan, u64)> {
+        let what = plan(self.stop, notice);
+        match what {
+            Plan::Nothing => return None,
+            Plan::Announce(s) => self.stop = Some(s),
+            Plan::Cancel => self.stop = None,
+        }
+        self.keep = None;
+        self.generation += 1;
+        Some((what, self.generation))
+    }
+
+    /// An agent asks for the stop to be pushed back: only while one is pending, and by 1 to 240 minutes. srv records
+    /// the request and tells the host with its next activity answer; whether to honour it is the host's.
+    pub(crate) fn ask_keep_running(&mut self, minutes: u32, by: &str, at_ms: u64) -> Result<KeepRunning, KeepRefusal> {
+        if !(1..=MAX_KEEP_MINUTES).contains(&minutes) {
+            return Err(KeepRefusal::Minutes);
+        }
+        if self.stop.is_none() {
+            return Err(KeepRefusal::NoStop);
+        }
+        let keep = KeepRunning { minutes, by: by.to_string(), at_ms };
+        self.keep = Some(keep.clone());
+        Ok(keep)
+    }
+}
+
+static HELD: Mutex<Held> = Mutex::new(Held { stop: None, keep: None, generation: 0 });
+
+fn held() -> std::sync::MutexGuard<'static, Held> {
+    HELD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The stop srv holds now, and what an agent has asked for since.
+pub(crate) fn current() -> (Option<Stop>, Option<KeepRunning>) {
+    let h = held();
+    (h.stop, h.keep.clone())
+}
+
+/// An agent asks to push the stop back (`Held::ask_keep_running`).
+pub(crate) fn ask_keep_running(minutes: u32, by: &str) -> Result<KeepRunning, KeepRefusal> {
+    held().ask_keep_running(minutes, by, current_ms())
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -317,19 +399,7 @@ pub(crate) async fn handle_notice(State(state): State<AppState>, Json(req): Json
 
 /// Hold the notice, show it, tell the agents, and remind them a minute before; or take it back.
 fn apply(state: &AppState, notice: Notice) {
-    let generation;
-    let what = {
-        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
-        let what = plan(held.0, notice);
-        match what {
-            Plan::Nothing => return,
-            Plan::Announce(s) => held.0 = Some(s),
-            Plan::Cancel => held.0 = None,
-        }
-        held.1 += 1;
-        generation = held.1;
-        what
-    };
+    let Some((what, generation)) = held().take(notice) else { return };
     match what {
         Plan::Announce(stop) => {
             tracing::info!(reason = stop.reason.id(), stop_at_ms = stop.at_ms, "the external host set a workspace stop");
@@ -354,7 +424,7 @@ fn remind_later(state: AppState, stop: Stop, generation: u64) {
     }
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(wait)).await;
-        if HELD.lock().unwrap_or_else(|e| e.into_inner()).1 == generation {
+        if held().generation == generation {
             tell_agents(&state, &remind_note(stop));
         }
     });

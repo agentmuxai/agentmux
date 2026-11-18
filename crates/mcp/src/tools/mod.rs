@@ -11,6 +11,7 @@ use super::*;
 mod accounts;
 mod agents_tool;
 mod app_record;
+mod app_workspace;
 mod app_tool;
 mod browser;
 mod browser_account;

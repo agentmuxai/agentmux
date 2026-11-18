@@ -343,6 +343,8 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         // Presence status: the agent's own one-line account of what it is doing now.
         .route("/api/v1/agent/status", post(agent_status_handlers::handle_agent_status))
+        // An agent asks for a pending workspace stop to be put back (recorded as that agent).
+        .route("/api/v1/agent/keep-running", post(app_api::workspace_stop::handle_keep_running))
         .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route("/api/v1/bulletin", post(bulletin_handlers::handle_post_bulletin).get(bulletin_handlers::handle_read_bulletin))
         .route("/api/v1/quota-mode", post(quota_mode_handler::handle_set_quota_mode).get(quota_mode_handler::handle_get_quota_mode))
@@ -726,6 +728,18 @@ fn memory_and_identity_routes() -> Router<AppState> {
         .route("/api/v1/agent/skill", post(handle_agent_skill))
 }
 
+/// A headless server's registered external host: it vouches for a connection, and asks what the workspace is doing,
+/// for a graceful shutdown and for a stop notice. Every one answers 404 unless a host is registered.
+fn external_host_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/host/external_nonce", post(super::external_host::handle_nonce))
+        .route("/api/v1/host/external_attest", post(super::external_host::handle_attest))
+        .route("/api/v1/host/external_revoke", post(super::external_host::handle_revoke))
+        .route("/api/v1/host/activity", post(super::host_control::handle_activity))
+        .route("/api/v1/host/shutdown", post(super::host_control::handle_shutdown))
+        .route("/api/v1/host/notice", post(super::host_control::handle_notice))
+}
+
 /// UI automation, the browser pane and the host relays.
 fn ui_and_host_routes() -> Router<AppState> {
     Router::new()
@@ -783,14 +797,7 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
         // The host vouches for the AgentMux window's websocket connection.
         .route("/api/v1/host/operator_attest", post(super::operator_proof::handle_host_attest))
-        // A headless server's registered external host vouches for a connection (answers 404 unless one is registered).
-        .route("/api/v1/host/external_nonce", post(super::external_host::handle_nonce))
-        .route("/api/v1/host/external_attest", post(super::external_host::handle_attest))
-        .route("/api/v1/host/external_revoke", post(super::external_host::handle_revoke))
-        // The registered external host's own calls (answer 404 unless one is registered): what the workspace is doing, a graceful shutdown, a stop notice.
-        .route("/api/v1/host/activity", post(super::host_control::handle_activity))
-        .route("/api/v1/host/shutdown", post(super::host_control::handle_shutdown))
-        .route("/api/v1/host/notice", post(super::host_control::handle_notice))
+        .merge(external_host_routes())
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/host/browser_permission", post(crate::server::browser_permission::handle_host_browser_permission))
@@ -822,6 +829,8 @@ fn ui_and_host_routes() -> Router<AppState> {
         .route("/api/v1/agent/remote/op", post(super::remote_ops::send::handle_agent_remote_op))
         .route("/api/v1/app/connectivity", get(app_api::connectivity::handle_status))
         .route("/api/v1/app/health", get(super::remote_ops::app_ops::handle_health))
+        // This workspace's pending stop, for any agent to read.
+        .route("/api/v1/app/workspace", get(app_api::workspace_stop::handle_workspace))
         .route("/api/v1/app/logs", get(super::remote_ops::log_ops::handle_local_logs))
         // The record of AgentMux's own size over weeks (SPEC_LONG_RUNNING_ZERO_DEGRADATION §6).
         .route("/api/v1/app/record", get(app_api::record_read::handle_record))
