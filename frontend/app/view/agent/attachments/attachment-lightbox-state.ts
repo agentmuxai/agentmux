@@ -6,7 +6,7 @@
  * send-copy URL or text preview it shows, and the paging and keys.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
@@ -62,6 +62,11 @@ export function createLightbox(props: LightboxProps) {
     const noun = () => (kind() === "image" ? "image" : "file");
     const missing = () => item()?.error ?? `This ${noun()} is no longer available.`;
 
+    // One picture pixel per screen pixel, until the item changes. Only a picture has one.
+    const [actual, setActual] = createSignal(false);
+    createEffect(on(() => item()?.key, () => setActual(false)));
+    const toggleActual = () => isPicture(kind()) && setActual((a) => !a);
+
     const go = (delta: number) => {
         const n = props.items.length;
         if (n === 0) return;
@@ -79,6 +84,9 @@ export function createLightbox(props: LightboxProps) {
         } else if (e.key === "ArrowRight") {
             e.preventDefault();
             go(1);
+        } else if (e.key === "1" && !(e.ctrlKey || e.metaKey || e.altKey)) {
+            e.preventDefault();
+            toggleActual();
         }
     };
 
@@ -96,6 +104,8 @@ export function createLightbox(props: LightboxProps) {
         noun,
         missing,
         go,
+        actual,
+        toggleActual,
         onKeyDown,
         setDialog: (el: HTMLDivElement) => {
             dialogRef = el;

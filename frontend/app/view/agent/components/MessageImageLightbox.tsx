@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Full-pane preview of one image of an agent's message, with ←/→ to step through the message's other
- * images, Esc to close and Open in editor for the one shown. The shell and styles are the attachment
- * preview's (attachments/AttachmentLightbox.tsx); the images are local files, not attachment ids
+ * Preview of one image or video of an agent's message, over the whole tab it is in, with ←/→ to step through the
+ * message's other images and videos, Esc to close and Open in editor for the one shown. A click on an image
+ * switches between fitting the tab and its actual size. The shell and styles are the attachment preview's
+ * (attachments/AttachmentLightbox.tsx); the files are local, not attachment ids
  * (SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md).
  */
 
@@ -19,23 +20,43 @@ const BLOCK = "agent-attachment-lightbox";
 
 function Picture(props: { s: MessageLightboxState }): JSX.Element {
     const s = props.s;
+    const url = () => (s.entry()?.kind === "ready" ? (s.entry() as { url: string }).url : undefined);
     return (
         <Show
-            when={s.entry()?.kind === "ready" ? (s.entry() as { url: string }).url : undefined}
+            when={url()}
             fallback={
                 <span class={`${BLOCK}__missing`}>
                     {s.entry()?.kind === "missing" || s.entry()?.kind === "too-large"
-                        ? "This image is no longer available."
+                        ? `This ${s.isVideo() ? "video" : "image"} is no longer available.`
                         : "Loading…"}
                 </span>
             }
         >
-            {(url) => (
-                <img
-                    src={url()}
-                    alt={s.item()?.alt || s.item()?.name || ""}
-                    onLoad={(e) => s.setSize(s.item()!.path, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
-                />
+            {(src) => (
+                <Show
+                    when={s.isVideo()}
+                    fallback={
+                        <img
+                            src={src()}
+                            alt={s.item()?.alt || s.item()?.name || ""}
+                            classList={{ "is-actual": s.actual() }}
+                            {...tip(s.actual() ? "Fit to the window (1)" : "Actual size (1)")}
+                            onClick={s.toggleActual}
+                            onLoad={(e) => s.setSize(s.item()!.path, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+                        />
+                    }
+                >
+                    <video
+                        ref={s.setVideo}
+                        src={src()}
+                        controls
+                        playsinline
+                        aria-label={s.item()?.alt || s.item()?.name || "Video"}
+                        onLoadedMetadata={(e) =>
+                            s.setSize(s.item()!.path, e.currentTarget.videoWidth, e.currentTarget.videoHeight)
+                        }
+                    />
+                </Show>
             )}
         </Show>
     );
@@ -55,12 +76,12 @@ function Actions(props: { s: MessageLightboxState; onClose: () => void }): JSX.E
     const s = props.s;
     return (
         <span class={`${BLOCK}__actions`}>
-            <IconButton icon="chevron-left" label="Previous image" tooltip={false} title="Previous (←)" onClick={() => s.go(s.index() - 1)} />
+            <IconButton icon="chevron-left" label="Previous" tooltip={false} title="Previous (←)" onClick={() => s.go(s.index() - 1)} />
             <span class="pos">
                 {Math.min(s.index(), s.count() - 1) + 1} / {s.count()}
             </span>
-            <IconButton icon="chevron-right" label="Next image" tooltip={false} title="Next (→)" onClick={() => s.go(s.index() + 1)} />
-            <Button title="Open this image in the editor (E)" onClick={s.openEditor}>
+            <IconButton icon="chevron-right" label="Next" tooltip={false} title="Next (→)" onClick={() => s.go(s.index() + 1)} />
+            <Button title="Open this file in the editor (E)" onClick={s.openEditor}>
                 Open in editor
             </Button>
             <CloseButton label="Close preview" tooltip={false} title="Close (Esc)" onClick={props.onClose} />
@@ -68,22 +89,30 @@ function Actions(props: { s: MessageLightboxState; onClose: () => void }): JSX.E
     );
 }
 
+/** The keys this preview answers to, for the item shown. */
+function hint(s: MessageLightboxState): string {
+    const step = s.count() > 1 ? "← → step · " : "";
+    return s.isVideo()
+        ? `${step}Space play · J L skip 10 s · E editor · Esc close`
+        : `${step}1 or click: actual size · E editor · Esc close`;
+}
+
 export function MessageImageLightbox(props: MessageImageLightboxProps): JSX.Element {
     const s = createMessageLightbox(props);
     return (
-        // A pane modal: it covers the pane the message is in (Escape and a click outside close it), not the
-        // window. The arrows are this dialog's own keys.
+        // A tab modal: it covers the whole tab the message is in, not just its pane (Escape and a click outside
+        // close it; the tab bar and other tabs stay live). The arrows are this dialog's own keys.
         <Modal
             open={true}
-            scope="pane"
+            scope="tab"
             size="fit"
-            panelClass={`${BLOCK}__panel ${BLOCK}__panel--message`}
-            onClose={props.onClose}
+            panelClass={`${BLOCK}__panel ${BLOCK}__panel--fit`}
+            onClose={s.close}
             ariaLabel={s.label()}
             initialFocus={() => s.dialog() ?? null}
         >
-            <div ref={s.setDialog} class={`${BLOCK}__dialog ${BLOCK}__dialog--message`} tabIndex={-1} onKeyDown={s.onKeyDown}>
-                <div class={`${BLOCK}__image ${BLOCK}__image--message`}>
+            <div ref={s.setDialog} class={`${BLOCK}__dialog ${BLOCK}__dialog--fit`} tabIndex={-1} onKeyDown={s.onKeyDown}>
+                <div class={`${BLOCK}__image ${BLOCK}__image--fit`} classList={{ "is-actual": s.actual() }}>
                     <Picture s={s} />
                 </div>
                 <div class={`${BLOCK}__bar`}>
@@ -94,8 +123,9 @@ export function MessageImageLightbox(props: MessageImageLightboxProps): JSX.Elem
                         </Show>
                     </span>
                     <Meta s={s} />
-                    <Actions s={s} onClose={props.onClose} />
+                    <Actions s={s} onClose={s.close} />
                 </div>
+                <div class={`${BLOCK}__hint`}>{hint(s)}</div>
                 {/* One polite announcement per step. */}
                 <span class={`${BLOCK}__live`} aria-live="polite">
                     {s.label()}

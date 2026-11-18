@@ -57,7 +57,12 @@ function PictureView(props: { s: LightboxState }): JSX.Element {
                 <span class="agent-attachment-lightbox__missing">{s.url() === null ? s.missing() : "Loading…"}</span>
             }
         >
-            <img src={s.url()!} alt={s.item()?.name ?? ""} />
+            <img
+                src={s.url()!}
+                alt={s.item()?.name ?? ""}
+                {...tip(s.actual() ? "Fit to the window (1)" : "Actual size (1)")}
+                onClick={s.toggleActual}
+            />
         </Show>
     );
 }

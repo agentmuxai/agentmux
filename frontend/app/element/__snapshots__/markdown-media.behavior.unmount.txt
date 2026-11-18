@@ -2,7 +2,7 @@ fetchMediaRange C:/work/clips/demo.mp4 0-2097151 aborted=false
 createObjectURL blob:test/1
 -- no observer: probed at once
 <div>
-  <figure class="am-media am-media-video">
+  <figure class="am-media am-media-video" data-am-media-path="C:/work/clips/demo.mp4" data-am-media-kind="video">
     <div class="am-media-stage">
       <video class="am-media-poster" preload="auto" muted="" playsinline="" src="blob:test/1#t=0.1" muted.prop=false>
       <div class="am-media-stage-overlay">
