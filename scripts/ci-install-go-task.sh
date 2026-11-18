@@ -62,8 +62,11 @@ mkdir -p "$DEST" || die "cannot create $DEST"
 
 sha256_of() {
     # Hash from stdin: given a Windows path, coreutils prefixes the hash with a backslash.
-    if command -v sha256sum > /dev/null 2>&1; then sha256sum < "$1" | cut -d' ' -f1
-    else shasum -a 256 < "$1" | cut -d' ' -f1; fi
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum < "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 < "$1" | cut -d' ' -f1
+    fi
 }
 
 got=""
