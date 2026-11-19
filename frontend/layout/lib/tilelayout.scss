@@ -283,28 +283,29 @@
                 pointer-events: none;
             }
 
-            // The mark an empty pane shows (EmptyPaneLogo.scss), here in the words' colour and less faded: it
+            // The mark an empty pane shows (EmptyPaneLogo.scss), here in the words' colour (`--on-error-color`) and less faded: it
             // has to read over two reds.
             .tear-off-place .empty-pane-logo {
                 width: min(60cqw, 80cqh, 560px);
                 opacity: 0.32;
 
                 rect {
-                    fill: var(--button-color);
+                    fill: var(--on-error-color);
                 }
             }
 
             .tear-off-words {
                 position: relative;
                 z-index: var(--z-over-content);
-                color: var(--button-color);
+                // White, or the theme's dark base where its red is too pale for white (theme.scss `--on-error-color`).
+                color: var(--on-error-color);
                 font-weight: 800;
                 font-size: clamp(12px, min(14cqw, 50cqh), 160px);
                 line-height: 1;
                 letter-spacing: 0.06em;
                 white-space: nowrap;
-                // An edge of the red's own shade, so the words hold on the lighter squares and over the mark.
-                text-shadow: 0 0 0.12em color-mix(in srgb, var(--error-color) 55%, black), 0 0.03em 0.06em color-mix(in srgb, var(--error-color) 55%, black);
+                // An edge of the red's own shade (toward black, or toward white under dark words), so the words hold on the lighter squares and over the mark.
+                text-shadow: 0 0 0.12em color-mix(in srgb, var(--error-color) 55%, var(--on-error-edge)), 0 0.03em 0.06em color-mix(in srgb, var(--error-color) 55%, var(--on-error-edge));
             }
 
             // Inside the gap a split pane keeps around itself, as the pane's own frame is (below).
