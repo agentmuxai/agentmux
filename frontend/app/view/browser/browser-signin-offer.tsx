@@ -9,6 +9,7 @@
 
 import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { agentDisplayName, followAgentNames } from "@/app/store/agent-names";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readSigninOffer, readSigninPending, signinOfferQuestion, signinPendingText } from "./browser-signin-offer-model";
@@ -62,6 +63,7 @@ export function BrowserSigninOffer(props: {
  */
 export function BrowserSigninPending(props: { blockId: string; meta: () => Record<string, unknown> | undefined }): JSX.Element {
     const pending = createMemo(() => readSigninPending(props.meta()));
+    followAgentNames();
     const [now, setNow] = createSignal(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 250);
     onCleanup(() => clearInterval(timer));
@@ -75,7 +77,7 @@ export function BrowserSigninPending(props: { blockId: string; meta: () => Recor
             {(p) => (
                 <div class="browser-signin-offer browser-signin-pending" role="alert" aria-label="An agent is signing in">
                     <i class="fa-solid fa-key" aria-hidden="true" />
-                    <span class="browser-signin-offer-question">{signinPendingText(p(), now())}</span>
+                    <span class="browser-signin-offer-question">{signinPendingText({ ...p(), agent: agentDisplayName(p().agent) }, now())}</span>
                     <div class="browser-signin-offer-actions">
                         <Button density="compact" tone="danger" onClick={() => stop(p().id)}>
                             Stop

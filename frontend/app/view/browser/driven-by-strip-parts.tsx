@@ -10,6 +10,7 @@
 import { Button } from "@/app/element/ui";
 import { pausedLabel, browserPauseAll } from "@/app/store/browser-pause-all";
 import { tip } from "@/app/element/tip";
+import { agentDisplayName } from "@/app/store/agent-names";
 import { For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
 import type { BrowserViewModel } from "./browser-model";
@@ -145,7 +146,7 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
                     when={!model.pausedAtom()}
                     fallback={
                         <span>
-                            <b>Paused{t.everyPane() ? " for every pane" : ""}:</b> <b>{b().agent}</b>'s actions here wait until you resume ·{" "}
+                            <b>Paused{t.everyPane() ? " for every pane" : ""}:</b> <b>{agentDisplayName(b().agent)}</b>'s actions here wait until you resume ·{" "}
                             {b().always
                                 ? "auto-approve is held"
                                 : `auto-approve's clock is stopped at ${model.bypassMinutesLeft()} min left`}
@@ -157,13 +158,13 @@ export function BypassStrip(props: Part & { grant: () => BrowserBypass }): JSX.E
                         fallback={
                             <span>
                                 <b>Auto-approve paused:</b> the page left{" "}
-                                {b().origins.map(siteLabel).join(", ")}, so <b>{b().agent}</b> asks again
+                                {b().origins.map(siteLabel).join(", ")}, so <b>{agentDisplayName(b().agent)}</b> asks again
                                 here
                             </span>
                         }
                     >
                         <span>
-                            <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
+                            <b>Auto-approve on:</b> <b>{agentDisplayName(b().agent)}</b>'s clicks go through without asking on{" "}
                             {b().origins.map(siteLabel).join(", ")}
                             {powersNote(b().powers)} ·{" "}
                             {leftLabel(b().always, model.bypassMinutesLeft())}
