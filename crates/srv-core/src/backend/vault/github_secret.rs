@@ -120,7 +120,7 @@ async fn ask<R: Runner>(runner: &R, endpoint: String) -> Result<(u16, Answer), S
     env.extend(SESSION.iter().filter_map(|name| Some((name.to_string(), std::env::var(name).ok()?))));
     let out = match runner.run(RunSpec { program, args: argv(endpoint), env, timeout: RECIPE_TIMEOUT }).await {
         Ok(out) => out,
-        Err(RunError::TimedOut) => return Err("GitHub took too long to answer (25 s). Try again in a minute.".into()),
+        Err(RunError::TimedOut) => return Err(format!("GitHub took too long to answer ({} s). Try again in a minute.", RECIPE_TIMEOUT.as_secs())),
         Err(RunError::Spawn(_)) => return Err("couldn't run the GitHub CLI on this computer".into()),
     };
     let said = Answer(out.stdout);
