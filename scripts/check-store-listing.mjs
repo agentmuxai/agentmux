@@ -14,11 +14,12 @@
 // the Store holds. A listing it cannot read is its own outcome (exit 2), never "behind": nothing is opened or closed.
 //
 //   node scripts/check-store-listing.mjs --repo owner/name [--max-releases 1] [--max-days 2] [--out dir]
+//   node scripts/check-store-listing.mjs --find-issue issues.json   (the tracking issue's number, by title AND author)
 //
 // Writes <out>/verdict.txt ("behind" or "current") and <out>/body.md (the issue text), and `verdict` to
 // $GITHUB_OUTPUT. Exit 0: it read both and decided; 2: it could not read one.
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +57,20 @@ export function evaluate({ listed, releases, now, maxReleases = 1, maxDays = 2 }
     const oldestDays = oldest ? (now - oldest.at) / DAY_MS : 0;
     const behind = uncovered.length > maxReleases || (uncovered.length > 0 && oldestDays > maxDays);
     return { behind, uncovered, oldest, oldestDays };
+}
+
+/** The only account whose issue counts as this check's own. */
+export const ISSUE_AUTHOR = "github-actions[bot]";
+
+/**
+ * The one issue this check keeps: an open issue with the check's title that the Actions bot opened. The repository is public, so
+ * anyone can open an issue with the same title; theirs is never the tracking issue, and so is never edited or closed. `issues` is
+ * the REST list of issues (pull requests also appear in it and are skipped). Returns the issue's number, or undefined.
+ */
+export function trackingIssue(issues, title = ISSUE_TITLE) {
+    return issues.find(
+        (i) => i.state !== "closed" && !i.pull_request && i.title === title && i.user?.login === ISSUE_AUTHOR && i.user?.type === "Bot",
+    )?.number;
 }
 
 const fmt = (d) => d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
@@ -104,7 +119,14 @@ function args(argv) {
     return o;
 }
 
+// `--find-issue <issues.json>`: print the number of the tracking issue in the REST issue list in that file, or nothing.
+function findIssue(file) {
+    const found = trackingIssue(JSON.parse(readFileSync(file, "utf8")));
+    if (found !== undefined) console.log(found);
+}
+
 async function main() {
+    if (process.argv[2] === "--find-issue") return findIssue(process.argv[3]);
     const o = args(process.argv.slice(2));
     const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
     const product = await getJson(STORE_URL);

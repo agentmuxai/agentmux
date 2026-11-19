@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ISSUE_MARKER, ISSUE_TITLE, evaluate, listedAt, publishedReleases, renderBody } from "./check-store-listing.mjs";
+import { ISSUE_AUTHOR, ISSUE_MARKER, ISSUE_TITLE, evaluate, listedAt, publishedReleases, renderBody, trackingIssue } from "./check-store-listing.mjs";
 
 const at = (s) => new Date(s);
 const rel = (tag, published_at, extra = {}) => ({ tag_name: tag, published_at, draft: false, prerelease: false, ...extra });
@@ -109,6 +109,28 @@ describe("renderBody", () => {
     });
 });
 
+describe("trackingIssue: only the Actions bot's own issue is the tracking issue", () => {
+    const issue = (number, login, extra = {}) => ({ number, title: ISSUE_TITLE, state: "open", user: { login, type: login.endsWith("[bot]") ? "Bot" : "User" }, ...extra });
+    const bot = ISSUE_AUTHOR;
+
+    it("an issue with the same title by someone else is ignored, so the check opens its own (nothing to edit or close)", () => {
+        expect(trackingIssue([issue(7, "someone")])).toBeUndefined();
+    });
+    it("a user whose name only looks like the bot's is ignored; an app account of another name is ignored", () => {
+        expect(trackingIssue([issue(7, "github-actions"), { ...issue(8, "github-actions[bot]"), user: { login: "github-actions[bot]", type: "User" } }, issue(9, "other-app[bot]")])).toBeUndefined();
+    });
+    it("the bot's own open issue is reused, even when a stranger's with the same title is listed first", () => {
+        expect(trackingIssue([issue(7, "someone"), issue(5, bot)])).toBe(5);
+    });
+    it("when the Store has caught up the number returned is the bot's alone: a stranger's issue is never the one closed", () => {
+        expect(trackingIssue([issue(7, "someone"), issue(8, "another")])).toBeUndefined();
+        expect(trackingIssue([issue(8, "another"), issue(5, bot), issue(7, "someone")])).toBe(5);
+    });
+    it("a closed issue, a pull request and a different title do not count", () => {
+        expect(trackingIssue([issue(1, bot, { state: "closed" }), issue(2, bot, { pull_request: {} }), issue(3, bot, { title: "something else" })])).toBeUndefined();
+    });
+});
+
 // The two workflows around the script: the release run's Store line, and the daily check.
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), "..", ".github/workflows");
 const text = (name) => readFileSync(join(WORKFLOWS, name), "utf8").replace(/\r\n/g, "\n");
@@ -180,6 +202,15 @@ describe("store-listing-check.yml", () => {
         expect(w).toContain("gh issue close");
         expect(w).toMatch(/ISSUE_TITLE: The Microsoft Store is behind the latest release/);
         expect(w).toMatch(/\[ "\$VERDICT" = behind \]/);
+    });
+
+    it("finds the issue through the script by title and author, asks only for the bot's issues, and edits or closes only that one", () => {
+        expect(w).toContain("--find-issue store-check/issues.json");
+        expect(w).toContain("creator=github-actions%5Bbot%5D");
+        expect(w).not.toMatch(/gh issue list/);
+        expect(w).toMatch(/gh issue edit "\$existing"/);
+        expect(w).toMatch(/gh issue close "\$existing"/);
+        expect(w).toMatch(/^permissions:\n {2}contents: read\n {2}issues: write\n/m);
     });
 
     it("the issue title the workflow uses is the script's", () => {
