@@ -957,6 +957,8 @@ jobs:
     # Which step failed, for `ms-store-note`: a continue-on-error job reports success to its dependents whatever happened in it.
     outputs:
       failed_step: ${{ steps.failed.outputs.step }}
+      # Set by the submit step only after `msstore publish` succeeded: the one positive sign that something reached the Store.
+      submitted: ${{ steps.submit.outputs.sent }}
     permissions:
       contents: read
       id-token: write
@@ -1060,6 +1062,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $what = if ($commit) { 'sent to the Store for certification' } else { 'left as a draft in Partner Center: check it there and send it' }
           "Microsoft Store: $($msix.Name) $what." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          'sent=true' | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
 
       # Names the step that failed, for `ms-store-note`. Runs only on a failure and carries no secret: it reads the steps' outcomes.
       - name: Say which step failed
@@ -1098,6 +1101,7 @@ jobs:
       TAG: v${{ needs.gate.outputs.version }}
       RESULT: ${{ needs.ms-store.result }}
       FAILED_STEP: ${{ needs.ms-store.outputs.failed_step }}
+      SUBMITTED: ${{ needs.ms-store.outputs.submitted }}
       COMMIT: ${{ vars.MSSTORE_COMMIT }}
     steps:
       - name: Say what happened to the Store submission
@@ -1106,6 +1110,11 @@ jobs:
           msix="AgentMux_${TAG#v}_x64.msix"
           if [ -n "$FAILED_STEP" ] || [ "$RESULT" = failure ]; then
             line="failed: ${FAILED_STEP:-the Store job failed}. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
+            warn=1
+          elif [ "$RESULT" = success ] && [ "$SUBMITTED" != true ]; then
+            # A continue-on-error job reads as success even when it stopped before any step ran (an environment approval that was
+            # refused, a runner that never started): only the submit step's own output says something was sent.
+            line="failed: the Store job did not reach the submission. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
             warn=1
           elif [ "$RESULT" = skipped ]; then
             line="skipped: Store submission is switched off. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand."

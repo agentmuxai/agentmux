@@ -146,6 +146,17 @@ describe("release-core.yml: the Store line of the run summary", () => {
         expect(note).not.toMatch(/id-token|actions: read|secrets\./);
     });
 
+    it("a Store job that read as success is 'submitted' only when the submit step itself said so (a job that stopped before any step ran is not)", () => {
+        expect(store).toMatch(/outputs:\n[\s\S]*?submitted: \$\{\{ steps\.submit\.outputs\.sent \}\}/);
+        const submit = store.slice(store.indexOf("- name: Submit to the Microsoft Store"), store.indexOf("- name: Say which step failed"));
+        expect(submit).toMatch(/msstore publish[\s\S]*exit \$LASTEXITCODE[\s\S]*'sent=true' \| Out-File -Append -Encoding utf8 \$env:GITHUB_OUTPUT/);
+        expect(note).toMatch(/SUBMITTED: \$\{\{ needs\.ms-store\.outputs\.submitted \}\}/);
+        const notSent = note.indexOf('[ "$RESULT" = success ] && [ "$SUBMITTED" != true ]');
+        expect(notSent).toBeGreaterThan(-1);
+        expect(notSent).toBeLessThan(note.indexOf("submitted:"));
+        expect(note.slice(notSent, note.indexOf("elif", notSent + 10))).toContain("warn=1");
+    });
+
     it("it says submitted, submitted as a draft, skipped, failed and cancelled, and warns on everything but a sent submission", () => {
         for (const word of ["submitted:", "submitted as a draft:", "skipped:", "failed:", "cancelled:"]) expect(note).toContain(word);
         expect(note).toContain("::warning title=Microsoft Store::");
