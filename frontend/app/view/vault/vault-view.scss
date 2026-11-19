@@ -249,6 +249,13 @@
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border-color);
+    // Requests taller than the pane (a long card in a narrow, zoomed pane) scroll here: the view itself never
+    // scrolls, so without this a card's buttons fell below the pane, out of the wheel's reach. They take the
+    // room they need before the list does, and never more than the pane.
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    max-height: 100%;
+    overflow-y: auto;
 }
 
 .vault-request {
