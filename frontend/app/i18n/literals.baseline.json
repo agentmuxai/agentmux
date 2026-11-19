@@ -37,7 +37,7 @@
     "frontend/app/errors/CopyableErrorMessage.tsx": 3,
     "frontend/app/errors/CopyErrorButton.tsx": 1,
     "frontend/app/errors/ErrorBanner.tsx": 3,
-    "frontend/app/modals/command-palette.tsx": 5,
+    "frontend/app/modals/command-palette.tsx": 4,
     "frontend/app/modals/conntypeahead.tsx": 1,
     "frontend/app/modals/messagemodal.tsx": 2,
     "frontend/app/modals/replace-pane-confirm.tsx": 2,
