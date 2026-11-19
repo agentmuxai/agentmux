@@ -833,3 +833,28 @@ async fn a_checkpoint_from_before_the_failed_set_was_kept_still_knows_which_bran
     };
     assert_eq!(resumed, kept.result, "a restore from the old checkpoint ends as the uninterrupted run did");
 }
+
+#[tokio::test]
+async fn what_a_failed_call_spent_is_still_on_its_block_after_a_restart() {
+    // `call` is a Drone block that fails (there is no drone to call), and its error edge takes the run on.
+    let graph = DroneGraph {
+        nodes: vec![node("call", json!({ "kind": "drone", "drone": "nowhere" })), response("handler", "caught")],
+        edges: vec![edge("e1", "call", "handler", Some("error"))],
+    };
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    assert_eq!(kept.result, Ok(json!("caught")));
+    let after_call = kept.steps.iter().rposition(|(_, id)| id.as_deref() == Some("call")).unwrap() + 1;
+    // The callee spent 0.25 before it failed: the run kept that in its position.
+    let mut c: Checkpoint = load(&kept.rows()[..after_call]).unwrap().unwrap();
+    assert_eq!(c.outputs["call"].get("cost_usd"), None, "the error edge's output says only what went wrong");
+    c.cost_usd = 0.25;
+    c.position.spent_by.insert("call".to_string(), 0.25);
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((&graph, &c, Limits::default()), &tx, &states).await;
+    assert_eq!(ended.ok(), Some(json!("caught")));
+    let states = states.lock().await;
+    assert_eq!(states["call"].output.as_ref().unwrap()["cost_usd"], json!(0.25), "the ledger sums this");
+    assert_eq!(states["call"].output.as_ref().unwrap()["failed"], json!(true), "and it still says it failed");
+}
