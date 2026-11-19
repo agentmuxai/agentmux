@@ -952,7 +952,7 @@
     "vault.vaults.new": "New Vault",
     "vault.secrets.coverage": "Showing {{shown}} of the {{found}} things agents did with secrets in the newest {{lines}} lines of the Vault's activity.",
     "vault.secrets.more": "Show more",
-    "vault.secrets.olderInVault": "Older lines are in the Vault's Activity.",
+    "vault.secrets.olderNotRead": "Older lines exist; this list reads no further back.",
     "vault.tooNarrow": "This pane is too narrow for the Vault. Make it wider.",
     "vault.vaults.change": "Change {{name}}",
     "vault.vaults.delete": "Delete {{name}}",

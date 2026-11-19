@@ -122,11 +122,12 @@ describe("Secrets in the Vault's Audit section", () => {
         expect(vault.mock.calls.filter((c) => c[0] === "activity").map((c) => (c[1] as { limit: number }).limit)).toEqual([500]);
     });
 
-    it("when the read came back full, reads twice as far back, to a limit, then points to the Vault", async () => {
+    it("when the read came back full, reads further back, to the host's limit of 1000, then says older lines are not read", async () => {
         const all = agentLines(20000);
         vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
             if (op === "grants") return { granted: [] };
-            if (op === "activity") return { activity: all.slice(0, Number(args?.limit)) };
+            // The host answers at most 1000 lines to one read.
+            if (op === "activity") return { activity: all.slice(0, Math.min(Number(args?.limit), 1000)) };
             return {};
         });
         render(() => <VaultSecrets />);
@@ -139,6 +140,12 @@ describe("Secrets in the Vault's Audit section", () => {
         await waitFor(() => expect(limits()).toEqual([500, 1000]));
         // The count may carry the language's thousands separator.
         await waitFor(() => expect(screen.getByText(/Showing 550 of the 1\D?000 things/)).toBeInTheDocument());
+        // The rest of the 1000 on screen: nothing more to read, and it says older lines exist.
+        for (let i = 0; i < 9; i++) fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        await waitFor(() => expect(screen.getByText(/Showing 1\D?000 of the 1\D?000 things/)).toBeInTheDocument());
+        expect(screen.getByText(/Older lines exist; this list reads no further back/)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+        expect(limits()).toEqual([500, 1000]);
     });
 
     it("loads nothing from the Vault until it is shown", async () => {

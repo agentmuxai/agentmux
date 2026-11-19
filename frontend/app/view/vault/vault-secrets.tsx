@@ -19,9 +19,11 @@ import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, 
 
 /** How many of the agents' doings to list at first, and how many more each "Show more" adds. */
 const PAGE = 50;
-/** How many of the Vault's newest activity lines are read first, and the most that "Show more" reads. */
+/** How many of the Vault's newest activity lines are read first, and the most that "Show more" reads: the
+ *  host answers at most 1000 lines to one read (`vault_activity_list(limit.clamp(1, 1000))`), so asking for
+ *  more would claim a reach the list does not have. */
 const WINDOW = 500;
-const WINDOW_MAX = 8000;
+const WINDOW_MAX = 1000;
 
 /** What an agent asks for rather than does: a request for a new entry, and a request to be given one. */
 const ASKS = ["requested an entry", "asked to be given it"];
@@ -165,7 +167,7 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                 </table>
                 <p class="warden-manager-dim vault-secrets__coverage">
                     {t("vault.secrets.coverage", { shown: rows()?.length ?? 0, found: found()?.length ?? 0, lines: lines() })}{" "}
-                    <Show when={readFull() && !moreToRead() && !moreLoaded()}>{t("vault.secrets.olderInVault")}</Show>
+                    <Show when={readFull() && !moreToRead() && !moreLoaded()}>{t("vault.secrets.olderNotRead")}</Show>
                     <Show when={canShowMore()}>
                         <Button density="compact" onClick={showMore}>
                             {t("vault.secrets.more")}
