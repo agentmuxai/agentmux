@@ -50,6 +50,8 @@
             .agent-pending-timer {
                 flex: none;
                 font-variant-numeric: tabular-nums;
+                // The header's label style is capitals; a duration reads "3m 5s", as the agent's own timer does.
+                text-transform: none;
             }
         }
 
