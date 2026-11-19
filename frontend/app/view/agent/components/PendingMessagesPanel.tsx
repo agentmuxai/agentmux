@@ -26,12 +26,16 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
+import { Button } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import type { PendingMessage } from "../../../agent-model/state";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
+    /** Stops the agent's turn. Offered while a message waits behind the agent's own running command, which only a stop ends. */
+    onStop?: () => void;
 }
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => {
@@ -91,6 +95,13 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                             {stillQueuedCount() === 1 ? " message" : " messages"})
                         </Show>
                     </span>
+                    <Show when={waiting() && stillQueuedCount() === 0 ? props.onStop : undefined}>
+                        {(stop) => (
+                            <Button variant="link" class="agent-pending-stop" onClick={stop()} {...tip(t("pendingPanel.stopAndSendTip"))}>
+                                {t("pendingPanel.stopAndSend")}
+                            </Button>
+                        )}
+                    </Show>
                 </div>
                 <For each={queuedMessages()}>
                     {(msg) => (

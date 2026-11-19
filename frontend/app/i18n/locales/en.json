@@ -52,6 +52,8 @@
     "agentCard.installing": "Installing…",
     "agentCard.update": "Update available",
     "agentCard.updateTitle": "A newer CLI version is pinned by AgentMux — update it in the Toolchain pane",
+    "pendingPanel.stopAndSend": "Stop it and send now",
+    "pendingPanel.stopAndSendTip": "Stops the agent's running command, then sends the waiting messages",
     "pendingPanel.waiting.one": "Waiting ({{count}} message) — the agent's command is still running",
     "pendingPanel.waiting.other": "Waiting ({{count}} messages) — the agent's command is still running",
     "pendingPanel.waitingAhead.one": "Waiting ({{count}} message, {{ahead}} ahead) — the agent's command is still running",
