@@ -18,11 +18,12 @@ vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: 
 
 let entries: VaultEntryInfo[] = [];
 let activity: VaultActivity[] = [];
-const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
+const defaultVault = async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
     if (op === "grants") return { granted: entries.filter((e) => e.grants.length > 0).map((e) => ({ id: e.id, label: e.label, kind: e.kind, grants: e.grants })) };
     if (op === "activity") return { activity };
     return {};
-});
+};
+const vault = vi.fn(defaultVault);
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
 import { VaultSecrets } from "./vault-secrets";
@@ -48,17 +49,21 @@ const entry = (over: Partial<VaultEntryInfo> = {}): VaultEntryInfo => ({
 const row = (over: Partial<VaultActivity>): VaultActivity => ({ at: Date.now(), entry_id: "api-key-stripe", entry_label: "Stripe", actor: "Agent1", action: "ran a command", target: "stripe balance retrieve", outcome: "done", seq: 1, version: 0, actor_kind: "agent", host: "", reason: "", refs: [], is_use: true, ...over });
 
 beforeEach(() => {
-    vault.mockClear();
+    vault.mockReset();
+    vault.mockImplementation(defaultVault);
     openOrFocus.mockClear();
     entries = [entry(), entry({ id: "ssn-alex", label: "Alex", grants: [] })];
     activity = [
         row({}),
-        row({ actor: "you", action: "revealed", target: "value" }),
+        row({ actor: "you", actor_kind: "person", action: "revealed", target: "value" }),
         row({ actor: "Agent2", action: "filled a web form", target: "https://irs.gov (SSN)", outcome: "denied" }),
         row({ actor: "Agent3", action: "requested an entry", target: "Stripe test key", outcome: "pending" }),
         row({ actor: "Agent4", action: "generated", entry_label: "Webhook secret", target: "sign test webhooks" }),
     ];
 });
+
+/** `n` lines by agents, newest first. */
+const agentLines = (n: number, from = 1): VaultActivity[] => Array.from({ length: n }, (_, i) => row({ actor: `Bot${from + i}`, seq: from + i, target: `job ${from + i}` }));
 afterEach(cleanup);
 
 describe("Secrets in the Vault's Audit section", () => {
@@ -74,6 +79,66 @@ describe("Secrets in the Vault's Audit section", () => {
         expect(table.textContent).not.toContain("Agent3");
         expect(table.textContent).toContain("Agent4");
         expect(table.textContent).toContain("sign test webhooks");
+    });
+
+    it("lists every kind of thing an agent did with an entry, and none of the app's or the person's", async () => {
+        activity = [
+            row({ actor: "Agent5", action: "signed in", target: "https://dash.example (alex)" }),
+            row({ actor: "Agent6", action: "rotated", target: "new value" }),
+            row({ actor: "Agent7", action: "captured", target: "aws iam create-access-key" }),
+            row({ actor: "Agent8", action: "imported a batch", target: "3 keys" }),
+            row({ actor: "Agent9", action: "shared", target: "profile of Agent9" }),
+            row({ actor: "Agent10", action: "asked to be given it", target: "Stripe" }),
+            row({ actor: "AgentMux", actor_kind: "srv", action: "reminded", target: "expires in 7 days" }),
+            row({ actor: "you", actor_kind: "person", action: "copied", target: "value" }),
+            // A line made before the Vault kept who did it: known by its old kinds of use only.
+            row({ actor: "Old1", actor_kind: "", action: "ran a command", target: "old command" }),
+            row({ actor: "Old2", actor_kind: "", action: "rotated", target: "old rotation" }),
+        ];
+        render(() => <VaultSecrets />);
+        const text = (await screen.findByRole("table", { name: "Agents' use of secrets" })).textContent ?? "";
+        for (const who of ["Agent5", "Agent6", "Agent7", "Agent8", "Agent9", "Old1"]) expect(text).toContain(who);
+        for (const not of ["Agent10", "AgentMux", "copied", "Old2"]) expect(text).not.toContain(not);
+    });
+
+    it("shows fifty at a time, says how much it covers, and reads further back when asked", async () => {
+        const all = agentLines(120);
+        vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+            if (op === "grants") return { granted: [] };
+            if (op === "activity") return { activity: all.slice(0, Math.min(Number(args?.limit), all.length)) };
+            return {};
+        });
+        render(() => <VaultSecrets />);
+        const table = await screen.findByRole("table", { name: "Agents' use of secrets" });
+        expect(within(table).getAllByRole("row")).toHaveLength(51);
+        // Fewer lines than the read asked for: nothing older exists, so no claim that there is.
+        expect(screen.getByText(/Showing 50 of the 120 things agents did/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(101));
+        fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(121));
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+        expect(screen.queryByText(/Older lines are in the Vault's Activity/)).toBeNull();
+        expect(vault.mock.calls.filter((c) => c[0] === "activity").map((c) => (c[1] as { limit: number }).limit)).toEqual([500]);
+    });
+
+    it("when the read came back full, reads twice as far back, to a limit, then points to the Vault", async () => {
+        const all = agentLines(20000);
+        vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+            if (op === "grants") return { granted: [] };
+            if (op === "activity") return { activity: all.slice(0, Number(args?.limit)) };
+            return {};
+        });
+        render(() => <VaultSecrets />);
+        await screen.findByRole("table", { name: "Agents' use of secrets" });
+        const limits = () => vault.mock.calls.filter((c) => c[0] === "activity").map((c) => (c[1] as { limit: number }).limit);
+        // 500 lines read, 500 are agents': show 50 at a time until all of them are on screen, then read further.
+        for (let i = 0; i < 9; i++) fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        await waitFor(() => expect(screen.getByText(/Showing 500 of the 500/)).toBeInTheDocument());
+        fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        await waitFor(() => expect(limits()).toEqual([500, 1000]));
+        // The count may carry the language's thousands separator.
+        await waitFor(() => expect(screen.getByText(/Showing 550 of the 1\D?000 things/)).toBeInTheDocument());
     });
 
     it("loads nothing from the Vault until it is shown", async () => {
@@ -108,7 +173,7 @@ describe("Secrets in the Vault's Audit section", () => {
     });
 
     it("says so when no agent has used a secret", async () => {
-        activity = [row({ actor: "you" })];
+        activity = [row({ actor: "you", actor_kind: "person" })];
         entries = [];
         render(() => <VaultSecrets />);
         expect(await screen.findByText("No agent has used a secret yet.")).toBeInTheDocument();
