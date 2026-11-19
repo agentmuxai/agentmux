@@ -17,6 +17,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/agent-grants", () => ({ startAgentGrants: () => {} }));
+const openConnectors = vi.fn();
+vi.mock("@/app/store/section-panes", () => ({ openConnectors: (...a: unknown[]) => openConnectors(...a) }));
 let onEvent: ((data: unknown) => void) | null = null;
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: (_: string, f: (d: unknown) => void) => (onEvent = f) }));
 vi.mock("@/app/notification/waiting-for-you", () => ({ startWaitingForYou: () => {}, endWaitingForYou: () => {} }));
@@ -64,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
     cleanup();
     decide.mockReset();
+    openConnectors.mockReset();
     vi.useRealTimers();
 });
 
@@ -187,6 +190,49 @@ describe("a one-line notice", () => {
         render(() => <Line {...r.props} close={close} />);
         fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
         expect(close).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("a container agent refused a credential", () => {
+    const REFUSED: NoticeView = {
+        ...LINE,
+        id: "c1",
+        kind: "github",
+        headline: "GitHub isn't connected on this AgentMux account: connect it in Connectors → Accounts",
+        body: "",
+        quote: "",
+    };
+
+    it("stays in the pane until srv says the credential works again", () => {
+        onEvent!(REFUSED);
+        expect(requestOf("agent-notice-line")).toBeTruthy();
+        vi.advanceTimersByTime(LINE_SHOWN_MS * 10);
+        expect(requestOf("agent-notice-line"), "a one-line notice goes by, this one doesn't").toBeTruthy();
+        onEvent!({ ...REFUSED, status: "cleared" });
+        expect(requestOf("agent-notice-line")).toBeUndefined();
+    });
+
+    it("says srv's sentence, with no countdown and no choice, and a way to Connectors for GitHub", () => {
+        onEvent!(REFUSED);
+        const r = requestOf("agent-notice-line")!;
+        const Line = r.Component;
+        render(() => <Line {...r.props} close={vi.fn()} />);
+        expect(screen.getByText(REFUSED.headline)).toBeTruthy();
+        expect(screen.queryByRole("timer")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Stop it" })).toBeNull();
+        expect(r.waits).toBe(false);
+        fireEvent.click(screen.getByRole("button", { name: "Open Connectors" }));
+        expect(openConnectors).toHaveBeenCalledWith("accounts");
+    });
+
+    it("has no Connectors link for AWS, whose login the person renews on the host", () => {
+        onEvent!({ ...REFUSED, id: "c2", kind: "aws", headline: "The host's AWS login for 'dev' has lapsed." });
+        const r = requestOf("agent-notice-line")!;
+        const Line = r.Component;
+        render(() => <Line {...r.props} close={vi.fn()} />);
+        expect(screen.getByText(/AWS login for 'dev' has lapsed/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Open Connectors" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy();
     });
 });
 

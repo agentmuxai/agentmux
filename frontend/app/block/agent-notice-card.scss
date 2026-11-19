@@ -107,6 +107,35 @@
     text-overflow: ellipsis;
 }
 
+// A refused credential is a sentence to read, not a note that goes by: it wraps, to three lines, and keeps its link.
+.agent-notice-line--credential .agent-notice-line-text {
+    display: -webkit-box;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+}
+
+.agent-notice-line-link {
+    flex: none;
+    white-space: nowrap;
+}
+
+// In a narrow pane the link goes under the sentence (the close button stays beside it), so the words keep the width.
+@container agent-pane (max-width: 400px) {
+    .agent-notice-line--credential {
+        flex-wrap: wrap;
+    }
+
+    .agent-notice-line--credential .agent-notice-line-text {
+        flex: 1 1 calc(100% - 2.5rem);
+    }
+
+    .agent-notice-line--credential .agent-notice-line-link {
+        order: 1;
+    }
+}
+
 @container (max-width: 280px) {
     .agent-notice-card {
         gap: var(--space-1);

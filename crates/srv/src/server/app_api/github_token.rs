@@ -22,6 +22,7 @@ use super::AppState;
 use crate::identity::github_connect;
 use crate::identity::github_tokens::{self, TokenError, Want};
 use crate::muxbus::github_broker::BrokerError;
+use crate::sagas::credential_notice::{self, Cause};
 use crate::server::caller::Caller;
 
 #[derive(Debug, Deserialize)]
@@ -75,7 +76,8 @@ pub(crate) async fn handle_github_token(
         return refuse(StatusCode::UNAUTHORIZED, "no agent token: GitHub tokens are for an agent's own commands".to_string());
     };
     let mstore = state.mstore.clone();
-    let (slug, in_container) = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&uid)).await {
+    let lookup = uid.clone();
+    let (slug, in_container) = match tokio::task::spawn_blocking(move || mstore.agent_def_get(&lookup)).await {
         Ok(Ok(Some(def))) => { let in_container = def.runtime().is_container(); (def.slug, in_container) }
         Ok(Ok(None)) => return refuse(StatusCode::UNAUTHORIZED, "the agent token names no agent on this machine".to_string()),
         _ => return refuse(StatusCode::INTERNAL_SERVER_ERROR, "couldn't read the agent".to_string()),
@@ -107,6 +109,7 @@ pub(crate) async fn handle_github_token(
             Ok(host) => {
                 let now = chrono::Utc::now().timestamp();
                 tracing::info!(target: "identity", agent = %slug, owner = %req.owner, repo = %req.repo, "identity.github: a container agent's token from the host's gh-agent");
+                credential_notice::worked(&state, &uid, &slug, Cause::Github);
                 return Json(json!({
                     "token": host.token.as_str(),
                     "expiresAt": if host.expires_at > now { host.expires_at } else { now + 300 },
@@ -142,21 +145,42 @@ pub(crate) async fn handle_github_token(
     let backend = github_tokens::Live { mstore: state.id_store.clone(), identity_store: state.identity_store.clone() };
     let want = Want { agent: slug, owner: req.owner, repo: req.repo, workflows };
     match github_tokens::global().token_for(&backend, &want, chrono::Utc::now().timestamp()).await {
-        Ok(minted) => Json(json!({
-            "token": minted.token.as_str(),
-            "expiresAt": minted.expires_at,
-            "botSlug": minted.bot.slug,
-            "botUserId": minted.bot.bot_user_id,
-            "ownerGithubId": owner.as_ref().map(|(id, _)| *id),
-            "ownerLogin": owner.as_ref().map(|(_, login)| login.as_str()),
-        }))
-        .into_response(),
+        Ok(minted) => {
+            // (A native agent never has a line up, so this is a lookup that finds nothing.)
+            credential_notice::worked(&state, &uid, &want.agent, Cause::Github);
+            Json(json!({
+                "token": minted.token.as_str(),
+                "expiresAt": minted.expires_at,
+                "botSlug": minted.bot.slug,
+                "botUserId": minted.bot.bot_user_id,
+                "ownerGithubId": owner.as_ref().map(|(id, _)| *id),
+                "ownerLogin": owner.as_ref().map(|(_, login)| login.as_str()),
+            }))
+            .into_response()
+        }
         Err(e) => {
             tracing::info!(target: "identity", agent = %want.agent, owner = %want.owner, repo = %want.repo, error = %e, "identity.github: no agent token");
-            let (status, message) = refusal_for(host_error, &e);
+            let (status, message) = refusal_shown(&state, &uid, &want.agent, in_container, host_error, &e);
             refuse(status, message)
         }
     }
+}
+
+/// [`refusal_for`], and for a container agent the sentence it was given is also put in its pane, when the person can fix it.
+fn refusal_shown(state: &AppState, uid: &str, slug: &str, in_container: bool, host_error: Option<String>, e: &TokenError) -> (StatusCode, String) {
+    let shows = in_container && the_persons_to_fix(e, host_error.as_deref());
+    let (status, message) = refusal_for(host_error, e);
+    if shows {
+        credential_notice::refused(state, uid, slug, Cause::Github, &message);
+    }
+    (status, message)
+}
+
+/// Whether a refusal is one the person can fix, so a container agent's pane says so: GitHub isn't connected, the
+/// App isn't installed where the repository is, or the Cloud sign-in lapsed. A slow `gh-agent` is only a bad moment.
+fn the_persons_to_fix(e: &TokenError, host_error: Option<&str>) -> bool {
+    let slow = host_error.is_some_and(crate::identity::gh_agent_token::is_took_too_long);
+    !slow && matches!(e, TokenError::NoGithubAccount | TokenError::NoInstallation { .. } | TokenError::Broker(BrokerError::NotSignedIn(_) | BrokerError::NotConnected))
 }
 
 /// What a refusal says, and its status, once the broker path has failed too (`host_error`: what `gh-agent` said
@@ -237,6 +261,18 @@ mod tests {
         let (status, message) = refusal_for(slow, &TokenError::NoInstallation { owner: "o".into() });
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(message.starts_with("GitHub token took too long") && message.contains("Try again in a minute; ") && message.contains("isn't installed"), "{message}");
+    }
+
+    #[test]
+    fn only_a_refusal_the_person_can_fix_is_shown_in_the_agents_pane() {
+        let slow = crate::identity::gh_agent_token::took_too_long();
+        for e in [TokenError::NoGithubAccount, TokenError::NoInstallation { owner: "o".into() }, TokenError::Broker(BrokerError::NotConnected), TokenError::Broker(BrokerError::NotSignedIn("lapsed".into()))] {
+            assert!(the_persons_to_fix(&e, None), "{e:?}");
+            assert!(the_persons_to_fix(&e, Some("gh-agent gave no token for that repository")), "{e:?}");
+            assert!(!the_persons_to_fix(&e, Some(&slow)), "a slow gh-agent is a bad moment, not a connection to fix: {e:?}");
+        }
+        assert!(!the_persons_to_fix(&TokenError::BadTarget("x".into()), None));
+        assert!(!the_persons_to_fix(&TokenError::Broker(BrokerError::Unavailable("x".into())), None));
     }
 
     #[test]

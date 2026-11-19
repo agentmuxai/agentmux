@@ -650,6 +650,7 @@
     "historyUsage.measured": "Measured {{ago}}",
     "historyUsage.measureAgain": "Measure again",
     "historyUsage.openHistory": "Open History",
+    "agentNotice.openConnectors": "Open Connectors",
     "gpuMeter.label": "GPU",
     "gpuMeter.aria": "GPU use, click for the GPU panel",
     "gpuMeter.gfxAria": "Graphics acceleration status, click for the GPU panel",
