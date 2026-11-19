@@ -45,6 +45,12 @@
                 min-width: 0;
                 @include mixins.truncate;
             }
+
+            // How long the oldest queued message has waited: one clock for the queue, at the header's right.
+            .agent-pending-timer {
+                flex: none;
+                font-variant-numeric: tabular-nums;
+            }
         }
 
         // A queued message (`.agent-pending-item`) is the human's own words waiting, so it is styled
