@@ -92,9 +92,7 @@ parseDiskVolumes 0
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-40-false);" data-tip="0 volumes" aria-expanded="false">
-      "Disk"
-      "40"
-      "%"
+      "Disk 40% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -132,9 +130,7 @@ parseDiskVolumes 0
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-40-true);" data-tip="0 volumes" aria-expanded="false">
-      "Disk"
-      "40"
-      "%"
+      "Disk 40% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -172,9 +168,7 @@ parseDiskVolumes 0
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-0-null);" data-tip="0 volumes" aria-expanded="false">
-      "Disk"
-      "0"
-      "%"
+      "Disk 0% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">

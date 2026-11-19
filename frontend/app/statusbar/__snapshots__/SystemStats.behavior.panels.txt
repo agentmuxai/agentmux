@@ -19,9 +19,7 @@ parseDiskVolumes 2
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -57,9 +55,7 @@ parseDiskVolumes 2
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -96,9 +92,7 @@ CpuCoresPopover onClose
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="false">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -134,9 +128,7 @@ CpuCoresPopover onClose
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="2 volumes" aria-expanded="true">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1">
     <span class="stat-separator">
       "|"
@@ -175,9 +167,7 @@ parseDiskVolumes 4
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="true">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1,v2,v3">
     <span class="stat-separator">
       "|"
@@ -215,9 +205,7 @@ parseDiskVolumes 4
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="true">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <div data-stand="DiskVolumesPopover" data-anchor="stat-mono stat-watch-disk stat-disk-button" data-volumes="v0,v1,v2,v3">
     <span class="stat-separator">
       "|"
@@ -256,9 +244,7 @@ DiskVolumesPopover onClose
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="false">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">
@@ -295,9 +281,7 @@ DiskVolumesPopover onClose
     <span class="stat-separator">
       "|"
     <button type="button" class="stat-mono stat-watch-disk stat-disk-button" aria-label="Free disk space, click for per-drive breakdown" aria-haspopup="dialog" style="color: var(--watch-55-null);" data-tip="4 volumes" aria-expanded="false">
-      "Disk"
-      "55"
-      "%"
+      "Disk 55% free"
     <span class="stat-separator">
       "|"
     <span class="stat-mono stat-net stat-idle" data-tip="Network upload and download" aria-label="Network traffic">

@@ -32,6 +32,7 @@ import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/a
 import { onCleanup, Show, type JSX } from "solid-js";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import { useClosedWindows } from "./useClosedWindows";
+import { useTrashedWindows } from "./useTrashedWindows";
 import {
     reconcileWhenLauncherSilent,
     useAboutDetails,
@@ -114,8 +115,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     reconcileWhenLauncherSilent();
 
     const { resolveEntryWindowId, resolveName } = useWindowIdentity(myLabel);
-    const { closed, refreshClosed } = useClosedWindows(() => entries().length, () => placeSlots());
-    const onlyOpenWindow = () => entries().length <= 1;
+    const { visibleEntries, hide } = useTrashedWindows(entries); // a window just removed leaves the list at once
+    const { closed, refreshClosed } = useClosedWindows(() => visibleEntries().length, () => placeSlots());
+    const onlyOpenWindow = () => visibleEntries().length <= 1;
     const reopen = (w: ClosedWindow) => {
         if (!isHeldWindow(w)) void reopenClosedWindow(w.workspaceid).then(refreshClosed);
     };
@@ -126,7 +128,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const removeOpen = (entry: WindowEntry) => {
         if (onlyOpenWindow()) return;
         // A row whose window id has not arrived (no opacity slider yet) is closed by its label, not ignored.
-        void requestRemoveWindow({ windowId: resolveEntryWindowId(entry), label: entry.label }, () => discard(entry)).then(refreshClosed);
+        const label = entry.label;
+        void requestRemoveWindow(
+            { windowId: resolveEntryWindowId(entry), label },
+            () => {
+                discard(entry);
+                hide(label, true); // the window is certain to go: its row goes now
+            },
+            () => hide(label, false), // the close failed (it said so): the window is still there
+        ).then(refreshClosed);
     };
 
     const windowRename = useWindowRename(entries, resolveEntryWindowId);
@@ -148,8 +158,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         windowRename.flush();
     });
 
-    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(entries, closed, resolveEntryWindowId, resolveName);
-    const rowContext = { OpacityControl, entries, myLabel, rename: windowRename, resolveName, onlyOpenWindow, focusWindow, remove: removeOpen };
+    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(visibleEntries, closed, resolveEntryWindowId, resolveName);
+    const rowContext = { OpacityControl, entries: visibleEntries, myLabel, rename: windowRename, resolveName, onlyOpenWindow, focusWindow, remove: removeOpen };
 
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
@@ -168,7 +178,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             <AboutSection about={about} />
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
-                <WorkspaceTitle rename={workspaceRename} windowCount={() => entries().length + closed().length} />
+                <WorkspaceTitle rename={workspaceRename} windowCount={() => visibleEntries().length + closed().length} />
                 <WindowSlotList
                     slotKeys={slotKeys}
                     openByKey={openByKey}
