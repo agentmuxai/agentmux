@@ -1163,6 +1163,8 @@
     "connectors.state.alsoSignIn.other": "{{count}} need sign-in again",
     "connectors.state.alsoFailed.one": "{{count}} couldn't connect",
     "connectors.state.alsoFailed.other": "{{count}} couldn't connect",
+    "connectors.flash.connected": "✓ Connected",
+    "connectors.flash.announce": "{{name}} connected",
     "connectors.control.connect": "Connect",
     "connectors.control.howTo": "How to connect",
     "connectors.control.reconnect": "Reconnect",

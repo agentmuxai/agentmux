@@ -204,6 +204,18 @@ Per decision D1 and D2. The three places in §2 change together:
 
 The new pane starts on the list (`connectors:section` unset means `accounts`).
 
+### 4.9 No success step: the card flashes "Connected"
+
+Added after approval, from the operator's words relayed by AgentY on 2026-11-19: no success step after "Connected", in the agent pane and in Connectors; "we can tell from the UI"; in Connectors, flash "connected" inside the pane.
+
+- **When a connect succeeds, nothing is left to read and dismiss.** No modal, no "Signed in" panel with Done or OK. The Connect section collapses at once (a sign-in that worked, or an account saved).
+- **The card flashes, once, in place.** The card is now in Connected; for about 2.8 seconds it holds a success-coloured line and tint with "✓ Connected" where the chevron goes, then goes back to its connected state. The state word under the name ("Connected · <account>") is there throughout and stays.
+- **It shows with animation effects off.** The flash is a held state that a timer removes, not a keyframe animation, so the OS's reduced-motion setting does not switch it off; the preference only removes any fade back.
+- **Screen readers hear it once:** a `role="status"` line ("OpenAI connected") is added to the card for the flash; the visible badge is hidden from them.
+- **Only a connect the person started here flashes.** A card flashes when its Connect section was opened in this pane and the connector then becomes connected. The first load of the list, where every connected card appears at once, flashes nothing.
+- **A failure still shows its reason** in the section, with Retry, as today. Only the success step is gone.
+- **The agent pane side** (the in-pane sign-in panel closing by itself on success) is #48130, Agent1's. It is one shared component (`SignedIn` in `provider-login-view.tsx`), so that task removes it; Connectors does not depend on it, because its own sections close the panel as soon as the sign-in reports success.
+
 ## 5. Research: what other harnesses do
 
 Read 2026-11-19, each page fetched. Practices are paraphrased. **Not found:** the ChatGPT help pages returned 403 to every fetch, so nothing here claims what ChatGPT does; and I found no documented guidance on narrow layouts or screen readers for a connector list in any product, so §4.7 is our own rules, from the UI spec.

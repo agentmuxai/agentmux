@@ -54,6 +54,28 @@
     &.is-attention:not(.is-open) {
         border-color: var(--ui-line-danger);
     }
+
+    // Just connected (§4.9): the card holds a success line and tint, with "✓ Connected" where the chevron goes, for a
+    // moment, then goes back. It is a held state, not an animation, so it shows on a machine whose animation effects are
+    // off (prefers-reduced-motion): the only thing the preference removes is the fade back.
+    &.is-flash,
+    &.is-flash:hover {
+        border-color: var(--success-color);
+        background: color-mix(in srgb, var(--success-color) var(--ui-tint-hover), transparent);
+    }
+}
+
+.connector-card-flash {
+    padding: 0 var(--space-1);
+    color: var(--success-color);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+// Read by a screen reader once when the card connects; never drawn.
+.connector-card-announce {
+    @include mixins.sr-only;
 }
 
 .connector-card-icon {

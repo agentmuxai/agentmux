@@ -55,6 +55,7 @@ function Group(props: {
                     <ConnectorCard
                         entry={e}
                         open={s.openKey() === e.key}
+                        flash={s.flash().has(e.key)}
                         detailId={props.detailId}
                         onToggle={() => s.toggle(e)}
                         onReconnect={() => s.reconnect(e)}

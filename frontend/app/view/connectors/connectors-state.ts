@@ -5,7 +5,7 @@
 // and Available), and which card is open (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.5). One card is open at a
 // time: its details when connected, its Connect section when not.
 
-import { createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 
 import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { useAccountUseCounts } from "@/app/view/accounts/account-card";
@@ -14,6 +14,9 @@ import { requestReconnect } from "@/app/view/accounts/oauth-account-state";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { IdentityViewModel } from "@/app/view/identity/identity-model";
 import { connectorEntries, connectorMatches, type ConnectorEntry } from "./connector-entries";
+
+/** How long a card that has just connected shows "Connected" before it settles into its state. */
+export const CONNECTED_FLASH_MS = 2800;
 
 export interface ConnectorsState {
     model: IdentityViewModel;
@@ -27,6 +30,8 @@ export interface ConnectorsState {
     shownCount: Accessor<number>;
     connectedCount: Accessor<number>;
     openKey: Accessor<string | null>;
+    /** The keys of cards that have just connected and are showing "Connected" (§4.9). */
+    flash: Accessor<ReadonlySet<string>>;
     /** The open connected card's Add another account section is showing. */
     adding: Accessor<boolean>;
     setAdding: (open: boolean) => void;
@@ -62,7 +67,34 @@ export function useConnectorsState(): ConnectorsState {
         setAdding(false);
         model.setSelectedAccount(null);
     };
+
+    // A connect succeeding has no success step to read and dismiss (§4.9): the Connect section closes and the card,
+    // now in Connected, shows "Connected" once, in place. Only a card whose Connect section the person opened here
+    // counts, so the first load of the list, where every account appears at once, flashes nothing.
+    const awaiting = new Set<string>();
+    const [flash, setFlash] = createSignal<ReadonlySet<string>>(new Set());
+    const timers: number[] = [];
+    onCleanup(() => timers.forEach((id) => window.clearTimeout(id)));
+    createEffect(() => {
+        for (const e of entries()) {
+            if (!e.connected || !awaiting.delete(e.key)) continue;
+            if (untrack(openKey) === e.key) close();
+            setFlash((s) => new Set(s).add(e.key));
+            timers.push(
+                window.setTimeout(
+                    () =>
+                        setFlash((s) => {
+                            const n = new Set(s);
+                            n.delete(e.key);
+                            return n;
+                        }),
+                    CONNECTED_FLASH_MS
+                )
+            );
+        }
+    });
     const open = (e: ConnectorEntry, withAdd = false) => {
+        if (!e.connected) awaiting.add(e.key);
         model.setSelectedAccount(null);
         setAdding(withAdd);
         setOpenKey(e.key);
@@ -80,6 +112,7 @@ export function useConnectorsState(): ConnectorsState {
         shownCount: () => shown().length,
         connectedCount: () => entries().filter((e) => e.connected).length,
         openKey,
+        flash,
         adding,
         setAdding,
         close,

@@ -19,6 +19,8 @@ export interface ConnectorCardProps {
     entry: ConnectorEntry;
     /** Its details (or, before it is connected, its Connect section) are showing. */
     open: boolean;
+    /** It has just connected: it shows "Connected" in place for a moment (§4.9). */
+    flash?: boolean;
     /** The id of the panel it opens, for `aria-controls`. */
     detailId: string;
     onToggle: () => void;
@@ -50,7 +52,16 @@ function Control(props: ConnectorCardProps): JSX.Element {
     return (
         <Show
             when={e().control !== "open"}
-            fallback={<span class="connector-card-chevron" aria-hidden="true" data-open={props.open ? "" : undefined} />}
+            fallback={
+                <Show
+                    when={props.flash}
+                    fallback={<span class="connector-card-chevron" aria-hidden="true" data-open={props.open ? "" : undefined} />}
+                >
+                    <span class="connector-card-flash" aria-hidden="true">
+                        {t("connectors.flash.connected")}
+                    </span>
+                </Show>
+            }
         >
             <Button
                 density="compact"
@@ -83,7 +94,7 @@ export function ConnectorCard(props: ConnectorCardProps): JSX.Element {
     return (
         <div
             class="connector-card"
-            classList={{ "is-open": props.open, "is-attention": e().connected && e().tone === "error", "is-connected": e().connected }}
+            classList={{ "is-open": props.open, "is-flash": props.flash, "is-attention": e().connected && e().tone === "error", "is-connected": e().connected }}
             data-connector={e().key}
             // The whole connected card is the disclosure for a mouse; the keyboard and screen readers use its button.
             onClick={(ev) => {
@@ -110,6 +121,12 @@ export function ConnectorCard(props: ConnectorCardProps): JSX.Element {
             <span class="connector-card-control">
                 <Control {...props} />
             </span>
+            {/* Announced once, when the card connects; the visible flash is aria-hidden so it is not read twice. */}
+            <Show when={props.flash}>
+                <span class="connector-card-announce" role="status">
+                    {t("connectors.flash.announce", { name: e().name })}
+                </span>
+            </Show>
         </div>
     );
 }

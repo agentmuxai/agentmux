@@ -104,7 +104,14 @@ export function AddAccountSection(props: {
             </Show>
             <Show when={signInProvider()}>
                 {(p) => (
-                    <ProviderLoginPanel inline provider={p()} brand={tile.signIn?.brand} onClose={() => props.onClose()} />
+                    // A sign-in that worked collapses the section at once: no "Signed in" step to dismiss (§4.9); the card says it.
+                    <ProviderLoginPanel
+                        inline
+                        provider={p()}
+                        brand={tile.signIn?.brand}
+                        onSignedIn={() => props.onClose()}
+                        onClose={() => props.onClose()}
+                    />
                 )}
             </Show>
             <Show when={mode() !== null && !signInProvider() && model.formOpenAtom() && !model.editingAccountAtom()}>

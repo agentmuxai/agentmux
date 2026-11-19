@@ -25,7 +25,9 @@ vi.mock("@/app/element/ui/open-menu-at", async (original) => ({
     openMenuAt: menu.show,
 }));
 
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { ConnectorsList } from "./connectors-list";
+import { CONNECTED_FLASH_MS } from "./connectors-state";
 
 function account(id: string, provider: string, email: string, extra: Record<string, unknown> = {}) {
     return {
@@ -208,6 +210,39 @@ describe("Connect", () => {
         // Close collapses it.
         fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
         await waitFor(() => expect(screen.queryByRole("group", { name: "Connect Custom" })).toBeNull());
+    });
+
+    it("has no success step: the section closes and the card shows Connected in place once, then settles (§4.9)", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        // The first load flashes nothing: every connected card appeared at once.
+        expect(document.querySelector(".connector-card.is-flash")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
+        await screen.findByRole("group", { name: "Connect OpenAI" });
+
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+            rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, account("a4", "openai", "gpt@example.com")]);
+            await refreshAccountCache();
+            await vi.waitFor(() => expect(connectedNames()).toContain("OpenAI"));
+
+            // No section, no dialog, no OK to press; the card itself says Connected, and the screen reader hears it once.
+            expect(screen.queryByRole("group", { name: "Connect OpenAI" })).toBeNull();
+            expect(screen.queryByRole("dialog")).toBeNull();
+            const card = document.querySelector('[data-connector="openai"]')!;
+            expect(card.classList.contains("is-flash")).toBe(true);
+            expect(card.querySelector(".connector-card-flash")?.textContent).toContain("Connected");
+            expect(card.querySelector('[role="status"]')?.textContent).toBe("OpenAI connected");
+
+            // It settles into its connected state, and the state word stays.
+            await vi.advanceTimersByTimeAsync(CONNECTED_FLASH_MS + 50);
+            const settled = document.querySelector('[data-connector="openai"]')!;
+            expect(settled.classList.contains("is-flash")).toBe(false);
+            expect(settled.querySelector(".connector-card-flash")).toBeNull();
+            expect(settled.querySelector(".connector-card-line")?.textContent).toContain("Connected");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("moves the add section to another card when the person picks one, and keeps its form open", async () => {
