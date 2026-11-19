@@ -22,7 +22,8 @@
  *    the gap between slots: every width changes with them), or when the set of slots changed (a different strip,
  *    not a wobble in one).
  *  - A release is followed by the strip measuring again at the new width; those passes (`settling`, which the strip
- *    holds open for two frames) take the fresh layout as it comes, so the latch starts from the settled layout.
+ *    holds open while they keep coming, SETTLE_MS after the last) take the fresh layout as it comes, so the latch
+ *    starts from the settled layout. This lengthens the start of a latch; nothing ends one.
  *  - Nothing else is timed: a pane left alone for an hour keeps its layout. The latch is state of one strip, so one
  *    pane's latch does not touch another's; a strip hidden and shown at the same width comes back as it was.
  */
@@ -53,6 +54,9 @@ export interface Latch {
  * end of it.
  */
 export const RESIZE_PX = 1;
+
+/** How long after the last measuring pass the strip stops taking fresh layouts at the width it just released at. */
+export const SETTLE_MS = 300;
 
 /**
  * The visual lines a layout takes: its rows, and the stats' own line when there are stats and they are not inline

@@ -57,7 +57,7 @@ import { useBlockStats } from "@/app/hook/useBlockStats";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { ACCOUNT_BUDGETS, accountInitial, middleTruncate, shortContextText } from "./composer-forms";
 import { useSlotForms } from "./composer-forms-probes";
-import { latchLayout, type Latch } from "./composer-row-latch";
+import { latchLayout, SETTLE_MS, type Latch } from "./composer-row-latch";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
 import { tip } from "@/app/element/tip";
@@ -936,17 +936,17 @@ function createLayout(
     // Kept across the stretches with no measurement (a hidden pane reports no width), so the same width coming back
     // comes back to the same layout.
     let latch: Latch | undefined;
-    // Open after a release, for two frames: the measuring that a new width sets off finishes inside it.
+    // Open after a release and kept open while the measuring that a new width sets off is still going (the compact
+    // forms measure a frame or more later): each pass inside it opens it again, and it closes once SETTLE_MS pass
+    // with no pass. It only ever lengthens the start of a latch, it never ends one.
     let settling = false;
     let settleId = 0;
     const openSettle = (): void => {
         const mine = ++settleId;
         settling = true;
-        const close = (): void => {
+        setTimeout(() => {
             if (mine === settleId) settling = false;
-        };
-        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(close));
-        else queueMicrotask(close);
+        }, SETTLE_MS);
     };
     return createMemo((): { rows: ComposerRow[]; statsInline: boolean } => {
         const list = slots();
@@ -965,6 +965,7 @@ function createLayout(
         const fresh = measuredLayout(list, widths, width, statsWidth, refs, edgeOrdered);
         const gapPx = stripGap(refs);
         const before = latch;
+        const wasSettling = settling;
         latch = latchLayout(latch, fresh, {
             settling,
             widths,
@@ -975,7 +976,8 @@ function createLayout(
             metrics: `${zoomRatio(refs).toFixed(3)}|${gapPx.toFixed(1)}|${refs.rowsRef ? getComputedStyle(refs.rowsRef).fontSize : ""}`,
             content: `${list.map((s) => s.key).join(",")}|${statsWidth() > 0}`,
         });
-        if (!before || latch.width !== before.width || latch.metrics !== before.metrics || latch.content !== before.content) openSettle();
+        const began = !before || latch.width !== before.width || latch.metrics !== before.metrics || latch.content !== before.content;
+        if (began || wasSettling) openSettle();
         return latch.layout;
     });
 }
