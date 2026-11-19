@@ -14,6 +14,9 @@ vi.mock("./pane-color-menu", async (importOriginal) => ({
 
 import { buildPaneColorSubmenu } from "./blockframe";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
+import { PALETTE } from "@/app/theme/palette";
+import { tabSample } from "@/app/theme/paint";
+import { currentTabInk } from "@/app/tab/tab-ink";
 
 const block = (meta: Record<string, unknown>) => ({ oid: "block-1", meta }) as unknown as Block;
 const entries = (meta: Record<string, unknown>) =>
@@ -38,11 +41,16 @@ describe("the Pane Color menu", () => {
         expect(shape({ view: "t-term" })).toEqual(["Default", "-", ...HUES, "-", "Black", "White"]);
     });
 
-    it("gives every colour a swatch, Black and White as themselves", () => {
+    it("draws every colour's swatch as the selected pill it makes: its fill with its bar, from the one paint call", () => {
         const items = entries({ view: "t-term" }).filter((i) => i.type !== "separator" && i.label !== "Default");
         expect(items).toHaveLength(14);
-        for (const item of items) expect(item.swatchColor, item.label).toMatch(/^#[0-9a-f]{6}$/);
-        expect(items.slice(12).map((i) => i.swatchColor)).toEqual(["#000000", "#ffffff"]);
+        for (const item of items) {
+            const slot = PALETTE.find((s) => s.name === item.label)!;
+            const sample = tabSample(slot, false, currentTabInk());
+            expect([item.swatchColor, item.swatchBar], item.label).toEqual([sample.fill, sample.bar]);
+            expect(item.swatchColor, item.label).toMatch(/^#[0-9a-f]{6}$/);
+            expect(item.swatchBar, item.label).toMatch(/^#[0-9a-f]{6}$/);
+        }
     });
 
     it("checks Default with no pick, the picked slot otherwise, and the slot a retired id became", () => {
