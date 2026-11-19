@@ -15,9 +15,11 @@
 //!    exactly that version, newer than this one, beside a portable; or that
 //!    version's installer, with the release's digest, in this version's own
 //!    `updates/<v>/`, on a `setup.exe` install;
-//! 2. asks the user with a native dialog ([`confirm`]), which no page or agent
-//!    tool in AgentMux can click: a restart stops every agent, so it takes the
-//!    user's own answer here, whoever asked srv;
+//! 2. goes ahead when srv marks the request confirmed (the restart was decided
+//!    in the app: the user's own click or turn, or an approved request's in-app
+//!    countdown with no veto); a request without the mark, from an older srv, is
+//!    asked with a native dialog ([`confirm`]), which no page or agent tool in
+//!    AgentMux can click;
 //! 3. quits the host the way the tray's Quit does, which closes the windows and
 //!    saves the session;
 //! 4. after srv has stopped (so the new version copies complete data,

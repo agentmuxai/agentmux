@@ -552,8 +552,8 @@ fn describe_outcome(o: &Value) -> String {
     match s(o, "status") {
         "started" => {
             let mut text = format!(
-                "Upgrade to {version} started: AgentMux downloads it if needed, asks the user to confirm in its own \
-                 dialog, then restarts once every agent has finished its turn. End your turn so you don't hold it up. \
+                "Upgrade to {version} started: AgentMux downloads it if needed, then restarts once every agent has finished \
+                 its turn and the in-app countdown has ended, with no second dialog. End your turn so you don't hold it up. \
                  Your session resumes after the restart."
             );
             let stopping: Vec<&str> = o["stopping"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).collect();

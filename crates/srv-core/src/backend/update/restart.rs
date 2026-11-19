@@ -380,9 +380,10 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool, a
     if !asked {
         return;
     }
-    // The launcher is asking the user. A No (or a question that lapsed) comes
-    // back as a file, so the panel stops saying "Restarting" at once; with no
-    // answer at all the grace runs out.
+    // The launcher is told to go ahead. It asks only about a file it refuses or a
+    // package install's own permission prompt; a No to that (or a question that
+    // lapsed) comes back as a file, so the panel stops saying "Restarting" at
+    // once; with no answer at all the grace runs out.
     let grace_ends = tokio::time::Instant::now() + RESTART_GRACE;
     while tokio::time::Instant::now() < grace_ends {
         tokio::time::sleep(POLL).await;
