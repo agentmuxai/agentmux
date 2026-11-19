@@ -57,6 +57,7 @@ import { useBlockStats } from "@/app/hook/useBlockStats";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { ACCOUNT_BUDGETS, accountInitial, middleTruncate, shortContextText } from "./composer-forms";
 import { useSlotForms } from "./composer-forms-probes";
+import { latchLayout, type Latch } from "./composer-row-latch";
 import { useStatsZone } from "./composer-stats-zone";
 import { isContainerAgentMode, parseRuntimeKind } from "@/util/runtime-kind";
 import { tip } from "@/app/element/tip";
@@ -930,6 +931,23 @@ function createLayout(
     statsWidth: Accessor<number>,
     refs: StripRefs,
 ): Accessor<{ rows: ComposerRow[]; statsInline: boolean }> {
+    // The strip's row latch (composer-row-latch.ts): not reactive state, only what the last measured layout was, so
+    // a readout that changes width by a character cannot flip the strip between line counts at one pane width.
+    // Kept across the stretches with no measurement (a hidden pane reports no width), so the same width coming back
+    // comes back to the same layout.
+    let latch: Latch | undefined;
+    // Open after a release, for two frames: the measuring that a new width sets off finishes inside it.
+    let settling = false;
+    let settleId = 0;
+    const openSettle = (): void => {
+        const mine = ++settleId;
+        settling = true;
+        const close = (): void => {
+            if (mine === settleId) settling = false;
+        };
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => requestAnimationFrame(close));
+        else queueMicrotask(close);
+    };
     return createMemo((): { rows: ComposerRow[]; statsInline: boolean } => {
         const list = slots();
         const widths = slotWidths();
@@ -944,7 +962,21 @@ function createLayout(
         const edgeOrdered = edgeOrderer(list);
 
         if (!allMeasured || totalMeasured === 0 || width === 0) return fallbackLayout(list, edgeOrdered);
-        return measuredLayout(list, widths, width, statsWidth, refs, edgeOrdered);
+        const fresh = measuredLayout(list, widths, width, statsWidth, refs, edgeOrdered);
+        const gapPx = stripGap(refs);
+        const before = latch;
+        latch = latchLayout(latch, fresh, {
+            settling,
+            widths,
+            statsWidth: statsWidth(),
+            gapPx,
+            width,
+            // A zoom, a font size or a changed gap changes every width at once: a release, like a resize.
+            metrics: `${zoomRatio(refs).toFixed(3)}|${gapPx.toFixed(1)}|${refs.rowsRef ? getComputedStyle(refs.rowsRef).fontSize : ""}`,
+            content: `${list.map((s) => s.key).join(",")}|${statsWidth() > 0}`,
+        });
+        if (!before || latch.width !== before.width || latch.metrics !== before.metrics || latch.content !== before.content) openSettle();
+        return latch.layout;
     });
 }
 
