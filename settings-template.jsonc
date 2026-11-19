@@ -489,6 +489,13 @@
     // Claude Code compacts on its own mid-task.
     // "agent:compacthintat": 400000,
 
+    // The context size, in tokens, over which AgentMux compacts a container agent itself, between
+    // turns, when the agent has not acted on the agent:compacthints note: at the head of the
+    // container's queue, ahead of the messages waiting. Two tries; if the context is still over
+    // after them, the agent's pane shows a warning and its leader is told. 0 turns it off. A route
+    // agent has its own limit, from its model's budget.
+    // "agent:compactbackstopat": 600000,
+
     // When an agent edits a file another agent on this computer has uncommitted or edited in
     // the last two hours (same repository and path, in any clone), AgentMux sends the editing
     // agent a short [AgentMux] note naming the other agent, so it can message them first.
