@@ -166,6 +166,46 @@ describe("Connectors as cards", () => {
         await waitFor(() => expect(document.querySelector(".identity-account-panel")).toBeTruthy());
     });
 
+    it("keeps an open card's accounts current: an account added or deleted shows without closing it", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(disclosure(/^Anthropic/));
+        await screen.findByRole("region", { name: "Anthropic details" });
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, account("a5", "claude", "second@example.com")]);
+        await refreshAccountCache();
+        const accounts = await screen.findByRole("group", { name: "Anthropic accounts" });
+        await waitFor(() =>
+            expect([...accounts.querySelectorAll(".ui-card-title")].map((n) => n.textContent)).toEqual(["me@example.com", "second@example.com"]),
+        );
+        rpc.ListIdentityAccountsCommand.mockResolvedValue(ACCOUNTS);
+        await refreshAccountCache();
+        await waitFor(() => expect(within(accounts).queryByText("second@example.com")).toBeNull());
+    });
+
+    it("closes an open card's details when its last account is deleted, instead of opening Connect under it", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(disclosure(/^Anthropic/));
+        await screen.findByRole("region", { name: "Anthropic details" });
+        rpc.ListIdentityAccountsCommand.mockResolvedValue(ACCOUNTS.filter((a) => a.id !== "a2"));
+        await refreshAccountCache();
+        await waitFor(() => expect(availableNames()).toContain("Anthropic"));
+        expect(screen.queryByRole("group", { name: "Connect Anthropic" })).toBeNull();
+        expect(screen.queryByRole("region", { name: "Anthropic details" })).toBeNull();
+    });
+
+    it("gives each pane its own detail ids", async () => {
+        render(() => (
+            <>
+                <ConnectorsList />
+                <ConnectorsList />
+            </>
+        ));
+        await waitFor(() => expect(document.querySelectorAll('[data-connector="github"]').length).toBe(2));
+        const ids = [...document.querySelectorAll('[data-connector="github"] [aria-controls]')].map((b) => b.getAttribute("aria-controls"));
+        expect(new Set(ids).size).toBe(2);
+    });
+
     it("builds the account menu on right-click of an account in the details", async () => {
         render(() => <ConnectorsList />);
         await ready();
@@ -240,6 +280,25 @@ describe("Connect", () => {
             expect(settled.classList.contains("is-flash")).toBe(false);
             expect(settled.querySelector(".connector-card-flash")).toBeNull();
             expect(settled.querySelector(".connector-card-line")?.textContent).toContain("Connected");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not flash a card that connects some other way after its Connect section was closed", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
+        const section = await screen.findByRole("group", { name: "Connect OpenAI" });
+        fireEvent.click(within(section).getAllByRole("button", { name: "Close" })[0]);
+        await waitFor(() => expect(screen.queryByRole("group", { name: "Connect OpenAI" })).toBeNull());
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+        try {
+            await vi.advanceTimersByTimeAsync(6000);
+            rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, account("a4", "openai", "gpt@example.com")]);
+            await refreshAccountCache();
+            await vi.waitFor(() => expect(connectedNames()).toContain("OpenAI"));
+            expect(document.querySelector(".connector-card.is-flash")).toBeNull();
         } finally {
             vi.useRealTimers();
         }

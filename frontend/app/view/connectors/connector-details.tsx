@@ -20,7 +20,8 @@ import type { Account, IdentityViewModel } from "@/app/view/identity/identity-mo
 import type { ConnectorEntry } from "./connector-entries";
 
 export interface ConnectorDetailsProps {
-    entry: ConnectorEntry;
+    /** The connector, read live: its accounts change while its details are open (an account added, deleted or updated). */
+    entry: Accessor<ConnectorEntry>;
     model: IdentityViewModel;
     muxbus: MuxBusController;
     /** How many agents use each account. */
@@ -42,8 +43,8 @@ function Accounts(props: ConnectorDetailsProps): JSX.Element {
     return (
         <CardGrid
             class="connector-accounts"
-            ariaLabel={t("connectors.accountsLabel", { name: props.entry.name })}
-            items={props.entry.accounts}
+            ariaLabel={t("connectors.accountsLabel", { name: props.entry().name })}
+            items={props.entry().accounts}
             keyOf={(a) => a.id}
             // One column however wide: an account's line is read as a list.
             minCardWidth={100000}
@@ -52,7 +53,7 @@ function Accounts(props: ConnectorDetailsProps): JSX.Element {
             renderCard={(a) => (
                 <AccountCard
                     account={a}
-                    all={props.entry.accounts}
+                    all={props.entry().accounts}
                     usedBy={props.usedBy().get(a.id) ?? 0}
                     selected={model.selectedAccountAtom()?.id === a.id}
                     onSelect={() => toggle(a)}
@@ -76,7 +77,7 @@ function Accounts(props: ConnectorDetailsProps): JSX.Element {
 export function ConnectorDetails(props: ConnectorDetailsProps): JSX.Element {
     return (
         <Show
-            when={props.entry.tile.id !== "agentmux"}
+            when={props.entry().tile.id !== "agentmux"}
             fallback={<AgentMuxConnectBody muxbus={props.muxbus} />}
         >
             <div class="connector-details">
@@ -88,7 +89,7 @@ export function ConnectorDetails(props: ConnectorDetailsProps): JSX.Element {
                 </div>
                 <Show when={props.adding()}>
                     <AddAccountSection
-                        tile={props.entry.tile}
+                        tile={props.entry().tile}
                         model={props.model}
                         muxbus={props.muxbus}
                         onClose={() => props.setAdding(false)}

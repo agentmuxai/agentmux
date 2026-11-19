@@ -18,9 +18,8 @@
 
 // ── Tile-click chooser (OAuth / Key) ──────────────────────────────────────────
 // These class names are shared by TWO different dialogs:
-//  1. AccountsGallery.tsx's own OAuth-vs-Key mode picker — a small, still
-//     hand-rolled overlay+dialog (`.accounts-chooser-overlay` provides its
-//     backdrop; `.accounts-chooser` its box chrome). Unrelated to Modal.
+//  1. The OAuth-vs-Key mode picker (Connectors' add section uses the inline
+//     form of it; `.accounts-chooser` is its box chrome). Unrelated to Modal.
 //  2. ProviderLoginPanel.tsx's dialog — now wrapped in the canonical <Modal>
 //     via `panelClass="accounts-chooser"`, which just adds this class
 //     alongside `modal-panel` on the same element. Outer chrome (backdrop,

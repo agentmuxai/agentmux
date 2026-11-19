@@ -6,7 +6,7 @@
 // connected has Connect, which opens the add section under its row of cards; a connected one opens its accounts there.
 // It replaces the Accounts section's two lists, the add gallery and the Connected cards. Its section id stays `accounts`.
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { createUniqueId, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button, CardGrid, EmptyState, FilterInput, SectionHeader } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
@@ -69,6 +69,8 @@ function Group(props: {
 
 export function ConnectorsList(): JSX.Element {
     const s = useConnectorsState();
+    // Panel ids are per pane: two Connectors panes in one window must not share an id (aria-controls points at it).
+    const uid = createUniqueId();
     return (
         <div class="identity-view accounts-manager">
             <div class="identity-body accounts-manager-body">
@@ -87,11 +89,11 @@ export function ConnectorsList(): JSX.Element {
                     <Group
                         s={s}
                         title={t("connectors.group.connected")}
-                        detailId="connectors-detail-connected"
+                        detailId={`connectors-${uid}-connected`}
                         items={s.connected}
                         renderDetail={(e) => (
                             <ConnectorDetails
-                                entry={e}
+                                entry={() => s.entryOf(e.key) ?? e}
                                 model={s.model}
                                 muxbus={s.muxbus}
                                 usedBy={s.usedBy}
@@ -103,7 +105,7 @@ export function ConnectorsList(): JSX.Element {
                     <Group
                         s={s}
                         title={t("connectors.group.available")}
-                        detailId="connectors-detail-available"
+                        detailId={`connectors-${uid}-available`}
                         items={s.available}
                         renderDetail={(e) => (
                             <AddAccountSection tile={e.tile} model={s.model} muxbus={s.muxbus} onClose={s.close} />

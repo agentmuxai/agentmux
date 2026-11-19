@@ -17,6 +17,8 @@ import { connectorEntries, connectorMatches, type ConnectorEntry } from "./conne
 
 /** How long a card that has just connected shows "Connected" before it settles into its state. */
 export const CONNECTED_FLASH_MS = 2800;
+/** How long after its section closes a connector that then connects still counts as connected from here. */
+const CONNECT_GRACE_MS = 5000;
 
 export interface ConnectorsState {
     model: IdentityViewModel;
@@ -39,6 +41,8 @@ export interface ConnectorsState {
     toggle: (e: ConnectorEntry) => void;
     reconnect: (e: ConnectorEntry) => void;
     openCustom: () => void;
+    /** The live entry for a connector key, for details that stay open while its accounts change. */
+    entryOf: (key: string) => ConnectorEntry | undefined;
     /** `key` when it is open among `items`, else null: what a group's grid passes as its selected key. */
     openIn: (items: Accessor<ConnectorEntry[]>) => string | null;
 }
@@ -63,6 +67,8 @@ export function useConnectorsState(): ConnectorsState {
     const available = () => shown().filter((e) => !e.connected);
 
     const close = () => {
+        const was = untrack(openKey);
+        if (was != null && awaiting.has(was)) awaiting.set(was, Date.now() + CONNECT_GRACE_MS);
         setOpenKey(null);
         setAdding(false);
         model.setSelectedAccount(null);
@@ -71,13 +77,19 @@ export function useConnectorsState(): ConnectorsState {
     // A connect succeeding has no success step to read and dismiss (§4.9): the Connect section closes and the card,
     // now in Connected, shows "Connected" once, in place. Only a card whose Connect section the person opened here
     // counts, so the first load of the list, where every account appears at once, flashes nothing.
-    const awaiting = new Set<string>();
+    // A Connect section that closes keeps its place for a moment: saving the account closes the section, and the account
+    // reaches the list a beat later. After that a connector that connects some other way (the agent pane's sign-in) does
+    // not flash here, since no connect was started in this pane.
+    const awaiting = new Map<string, number>();
     const [flash, setFlash] = createSignal<ReadonlySet<string>>(new Set());
     const timers: number[] = [];
     onCleanup(() => timers.forEach((id) => window.clearTimeout(id)));
     createEffect(() => {
         for (const e of entries()) {
-            if (!e.connected || !awaiting.delete(e.key)) continue;
+            if (!e.connected) continue;
+            const until = awaiting.get(e.key);
+            awaiting.delete(e.key);
+            if (until === undefined || until < Date.now()) continue;
             if (untrack(openKey) === e.key) close();
             setFlash((s) => new Set(s).add(e.key));
             timers.push(
@@ -93,8 +105,15 @@ export function useConnectorsState(): ConnectorsState {
             );
         }
     });
+    // The open card stops being connected (its last account was deleted): its details close, rather than the card's Connect
+    // section opening by itself under it. A card opened through Connect is waiting to connect and is left alone.
+    createEffect(() => {
+        const key = openKey();
+        const e = key == null ? undefined : entries().find((x) => x.key === key);
+        if (e && !e.connected && !untrack(() => awaiting.has(key!))) close();
+    });
     const open = (e: ConnectorEntry, withAdd = false) => {
-        if (!e.connected) awaiting.add(e.key);
+        if (!e.connected) awaiting.set(e.key, Infinity);
         model.setSelectedAccount(null);
         setAdding(withAdd);
         setOpenKey(e.key);
@@ -128,6 +147,7 @@ export function useConnectorsState(): ConnectorsState {
             const custom = entries().find((e) => e.key === "custom");
             if (custom) open(custom, custom.connected);
         },
+        entryOf: (key) => entries().find((e) => e.key === key),
         openIn: (items) => items().find((e) => e.key === openKey())?.key ?? null,
     };
 }
