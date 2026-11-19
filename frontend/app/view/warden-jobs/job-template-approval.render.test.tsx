@@ -802,8 +802,14 @@ describe("it follows its props", () => {
 
 
 describe("a Drone template's facts", () => {
-    const drone = (summary: { nodes: number; agents: number; writes_outside: string[] }, manifest: Partial<JobTemplateManifest> = {}) =>
-        job({ kind: "drone", action: null, outputs: [], ...manifest }, { drone: summary });
+    const drone = (summary: { nodes: number; agents: number; writes_outside: string[]; credentials?: string[] }, manifest: Partial<JobTemplateManifest> = {}) =>
+        job({ kind: "drone", action: null, outputs: [], ...manifest }, { drone: { credentials: [], ...summary } });
+
+    it("says whether it uses a credential and where, from the graph and trigger, whatever the manifest declares", () => {
+        show(drone({ nodes: 2, agents: 0, writes_outside: [], credentials: ["trigger: {{param.credential}}"] }, { secrets: [] }));
+        expect(fact("Uses a credential").textContent).toBe("yes, because of auth.vault:trigger: {{param.credential}}");
+        expect(fact("Secrets").textContent).toBe("none declared (see Uses a credential)");
+    });
 
     it("shows the graph's size, the agents it starts and the calls it makes outside AgentMux", () => {
         show(drone({ nodes: 5, agents: 2, writes_outside: ["post: POST https://example.com/hook"] }));

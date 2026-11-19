@@ -1103,5 +1103,9 @@
     "towerLong.page.heap": "JS heap {{heap}}",
     "towerLong.page.elements": "{{n}} elements",
     "towerLong.page.rows": "{{n}} rows",
-    "towerLong.page.charted": "(charted)"
+    "towerLong.page.charted": "(charted)",
+    "templateApproval.usesCredential": "Uses a credential",
+    "templateApproval.usesCredentialYes": "yes, because of auth.vault:",
+    "templateApproval.usesCredentialNo": "no",
+    "templateApproval.secretsNoneDeclared": "none declared (see Uses a credential)"
 }

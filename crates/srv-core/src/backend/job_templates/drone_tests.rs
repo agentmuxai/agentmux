@@ -269,9 +269,9 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
                 assert!(node.data.get(*key).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()), "{}: node {} needs {key}", b.id, node.id);
             }
         }
-        // Nothing is secret-looking or private, and nothing writes outside AgentMux but the one re-run.
+        // Nothing is secret-looking or private, and nothing writes outside AgentMux.
         let writes = graph::summarize(pkg.graph.as_ref().unwrap()).writes_outside;
-        assert_eq!(writes.is_empty(), b.id != "agentmux.rerun-flaky-job", "{}: {writes:?}", b.id);
+        assert!(writes.is_empty(), "{}: {writes:?}", b.id);
         assert!(pkg.manifest.secrets.is_empty());
     }
 }
@@ -415,24 +415,83 @@ fn the_nightly_triage_spends_an_agent_only_on_a_failure_and_files_a_task_only_wh
 }
 
 #[test]
-fn the_flaky_rerun_writes_outside_once_and_only_for_the_named_workflow_on_its_first_attempt() {
+fn the_flaky_job_check_tells_once_and_only_for_the_named_workflow_on_its_first_attempt_and_writes_nothing_outside() {
     let (pkg, g, trigger) = rendered("agentmux.rerun-flaky-job");
-    assert_eq!(pkg.manifest.outputs, ["message:owner", "ci_rerun"]);
-    assert_eq!(pkg.manifest.outside_writes(), ["ci_rerun"]);
+    // It reads untrusted text and uses a credential, so it may not write outside AgentMux (the Rule of Two):
+    // the re-run is left to the person or agent the line goes to.
+    assert_eq!(pkg.manifest.outputs, ["message:owner"]);
+    assert!(pkg.manifest.outside_writes().is_empty());
     assert_eq!(trigger["filter"]["id"], "id", "a run is told once, by its id");
     let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
     assert_eq!(data("flaky")["expr"], "{{trigger.item.run_attempt}} == 1 && {{trigger.item.name}} == 'CI'");
-    assert_eq!(edges_from(&g, "flaky", Some("true")), ["rerun"]);
+    assert_eq!(edges_from(&g, "flaky", Some("true")), ["tell"]);
     assert!(edges_from(&g, "flaky", Some("false")).is_empty());
-    // GitHub answers 201 when it takes the re-run; any other answer is told as a refusal, never as a re-run.
-    assert_eq!(data("ok")["expr"], "{{rerun.status}} == 201");
-    assert_eq!(edges_from(&g, "rerun", None), ["ok"]);
-    assert_eq!(edges_from(&g, "ok", Some("true")), ["tell"]);
-    assert_eq!(edges_from(&g, "ok", Some("false")), ["refused"]);
-    assert!(data("refused")["body"].as_str().unwrap().contains("refused the re-run"));
-    // The one write is the re-run, its address is constant but for the run's number (a number the poll read).
-    assert_eq!(graph::summarize(&g).writes_outside, ["rerun: POST https://api.github.com/repos/acme/site/actions/runs/{{trigger.key}}/rerun-failed-jobs"]);
+    assert!(data("tell")["body"].as_str().unwrap().contains("re-run its failed jobs"));
+    assert!(graph::summarize(&g).writes_outside.is_empty());
     assert_eq!(graph::summarize(&g).agents, 0, "no agent reads the run");
+}
+
+// ── A credential is found in the graph and the trigger, not in what the manifest declares ──
+
+/// A poll trigger and a graph of one POST, each with a Vault entry as given, and the outputs declared.
+fn with_credential(trigger_vault: Option<&str>, node_vault: Option<&str>, outputs: Value, policy: Value) -> Result<package::Package, String> {
+    let mut filter = json!({ "query": "api", "every_minutes": 10, "url": "https://api.github.com/repos/a/b/actions/runs" });
+    if let Some(v) = trigger_vault {
+        filter["auth"] = json!({ "vault": v, "as": "bearer" });
+    }
+    let mut call = json!({ "kind": "api", "url": "https://api.github.com/repos/a/b/x", "method": "POST" });
+    if let Some(v) = node_vault {
+        call["auth"] = json!({ "vault": v, "as": "bearer" });
+    }
+    let m = manifest(json!({
+        "params": { "type": "object", "properties": { "credential": { "type": "string" } } },
+        "trigger": { "kind": "event", "source": "poll", "filter": filter },
+        "outputs": outputs,
+        "policy": policy,
+    }));
+    parse(&m, Some(&json!({ "nodes": [node("call", call)], "edges": [] })), None)
+}
+
+#[test]
+fn a_credential_in_the_trigger_or_a_node_counts_for_the_rule_of_two_whatever_secrets_says() {
+    let outside = json!(["ci_rerun"]);
+    // Untrusted (a poll), a credential, and a write outside: refused, naming the three and what to do.
+    for (trigger, node, where_) in [(Some("api-key-github"), None, "in the trigger, a literal id"), (None, Some("{{param.credential}}"), "in a node, through a parameter")] {
+        let err = with_credential(trigger, node, outside.clone(), Value::Null).unwrap_err();
+        assert!(err.contains("reads untrusted input") && err.contains("uses a credential") && err.contains("writes outside (ci_rerun)"), "{where_}: {err}");
+        assert!(err.contains("remove one of the three"), "{where_}: {err}");
+    }
+    // No credential anywhere: it passes, with the same outputs.
+    assert!(with_credential(None, None, outside.clone(), Value::Null).is_ok());
+    // A credential and untrusted input but no write outside: it passes.
+    assert!(with_credential(Some("api-key-github"), Some("api-key-github"), json!(["message:owner"]), Value::Null).is_ok());
+    // An approval per run lets all three stand.
+    assert!(with_credential(Some("api-key-github"), None, outside, json!({ "approval": "required" })).is_ok());
+}
+
+#[test]
+fn the_prompt_says_where_a_template_reads_a_credential() {
+    let pkg = with_credential(Some("api-key-github"), Some("{{param.credential}}"), json!(["message:owner"]), Value::Null).unwrap();
+    assert!(pkg.manifest.secrets.is_empty(), "the manifest declares none");
+    assert_eq!(
+        graph::credentials(pkg.graph.as_ref().unwrap(), pkg.manifest.trigger.as_ref()),
+        ["trigger: api-key-github", "node call: {{param.credential}}"]
+    );
+    let none = with_credential(None, None, json!(["message:owner"]), Value::Null).unwrap();
+    assert!(graph::credentials(none.graph.as_ref().unwrap(), none.manifest.trigger.as_ref()).is_empty());
+}
+
+#[test]
+fn the_built_in_drones_that_poll_with_a_token_are_shown_with_it_and_none_of_them_writes_outside() {
+    for b in DRONE_BUILTINS {
+        let pkg = package::load_embedded(b.id, b.files).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+        let credentials = graph::credentials(pkg.graph.as_ref().unwrap(), pkg.manifest.trigger.as_ref());
+        let polls_with_token = ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed"].contains(&b.id);
+        assert_eq!(!credentials.is_empty(), polls_with_token, "{}: {credentials:?}", b.id);
+        if !credentials.is_empty() {
+            assert!(pkg.manifest.outside_writes().is_empty(), "{}: it reads untrusted text and uses a credential", b.id);
+        }
+    }
 }
 
 #[test]
@@ -485,7 +544,7 @@ fn a_parameter_put_into_an_address_is_a_name_or_owner_slash_name() {
         let b = DRONE_BUILTINS.iter().find(|b| b.id == id).unwrap();
         package::load_embedded(b.id, b.files).unwrap()
     };
-    let id = "agentmux.rerun-flaky-job";
+    let id = "agentmux.triage-failed-nightly";
     let p = pkg(id);
     let with = |repo: &str| {
         let mut given = example(id);

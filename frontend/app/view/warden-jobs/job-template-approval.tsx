@@ -12,6 +12,7 @@
 import { For, Show, type JSX } from "solid-js";
 
 import { Button, Pill, type PillTone } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { CloudExpect } from "@/types/rpc/CloudExpect";
 import type { DroneSummary } from "@/types/rpc/DroneSummary";
 import type { JobTemplateInfo } from "@/types/rpc/JobTemplateInfo";
@@ -179,6 +180,18 @@ const DroneFacts = (props: { manifest: JobTemplateManifest; drone: DroneSummary 
                 <For each={props.drone?.writes_outside}>{(call) => <Pill tone="warn">{call}</Pill>}</For>
             </Show>
         </dd>
+        <dt>{t("templateApproval.usesCredential")}</dt>
+        <dd>
+            <Show
+                when={(props.drone?.credentials?.length ?? 0) > 0}
+                fallback={<span class="warden-manager-dim">{t("templateApproval.usesCredentialNo")}</span>}
+            >
+                {t("templateApproval.usesCredentialYes")}
+                <For each={props.drone?.credentials}>
+                    {(use) => <div style={{ "overflow-wrap": "anywhere" }}>{use}</div>}
+                </For>
+            </Show>
+        </dd>
     </>
 );
 
@@ -204,11 +217,18 @@ const OutputsFact = (props: { outputs: string[] }): JSX.Element => (
 );
 
 /** Every secret the template declares. */
-const SecretsFact = (props: { secrets: JobTemplateManifest["secrets"] }): JSX.Element => (
+const SecretsFact = (props: { secrets: JobTemplateManifest["secrets"]; usesCredential?: boolean }): JSX.Element => (
     <>
         <dt>Secrets</dt>
         <dd>
-            <Show when={props.secrets.length > 0} fallback={<span class="warden-manager-dim">none</span>}>
+            <Show
+                when={props.secrets.length > 0}
+                fallback={
+                    <span class="warden-manager-dim">
+                        {props.usesCredential ? t("templateApproval.secretsNoneDeclared") : "none"}
+                    </span>
+                }
+            >
                 <For each={props.secrets}>{(s) => <Pill title={s.description ?? undefined}>{s.name}</Pill>}</For>
             </Show>
         </dd>
@@ -239,7 +259,10 @@ const ApprovalFacts = (props: { info: JobTemplateInfo; manifest: JobTemplateMani
                     <DroneFacts manifest={props.manifest} drone={props.info.drone} />
                 </Show>
                 <OutputsFact outputs={props.manifest.outputs} />
-                <SecretsFact secrets={props.manifest.secrets} />
+                <SecretsFact
+                    secrets={props.manifest.secrets}
+                    usesCredential={(props.info.drone?.credentials?.length ?? 0) > 0}
+                />
                 <Show when={props.manifest.kind !== "cloud"}>
                     <dt>Default caps</dt>
                     <dd>{capsWords(props.manifest.policy)}</dd>

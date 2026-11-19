@@ -247,10 +247,19 @@ impl JobTemplateManifest {
 /// secrets and write outside, unless each run waits for the operator's
 /// approval.
 pub fn rule_of_two(m: &JobTemplateManifest) -> Result<(), String> {
+    rule_of_two_with(m, false)
+}
+
+/// [`rule_of_two`], where `graph_credential` says the template's graph or trigger reads a credential
+/// from the Vault (`auth.vault`): that counts as holding secrets whatever `secrets` declares, which
+/// a Drone template cannot declare at all.
+pub fn rule_of_two_with(m: &JobTemplateManifest, graph_credential: bool) -> Result<(), String> {
     let outside = m.outside_writes();
-    if m.reads_untrusted_input() && m.holds_secrets() && !outside.is_empty() && !m.requires_approval() {
+    let holds = m.holds_secrets() || graph_credential;
+    if m.reads_untrusted_input() && holds && !outside.is_empty() && !m.requires_approval() {
+        let credential = if m.holds_secrets() { "holds secrets" } else { "uses a credential (an auth.vault in its graph or trigger)" };
         return Err(format!(
-            "it reads untrusted input, holds secrets and writes outside ({}): one of the three must go, or its policy must say \"approval\": \"required\"",
+            "it reads untrusted input, {credential} and writes outside ({}): remove one of the three (read only trusted input, drop the credential, or make the outside write an inside one, such as a message or a task that says what to do), or its policy must say \"approval\": \"required\"",
             outside.join(", ")
         ));
     }
