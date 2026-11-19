@@ -194,8 +194,11 @@ mod tests {
         use std::io::BufRead as _;
         use std::os::unix::process::CommandExt as _;
         let dir = temp_dir("leaderless");
+        // The CLI waits on its stdin, so it is still running while its start time is read (on a slow machine a
+        // CLI that had already exited has no start time to read); closing stdin lets it exit.
         let mut cli = std::process::Command::new("sh")
-            .args(["-c", "sleep 30 & echo $!"])
+            .args(["-c", "sleep 30 & echo $!; read line"])
+            .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .process_group(0)
             .spawn()
@@ -206,6 +209,7 @@ mod tests {
         let mut line = String::new();
         std::io::BufReader::new(cli.stdout.take().unwrap()).read_line(&mut line).unwrap();
         let helper: u32 = line.trim().parse().unwrap();
+        drop(cli.stdin.take());
         cli.wait().unwrap();
         assert!(is_alive(&roots.roots[0]), "kept while the helper holds the group");
 
