@@ -22,7 +22,7 @@ use crate::backend::vault::inspect::{self, KeyResult, LinkChange, UpdateRequest}
 use crate::backend::vault::seal;
 use crate::backend::vault::shares::{self, Ask, Asked};
 use crate::backend::vault::source_link::Link;
-use crate::backend::vault::uses::{Ended, UseLink, UseRequest};
+use crate::backend::vault::uses::{Ended, UseHttpPrompt, UseLink, UseRequest};
 
 /// How long the person has to answer a change to an entry's machine copy by default, and at most.
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
@@ -218,14 +218,37 @@ fn share_card(ask: &Ask, agent: &str, pane: &str) -> UseRequest {
         what: "share".into(),
         origin: ask.site.clone(),
         field: ask.user.clone(),
-        offer_always: false,
-        reason: "an agent asked to be able to sign in with this login".into(),
+        // A form login's "Always" is given at its first sign-in. A prompt's is given here: the browser answers it
+        // with no call of the agent's to ask about (A11).
+        offer_always: ask.prompt,
+        reason: if ask.prompt { "an agent asked for its browser to answer this sign-in prompt with this login".into() } else { "an agent asked to be able to sign in with this login".into() },
         agent_reason: ask.reason.clone(),
         kind: "login".into(),
         requested_ms: agentmux_common::time::now_ms_u64(),
         share: true,
+        prompt: ask.prompt.then(|| UseHttpPrompt { realm: ask.realm.clone(), proxy: ask.proxy }),
         ..Default::default()
     }
+}
+
+/// The card's headline, as the attention list shows it.
+fn share_headline(ask: &Ask, agent: &str) -> String {
+    if ask.prompt {
+        return format!("{agent} wants its browser to answer the sign-in prompt of {} with {}", ask.site, ask.label);
+    }
+    format!("{agent} wants to sign in to {} with {}", ask.site, ask.label)
+}
+
+/// What the agent is told of a share the person made: for a sign-in the browser answers a prompt with, also that it
+/// is not typed by `signin` and what to do next.
+fn shared_answer(ask: &Ask, always: bool) -> serde_json::Value {
+    let mut out = json!({ "status": "shared", "id": ask.entry_id, "label": ask.label, "site": ask.site });
+    if ask.prompt {
+        out["prompt"] = json!(true);
+        out["always"] = json!(always);
+        out["next"] = json!("load the page again in a tab of your own browser profile: the browser answers the site's sign-in prompt with it, you never see it, and you are told what became of it");
+    }
+    out
 }
 
 /// What the agent is told when the card didn't end in a yes: silence is a no.
@@ -265,7 +288,7 @@ pub(crate) async fn handle_vault_share(State(state): State<AppState>, caller: Op
         Err(refusal) => return refusal,
     };
     let wait = body.wait_secs.map(Duration::from_secs).unwrap_or(SHARE_WAIT).min(ANSWER_WAIT_MAX);
-    let headline = format!("{agent} wants to sign in to {} with {}", ask.site, ask.label);
+    let headline = share_headline(&ask, &agent);
     let (ended, _) = super::vault_ask::ask(&state, &pane, share_card(&ask, &agent, &pane), wait, &headline).await;
     if !ended.allowed() {
         let (store, ask, who) = (state.identity_store.clone(), ask.clone(), agent.clone());
@@ -273,16 +296,29 @@ pub(crate) async fn handle_vault_share(State(state): State<AppState>, caller: Op
         publish(&state);
         return error(StatusCode::FORBIDDEN, share_not_allowed(ended));
     }
-    let (store, made, who) = (state.identity_store.clone(), ask.clone(), agent.clone());
+    // "Always" is only on the card of a sign-in the browser answers a prompt with (A11).
+    let always = ask.prompt && ended == Ended::Always;
+    let (store, made, who, to) = (state.identity_store.clone(), ask.clone(), agent.clone(), uid.clone());
     let granted = blocking(move || {
-        shares::grant_asked(&store, &made, &uid)?;
+        if always {
+            let profile = format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&to));
+            shares::grant_asked_always(&store, &made, &to, &profile)?;
+        } else {
+            shares::grant_asked(&store, &made, &to)?;
+        }
         shares::note_ask(&store, &made, &who, "done");
         Ok(())
     })
     .await;
     publish(&state);
     match granted {
-        Ok(()) => Json(json!({ "status": "shared", "id": ask.entry_id, "label": ask.label, "site": ask.site })).into_response(),
+        Ok(()) => {
+            // The yes also answers the prompt that waited for it, once.
+            if ask.prompt && !always {
+                super::vault_prompt_share::yes_given(&ask.entry_id, &uid);
+            }
+            Json(shared_answer(&ask, always)).into_response()
+        }
         Err(refusal) => refusal,
     }
 }

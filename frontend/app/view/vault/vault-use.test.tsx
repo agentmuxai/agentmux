@@ -202,6 +202,37 @@ describe("the prompt for an agent's use of an entry", () => {
         await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
     });
 
+    const askShare = async (over: Partial<UseRequest> = {}) => {
+        uses = [use({ entry_id: "login-intranet", entry_label: "Intranet", kind: "login", origin: "https://intranet.example.com", field: "al***", what: "share", offer_always: false, share: true, agent_reason: "read the build status, task 31010", ...over })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        return screen.findByRole("group");
+    };
+
+    it("asks to share a sign-in the browser answers a prompt with: the prompt is named and an Always is offered", async () => {
+        const dialog = await askShare({ offer_always: true, prompt: { realm: "Staff", proxy: false } });
+        expect(dialog.textContent).toContain("Agent1 wants its browser to answer the sign-in prompt of intranet.example.com with Intranet");
+        expect(dialog.textContent).toContain("The browser would give the user name al*** and the password to the sign-in prompt Staff of intranet.example.com");
+        expect(dialog.textContent).toContain("in Agent1's own browser profile");
+        expect(dialog.textContent).toContain("Always answers every one without asking");
+        expect(dialog.textContent).not.toContain("typed into the sign-in form");
+        expect(within(dialog).getByRole("button", { name: "Share it" })).toBeTruthy();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1 on intranet.example.com" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
+    });
+
+    it("says a proxy's sign-in is for the proxy, and leaves a form login's share card with no Always", async () => {
+        const proxy = await askShare({ origin: "http://proxy.example.com:3128", offer_always: true, prompt: { realm: "", proxy: true } });
+        expect(proxy.textContent).toContain("to the proxy proxy.example.com:3128 (http://proxy.example.com:3128) when it asks");
+        cleanup();
+        const form = await askShare();
+        expect(form.textContent).toContain("Agent1 wants to sign in to intranet.example.com with Intranet");
+        expect(form.textContent).toContain("typed into the sign-in form on intranet.example.com");
+        expect(within(form).queryByRole("button", { name: /Always/ })).toBeNull();
+        fireEvent.click(within(form).getByRole("button", { name: "Share it" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once" }]));
+    });
+
     it("cuts a long secret id in the middle, so the name at its end stays readable, with the whole in the tooltip's place", async () => {
         const long = `team-a/secrets/${"team/".repeat(20)}staging-db-creds-AbCdEf`;
         const shown = clipMiddle(long, 90);

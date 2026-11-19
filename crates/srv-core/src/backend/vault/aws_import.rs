@@ -236,6 +236,11 @@ fn check_login_import(target: &Target, source: &Source, share: bool) -> Result<(
     }
     if share {
         super::shares::check_shareable("login", fields)?;
+        // An import's share is the form login's (B3): a sign-in the browser answers a prompt with is asked for on its
+        // own card, which says what that share does (A11).
+        if super::shares::answers_prompt(fields) {
+            return Err("a sign-in for a site's HTTP prompt or a proxy can't be shared with its import: ask for it afterwards with Vault share".into());
+        }
         let site = fields.get(super::signins::SITE).map_or("", String::as_str);
         if !agentmux_common::allowed_origins::target_origin(site).is_some_and(|o| o == site && o.starts_with("https://")) {
             return Err("a login to share names its site as an exact https origin, such as https://example.com".into());

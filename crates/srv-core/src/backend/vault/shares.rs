@@ -9,6 +9,11 @@
 //! refuses an agent's update of it). It changes nothing else about the entry. A
 //! share lets the agent ask: each first use is still approved as a `Browser`
 //! `signin` is (browser_signin.rs).
+//!
+//! A sign-in for a site's HTTP prompt or a proxy (A11) is shared the same way. The
+//! browser answers that prompt itself, in the agent's own profile
+//! ([`signins::find_shared`]); the person is asked at each use unless they chose
+//! "Always" for it, which is kept under [`prompt_grant_key`].
 
 use std::collections::BTreeMap;
 
@@ -44,6 +49,20 @@ pub fn names(fields: &BTreeMap<String, String>, uid: &str) -> bool {
 /// browser_signin.rs names the agent by uid for a shared login, never by a name.
 pub fn grant_prefix(uid: &str) -> String {
     format!("signin:{uid}|")
+}
+
+/// The key the person's "Always" for a shared HTTP-prompt sign-in is kept under: [`grant_prefix`], so it is listed and
+/// ended as any sign-in's "Always" is, then the agent's own browser profile and the origin, kind of prompt and realm
+/// the person was shown. A login whose site or realm is edited afterwards has another key, so its next use asks again
+/// (A6); no form sign-in's key ends this way, so neither kind of "Always" stands for the other.
+pub fn prompt_grant_key(uid: &str, profile: &str, origin: &str, realm: &str, proxy: bool) -> String {
+    format!("{}{profile}|{origin}|prompt:{}|{realm}", grant_prefix(uid), if proxy { "proxy" } else { "site" })
+}
+
+/// Whether a login with these `fields` is a sign-in for a site's HTTP prompt (it names a realm) or for a proxy: the
+/// browser answers that prompt itself, and such a login is never typed into a form.
+pub fn answers_prompt(fields: &BTreeMap<String, String>) -> bool {
+    fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY)
 }
 
 /// An agent's permanent uid, as a share can name it: never the "every agent" mark or a list.
@@ -93,14 +112,11 @@ pub fn remove(store: &Store, id: &str, who: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// Whether an entry of `kind` with these `fields` can be shared: a login saved for a site, which is no sign-in for a
-/// site's HTTP prompt or a proxy.
+/// Whether an entry of `kind` with these `fields` can be shared: a login saved for a site. One for a site's HTTP prompt
+/// or a proxy is shared too ([`answers_prompt`]): the browser answers the prompt with it, and it is typed into no form.
 pub fn check_shareable(kind: &str, fields: &BTreeMap<String, String>) -> Result<(), String> {
     if kind != "login" || !fields.contains_key(SITE) {
         return Err("only a login saved for a site can be shared".into());
-    }
-    if fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY) {
-        return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared".into());
     }
     Ok(())
 }
@@ -176,6 +192,12 @@ pub struct Ask {
     pub user: String,
     pub created_at: i64,
     pub reason: String,
+    /// The login answers a site's HTTP prompt or a proxy's ([`answers_prompt`]): `realm` is the realm it names and
+    /// `proxy` whether it is a proxy's. A login that became one, or stopped being one, while the person was asked is
+    /// not the login they were shown.
+    pub prompt: bool,
+    pub realm: String,
+    pub proxy: bool,
 }
 
 /// What `plan_ask` found.
@@ -194,6 +216,9 @@ fn asked_of(row: &super::VaultRow, fields: &BTreeMap<String, String>, reason: &s
         user: signins::mask(fields.get(USERNAME).map(String::as_str).unwrap_or("")),
         created_at: row.created_at,
         reason: reason.to_string(),
+        prompt: answers_prompt(fields),
+        realm: fields.get(REALM).cloned().unwrap_or_default(),
+        proxy: fields.contains_key(super::signins::PROXY),
     }
 }
 
@@ -217,6 +242,30 @@ pub fn plan_ask(store: &Store, id: &str, agent: &str, uid: &str, reason: Option<
 /// The person allowed `ask`: shares the login with the agent `uid`, if it is still the login they were shown.
 pub fn grant_asked(store: &Store, ask: &Ask, uid: &str) -> Result<(), String> {
     add_shown(store, &ask.entry_id, uid, Some(ask)).map(|_| ())
+}
+
+/// The person answered "Always" to `ask` for an HTTP-prompt sign-in: [`grant_asked`], and the browser then answers
+/// the prompt in the agent's own `profile` without asking again. Only a login that answers a prompt has this: a form
+/// login's "Always" is given at its first `signin`, never with the share (A6).
+pub fn grant_asked_always(store: &Store, ask: &Ask, uid: &str, profile: &str) -> Result<(), String> {
+    if !ask.prompt {
+        return Err("only a sign-in for a site's HTTP prompt or a proxy is shared with an Always".into());
+    }
+    grant_asked(store, ask, uid)?;
+    let key = prompt_grant_key(uid, profile, &ask.site, &ask.realm, ask.proxy);
+    store.vault_grant_add(&ask.entry_id, &key, now_ms(), ask.created_at).map_err(|e| e.to_string())
+}
+
+/// Whether the person gave agent `uid` an "Always" for the shared HTTP-prompt sign-in `row`, used in `profile`: the
+/// login is still shared with it and still names the site and realm the "Always" was given for.
+pub fn prompt_always(store: &Store, row: &super::VaultRow, uid: &str, profile: &str) -> bool {
+    let fields = fields_of(row);
+    if !answers_prompt(&fields) || !names(&fields, uid) {
+        return false;
+    }
+    let get = |k: &str| fields.get(k).map(String::as_str).unwrap_or("");
+    let key = prompt_grant_key(uid, profile, get(SITE), get(REALM), fields.contains_key(super::signins::PROXY));
+    store.vault_grant_check(&row.id, &key).unwrap_or(false)
 }
 
 /// The history line of an ask that did not end in a share: `outcome` is `denied`, `expired` or the like.
@@ -258,3 +307,7 @@ pub fn forget_agent(store: &Store, uid: &str) -> Result<usize, String> {
 #[cfg(test)]
 #[path = "shares_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "shares_prompt_tests.rs"]
+mod prompt_tests;

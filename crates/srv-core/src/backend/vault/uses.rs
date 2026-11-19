@@ -74,8 +74,13 @@ pub struct UseRequest {
     #[ts(skip)]
     pub shared: bool,
     /// An agent asks the person to share a login with it (`Vault` `share`): `origin` is the login's site and `field`
-    /// its user name as the card shows it. Never goes ahead on silence, and never offers "Always".
+    /// its user name as the card shows it. Never goes ahead on silence, and offers "Always" only with `prompt`.
     pub share: bool,
+    /// With `share`: the login answers a site's HTTP prompt or a proxy's, which the browser answers itself in the
+    /// agent's own profile. "Always" then means the browser answers it there without asking again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt: Option<UseHttpPrompt>,
     /// An agent's new account on a sign-up form (`Browser` `generate_password`): the
     /// Vault makes the password. There is no entry yet; `origin` is the site.
     pub account: bool,
@@ -112,6 +117,15 @@ pub struct UseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub choices: Option<Vec<UseChoice>>,
+}
+
+/// The HTTP prompt a shared sign-in answers, as the person reads it: the realm the site names (empty when it names
+/// none) and whether the prompt is a proxy's.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct UseHttpPrompt {
+    pub realm: String,
+    pub proxy: bool,
 }
 
 /// One card of a picker: what the person reads of it, never a number.

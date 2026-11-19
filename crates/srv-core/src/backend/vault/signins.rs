@@ -249,6 +249,64 @@ pub fn fill(store: &Store, s: &Space) -> Result<Option<(String, zeroize::Zeroizi
 /// The action an HTTP sign-in's use is logged as.
 pub const SIGNED_IN: &str = "signed in";
 
+/// The agent whose own browser profile a tab is in, as the Vault knows it: the name its Vaults list it by (`names`:
+/// its slug and its id) and its permanent uid.
+#[derive(Debug, Clone)]
+pub struct ProfileOwner {
+    pub names: Vec<String>,
+    pub uid: String,
+}
+
+/// The HTTP-prompt sign-in the person shared with `owner` that answers `s`, and its user name: the newest that may be
+/// offered ([`offered`]), in a Vault the agent may use, whatever profile it is saved for (spec A4, A5, A11). Only in
+/// the agent's own profile: `s.profile` of any other profile finds none. Only a login that answers a prompt
+/// ([`super::shares::answers_prompt`]): a form login shared with the agent is never given to a prompt.
+pub fn find_shared(store: &Store, s: &Space, owner: &ProfileOwner) -> Result<Option<(VaultRow, String)>, String> {
+    if s.profile != format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(&owner.uid)) {
+        return Ok(None);
+    }
+    let mut rows: Vec<VaultRow> = store
+        .vault_list()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|r| {
+            let f = fields_of(r);
+            let get = |k: &str| f.get(k).map(String::as_str).unwrap_or("");
+            r.kind == "login"
+                && super::shares::answers_prompt(&f)
+                && super::shares::names(&f, &owner.uid)
+                && get(SITE) == s.origin
+                && get(REALM) == s.realm
+                && f.contains_key(PROXY) == s.proxy
+                && offered(r)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    for row in rows {
+        let mut usable = false;
+        for name in &owner.names {
+            usable = usable || super::vaults::entry_row_usable(store, &row.vault_id, Some(name))?;
+        }
+        if usable {
+            let user = fields_of(&row).get(USERNAME).cloned().unwrap_or_default();
+            return Ok(Some((row, user)));
+        }
+    }
+    Ok(None)
+}
+
+/// [`fill`] for the sign-in [`find_shared`] finds: the use is the agent's, logged under `actor`.
+pub fn fill_shared(store: &Store, s: &Space, owner: &ProfileOwner, actor: &str) -> Result<Option<(VaultRow, String, zeroize::Zeroizing<String>)>, String> {
+    let Some((row, user)) = find_shared(store, s, owner)? else { return Ok(None) };
+    let parts = seal::open(&seal::key(false)?, &row.id, &row.sealed)?;
+    let password = zeroize::Zeroizing::new(parts.get("password").unwrap_or("").to_string());
+    record(store, &row.id, &row.label, actor, SIGNED_IN, &s.origin, "done");
+    if let Err(e) = store.vault_touch(&row.id, now_ms()) {
+        tracing::warn!(error = %e, "vault: couldn't note a shared sign-in's use");
+    }
+    Ok(Some((row, user, password)))
+}
+
 /// Keeps the user name and password the person typed for `s`. The same user's
 /// entry gets the new password (the old one kept as a version); another user
 /// gets an entry of its own. Returns the entry's id.
@@ -310,13 +368,24 @@ pub(super) fn label_for(s: &Space) -> String {
 /// the person's only copy, but not offered again until a new password is saved.
 pub fn refused(store: &Store, s: &Space) -> Result<(), String> {
     let Some((row, _)) = find(store, s)? else { return Ok(()) };
-    let mut tags = tags_of(&row);
+    refused_row(store, &row, &s.origin)
+}
+
+/// [`refused`] for the sign-in `owner` was given through a share ([`find_shared`]): the same password is out of date
+/// in every profile that uses it.
+pub fn refused_shared(store: &Store, s: &Space, owner: &ProfileOwner) -> Result<(), String> {
+    let Some((row, _)) = find_shared(store, s, owner)? else { return Ok(()) };
+    refused_row(store, &row, &s.origin)
+}
+
+fn refused_row(store: &Store, row: &VaultRow, origin: &str) -> Result<(), String> {
+    let mut tags = tags_of(row);
     if tags.len() < super::MAX_TAGS {
         tags.push(REFUSED.to_string());
     }
     let changed = VaultRow { tags: serde_json::to_string(&tags).map_err(|e| e.to_string())?, updated_at: now_ms(), ..row.clone() };
     if store.vault_update_kept(&changed, &row.sealed, &row.fields, None).map_err(|e| e.to_string())? {
-        record(store, &row.id, &row.label, PERSON, "refused by the site", &s.origin, "done");
+        record(store, &row.id, &row.label, PERSON, "refused by the site", origin, "done");
     }
     Ok(())
 }
