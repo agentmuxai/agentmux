@@ -151,6 +151,27 @@ pub(super) async fn handle_agent_identity_validate(
 }
 
 #[derive(serde::Deserialize)]
+pub(super) struct AgentIdentityCheckLimitsRequest {
+    pub(super) agent_id: String,
+    /// The account (id, label or email) whose limited agents are looked at; every limited agent when absent.
+    #[serde(default)]
+    pub(super) account: Option<String>,
+}
+
+/// `POST /api/v1/agent/identity/check-limits`: look again, now, at the agents marked out of quota. Backs
+/// `Identity` with action `check_limits` (task #2648): a small turn on each, and one that works clears the limit.
+pub(super) async fn handle_agent_identity_check_limits(
+    State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
+    Json(req): Json<AgentIdentityCheckLimitsRequest>,
+) -> impl IntoResponse {
+    if let Err(e) = actor::require_token(&state, caller.as_deref(), actor::ActorSite::IdentityCheckLimits, &req.agent_id) {
+        return app_api_response::<()>(Err(e));
+    }
+    app_api_response(crate::server::limit_check_api::check_account_limits(state, req.account).await)
+}
+
+#[derive(serde::Deserialize)]
 pub(super) struct SelfQuery {
     /// Block UUID of the calling agent pane (its `AGENTMUX_BLOCKID`).
     pub(super) block_id: Option<String>,

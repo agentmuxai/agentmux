@@ -36,7 +36,7 @@ pub const ALWAYS: &[&str] = &[
     "copyforkhistory", "createagent", "createagentinstance", "createagentskill", "createeditordir",
     "createeditorfile", "createscratchfile", "deleteagent", "deleteagentinstance", "deleteagentskill", "deletedrone",
     "deleteeditorfile", "deleteidentityaccount", "deletememory", "deletesystemmemory", "fleet.broadcast",
-    "fleet.bulk-stop", "fleet.group.create", "fleet.group.delete", "fleet.group.update", "forkagentdefinition",
+    "fleet.bulk-stop", "fleet.check-limits", "fleet.group.create", "fleet.group.delete", "fleet.group.update", "forkagentdefinition",
     "fs.create", "fs.delete", "fs.op.cancel", "fs.op.resolve", "fs.op.start", "fs.open", "fs.rename", "fs.restore",
     "fs.trash", "github.connection", "github.installations", "globalmemory:import", "globalmemory:revert", "globalmemory:set_reach", "hidenamedagent", "history.reclaim",
     "identity.account.move_agents", "identity.account.upsert", "identity.ensureaccountdir", "identity.self.unlink",

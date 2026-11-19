@@ -62,7 +62,7 @@ use super::AppState;
 use super::agent_io::stop_one_agent_block;
 use crate::server::agent_handlers::{run_agent_turn, AgentTurnDeps, TurnRegistration};
 
-const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
+pub(super) const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
 
 /// Turns started at once. Delivery is not rate-limited the way `inject_message`
 /// was (which is why the old 10-per-second chunking is gone), but a pane's turn
@@ -73,6 +73,7 @@ const BROADCAST_CONCURRENCY: usize = 8;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_fleet_broadcast(engine, state);
     register_fleet_bulk_stop(engine, state);
+    super::fleet_check_limits::register(engine, state);
     register_fleet_group_create(engine, state);
     register_fleet_group_list(engine, state);
     register_fleet_group_update(engine, state);
@@ -210,6 +211,16 @@ pub(crate) async fn deliver_broadcast_turn(
     if let Some(u) = unavailable {
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
+    deliver_available(deps, block_id, text, from).await
+}
+
+/// [`deliver_broadcast_turn`] for an agent that can work: the words go as a turn of the person's.
+pub(crate) async fn deliver_available(
+    deps: &AgentTurnDeps,
+    block_id: String,
+    text: String,
+    from: MessageOrigin,
+) -> Result<(), String> {
     let input = crate::backend::blockcontroller::health::TurnInput { from: from.clone(), text: text.clone(), joins_turn: None };
     match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), from.clone(), &[], None)) {
         BroadcastAction::Done => Ok(()),
@@ -423,38 +434,22 @@ pub(crate) async fn fleet_broadcast_impl(
                         Some(sender) => sender.deliver(&client, route, agent, &body, recipients).await,
                         None => Err("no LAN sender".to_string()),
                     },
-                    _ => deliver_broadcast_turn(&deps, block_id, text, origin).await,
+                    _ => crate::server::person_hold::deliver_person_broadcast(&deps, block_id, text, origin).await,
                 }
             }
         },
     )
     .await;
+    // The agents kept for a check are waited for together, outside the delivery slots above.
+    let outcomes = crate::server::person_hold::resolve_pending(outcomes).await;
 
-    let mut result = FleetActionResult::default();
-    for outcome in outcomes {
-        let target_agent = outcome.agent_id.as_deref().unwrap_or(&outcome.block_id);
-        match outcome.result {
-            Ok(()) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
-                    true, None, &msg_id, None,
-                );
-                // What the user typed, in each recipient of this instance's history.
-                if matches!(routes.get(&outcome.block_id), Some(BroadcastRoute::Local(_))) {
-                    super::input_history::record_broadcast(state, &outcome.block_id, &message);
-                }
-                result.succeeded.push(outcome.block_id);
-            }
-            Err(error) => {
-                state.reactive_handler.log_fleet_action_audit(
-                    None, target_agent, &outcome.block_id, FLEET_BROADCAST_AUDIT_ACTION,
-                    false, Some(&error), &msg_id, None,
-                );
-                result.failed.push(FleetActionFailure { id: outcome.block_id, error });
-            }
-        }
-    }
-    result
+    super::fleet_result::settle_broadcast(
+        state,
+        outcomes,
+        |block_id| matches!(routes.get(block_id), Some(BroadcastRoute::Local(_))),
+        &msg_id,
+        &message,
+    )
 }
 
 

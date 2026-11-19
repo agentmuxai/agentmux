@@ -580,6 +580,7 @@ impl StdoutReader {
             if let Some(mstore) = &self.mstore_read {
                 crate::backend::route_credits::turn_succeeded(mstore, self.broker_read.as_ref(), &self.block_id_read);
             }
+            crate::backend::limit_evidence::clean_turn(&self.block_id_read, &self.mstore_read, &self.event_bus_read);
         }
         FrameVerdict { is_result_frame, inband_error, early_failure }
     }
@@ -1054,6 +1055,7 @@ impl StdoutReader {
             // same tick — that state must survive, not be
             // immediately wiped by this frame's own success.
             core::persist_last_failure(&self.block_id_read, None, &self.mstore_read, &self.event_bus_read);
+            crate::backend::limit_evidence::clean_turn(&self.block_id_read, &self.mstore_read, &self.event_bus_read);
             // A completed turn is when the agent's running
             // summary may be due for an update. Background, and
             // a no-op unless enough happened since the last one

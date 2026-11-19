@@ -101,8 +101,8 @@ function modelStub() {
         toggleSelected: vi.fn((key: string) => change([key], !selected().has(key))),
         selectAll: vi.fn((keys: string[]) => setSelected(new Set(keys))),
         clearSelection: vi.fn(() => setSelected(new Set<string>())),
-        broadcastToSelection: vi.fn(async () => ({ succeeded: [...selected()], failed: [], aborted_early: false, pending: [] })),
-        bulkStopSelection: vi.fn(async () => ({ succeeded: [], failed: [], aborted_early: false, pending: [] })),
+        broadcastToSelection: vi.fn(async () => ({ succeeded: [...selected()], failed: [], aborted_early: false, pending: [], held: [] })),
+        bulkStopSelection: vi.fn(async () => ({ succeeded: [], failed: [], aborted_early: false, pending: [], held: [] })),
         superviseSelection: vi.fn(),
         dismissFleetResult: vi.fn(),
     };
