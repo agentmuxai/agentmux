@@ -29,9 +29,10 @@ import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opaci
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { type ClosedWindow } from "@/store/services";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
-import { createEffect, createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { onCleanup, Show, type JSX } from "solid-js";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import { useClosedWindows } from "./useClosedWindows";
+import { useTrashedWindows } from "./useTrashedWindows";
 import {
     reconcileWhenLauncherSilent,
     useAboutDetails,
@@ -114,16 +115,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     reconcileWhenLauncherSilent();
 
     const { resolveEntryWindowId, resolveName } = useWindowIdentity(myLabel);
-    // Windows this panel has just removed, by label: the row goes at once, not when the host has finished
-    // tearing the window down (on macOS that took 8 to 13 s, the row meanwhile reading as a live window with no
-    // opacity slider, as the host drops its id first). A label leaves this set once the host no longer lists it.
-    const [trashed, setTrashed] = createSignal<ReadonlySet<string>>(new Set());
-    const visibleEntries = createMemo(() => entries().filter((e) => !trashed().has(e.label)));
-    createEffect(() => {
-        const listed = new Set(entries().map((e) => e.label));
-        const t = untrack(trashed);
-        if ([...t].some((l) => !listed.has(l))) setTrashed(new Set([...t].filter((l) => listed.has(l))));
-    });
+    const { visibleEntries, hide } = useTrashedWindows(entries); // a window just removed leaves the list at once
     const { closed, refreshClosed } = useClosedWindows(() => visibleEntries().length, () => placeSlots());
     const onlyOpenWindow = () => visibleEntries().length <= 1;
     const reopen = (w: ClosedWindow) => {
@@ -137,14 +129,13 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         if (onlyOpenWindow()) return;
         // A row whose window id has not arrived (no opacity slider yet) is closed by its label, not ignored.
         const label = entry.label;
-        const hide = (on: boolean) => setTrashed((t) => new Set(on ? [...t, label] : [...t].filter((l) => l !== label)));
         void requestRemoveWindow(
             { windowId: resolveEntryWindowId(entry), label },
             () => {
                 discard(entry);
-                hide(true); // the window is certain to go: its row goes now
+                hide(label, true); // the window is certain to go: its row goes now
             },
-            () => hide(false), // the close failed (it said so): the window is still there
+            () => hide(label, false), // the close failed (it said so): the window is still there
         ).then(refreshClosed);
     };
 
