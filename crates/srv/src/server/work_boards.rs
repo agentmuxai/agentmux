@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use agentmux_common::time::now_ms;
 
 use crate::backend::storage::work_board_stages as stages;
-use crate::backend::storage::work_boards::{Board, BoardEdit, Deletion, DELETE_COUNTDOWN_MS};
+use crate::backend::storage::work_boards::{Board, BoardEdit, BoardEvent, Deletion, DELETE_COUNTDOWN_MS};
 
 use super::AppState;
 
@@ -77,10 +77,44 @@ pub(crate) fn board_json(b: &Board) -> Value {
     })
 }
 
-/// The boards `who` sees (none: all), default first.
+/// How many lines of a board's history the list carries.
+const HISTORY_SHOWN: usize = 8;
+
+/// The history line for a change of a board's stages: who, how many stages before and after, and both sets
+/// (kept for a later Restore). A failure to write it is logged and never fails the change itself.
+fn note_stages_change(state: &AppState, who: Option<(&str, &str)>, before: &Board, after: &Board, reset: bool, now: i64) {
+    let set_of = |b: &Board| stages::parse_stored(&b.stages).unwrap_or_else(|_| stages::default_set());
+    let (old, new) = (set_of(before), set_of(after));
+    let what = if reset { "reset the stages to the default" } else { "changed the stages" };
+    let (actor, actor_kind) = match who {
+        Some((id, _)) => (id.to_string(), "agent"),
+        None => (String::new(), "operator"),
+    };
+    let ev = BoardEvent {
+        at: now,
+        actor,
+        actor_kind: actor_kind.to_string(),
+        kind: "stages".to_string(),
+        body: format!("{what}: {} → {}", old.stages.len(), new.stages.len()),
+        detail: json!({ "from": old, "to": new }).to_string(),
+    };
+    if let Err(e) = state.work_store.work_board_event_add(&after.id, &ev) {
+        tracing::warn!(target: "workqueue", board = %after.slug, error = %e, "could not record the stages change in the board's history");
+    }
+}
+
+/// The boards `who` sees (none: all), default first, each with its latest history lines.
 pub(crate) fn boards_view(state: &AppState, who: Option<(&str, &str)>, include_archived: bool) -> Result<Value, String> {
     let boards = state.work_store.work_boards_list(include_archived, now_ms()).map_err(|e| e.to_string())?;
-    let seen: Vec<Value> = boards.iter().filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u))).map(board_json).collect();
+    let seen: Vec<Value> = boards
+        .iter()
+        .filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u)))
+        .map(|b| {
+            let mut v = board_json(b);
+            v["history"] = json!(state.work_store.work_board_events(&b.id, HISTORY_SHOWN).unwrap_or_default());
+            v
+        })
+        .collect();
     let default = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
     Ok(json!({ "boards": seen, "default": default }))
 }
@@ -110,8 +144,11 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
             json!({ "ok": true, "board": board_json(&b) })
         }
         "edit" => {
-            let b = on(&req.board)?;
-            let b = store.work_board_edit(&b.id, &edit, now).map_err(|e| e.to_string())?;
+            let before = on(&req.board)?;
+            let b = store.work_board_edit(&before.id, &edit, now).map_err(|e| e.to_string())?;
+            if edit.stages.is_some() || edit.stages_reset {
+                note_stages_change(state, who, &before, &b, edit.stages_reset, now);
+            }
             json!({ "ok": true, "board": board_json(&b) })
         }
         "archive" | "unarchive" => {
