@@ -158,14 +158,18 @@ pub(crate) fn global_memory_write_inner(
 
     state.broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
     tracing::info!(agent_id, bundle_id = %bundle.id, name = %bundle.name, "globalmemory.write");
-    let mut answer = json!({ "id": bundle.id, "name": bundle.name });
-    // The machines the last sync did not bring up to date (one that could not be reached, one that kept
-    // an entry back and why): this write may not reach them either. Said here, not only in `list`.
+    Ok(with_peers_not_in_step(json!({ "id": bundle.id, "name": bundle.name })))
+}
+
+/// A write's answer, with the machines the last sync did not bring up to date (one that could not be
+/// reached, one that kept an entry back and why): this write may not reach them either. Said here,
+/// not only in `list`. Nothing is added when every machine is in step.
+fn with_peers_not_in_step(mut answer: serde_json::Value) -> serde_json::Value {
     let behind = crate::server::remote_ops::fleet_sync::status::global().not_in_step();
     if behind.as_object().is_some_and(|peers| !peers.is_empty()) {
         answer["peers_not_in_step"] = behind;
     }
-    Ok(answer)
+    answer
 }
 
 /// Puts `bundle_id` last in the Global Memory order, as Memory → Global's own
