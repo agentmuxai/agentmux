@@ -15,6 +15,7 @@
     "ignoreFiles": [
         "frontend/types/rpc/**",
         "public/**",
+        "docs/specs/**/*_mocks/**",
         "sdk/**/*.css",
         "frontend/**/*.{darwin,linux,win32}.scss"
     ],
