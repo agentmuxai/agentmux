@@ -212,6 +212,8 @@ fn start_container_status(state: &AppState) {
     let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
         mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
     });
+    // Git facts of a container agent are read inside its container, through this runtime.
+    backend::container::mounts::read_exec::install(&state.container_manager);
     let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
     tokio::spawn(backend::container_status::run(source, hub, Default::default()));
 }

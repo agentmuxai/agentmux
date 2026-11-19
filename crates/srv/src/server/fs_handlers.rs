@@ -146,13 +146,24 @@ pub(crate) fn fs_unwatch(state: &AppState, cmd: FsUnwatchReq) -> Result<FsEmptyR
 /// `fs.git_status` → the markers for a listed folder's entries. Never an
 /// error: outside a repository, or if git fails, the pane shows none.
 pub(crate) async fn fs_git_status(state: &AppState, cmd: FsPathReq) -> Result<FsGitStatus, String> {
-    // A confined pane shows no markers.
-    if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+    // Named before any git run: what says whose a folder is, and what reads inside a container.
+    fs_ops::container_folders::install(&state.mstore);
+    crate::backend::container::mounts::read_exec::install(&state.container_manager);
+    if !super::files_root::is_confined(state, cmd.block_id.as_deref()) {
+        return Ok(fs_ops::git::git_status(&cmd.path).await);
+    }
+    // A confined pane shows a container agent's folder. Its path is resolved inside its root again, and
+    // its markers are the ones read inside that agent's container: a folder no container agent has is
+    // shown without any.
+    let Ok(path) = super::files_root::bound_path(state, cmd.block_id.as_deref(), &cmd.path).await else {
+        return Ok(Default::default());
+    };
+    let asked = path.clone();
+    let place = tokio::task::spawn_blocking(move || fs_ops::container_folders::place(&asked)).await;
+    if !matches!(place, Ok(fs_ops::container_folders::Place::Inside(_))) {
         return Ok(Default::default());
     }
-    // A container agent's folder has no markers: its git facts are not read on the host.
-    fs_ops::container_folders::install(&state.mstore);
-    Ok(fs_ops::git::git_status(&cmd.path).await)
+    Ok(fs_ops::git::git_status(&path).await)
 }
 
 // ── Mutations. Spec §7, §9 ──────────────────────────────────────────

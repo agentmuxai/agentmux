@@ -21,9 +21,11 @@
 //! object, and none may start a transport ([`NO_NETWORK_ENV`]). Those two are
 //! set in the environment, where no config file can change them.
 //!
-//! Git facts of a container agent's folder are not read on the host: no git
-//! is started for such a folder or anything inside it
-//! ([`super::container_folders`]).
+//! Git facts of a container agent are read inside its container: for a folder
+//! a container agent can write, or anything inside it, no git is started on
+//! the host. The same command runs in the agent's container, as the agent, at
+//! the same folder there ([`super::container_folders`]), and says nothing
+//! while that container is not running.
 //!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
 //! decorations).
@@ -33,8 +35,10 @@ use std::time::Duration;
 
 use agentmux_common::win32::NoWindow;
 
+use crate::backend::container::mounts::read_exec;
 use crate::backend::rpc_types::{FsGitEntry, FsGitState, FsGitStatus};
 
+use super::container_folders::{self, Inside, Place};
 use super::platform::display_path;
 
 /// A status that takes longer than this is abandoned: the pane shows no
@@ -56,8 +60,16 @@ const SAFE_CONFIG: &[&str] = &[
 /// empty list of allowed protocols), whatever the repository's config says.
 pub const NO_NETWORK_ENV: &[(&str, &str)] = &[("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", "")];
 
-/// What a git run for a container agent's folder answers, without starting git.
+/// Set on every git run here, with [`NO_NETWORK_ENV`]: nothing prompts and no
+/// lock is taken.
+const QUIET_ENV: &[(&str, &str)] = &[("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0")];
+
+/// What a git run answers, without starting git, while it can't be told whose
+/// the folder is.
 pub const NOT_READ_ON_THE_HOST: &str = "Git facts of a container agent's folder are not read on the host.";
+
+/// The most a git run inside a container may print.
+const MAX_INSIDE_OUTPUT: usize = 16 * 1024 * 1024;
 
 /// `fs.git_status` for `raw` (a folder the pane listed).
 pub async fn git_status(raw: &str) -> FsGitStatus {
@@ -133,6 +145,21 @@ pub(crate) async fn safe_status_porcelain(dir: &str, extra: &[&str]) -> Result<V
     run_git(dir, &arg_refs).await.map_err(|e| StatusError::Git(e.message()))
 }
 
+/// The top folder of the repository `dir` is in, as a host path. `None`
+/// outside a repository, and for a container agent's folder whose repository
+/// is not inside the folder bound into its container.
+pub(crate) async fn safe_toplevel(dir: &str) -> Option<String> {
+    let (out, inside) = run_git_where(dir, &["rev-parse", "--show-toplevel"]).await.ok()?;
+    let line = String::from_utf8_lossy(&out).trim_end_matches(['\r', '\n']).to_string();
+    if line.is_empty() {
+        return None;
+    }
+    match inside {
+        None => Some(line),
+        Some(inside) => inside.host_path(&line),
+    }
+}
+
 /// Run a read-only git command (`rev-parse`, `remote get-url`) in `dir` with
 /// the same safe settings and timeout as the status above: its trimmed
 /// stdout, or `None` on any failure.
@@ -189,13 +216,46 @@ pub fn filter_names(out: &str, scoped: bool) -> Vec<String> {
     names
 }
 
-/// Run git in `dir` with the safe settings; its stdout, or a sentence.
+/// Run git for `dir` with the safe settings, where that folder's git runs: on
+/// the host, or inside the container of the agent that can write it. Its
+/// stdout, or a sentence.
 async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
-    // Decided before any command is built; a check that can't finish counts as yes.
+    run_git_where(dir, args).await.map(|(out, _)| out)
+}
+
+/// [`run_git`], with the place it ran in when that was inside a container.
+async fn run_git_where(dir: &str, args: &[&str]) -> Result<(Vec<u8>, Option<Inside>), GitError> {
+    // Decided before any command is built; a check that can't finish counts as not known.
     let asked = dir.to_string();
-    if tokio::task::spawn_blocking(move || super::container_folders::holds(&asked)).await.unwrap_or(true) {
-        return Err(GitError::Failed(NOT_READ_ON_THE_HOST.to_string()));
+    let place = tokio::task::spawn_blocking(move || container_folders::place(&asked)).await.unwrap_or(Place::Unknown);
+    match place {
+        Place::Host => run_on_host(dir, args).await.map(|out| (out, None)),
+        Place::Inside(inside) => run_inside(&inside, args).await.map(|out| (out, Some(inside))),
+        Place::Unknown => Err(GitError::Failed(NOT_READ_ON_THE_HOST.to_string())),
     }
+}
+
+/// The command in the container of the agent that can write the folder, as
+/// that agent, with the settings and the environment of a host run. git's
+/// exit and error text are read as on the host.
+async fn run_inside(inside: &Inside, args: &[&str]) -> Result<Vec<u8>, GitError> {
+    let mut argv = vec!["git".to_string()];
+    argv.extend(git_args(&inside.dir, args));
+    let env: Vec<(String, String)> = QUIET_ENV.iter().chain(NO_NETWORK_ENV).map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let out = read_exec::read(&inside.container, &argv, &env, GIT_TIMEOUT, MAX_INSIDE_OUTPUT).await.map_err(GitError::Failed)?;
+    match out.exit {
+        Some(0) => Ok(out.stdout),
+        Some(read_exec::TIMED_OUT_EXIT) => Err(GitError::Failed("git took too long to answer.".to_string())),
+        Some(code) if out.stderr.is_empty() => Err(GitError::Exit(i32::try_from(code).unwrap_or(-1))),
+        None if out.stderr.is_empty() => Err(GitError::Failed("git didn't say how it ended.".to_string())),
+        _ => Err(GitError::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string())),
+    }
+}
+
+/// The command on the host.
+async fn run_on_host(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
+    #[cfg(test)]
+    test_support::note_host_run(dir);
     let mut cmd = git_command(dir, args);
     let child = cmd.spawn().map_err(|e| GitError::Failed(format!("Couldn't run git: {e}")))?;
     match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
@@ -209,13 +269,23 @@ async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
     }
 }
 
-/// The one git command this module runs: the safe settings, no prompt, no
-/// optional lock, no fetch and no transport, and nothing of this instance's
-/// identity.
+/// What follows `git` in every run here: the folder, the safe settings, no
+/// optional lock, then the command.
+fn git_args(dir: &str, args: &[&str]) -> Vec<String> {
+    let mut all = vec!["-C".to_string(), dir.to_string()];
+    all.extend(SAFE_CONFIG.iter().map(|s| s.to_string()));
+    all.push("--no-optional-locks".to_string());
+    all.extend(args.iter().map(|s| s.to_string()));
+    all
+}
+
+/// The one git command this module runs on the host: the safe settings, no
+/// prompt, no optional lock, no fetch and no transport, and nothing of this
+/// instance's identity.
 fn git_command(dir: &str, args: &[&str]) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("git");
-    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
-    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
+    cmd.args(git_args(dir, args));
+    cmd.envs(QUIET_ENV.iter().copied());
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -372,6 +442,63 @@ pub fn summarize(p: &Porcelain, prefix: &str) -> FsGitStatus {
         entries,
         changes,
         error: None,
+    }
+}
+
+/// For the tests of this crate: a container whose git answers, and which
+/// folders git was started for on the host.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::Arc;
+
+    use crate::backend::container::mounts::read_exec::{self, ReadOutput};
+
+    fn host_runs() -> &'static parking_lot::Mutex<Vec<String>> {
+        static RUNS: std::sync::LazyLock<parking_lot::Mutex<Vec<String>>> = std::sync::LazyLock::new(Default::default);
+        &RUNS
+    }
+
+    pub(super) fn note_host_run(dir: &str) {
+        host_runs().lock().push(dir.replace('\\', "/"));
+    }
+
+    /// How many times git was started on the host for a folder whose path has `part` in it.
+    pub(crate) fn host_runs_for(part: &str) -> usize {
+        host_runs().lock().iter().filter(|dir| dir.contains(part)).count()
+    }
+
+    /// Each run a container's git was asked for: its words and its environment.
+    pub(crate) type Seen = Arc<parking_lot::Mutex<Vec<(Vec<String>, Vec<(String, String)>)>>>;
+
+    /// Stands in for the git of `container`: a repository at `/workspace` on the branch `inside`, from
+    /// `agentmuxai/inside`, with `in-container.txt` changed and `sub/new-inside.txt` new. Answers what it was
+    /// asked with.
+    pub(crate) fn container_git(container: &str) -> Seen {
+        let seen = Seen::default();
+        let log = seen.clone();
+        read_exec::stand_in_for_test(container, move |argv, env| {
+            log.lock().push((argv.to_vec(), env.to_vec()));
+            let has = |word: &str| argv.iter().any(|a| a == word);
+            let says = |out: &[u8]| Ok(ReadOutput { exit: Some(0), stdout: out.to_vec(), stderr: Vec::new() });
+            let dir = argv.get(2).map(String::as_str).unwrap_or_default();
+            if !(dir == "/workspace" || dir.starts_with("/workspace/")) {
+                return Ok(ReadOutput { exit: Some(128), stdout: Vec::new(), stderr: b"fatal: not a git repository".to_vec() });
+            }
+            if has("--show-toplevel") {
+                says(b"/workspace\n")
+            } else if has("--show-prefix") {
+                let below = dir.trim_start_matches("/workspace").trim_start_matches('/');
+                says(if below.is_empty() { String::new() } else { format!("{below}/\n") }.as_bytes())
+            } else if has("get-url") {
+                says(b"https://github.com/AgentMuxAI/Inside.git\n")
+            } else if has("status") {
+                says(b"# branch.head inside\x001 .M N... 100644 100644 100644 abc abc in-container.txt\x00? sub/new-inside.txt\x00")
+            } else {
+                // No filter is set, no such ref: git's quiet exit 1.
+                Ok(ReadOutput { exit: Some(1), ..Default::default() })
+            }
+        });
+        seen
     }
 }
 
@@ -683,32 +810,74 @@ mod tests {
         Some(())
     }
 
-    /// No git is started for a container agent's folder, or for a folder inside it: the run answers before a
-    /// command exists, so the Files pane has no markers there and the one-line reads have nothing.
-    #[tokio::test]
-    async fn git_facts_of_a_container_agents_folder_are_not_read_on_the_host() {
+    /// A temp folder that is a repository with changes on the host, its `sub` folder, and a name no other
+    /// test's folder has.
+    fn host_repository() -> (tempfile::TempDir, String, String, String) {
         let dir = tempfile::tempdir().unwrap();
-        if repository_with_changes(dir.path()).is_none() {
-            return; // No git on this machine.
-        }
+        let _ = repository_with_changes(dir.path());
         let inner = dir.path().join("sub");
         std::fs::create_dir_all(&inner).unwrap();
         let (top, sub) = (dir.path().to_string_lossy().into_owned(), inner.to_string_lossy().into_owned());
-        // As any other folder, it has facts.
-        assert!(git_status(&top).await.in_repo);
-        assert!(safe_git_line(&sub, &["rev-parse", "--show-toplevel"]).await.is_some());
+        let name = dir.path().file_name().unwrap().to_string_lossy().into_owned();
+        (dir, top, sub, name)
+    }
 
-        crate::backend::fs_ops::container_folders::add_for_test(dir.path());
-        for folder in [&top, &sub] {
-            match run_git(folder, &["rev-parse", "--show-toplevel"]).await {
-                Err(GitError::Failed(why)) => assert_eq!(why, NOT_READ_ON_THE_HOST),
-                other => panic!("git was started for {folder}: {other:?}"),
+    /// For a folder a container agent can write, and a folder inside it, every read is git run inside the
+    /// agent's container at the same folder there, with the settings and the environment of a host run, and
+    /// no git is started on the host: the Files pane's markers, the status and the one-line reads say what
+    /// the container's git says, not what the host's would.
+    #[tokio::test]
+    async fn git_facts_of_a_container_agent_are_read_inside_its_container() {
+        let (dir, top, sub, name) = host_repository();
+        // As any other folder, the host's git reads it (where there is one).
+        let on_host = git_status(&top).await;
+        let host_runs = test_support::host_runs_for(&name);
+
+        let container = format!("agentmux-{name}");
+        container_folders::add_for_test(dir.path(), &container, "/workspace");
+        let seen = test_support::container_git(&container);
+
+        let s = git_status(&top).await;
+        assert!(s.in_repo && s.error.is_none(), "{s:?}");
+        assert_eq!(s.branch.as_deref(), Some("inside"));
+        let names: Vec<&str> = s.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["in-container.txt", "sub"], "the container's changes, not the host's: {on_host:?}");
+        let below = git_status(&sub).await;
+        assert_eq!(below.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["new-inside.txt"]);
+        assert_eq!(safe_git_line(&sub, &["remote", "get-url", "origin"]).await.as_deref(), Some("https://github.com/AgentMuxAI/Inside.git"));
+        assert!(safe_status_porcelain(&top, &[]).await.is_ok());
+
+        // The repository's top folder comes back as the host folder it is bound from.
+        let root = safe_toplevel(&sub).await.expect("inside a repository");
+        assert!(root.ends_with(&name), "{root}");
+        assert!(matches!(container_folders::place(&root), Place::Inside(at) if at.dir == "/workspace"));
+
+        let seen = seen.lock().clone();
+        assert!(seen.len() >= 8, "{seen:?}");
+        for (argv, env) in &seen {
+            assert_eq!(&argv[..2], ["git", "-C"]);
+            assert!(argv[2] == "/workspace" || argv[2] == "/workspace/sub", "the same folder, as the container names it: {argv:?}");
+            assert_eq!(&argv[3..8], ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "--no-optional-locks"]);
+            for pair in [("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", ""), ("GIT_TERMINAL_PROMPT", "0"), ("GIT_OPTIONAL_LOCKS", "0")] {
+                assert!(env.contains(&(pair.0.to_string(), pair.1.to_string())), "{pair:?} is set inside too: {env:?}");
             }
+        }
+        assert_eq!(test_support::host_runs_for(&name), host_runs, "git was started on the host for a container agent's folder");
+    }
+
+    /// While the agent's container is not running there are no facts, and still no git on the host.
+    #[tokio::test]
+    async fn a_container_agents_folder_has_no_git_facts_while_its_container_is_not_running() {
+        let (dir, top, sub, name) = host_repository();
+        container_folders::add_for_test(dir.path(), &format!("agentmux-stopped-{name}"), "/workspace");
+        for folder in [&top, &sub] {
             let s = git_status(folder).await;
             assert!(!s.in_repo && s.entries.is_empty() && s.error.is_none(), "{s:?}");
-            assert_eq!(safe_git_line(folder, &["rev-parse", "--show-toplevel"]).await, None);
+            assert_eq!(safe_git_line(folder, &["rev-parse", "--show-prefix"]).await, None);
+            assert_eq!(safe_toplevel(folder).await, None);
             assert!(matches!(safe_status_porcelain(folder, &[]).await, Err(StatusError::Settings(_))), "no status run");
         }
+        assert_eq!(test_support::host_runs_for(&name), 0, "git was started on the host for a container agent's folder");
     }
 
     #[tokio::test]
