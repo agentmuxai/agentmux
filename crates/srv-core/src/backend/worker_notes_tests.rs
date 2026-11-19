@@ -16,7 +16,7 @@ fn turn_ends_exits_and_failures_are_read_and_hidden_turns_are_not() {
     let t = crate::backend::mps::EVENT_AGENT_TURN;
     assert_eq!(
         parse_event(t, &[], Some(&turn("completed", "user"))),
-        Some(WorkerEvent::TurnEnded { block_id: "b1".into(), started_at_ms: 5, key: "b1/7/9".into() })
+        Some(WorkerEvent::TurnEnded { block_id: "b1".into(), started_at_ms: 5, ended_at_ms: 9, key: "b1/7/9".into() })
     );
     assert_eq!(parse_event(t, &[], Some(&turn("exited", "agent"))), Some(WorkerEvent::Exited { block_id: "b1".into(), key: "b1/7/9".into() }));
     assert_eq!(parse_event(t, &[], Some(&turn("completed", "system"))), None, "AgentMux's own hidden turn");
@@ -54,10 +54,13 @@ fn a_report_outlives_the_delivery_logs_ring() {
 #[test]
 fn a_turn_end_published_twice_is_handled_once() {
     let mut seen = Seen::default();
-    let ev = WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, key: "b/7/9".into() };
+    let ev = WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, ended_at_ms: 9, key: "b/7/9".into() };
     assert!(seen.first(&ev));
     assert!(!seen.first(&ev));
-    assert!(seen.first(&WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, key: "b/8/20".into() }), "the next turn");
+    assert!(
+        seen.first(&WorkerEvent::TurnEnded { block_id: "b".into(), started_at_ms: 1, ended_at_ms: 20, key: "b/8/20".into() }),
+        "the next turn"
+    );
     let failed = WorkerEvent::Failed { block_id: "b".into(), title: "x".into() };
     assert!(seen.first(&failed) && seen.first(&failed), "failures carry no turn identity");
 }
@@ -207,7 +210,7 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     state.mstore.agent_def_insert(&mut lead).unwrap();
     state.mstore.agent_def_insert(&mut worker).unwrap();
     let worker_pane = pane(&state, &tab, &worker_id).await;
-    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, key: "k".into() };
+    let ev = WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, ended_at_ms: 0, key: "k".into() };
     assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "not marked as a worker");
 
     mark_worker(&state, &worker_id, &lead);
@@ -272,4 +275,76 @@ async fn a_rate_limited_turns_note_names_the_cause_and_the_exit_adds_none() {
     assert_eq!(wait, None);
     assert!(text.contains("stopped with an error: API rate limit. The provider rate-limited it (HTTP 429)"), "{text}");
     assert!(text.contains("transient and has no reset time") && text.contains("send it another message"), "{text}");
+}
+
+#[test]
+fn only_a_recent_turn_end_and_a_transcript_written_in_the_turn_count() {
+    let now = 10 * TURN_END_FRESH_MS;
+    assert!(turn_end_is_fresh(now - 1_000, now), "a turn that just ended");
+    assert!(turn_end_is_fresh(now - TURN_END_FRESH_MS, now), "at the limit");
+    assert!(!turn_end_is_fresh(now - TURN_END_FRESH_MS - 1, now), "an old turn, read again after a restart");
+    assert!(turn_end_is_fresh(0, now), "an end that did not say when: judged by the other checks");
+
+    assert!(written_since(Some(100_000), 99_000), "written after the turn began");
+    assert!(written_since(Some(95_000), 99_000), "within the slack of its start");
+    assert!(!written_since(Some(1_000), 99_000), "last written before the turn: an older session's file");
+    assert!(!written_since(None, 99_000), "no file");
+    assert!(written_since(Some(1_000), 0), "a start that did not say when");
+}
+
+/// A container agent's session resumed after days: its worker note fired twice mid-turn, quoting words of the old
+/// session. An old turn end, and an end heard while the worker is in a turn, tell the leader nothing.
+#[tokio::test]
+async fn an_old_turn_end_or_one_heard_mid_turn_notes_no_one() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{delete_controller, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    let state = crate::test_support::core_parts();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let (lead_id, worker_id) = (format!("lead-{id}"), format!("worker-{id}"));
+    let mut lead = test_agent_def(&lead_id, &format!("Lead {}", &id[..8]), "claude", "host", 1, "");
+    let mut worker = test_agent_def(&worker_id, &format!("Helper {}", &id[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut lead).unwrap();
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    mark_worker(&state, &worker_id, &lead);
+    pane(&state, &tab, &lead_id).await;
+    let worker_pane = pane(&state, &tab, &worker_id).await;
+    let now = agentmux_common::time::now_ms_u64();
+    let ended = |ended_at_ms: u64| WorkerEvent::TurnEnded { block_id: worker_pane.clone(), started_at_ms: u64::MAX / 2, ended_at_ms, key: "k".into() };
+
+    assert_eq!(note_for(&state.mstore, &state.filestore, &ended(now - 2 * TURN_END_FRESH_MS)), None, "an end from long ago");
+
+    register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    assert_eq!(note_for(&state.mstore, &state.filestore, &ended(now)), None, "the worker is in a turn: nothing has finished");
+
+    register_stub(&worker_pane, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    let (_, text, _) = note_for(&state.mstore, &state.filestore, &ended(now)).expect("a turn that just ended, with the worker idle");
+    assert_eq!(text, format!("[AgentMux] Your worker {} finished a turn without reporting to you.", worker.name));
+    delete_controller(&worker_pane);
+}
+
+/// The words a note quotes are the turn's own: a transcript last written before the turn began is an older
+/// session's, and is not quoted.
+#[tokio::test]
+async fn a_note_does_not_quote_a_transcript_written_before_the_turn() {
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    let state = crate::test_support::core_parts();
+    let tab = tab(&state).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let worker_id = format!("worker-{id}");
+    let mut worker = test_agent_def(&worker_id, &format!("Helper {}", &id[..8]), "claude", "host", 1, "");
+    state.mstore.agent_def_insert(&mut worker).unwrap();
+    let worker_pane = pane(&state, &tab, &worker_id).await;
+    state.filestore.make_file(&worker_pane, "output", FileMeta::default(), FileOpts::default()).unwrap();
+    let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Old words."}]}}"#;
+    state.filestore.append_lines(&worker_pane, "output", format!("{line}\n").as_bytes()).unwrap();
+
+    let now = agentmux_common::time::now_ms_u64();
+    assert_eq!(last_words(&state.mstore, &state.filestore, &worker_pane, 0).text, "Old words.", "a start that is not known: read as before");
+    assert_eq!(last_words(&state.mstore, &state.filestore, &worker_pane, now - 1_000).text, "Old words.", "written after the turn began");
+    assert_eq!(
+        last_words(&state.mstore, &state.filestore, &worker_pane, now + 3_600_000),
+        LastWords::default(),
+        "the turn began after the file was last written: those words are an older session's"
+    );
 }
