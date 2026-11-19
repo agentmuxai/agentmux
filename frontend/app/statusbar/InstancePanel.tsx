@@ -124,9 +124,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
     // Asks first when an agent in it is mid-turn (window-close.ts).
     const removeOpen = (entry: WindowEntry) => {
-        const windowId = resolveEntryWindowId(entry);
-        if (!windowId || onlyOpenWindow()) return;
-        void requestRemoveWindow({ windowId, label: entry.label }, () => discard(entry)).then(refreshClosed);
+        if (onlyOpenWindow()) return;
+        // A row whose window id has not arrived (no opacity slider yet) is closed by its label, not ignored.
+        void requestRemoveWindow({ windowId: resolveEntryWindowId(entry), label: entry.label }, () => discard(entry)).then(refreshClosed);
     };
 
     const windowRename = useWindowRename(entries, resolveEntryWindowId);

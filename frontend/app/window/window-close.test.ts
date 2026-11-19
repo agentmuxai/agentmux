@@ -205,6 +205,12 @@ describe("removing an open window from the workspace", () => {
         expect(h.calls).toEqual(["agents:win-2", "discard:win-2", "close:window-2"]);
     });
 
+    it("closes a window the host has not named the id of by its label, with nothing asked or deleted", async () => {
+        await requestRemoveWindow({ windowId: null, label: "window-2" });
+        expect(h.modals).toHaveLength(0);
+        expect(h.calls).toEqual(["close:window-2"]);
+    });
+
     it("tells the caller once the contents are deleted, just before the window closes", async () => {
         h.agents = [agent("Korp", false)];
         await requestRemoveWindow({ windowId: "win-2", label: "window-2" }, () => h.calls.push("removing"));
