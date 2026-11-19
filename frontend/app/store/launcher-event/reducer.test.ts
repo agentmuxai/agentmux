@@ -381,6 +381,16 @@ describe("launcher-event reducer", () => {
             expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-3"));
         });
 
+        it("a window the stream knows again after its close (assigned or id-registered, no window_opened) stays through a snapshot", () => {
+            const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            const assigned = update(base, { type: "ApplyEvent", event: evt({ event: "window_instance_assigned", label: "window-x" }) }).state;
+            const afterAssign = update(assigned, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-5")] });
+            expect(afterAssign.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-5"));
+            const registered = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) }).state;
+            const afterRegister = update(registered, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", null)] });
+            expect(afterRegister.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+        });
+
         it("forgets a close after RECENT_CLOSE_MS, so a stale label can't hide a window for good", () => {
             vi.useFakeTimers();
             try {

@@ -304,8 +304,10 @@ function reconcileFromSnapshot(
     const next = new Map<string, WindowEntry>();
     for (const e of entries) {
         if (!isInstanceLabel(e.label)) continue;
+        // Only a label the stream no longer knows: one it knows again (assigned or id-registered after the
+        // close, with or without a window_opened) is a live window whatever was recorded before.
         const closedAt = state.recentlyClosed.get(e.label);
-        if (closedAt !== undefined && now - closedAt < RECENT_CLOSE_MS) continue;
+        if (closedAt !== undefined && now - closedAt < RECENT_CLOSE_MS && !state.knownEntries.has(e.label)) continue;
         next.set(e.label, { label: e.label, windowId: e.windowId ?? state.knownEntries.get(e.label)?.windowId ?? null });
     }
     let added = 0;
