@@ -251,6 +251,9 @@ jobs:
         with:
           sparse-checkout: scripts/ci-docker-pull.sh
           sparse-checkout-cone-mode: false
+          # The steps after this run distribution containers and package scripts: keep the job token out of the
+          # checkout's git config.
+          persist-credentials: false
       - name: Pull the image
         env:
           IMAGE: ${{ matrix.image }}
