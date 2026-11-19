@@ -26,7 +26,7 @@
 //!    installer silently and starts AgentMux again ([`relaunch`]), and exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -244,46 +244,104 @@ pub fn ask_then(
         let opened = Instant::now();
         let thread = current_thread();
         DIALOG_THREAD.store(thread, Ordering::SeqCst);
+        // Set by the timer below just before it closes the dialog: a close by time is told from a No by it.
+        let timed_out = std::sync::Arc::new(AtomicBool::new(false));
+        let timer_closed = timed_out.clone();
         std::thread::spawn(move || {
             std::thread::sleep(ANSWER_WITHIN);
             if DIALOG_THREAD.load(Ordering::SeqCst) == thread {
+                timer_closed.store(true, Ordering::SeqCst);
                 dismiss(thread);
             }
         });
         let yes = confirm(&version, &staged, &stopping, host_pid);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
         let latest = LATEST_ASK.load(Ordering::SeqCst);
-        if !yes {
-            // A No, or the dialog closing itself. Not when a newer request closed
-            // this one: that request's own answer is still to come.
-            if ask == latest {
-                write_declined(&data_dir, &version);
+        let waited = opened.elapsed();
+        let outcome = dialog_outcome(yes, timed_out.load(Ordering::SeqCst), ask, latest, waited);
+        crate::log(&outcome.log_line(waited));
+        match outcome {
+            DialogOutcome::Yes => on_yes(staged),
+            // A newer request closed this one: that request's own answer is still to come.
+            DialogOutcome::Superseded => {}
+            DialogOutcome::No | DialogOutcome::TimedOut | DialogOutcome::TooLate => {
+                // Not when the question was an older one: only the latest is waited for.
+                if ask == latest {
+                    if let Some(why) = outcome.declined() {
+                        write_declined(&data_dir, &version, why);
+                    }
+                }
+                if outcome == DialogOutcome::TooLate {
+                    crate::show_fatal_dialog(
+                        "AgentMux upgrade",
+                        "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
+                    );
+                }
             }
-            return;
-        }
-        if answer_counts(ask, latest, opened.elapsed()) {
-            on_yes(staged);
-        } else {
-            if ask == latest {
-                write_declined(&data_dir, &version);
-            }
-            crate::log(&format!("upgrade: a Yes {}s after asking, or to an older request, was ignored", opened.elapsed().as_secs()));
-            crate::show_fatal_dialog(
-                "AgentMux upgrade",
-                "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
-            );
         }
     });
 }
 
-/// Tell srv the restart it asked for won't happen
+/// How the restart question ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogOutcome {
+    /// An explicit Yes that still counts.
+    Yes,
+    /// The user answered No.
+    No,
+    /// Nobody answered: the dialog closed itself after [`ANSWER_WITHIN`], which counts as a No.
+    TimedOut,
+    /// A Yes that came too late, or to an older request: ignored.
+    TooLate,
+    /// A newer request closed this dialog.
+    Superseded,
+}
+
+/// What became of the question: `yes` is the dialog's answer, `timed_out` that the timer closed it,
+/// `ask` this request's number and `latest` the newest one's, `waited` how long it was open.
+fn dialog_outcome(yes: bool, timed_out: bool, ask: u64, latest: u64, waited: Duration) -> DialogOutcome {
+    match (yes, timed_out) {
+        (true, _) if answer_counts(ask, latest, waited) => DialogOutcome::Yes,
+        (true, _) => DialogOutcome::TooLate,
+        (false, _) if ask != latest => DialogOutcome::Superseded,
+        (false, true) => DialogOutcome::TimedOut,
+        (false, false) => DialogOutcome::No,
+    }
+}
+
+impl DialogOutcome {
+    /// The launcher log's line for it: every outcome says so, with how long the dialog was open.
+    fn log_line(self, waited: Duration) -> String {
+        let s = waited.as_secs();
+        match self {
+            DialogOutcome::Yes => format!("upgrade: the dialog was answered Yes after {s}s"),
+            DialogOutcome::No => format!("upgrade: the dialog was answered No after {s}s"),
+            DialogOutcome::TimedOut => format!("upgrade: nobody answered the dialog within {s}s; it closed itself, which counts as No"),
+            DialogOutcome::TooLate => format!("upgrade: a Yes {s}s after asking, or to an older request, was ignored"),
+            DialogOutcome::Superseded => format!("upgrade: a newer request closed the dialog after {s}s"),
+        }
+    }
+
+    /// What srv is told when this ends the question without a restart.
+    fn declined(self) -> Option<agentmux_common::srv_stderr::Declined> {
+        use agentmux_common::srv_stderr::Declined;
+        match self {
+            DialogOutcome::No => Some(Declined::No),
+            DialogOutcome::TimedOut => Some(Declined::TimedOut),
+            DialogOutcome::TooLate => Some(Declined::TooLate),
+            DialogOutcome::Yes | DialogOutcome::Superseded => None,
+        }
+    }
+}
+
+/// Tell srv the restart it asked for won't happen, and why
 /// ([`agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE`]): it is waiting on
 /// this launcher and would otherwise say "Restarting" for minutes after a No.
-fn write_declined(data_dir: &Path, version: &str) {
+fn write_declined(data_dir: &Path, version: &str, why: agentmux_common::srv_stderr::Declined) {
     let dir = data_dir.join("updates");
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-    if let Err(e) = std::fs::write(&file, format!("{version}\n")) {
+    if let Err(e) = std::fs::write(&file, agentmux_common::srv_stderr::declined_text(version, why)) {
         crate::log(&format!("upgrade: couldn't leave {} for srv: {e}", file.display()));
     }
 }
@@ -924,8 +982,38 @@ Naki-2: `node server.js`
     fn a_no_is_left_for_srv_under_the_name_it_reads() {
         let data = tempfile::tempdir().unwrap();
         // The updates folder may not exist yet.
-        write_declined(data.path(), "0.59.37");
+        write_declined(data.path(), "0.59.37", agentmux_common::srv_stderr::Declined::TimedOut);
         let file = data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-        assert_eq!(std::fs::read_to_string(file).unwrap().trim(), "0.59.37");
+        let text = std::fs::read_to_string(file).unwrap();
+        assert_eq!(agentmux_common::srv_stderr::parse_declined(&text), ("0.59.37", Some(agentmux_common::srv_stderr::Declined::TimedOut)));
+    }
+
+    #[test]
+    fn every_way_the_question_can_end_is_told_apart_and_logged() {
+        use agentmux_common::srv_stderr::Declined;
+        let quick = Duration::from_secs(2);
+        // Yes, within the time, to the latest request.
+        assert_eq!(dialog_outcome(true, false, 3, 3, quick), DialogOutcome::Yes);
+        // A Yes at or after the time, or to an older request, is ignored.
+        assert_eq!(dialog_outcome(true, false, 3, 3, ANSWER_WITHIN), DialogOutcome::TooLate);
+        assert_eq!(dialog_outcome(true, false, 2, 3, quick), DialogOutcome::TooLate);
+        // No: an answer; a timeout: the timer closed the dialog; both end as a decline, with different reasons.
+        assert_eq!(dialog_outcome(false, false, 3, 3, quick), DialogOutcome::No);
+        assert_eq!(dialog_outcome(false, true, 3, 3, ANSWER_WITHIN), DialogOutcome::TimedOut);
+        // A newer request closed it: neither, and srv is told nothing.
+        assert_eq!(dialog_outcome(false, false, 2, 3, quick), DialogOutcome::Superseded);
+        assert_eq!(dialog_outcome(false, true, 2, 3, ANSWER_WITHIN), DialogOutcome::Superseded);
+        assert_eq!(DialogOutcome::No.declined(), Some(Declined::No));
+        assert_eq!(DialogOutcome::TimedOut.declined(), Some(Declined::TimedOut));
+        assert_eq!(DialogOutcome::TooLate.declined(), Some(Declined::TooLate));
+        assert_eq!((DialogOutcome::Yes.declined(), DialogOutcome::Superseded.declined()), (None, None));
+        // Every outcome has a line, and the line says how long the dialog was open.
+        let lines: Vec<String> =
+            [DialogOutcome::Yes, DialogOutcome::No, DialogOutcome::TimedOut, DialogOutcome::TooLate, DialogOutcome::Superseded]
+                .iter()
+                .map(|o| o.log_line(Duration::from_secs(150)))
+                .collect();
+        assert!(lines.iter().all(|l| l.starts_with("upgrade: ") && l.contains("150s")), "{lines:?}");
+        assert_eq!(lines.iter().collect::<std::collections::HashSet<_>>().len(), 5, "each outcome reads differently");
     }
 }

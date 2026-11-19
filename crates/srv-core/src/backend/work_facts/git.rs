@@ -13,7 +13,9 @@
 //! is why every answer carries `git_checked_ms`. Every git run goes through
 //! `fs_ops::git`'s safe runner (the repository's own fsmonitor and filters
 //! are off, nothing prompts, the index isn't written, a slow run is killed
-//! after a few seconds).
+//! after a few seconds). For a folder a container agent can write, that
+//! runner runs git inside the agent's container and never on the host, so a
+//! container agent's facts are its own git's.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -24,7 +26,7 @@ use futures_util::StreamExt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::backend::fs_ops::git::{parse_porcelain_v2, safe_git_line, safe_status_porcelain};
+use crate::backend::fs_ops::git::{parse_porcelain_v2, safe_git_line, safe_status_porcelain, safe_toplevel};
 use crate::backend::rpc_types::FsGitState;
 use crate::backend::storage::store::Store;
 
@@ -69,7 +71,7 @@ pub struct GitFacts {
 /// Probe `dir`: `None` when it isn't inside a git repository (or git is
 /// missing or too slow).
 pub async fn probe(dir: &str, now_ms: u64) -> Option<GitFacts> {
-    let root = normalize_path(&safe_git_line(dir, &["rev-parse", "--show-toplevel"]).await?);
+    let root = normalize_path(&safe_toplevel(dir).await?);
     let repo = safe_git_line(&root, &["remote", "get-url", "origin"])
         .await
         .and_then(|url| normalize_repo(&url));
@@ -192,7 +194,7 @@ pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
             let home = dirs::home_dir();
             agents
                 .iter()
-                .filter_map(|a| super::host_folder_of(&store, home.as_deref(), a).map(|d| (a.block_id.clone(), d)))
+                .filter_map(|a| super::folder_of(&store, home.as_deref(), a).map(|d| (a.block_id.clone(), d)))
                 .collect::<Vec<_>>()
         })
         .await
@@ -370,6 +372,38 @@ mod tests {
         assert_eq!(facts.checked_ms, 42);
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         assert!(facts.root.ends_with(&name), "root {} is the temp repository, not its src folder", facts.root);
+    }
+
+    /// A container agent's facts are what git says inside its container, and the helpers that compare
+    /// branches run there too: for its folder no git is started on the host.
+    #[tokio::test]
+    async fn a_container_agents_git_facts_are_read_inside_its_container() {
+        use crate::backend::fs_ops::git::test_support;
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let name = tmp.path().file_name().unwrap().to_string_lossy().into_owned();
+        let container = format!("agentmux-{name}");
+        crate::backend::fs_ops::container_folders::add_for_test(tmp.path(), &container, "/workspace");
+        let seen = test_support::container_git(&container);
+
+        let facts = probe(&sub.to_string_lossy(), 42).await.expect("the container's git has facts");
+        assert_eq!(facts.repo.as_deref(), Some("agentmuxai/inside"));
+        assert_eq!(facts.branch.as_deref(), Some("inside"));
+        assert_eq!(facts.dirty_files, vec!["in-container.txt".to_string(), "sub/new-inside.txt".to_string()]);
+        assert_eq!(facts.error, None);
+        assert!(facts.root.ends_with(&name), "the host folder the repository is bound from: {}", facts.root);
+
+        // The overlap and PR helpers, in the root the facts gave.
+        assert!(branch_files(&facts.root, None, "inside").await.is_empty());
+        assert!(!branch_contained_in_default(&facts.root, "inside").await);
+        assert_eq!(merge_base_setting(&facts.root, "inside").await, None);
+        assert!(landed_files(&facts.root, None, &facts.root, "inside", &["a.rs".to_string()]).await.is_empty());
+
+        let seen = seen.lock().clone();
+        assert!(seen.iter().any(|(argv, _)| argv.iter().any(|a| a == "--verify")), "the helpers asked the container: {seen:?}");
+        assert!(seen.iter().all(|(argv, _)| argv[2] == "/workspace" || argv[2] == "/workspace/sub"), "{seen:?}");
+        assert_eq!(test_support::host_runs_for(&name), 0, "git was started on the host for a container agent's folder");
     }
 
     #[tokio::test]

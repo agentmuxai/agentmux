@@ -20,6 +20,8 @@ use std::sync::{LazyLock, Mutex};
 use crate::backend::sensitive_ops::{self, OpSpec};
 
 /// Requests one agent may have open (asked or pending) at once.
+/// A request filed by an agent of another machine is owned by `remote:<agent>@<machine>`: there is no agent here to tell.
+pub const REMOTE_OWNER_PREFIX: &str = "remote:";
 pub const MAX_OPEN_PER_REQUESTER: usize = 8;
 /// Requests open at once, all agents together.
 pub const MAX_OPEN: usize = 200;

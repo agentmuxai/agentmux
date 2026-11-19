@@ -178,7 +178,7 @@ fn publish(broker: &Arc<Broker>, mstore: &Arc<Store>) {
 }
 
 /// Tell the agent in `block_id` something, as an `[AgentMux]` note.
-fn tell(block_id: &str, text: &str) {
+pub(crate) fn tell(block_id: &str, text: &str) {
     let handler = crate::backend::reactive::get_global_handler();
     let Some(target) = handler
         .list_agents()
@@ -324,7 +324,7 @@ pub fn start_upgrade(version: String, askers: Vec<String>) {
         if !still_latest(&s) {
             return stop(&newer(&s));
         }
-        if let Err(e) = crate::backend::update::restart::start(false) {
+        if let Err(e) = crate::backend::update::restart::start(false, askers.clone()) {
             stop(&format!("the restart couldn't start ({e})"));
         }
     });
@@ -384,6 +384,8 @@ mod tests {
             waiting_for: 0,
             waiting_on: Vec::new(),
             stopping: Vec::new(),
+            not_confirmed_at: None,
+            not_confirmed: None,
         });
         let Err(Outcome::Unavailable { message, .. }) = installable(&busy, None) else { panic!("expected unavailable") };
         assert!(message.contains("already restarting into 0.59.26"), "{message}");

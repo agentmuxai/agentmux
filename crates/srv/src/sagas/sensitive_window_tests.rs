@@ -396,3 +396,9 @@ fn the_toast_names_what_happens_and_who_asked_but_never_a_fact() {
     // An operation the table does not know still gets a plain title.
     assert_eq!(toast_text("x", None, "mystery").0, "A sensitive operation");
 }
+
+#[test]
+fn an_asker_on_another_machine_is_not_told_by_a_note_and_that_is_not_a_failure() {
+    // Its request is owned as `remote:<agent>@<machine>`: no pane here to put a note in. It reads the status.
+    assert!(!tell_one("remote:agenty@narko", "[AgentMux] nothing to deliver"));
+}
