@@ -26,13 +26,28 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { t } from "@/app/i18n/i18n";
+import { formatElapsedCompact } from "@/util/format-time";
 import type { PendingMessage } from "../../../agent-model/state";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
 }
+
+// One clock for the whole queue, however many messages stack: how long the oldest one has waited. It starts
+// showing at one second, so a message that goes straight through never flashes "0s". It ticks only while the
+// panel is on screen (the panel's own Show owns it).
+const PendingTimer = (props: { since: Accessor<number> }): JSX.Element => {
+    const tick = useTick(1000);
+    const waited = createMemo(() => (tick(), Date.now() - props.since()));
+    return (
+        <Show when={waited() >= 1000}>
+            <span class="agent-pending-timer">{formatElapsedCompact(waited())}</span>
+        </Show>
+    );
+};
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => {
     // Only surface messages that were genuinely queued behind a running turn.
@@ -55,6 +70,7 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     // srv has the message but holds it behind the agent's live process (`agent-message-queued`): "reaching the
     // agent any moment" is not true then. The first such message is the one that goes next.
     const waiting = createMemo(() => queuedMessages().find((m) => m.flushing && m.waiting)?.waiting);
+    const oldest = createMemo(() => Math.min(...queuedMessages().map((m) => m.createdAt)));
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
@@ -91,6 +107,7 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                             {stillQueuedCount() === 1 ? " message" : " messages"})
                         </Show>
                     </span>
+                    <PendingTimer since={oldest} />
                 </div>
                 <For each={queuedMessages()}>
                     {(msg) => (

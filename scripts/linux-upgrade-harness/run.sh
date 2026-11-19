@@ -98,6 +98,9 @@ snapshot() { # distro
     read -r base fam <<<"$(base_of "$d")" || return 1
     if [ -n "$(docker images -q "$img")" ] && [ "${REBUILD:-0}" != 1 ]; then return 0; fi
     echo "== $d: building the image on $base" >&2
+    # From a mirror that needs no Docker Hub sign-in, with retries (the build then finds it here); if none
+    # answers, the build pulls it itself as it always did.
+    [ -f ../ci-docker-pull.sh ] && { bash ../ci-docker-pull.sh "$base" >&2 || true; }
     docker build -q -t "$IMG/$d-tools" --label "$LABEL" --build-arg "BASE=$base" -f "ctx/Dockerfile.$fam" ctx >/dev/null || return 1
     record images "$IMG/$d-tools"
     local install

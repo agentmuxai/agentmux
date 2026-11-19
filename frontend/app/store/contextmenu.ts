@@ -44,6 +44,7 @@ class ContextMenuModelType {
                 id: crypto.randomUUID(),
                 checked: item.checked,
                 swatchColor: item.swatchColor,
+                swatchBar: item.swatchBar,
             };
             if (item.visible === false) {
                 nativeItem.visible = false;

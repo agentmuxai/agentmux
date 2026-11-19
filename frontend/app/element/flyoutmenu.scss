@@ -137,6 +137,15 @@
     flex-shrink: 0;
     // A hairline in the theme's text colour: a black swatch shows on a dark menu and a white one on a light menu.
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--main-text-color) 35%, transparent);
+
+    // A swatch of a thing that has a bar (a tab or a pane's pill): the bar across the top, over the fill, as the thing is
+    // drawn. border-box and no-repeat, so the bar is not drawn again under the bottom edge.
+    &--bar {
+        background-image: linear-gradient(var(--swatch-bar) 0 3px, transparent 3px);
+        background-origin: border-box;
+        background-clip: border-box;
+        background-repeat: no-repeat;
+    }
 }
 
 // Radio/checkbox indicator. More opaque + slightly larger than the

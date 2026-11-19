@@ -11,6 +11,7 @@ import {
     addStage,
     canRemove,
     moveStage,
+    moveStageNear,
     recolourStage,
     removalTarget,
     removeStage,
@@ -156,6 +157,18 @@ describe("the draft edits", () => {
         expect(moveStage(s, "review", -1).map((x) => x.id).slice(3, 7)).toEqual(["progress", "review", "needs", "merged"]);
         expect(moveStage(s, "backlog", -1)).toEqual(s);
         expect(moveStage(s, "released", 3)).toEqual(s);
+    });
+
+    it("moves a stage next to another, before or after, and ignores a drop on itself or on nothing", () => {
+        const s = defaultStages();
+        const ids = (x: typeof s) => x.map((y) => y.id);
+        expect(ids(moveStageNear(s, "review", "backlog", false)).slice(0, 2)).toEqual(["review", "backlog"]);
+        expect(ids(moveStageNear(s, "backlog", "review", true)).slice(3, 6)).toEqual(["needs", "review", "backlog"]);
+        expect(ids(moveStageNear(s, "backlog", "review", false)).slice(3, 6)).toEqual(["needs", "backlog", "review"]);
+        expect(moveStageNear(s, "review", "review", true)).toEqual(s);
+        expect(moveStageNear(s, "review", "nope", true)).toEqual(s);
+        expect(moveStageNear(s, "nope", "review", true)).toEqual(s);
+        expect(moveStageNear(s, "review", "review", false)).not.toBe(s);
     });
 
     it("turning a source on takes it from the stage that had it", () => {

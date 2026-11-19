@@ -811,6 +811,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** With `swatchColor`: the bar drawn across the top of the swatch (a tab's or pill's bar). */
+        swatchBar?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
         /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
@@ -829,6 +831,8 @@ declare global {
         sublabel?: string;
         /** CSS color for an inline swatch square rendered before the label. */
         swatchColor?: string;
+        /** With `swatchColor`: the bar drawn across the top of the swatch (a tab's or pill's bar). */
+        swatchBar?: string;
         /** A Font Awesome name (`"copy"`, `"regular@window-maximize"`) drawn in the row's leading slot; decoration only. See app/util/menu-icons.ts. */
         icon?: string;
         /** A CSS colour for that icon (a widget's own colour in the pane "+" menu); the label keeps the menu's text colour. */
