@@ -1018,29 +1018,10 @@
     }
 }
 
-// "Check now" beside "Out of quota": looks at the agent again now (swarm-check-limits.tsx).
+// "Check now" beside "Out of quota" (swarm-check-limits.tsx): a UI kit Button; it keeps its size in a narrow row.
 .swarm-unavailable-check {
-    display: flex;
-    align-items: center;
-    gap: 4px;
     flex-shrink: 0;
-    padding: 0 6px;
-    font-size: var(--text-xs);
     white-space: nowrap;
-    cursor: pointer;
-    color: var(--warning-text-color);
-    background: transparent;
-    border: 1px solid currentColor;
-    border-radius: var(--radius-sm, 4px);
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
-    }
-
-    &:disabled {
-        cursor: default;
-        opacity: 0.7;
-    }
 }
 
 // An agent another instance claims, or whose message was refused: the row's one warning (swarm-row-registration.tsx).

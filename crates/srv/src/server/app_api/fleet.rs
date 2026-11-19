@@ -209,11 +209,6 @@ pub(crate) async fn deliver_broadcast_turn(
     .ok()
     .flatten();
     if let Some(u) = unavailable {
-        // A person's words never wait silently on a reset that may have been overtaken: they are kept,
-        // the agent is checked at once, and they are sent when it can work (`person_hold`).
-        if crate::server::person_hold::is_kept_for_check(&u) {
-            return crate::server::person_hold::hold_and_check(deps, block_id, text, from, &u.reason()).await;
-        }
         return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
     }
     deliver_available(deps, block_id, text, from).await
@@ -439,12 +434,14 @@ pub(crate) async fn fleet_broadcast_impl(
                         Some(sender) => sender.deliver(&client, route, agent, &body, recipients).await,
                         None => Err("no LAN sender".to_string()),
                     },
-                    _ => deliver_broadcast_turn(&deps, block_id, text, origin).await,
+                    _ => crate::server::person_hold::deliver_person_broadcast(&deps, block_id, text, origin).await,
                 }
             }
         },
     )
     .await;
+    // The agents kept for a check are waited for together, outside the delivery slots above.
+    let outcomes = crate::server::person_hold::resolve_pending(outcomes).await;
 
     super::fleet_result::settle_broadcast(
         state,

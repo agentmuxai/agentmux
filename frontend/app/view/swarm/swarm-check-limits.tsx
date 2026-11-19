@@ -8,9 +8,10 @@
  * held for it). The agent API for the same thing is `Identity` with action `check_limits`.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { Button } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 
 /** How long the button says "Checking…" before it is offered again if the limit is still shown. */
@@ -50,19 +51,16 @@ export function CheckNowButton(props: { blockId: string; check?: (blockIds: stri
         setTimeout(() => setChecking(false), CHECKING_MS);
     };
     return (
-        <button
-            class="swarm-unavailable-check"
-            disabled={checking()}
-            onClick={click}
+        <span
+            class="ui-tooltip-anchor"
             {...tip(
                 error() ??
                     "Looks at this agent again now, in case your quota is back before the reset. It starts a small turn; if it works, the agent can take messages again."
             )}
         >
-            <Show when={checking()} fallback={<i class="fa-solid fa-rotate" />}>
-                <i class="fa-solid fa-spinner fa-spin" />
-            </Show>
-            {checkNowText(checking(), error())}
-        </button>
+            <Button class="swarm-unavailable-check" tone="attention" density="compact" icon="rotate" busy={checking()} onClick={click}>
+                {checkNowText(checking(), error())}
+            </Button>
+        </span>
     );
 }

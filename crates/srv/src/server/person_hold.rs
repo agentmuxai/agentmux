@@ -92,46 +92,91 @@ pub(crate) fn kept_count(block_id: &str) -> usize {
     KEPT.lock().unwrap_or_else(|e| e.into_inner()).get(block_id).map_or(0, Vec::len)
 }
 
-/// The words of a broadcast to `block_id`, an agent out of quota: kept, the check started, and the
-/// answer after [`CHECK_WAIT_MS`] at most. `Ok` when delivered; an `Err` that starts with
-/// [`HELD_PREFIX`] when kept and not sent yet.
-pub(crate) async fn hold_and_check(
-    deps: &AgentTurnDeps,
-    block_id: String,
-    text: String,
-    from: MessageOrigin,
-    reason: &str,
-) -> Result<(), String> {
-    hold_and_check_within(deps, block_id, text, from, reason, Duration::from_millis(CHECK_WAIT_MS)).await
+/// A broadcast's words kept for an agent out of quota, with its check started: what the answer waits for.
+pub(crate) struct Pending {
+    answered: oneshot::Receiver<Result<(), String>>,
+    reason: String,
+    started: std::time::Instant,
 }
 
-/// [`hold_and_check`], with how long the answer waits for the check.
-async fn hold_and_check_within(
-    deps: &AgentTurnDeps,
-    block_id: String,
-    text: String,
-    from: MessageOrigin,
-    reason: &str,
-    wait: Duration,
-) -> Result<(), String> {
+impl Pending {
+    /// The answer, waiting up to `wait` from when the check started: `Ok` when delivered; an `Err` that
+    /// starts with [`HELD_PREFIX`] when kept and not sent yet.
+    async fn answer(self, wait: Duration) -> Result<(), String> {
+        let left = wait.saturating_sub(self.started.elapsed());
+        match tokio::time::timeout(left, self.answered).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(format!("{}the message was dropped before it was sent", crate::backend::reactive::UNAVAILABLE_PREFIX)),
+            Err(_) => Err(format!(
+                "{HELD_PREFIX}{}; the check has not cleared it yet. Kept, and sent when it can work (up to 24 hours)",
+                self.reason
+            )),
+        }
+    }
+}
+
+/// Keeps `text` for `block_id`, an agent out of quota, and starts its check turn.
+fn keep_and_check(deps: &AgentTurnDeps, block_id: &str, text: String, from: MessageOrigin, reason: String) -> Result<Pending, String> {
     let (answer, answered) = oneshot::channel();
     let now_ms = agentmux_common::time::now_ms_u64();
-    let first = keep(&block_id, Words { text, from, kept_at_ms: now_ms, answer })?;
+    let first = keep(block_id, Words { text, from, kept_at_ms: now_ms, answer })?;
     if first {
-        spawn_watch(deps.clone(), block_id.clone());
+        spawn_watch(deps.clone(), block_id.to_string());
     }
-    match super::limit_probe::check_now(&block_id, now_ms) {
+    match super::limit_probe::check_now(block_id, now_ms) {
         super::limit_probe::Check::Started => tracing::info!(block_id = %block_id, "person hold: started a check turn for the person's message"),
         super::limit_probe::Check::Running => {}
         super::limit_probe::Check::NotStarted(why) => tracing::info!(block_id = %block_id, why = %why, "person hold: no check turn started; the message waits"),
     }
-    match tokio::time::timeout(wait, answered).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(format!("{}the message was dropped before it was sent", crate::backend::reactive::UNAVAILABLE_PREFIX)),
-        Err(_) => Err(format!(
-            "{HELD_PREFIX}{reason}; the check has not cleared it yet. Kept, and sent when it can work (up to 24 hours)"
-        )),
+    Ok(Pending { answered, reason, started: std::time::Instant::now() })
+}
+
+/// An answer that starts with this stands for a [`Pending`] to be waited for ([`resolve_pending`]).
+const PENDING_PREFIX: &str = "pending: ";
+static PARKED: LazyLock<Mutex<HashMap<u64, Pending>>> = LazyLock::new(Default::default);
+static NEXT_TICKET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// One target of a Swarm broadcast: the person's words. To an agent that can work they go as a turn; to
+/// one out of quota by its plan they are kept and its check starts at once, instead of being refused
+/// (`resolve_pending` then waits for the check, for every such target together); any other agent that
+/// cannot work refuses them as before. Only this path keeps: a task start or an agent's message to a
+/// limited agent (`deliver_broadcast_turn`) still refuses, since it undoes its work on a refusal.
+pub(crate) async fn deliver_person_broadcast(deps: &AgentTurnDeps, block_id: String, text: String, from: MessageOrigin) -> Result<(), String> {
+    let (mstore, id) = (deps.mstore.clone(), block_id.clone());
+    let unavailable = tokio::task::spawn_blocking(move || super::jekt_hold::holding_unavailable(&mstore, &id)).await.ok().flatten();
+    match unavailable {
+        Some(u) if is_kept_for_check(&u) => {
+            let pending = keep_and_check(deps, &block_id, text, from, u.reason())?;
+            let ticket = NEXT_TICKET.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            PARKED.lock().unwrap_or_else(|e| e.into_inner()).insert(ticket, pending);
+            Err(format!("{PENDING_PREFIX}{ticket}"))
+        }
+        _ => super::app_api::fleet::deliver_broadcast_turn(deps, block_id, text, from).await,
     }
+}
+
+/// Waits for every target parked by [`deliver_person_broadcast`] together, up to [`CHECK_WAIT_MS`] from
+/// when its check started, and puts each one's answer in its outcome.
+pub(crate) async fn resolve_pending(outcomes: Vec<super::app_api::fleet::BroadcastOutcome>) -> Vec<super::app_api::fleet::BroadcastOutcome> {
+    resolve_pending_within(outcomes, Duration::from_millis(CHECK_WAIT_MS)).await
+}
+
+async fn resolve_pending_within(outcomes: Vec<super::app_api::fleet::BroadcastOutcome>, wait: Duration) -> Vec<super::app_api::fleet::BroadcastOutcome> {
+    use futures_util::future::join_all;
+    join_all(outcomes.into_iter().map(|mut outcome| async move {
+        let ticket = outcome.result.as_ref().err().and_then(|e| e.strip_prefix(PENDING_PREFIX)).and_then(|t| t.parse::<u64>().ok());
+        if let Some(pending) = ticket.and_then(|t| PARKED.lock().unwrap_or_else(|e| e.into_inner()).remove(&t)) {
+            outcome.result = pending.answer(wait).await;
+        }
+        outcome
+    }))
+    .await
+}
+
+/// [`deliver_person_broadcast`] for one agent, waiting `wait` for its check (the test's way in).
+#[cfg(test)]
+async fn hold_and_check_within(deps: &AgentTurnDeps, block_id: String, text: String, from: MessageOrigin, reason: &str, wait: Duration) -> Result<(), String> {
+    keep_and_check(deps, &block_id, text, from, reason.to_string())?.answer(wait).await
 }
 
 /// Watches `block_id` until it can work, then sends what is kept, oldest first.
@@ -285,6 +330,44 @@ mod tests {
             }
         };
         tokio::time::timeout(Duration::from_secs(5), gone).await.expect("the watcher sends what was kept once the agent can work");
+        crate::backend::blockcontroller::delete_controller(&block_id);
+    }
+
+    /// Review of #7797: a task start or an agent's message goes through `deliver_broadcast_turn`, which undoes
+    /// its work on a refusal; only the Swarm's person broadcast keeps words for a limited agent, and the waits
+    /// of all its kept targets run together after the delivery slots, not inside them.
+    #[tokio::test]
+    async fn only_a_swarm_broadcast_keeps_words_for_a_limited_agent() {
+        let state = crate::server::tests::test_state();
+        let deps = AgentTurnDeps::from_state(&state);
+        let block_id = "person-hold-callers-pane".to_string();
+        let mut block = crate::backend::obj::Block { oid: block_id.clone(), ..Default::default() };
+        let now = agentmux_common::time::now_ms_u64();
+        block.meta.insert(
+            crate::backend::blockcontroller::core::META_LAST_FAILURE.to_string(),
+            serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false, "resetsAtMs": now + 86_400_000, "atMs": now - 1_000}),
+        );
+        state.mstore.insert(&mut block).unwrap();
+        crate::backend::agent_state::test_support::register_stub(
+            &block_id,
+            crate::backend::blockcontroller::BLOCK_CONTROLLER_PERSISTENT,
+            crate::backend::blockcontroller::STATUS_RUNNING,
+            false,
+        );
+
+        let refused = super::super::app_api::fleet::deliver_broadcast_turn(&deps, block_id.clone(), "start #1".into(), MessageOrigin::broadcast()).await.unwrap_err();
+        assert!(refused.starts_with(crate::backend::reactive::UNAVAILABLE_PREFIX), "{refused}");
+        assert_eq!(kept_count(&block_id), 0, "a task start or an agent's message keeps nothing");
+
+        let parked = deliver_person_broadcast(&deps, block_id.clone(), "quota is back".into(), MessageOrigin::broadcast()).await.unwrap_err();
+        assert!(parked.starts_with(PENDING_PREFIX), "{parked}");
+        assert_eq!(kept_count(&block_id), 1);
+        let outcome = super::super::app_api::fleet::BroadcastOutcome { block_id: block_id.clone(), agent_id: None, result: Err(parked) };
+        let resolved = resolve_pending_within(vec![outcome], Duration::from_millis(50)).await;
+        let note = resolved[0].result.as_ref().err().and_then(|e| held_note(e)).expect("answered as kept");
+        assert!(note.contains("sent when it can work"), "{note}");
+        assert_eq!(kept_count(&block_id), 1, "still kept after the answer");
+        take_all(&block_id);
         crate::backend::blockcontroller::delete_controller(&block_id);
     }
 

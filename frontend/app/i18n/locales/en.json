@@ -981,6 +981,7 @@
     "vault.section.countOf": "{{shown}} of {{total}}",
     "attachments.strip.fewer": "Show fewer",
     "swarm.broadcast.hint": "Enter sends · {{newlineKey}} adds a line",
+    "swarm.broadcast.kept": ", {{count}} kept",
     "swarm.select.host": "Select all on host",
     "swarm.select.hostTitle": "Select only the agents of this computer, not those on LAN or cloud machines",
     "accountForm.addAccount": "Add Account",
