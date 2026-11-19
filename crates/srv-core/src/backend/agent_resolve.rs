@@ -143,6 +143,30 @@ pub(crate) fn single_row_slug_folded(mstore: &Store, name: &str) -> Option<Strin
     (slugs.len() == 1).then(|| slugs.remove(0))
 }
 
+/// [`resolve_agent_id`], and where that finds nothing, an agent named as a person writes it: its display name or
+/// its slug in any letter case, when exactly one agent on this machine has it. A name two agents share is refused,
+/// with their ids, not guessed. `Agents transcript` reads names this way; `Agents watch` and the lifecycle actions
+/// refused a display name ("Korp" for the slug "korp") and wanted the uid.
+pub fn resolve_agent_named(store: &Store, named: &str) -> Result<String, String> {
+    let err = match resolve_agent_id(store, named) {
+        Ok(id) => return Ok(id),
+        Err(e) => e,
+    };
+    let defs = store.agent_def_list().map_err(|e| format!("resolve_agent_named: store: {e}"))?;
+    let same: Vec<&crate::backend::storage::agents::AgentDefinition> = defs
+        .iter()
+        .filter(|d| d.is_seeded != 1 && (d.name.eq_ignore_ascii_case(named) || d.slug.eq_ignore_ascii_case(named)))
+        .collect();
+    match same.as_slice() {
+        [one] => Ok(one.id.clone()),
+        [] => Err(format!("{err}; give an agent's id or slug (Agents list)")),
+        many => {
+            let ids: Vec<&str> = many.iter().map(|d| d.id.as_str()).collect();
+            Err(format!("more than one agent is named '{named}' (ids {}): give an id (Agents list)", ids.join(", ")))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +240,34 @@ mod tests {
         with_isolated_home(|| {
             let store = Store::open_in_memory().unwrap();
             assert!(resolve_agent_id(&store, "nobody").is_err());
+        });
+    }
+
+    #[test]
+    fn a_display_name_in_any_case_resolves_when_one_agent_has_it() {
+        with_isolated_home(|| {
+            let store = Store::open_in_memory().unwrap();
+            let mut def = test_agent_def("def-1", "Solo Agent", "claude", "agent", 1, "");
+            def.slug = "solo".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            assert!(resolve_agent_id(&store, "solo agent").is_err(), "the strict resolver wants a slug or an id");
+            assert_eq!(resolve_agent_named(&store, "solo agent").unwrap(), "def-1");
+            assert_eq!(resolve_agent_named(&store, "SOLO").unwrap(), "def-1");
+            assert_eq!(resolve_agent_named(&store, "def-1").unwrap(), "def-1");
+            assert!(resolve_agent_named(&store, "nobody").unwrap_err().contains("Agents list"));
+        });
+    }
+
+    #[test]
+    fn a_display_name_two_agents_share_is_refused_with_their_ids() {
+        with_isolated_home(|| {
+            let store = Store::open_in_memory().unwrap();
+            for id in ["def-a", "def-b"] {
+                let mut def = test_agent_def(id, "Twin", "claude", "agent", 1, "");
+                store.agent_def_insert(&mut def).unwrap();
+            }
+            let err = resolve_agent_named(&store, "twin").unwrap_err();
+            assert!(err.contains("more than one agent") && err.contains("def-a") && err.contains("def-b"), "{err}");
         });
     }
 
