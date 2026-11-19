@@ -44,8 +44,10 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
 
 let uses: UseRequest[] = [];
 let entries: VaultEntryInfo[] = [];
+let shareList: unknown = {};
 const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
     if (op === "list") return { entries, problem: null, requests: [], uses, backend: "keychain" };
+    if (op === "share_list") return shareList;
     return {};
 });
 vi.mock("@/util/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
@@ -478,6 +480,27 @@ describe("the sites an entry may be filled into", () => {
         expect(row.textContent).not.toContain("Agents may fill it on");
         fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Agent1 on accounts.example.com" }));
         await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "signin:Agent1|personal|https://accounts.example.com" }]));
+    });
+
+    it("names the agent of a shared login's sign-in grant, stored under its id, and the prompt it answers", async () => {
+        const grant = "signin:uid-7|profile:agent-tester-1|https://example.com|prompt:site|Staff area";
+        entries = [{ ...entries[0], kind: "login", grants: [grant] }];
+        shareList = { shares: [{ agent: "uid-7", name: "Tester", uses: 0, last_used_ms: 0 }], agents: [{ uid: "uid-8", name: "Other" }] };
+        await refreshVault();
+        render(() => <VaultEntries section="personal" />);
+        const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
+        await waitFor(() => expect(row.textContent).toContain("Tester on example.com (sign-in prompt Staff area)"));
+        expect(row.textContent).not.toContain("uid-7");
+        // Taking it back still names the stored grant.
+        fireEvent.click(within(row).getByRole("button", { name: "Stop signing in with Alex without asking for Tester on example.com (sign-in prompt Staff area)" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: grant }]));
+        shareList = {};
+    });
+
+    it("reads no names for an entry with no sign-in grant", async () => {
+        render(() => <VaultEntries section="personal" />);
+        await screen.findByText("Alex");
+        expect(calls("share_list")).toEqual([]);
     });
 });
 
