@@ -42,7 +42,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 };
                 let mut result = audit_query::query(&src, &req)?;
                 // The task each row's agent held at the time, and its PR: from the Kanban's history.
-                let held = audit_query::tasks::from_store(&state.identity_store);
+                let held = audit_query::tasks::from_store(&state.work_store);
                 audit_query::tasks::attach(&mut result.entries, &held);
                 Ok(result)
             })
