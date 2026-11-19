@@ -147,3 +147,14 @@ async fn a_request_with_no_agent_token_is_refused() {
     let resp = handle_aws_credentials(State(test_state()), Some(Extension(Caller::Agent { uid: "no-such-agent".into() })), Json(request("read", None))).await;
     assert_eq!(answer(resp).await.0, StatusCode::UNAUTHORIZED);
 }
+
+#[test]
+fn only_a_refusal_the_person_can_fix_is_shown_in_the_agents_pane() {
+    let refusal = |code: &'static str| Refusal { status: StatusCode::SERVICE_UNAVAILABLE, code, message: "x".to_string() };
+    for code in ["AWS_HOST_LOGIN_NEEDED", "AWS_HOST_REFUSED", "GRANT_DISABLED"] {
+        assert!(the_persons_to_fix(&refusal(code)), "{code}");
+    }
+    for code in ["UNKNOWN_PROFILE", "NOT_ALLOWED_FOR_YOU", "REASON_REQUIRED", "TOO_MANY_MINTS", "AWS_TOOK_TOO_LONG", "AWS_CLI_MISSING", "NATIVE_AGENT", "AWS_NOT_SHARED"] {
+        assert!(!the_persons_to_fix(&refusal(code)), "{code}");
+    }
+}

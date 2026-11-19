@@ -4,7 +4,12 @@
  * A notice as the pane draws it: a one-line `line`, a `pending` card with a countdown, or the end
  * of a card (`cleared`, with its `outcome`).
  */
-export type NoticeView = { id: string, kind: "spawn" | "ssh" | "google" | "memory", block_id: string, agent: string, headline: string, body: string, 
+export type NoticeView = { id: string, 
+/**
+ * `github` and `aws` are a container agent refused a credential (`sagas::credential_notice`): a line with
+ * no countdown and no buttons, kept until the credential works again.
+ */
+kind: "spawn" | "ssh" | "google" | "memory" | "github" | "aws", block_id: string, agent: string, headline: string, body: string, 
 /**
  * The agent's own words, for the quote.
  */

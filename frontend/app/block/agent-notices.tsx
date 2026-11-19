@@ -10,6 +10,7 @@
  * (`paneRequests`), and the tone and notification come from srv's attention event.
  */
 
+import { t } from "@/app/i18n/i18n";
 import { startAgentGrants } from "@/app/store/agent-grants";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -17,7 +18,7 @@ import { paneRequests, type PaneRequestHandle } from "@/app/store/pane-requests"
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { NoticeView } from "@/types/rpc/NoticeView";
-import { AgentNoticeCard, AgentNoticeLine, type NoticeChoice } from "./agent-notice-card";
+import { AgentNoticeCard, AgentNoticeLine, isCredentialNotice, type NoticeChoice } from "./agent-notice-card";
 
 /** How long a one-line notice stays. */
 export const LINE_SHOWN_MS = 12_000;
@@ -43,10 +44,12 @@ function show(n: NoticeView): void {
             source: "agent-notice-line",
             Component: AgentNoticeLine,
             props: { notice: n },
-            summary: n.headline,
+            // A refused credential's headline is a whole sentence: the dock's "N more:" row names it by what it is about.
+            summary: n.kind === "github" ? t("agentNotice.githubRefused") : n.kind === "aws" ? t("agentNotice.awsRefused") : n.headline,
             waits: false,
         });
-        shown.set(n.id, { handle, timer: setTimeout(() => drop(n.id), LINE_SHOWN_MS) });
+        // A refused credential stays until srv says it works again (`cleared`) or the person dismisses it.
+        shown.set(n.id, { handle, timer: isCredentialNotice(n.kind) ? undefined : setTimeout(() => drop(n.id), LINE_SHOWN_MS) });
         return;
     }
     const handle = paneRequests.push(n.block_id, {
