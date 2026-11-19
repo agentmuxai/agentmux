@@ -6,6 +6,7 @@
 // agent's own driving is `driven-by-strip.tsx`; this one shows when no agent drives and one did.
 
 import { Button } from "@/app/element/ui";
+import { agentDisplayName, followAgentNames } from "@/app/store/agent-names";
 import { createSignal, Show, type JSX } from "solid-js";
 import type { BrowserViewModel } from "./browser-model";
 import { ActionLogStrip } from "./driven-by-strip";
@@ -26,6 +27,8 @@ export function NoDriverStrips(props: { model: BrowserViewModel }): JSX.Element 
 
 export function GiveBackStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const [error, setError] = createSignal<string | undefined>();
+    followAgentNames();
+    const who = () => agentDisplayName(props.agent);
     const giveBack = () => {
         setError(undefined);
         props.model.giveBack().catch((err) => setError(plainError(err, "give the pane back")));
@@ -35,7 +38,7 @@ export function GiveBackStrip(props: { model: BrowserViewModel; agent: string })
             <i class="fa-solid fa-hand" aria-hidden="true" />
             <div class="browser-driven-by-message">
                 <span>
-                    You are driving this pane. <b>{props.agent}</b> can't act in it until you give it back.
+                    You are driving this pane. <b>{who()}</b> can't act in it until you give it back.
                 </span>
                 <Show when={error()}>
                     <span class="browser-bypass-strip-error" role="alert">
@@ -47,10 +50,10 @@ export function GiveBackStrip(props: { model: BrowserViewModel; agent: string })
                 <Button
                     density="compact"
                     class="browser-give-back"
-                    title={`Let ${props.agent} drive this pane again; it takes it back with its next retake.`}
+                    title={`Let ${who()} drive this pane again; it takes it back with its next retake.`}
                     onClick={giveBack}
                 >
-                    Give back to {props.agent}
+                    Give back to {who()}
                 </Button>
             </div>
         </div>
