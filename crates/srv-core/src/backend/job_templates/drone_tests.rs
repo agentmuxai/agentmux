@@ -470,3 +470,51 @@ fn a_job_made_from_a_template_gets_the_trigger_with_its_parameters_filled_in() {
     let own = make(json!({ "kind": "manual" })).unwrap();
     assert_eq!(own["trigger"], json!({ "kind": "manual" }));
 }
+
+// ── Where a parameter lands decides what it may hold ─────────────────────────
+
+#[test]
+fn a_parameter_put_into_an_address_is_a_name_or_owner_slash_name() {
+    let pkg = |id: &str| {
+        let b = DRONE_BUILTINS.iter().find(|b| b.id == id).unwrap();
+        package::load_embedded(b.id, b.files).unwrap()
+    };
+    let id = "agentmux.rerun-flaky-job";
+    let p = pkg(id);
+    let with = |repo: &str| {
+        let mut given = example(id);
+        given.insert("repo".into(), json!(repo));
+        let g = graph::render(p.graph.as_ref().unwrap(), &p.manifest, &given);
+        let params = manifest::resolve_params(&p.manifest, &given).unwrap();
+        let mut trigger = p.manifest.trigger.clone().unwrap();
+        let t = graph::render_value(&mut trigger, &params);
+        (g.map(|_| ()), t)
+    };
+    assert!(with("acme/site").0.is_ok() && with("acme/site").1.is_ok());
+    assert!(with("a-b.c_d/e-f.g_h").0.is_ok());
+    for bad in ["acme/site?x=1", "acme/site#frag", "acme//site", "acme/site/actions", "../site", "acme/..", "acme/site%2F..", "a b/c", "acme/site@evil", "acme:80/site", "", "/site", "acme/"] {
+        let (g, t) = with(bad);
+        assert!(g.unwrap_err().contains("owner/name"), "{bad:?} in the graph");
+        assert!(t.unwrap_err().contains("owner/name"), "{bad:?} in the trigger");
+    }
+}
+
+#[test]
+fn a_parameter_put_into_a_condition_holds_no_quote_mark_or_backslash() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.rerun-flaky-job").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let with = |workflow: &str| {
+        let mut given = example(b.id);
+        given.insert("workflow".into(), json!(workflow));
+        graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given)
+    };
+    assert!(with("CI").is_ok() && with("Build and test (linux)").is_ok());
+    for bad in ["CI' || 'x' == 'x", "CI\" || \"x", "CI\\", "CI`x"] {
+        assert!(with(bad).unwrap_err().contains("no quote mark or backslash"), "{bad:?}");
+    }
+    // Words in an agent's task or a message are prose, not an expression: a quote there is fine.
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.check-and-file-task").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let given = json!({ "check": "Is the 'main' build green?" }).as_object().cloned().unwrap();
+    assert!(graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).is_ok());
+}

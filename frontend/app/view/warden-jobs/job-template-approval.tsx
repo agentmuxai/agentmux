@@ -23,7 +23,7 @@ import { describeCron } from "./jobs-format";
 import "./job-editor.scss";
 
 /** Outputs that write outside AgentMux or to someone else (srv's `OUTSIDE_OUTPUTS`). */
-const OUTSIDE = new Set(["pull_request", "comment", "message:others", "deploy"]);
+const OUTSIDE = new Set(["pull_request", "comment", "message:others", "deploy", "ci_rerun"]);
 
 const writesOutside = (output: string): boolean => OUTSIDE.has(output) || OUTSIDE.has(output.split(":")[0]);
 

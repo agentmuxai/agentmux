@@ -530,7 +530,7 @@ describe("Outputs", () => {
     });
 
     it("warns about an output that writes outside AgentMux, and says so in its tooltip", () => {
-        show(job({ outputs: ["pull_request", "comment", "message:others", "deploy"] }));
+        show(job({ outputs: ["pull_request", "comment", "message:others", "deploy", "ci_rerun"] }));
         for (const p of pills(fact("Outputs"))) {
             expect(tone(p), p.textContent ?? "").toBe("warn");
             expect(p).toHaveAttribute("title", "Writes outside AgentMux");
