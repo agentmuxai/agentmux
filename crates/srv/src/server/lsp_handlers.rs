@@ -32,6 +32,7 @@ pub fn register_lsp_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .start(crate::backend::lsp::StartArgs {
                         language: cmd.language,
                         workspace_root,
+                        file_path: expanded,
                     })
                     .await
                     .map_err(|e| e.to_wire_string())?;

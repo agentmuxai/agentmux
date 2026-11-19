@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { decodeFileUri, workspaceCovers } from "./editor-lsp-paths";
-import { lspBannerShows, lspStatusChipText } from "./editor-lsp-status";
+import { lspBannerKey, lspBannerShows, lspStatusChipText, NOT_ON_HOST_TEXT } from "./editor-lsp-status";
 
 describe("workspaceCovers", () => {
     it("is false with no root", () => {
@@ -57,6 +57,7 @@ describe("the language server's status", () => {
         expect(lspStatusChipText({ kind: "ready", capabilities: {} as never }, "python")).toBe("python: ready");
         expect(lspStatusChipText({ kind: "missing", language: "python" }, "python")).toBe("python: not installed");
         expect(lspStatusChipText({ kind: "crashed", error: "x" }, "go")).toBe("go: error");
+        expect(lspStatusChipText({ kind: "notOnHost" }, "typescript")).toBe("typescript: off in this folder");
         expect(lspStatusChipText({ kind: "disposed" }, "go")).toBe("");
     });
 
@@ -67,5 +68,16 @@ describe("the language server's status", () => {
         expect(lspBannerShows(missing, new Set(["rust"]))).toBe(true);
         expect(lspBannerShows({ kind: "starting" }, new Set())).toBe(false);
         expect(lspBannerShows(null, new Set())).toBe(false);
+    });
+
+    it("shows a banner for a container agent's folder until it is dismissed, whatever the language", () => {
+        const notOnHost = { kind: "notOnHost" } as const;
+        expect(lspBannerShows(notOnHost, new Set())).toBe(true);
+        expect(lspBannerShows(notOnHost, new Set(["typescript"]))).toBe(true);
+        const key = lspBannerKey(notOnHost)!;
+        expect(lspBannerShows(notOnHost, new Set([key]))).toBe(false);
+        expect(lspBannerKey({ kind: "missing", language: "python" })).toBe("python");
+        expect(lspBannerKey({ kind: "ready", capabilities: {} as never })).toBeNull();
+        expect(NOT_ON_HOST_TEXT).toContain("no language server runs on the host");
     });
 });

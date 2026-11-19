@@ -34,6 +34,8 @@ pub type ServerId = String;
 pub struct StartArgs {
     pub language: String,
     pub workspace_root: PathBuf,
+    /// The file the server is asked for: with the root, it decides whether a server runs on the host.
+    pub file_path: PathBuf,
 }
 
 pub struct StartResult {
@@ -50,6 +52,11 @@ pub enum LspError {
 
     #[error("unsupported language: {0}")]
     UnsupportedLanguage(String),
+
+    /// The file, or its project folder, is one a container agent can write: no server runs on the host
+    /// for it, whatever the language. The frontend shows this as a state of its own.
+    #[error("no_host_server_for_container_agent_folder")]
+    ContainerAgentFolder,
 
     #[error("spawn failed: {0}")]
     SpawnFailed(String),
@@ -92,6 +99,18 @@ impl LspSupervisor {
         let root_str = args.workspace_root.to_string_lossy().to_string();
         let key = (root_str.clone(), lang.clone());
         let server_id = make_server_id(&root_str, &lang);
+
+        // First, before a running server is attached to and before the language is looked at: the answer
+        // is about the folder. The check reads the disk and the store, so it runs off the async workers.
+        let (file, root) = (args.file_path.clone(), args.workspace_root.clone());
+        let on_host = tokio::task::spawn_blocking(move || {
+            super::workspace::runs_on_host(&file, &root, &crate::backend::fs_ops::container_folders::place)
+        })
+        .await
+        .map_err(|e| LspError::SpawnFailed(format!("the folder check did not finish: {e}")))?;
+        if !on_host {
+            return Err(LspError::ContainerAgentFolder);
+        }
 
         // Fast-path: existing server, bump refcount.
         {
@@ -398,5 +417,30 @@ mod tests {
         assert_eq!(binary_for_language("c"), Some("clangd"));
         assert_eq!(binary_for_language("cpp"), Some("clangd"));
         assert_eq!(binary_for_language("brainfuck"), None);
+    }
+
+    fn start_args(language: &str, root: &std::path::Path) -> StartArgs {
+        StartArgs { language: language.to_string(), workspace_root: root.to_path_buf(), file_path: root.join("a.ts") }
+    }
+
+    #[tokio::test]
+    async fn a_container_agents_folder_gets_no_server_on_the_host_in_any_language() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ws, own) = (tmp.path().join("ws"), tmp.path().join("own"));
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        crate::backend::fs_ops::container_folders::add_for_test(&ws, &format!("lsp-{}", uuid::Uuid::new_v4().simple()), "/workspace");
+        let supervisor = LspSupervisor::new(Arc::new(EventBus::new()));
+
+        for language in ["typescript", "javascript", "rust", "python", "go", "c", "cpp", "no-such-language"] {
+            let refused = supervisor.start(start_args(language, &ws)).await;
+            assert!(matches!(refused, Err(LspError::ContainerAgentFolder)), "{language}: {:?}", refused.err());
+        }
+        assert_eq!(LspError::ContainerAgentFolder.to_wire_string(), "no_host_server_for_container_agent_folder");
+        assert!(supervisor.servers.lock().await.is_empty());
+
+        // The person's own folder passes the check and goes on to the language.
+        let own_folder = supervisor.start(start_args("no-such-language", &own)).await;
+        assert!(matches!(own_folder, Err(LspError::UnsupportedLanguage(_))), "{:?}", own_folder.err());
     }
 }
