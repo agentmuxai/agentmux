@@ -379,5 +379,13 @@ mod tests {
         let any = cond("agentmux.merged-pr-still-claimed", "found", json!({ "repo": "acme/site", "steward": "masty" }));
         assert_eq!(run(&any, &scope_with(json!({ "claimed": { "count": 1 } }))).await.unwrap()["result"], json!(true));
         assert_eq!(run(&any, &scope_with(json!({ "claimed": { "count": 0 } }))).await.unwrap()["result"], json!(false));
+        // The line the steward gets names the first task: a plain dotted reference can't index a list, so the
+        // template reads it through `json:`.
+        let tell = cond("agentmux.merged-pr-still-claimed", "tell", json!({ "repo": "acme/site", "steward": "masty" }));
+        let mut scope = scope_item(json!({ "id": 9, "number": 9, "html_url": "https://github.com/acme/site/pull/9" }), json!({}));
+        scope.outputs.insert("claimed".to_string(), json!({ "count": 1, "tasks": [{ "num": 412, "title": "Fix the thing", "holder": "agent5" }] }));
+        let body = scope.resolve(tell.data["body"].as_str().unwrap());
+        assert!(body.contains("task #412 (Fix the thing) is still claimed by agent5."), "{body}");
+        assert!(body.contains("https://github.com/acme/site/pull/9"), "{body}");
     }
 }

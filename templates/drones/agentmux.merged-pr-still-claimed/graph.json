@@ -44,7 +44,7 @@
       "data": {
         "kind": "message",
         "to": "{{param.steward}}",
-        "body": "Pull request {{trigger.item.html_url}} was merged half an hour ago, but task #{{claimed.tasks.0.num}} ({{claimed.tasks.0.title}}) is still claimed by {{claimed.tasks.0.holder}}. Ask them to complete it or say why not. No reply needed."
+        "body": "Pull request {{trigger.item.html_url}} was merged half an hour ago, but task #{{claimed.tasks | json:0.num}} ({{claimed.tasks | json:0.title}}) is still claimed by {{claimed.tasks | json:0.holder}}. Ask them to complete it or say why not. No reply needed."
       }
     }
   ],
