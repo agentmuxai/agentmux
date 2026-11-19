@@ -9,11 +9,13 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { Button, FilterChip, FilterChips, IconButton, Notice, Select, TextInput } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
+import { makeIconClass } from "@/util/util";
 import { COLUMNS, type ColumnId } from "@/app/view/kanban/kanban-columns";
 import { canRemove, canShow } from "@/app/view/kanban/kanban-stages-draft";
 import { MAX_STAGES, STAGE_PALETTE, validateStages, type KanbanStage, type StageColour } from "@/app/view/kanban/kanban-stages";
 
 import type { KanbanStagesState } from "./kanban-section-state";
+import { createStageReorder, type StageReorder } from "./kanban-stages-reorder";
 
 import "@/app/view/kanban/kanban-stage-colours.scss";
 import "./kanban-section.scss";
@@ -78,15 +80,32 @@ function RemovePanel(props: Part & { stage: KanbanStage; onClose: () => void }):
     );
 }
 
-function StageRow(props: Part & { stage: KanbanStage; index: number; last: boolean }): JSX.Element {
+function StageRow(props: Part & { stage: KanbanStage; index: number; last: boolean; reorder: StageReorder }): JSX.Element {
     const [removing, setRemoving] = createSignal(false);
     const s = props.s;
     const stage = () => props.stage;
     const here = () => validateStages(s.stages()).filter((p) => p.stage === stage().id);
     const needs = () => stage().takes.includes("needs");
     return (
-        <li class="kanban-stages__row" data-stage-colour={stage().colour}>
+        <li
+            class="kanban-stages__row"
+            data-stage-colour={stage().colour}
+            data-dragging={props.reorder.dragging ? "" : undefined}
+            data-drop={props.reorder.drop}
+            onDragOver={props.reorder.onDragOver}
+            onDrop={props.reorder.onDrop}
+        >
             <div class="kanban-stages__line">
+                <span
+                    class="kanban-stages__grip"
+                    draggable={s.editable()}
+                    aria-hidden="true"
+                    {...tip(t("settings.kanban.dragStage"))}
+                    onDragStart={props.reorder.onDragStart}
+                    onDragEnd={props.reorder.onDragEnd}
+                >
+                    <i class={makeIconClass("grip-vertical", true)} />
+                </span>
                 <span class="kanban-stages__dot" aria-hidden="true" />
                 <TextInput
                     density="compact"
@@ -149,6 +168,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
 
 export function StageList(props: Part): JSX.Element {
     const s = props.s;
+    const reorder = createStageReorder(s.moveNear);
     return (
         <ol class="kanban-stages__list" aria-label={t("settings.kanban.stages")}>
             <For each={s.stages().map((x) => x.id)}>
@@ -160,6 +180,7 @@ export function StageList(props: Part): JSX.Element {
                                 stage={stage()}
                                 index={s.stages().findIndex((x) => x.id === id)}
                                 last={s.stages()[s.stages().length - 1]?.id === id}
+                                reorder={reorder(id)}
                             />
                         )}
                     </Show>
