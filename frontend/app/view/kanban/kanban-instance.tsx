@@ -10,12 +10,17 @@ import { createMemo, createSignal } from "solid-js";
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { readZoom } from "@/app/store/zoom-factor";
 
-import { parseCollapsed } from "./kanban-columns";
 import { KanbanSection } from "./kanban-section";
 
 /** The pane's title: the Kanban, and how many tasks need the operator (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1). */
 export function kanbanTitleOf(needs: number): string {
     return needs > 0 ? `Kanban · ${needs} need${needs === 1 ? "s" : ""} you` : "Kanban";
+}
+
+/** The ids in the pane's `kanban:collapsed` meta, whatever else was written there. Which of them are stages of
+ *  the board shown is the section's to say (a board has its own stages). */
+function storedCollapsed(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
 }
 
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
@@ -37,7 +42,7 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
                     onLanes={(on) => void ctx.setMeta({ "kanban:lanes": on })}
                     board={typeof ctx.meta()?.["kanban:board"] === "string" ? (ctx.meta()?.["kanban:board"] as string) : null}
                     onBoard={(slug) => void ctx.setMeta({ "kanban:board": slug })}
-                    collapsed={parseCollapsed(ctx.meta()?.["kanban:collapsed"])}
+                    collapsed={storedCollapsed(ctx.meta()?.["kanban:collapsed"])}
                     onCollapsed={(ids) => void ctx.setMeta({ "kanban:collapsed": ids })}
                 />
             </div>

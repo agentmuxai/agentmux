@@ -26,6 +26,24 @@ describe("openSettingsAt", () => {
         );
     });
 
+    it("points the Kanban section at a board when it is asked for one", async () => {
+        await openSettingsAt("kanban", "client-x");
+        expect(h.open).toHaveBeenCalledWith(
+            "settings",
+            { meta: { view: "settings", "settings:section": "kanban", "settings:kanban-board": "client-x", "settings:kanban-ask": expect.any(Number) } },
+            { "settings:section": "kanban", "settings:kanban-board": "client-x", "settings:kanban-ask": expect.any(Number) },
+        );
+    });
+
+    it("forgets an earlier board when the Kanban section is opened without one", async () => {
+        await openSettingsAt("kanban");
+        expect(h.open).toHaveBeenCalledWith(
+            "settings",
+            { meta: { view: "settings", "settings:section": "kanban" } },
+            { "settings:section": "kanban", "settings:kanban-board": null, "settings:kanban-ask": null },
+        );
+    });
+
     it("never asks the server to pick the tab", async () => {
         await openSettingsAt("agents");
         expect(h.rpc).not.toHaveBeenCalled();

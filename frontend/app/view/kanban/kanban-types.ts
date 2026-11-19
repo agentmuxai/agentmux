@@ -4,6 +4,8 @@
 // The Kanban's data as srv's `kanban.*` commands send it
 // (crates/srv/src/server/app_api/kanban.rs, docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7).
 
+import type { KanbanStageSet } from "./kanban-stages";
+
 /** A task's state in the queue (`work_state` in crates/srv-core/src/backend/storage/work_queue.rs). */
 export type TaskState = "open" | "held" | "claimed" | "blocked" | "review" | "done" | "failed" | "cancelled";
 
@@ -193,6 +195,14 @@ export interface KanbanBoardInfo {
     total: number;
     /** While a delete waits out its countdown: when it happens (ms). */
     pending_delete_at?: number | null;
+    /** The stage set in use (the stored one, or the default eight); absent from an older srv. */
+    stages?: KanbanStageSet;
+    /** Goes up with each change of the stages: an editor sends the one it read, so a stale one is refused. */
+    stages_rev?: number;
+    /** No stage set is stored (or the stored one can't be used): the board shows the default eight. */
+    stages_default?: boolean;
+    /** Why a stored set can't be used, when it can't. */
+    stages_error?: string | null;
 }
 
 export interface KanbanBoard {
@@ -288,6 +298,10 @@ export interface KanbanActRequest {
     slug?: string;
     /** board_edit: the agents that see the board; `[]` means all. */
     agents?: string[];
+    /** board_edit: the whole new stage set, the stages back to the default, and the revision the editor read. */
+    stages?: KanbanStageSet;
+    stages_reset?: boolean;
+    stages_rev?: number;
 }
 
 export interface KanbanActResult {

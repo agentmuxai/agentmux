@@ -53,6 +53,12 @@ board#5 mounted
 </i>
 </button>
 </div>
+<div class="ui-tooltip-anchor">
+<button aria-label="Kanban settings" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-gear">
+</i>
+</button>
+</div>
 </div>
 <div class="kanban-strip" aria-label="Agents">
 <button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
@@ -181,6 +187,12 @@ board#3 unmounted
 </i>
 </button>
 </div>
+<div class="ui-tooltip-anchor">
+<button aria-label="Kanban settings" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-gear">
+</i>
+</button>
+</div>
 </div>
 <div class="kanban-strip" aria-label="Agents">
 <button title="Camper: working. Drop a waiting task here to start it on Camper; click to open it." type="button" class="ui-button ui-tone-quiet ui-density-compact kanban-strip__agent">
@@ -297,6 +309,12 @@ board#6 mounted
 <div class="ui-tooltip-anchor">
 <button aria-label="Refresh" type="button" class="ui-button ui-tone-quiet ui-icon-button">
 <i aria-hidden="true" class="fa-solid fa-rotate">
+</i>
+</button>
+</div>
+<div class="ui-tooltip-anchor">
+<button aria-label="Kanban settings" type="button" class="ui-button ui-tone-quiet ui-icon-button">
+<i aria-hidden="true" class="fa-solid fa-gear">
 </i>
 </button>
 </div>

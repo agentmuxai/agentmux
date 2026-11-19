@@ -23,6 +23,7 @@ import { RecordingSection } from "./sections/recording-section";
 import { DevicesSection } from "./sections/devices-section";
 import { WidgetsSection } from "./sections/widgets-section";
 import { AgentsSection } from "./sections/agents-section";
+import { KanbanSection } from "./sections/kanban-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 import { DURATION_LINGER_MS } from "@/app/motion/tokens";
@@ -61,7 +62,7 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
 const RAIL: TabItem<SettingsSection>[] = [...SETTINGS_SECTIONS.items];
 
 // The body each rail entry shows. A section mounts when its tab is chosen and unmounts when another is.
-const SECTION_VIEWS: Record<SettingsSection, () => JSX.Element> = {
+const SECTION_VIEWS: Record<SettingsSection, (p: { model: SettingsViewModel }) => JSX.Element> = {
     appearance: AppearanceSection,
     animations: AnimationsSection,
     window: WindowPanesSection,
@@ -74,6 +75,7 @@ const SECTION_VIEWS: Record<SettingsSection, () => JSX.Element> = {
     devices: DevicesSection,
     widgets: WidgetsSection,
     agents: AgentsSection,
+    kanban: KanbanSection,
     advanced: AdvancedSection,
 };
 
@@ -139,7 +141,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         onSelectResult={handleSelectResult}
                     />
                     <ConfigErrorsBanner onOpen={(f) => void openFile(f)} />
-                    <Dynamic component={SECTION_VIEWS[section()]} />
+                    <Dynamic component={SECTION_VIEWS[section()]} model={props.model} />
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
                             {t("settings.footer.openRaw", { file: "settings.json" })}

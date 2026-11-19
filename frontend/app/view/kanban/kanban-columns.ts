@@ -197,16 +197,17 @@ export interface BacklogGroup {
     tasks: KanbanTask[];
 }
 
-/** A waiting column (Backlog, or Spec'd) grouped by who each task waits for: one group per agent,
- *  alphabetically, then Anyone. */
+/** A waiting column (Backlog, or Spec'd, or a stage showing both) grouped by who each task waits for: one
+ *  group per agent, alphabetically, then Anyone. */
 export function backlogGroups(
     tasks: KanbanTask[],
     agents: KanbanAgent[],
-    column: ColumnId = "backlog"
+    column: ColumnId | readonly ColumnId[] = "backlog"
 ): BacklogGroup[] {
+    const columns: readonly ColumnId[] = typeof column === "string" ? [column] : column;
     const groups = new Map<string, KanbanTask[]>();
     for (const t of tasks) {
-        if (columnOf(t) !== column) continue;
+        if (!columns.includes(columnOf(t))) continue;
         const key = t.target_agent || "";
         groups.set(key, [...(groups.get(key) ?? []), t]);
     }
