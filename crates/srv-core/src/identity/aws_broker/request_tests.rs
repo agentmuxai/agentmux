@@ -138,7 +138,7 @@ async fn what_goes_wrong_on_the_host_reads_as_the_hosts_problem() {
 
     let r = go(&Fake::answering(Err(RunError::TimedOut)), &Sessions::default(), ask("deploy", Some("x"))).await.err().unwrap();
     assert_eq!(r.code, "AWS_TOOK_TOO_LONG");
-    assert_eq!(r.message, "AWS credentials took too long (25 s). Try again in a minute.");
+    assert_eq!(r.message, format!("AWS credentials took too long ({} s). Try again in a minute.", mint::RECIPE_TIMEOUT.as_secs()));
 
     let r = go(
         &Fake::answering(Ok(RunOutput { success: true, stdout: b"hello".to_vec(), stderr: String::new() })),

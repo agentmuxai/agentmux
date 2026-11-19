@@ -172,7 +172,7 @@ The text goes to the SDK's stderr through `credential_process`; the AWS CLI prin
 | `AWS_HOST_LOGIN_NEEDED` | "The host's AWS login for 'work' has lapsed. A person runs `aws sso login --profile work` on this computer." |
 | `AWS_CLI_MISSING` | "This computer has no AWS CLI (v2.9 or newer), which the 'read' grant uses. Install it, or use a grant with a command recipe." |
 | `AWS_HOST_REFUSED` | "The host's AWS refused: <its message, first 400 characters>" |
-| `AWS_TOOK_TOO_LONG` | "AWS credentials took too long (25 s). Try again in a minute." |
+| `AWS_TOOK_TOO_LONG` | "AWS credentials took too long (50 s). Try again in a minute." |
 | `NATIVE_AGENT` | "This is for container agents. A native agent has the host's own AWS setup." |
 
 A person with no AWS at all gets `AWS_NOT_SHARED` first, and, with a policy but no AWS CLI on the host, `AWS_CLI_MISSING`. Neither falls back to another credential, the way the GitHub path never does.

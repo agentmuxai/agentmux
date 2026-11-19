@@ -154,9 +154,11 @@ pub async fn credentials_for<R: Runner>(
                 )
             }
             MintError::Refused(said) => Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_HOST_REFUSED", format!("The host's AWS refused: {said}")),
-            MintError::TookTooLong => {
-                Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_TOOK_TOO_LONG", "AWS credentials took too long (25 s). Try again in a minute.")
-            }
+            MintError::TookTooLong => Refusal::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "AWS_TOOK_TOO_LONG",
+                format!("AWS credentials took too long ({} s). Try again in a minute.", mint::RECIPE_TIMEOUT.as_secs()),
+            ),
         }),
     }
 }

@@ -15,8 +15,12 @@ use zeroize::Zeroizing;
 
 use super::policy::{Grant, Mint};
 
-/// How long a recipe may take: a cached login is instant, a fresh one is a round trip or two.
-pub const RECIPE_TIMEOUT: Duration = Duration::from_secs(25);
+/// How long a recipe may take: a cached login is instant, a fresh one is a round trip or two, and a slow one on a
+/// busy machine has been seen to take 20 to 26 seconds, so the limit is well past that (a recipe that is stopped part
+/// way leaves nothing behind, and the next ask starts it over). It stays under the container's own wait
+/// (`ASK_TIMEOUT` in `crates/bashwrap/src/aws.rs`), so the container is always answered, with the credentials or with
+/// the reason they were not.
+pub const RECIPE_TIMEOUT: Duration = Duration::from_secs(50);
 /// What of a recipe's stderr reaches the person.
 const STDERR_KEPT: usize = 400;
 /// AWS accepts only these in a session tag, and at most 256 characters.
