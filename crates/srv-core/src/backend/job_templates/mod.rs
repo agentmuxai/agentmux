@@ -356,7 +356,7 @@ impl JobTemplates {
             error: None,
             hash: pkg.hash.clone(),
             manifest: Some(pkg.manifest.clone()),
-            drone: pkg.graph.as_ref().map(graph::summarize),
+            drone: pkg.graph.as_ref().map(|g| graph::DroneSummary { credentials: graph::credentials(g, pkg.manifest.trigger.as_ref()), ..graph::summarize(g) }),
             reporter: pkg.manifest.reporter.as_ref().filter(|_| pkg.manifest.kind == JobTemplateKind::Cloud).map(|r| cloud::ReporterNote {
                 name: r.name.clone(),
                 fingerprint: sig::fingerprint(&r.key),

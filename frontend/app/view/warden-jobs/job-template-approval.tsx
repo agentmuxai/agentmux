@@ -179,6 +179,16 @@ const DroneFacts = (props: { manifest: JobTemplateManifest; drone: DroneSummary 
                 <For each={props.drone?.writes_outside}>{(call) => <Pill tone="warn">{call}</Pill>}</For>
             </Show>
         </dd>
+        <dt>Uses a credential</dt>
+        <dd>
+            <Show
+                when={(props.drone?.credentials?.length ?? 0) > 0}
+                fallback={<span class="warden-manager-dim">no</span>}
+            >
+                yes, because of auth.vault:{" "}
+                <For each={props.drone?.credentials}>{(use) => <Pill tone="warn">{use}</Pill>}</For>
+            </Show>
+        </dd>
     </>
 );
 
