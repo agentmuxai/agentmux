@@ -318,18 +318,15 @@
         }
     }
 
-    // A background (inactive) tab with its own pane color hovers to a
-    // LIGHTER version of that same color, not the generic white tint above
-    // — `filter: brightness` on top of the resting --pane-tab-bg rather
-    // than a separate lightened color value, so it's guaranteed to track
-    // whatever hue that pill actually has. `:not(&--active)` is kept for a
-    // different reason than it was originally added for (it used to
-    // protect --active's plain surface, which no longer exists — see
-    // --active below): hover is an affordance for "you can select this",
-    // and the active tab is already selected, so brightening it is noise.
+    // A background (inactive) tab with its own pane color hovers to a tone
+    // of its own (--pane-tab-bg-hover, theme/paint.ts): one small step from
+    // the resting color, the same hue, readable under the label. Never a
+    // `filter`, which moved the fill by more than selecting does and took
+    // every light-theme hue to white. `:not(&--active)`: hover is an
+    // affordance for "you can select this", and the active tab is already
+    // selected, so lifting it is noise.
     &--colored:hover:not(&--active) {
-        background: var(--pane-tab-bg);
-        filter: brightness(1.4);
+        background: var(--pane-tab-bg-hover, var(--pane-tab-bg));
     }
 
     &--active {

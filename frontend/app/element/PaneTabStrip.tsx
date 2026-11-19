@@ -73,6 +73,8 @@ export interface PaneTabColors {
     /** The selected pill's background (a step stronger than `background`);
      *  falls back to `background` when absent. */
     activeBackground?: string;
+    /** The resting pill's background while hovered: a step from `background`, never a filter on it. */
+    hoverBackground?: string;
     neutralBackground?: string;
 }
 
@@ -516,6 +518,7 @@ function pillColorStyle(c: PaneTabColors | undefined): JSX.CSSProperties {
     return {
         ...(c.background ? { "--pane-tab-bg": c.background } : {}),
         ...(c.activeBackground ? { "--pane-tab-bg-active": c.activeBackground } : {}),
+        ...(c.hoverBackground ? { "--pane-tab-bg-hover": c.hoverBackground } : {}),
         ...(c.underline ? { "--pane-tab-underline": c.underline } : {}),
         ...(c.neutralBackground ? { "--pane-tab-neutral-bg": c.neutralBackground } : {}),
     } as JSX.CSSProperties;

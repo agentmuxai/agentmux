@@ -253,6 +253,10 @@ function appendSwatchAndLabels(row: HTMLElement, item: NativeContextMenuItem) {
         const swatch = document.createElement("span");
         swatch.className = "menu-item-swatch";
         swatch.style.backgroundColor = item.swatchColor;
+        if (item.swatchBar) {
+            swatch.classList.add("menu-item-swatch--bar");
+            swatch.style.setProperty("--swatch-bar", item.swatchBar);
+        }
         row.appendChild(swatch);
     }
 
