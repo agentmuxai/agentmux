@@ -40,6 +40,25 @@ export const isAgentUse = (a: VaultActivity): boolean => {
     return a.actor !== "you" && LEGACY_USES.includes(a.action);
 };
 
+/** No agent doing among the lines read. Only when the read was short is that "none yet": a full read has
+ *  older lines it did not look at, so it says how far back it looked and offers to look further. */
+function NoUses(props: { loading: boolean; readFull: boolean; lines: number; canReadMore: boolean; onMore: () => void }): JSX.Element {
+    return (
+        <div class="warden-section-stub">
+            <Show when={!props.loading} fallback="Loading…">
+                <Show when={props.readFull} fallback="No agent has used a secret yet.">
+                    {t("vault.secrets.noneInWindow", { lines: props.lines })}{" "}
+                    <Show when={props.canReadMore} fallback={t("vault.secrets.olderNotRead")}>
+                        <Button density="compact" onClick={props.onMore}>
+                            {t("vault.secrets.more")}
+                        </Button>
+                    </Show>
+                </Show>
+            </Show>
+        </div>
+    );
+}
+
 /** What the list reads and shows: the agents' doings from the newest `lines` lines of the Vault's activity,
  *  `shown` of them at a time, and the standing permissions. Neither read opens the Vault key, so showing
  *  this never makes the OS ask for it (the entries' list, which decrypts, is the Vault section's alone). */
@@ -139,7 +158,10 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                     </tbody>
                 </table>
             </Show>
-            <Show when={(rows() ?? []).length > 0} fallback={<div class="warden-section-stub">{rows() === null ? "Loading…" : "No agent has used a secret yet."}</div>}>
+            <Show
+                when={(rows() ?? []).length > 0}
+                fallback={<NoUses loading={rows() === null} readFull={readFull()} lines={lines()} canReadMore={moreToRead()} onMore={showMore} />}
+            >
                 <table class="warden-manager-table" aria-label="Agents' use of secrets">
                     <thead>
                         <tr>

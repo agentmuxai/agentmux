@@ -150,6 +150,39 @@ describe("Secrets in the Vault's Audit section", () => {
         expect(limits()).toEqual([500, 1000]);
     });
 
+    it("with no agent doing among a full read, says how far back it looked and reads further, never 'none yet'", async () => {
+        // 500 lines of the person's own doings, then agents' doings further back (the host answers at most 1000).
+        const mine = Array.from({ length: 700 }, (_, i) => row({ actor: "you", actor_kind: "person", action: "copied", seq: i + 1 }));
+        const all = [...mine, ...agentLines(30, 701)];
+        vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+            if (op === "grants") return { granted: [] };
+            if (op === "activity") return { activity: all.slice(0, Math.min(Number(args?.limit), 1000)) };
+            return {};
+        });
+        render(() => <VaultSecrets />);
+        expect(await screen.findByText(/No agent has used a secret in the newest 500 lines of the Vault's activity/)).toBeInTheDocument();
+        expect(screen.queryByText("No agent has used a secret yet.")).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+        const table = await screen.findByRole("table", { name: "Agents' use of secrets" });
+        expect(within(table).getAllByRole("row")).toHaveLength(31);
+        // 730 lines came back for a ask of 1000: the whole activity was read.
+        expect(screen.getByText(/Showing 30 of the 30 things agents did with secrets in the Vault's activity\./)).toBeInTheDocument();
+    });
+
+    it("with no agent doing among a full read at the host's limit, says older lines exist", async () => {
+        const all = Array.from({ length: 1000 }, (_, i) => row({ actor: "you", actor_kind: "person", action: "copied", seq: i + 1 }));
+        vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+            if (op === "grants") return { granted: [] };
+            if (op === "activity") return { activity: all.slice(0, Math.min(Number(args?.limit), 1000)) };
+            return {};
+        });
+        render(() => <VaultSecrets />);
+        fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+        expect(await screen.findByText(/in the newest 1\D?000 lines of the Vault's activity\./)).toBeInTheDocument();
+        expect(screen.getByText(/Older lines exist; this list reads no further back/)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+
     it("loads nothing from the Vault until it is shown", async () => {
         const [shown, setShown] = createSignal(false);
         render(() => <VaultSecrets visible={shown()} />);
