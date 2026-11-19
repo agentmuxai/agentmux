@@ -223,137 +223,139 @@ fn agents_text(s: &Summary) -> String {
     }
 }
 
+/// The events of one `sync`, with the ids they are given: `c<time in hex>-<n>`.
+struct Log {
+    now_ms: i64,
+    seq: usize,
+    events: Vec<Event>,
+}
+
+impl Log {
+    /// Records an event and returns its id, which the grant it is about keeps as its last change.
+    fn push(&mut self, kind: &'static str, grant: Option<&str>, text: String, held: bool) -> String {
+        self.seq += 1;
+        let id = format!("c{:x}-{}", self.now_ms, self.seq);
+        self.events.push(Event { id: id.clone(), kind, grant: grant.map(str::to_string), text, by: None, held });
+        id
+    }
+}
+
 /// Compare the grants file `policy` (with the hash of its text) with what was recorded, and say what changed. `old`
 /// is the record read from disk: none on the first run, which records the file as the baseline.
 pub fn sync(old: Option<Record>, policy: &Policy, file_sha256: &str, now_ms: i64) -> (Record, Vec<Event>) {
-    let mut seq = 0usize;
-    let mut next_id = || {
-        seq += 1;
-        format!("c{now_ms:x}-{seq}")
-    };
-    let mut events: Vec<Event> = Vec::new();
-    let push = |events: &mut Vec<Event>, id: String, kind: &'static str, grant: Option<&str>, text: String, held: bool| {
-        events.push(Event { id, kind, grant: grant.map(str::to_string), text, by: None, held });
-    };
-
+    let mut log = Log { now_ms, seq: 0, events: Vec::new() };
     let Some(mut rec) = old else {
-        let id = next_id();
-        let mut grants = BTreeMap::new();
-        for (name, g) in &policy.grants {
-            let s = Summary::of(g);
-            grants.insert(
-                name.clone(),
-                Entry {
-                    current: s.clone(),
-                    acknowledged: Some(s),
-                    refused: None,
-                    added_ms: now_ms,
-                    added_change: id.clone(),
-                    change: id.clone(),
-                    allowed_by: Some(BASELINE_BY.to_string()),
-                    allowed_reason: None,
-                    allowed_ms: Some(now_ms),
-                },
-            );
-        }
-        let writes = grants.values().filter(|e| e.current.is_write()).count();
-        let text = format!(
-            "no earlier record of the grants file: this version is the baseline, {} grants ({} write) counted as allowed",
-            grants.len(),
-            writes
-        );
-        push(&mut events, id, "baseline", None, text, false);
-        let rec = Record { version: VERSION, file_sha256: file_sha256.to_string(), default_grant: policy.default_grant.clone(), grants, changes: Vec::new() };
-        return finish(rec, events, now_ms);
+        let rec = baseline(policy, file_sha256, &mut log);
+        return finish(rec, log.events, now_ms);
     };
-
     if rec.file_sha256 == file_sha256 {
-        return (rec, events);
+        return (rec, log.events);
     }
     rec.file_sha256 = file_sha256.to_string();
-
     for (name, g) in &policy.grants {
-        let now = Summary::of(g);
-        match rec.grants.get_mut(name) {
-            None => {
-                let id = next_id();
-                // A grant that is switched off can't be used, so a new one that is off waits for nothing; switching
-                // it on later is a widening.
-                let inert = now.disabled;
-                let text = format!(
-                    "added {} grant '{name}' for {}{}",
-                    now.tier,
-                    agents_text(&now),
-                    if inert { " (switched off)" } else { "; held until a native agent or a person allows it" }
-                );
-                rec.grants.insert(
-                    name.clone(),
-                    Entry {
-                        current: now.clone(),
-                        acknowledged: inert.then(|| now.clone()),
-                        refused: None,
-                        added_ms: now_ms,
-                        added_change: id.clone(),
-                        change: id.clone(),
-                        allowed_by: inert.then(|| "switched off".to_string()),
-                        allowed_reason: None,
-                        allowed_ms: inert.then_some(now_ms),
-                    },
-                );
-                push(&mut events, id, "added", Some(name), text, !inert);
-            }
-            Some(entry) if entry.current == now => {}
-            Some(entry) => {
-                let id = next_id();
-                entry.current = now.clone();
-                entry.change = id.clone();
-                let delta = entry.acknowledged.as_ref().map(|a| compare(a, &now));
-                match delta {
-                    Some(Delta::Same) => {
-                        entry.refused = None;
-                        let text = format!("grant '{name}' is back to what was allowed");
-                        push(&mut events, id, "reverted", Some(name), text, false);
-                    }
-                    Some(Delta::Narrower) => {
-                        entry.acknowledged = Some(now.clone());
-                        entry.refused = None;
-                        entry.allowed_by = Some("narrowed".to_string());
-                        entry.allowed_reason = None;
-                        entry.allowed_ms = Some(now_ms);
-                        let text = format!("grant '{name}' is narrower now ({} tier, {}): in force at once", now.tier, agents_text(&now));
-                        push(&mut events, id, "narrowed", Some(name), text, false);
-                    }
-                    Some(Delta::Wider(dims)) => {
-                        let text = format!("grant '{name}' is wider than what was allowed ({}): held until a native agent or a person allows it", dims.join(", "));
-                        push(&mut events, id, "widened", Some(name), text, true);
-                    }
-                    None => {
-                        // Never allowed (added, and edited again before anyone looked): still held.
-                        let text = format!("grant '{name}' changed again before it was allowed ({} tier, {}): still held", now.tier, agents_text(&now));
-                        push(&mut events, id, "widened", Some(name), text, true);
-                    }
-                }
-            }
-        }
+        sync_grant(&mut rec, name, Summary::of(g), &mut log);
     }
-
     let gone: Vec<String> = rec.grants.keys().filter(|n| !policy.grants.contains_key(*n)).cloned().collect();
     for name in gone {
         rec.grants.remove(&name);
-        let id = next_id();
-        push(&mut events, id, "removed", Some(&name), format!("grant '{name}' was removed: it stopped working at once"), false);
+        log.push("removed", Some(&name), format!("grant '{name}' was removed: it stopped working at once"), false);
     }
-
     if rec.default_grant != policy.default_grant {
         rec.default_grant = policy.default_grant.clone();
         let text = match &rec.default_grant {
             Some(d) => format!("the default grant is now '{d}'"),
             None => "the grants file no longer names a default grant".to_string(),
         };
-        let id = next_id();
-        push(&mut events, id, "default", None, text, false);
+        log.push("default", None, text, false);
     }
-    finish(rec, events, now_ms)
+    finish(rec, log.events, now_ms)
+}
+
+/// The record of a file there was none of: everything in it counts as allowed, and the Audit view says so.
+fn baseline(policy: &Policy, file_sha256: &str, log: &mut Log) -> Record {
+    let mut grants = BTreeMap::new();
+    let mut writes = 0;
+    for (name, g) in &policy.grants {
+        let s = Summary::of(g);
+        writes += usize::from(s.is_write());
+        let entry = Entry {
+            current: s.clone(),
+            acknowledged: Some(s),
+            refused: None,
+            added_ms: log.now_ms,
+            added_change: String::new(),
+            change: String::new(),
+            allowed_by: Some(BASELINE_BY.to_string()),
+            allowed_reason: None,
+            allowed_ms: Some(log.now_ms),
+        };
+        grants.insert(name.clone(), entry);
+    }
+    let text = format!("no earlier record of the grants file: this version is the baseline, {} grants ({writes} write) counted as allowed", grants.len());
+    let id = log.push("baseline", None, text, false);
+    for e in grants.values_mut() {
+        e.added_change = id.clone();
+        e.change = id.clone();
+    }
+    Record { version: VERSION, file_sha256: file_sha256.to_string(), default_grant: policy.default_grant.clone(), grants, changes: Vec::new() }
+}
+
+/// One grant of the file against the record: new, unchanged, or changed.
+fn sync_grant(rec: &mut Record, name: &str, now: Summary, log: &mut Log) {
+    let Some(entry) = rec.grants.get_mut(name) else {
+        add_grant(rec, name, now, log);
+        return;
+    };
+    if entry.current == now {
+        return;
+    }
+    let delta = entry.acknowledged.as_ref().map(|a| compare(a, &now));
+    let id = match delta {
+        Some(Delta::Same) => {
+            entry.refused = None;
+            log.push("reverted", Some(name), format!("grant '{name}' is back to what was allowed"), false)
+        }
+        Some(Delta::Narrower) => {
+            entry.acknowledged = Some(now.clone());
+            entry.refused = None;
+            entry.allowed_by = Some("narrowed".to_string());
+            entry.allowed_reason = None;
+            entry.allowed_ms = Some(log.now_ms);
+            let text = format!("grant '{name}' is narrower now ({} tier, {}): in force at once", now.tier, agents_text(&now));
+            log.push("narrowed", Some(name), text, false)
+        }
+        Some(Delta::Wider(dims)) => {
+            let text = format!("grant '{name}' is wider than what was allowed ({}): held until a native agent or a person allows it", dims.join(", "));
+            log.push("widened", Some(name), text, true)
+        }
+        // Never allowed (added, and edited again before anyone looked): still held.
+        None => {
+            let text = format!("grant '{name}' changed again before it was allowed ({} tier, {}): still held", now.tier, agents_text(&now));
+            log.push("widened", Some(name), text, true)
+        }
+    };
+    entry.current = now;
+    entry.change = id;
+}
+
+/// A grant the record has not seen. One that is switched off can't be used, so it waits for nothing; switching it on
+/// later is a widening.
+fn add_grant(rec: &mut Record, name: &str, now: Summary, log: &mut Log) {
+    let inert = now.disabled;
+    let tail = if inert { " (switched off)" } else { "; held until a native agent or a person allows it" };
+    let id = log.push("added", Some(name), format!("added {} grant '{name}' for {}{tail}", now.tier, agents_text(&now)), !inert);
+    let entry = Entry {
+        current: now.clone(),
+        acknowledged: inert.then(|| now.clone()),
+        refused: None,
+        added_ms: log.now_ms,
+        added_change: id.clone(),
+        change: id,
+        allowed_by: inert.then(|| "switched off".to_string()),
+        allowed_reason: None,
+        allowed_ms: inert.then_some(log.now_ms),
+    };
+    rec.grants.insert(name.to_string(), entry);
 }
 
 fn finish(mut rec: Record, events: Vec<Event>, now_ms: i64) -> (Record, Vec<Event>) {
