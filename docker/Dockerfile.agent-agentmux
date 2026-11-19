@@ -40,7 +40,12 @@
 # builds linux/amd64 AND linux/arm64 via buildx + QEMU — this stage needs no
 # explicit cross-compilation setup, since buildx runs a whole separate build
 # (under emulation) per target platform.
-FROM rust:1-bookworm AS mcp-builder
+# The base images are the official ones from Amazon's public mirror, not Docker Hub: Docker Hub limits anonymous
+# pulls per address and CI runners share addresses ("toomanyrequests"). Same images, same tags; pass
+# --build-arg RUST_IMAGE=rust:1-bookworm (and NODE_IMAGE) to take them from Docker Hub.
+ARG RUST_IMAGE=public.ecr.aws/docker/library/rust:1-bookworm
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-slim
+FROM ${RUST_IMAGE} AS mcp-builder
 
 # pkg-config + libdbus-1-dev + libxcb1-dev: agentmux-mcp's `xcap` (screen
 # capture, used by the CaptureWindow tool) dependency needs dbus-1.pc AND
@@ -67,7 +72,7 @@ COPY . .
 RUN cargo build --release -p agentmux-mcp -p agentmux-bashwrap
 
 # ── Stage 2: the actual agent runtime image ─────────────────────────────────
-FROM node:24-slim
+FROM ${NODE_IMAGE}
 
 # System dependencies
 # procps provides `pkill`, used by the host to interrupt an in-flight turn:

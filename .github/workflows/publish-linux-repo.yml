@@ -245,6 +245,16 @@ jobs:
       VERSION_IN: ${{ inputs.version }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # The image comes from a mirror that needs no sign-in, with retries: Docker Hub limits anonymous pulls
+      # per address and the runners share addresses (scripts/ci-docker-pull.sh).
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci-docker-pull.sh
+          sparse-checkout-cone-mode: false
+      - name: Pull the image
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: bash scripts/ci-docker-pull.sh "$IMAGE"
       - name: Check
         shell: bash
         env:
