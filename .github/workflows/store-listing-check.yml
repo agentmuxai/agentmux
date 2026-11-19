@@ -49,8 +49,10 @@ jobs:
         env:
           VERDICT: ${{ steps.read.outputs.verdict }}
         run: |
-          existing=$(gh issue list --state open --limit 100 --json number,title \
-            --jq "[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty")
+          # Only an issue the Actions bot opened counts: the repository is public, so anyone can open one with the same title,
+          # and theirs is never edited or closed. The author is checked again in the script, not only by the query.
+          gh api "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" > store-check/issues.json
+          existing=$(node scripts/check-store-listing.mjs --find-issue store-check/issues.json)
           if [ "$VERDICT" = behind ]; then
             if [ -n "$existing" ]; then
               gh issue edit "$existing" --body-file store-check/body.md

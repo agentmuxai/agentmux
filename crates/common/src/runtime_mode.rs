@@ -658,7 +658,10 @@ fn run_git_branch(repo_dir: &Path) -> Option<String> {
     GIT_BRANCH_LOOKUPS.with(|n| n.set(n.get() + 1));
     let mut cmd = Command::new("git");
     cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_dir);
+        .current_dir(repo_dir)
+        // A read of what is on the disk: fetch nothing, allow no transport.
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_ALLOW_PROTOCOL", "");
     #[cfg(windows)]
     {
         // CREATE_NO_WINDOW: console-flash suppression.

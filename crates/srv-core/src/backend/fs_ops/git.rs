@@ -17,6 +17,14 @@
 //! (`--no-optional-locks`), prompts for nothing, and is killed after a few
 //! seconds on a huge repository.
 //!
+//! Every run here reads what is already on the disk: none fetches a missing
+//! object, and none may start a transport ([`NO_NETWORK_ENV`]). Those two are
+//! set in the environment, where no config file can change them.
+//!
+//! Git facts of a container agent's folder are not read on the host: no git
+//! is started for such a folder or anything inside it
+//! ([`super::container_folders`]).
+//!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
 //! decorations).
 
@@ -42,6 +50,14 @@ const SAFE_CONFIG: &[&str] = &[
     "-c",
     "core.untrackedCache=false",
 ];
+
+/// Set on every git run here: a read of the folder as it is. git does not
+/// fetch an object the repository lacks, and no transport is allowed (an
+/// empty list of allowed protocols), whatever the repository's config says.
+pub const NO_NETWORK_ENV: &[(&str, &str)] = &[("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", "")];
+
+/// What a git run for a container agent's folder answers, without starting git.
+pub const NOT_READ_ON_THE_HOST: &str = "Git facts of a container agent's folder are not read on the host.";
 
 /// `fs.git_status` for `raw` (a folder the pane listed).
 pub async fn git_status(raw: &str) -> FsGitStatus {
@@ -175,16 +191,12 @@ pub fn filter_names(out: &str, scoped: bool) -> Vec<String> {
 
 /// Run git in `dir` with the safe settings; its stdout, or a sentence.
 async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
-    let mut cmd = tokio::process::Command::new("git");
-    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
-    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .no_window();
-    // git needs nothing of this instance's identity.
-    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    // Decided before any command is built; a check that can't finish counts as yes.
+    let asked = dir.to_string();
+    if tokio::task::spawn_blocking(move || super::container_folders::holds(&asked)).await.unwrap_or(true) {
+        return Err(GitError::Failed(NOT_READ_ON_THE_HOST.to_string()));
+    }
+    let mut cmd = git_command(dir, args);
     let child = cmd.spawn().map_err(|e| GitError::Failed(format!("Couldn't run git: {e}")))?;
     match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
         Err(_) => Err(GitError::Failed("git took too long to answer.".to_string())),
@@ -195,6 +207,25 @@ async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
             _ => Err(GitError::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string())),
         },
     }
+}
+
+/// The one git command this module runs: the safe settings, no prompt, no
+/// optional lock, no fetch and no transport, and nothing of this instance's
+/// identity.
+fn git_command(dir: &str, args: &[&str]) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .no_window();
+    // git needs nothing of this instance's identity.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    // Last, so nothing above can take them off.
+    cmd.envs(NO_NETWORK_ENV.iter().copied());
+    cmd
 }
 
 #[derive(Debug)]
@@ -560,6 +591,124 @@ mod tests {
         let s = git_status(&dir.path().to_string_lossy()).await;
         assert!(s.entries.is_empty(), "{s:?}");
         assert!(!s.in_repo || s.error.is_some(), "{s:?}");
+    }
+
+    fn test_git(dir: &std::path::Path, args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.email=a@b", "-c", "user.name=a"])
+            .args(args)
+            .current_dir(dir)
+            .no_window()
+            .output()
+            .ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// A repository whose own settings say where a missing object comes from
+    /// and allow every transport, with one object of its HEAD missing. The
+    /// program it names for that would leave `mark`. The missing object's id,
+    /// or `None` without git (or when the object isn't a loose file).
+    fn repository_missing_an_object(dir: &std::path::Path, mark: &std::path::Path) -> Option<String> {
+        test_git(dir, &["init", "-q"])?;
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        test_git(dir, &["add", "."])?;
+        test_git(dir, &["commit", "-qm", "x"])?;
+        let tree = test_git(dir, &["rev-parse", "HEAD^{tree}"])?;
+        let source = dir.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let slashes = |p: &std::path::Path| p.display().to_string().replace('\\', "/");
+        for (key, value) in [
+            ("core.repositoryformatversion", "1".to_string()),
+            ("extensions.partialClone", "origin".to_string()),
+            ("remote.origin.url", slashes(&source)),
+            ("remote.origin.promisor", "true".to_string()),
+            ("remote.origin.uploadpack", format!("echo ran > '{}' ; true", slashes(mark))),
+            ("protocol.allow", "always".to_string()),
+            ("protocol.file.allow", "always".to_string()),
+        ] {
+            test_git(dir, &["config", key, &value])?;
+        }
+        let object = dir.join(".git").join("objects").join(&tree[..2]).join(&tree[2..]);
+        std::fs::remove_file(object).ok()?;
+        Some(tree)
+    }
+
+    #[test]
+    fn every_git_run_is_set_to_fetch_nothing_and_allow_no_transport() {
+        let cmd = git_command(".", &["status"]);
+        let env: std::collections::HashMap<String, Option<String>> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        assert_eq!(env.get("GIT_NO_LAZY_FETCH"), Some(&Some("1".to_string())));
+        assert_eq!(env.get("GIT_ALLOW_PROTOCOL"), Some(&Some(String::new())), "set, and empty: no protocol is allowed");
+    }
+
+    /// The status read fetches nothing and starts no transport, whatever the
+    /// repository's own config allows.
+    #[tokio::test]
+    async fn a_status_read_never_fetches_and_allows_no_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("fetch-ran");
+        if repository_missing_an_object(dir.path(), &mark).is_none() {
+            return; // No git on this machine.
+        }
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.in_repo && s.entries.is_empty(), "{s:?}");
+        assert!(!mark.exists(), "the status read went to fetch the missing object");
+    }
+
+    /// The same for the one-line reads (the checks of a ref the work facts make).
+    #[tokio::test]
+    async fn a_ref_check_never_fetches_and_allows_no_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("fetch-ran");
+        let Some(tree) = repository_missing_an_object(dir.path(), &mark) else {
+            return; // No git on this machine.
+        };
+        let found = safe_git_line(&dir.path().to_string_lossy(), &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")]).await;
+        assert_eq!(found, None, "the object is not there");
+        assert!(!mark.exists(), "the ref check went to fetch the missing object");
+    }
+
+    /// A repository with a commit, a changed file and a new one: every read here has something to say about it.
+    fn repository_with_changes(dir: &std::path::Path) -> Option<()> {
+        test_git(dir, &["init", "-q"])?;
+        std::fs::write(dir.join("tracked.txt"), "a").unwrap();
+        test_git(dir, &["add", "."])?;
+        test_git(dir, &["commit", "-qm", "x"])?;
+        std::fs::write(dir.join("tracked.txt"), "b").unwrap();
+        std::fs::write(dir.join("new.txt"), "n").unwrap();
+        Some(())
+    }
+
+    /// No git is started for a container agent's folder, or for a folder inside it: the run answers before a
+    /// command exists, so the Files pane has no markers there and the one-line reads have nothing.
+    #[tokio::test]
+    async fn git_facts_of_a_container_agents_folder_are_not_read_on_the_host() {
+        let dir = tempfile::tempdir().unwrap();
+        if repository_with_changes(dir.path()).is_none() {
+            return; // No git on this machine.
+        }
+        let inner = dir.path().join("sub");
+        std::fs::create_dir_all(&inner).unwrap();
+        let (top, sub) = (dir.path().to_string_lossy().into_owned(), inner.to_string_lossy().into_owned());
+        // As any other folder, it has facts.
+        assert!(git_status(&top).await.in_repo);
+        assert!(safe_git_line(&sub, &["rev-parse", "--show-toplevel"]).await.is_some());
+
+        crate::backend::fs_ops::container_folders::add_for_test(dir.path());
+        for folder in [&top, &sub] {
+            match run_git(folder, &["rev-parse", "--show-toplevel"]).await {
+                Err(GitError::Failed(why)) => assert_eq!(why, NOT_READ_ON_THE_HOST),
+                other => panic!("git was started for {folder}: {other:?}"),
+            }
+            let s = git_status(folder).await;
+            assert!(!s.in_repo && s.entries.is_empty() && s.error.is_none(), "{s:?}");
+            assert_eq!(safe_git_line(folder, &["rev-parse", "--show-toplevel"]).await, None);
+            assert!(matches!(safe_status_porcelain(folder, &[]).await, Err(StatusError::Settings(_))), "no status run");
+        }
     }
 
     #[tokio::test]
