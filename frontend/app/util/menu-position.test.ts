@@ -289,6 +289,63 @@ describe("computeMenuPosition — cross-axis offset (Floating UI offset() parity
     });
 });
 
+describe("computeMenuPosition — a submenu beside its row", () => {
+    // The parent menu's row, and a 222 px wide submenu (the Pane Color list).
+    const row = makeRect(105, 100, 188, 24);
+    const subRect = makeRect(0, 0, 222, 300);
+    const narrow = () => {
+        window.innerWidth = 380;
+        Object.defineProperty(document.documentElement, "clientWidth", { value: 380, configurable: true });
+    };
+    const place = () =>
+        computeMenuPosition({ anchor: row, placement: "right-start", avoidNativePanes: false }, elementWithRect(subRect));
+
+    it("opens to the right of the row when there is room", async () => {
+        const res = await place();
+        expect(parseInt(res.style.left as string, 10)).toBeGreaterThanOrEqual(row.right);
+        expect(res.placement).toBe("right-start");
+    });
+
+    it("opens to the left when only the left has room", async () => {
+        window.innerWidth = 600;
+        Object.defineProperty(document.documentElement, "clientWidth", { value: 600, configurable: true });
+        const res = await computeMenuPosition(
+            { anchor: makeRect(380, 100, 188, 24), placement: "right-start", avoidNativePanes: false },
+            elementWithRect(subRect),
+        );
+        const left = parseInt(res.style.left as string, 10);
+        expect(res.placement).toBe("left-start");
+        expect(left + 222).toBeLessThanOrEqual(380);
+    });
+
+    it("stays inside a narrow window when neither side has room, over its parent rather than cut off", async () => {
+        narrow();
+        const res = await place();
+        const left = parseInt(res.style.left as string, 10);
+        expect(left).toBeGreaterThanOrEqual(0);
+        expect(left + 222).toBeLessThanOrEqual(380);
+    });
+
+    it("keeps the same overlap rule for a menu placed to the left of its anchor", async () => {
+        narrow();
+        const res = await computeMenuPosition(
+            { anchor: row, placement: "left-start", avoidNativePanes: false },
+            elementWithRect(subRect),
+        );
+        const left = parseInt(res.style.left as string, 10);
+        expect(left).toBeGreaterThanOrEqual(0);
+        expect(left + 222).toBeLessThanOrEqual(380);
+    });
+
+    it("does not slide a menu below its anchor sideways to cover the anchor", async () => {
+        const res = await computeMenuPosition(
+            { anchor: makeRect(100, 100, 40, 24), placement: "bottom-start", avoidNativePanes: false },
+            elementWithRect(subRect),
+        );
+        expect(parseInt(res.style.top as string, 10)).toBeGreaterThanOrEqual(124);
+    });
+});
+
 describe("computeMenuPosition — kept inside a container (browser pane menus)", () => {
     // A pane at x 600..1000, y 100..700, in the 1200x800 window.
     const pane = () => elementWithRect(makeRect(600, 100, 400, 600));
