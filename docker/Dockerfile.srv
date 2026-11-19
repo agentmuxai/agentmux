@@ -103,9 +103,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # AGENTMUX_STREAMED_BROWSER=1, so an image built with this argument still does nothing by default.
 # chromium-sandbox is Chromium's own sandbox helper: with it, and a container profile that allows creating namespaces,
 # Chromium starts with its sandbox on (no capability needed); without it the sandbox cannot start.
+# The Noto fonts cover the scripts a page may use (Arabic, Hebrew, Indic, Thai and more in noto-core; Chinese, Japanese
+# and Korean in noto-cjk; emoji): without them a page in those scripts shows empty boxes.
 ARG STREAMED_BROWSER=
 RUN if [ -n "$STREAMED_BROWSER" ]; then \
       apt-get update && apt-get install -y --no-install-recommends chromium chromium-sandbox fonts-liberation \
+        fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
       && rm -rf /var/lib/apt/lists/*; \
     fi
 
