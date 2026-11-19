@@ -219,6 +219,7 @@
     "settings.kanban.cantRemove": "Can't be removed",
     "settings.kanban.needsNote": "Shows what needs you, so it always stays a stage of its own.",
     "settings.kanban.tasksHere": "Tasks in this stage now",
+    "settings.kanban.dragStage": "Drag to reorder",
     "settings.kanban.moveUp": "Move {{name}} earlier",
     "settings.kanban.moveDown": "Move {{name}} later",
     "settings.kanban.removeStage": "Remove {{name}}",
