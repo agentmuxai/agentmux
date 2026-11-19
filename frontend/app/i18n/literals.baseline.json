@@ -387,7 +387,7 @@
     "frontend/app/view/vault/vault-manage.tsx": 10,
     "frontend/app/view/vault/vault-requests-list.tsx": 5,
     "frontend/app/view/vault/vault-reveal.tsx": 6,
-    "frontend/app/view/vault/vault-secrets.tsx": 17,
+    "frontend/app/view/vault/vault-secrets.tsx": 15,
     "frontend/app/view/vault/vault-signin-vaults.tsx": 4,
     "frontend/app/view/vault/vault-use-card.tsx": 11,
     "frontend/app/view/vault/vault-use-question.tsx": 46,
