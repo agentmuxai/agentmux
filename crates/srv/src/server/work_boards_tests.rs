@@ -333,6 +333,10 @@ async fn a_change_of_stages_leaves_a_line_in_the_boards_history() {
     assert_eq!(lines[1]["body"], json!("changed the stages: 8 → 5"));
     assert_eq!((lines[1]["actor"].clone(), lines[1]["actor_kind"].clone(), lines[1]["kind"].clone()), (json!("agentx"), json!("agent"), json!("stages")));
     assert!(lines[1].get("detail").is_none() && lines[1]["at"].as_i64().unwrap() > 0);
+    // The Kanban's own list, which Settings reads, carries the same lines.
+    let listed = crate::server::app_api::kanban::list_for_tests(&state, json!({ "board": "all" })).await;
+    let main = listed["boards"].as_array().unwrap().iter().find(|b| b["slug"] == "main").unwrap();
+    assert_eq!(main["history"], v["boards"][0]["history"]);
     // The sets before and after are kept, for a later Restore.
     let kept = state.work_store.work_board_events("main", 5).unwrap();
     let detail: Value = serde_json::from_str(&kept[1].detail).unwrap();

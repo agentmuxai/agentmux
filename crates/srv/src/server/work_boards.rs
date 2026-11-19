@@ -80,6 +80,14 @@ pub(crate) fn board_json(b: &Board) -> Value {
 /// How many lines of a board's history the list carries.
 const HISTORY_SHOWN: usize = 8;
 
+/// A board as a list shows it: [`board_json`] and its latest history lines. Every list of boards (the agents'
+/// route and the Kanban's own) goes through this, so none of them leaves the history out.
+pub(crate) fn board_with_history(store: &crate::backend::storage::store::Store, b: &Board) -> Value {
+    let mut v = board_json(b);
+    v["history"] = json!(store.work_board_events(&b.id, HISTORY_SHOWN).unwrap_or_default());
+    v
+}
+
 /// The history line for a change of a board's stages: who, how many stages before and after, and both sets
 /// (kept for a later Restore). A failure to write it is logged and never fails the change itself.
 fn note_stages_change(state: &AppState, who: Option<(&str, &str)>, before: &Board, after: &Board, reset: bool, now: i64) {
@@ -109,11 +117,7 @@ pub(crate) fn boards_view(state: &AppState, who: Option<(&str, &str)>, include_a
     let seen: Vec<Value> = boards
         .iter()
         .filter(|b| who.map_or(true, |(a, u)| b.visible_to(a, u)))
-        .map(|b| {
-            let mut v = board_json(b);
-            v["history"] = json!(state.work_store.work_board_events(&b.id, HISTORY_SHOWN).unwrap_or_default());
-            v
-        })
+        .map(|b| board_with_history(&state.work_store, b))
         .collect();
     let default = boards.iter().find(|b| b.is_default).map(|b| b.slug.clone());
     Ok(json!({ "boards": seen, "default": default }))
