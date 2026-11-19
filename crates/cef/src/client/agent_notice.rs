@@ -60,6 +60,36 @@ pub(super) fn on_auth_expired(state: &Arc<crate::state::AppState>, block_id: &st
     })
 }
 
+/// Whether an agent drives the pane `block_id` and hasn't handed it to the person.
+pub(crate) fn drives(state: &Arc<crate::state::AppState>, block_id: &str) -> bool {
+    super::jsdialog::driven_pane(state, block_id)
+}
+
+/// The site a sign-in prompt is for and its realm's name, in the words the agent reads: `host:port (realm "name")`. Only
+/// the site and the name the server gave its realm go up (control characters out, clipped); never a credential, a path
+/// or a query.
+fn auth_words(host: &str, port: i32, realm: &str) -> String {
+    let site = if port > 0 { format!("{host}:{port}") } else { host.to_string() };
+    let realm: String = realm.chars().filter(|c| !c.is_control()).take(80).collect();
+    if realm.is_empty() {
+        site
+    } else {
+        format!("{site} (realm \"{realm}\")")
+    }
+}
+
+/// Tell the agent that drives the pane `block_id` what is happening to a sign-in prompt (HTTP Basic or Digest) its page
+/// raised: `auth_required` (nothing saved could answer it), `auth_waiting_approval` (a saved one waits for the person's
+/// yes), `auth_answered`, `auth_refused` (the site refused the saved one) and `auth_denied`. Without this the pane stays
+/// blank and looks like a page still loading. A pane the person drives is not told anything.
+pub(crate) fn auth_notice(state: &Arc<crate::state::AppState>, block_id: &str, kind: &'static str, host: &str, port: i32, realm: &str) {
+    if !drives(state, block_id) || !due(block_id, kind, Instant::now()) {
+        return;
+    }
+    tracing::info!(target = %block_id, kind, "browser pane: a sign-in prompt in an agent-driven pane, the agent was told");
+    super::jsdialog::notify(state, serde_json::json!({ "target": block_id, "notice": kind, "message": auth_words(host, port, realm) }));
+}
+
 /// [`tell`] for a navigation the handler cancels: returns 1, `on_before_browse`'s "cancel".
 pub(super) fn refused(
     state: &Arc<crate::state::AppState>,
@@ -83,6 +113,15 @@ mod tests {
         assert_eq!(shown("external_protocol", "zoommtg://zoom.us/join?confno=123&pwd=abc"), "zoommtg");
         assert_eq!(shown("certificate_error", "https://user:pw@expired.example:8443/path?token=abc#x"), "expired.example:8443");
         assert_eq!(shown("certificate_error", "https://self-signed.example/"), "self-signed.example");
+    }
+
+    #[test]
+    fn a_sign_in_prompt_names_the_site_and_the_realm_and_nothing_else() {
+        assert_eq!(auth_words("intranet.example", 8080, "staff"), "intranet.example:8080 (realm \"staff\")");
+        assert_eq!(auth_words("intranet.example", 0, ""), "intranet.example");
+        assert_eq!(auth_words("h", 443, "a\nb\u{7}c"), "h:443 (realm \"abc\")");
+        let long = "x".repeat(500);
+        assert_eq!(auth_words("h", 1, &long).len(), "h:1 (realm \"\")".len() + 80);
     }
 
     #[test]

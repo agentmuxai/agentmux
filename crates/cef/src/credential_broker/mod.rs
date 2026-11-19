@@ -124,7 +124,14 @@ async fn run_challenge(
     realm: String,
     is_proxy: bool,
 ) {
-    let fall_through = || fall_through_to(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
+    // An agent that drives the pane is told what is happening, since the page stays blank while the prompt waits: a person's
+    // pane is not told anything.
+    let tell = |kind: &'static str| crate::client::agent_notice::auth_notice(&state, &block_id, kind, &host, port, &realm);
+    // No saved sign-in could answer: the prompt for the person, and the agent is told it has nothing to do to answer it.
+    let fall_through = || {
+        tell("auth_required");
+        fall_through_to(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
+    };
 
     let identity_id = match call_credential_service(
         &state,
@@ -157,6 +164,16 @@ async fn run_challenge(
     // credential forever.
     let recent_key = recent_fill::key(&identity_id, &origin, &realm, is_proxy);
     if recent_fill::take_if_recent(&recent_key) {
+        // In a pane an agent drives, the saved sign-in is the person's entry and nobody is there to retype it: it is NOT
+        // deleted on one refusal. The agent is told the site refused it (a stale password), and the site's own 401 shows.
+        if crate::client::agent_notice::drives(&state, &block_id) {
+            tell("auth_refused");
+            if let Some(cb) = crate::browser_pane::auth::take(&request_id) {
+                use cef::ImplAuthCallback;
+                cb.cancel();
+            }
+            return;
+        }
         tracing::info!(
             "[credential-broker] re-challenge within {:?} of an auto-fill for origin={} — \
              treating the stored credential as wrong; deleting and falling through",
@@ -201,6 +218,8 @@ async fn run_challenge(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // The person's yes is asked (below); the agent is told that is what the page waits for.
+    tell("auth_waiting_approval");
 
     match approval::reserve_or_join(
         &identity_id,

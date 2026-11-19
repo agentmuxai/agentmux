@@ -1082,6 +1082,10 @@ async fn route_command(
                         for parked in &resolved.auth_requests {
                             if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                                 cb.cont(Some(&u), Some(&p));
+                                // An agent that drives that pane is told the saved sign-in was used (never its value).
+                                crate::client::agent_notice::auth_notice(
+                                    state, &parked.block_id, "auth_answered", &resolved.host, resolved.port, &resolved.realm,
+                                );
                             }
                         }
                     }
@@ -1128,6 +1132,9 @@ async fn route_command(
                 for parked in &resolved.auth_requests {
                     if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                         cb.cancel();
+                        crate::client::agent_notice::auth_notice(
+                            state, &parked.block_id, "auth_denied", &resolved.host, resolved.port, &resolved.realm,
+                        );
                     }
                 }
             }
