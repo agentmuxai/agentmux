@@ -311,7 +311,7 @@ fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
         // A sign-in prompt (HTTP Basic or Digest) the site raised. `shown` is the site and the realm's name, never a value.
         "auth_required" => (
             format!("{shown} asks for a sign-in and the page waits for it, blank until it is answered"),
-            "No saved sign-in of this pane's profile could be used. The person can type it into the prompt shown in the pane, or save one for this profile in Vault; nothing the agent can do types it. The prompt gives up after 5 minutes. Tell the person which site you need",
+            "No saved sign-in of this pane's profile could be used. If Vault list shows a login for this site and realm, ask for it with Vault share (the entry and a reason) from a tab of your own profile, then load the page again. Otherwise the person can type it into the prompt shown in the pane, or save one in Vault; nothing the agent can do types it. The prompt gives up after 5 minutes. Tell the person which site you need",
         ),
         "auth_waiting_approval" => (
             format!("{shown} asks for a sign-in; this profile has a saved one, and the person is asked to approve using it"),
