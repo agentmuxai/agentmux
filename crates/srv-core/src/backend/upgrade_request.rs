@@ -18,8 +18,8 @@
 //! The prompt every window used to show for the second case is gone; `answer`,
 //! `list` and `UpgradeRequest` below only serve any left from before.
 //!
-//! Either way the launcher still asks the user in its own dialog before it
-//! restarts (`crates/launcher/src/upgrade_restart.rs`), and only a release
+//! Either way the restart is already decided by then, so the launcher asks
+//! nothing more (`crates/launcher/src/upgrade_restart.rs`), and only a release
 //! the update check found, verified against GitHub's checksum, is installed:
 //! the agent can't name a file or a URL.
 
@@ -230,7 +230,7 @@ pub fn answer(broker: &Arc<Broker>, mstore: &Arc<Store>, id: &str, version: &str
     for r in &answered {
         let text = if accept {
             format!(
-                "[AgentMux] The user approved upgrading AgentMux to {}. It downloads now, then AgentMux asks the user once more and restarts after every agent finishes its turn; your session resumes afterwards.",
+                "[AgentMux] The user approved upgrading AgentMux to {}. It downloads now, then AgentMux restarts after every agent finishes its turn; your session resumes afterwards.",
                 r.version
             )
         } else {
@@ -267,7 +267,8 @@ pub fn resolve_started(broker: &Arc<Broker>, mstore: &Arc<Store>, version: &str)
 }
 
 /// Download `version` if it isn't yet, then restart once every agent has
-/// finished its turn (the launcher asks the user before it does). Only while
+/// finished its turn (the restart is already decided, so the launcher asks
+/// nothing more). Only while
 /// `version` is still the latest release: the download and restart take the
 /// latest, so a newer one appearing meanwhile stops the flow. The agents in
 /// `askers` (their panes) are told if it stops short, and why.

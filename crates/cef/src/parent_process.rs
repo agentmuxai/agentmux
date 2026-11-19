@@ -177,10 +177,10 @@ fn parent_exe_file_windows() -> Option<String> {
 
 /// Let the launcher put its window in front of whatever the person is using.
 /// Called when they click Upgrade & restart in the version panel: the launcher
-/// then asks "Restart AgentMux to upgrade?" in a dialog of its own, and Windows
-/// only brings a window to the front for a process that was given the right,
-/// which a click in this host's window gives to this process and not to the
-/// launcher. Only when the launcher is this host's real parent (the stamp is
+/// then restarts, and shows a dialog of its own only for a file it refuses or an
+/// older srv's unconfirmed request. Windows only brings a window to the front
+/// for a process that was given the right, which a click in this host's window
+/// gives to this process and not to the launcher. Only when the launcher is this host's real parent (the stamp is
 /// not one inherited from another AgentMux); a no-op everywhere else.
 #[cfg(target_os = "windows")]
 pub fn allow_launcher_foreground() {
