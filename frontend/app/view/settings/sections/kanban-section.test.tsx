@@ -114,6 +114,24 @@ describe("Settings → Kanban", () => {
         expect(screen.getByRole("button", { name: "Remove Backlog" })).toBeTruthy();
     });
 
+    it("lists who changed the stages and when, newest first, and names the operator as You", async () => {
+        const lines = [
+            { at: 2000, actor: "", actor_kind: "operator", kind: "stages", body: "reset the stages to the default: 5 → 8" },
+            { at: 1000, actor: "agentx", actor_kind: "agent", kind: "stages", body: "changed the stages: 8 → 5" },
+        ];
+        h.board = boardOf([info("main", { history: lines })]);
+        await shown();
+        const items = screen.getAllByRole("listitem").filter((li) => li.textContent?.includes("the stages"));
+        expect(items).toHaveLength(2);
+        expect(items[0].textContent).toContain("You reset the stages to the default: 5 → 8");
+        expect(items[1].textContent).toContain("agentx changed the stages: 8 → 5");
+    });
+
+    it("shows no history list for a board nobody has changed", async () => {
+        await shown();
+        expect(screen.queryByText("Recent changes")).toBeNull();
+    });
+
     it("reorders a stage by dragging its grip onto another row, before or after by the pointer", async () => {
         await shown();
         const rows = () => Array.from(document.querySelectorAll<HTMLElement>(".kanban-stages__row"));

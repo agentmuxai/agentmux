@@ -9,6 +9,7 @@ import { createEffect, createSignal, For, on, onCleanup, Show, type Accessor, ty
 
 import { useOnResize } from "@/app/hook/useDimensions";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { VaultList } from "./vault-list";
 import { VaultNarrowActions } from "./vault-narrow-actions";
@@ -135,6 +136,10 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         <VaultShown.Provider value={model.shown}>
         <div class="vault-container" data-agent-hidden="vault" ref={(el) => (container.current = el)}>
             <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
+                {/* Shown, with everything else hidden, below the smallest width the Vault supports (vault-view.scss). */}
+                <div class="vault-too-narrow" role="status">
+                    {t("vault.tooNarrow")}
+                </div>
                 <Show
                     when={vaultAvailable()}
                     fallback={<div class="warden-section-stub vault-unavailable">The Vault needs the AgentMux desktop app.</div>}

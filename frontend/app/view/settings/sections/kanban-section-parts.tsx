@@ -295,6 +295,31 @@ function CopyToAll(props: Part): JSX.Element {
     );
 }
 
+/** The board's latest changes to its stages, newest first: who changed them, how, and when. */
+export function History(props: Part): JSX.Element {
+    const lines = () => props.s.info()?.history ?? [];
+    return (
+        <Show when={lines().length > 0}>
+            <section class="kanban-stages__history" aria-label={t("settings.kanban.history")}>
+                <h4 class="kanban-stages__history-title">{t("settings.kanban.history")}</h4>
+                <ul class="kanban-stages__history-list">
+                    <For each={lines()}>
+                        {(ev) => (
+                            <li>
+                                {t("settings.kanban.historyLine", {
+                                    who: ev.actor_kind === "agent" ? ev.actor : t("settings.kanban.you"),
+                                    what: ev.body,
+                                    when: new Date(ev.at).toLocaleString(),
+                                })}
+                            </li>
+                        )}
+                    </For>
+                </ul>
+            </section>
+        </Show>
+    );
+}
+
 export function Footer(props: Part): JSX.Element {
     const s = props.s;
     return (

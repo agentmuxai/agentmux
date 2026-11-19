@@ -270,8 +270,10 @@ fn who(state: &AppState, caller: Option<&Caller>) -> Who {
     }
 }
 
-/// What a container agent gets for anything but reading (§7).
-const CONTAINER_READ_ONLY: &str = "a container agent can list jobs and read their history, not create, change or run them";
+/// What a container agent is told for a job whose runs start things on the
+/// host (§7): the only jobs it can't have, as it can't start or run anything
+/// there. It says why and what to do instead.
+const CONTAINER_HOST_JOB: &str = "a container agent can't schedule a job that starts workers or runs a Drone, because its runs start things on the host: schedule a message or task job instead, or ask your leader to create this one";
 
 fn forbidden(why: impl Into<String>) -> Answer {
     (StatusCode::FORBIDDEN, Json(json!({"error": why.into()})))
@@ -281,23 +283,23 @@ fn bad_request(why: impl Into<String>) -> Answer {
     (StatusCode::BAD_REQUEST, Json(json!({"error": why.into()})))
 }
 
-/// Refuse a container agent's change.
-fn refuse_container(state: &AppState, caller: Option<&Caller>) -> Result<(), Answer> {
-    match who(state, caller) {
-        Who::Agent { container: true, .. } => Err(forbidden(CONTAINER_READ_ONLY)),
-        _ => Ok(()),
-    }
+/// Whether a job of this `action_kind` is one a container agent can't run
+/// now or have scheduled: a spawn or Drone job starts things on the host.
+fn starts_on_the_host(action_kind: &str) -> bool {
+    matches!(action_kind, "spawn" | "drone")
 }
 
 /// Whether `who` may define a job like `def` (§7): the operator any job; an
-/// agent a `message` or `task` job it owns. A `spawn` job needs the
-/// operator's approval once (the spawn consent rule, made at creation since
-/// its runs are unattended), which has no flow yet, so an agent can't create
-/// one. `current_owner` is the job's owner on an edit.
+/// agent, container or not, a `message` or `task` job it owns; a native agent
+/// a Drone job too, which a container agent can't have as its runs start on
+/// the host. A `spawn` job needs the operator's approval once (the spawn
+/// consent rule, made at creation since its runs are unattended), which has
+/// no flow yet, so an agent can't create one. `current_owner` is the job's
+/// owner on an edit.
 pub(crate) fn may_define(who: &Who, def: &JobDefinition, current_owner: Option<&str>) -> Result<(), String> {
     let Who::Agent { uid, container, .. } = who else { return Ok(()) };
-    if *container {
-        return Err(CONTAINER_READ_ONLY.to_string());
+    if *container && matches!(def.action, Action::Spawn { .. } | Action::Drone { .. }) {
+        return Err(CONTAINER_HOST_JOB.to_string());
     }
     if let Action::Spawn { leader, .. } = &def.action {
         if leader != uid {
@@ -595,9 +597,6 @@ pub(super) async fn handle_cron_run_now(
     caller: Option<axum::Extension<Caller>>,
     Path(id): Path<String>,
 ) -> Answer {
-    if let Err(refused) = refuse_container(&state, caller.as_deref()) {
-        return refused;
-    }
     let store = match jobs_store_or_503(&state) {
         Ok(store) => store,
         Err(e) => return e,
@@ -612,6 +611,9 @@ pub(super) async fn handle_cron_run_now(
             StatusCode::FORBIDDEN,
             Json(json!({"error": "only the agent that created this job, or the operator, can run it now"})),
         );
+    }
+    if starts_on_the_host(&job.action_kind) && matches!(who(&state, caller.as_deref()), Who::Agent { container: true, .. }) {
+        return forbidden(CONTAINER_HOST_JOB);
     }
     if job.action_kind == "spawn" {
         return forbidden(SPAWN_FROM_THE_APP);
@@ -798,15 +800,14 @@ fn may_edit_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool {
     !uid.is_empty() && (job.created_by_uid == uid || job.owner_uid() == uid)
 }
 
-/// The store and the job, or the response refusing the change: no store, a
-/// container agent, no such job, or a caller [`may_change_job`] refuses.
+/// The store and the job, or the response refusing the change: no store, no
+/// such job, or a caller [`may_change_job`] refuses.
 fn job_for_change(
     state: &AppState,
     caller: Option<&super::caller::Caller>,
     id: &str,
 ) -> Result<(Arc<Store>, CronJob), Answer> {
     let store = jobs_store_or_503(state)?;
-    refuse_container(state, caller)?;
     match store.cron_get(id) {
         Ok(Some(job)) if may_change_job(caller, &job) => Ok((store, job)),
         Ok(Some(_)) => Err(forbidden("an agent can change only a scheduled job it created or one aimed at it")),

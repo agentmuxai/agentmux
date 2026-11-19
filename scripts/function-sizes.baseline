@@ -63,13 +63,13 @@
 477 crates/cef/src/commands/window_pool.rs::promote_pool_window
 111 crates/cef/src/commands/window_pool.rs::promote_pool_window_for_new_window
 169 crates/cef/src/commands/window_pool.rs::spawn_pool_window
-159 crates/cef/src/credential_broker/mod.rs::run_challenge
+147 crates/cef/src/credential_broker/mod.rs::run_challenge
 112 crates/cef/src/dev_authfile.rs::apply_owner_only_dacl
 150 crates/cef/src/floating_pane.rs::CreateFloatingWindowTask::Task::execute
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 153 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1103 crates/cef/src/ipc.rs::route_command
+1094 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2

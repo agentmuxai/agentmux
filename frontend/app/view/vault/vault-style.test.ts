@@ -37,6 +37,18 @@ describe("the Vault's stylesheets", () => {
         expect(css).not.toMatch(/\.vault-container\s*\{[^}]*container/);
     });
 
+    it("shows one line instead of the Vault below 160px of the pane's zoomed width", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        // The view is a size container inside its zoom, so 160px is 240px of pane at 150%.
+        expect(css).toMatch(/\.vault-view\s*\{[^}]*container-name:\s*vault-pane;/);
+        const narrow = css.match(/@container vault-pane \(max-width: 159px\)\s*\{([\s\S]*?\n\})\s*\n/);
+        expect(narrow).not.toBeNull();
+        // Everything but the line goes, and the line (hidden above the limit) comes.
+        expect(narrow![1]).toMatch(/\.vault-view > :not\(\.vault-too-narrow\)\s*\{\s*display:\s*none;/);
+        expect(narrow![1]).toMatch(/\.vault-too-narrow\s*\{\s*display:\s*block;/);
+        expect(css).toMatch(/\.vault-too-narrow\s*\{[^}]*display:\s*none;/);
+    });
+
     it("clears a stacked cell's own line and padding with a rule that outranks the shared table's", () => {
         const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
         expect(css).toMatch(/\.vault-table tbody td\s*\{[^}]*padding:\s*0;[^}]*border-bottom:\s*0;/);
