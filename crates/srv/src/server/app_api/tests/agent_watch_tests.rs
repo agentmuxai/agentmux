@@ -138,6 +138,23 @@ async fn replay_then_tail_returns_each_line_once_and_a_cursor_past_the_end_repla
     assert_eq!((reset["reset"].clone(), lines(&reset)), (json!(true), vec!["l5-partial"]));
 }
 
+/// `Agents transcript` takes an agent's name as written ("Korp" for the slug "korp"); `Agents watch` refused it as
+/// an unknown agent and wanted the uid. Both read a name the same way now.
+#[tokio::test]
+async fn a_watch_takes_an_agents_name_in_any_letter_case() {
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    seed_agent_block(&state, &tabs[0], "wn-caller").await;
+    let block = seed_agent_block(&state, &tabs[0], "wn-target").await;
+    append(&state, &block, "only\n");
+    let (status, body) = call(&state, Some("wn-caller"), json!({ "agent": "WN-Target" })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(lines(&body), ["only"]);
+    let (status, body) = call(&state, Some("wn-caller"), json!({ "agent": "nobody-here" })).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body["error"].as_str().unwrap().contains("Agents list"), "the error says where to look: {body}");
+}
+
 #[tokio::test]
 async fn a_wait_returns_when_a_line_arrives() {
     let state = test_state();
