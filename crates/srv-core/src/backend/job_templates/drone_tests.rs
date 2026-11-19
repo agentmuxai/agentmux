@@ -221,6 +221,9 @@ fn example(id: &str) -> Map<String, Value> {
         "agentmux.check-and-file-task" => json!({ "check": "Is the build green?" }),
         "agentmux.two-agent-handoff" => json!({ "first": "Name three colours.", "second": "Sort them.", "owner": "loap" }),
         "agentmux.after-upgrade-check" => json!({ "leader": "agenty", "steward": "masty" }),
+        "agentmux.triage-failed-nightly" => json!({ "repo": "acme/site", "leader": "agenty", "triager": "masty" }),
+        "agentmux.rerun-flaky-job" => json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }),
+        "agentmux.merged-pr-still-claimed" => json!({ "repo": "acme/site", "steward": "masty" }),
         other => panic!("no example for {other}"),
     };
     v.as_object().cloned().unwrap()
@@ -229,7 +232,18 @@ fn example(id: &str) -> Map<String, Value> {
 #[test]
 fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
     let ids: Vec<&str> = DRONE_BUILTINS.iter().map(|b| b.id).collect();
-    assert_eq!(ids, ["agentmux.scheduled-report", "agentmux.check-and-file-task", "agentmux.two-agent-handoff", "agentmux.after-upgrade-check"]);
+    assert_eq!(
+        ids,
+        [
+            "agentmux.scheduled-report",
+            "agentmux.check-and-file-task",
+            "agentmux.two-agent-handoff",
+            "agentmux.after-upgrade-check",
+            "agentmux.triage-failed-nightly",
+            "agentmux.rerun-flaky-job",
+            "agentmux.merged-pr-still-claimed"
+        ]
+    );
     for b in DRONE_BUILTINS {
         let pkg = package::load_embedded(b.id, b.files).unwrap_or_else(|e| panic!("{}: {e}", b.id));
         assert_eq!(pkg.manifest.kind, manifest::JobTemplateKind::Drone, "{}", b.id);
@@ -247,14 +261,17 @@ fn the_built_in_drone_templates_are_valid_and_render_with_example_parameters() {
                 "task" => &["title"],
                 "app_query" => &["query"],
                 "notify" => &["title"],
+                "api" => &["url"],
+                "transform" => &["input"],
                 other => panic!("{}: node {} is a {other} node", b.id, node.id),
             };
             for key in needs {
                 assert!(node.data.get(*key).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()), "{}: node {} needs {key}", b.id, node.id);
             }
         }
-        // Nothing is secret-looking or private, and nothing writes outside AgentMux.
-        assert!(graph::summarize(pkg.graph.as_ref().unwrap()).writes_outside.is_empty(), "{}", b.id);
+        // Nothing is secret-looking or private, and nothing writes outside AgentMux but the one re-run.
+        let writes = graph::summarize(pkg.graph.as_ref().unwrap()).writes_outside;
+        assert_eq!(writes.is_empty(), b.id != "agentmux.rerun-flaky-job", "{}: {writes:?}", b.id);
         assert!(pkg.manifest.secrets.is_empty());
     }
 }
@@ -313,4 +330,197 @@ fn the_after_upgrade_check_tells_the_leader_when_all_is_up_and_files_a_task_when
     assert!(to("allclear", None).is_empty());
     let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
     assert_eq!((data("allclear")["to"].clone(), data("file")["target"].clone()), (json!("agenty"), json!("masty")), "the parameters land where the messages go");
+}
+
+// ── A trigger default that names the template's parameters ──────────────────
+
+#[test]
+fn a_template_trigger_may_use_its_parameters_and_only_those() {
+    let m = |url: &str| manifest(json!({ "trigger": { "kind": "event", "source": "poll", "filter": { "query": "api", "every_minutes": 15, "url": url } } }));
+    let mp = |url: &str| {
+        let mut v = m(url);
+        v["params"] = json!({ "type": "object", "properties": { "repo": { "type": "string" }, "who": { "type": "string", "default": "loap" } }, "required": ["repo"] });
+        v
+    };
+    assert!(parse(&mp("https://api.github.com/repos/{{param.repo}}/runs"), Some(&param_graph()), None).is_ok());
+    let err = parse(&m("https://api.github.com/repos/{{param.nope}}/runs"), Some(&graph()), None).unwrap_err();
+    assert!(err.contains("the trigger uses {{param.nope}}") && err.contains("isn't one of its parameters"), "{err}");
+}
+
+#[test]
+fn a_trigger_default_takes_each_parameter_once_and_never_reads_a_value_for_placeholders() {
+    let params = json!({ "repo": "acme/site" }).as_object().cloned().unwrap();
+    let mut t = json!({ "kind": "event", "filter": { "url": "https://api.github.com/repos/{{param.repo}}/runs", "n": 5 } });
+    graph::render_value(&mut t, &params).unwrap();
+    assert_eq!(t["filter"]["url"], "https://api.github.com/repos/acme/site/runs");
+    assert_eq!(t["filter"]["n"], 5, "a number is left as it is");
+    let hostile = json!({ "repo": "a/b{{trigger.item.x}}" }).as_object().cloned().unwrap();
+    assert!(graph::render_value(&mut json!({ "u": "{{param.repo}}" }), &hostile).unwrap_err().contains("can't contain"));
+}
+
+// ── The acceptance drones (a), (b) and (d), in their local forms ─────────────
+
+fn rendered(id: &str) -> (package::Package, crate::backend::storage::drone_types::DroneGraph, Value) {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == id).unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let given = example(id);
+    let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).unwrap();
+    let params = manifest::resolve_params(&pkg.manifest, &given).unwrap();
+    let mut trigger = pkg.manifest.trigger.clone().unwrap();
+    graph::render_value(&mut trigger, &params).unwrap();
+    (pkg, g, trigger)
+}
+
+fn edges_from(g: &crate::backend::storage::drone_types::DroneGraph, from: &str, handle: Option<&str>) -> Vec<String> {
+    g.edges.iter().filter(|e| e.source == from && e.source_handle.as_deref() == handle).map(|e| e.target.clone()).collect()
+}
+
+#[test]
+fn the_acceptance_drones_poll_the_one_repository_their_calls_name_and_the_poll_accepts_the_trigger() {
+    for id in ["agentmux.triage-failed-nightly", "agentmux.rerun-flaky-job", "agentmux.merged-pr-still-claimed"] {
+        let (_pkg, g, trigger) = rendered(id);
+        assert_eq!((trigger["kind"].clone(), trigger["source"].clone()), (json!("event"), json!("poll")), "{id}");
+        let filter = trigger["filter"].as_object().unwrap();
+        crate::backend::jobs::poll::validate_filter(filter).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let url = filter["url"].as_str().unwrap();
+        assert!(url.starts_with("https://api.github.com/repos/acme/site/"), "{id}: {url}");
+        assert_eq!(filter["auth"], json!({ "vault": "api-key-github", "as": "bearer" }), "{id}: the entry the parameter names");
+        // Every call of the graph goes to the same site and repository, with the same entry.
+        for n in g.nodes.iter().filter(|n| n.data["kind"] == "api" && n.data.get("auth").is_some()) {
+            assert!(n.data["url"].as_str().unwrap().starts_with("https://api.github.com/repos/acme/site/"), "{id}: {}", n.id);
+            assert_eq!(n.data["auth"], filter["auth"], "{id}: {}", n.id);
+        }
+    }
+}
+
+#[test]
+fn the_nightly_triage_spends_an_agent_only_on_a_failure_and_files_a_task_only_when_it_is_sure() {
+    let (pkg, g, trigger) = rendered("agentmux.triage-failed-nightly");
+    assert_eq!(pkg.manifest.outputs, ["message:owner", "kanban_task"]);
+    assert_eq!(trigger["filter"]["url"], "https://api.github.com/repos/acme/site/actions/runs?event=schedule&status=failure&per_page=10", "scheduled runs that failed");
+    assert_eq!(trigger["filter"]["items"], "workflow_runs");
+    let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
+    assert_eq!(graph::summarize(&g).agents, 1);
+    // The agent's answer is four short fields, and only a closed set says how sure it is.
+    assert_eq!(data("triage")["output_schema"]["confidence"], json!({ "enum": ["high", "medium", "low"] }));
+    assert_eq!(edges_from(&g, "found", Some("true")), ["loglink"]);
+    assert!(edges_from(&g, "found", Some("false")).is_empty(), "no failed job in the run: it ends");
+    assert_eq!(edges_from(&g, "sure", Some("true")), ["file"]);
+    assert_eq!(edges_from(&g, "file", None), ["tell"]);
+    // The task goes to the person named, one task for the same workflow in the same repository.
+    assert_eq!((data("file")["target"].clone(), data("tell")["to"].clone()), (json!("masty"), json!("agenty")));
+    assert!(data("file")["dedupe"].as_str().unwrap().contains("acme/site"));
+    // The log's address is read by a call that has no credential, so the token never goes to the log's host.
+    assert!(data("log").get("auth").is_none() && data("loglink").get("auth").is_some());
+}
+
+#[test]
+fn the_flaky_rerun_writes_outside_once_and_only_for_the_named_workflow_on_its_first_attempt() {
+    let (pkg, g, trigger) = rendered("agentmux.rerun-flaky-job");
+    assert_eq!(pkg.manifest.outputs, ["message:owner", "ci_rerun"]);
+    assert_eq!(pkg.manifest.outside_writes(), ["ci_rerun"]);
+    assert_eq!(trigger["filter"]["id"], "id", "a run is told once, by its id");
+    let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
+    assert_eq!(data("flaky")["expr"], "{{trigger.item.run_attempt}} == 1 && {{trigger.item.name}} == 'CI'");
+    assert_eq!(edges_from(&g, "flaky", Some("true")), ["rerun"]);
+    assert!(edges_from(&g, "flaky", Some("false")).is_empty());
+    // GitHub answers 201 when it takes the re-run; any other answer is told as a refusal, never as a re-run.
+    assert_eq!(data("ok")["expr"], "{{rerun.status}} == 201");
+    assert_eq!(edges_from(&g, "rerun", None), ["ok"]);
+    assert_eq!(edges_from(&g, "ok", Some("true")), ["tell"]);
+    assert_eq!(edges_from(&g, "ok", Some("false")), ["refused"]);
+    assert!(data("refused")["body"].as_str().unwrap().contains("refused the re-run"));
+    // The one write is the re-run, its address is constant but for the run's number (a number the poll read).
+    assert_eq!(graph::summarize(&g).writes_outside, ["rerun: POST https://api.github.com/repos/acme/site/actions/runs/{{trigger.key}}/rerun-failed-jobs"]);
+    assert_eq!(graph::summarize(&g).agents, 0, "no agent reads the run");
+}
+
+#[test]
+fn the_merged_pull_request_check_waits_half_an_hour_and_tells_only_when_a_task_is_still_claimed() {
+    let (pkg, g, trigger) = rendered("agentmux.merged-pr-still-claimed");
+    assert_eq!(pkg.manifest.outputs, ["message:owner"]);
+    assert_eq!((trigger["delay"].clone(), trigger["filter"]["id"].clone()), (json!(30), json!("number")));
+    let data = |id: &str| g.nodes.iter().find(|n| n.id == id).unwrap().data.clone();
+    assert_eq!(data("claimed")["pr"], "{{trigger.item.html_url}}");
+    assert_eq!(data("claimed")["state"], "claimed");
+    assert_eq!(edges_from(&g, "merged", Some("true")), ["claimed"], "a pull request closed without a merge ends here");
+    assert_eq!(edges_from(&g, "found", Some("true")), ["tell"]);
+    assert!(graph::summarize(&g).writes_outside.is_empty());
+    assert_eq!(data("tell")["to"], "masty");
+}
+
+#[test]
+fn a_job_made_from_a_template_gets_the_trigger_with_its_parameters_filled_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("src").join("acme.echo");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut m = param_manifest();
+    m["trigger"] = json!({ "kind": "event", "source": "poll", "filter": { "query": "api", "every_minutes": 15, "url": "https://api.github.com/repos/{{param.repo}}/actions/runs" } });
+    std::fs::write(dir.join("template.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+    std::fs::write(dir.join("graph.json"), serde_json::to_vec(&param_graph()).unwrap()).unwrap();
+    let svc = JobTemplates::new(tmp.path().join("job-templates"), &tmp.path().join("data"), &[]);
+    svc.install(&dir, false).unwrap();
+    let hash = svc.get("acme.echo").unwrap().0.hash;
+    svc.approve("acme.echo", &hash, "").unwrap();
+
+    let make = |trigger: Value| {
+        let mut def = json!({ "jobVersion": 1, "template": { "id": "acme.echo" }, "params": { "repo": "a/b" }, "action": { "kind": "drone", "drone_id": "d-1" }, "owner": "uid-a" });
+        if !trigger.is_null() {
+            def["trigger"] = trigger;
+        }
+        crate::backend::jobs::from_template::apply_with(&mut def, None, &svc).map(|()| def)
+    };
+    let def = make(Value::Null).unwrap();
+    assert_eq!(def["trigger"]["filter"]["url"], "https://api.github.com/repos/a/b/actions/runs", "the poll asks about the repository the drone's calls name");
+    // A trigger the job names itself is its own: nothing is filled in.
+    let own = make(json!({ "kind": "manual" })).unwrap();
+    assert_eq!(own["trigger"], json!({ "kind": "manual" }));
+}
+
+// ── Where a parameter lands decides what it may hold ─────────────────────────
+
+#[test]
+fn a_parameter_put_into_an_address_is_a_name_or_owner_slash_name() {
+    let pkg = |id: &str| {
+        let b = DRONE_BUILTINS.iter().find(|b| b.id == id).unwrap();
+        package::load_embedded(b.id, b.files).unwrap()
+    };
+    let id = "agentmux.rerun-flaky-job";
+    let p = pkg(id);
+    let with = |repo: &str| {
+        let mut given = example(id);
+        given.insert("repo".into(), json!(repo));
+        let g = graph::render(p.graph.as_ref().unwrap(), &p.manifest, &given);
+        let params = manifest::resolve_params(&p.manifest, &given).unwrap();
+        let mut trigger = p.manifest.trigger.clone().unwrap();
+        let t = graph::render_value(&mut trigger, &params);
+        (g.map(|_| ()), t)
+    };
+    assert!(with("acme/site").0.is_ok() && with("acme/site").1.is_ok());
+    assert!(with("a-b.c_d/e-f.g_h").0.is_ok());
+    for bad in ["acme/site?x=1", "acme/site#frag", "acme//site", "acme/site/actions", "../site", "acme/..", "acme/site%2F..", "a b/c", "acme/site@evil", "acme:80/site", "", "/site", "acme/"] {
+        let (g, t) = with(bad);
+        assert!(g.unwrap_err().contains("owner/name"), "{bad:?} in the graph");
+        assert!(t.unwrap_err().contains("owner/name"), "{bad:?} in the trigger");
+    }
+}
+
+#[test]
+fn a_parameter_put_into_a_condition_holds_no_quote_mark_or_backslash() {
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.rerun-flaky-job").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let with = |workflow: &str| {
+        let mut given = example(b.id);
+        given.insert("workflow".into(), json!(workflow));
+        graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given)
+    };
+    assert!(with("CI").is_ok() && with("Build and test (linux)").is_ok());
+    for bad in ["CI' || 'x' == 'x", "CI\" || \"x", "CI\\", "CI`x"] {
+        assert!(with(bad).unwrap_err().contains("no quote mark or backslash"), "{bad:?}");
+    }
+    // Words in an agent's task or a message are prose, not an expression: a quote there is fine.
+    let b = DRONE_BUILTINS.iter().find(|b| b.id == "agentmux.check-and-file-task").unwrap();
+    let pkg = package::load_embedded(b.id, b.files).unwrap();
+    let given = json!({ "check": "Is the 'main' build green?" }).as_object().cloned().unwrap();
+    assert!(graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, &given).is_ok());
 }

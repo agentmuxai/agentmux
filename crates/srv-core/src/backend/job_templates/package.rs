@@ -68,6 +68,11 @@ pub fn parse(folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<Package,
 fn graph_of(m: &JobTemplateManifest, files: &BTreeMap<String, Vec<u8>>) -> Result<Option<DroneGraph>, String> {
     match (m.kind == JobTemplateKind::Drone, files.get(GRAPH_FILE)) {
         (true, Some(raw)) => {
+            if let Some(trigger) = &m.trigger {
+                if let Some(name) = graph::param_names_in(trigger)?.into_iter().find(|n| !m.params.properties.contains_key(n)) {
+                    return Err(format!("the trigger uses {{{{param.{name}}}}}, which isn't one of its parameters"));
+                }
+            }
             let g = graph::parse(raw)?;
             if let Some(name) = graph::param_names(&g)?.into_iter().find(|n| !m.params.properties.contains_key(n)) {
                 return Err(format!("graph.json uses {{{{param.{name}}}}}, which isn't one of its parameters"));

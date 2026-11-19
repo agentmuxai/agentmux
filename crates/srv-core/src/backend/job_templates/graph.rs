@@ -172,34 +172,103 @@ pub fn param_names(graph: &DroneGraph) -> Result<Vec<String>, String> {
 /// time.
 pub fn render(graph: &DroneGraph, m: &JobTemplateManifest, given: &Map<String, Value>) -> Result<DroneGraph, String> {
     let params = manifest::resolve_params(m, given)?;
-    if let Some((name, _)) = params.iter().find(|(_, v)| manifest::as_text(v).contains("{{")) {
-        return Err(format!("parameter {name:?} can't contain {{{{: a drone would read it as a reference"));
-    }
+    refuse_reference_in_values(&params)?;
     let mut out = graph.clone();
     for node in &mut out.nodes {
         let id = node.id.clone();
+        // A value put into a condition's expression is read as part of it: no quote or backslash, so it cannot close a
+        // literal and add to the expression.
+        let in_expression = node.data.get("kind").and_then(Value::as_str) == Some("condition");
         each_string(&mut node.data, &mut |s| {
-            let mut text = String::with_capacity(s.len());
-            let mut inserted = Vec::new();
-            for part in split_params(s)? {
-                match part {
-                    Seg::Text(plain) => text.push_str(plain),
-                    Seg::Param(name) => {
-                        let start = text.len();
-                        text.push_str(&params.get(name).map(manifest::as_text).unwrap_or_default());
-                        inserted.push(start..text.len());
-                    }
-                }
-            }
-            if opens_reference_in(&text, &inserted) {
-                return Err("a parameter value forms {{ with the text next to it: a drone would read it as a reference".to_string());
-            }
-            *s = text;
+            *s = fill(s, &params, in_expression)?;
             Ok(())
         })
         .map_err(|e| format!("node {id:?}: {e}"))?;
     }
     Ok(out)
+}
+
+/// A parameter value that holds `{{` would be read as a reference by the drone's own templating.
+fn refuse_reference_in_values(params: &Map<String, Value>) -> Result<(), String> {
+    match params.iter().find(|(_, v)| manifest::as_text(v).contains("{{")) {
+        Some((name, _)) => Err(format!("parameter {name:?} can't contain {{{{: a drone would read it as a reference")),
+        None => Ok(()),
+    }
+}
+
+/// A parameter put into an address (after `scheme://`) is a name or `owner/name`: letters, digits, `.`, `_` and `-`, at
+/// most one `/` between two such parts, and no `.` or `..` part. Anything else (`?`, `#`, `%`, `@`, `:`, a space, a second
+/// slash) could turn the call into another one under the same Vault token.
+fn address_part(name: &str, value: &str) -> Result<(), String> {
+    let part_ok = |p: &str| !p.is_empty() && p != "." && p != ".." && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    let mut parts = value.split('/');
+    let (a, b, c) = (parts.next().unwrap_or(""), parts.next(), parts.next());
+    if part_ok(a) && b.is_none_or(part_ok) && c.is_none() {
+        return Ok(());
+    }
+    Err(format!("parameter {name:?} is put into an address, so it is a name or owner/name (letters, digits, '.', '_' and '-', one '/' at most), not {value:?}"))
+}
+
+/// A parameter put into a condition's expression holds no quote mark and no backslash: a value with one could close the
+/// literal it sits in and change what the condition says.
+fn expression_part(name: &str, value: &str) -> Result<(), String> {
+    if value.chars().any(|c| matches!(c, '\'' | '"' | '`' | '\\')) {
+        return Err(format!("parameter {name:?} is put into a condition, so it holds no quote mark or backslash: {value:?}"));
+    }
+    Ok(())
+}
+
+/// `s` with each `{{param.NAME}}` replaced by the parameter's text. The values go in once and are never read for
+/// placeholders.
+fn fill(s: &str, params: &Map<String, Value>, in_expression: bool) -> Result<String, String> {
+    let mut text = String::with_capacity(s.len());
+    let mut inserted = Vec::new();
+    for part in split_params(s)? {
+        match part {
+            Seg::Text(plain) => text.push_str(plain),
+            Seg::Param(name) => {
+                let value = params.get(name).map(manifest::as_text).unwrap_or_default();
+                // Where a value lands decides what it may hold: in an address a Vault token is sent to, or in an expression.
+                if text.contains("://") {
+                    address_part(name, &value)?;
+                }
+                if in_expression {
+                    expression_part(name, &value)?;
+                }
+                let start = text.len();
+                text.push_str(&value);
+                inserted.push(start..text.len());
+            }
+        }
+    }
+    if opens_reference_in(&text, &inserted) {
+        return Err("a parameter value forms {{ with the text next to it: a drone would read it as a reference".to_string());
+    }
+    Ok(text)
+}
+
+/// The parameter names a JSON value's strings use (a template's trigger default), each of which the manifest must declare.
+pub fn param_names_in(value: &Value) -> Result<Vec<String>, String> {
+    let mut names = Vec::new();
+    each_string(&mut value.clone(), &mut |s| {
+        for part in split_params(s)? {
+            if let Seg::Param(name) = part {
+                names.push(name.to_string());
+            }
+        }
+        Ok(())
+    })?;
+    Ok(names)
+}
+
+/// `value` with each `{{param.NAME}}` in its strings replaced, for a template's trigger default: the repository a poll
+/// asks about is the one the drone's calls name. `params` are the resolved ones.
+pub fn render_value(value: &mut Value, params: &Map<String, Value>) -> Result<(), String> {
+    refuse_reference_in_values(params)?;
+    each_string(value, &mut |s| {
+        *s = fill(s, params, false)?;
+        Ok(())
+    })
 }
 
 /// Whether a `{{` in `text` takes in a byte of a value that was put in, which

@@ -1,0 +1,70 @@
+{
+  "nodes": [
+    {
+      "id": "merged",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "kind": "condition",
+        "expr": "exists({{trigger.item.merged_at}})"
+      }
+    },
+    {
+      "id": "claimed",
+      "position": {
+        "x": 240,
+        "y": 0
+      },
+      "data": {
+        "kind": "app_query",
+        "query": "tasks",
+        "pr": "{{trigger.item.html_url}}",
+        "state": "claimed"
+      }
+    },
+    {
+      "id": "found",
+      "position": {
+        "x": 480,
+        "y": 0
+      },
+      "data": {
+        "kind": "condition",
+        "expr": "{{claimed.count}} > 0"
+      }
+    },
+    {
+      "id": "tell",
+      "position": {
+        "x": 720,
+        "y": 0
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.steward}}",
+        "body": "Pull request {{trigger.item.html_url}} was merged half an hour ago, but task #{{claimed.tasks | json:0.num}} ({{claimed.tasks | json:0.title}}) is still claimed by {{claimed.tasks | json:0.holder}}. Ask them to complete it or say why not. No reply needed."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "merged-claimed",
+      "source": "merged",
+      "target": "claimed",
+      "sourceHandle": "true"
+    },
+    {
+      "id": "claimed-found",
+      "source": "claimed",
+      "target": "found"
+    },
+    {
+      "id": "found-tell",
+      "source": "found",
+      "target": "tell",
+      "sourceHandle": "true"
+    }
+  ]
+}

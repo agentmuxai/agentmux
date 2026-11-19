@@ -330,4 +330,67 @@ mod tests {
         assert_eq!(ask(true, false, 3, 3).await, json!(false), "MuxBus down");
         assert_eq!(ask(true, true, 2, 3).await, json!(false), "a peer silent");
     }
+
+    /// The three acceptance drones' conditions, as the templates ship them, over what their polls and calls answer.
+    #[tokio::test]
+    async fn the_acceptance_drones_conditions_read_a_poll_item_and_a_call_as_the_templates_mean() {
+        use crate::backend::job_templates::{graph, package, DRONE_BUILTINS};
+        let cond = |id: &str, node: &str, given: Value| {
+            let b = DRONE_BUILTINS.iter().find(|b| b.id == id).unwrap();
+            let pkg = package::load_embedded(b.id, b.files).unwrap();
+            let g = graph::render(pkg.graph.as_ref().unwrap(), &pkg.manifest, given.as_object().unwrap()).unwrap();
+            g.nodes.iter().find(|n| n.id == node).unwrap().clone()
+        };
+        let scope_item = |item: Value, outputs: Value| {
+            let mut scope = ExecutionScope::with_trigger(json!({ "key": item["id"].to_string(), "item": item }));
+            for (id, out) in outputs.as_object().unwrap() {
+                scope.outputs.insert(id.clone(), out.clone());
+            }
+            scope
+        };
+        // (a) the triage runs only when the run has a failed job, and files only when the agent is not unsure.
+        let nightly = "agentmux.triage-failed-nightly";
+        let params = json!({ "repo": "acme/site", "leader": "agenty" });
+        let found = cond(nightly, "found", params.clone());
+        assert_eq!(run(&found, &scope_with(json!({ "failed": { "value": { "id": 77 } } }))).await.unwrap()["result"], json!(true));
+        assert_eq!(run(&found, &scope_with(json!({ "failed": { "value": null } }))).await.unwrap()["result"], json!(false), "no failed job in the run");
+        let sure = cond(nightly, "sure", params);
+        assert_eq!(run(&sure, &scope_with(json!({ "triage": { "output": { "confidence": "high" } } }))).await.unwrap()["result"], json!(true));
+        assert_eq!(run(&sure, &scope_with(json!({ "triage": { "output": { "confidence": "low" } } }))).await.unwrap()["result"], json!(false));
+        // (b) a re-run only for the named workflow on its first attempt.
+        let flaky = cond("agentmux.rerun-flaky-job", "flaky", json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }));
+        let ask = |name: &str, attempt: u32| {
+            let scope = scope_item(json!({ "id": 5, "name": name, "run_attempt": attempt }), json!({}));
+            let flaky = flaky.clone();
+            async move { run(&flaky, &scope).await.unwrap()["result"].clone() }
+        };
+        assert_eq!(ask("CI", 1).await, json!(true));
+        assert_eq!(ask("CI", 2).await, json!(false), "a run that was already re-run");
+        assert_eq!(ask("Docs", 1).await, json!(false), "another workflow");
+        let ok = cond("agentmux.rerun-flaky-job", "ok", json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }));
+        for (status, told) in [(201, true), (403, false), (404, false), (422, false)] {
+            let got = run(&ok, &scope_with(json!({ "rerun": { "status": status } }))).await.unwrap()["result"].clone();
+            assert_eq!(got, json!(told), "status {status}");
+        }
+        // (d) only a merged pull request, and only with a task still claimed.
+        let merged = cond("agentmux.merged-pr-still-claimed", "merged", json!({ "repo": "acme/site", "steward": "masty" }));
+        let was = |merged_at: Value| {
+            let scope = scope_item(json!({ "id": 9, "number": 9, "merged_at": merged_at }), json!({}));
+            let merged = merged.clone();
+            async move { run(&merged, &scope).await.unwrap()["result"].clone() }
+        };
+        assert_eq!(was(json!("2026-11-15T10:00:00Z")).await, json!(true));
+        assert_eq!(was(Value::Null).await, json!(false), "closed without a merge");
+        let any = cond("agentmux.merged-pr-still-claimed", "found", json!({ "repo": "acme/site", "steward": "masty" }));
+        assert_eq!(run(&any, &scope_with(json!({ "claimed": { "count": 1 } }))).await.unwrap()["result"], json!(true));
+        assert_eq!(run(&any, &scope_with(json!({ "claimed": { "count": 0 } }))).await.unwrap()["result"], json!(false));
+        // The line the steward gets names the first task: a plain dotted reference can't index a list, so the
+        // template reads it through `json:`.
+        let tell = cond("agentmux.merged-pr-still-claimed", "tell", json!({ "repo": "acme/site", "steward": "masty" }));
+        let mut scope = scope_item(json!({ "id": 9, "number": 9, "html_url": "https://github.com/acme/site/pull/9" }), json!({}));
+        scope.outputs.insert("claimed".to_string(), json!({ "count": 1, "tasks": [{ "num": 412, "title": "Fix the thing", "holder": "agent5" }] }));
+        let body = scope.resolve(tell.data["body"].as_str().unwrap());
+        assert!(body.contains("task #412 (Fix the thing) is still claimed by agent5."), "{body}");
+        assert!(body.contains("https://github.com/acme/site/pull/9"), "{body}");
+    }
 }
