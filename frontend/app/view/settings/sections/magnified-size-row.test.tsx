@@ -95,6 +95,35 @@ describe("the magnified size field", () => {
         expect(input.value, "left: the box shows what was used").toBe("1");
     });
 
+    describe("keeps the entry in view when the Settings pane shrinks with it", () => {
+        const scroll = vi.fn();
+        beforeEach(() => {
+            scroll.mockReset();
+            Element.prototype.scrollIntoView = scroll;
+        });
+        afterEach(() => {
+            delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+        });
+
+        it("scrolls the message under a corrected entry into view, at once and again once the pane has its new size", async () => {
+            const { input, getByTestId } = setup(0.9);
+            await type(input, "0");
+            const message = getByTestId("magnified-size-snap");
+            expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+            expect(scroll.mock.contexts.at(-1)).toBe(message);
+            const first = scroll.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(300);
+            expect(scroll.mock.calls.length).toBeGreaterThan(first);
+            expect(scroll.mock.contexts.at(-1)).toBe(message);
+        });
+
+        it("scrolls the row itself into view for an entry in range", async () => {
+            const { input, container } = setup(0.9);
+            await type(input, "0.6");
+            expect(scroll.mock.contexts.at(-1)).toBe(container.querySelector(`#setting-${ROW.id}`));
+        });
+    });
+
     it("shows a stored size from an old config as the layout reads it, and an unset one as the default", () => {
         expect(setup(3).input.value).toBe("1");
         cleanup();
