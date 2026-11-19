@@ -5,16 +5,17 @@
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §4.1, §8.2,
 //! phase 3b).
 //!
-//! Once a release is staged (`update::download`), the user's click waits for
+//! Once a release is staged (`update::download`), a restart that is decided (the user's click or own turn, or
+//! an approved request whose in-app countdown ran out with no veto) waits for
 //! every agent to finish its turn (for as long as that takes, with who is
 //! waited for read again every pass; "Now" skips the wait, and Cancel stops
 //! it), then srv asks the launcher to restart into the new
-//! version with an `AGENTMUXSRV-UPGRADE` line on its stderr. The launcher
-//! checks the folder again and asks the user itself
-//! (`crates/launcher/src/upgrade_restart.rs`). From then on that dialog is
-//! the only place to decide: srv can't reach it, so `restarting` can't be
-//! cancelled here (No in the dialog does). If nothing has happened three
-//! minutes later (declined, or an AgentMux that can't restart itself), the
+//! version with an `AGENTMUXSRV-UPGRADE ... confirmed:1` line on its stderr. The launcher
+//! checks the folder and the release's digest again and, the restart being decided, restarts
+//! without asking again (`crates/launcher/src/upgrade_restart.rs`); `restarting` can't be
+//! cancelled from here. If nothing has happened three
+//! minutes later (the launcher refused the file, or an AgentMux that can't restart itself, or a
+//! prompt it still had to show was declined), the
 //! status goes back to ready and says so: when and why the restart wasn't
 //! confirmed (`not_confirmed_at`, `not_confirmed`), and the agents that asked
 //! are told. The launcher says why in its answer file and its own log.
@@ -40,10 +41,9 @@ use crate::backend::blockcontroller::{BlockControllerRuntimeStatus, STATUS_DONE}
 use crate::backend::update::check::{self, AppUpdateStatus, DownloadStatus, WaitingOn};
 
 const POLL: Duration = Duration::from_secs(2);
-/// How long the launcher has to ask the user and quit. Longer than the
-/// launcher counts a Yes (`ANSWER_WITHIN`, 150 s in
-/// `crates/launcher/src/upgrade_restart.rs`), so once this says the restart
-/// didn't happen, no open dialog can still start one.
+/// How long the launcher has to quit and restart (or, for a prompt it still has to show, to ask the user). Longer
+/// than the launcher counts a Yes (`ANSWER_WITHIN`, 150 s in `crates/launcher/src/upgrade_restart.rs`), so once
+/// this says the restart didn't happen, no open prompt can still start one.
 const RESTART_GRACE: Duration = Duration::from_secs(3 * 60);
 
 /// The current run, bumped by every start and cancel. Held across each
@@ -98,10 +98,10 @@ const UNANSWERED: &str = "unanswered";
 /// What happened, in words, for `why` (a `not_confirmed` word).
 fn why_words(why: &str) -> &'static str {
     match why {
-        "no" => "the user answered No in the restart dialog",
-        "timed_out" => "nobody answered the restart dialog before it closed itself",
-        "too_late" => "an answer to the restart dialog came after it had lapsed",
-        UNANSWERED => "no answer came back from the launcher in time (the dialog may not have been shown, or this AgentMux can't restart itself)",
+        "no" => "the user answered No",
+        "timed_out" => "nobody answered the prompt before it closed itself",
+        "too_late" => "an answer came after the prompt had lapsed",
+        UNANSWERED => "the launcher didn't restart AgentMux in time (it may have refused the file, or this AgentMux can't restart itself)",
         _ => "the restart was declined",
     }
 }
@@ -114,25 +114,20 @@ fn clock(ms: u64) -> String {
 /// What the version panel and the status say after a restart that was not confirmed.
 fn not_confirmed_line(why: &str, at_ms: u64) -> String {
     format!(
-        "The restart wasn't confirmed at {}: {}. It restarts only when someone answers the dialog on this computer, within {} s of it opening; start it again from the version panel when someone is there.",
+        "The restart didn't go ahead at {}: {}. The release is downloaded; start the upgrade again from the version panel.",
         clock(at_ms),
-        why_words(why),
-        DIALOG_SECONDS
+        why_words(why)
     )
 }
 
 /// What an agent that asked for the upgrade is told.
 fn not_confirmed_note(version: &str, why: &str, at_ms: u64) -> String {
     format!(
-        "[AgentMux] The upgrade to {version} did not happen: the restart wasn't confirmed at {}: {}. The release is downloaded and waiting; it restarts when someone at that computer answers the restart dialog within {} s of it opening. Ask again when someone is there.",
+        "[AgentMux] The upgrade to {version} did not happen: the restart didn't go ahead at {}: {}. The release is downloaded and waiting. Ask again if it's still wanted.",
         clock(at_ms),
-        why_words(why),
-        DIALOG_SECONDS
+        why_words(why)
     )
 }
-
-/// How long the launcher's dialog stays open (`ANSWER_WITHIN` in `crates/launcher/src/upgrade_restart.rs`).
-const DIALOG_SECONDS: u64 = 150;
 
 /// The restart the launcher was asked for did not happen: back to `ready`, with why and when, and the agents that
 /// asked told. Only if `run` is still the current run.
@@ -287,14 +282,14 @@ pub fn start(now: bool, askers: Vec<String>) -> Result<AppUpdateStatus, String> 
     Ok(check::current_status())
 }
 
-/// Stop waiting (the user's Cancel, through the host). Once the launcher is asking the user,
-/// only its dialog can say no.
+/// Stop waiting (the user's Cancel, through the host). Once the launcher is asked, the restart has started and
+/// can't be cancelled here.
 pub fn cancel() -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();
     let status = check::current_status();
     match status.download.as_ref() {
         Some(d) if d.state == "restarting" => {
-            Err("AgentMux is asking you to confirm the restart: answer No in its dialog to cancel".into())
+            Err("AgentMux has started to restart into the new version; it can't be cancelled now".into())
         }
         Some(d) if d.state == "waiting" => {
             *current += 1;
@@ -378,7 +373,9 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool, a
         }
         set(&d, "restarting", Vec::new(), None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
-        eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
+        // Asked only once the restart is decided: the user's own click or turn, or an approved request's in-app
+        // countdown that ran out with no veto. The launcher asks nothing more.
+        eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target, true));
     });
     if !asked {
         return;
@@ -593,14 +590,14 @@ mod tests {
         for (why, words) in [
             ("no", "answered No"),
             ("timed_out", "nobody answered"),
-            ("too_late", "lapsed"),
-            (UNANSWERED, "no answer came back"),
+            ("too_late", "had lapsed"),
+            (UNANSWERED, "didn't restart AgentMux in time"),
             ("declined", "was declined"),
         ] {
             let line = not_confirmed_line(why, at);
-            assert!(line.contains("16:33 UTC") && line.contains(words) && line.contains("150 s"), "{why}: {line}");
+            assert!(line.contains("16:33 UTC") && line.contains(words) && !line.contains("150"), "{why}: {line}");
             let note = not_confirmed_note("0.59.35", why, at);
-            assert!(note.starts_with("[AgentMux] The upgrade to 0.59.35 did not happen") && note.contains("16:33 UTC") && note.contains(words), "{why}: {note}");
+            assert!(note.starts_with("[AgentMux] The upgrade to 0.59.35 did not happen") && note.contains("16:33 UTC") && note.contains(words) && !note.contains("150"), "{why}: {note}");
         }
         // It is on the status as a word and a time (what a remote answer carries), and goes with the next wait or restart.
         let d = download("ready", None);
@@ -678,8 +675,8 @@ mod tests {
         let (d, target) = staged(&mac).unwrap();
         assert_eq!(target, UpgradeTarget::Installer { installer: dmg.clone(), sha256: "cd".repeat(32) });
         assert_eq!(
-            agentmux_common::srv_stderr::upgrade_line(&d.version, &target),
-            format!("AGENTMUXSRV-UPGRADE version:0.59.27 sha256:{} installer:{}", "cd".repeat(32), dmg.display())
+            agentmux_common::srv_stderr::upgrade_line(&d.version, &target, true),
+            format!("AGENTMUXSRV-UPGRADE version:0.59.27 confirmed:1 sha256:{} installer:{}", "cd".repeat(32), dmg.display())
         );
         // A download of an older release than the latest doesn't count.
         let mut newer = status(Some(download("ready", Some(&folder))));

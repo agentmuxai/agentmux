@@ -491,13 +491,13 @@ fn not_confirmed_words(d: &Value) -> String {
     let secs = at / 1000;
     let when = format!("{:02}:{:02} UTC", secs / 3600 % 24, secs / 60 % 60);
     let why = match s(d, "not_confirmed") {
-        "no" => "the user answered No in the restart dialog",
-        "timed_out" => "nobody answered the restart dialog before it closed itself",
-        "too_late" => "an answer to the restart dialog came after it had lapsed",
-        "unanswered" => "no answer came back from the launcher in time",
+        "no" => "the user answered No",
+        "timed_out" => "nobody answered the prompt before it closed itself",
+        "too_late" => "an answer came after the prompt had lapsed",
+        "unanswered" => "the launcher didn't restart AgentMux in time",
         _ => "the restart was declined",
     };
-    format!(" The last restart into it was not confirmed at {when}: {why}. It restarts when someone at that computer answers the restart dialog within 150 s of it opening.")
+    format!(" The last restart into it did not go ahead at {when}: {why}. Ask again if it is still wanted.")
 }
 
 /// `version`'s answer, from srv's `AppUpdateStatus`.
@@ -522,7 +522,7 @@ fn describe_status(st: &Value) -> String {
                     out.push_str(&not_confirmed_words(d));
                 }
                 "waiting" => out.push_str(" A restart into it is waiting for agents to finish their turn."),
-                "restarting" => out.push_str(" AgentMux is asking the user to confirm the restart."),
+                "restarting" => out.push_str(" AgentMux is restarting into it now."),
                 // A remote answer carries no error text (srv allow-lists what leaves a machine).
                 "failed" if s(d, "error").is_empty() => out.push_str(" Its download failed."),
                 "failed" => out.push_str(&format!(" Its download failed: {}.", s(d, "error"))),
@@ -628,12 +628,12 @@ mod tests {
         assert!(!text.contains("not confirmed"), "nothing unconfirmed to say: {text}");
 
         // A restart that was asked for and not confirmed says when and why, from a word and a time (a remote answer's).
-        for (why, words) in [("timed_out", "nobody answered"), ("no", "answered No"), ("too_late", "lapsed"), ("unanswered", "no answer came back"), ("declined", "was declined")] {
+        for (why, words) in [("timed_out", "nobody answered"), ("no", "answered No"), ("too_late", "had lapsed"), ("unanswered", "didn't restart AgentMux in time"), ("declined", "was declined")] {
             let mut unconfirmed = st.clone();
             unconfirmed["download"]["not_confirmed_at"] = json!(1_795_106_021_000u64);
             unconfirmed["download"]["not_confirmed"] = json!(why);
             let text = describe_status(&unconfirmed);
-            assert!(text.contains("ready to restart into. The last restart into it was not confirmed at 16:33 UTC") && text.contains(words), "{why}: {text}");
+            assert!(text.contains("ready to restart into. The last restart into it did not go ahead at 16:33 UTC") && text.contains(words), "{why}: {text}");
         }
 
         let setup = json!({ "state": "available", "current": "0.59.26", "latest": "0.59.27", "install": "windows-setup",
