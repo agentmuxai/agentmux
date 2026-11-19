@@ -784,6 +784,14 @@ tasks:
                 [ -f "$cefDir/vk_swiftshader.dll" ] && cp -f "$cefDir/vk_swiftshader.dll" dist/cef/
                 [ -f "$cefDir/vulkan-1.dll" ] && cp -f "$cefDir/vulkan-1.dll" dist/cef/
                 [ -f "$cefDir/vk_swiftshader_icd.json" ] && cp -f "$cefDir/vk_swiftshader_icd.json" dist/cef/
+                # WebGPU shader compiler (required for navigator.gpu.requestDevice()).
+                # Dawn's D3D12 backend opens dxcompiler.dll at device creation; without
+                # it requestAdapter() succeeds but requestDevice() fails, in every page
+                # (widget frames and Browser panes alike). dxil.dll is copied when the
+                # runtime has it (the DXC signing library). WebGL does not need either.
+                [ -f "$cefDir/dxcompiler.dll" ] && cp -f "$cefDir/dxcompiler.dll" dist/cef/
+                [ -f "$cefDir/dxil.dll" ] && cp -f "$cefDir/dxil.dll" dist/cef/
+                bash scripts/verify-webgpu-libs.sh dist/cef dxcompiler.dll || exit 1
                 # Data files (required)
                 [ -f "$cefDir/icudtl.dat" ] && cp -f "$cefDir/icudtl.dat" dist/cef/
                 [ -f "$cefDir/v8_context_snapshot.bin" ] && cp -f "$cefDir/v8_context_snapshot.bin" dist/cef/
@@ -793,10 +801,9 @@ tasks:
                 # Locales — en-US only (saves ~18 MB)
                 [ -f "$cefDir/locales/en-US.pak" ] && cp -f "$cefDir/locales/en-US.pak" dist/cef/locales/
                 # SKIPPED (not needed):
-                #   dxil.dll, dxcompiler.dll (WebGPU — not used)
                 #   snapshot_blob.bin (removed in CEF 133+)
                 #   49 non-English locale .pak files
-                echo "✓ Bundled runtime to dist/cef/ (GPU + SwiftShader software fallback kept; WebGPU/extra locales stripped)"
+                echo "✓ Bundled runtime to dist/cef/ (GPU + SwiftShader software fallback + WebGPU shader compiler kept; extra locales stripped)"
 
     bundle:darwin:
         internal: true
