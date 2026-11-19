@@ -148,7 +148,9 @@ export function EntryShares(props: { entry: VaultEntryInfo }): JSX.Element {
                 <For each={data()?.shares ?? []}>
                     {(s) => (
                         <span class="vault-grant" data-agent={s.agent}>
-                            {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms, s.always)})</span>
+                            <span class="vault-grant__text">
+                                {s.name} <span class="warden-manager-dim">({usedLine(s.uses, s.last_used_ms, s.always)})</span>
+                            </span>
                             <CloseButton size="sm" label={t("vault.share.stop", { label: props.entry.label, name: s.name })} onClick={() => void stop(s.agent)} />
                         </span>
                     )}
