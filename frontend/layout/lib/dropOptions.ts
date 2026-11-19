@@ -20,6 +20,7 @@ import { computeMoveNode } from "./layoutTree";
 import {
     DropDirection,
     LayoutTreeActionType,
+    type LayoutEdge,
     type LayoutNode,
     type LayoutTreeAction,
     type LayoutTreeComputeMoveNodeAction,
@@ -116,6 +117,7 @@ export const dropsBySplit = (subject: DropSubject): boolean => !!subject.foreign
 export function dropActionOf(model: LayoutModel, subject: DropSubject, direction: DropDirection | undefined): LayoutTreeAction | undefined {
     if (direction === undefined || subject.targetId === subject.draggedId) return undefined;
     if (dropsBySplit(subject)) return splitFor(subject, direction);
+    if (edgeOfDirection(direction)) return computeMoveNode(model.treeState, computeFor(subject, direction)) ?? undefined;
     if (direction === DropDirection.Center && centerOf(subject) !== "swap") return undefined;
     return computeMoveNode(model.treeState, computeFor(subject, direction)) ?? undefined;
 }
@@ -190,6 +192,23 @@ function signatureNow(model: LayoutModel, draggedId: string): string {
         .join(";");
 }
 
+/** The wide drops, in the order their spots stand: a band across the top, across the middle, across the bottom. */
+const WIDE_ORDER: DropDirection[] = [DropDirection.WideTop, DropDirection.WideCenter, DropDirection.WideBottom];
+
+/** The edge of the layout a wide drop puts the band at. */
+export function edgeOfDirection(direction: DropDirection | undefined): LayoutEdge | undefined {
+    switch (direction) {
+        case DropDirection.WideTop:
+            return "top";
+        case DropDirection.WideCenter:
+            return "middle";
+        case DropDirection.WideBottom:
+            return "bottom";
+        default:
+            return undefined;
+    }
+}
+
 /** Sides first, then the middle, then the drops beside the pane's whole group: the first of two alike is kept. */
 const ORDER: DropDirection[] = [
     DropDirection.Top,
@@ -205,13 +224,15 @@ const ORDER: DropDirection[] = [
 
 const isOuter = (d: DropDirection): boolean => d >= DropDirection.OuterTop && d <= DropDirection.OuterLeft;
 
-function listOptions(model: LayoutModel, subject: DropSubject): DropOption[] {
+function listOptions(model: LayoutModel, subject: DropSubject, wide: boolean): DropOption[] {
     if (!model.treeState.rootNode) return [];
+    // A band across the layout is made of a pane of this tree: a tab pill or a pane of another tab lands beside a pane.
+    if (wide && (subject.foreignNode || subject.pill)) return [];
     // A node that is not in this tree lands beside the hovered pane, never across its whole group.
     const besideOnly = !!subject.foreignNode || !!subject.pill;
     const seen = new Set<string>([signatureNow(model, subject.draggedId)]);
     const options: DropOption[] = [];
-    for (const direction of ORDER) {
+    for (const direction of wide ? WIDE_ORDER : ORDER) {
         if (direction === DropDirection.Center) {
             if (centerOf(subject) === "join") options.push({ direction, join: true });
             if (centerOf(subject) !== "swap") continue;
@@ -235,16 +256,29 @@ const cache = new Map<LayoutModel, { shape: string; byKey: Map<string, DropOptio
  * layout as it is. Listed once per pane for a drag: the same array comes back until the layout changes.
  */
 export function dropOptionsOf(model: LayoutModel, subject: DropSubject): DropOption[] {
+    return optionsOf(model, subject, false);
+}
+
+/**
+ * The wide drops of the layout for `subject`: the dragged pane as a band across the whole top, middle or bottom of
+ * the layout, each one a layout a release leaves that is not the layout as it is and not another wide drop's. Listed
+ * once per drag, like `dropOptionsOf`. None for a node that is not a pane of this tree.
+ */
+export function wideOptionsOf(model: LayoutModel, subject: DropSubject): DropOption[] {
+    return optionsOf(model, subject, true);
+}
+
+function optionsOf(model: LayoutModel, subject: DropSubject, wide: boolean): DropOption[] {
     const shape = layoutShape(model);
     let held = cache.get(model);
     if (!held || held.shape !== shape) {
         held = { shape, byKey: new Map() };
         cache.set(model, held);
     }
-    const key = `${subject.targetId}|${subject.draggedId}|${subject.pill ? 1 : 0}|${subject.foreignNode?.id ?? ""}|${centerOf(subject)}`;
+    const key = `${subject.targetId}|${subject.draggedId}|${subject.pill ? 1 : 0}|${subject.foreignNode?.id ?? ""}|${centerOf(subject)}|${wide ? "wide" : ""}`;
     let options = held.byKey.get(key);
     if (!options) {
-        options = listOptions(model, subject);
+        options = listOptions(model, subject, wide);
         held.byKey.set(key, options);
     }
     return options;

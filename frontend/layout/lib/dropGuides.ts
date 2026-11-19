@@ -194,10 +194,160 @@ export function guideSpots(rect: Dimensions, targetId: string, options: DropOpti
                 return [cx + outerX, cy];
         }
     };
-    return options.filter((option) => inside(option.direction)).map((option) => {
+    const spots = options.filter((option) => inside(option.direction)).map((option) => {
         const [x, y] = place(option.direction);
         return { direction: option.direction, x, y, width, height, panes: picture(option, targetId, now, bounds), join: !!option.join };
     });
+    return clearOfWide(spots, rect, bounds);
+}
+
+/** A rectangle of the layout, in the layout container's coordinates. */
+interface Box {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+}
+
+const overlaps = (a: Box, b: Box): boolean => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/** What a pointer takes as the spot: its rectangle and the slop past it (`spotAt`). */
+const boxOfSpot = (s: GuideSpot): Box => {
+    const [dx, dy] = [s.width / 2 + gapOf(s.width), s.height / 2 + gapOf(s.width)];
+    return { left: s.x - dx, right: s.x + dx, top: s.y - dy, bottom: s.y + dy };
+};
+
+const boxOfSpots = (spots: GuideSpot[]): Box => {
+    const boxes = spots.map(boxOfSpot);
+    return {
+        left: Math.min(...boxes.map((b) => b.left)),
+        right: Math.max(...boxes.map((b) => b.right)),
+        top: Math.min(...boxes.map((b) => b.top)),
+        bottom: Math.max(...boxes.map((b) => b.bottom)),
+    };
+};
+
+/** Where the wide set stands when it shows, at the layout's top centre and its bottom centre: three spots side by side, and their slop. */
+function wideBoxes(bounds: { width: number; height: number }): { top: Box; bottom: Box } | undefined {
+    const size = wideSize(bounds);
+    if (!size) return undefined;
+    const half = 1.5 * size.width + size.gap + size.gap;
+    const [left, right] = [bounds.width / 2 - half, bounds.width / 2 + half];
+    const depth = size.inset + size.height + size.gap;
+    return { top: { left, right, top: 0, bottom: depth }, bottom: { left, right, top: bounds.height - depth, bottom: bounds.height } };
+}
+
+const shiftSpots = (spots: GuideSpot[], dx: number, dy: number): GuideSpot[] => spots.map((s) => ({ ...s, x: s.x + dx, y: s.y + dy }));
+
+/**
+ * The compass of a pane that stands where the wide set shows (the pane's own guide and the wide one both show
+ * there: the pointer is in the zone, the wide set appears, and the pane's guide must not be in its way). The rule:
+ *
+ *  1. Where the compass is clear of the wide set's places, it stays where it is.
+ *  2. Otherwise it moves along the pane, away from the layout's edge the wide set is at: down from the top set, up from the bottom one,
+ *     by as much as it takes to be clear, if it still is in the pane.
+ *  3. A pane too short for that holds it beside the wide set instead: to the side the pane has room on, the nearer one when both have.
+ *  4. A pane too small for either keeps it where it is, and the spots that are under the wide set while it shows go (`withWideSpots`).
+ *
+ * It is by the pane and the layout only, never by the pointer, so a pointer that moves from the zone to the compass does not
+ * move the compass under it. The spots beside the compass (at the pane's edges) stay at the edges.
+ */
+function clearOfWide(spots: GuideSpot[], rect: Dimensions, bounds: { width: number; height: number }): GuideSpot[] {
+    const wide = wideBoxes(bounds);
+    const compass = spots.filter((s) => COMPASS[s.direction]);
+    if (!wide || compass.length === 0) return spots;
+    const [top, bottom] = [wide.top, wide.bottom];
+    const at = boxOfSpots(compass);
+    const hit = [top, bottom].filter((b) => overlaps(at, b));
+    if (hit.length === 0) return spots;
+    const pane: Box = { left: rect.left, right: rect.left + rect.width, top: rect.top, bottom: rect.top + rect.height };
+    // The way along the pane first, then beside the wide set (the nearer side first).
+    const tries: [number, number][] = [];
+    for (const b of hit) tries.push(b === top ? [0, top.bottom - at.top] : [0, bottom.top - at.bottom]);
+    for (const dx of [wide.top.left - at.right, wide.top.right - at.left].sort((a, b) => Math.abs(a) - Math.abs(b))) tries.push([dx, 0]);
+    for (const [dx, dy] of tries) {
+        const moved: Box = { left: at.left + dx, right: at.right + dx, top: at.top + dy, bottom: at.bottom + dy };
+        // In the pane along the way it moved: a pane too short for the compass at all is held to its width only.
+        const inside = dx !== 0 ? moved.left >= pane.left && moved.right <= pane.right : moved.top >= pane.top && moved.bottom <= pane.bottom;
+        if (inside && !overlaps(moved, top) && !overlaps(moved, bottom)) {
+            return spots.map((s) => (COMPASS[s.direction] ? shiftSpots([s], dx, dy)[0] : s));
+        }
+    }
+    return spots;
+}
+
+/**
+ * The pane's own spots with the wide ones: both show while the pointer is in the wide zone, and each is hit-tested.
+ * A spot of the pane that is under a wide one (the last case of `clearOfWide`) is the one that goes. The same arrays
+ * give the same one back, so the guide's elements stay on screen while the pointer moves.
+ */
+const mixed = new WeakMap<GuideSpot[], { wide: GuideSpot[]; spots: GuideSpot[] }>();
+export function withWideSpots(own: GuideSpot[], wide: GuideSpot[]): GuideSpot[] {
+    const held = mixed.get(own);
+    if (held?.wide === wide) return held.spots;
+    const under = wide.map(boxOfSpot);
+    const spots = [...wide, ...own.filter((s) => !under.some((b) => overlaps(boxOfSpot(s), b)))];
+    mixed.set(own, { wide, spots });
+    return spots;
+}
+
+/**
+ * The wide guides: a second set of spots, at the top centre and the bottom centre of the layout, for the drops that make
+ * the dragged pane a band across the whole layout (across its top, its middle or its bottom), whichever pane the pointer
+ * is over. Sized by the layout as the pane guides are by their pane: a share of it, within the floor and ceiling of a spot.
+ */
+const WIDE_SHARE = 0.09;
+
+/** The size of the wide set for a layout `bounds` big: its spots, and the zone it shows in; none where the layout is too small for it. */
+function wideSize(bounds: { width: number; height: number }) {
+    const ratio = Math.min(1, Math.max(0.5, bounds.height / bounds.width));
+    const width = Math.round(Math.max(SPOT_W_MIN, Math.min(SPOT_W_MAX, WIDE_SHARE * Math.min(bounds.width, bounds.height / ratio))));
+    const height = Math.round(width * ratio);
+    const [gap, inset] = [gapOf(width), insetOf(width)];
+    // The three spots stand side by side, and a zone is the room above (or below) them: the set leaves most of the layout to its panes.
+    const zoneHeight = inset + 2 * height;
+    if (3 * width + 2 * gap > 0.6 * bounds.width || 2 * zoneHeight > 0.45 * bounds.height) return undefined;
+    return { width, height, gap, inset, zoneHeight, halfWidth: 2 * width + gap };
+}
+
+/** The panes of the layout as it stands, in the layout container coordinates. */
+function paneRects(model: LayoutModel): { id: string; rect: Dimensions }[] {
+    return model.leafs().flatMap((leaf) => {
+        const r = model.getNodeRectById(leaf.id);
+        return r ? [{ id: leaf.id, rect: r }] : [];
+    });
+}
+
+/** The zone of the layout the pointer is in where the wide guides show: its top centre or its bottom centre. */
+export function wideZoneAt(model: LayoutModel, offset: { x: number; y: number }): "top" | "bottom" | undefined {
+    const bounds = boundsOf(paneRects(model).map((p) => p.rect));
+    const size = wideSize(bounds);
+    if (!size || Math.abs(offset.x - bounds.width / 2) > size.halfWidth) return undefined;
+    if (offset.y >= 0 && offset.y <= size.zoneHeight) return "top";
+    if (offset.y <= bounds.height && offset.y >= bounds.height - size.zoneHeight) return "bottom";
+    return undefined;
+}
+
+/**
+ * The spots of the wide set in `zone` for the drops `options`: side by side in the order of the options (across the top,
+ * the middle, the bottom), in the middle of the layout width and at its top or its bottom edge. Each is the layout the
+ * drop leaves, drawn small.
+ */
+export function wideGuideSpots(zone: "top" | "bottom", targetId: string, options: DropOption[], now: { id: string; rect: Dimensions }[]): GuideSpot[] {
+    const bounds = boundsOf(now.map((p) => p.rect));
+    const size = wideSize(bounds);
+    if (!size) return [];
+    const y = zone === "top" ? size.inset + size.height / 2 : bounds.height - size.inset - size.height / 2;
+    const middle = (options.length - 1) / 2;
+    return options.map((option, i) => ({
+        direction: option.direction,
+        x: bounds.width / 2 + (i - middle) * (size.width + size.gap),
+        y,
+        width: size.width,
+        height: size.height,
+        panes: picture(option, targetId, now, bounds),
+        join: false,
+    }));
 }
 
 /** The spot to light for a drop in `direction`: its own, or the join's where a release with no drop joins. */
@@ -224,11 +374,17 @@ export function guideSpotsFor(model: LayoutModel, rect: Dimensions, targetId: st
     const key = `${targetId}:${rect.left},${rect.top},${rect.width},${rect.height}`;
     const held = spotsOf.get(options);
     if (held?.key === key) return held.spots;
-    const now = model.leafs().flatMap((leaf) => {
-        const r = model.getNodeRectById(leaf.id);
-        return r ? [{ id: leaf.id, rect: r }] : [];
-    });
-    const spots = guideSpots(rect, targetId, options, now);
+    const spots = guideSpots(rect, targetId, options, paneRects(model));
+    spotsOf.set(options, { key, spots });
+    return spots;
+}
+
+/** The wide set spots in `zone`, made once for the drops they stand for, like `guideSpotsFor`. */
+export function wideSpotsFor(model: LayoutModel, zone: "top" | "bottom", targetId: string, options: DropOption[]): GuideSpot[] {
+    const key = `wide-${zone}:${targetId}`;
+    const held = spotsOf.get(options);
+    if (held?.key === key) return held.spots;
+    const spots = wideGuideSpots(zone, targetId, options, paneRects(model));
     spotsOf.set(options, { key, spots });
     return spots;
 }

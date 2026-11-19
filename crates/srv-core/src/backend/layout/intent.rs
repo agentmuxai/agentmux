@@ -12,7 +12,7 @@
 //! ancestor) or apply half an action (an invalid resize), srv refuses instead.
 //! SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
 
-use agentmux_common::{FlexDirection, LayoutIntent, LayoutNode, LayoutNodeData, LayoutResizeOp, SplitPosition};
+use agentmux_common::{FlexDirection, LayoutEdge, LayoutIntent, LayoutNode, LayoutNodeData, LayoutResizeOp, SplitPosition};
 
 use super::{
     balance_node, collect_insert_candidates, find_node_by_id, find_node_by_id_mut, find_parent_id,
@@ -114,6 +114,7 @@ fn apply_unbalanced(
             let parent_id = parent_id.ok_or_else(|| LayoutError::Refused("move: no parentId".into()))?;
             move_node(tree_mut(root)?, &node_id, &parent_id, index, ids)?;
         }
+        LayoutIntent::MoveToEdge { node_id, edge } => move_to_edge(root, &node_id, edge, ids)?,
         LayoutIntent::Swap { node1_id, node2_id } => swap_nodes(tree_mut(root)?, &node1_id, &node2_id)?,
         LayoutIntent::Resize { resize_operations } => resize_nodes(tree_mut(root)?, &resize_operations)?,
         LayoutIntent::Replace { target_node_id, new_node, focused } => {
@@ -402,6 +403,68 @@ fn move_node(tree: &mut LayoutNode, node_id: &str, parent_id: &str, index: i64, 
     add_child_at(parent, index, node, ids);
     let old_parent = find_node_by_id_mut(tree, &old_parent_id).ok_or_else(|| not_found(&old_parent_id))?;
     remove_child(old_parent, node_id, starting);
+    Ok(())
+}
+
+/// Flex size of a band, and of the rest of the layout beside a band that wraps it (a third of the layout).
+const BAND_SIZE: f32 = DEFAULT_NODE_SIZE;
+const BESIDE_BAND_SIZE: f32 = 2.0 * DEFAULT_NODE_SIZE;
+/// Flex size of each half of the rest of the layout, above and below a band across the middle.
+const HALF_SIZE: f32 = 1.5 * DEFAULT_NODE_SIZE;
+
+/// `moveToEdge` (layoutTree.ts): take the pane out of the layout, then put it back as a band across the whole of it.
+/// The rest is balanced first, and what the band goes into depends on how it is arranged:
+/// - a column of rows: the band is one more row, first, last, or in the middle;
+/// - one row of columns, or one pane: the band is above (or below) the rest, which becomes the rest of a new column;
+/// - across the middle of a row of columns: its first half above the band, the others below it.
+/// Nothing changes where the rest is one pane and the band is asked for the middle. The pane's own place closes.
+/// The middle of a column is after half of its rows, rounded up.
+fn move_to_edge(root: &mut Option<LayoutNode>, node_id: &str, edge: LayoutEdge, ids: &mut NodeIds) -> Result<(), LayoutError> {
+    let tree = tree_mut(root)?;
+    if tree.id == node_id {
+        return Err(LayoutError::RootCannotBeTarget);
+    }
+    let node = find_node_by_id(tree, node_id).ok_or_else(|| not_found(node_id))?;
+    if !node.children.is_empty() && is_effectively_minimized(node) {
+        return Err(LayoutError::NodeLocked { id: node_id.to_string() });
+    }
+    // Worked on a copy: a refusal below leaves the layout as it was.
+    let mut node = node.clone();
+    let mut rest = tree.clone();
+    delete_and_balance(&mut rest, node_id)?;
+    // A row or column left holding one branch is that branch (the pane that left was its other child).
+    while rest.children.len() == 1 && !rest.children[0].children.is_empty() {
+        let only = rest.children.remove(0);
+        rest = only;
+    }
+    node.size = BAND_SIZE;
+    let in_column = rest.flex_direction == FlexDirection::Column && !rest.children.is_empty();
+    let placed = match edge {
+        LayoutEdge::Top | LayoutEdge::Bottom if in_column => {
+            let at = if edge == LayoutEdge::Top { 0 } else { rest.children.len() as i64 };
+            add_child_at(&mut rest, at, node, ids);
+            rest
+        }
+        LayoutEdge::Middle if in_column => {
+            let at = rest.children.len().div_ceil(2) as i64;
+            add_child_at(&mut rest, at, node, ids);
+            rest
+        }
+        LayoutEdge::Top | LayoutEdge::Bottom => {
+            rest.size = BESIDE_BAND_SIZE;
+            let children = if edge == LayoutEdge::Top { vec![node, rest] } else { vec![rest, node] };
+            new_node(FlexDirection::Column, DEFAULT_NODE_SIZE, children, None, ids)
+        }
+        LayoutEdge::Middle if rest.children.len() >= 2 => {
+            let mut above = std::mem::take(&mut rest.children);
+            let below = above.split_off(above.len().div_ceil(2));
+            let above = new_node(FlexDirection::Row, HALF_SIZE, above, None, ids);
+            let below = new_node(FlexDirection::Row, HALF_SIZE, below, None, ids);
+            new_node(FlexDirection::Column, DEFAULT_NODE_SIZE, vec![above, node, below], None, ids)
+        }
+        LayoutEdge::Middle => return Err(LayoutError::Refused("movetoedge: one pane has no middle to put a band across".into())),
+    };
+    *tree = placed;
     Ok(())
 }
 
@@ -726,3 +789,6 @@ fn mean_sibling_size(children: &[LayoutNode], i: usize) -> f32 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod edge_tests;
