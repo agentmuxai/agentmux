@@ -114,6 +114,67 @@ pub fn on_auth_challenge(
     }
 }
 
+/// No saved sign-in could answer: the prompt for the person, and an agent driving the pane is told so (the page stays
+/// blank while the prompt waits, and there is nothing the agent can do to answer it). A person's pane is told nothing.
+fn fall_through_noticed(state: &Arc<AppState>, block_id: &str, request_id: &str, origin: &str, host: &str, port: i32, realm: &str, is_proxy: bool) {
+    crate::client::agent_notice::auth_notice(state, block_id, "auth_required", host, port, realm);
+    fall_through_to(state, block_id, request_id, origin, host, port, realm, is_proxy);
+}
+
+/// A re-challenge for the exact same protection space shortly after we auto-filled it means the stored credential was
+/// wrong (CEF gives no "auth succeeded" signal to hook — this is the only observable proxy). In a pane the person uses,
+/// delete it and fall through rather than looping the same bad credential forever. In a pane an agent drives, the entry is
+/// the person's and nobody is there to retype it: it is NOT deleted on one refusal; the agent is told the site refused it
+/// (a stale password), and the site's own 401 shows.
+async fn refused_again(
+    state: &Arc<AppState>,
+    request_id: &str,
+    block_id: &str,
+    identity_id: &str,
+    origin: &str,
+    host: &str,
+    port: i32,
+    realm: &str,
+    is_proxy: bool,
+) {
+    if crate::client::agent_notice::drives(state, block_id) {
+        crate::client::agent_notice::auth_notice(state, block_id, "auth_refused", host, port, realm);
+        if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+            use cef::ImplAuthCallback;
+            cb.cancel();
+        }
+        return;
+    }
+    tracing::info!(
+        "[credential-broker] re-challenge within {:?} of an auto-fill for origin={} — \
+         treating the stored credential as wrong; deleting and falling through",
+        recent_fill::WINDOW,
+        origin,
+    );
+    let _ = call_credential_service(
+        state,
+        "Delete",
+        serde_json::json!({
+            "identity_id": identity_id, "origin": origin, "realm": realm, "is_proxy": is_proxy,
+        }),
+    )
+    .await;
+    fall_through_noticed(state, block_id, request_id, origin, host, port, realm, is_proxy);
+}
+
+/// Tell an agent driving the pane of one parked request what became of the saved sign-in the person was asked about.
+pub(crate) fn tell_parked(state: &Arc<AppState>, p: &approval::ParkedRequest, kind: &'static str, r: &approval::ResolvedApproval) {
+    crate::client::agent_notice::auth_notice(state, &p.block_id, kind, &r.host, r.port, &r.realm);
+}
+
+/// The approval could not be used (its secret could not be read): every parked request gets the ordinary prompt, one per
+/// originating pane.
+pub(crate) fn fall_through_resolved(state: &Arc<AppState>, r: &approval::ResolvedApproval) {
+    for p in &r.auth_requests {
+        fall_through_noticed(state, &p.block_id, &p.request_id, &r.origin, &r.host, r.port, &r.realm, r.is_proxy);
+    }
+}
+
 async fn run_challenge(
     state: Arc<AppState>,
     request_id: String,
@@ -124,14 +185,7 @@ async fn run_challenge(
     realm: String,
     is_proxy: bool,
 ) {
-    // An agent that drives the pane is told what is happening, since the page stays blank while the prompt waits: a person's
-    // pane is not told anything.
-    let tell = |kind: &'static str| crate::client::agent_notice::auth_notice(&state, &block_id, kind, &host, port, &realm);
-    // No saved sign-in could answer: the prompt for the person, and the agent is told it has nothing to do to answer it.
-    let fall_through = || {
-        tell("auth_required");
-        fall_through_to(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
-    };
+    let fall_through = || fall_through_noticed(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
 
     let identity_id = match call_credential_service(
         &state,
@@ -164,31 +218,7 @@ async fn run_challenge(
     // credential forever.
     let recent_key = recent_fill::key(&identity_id, &origin, &realm, is_proxy);
     if recent_fill::take_if_recent(&recent_key) {
-        // In a pane an agent drives, the saved sign-in is the person's entry and nobody is there to retype it: it is NOT
-        // deleted on one refusal. The agent is told the site refused it (a stale password), and the site's own 401 shows.
-        if crate::client::agent_notice::drives(&state, &block_id) {
-            tell("auth_refused");
-            if let Some(cb) = crate::browser_pane::auth::take(&request_id) {
-                use cef::ImplAuthCallback;
-                cb.cancel();
-            }
-            return;
-        }
-        tracing::info!(
-            "[credential-broker] re-challenge within {:?} of an auto-fill for origin={} — \
-             treating the stored credential as wrong; deleting and falling through",
-            recent_fill::WINDOW,
-            origin,
-        );
-        let _ = call_credential_service(
-            &state,
-            "Delete",
-            serde_json::json!({
-                "identity_id": identity_id, "origin": origin, "realm": realm, "is_proxy": is_proxy,
-            }),
-        )
-        .await;
-        fall_through();
+        refused_again(&state, &request_id, &block_id, &identity_id, &origin, &host, port, &realm, is_proxy).await;
         return;
     }
 
@@ -218,8 +248,8 @@ async fn run_challenge(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    // The person's yes is asked (below); the agent is told that is what the page waits for.
-    tell("auth_waiting_approval");
+    // The person's yes is asked (below); an agent driving the pane is told that is what the page waits for.
+    crate::client::agent_notice::auth_notice(&state, &block_id, "auth_waiting_approval", &host, port, &realm);
 
     match approval::reserve_or_join(
         &identity_id,

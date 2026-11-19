@@ -1082,10 +1082,7 @@ async fn route_command(
                         for parked in &resolved.auth_requests {
                             if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                                 cb.cont(Some(&u), Some(&p));
-                                // An agent that drives that pane is told the saved sign-in was used (never its value).
-                                crate::client::agent_notice::auth_notice(
-                                    state, &parked.block_id, "auth_answered", &resolved.host, resolved.port, &resolved.realm,
-                                );
+                                crate::credential_broker::tell_parked(state, parked, "auth_answered", &resolved);
                             }
                         }
                     }
@@ -1113,18 +1110,7 @@ async fn route_command(
                             approval_id,
                             resolved.auth_requests.len(),
                         );
-                        for parked in &resolved.auth_requests {
-                            crate::credential_broker::fall_through_to(
-                                state,
-                                &parked.block_id,
-                                &parked.request_id,
-                                &resolved.origin,
-                                &resolved.host,
-                                resolved.port,
-                                &resolved.realm,
-                                resolved.is_proxy,
-                            );
-                        }
+                        crate::credential_broker::fall_through_resolved(state, &resolved);
                     }
                 }
             } else {
@@ -1132,9 +1118,7 @@ async fn route_command(
                 for parked in &resolved.auth_requests {
                     if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                         cb.cancel();
-                        crate::client::agent_notice::auth_notice(
-                            state, &parked.block_id, "auth_denied", &resolved.host, resolved.port, &resolved.realm,
-                        );
+                        crate::credential_broker::tell_parked(state, parked, "auth_denied", &resolved);
                     }
                 }
             }
