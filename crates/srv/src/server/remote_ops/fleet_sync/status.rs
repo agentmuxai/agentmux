@@ -86,6 +86,19 @@ impl Status {
         }
     }
 
+    /// The peers the last pass did not bring up to date: host -> `{ error, not_applied }`, only for a
+    /// host that could not be reached or that did not apply some entry. What a write tells its writer.
+    pub(crate) fn not_in_step(&self) -> Value {
+        let inner = self.inner.lock().unwrap();
+        let peers: serde_json::Map<String, Value> = inner
+            .peers
+            .iter()
+            .filter(|(_, p)| p.error.is_some() || !p.not_applied.is_empty())
+            .map(|(host, p)| (host.clone(), json!({ "error": p.error, "not_applied": p.not_applied })))
+            .collect();
+        Value::Object(peers)
+    }
+
     /// The Memory list's `sync` field.
     pub(crate) fn snapshot(&self) -> Value {
         let inner = self.inner.lock().unwrap();
@@ -138,6 +151,7 @@ mod tests {
         let status = Status::default();
         status.failed("old-build", "list: peer_cannot_do_remote_ops");
         let snap = status.snapshot();
+        assert_eq!(status.not_in_step()["old-build"]["error"], "list: peer_cannot_do_remote_ops");
         assert_eq!(snap["peers"]["old-build"]["error"], "list: peer_cannot_do_remote_ops");
         assert_eq!(snap["peers"]["old-build"]["synced_at"], Value::Null);
 
@@ -145,6 +159,19 @@ mod tests {
         status.keep_only(&["charlie"]);
         assert!(status.snapshot()["peers"].get("old-build").is_none());
         assert!(status.snapshot()["peers"].get("charlie").is_some());
+    }
+
+    #[test]
+    fn a_write_hears_only_of_the_peers_that_are_not_in_step() {
+        let status = Status::default();
+        assert_eq!(status.not_in_step(), json!({}), "nobody known: nothing to say");
+        status.synced("charlie", 1, 3, BTreeMap::new());
+        status.synced("area54", 1, 0, skipped(&[("e1", "name_taken")]));
+        status.failed("gamer", "list: timed out");
+        let out = status.not_in_step();
+        assert!(out.get("charlie").is_none(), "charlie took everything");
+        assert_eq!(out["area54"]["not_applied"]["e1"], "name_taken");
+        assert_eq!(out["gamer"]["error"], "list: timed out");
     }
 
     #[test]

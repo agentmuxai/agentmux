@@ -407,11 +407,67 @@ pub(super) async fn handle_agent_memory_revert(
 
 #[derive(serde::Deserialize)]
 pub(super) struct AgentGlobalMemoryWriteProvenanceReq {
+    /// A short label for where the write came from; `agent_inferred` when the object does not say.
+    #[serde(default = "default_agent_globalmemory_write_source")]
     pub(super) source: String,
     // Same "default() on a bare Value yields Null, not {}" trap as
     // NativeMemoryWriteProvenance in rpc_types — see `detail` there.
     #[serde(default = "default_agent_globalmemory_write_detail")]
     pub(super) detail: serde_json::Value,
+    /// Any other key the caller put in the object (the tool's description names none): kept with `detail`.
+    #[serde(flatten)]
+    pub(super) extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl AgentGlobalMemoryWriteProvenanceReq {
+    /// What is recorded as the version's detail: `detail`, with any other key of the object beside it.
+    pub(super) fn detail_json(&self) -> String {
+        if self.extra.is_empty() {
+            return self.detail.to_string();
+        }
+        let mut merged = match &self.detail {
+            serde_json::Value::Object(map) => map.clone(),
+            serde_json::Value::Null => serde_json::Map::new(),
+            other => serde_json::Map::from_iter([("detail".to_string(), other.clone())]),
+        };
+        for (key, value) in &self.extra {
+            merged.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+        serde_json::Value::Object(merged).to_string()
+    }
+}
+
+pub(super) fn default_agent_globalmemory_write_source() -> String {
+    "agent_inferred".to_string()
+}
+
+#[cfg(test)]
+mod global_memory_provenance_tests {
+    use super::*;
+
+    fn parse(value: serde_json::Value) -> AgentGlobalMemoryWriteProvenanceReq {
+        serde_json::from_value(value).expect("any object is accepted")
+    }
+
+    #[test]
+    fn an_object_without_source_is_taken_as_agent_inferred_and_its_keys_are_kept() {
+        let p = parse(serde_json::json!({ "reason": "slimming", "task": 47935 }));
+        assert_eq!(p.source, "agent_inferred");
+        let detail: serde_json::Value = serde_json::from_str(&p.detail_json()).unwrap();
+        assert_eq!(detail, serde_json::json!({ "reason": "slimming", "task": 47935 }));
+    }
+
+    #[test]
+    fn source_and_detail_are_read_as_before_and_an_empty_object_is_fine() {
+        let p = parse(serde_json::json!({ "source": "human", "detail": { "why": "x" } }));
+        assert_eq!((p.source.as_str(), p.detail_json().as_str()), ("human", r#"{"why":"x"}"#));
+        let empty = parse(serde_json::json!({}));
+        assert_eq!((empty.source.as_str(), empty.detail_json().as_str()), ("agent_inferred", "{}"));
+        // a detail that is not an object keeps its place beside the other keys; detail wins a clash
+        let mixed = parse(serde_json::json!({ "detail": "text", "note": 1 }));
+        let merged: serde_json::Value = serde_json::from_str(&mixed.detail_json()).unwrap();
+        assert_eq!(merged, serde_json::json!({ "detail": "text", "note": 1 }));
+    }
 }
 
 pub(super) fn default_agent_globalmemory_write_detail() -> serde_json::Value {
@@ -446,7 +502,7 @@ pub(super) async fn handle_agent_globalmemory_write(
     }
     let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
-        detail_str = p.detail.to_string();
+        detail_str = p.detail_json();
         Some(app_api::GlobalMemoryWriteProvenance { source: &p.source, detail: &detail_str })
     } else {
         None

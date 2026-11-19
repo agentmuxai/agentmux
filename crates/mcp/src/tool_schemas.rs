@@ -164,7 +164,7 @@ pub(crate) const MEMORY_TOOL: &str = r#"{
       "name":            { "type": "string", "description": "global write: the entry's display name, also its heading in every agent's instructions" },
       "content":         { "type": "string", "description": "write: the full markdown content" },
       "reach":           { "type": "string", "enum": ["fleet", "machine"], "description": "global reach, or write: where the entry goes. fleet: every proven machine on the LAN, newest write wins; machine: this machine only" },
-      "provenance":      { "type": "object", "description": "write: optional context on why you are writing this, for a human reviewing history later" },
+      "provenance":      { "type": "object", "description": "write: optional context on why you are writing this, for a human reviewing history later. Any JSON object; \"source\" (a short label, default agent_inferred) and \"detail\" (any JSON) are the two keys AgentMux reads, and any other key is kept beside detail" },
       "from_version_id": { "type": "string", "description": "diff: the earlier version (from history)" },
       "to_version_id":   { "type": "string", "description": "diff: the later version (from history)" },
       "version_id":      { "type": "string", "description": "revert: the version to restore (from history)" }

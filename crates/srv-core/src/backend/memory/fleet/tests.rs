@@ -70,6 +70,45 @@ fn the_newer_write_wins_and_an_older_or_identical_one_changes_nothing() {
     assert_eq!(store.bundle_version_list("f1").unwrap().len(), versions, "nothing was recorded");
 }
 
+fn named(id: &str, name: &str, text: &str, updated_at: i64) -> FleetEntry {
+    FleetEntry { name: name.to_string(), ..entry(id, text, updated_at) }
+}
+
+#[test]
+fn an_entry_whose_name_a_live_entry_here_holds_under_another_id_is_reported_and_the_others_still_apply() {
+    let store = store();
+    // Copied by hand here under a new id: the name is taken, and a person here must say which stays.
+    store.bundle_upsert(&Bundle { name: "Shared rule".into(), ..bundle("hand-copied", "mine", true) }).unwrap();
+    assert_eq!(put(&store, &named("f1", "Shared rule", "theirs", 9_000)), Outcome::Skipped(Skipped::NameTaken));
+    assert!(store.bundle_get("f1").unwrap().is_none(), "nothing was written");
+    let kept = store.bundle_get("hand-copied").unwrap().unwrap();
+    assert_eq!((kept.name.as_str(), kept.instructions.as_str(), kept.is_global), ("Shared rule", "mine", true));
+    assert_eq!(put(&store, &entry("f2", "another entry", 9_000)), Outcome::Applied(Applied::Created));
+    // An agent's own bundle with that name is as much in the way, and is not touched either.
+    store.bundle_upsert(&Bundle { name: "An agent's preset".into(), ..bundle("preset-1", "x", false) }).unwrap();
+    assert_eq!(put(&store, &named("f3", "An agent's preset", "y", 9_000)), Outcome::Skipped(Skipped::NameTaken));
+    assert_eq!(store.bundle_get("preset-1").unwrap().unwrap().name, "An agent's preset");
+}
+
+#[test]
+fn an_entry_removed_here_does_not_keep_its_name_from_the_entry_that_took_its_place() {
+    let store = store();
+    put(&store, &named("old-id", "Shared rule", "first", 1_000));
+    let removal = FleetRemoval { id: "old-id".into(), removed_at: 2_000, edited_by: String::new() };
+    assert_eq!(apply_remove(&store, &removal, REMOTE).unwrap(), Outcome::Applied(Applied::Removed));
+
+    // Removed and written again elsewhere under a new id: the same name, another id.
+    assert_eq!(put(&store, &named("new-id", "Shared rule", "second", 3_000)), Outcome::Applied(Applied::Created));
+    let live = store.bundle_get("new-id").unwrap().unwrap();
+    assert_eq!((live.name.as_str(), live.is_global), ("Shared rule", true));
+    let old = store.bundle_get("old-id").unwrap().unwrap();
+    assert_eq!(old.name, "Shared rule (removed old-id)");
+    assert!(!old.is_global);
+    assert!(store.bundle_is_removed_global("old-id").unwrap(), "it stays removed, with its history");
+    // Sending the same entry again changes nothing and raises nothing.
+    assert_eq!(put(&store, &named("new-id", "Shared rule", "second", 3_000)), Outcome::Skipped(Skipped::Same));
+}
+
 #[test]
 fn two_machines_that_wrote_in_the_same_millisecond_agree_on_the_same_winner() {
     let (a, b) = (store(), store());

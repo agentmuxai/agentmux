@@ -262,6 +262,14 @@ where
                 tracing::warn!(peer = %peer.host, op, "fleet memory: the other machine refused an entry as malformed");
                 not_applied.insert(entry_id, "bad_params".to_string());
             }
+            // The machine ran this one entry and it failed there (a store error on its side, from an
+            // older build than one that answers `name_taken`): say so for the entry and go on. One entry
+            // the peer cannot take must not stop the rest. An answer with no audit id never ran.
+            OpStatus::Failed if !answer.audit_id.is_empty() => {
+                let why = why_not(&answer);
+                tracing::warn!(peer = %peer.host, op, entry = %entry_id, why, "fleet memory: the other machine failed on an entry");
+                not_applied.insert(entry_id, format!("failed: {}", why.chars().take(120).collect::<String>()));
+            }
             _ => return Err(format!("{op}: {}", why_not(&answer))),
         }
     }
