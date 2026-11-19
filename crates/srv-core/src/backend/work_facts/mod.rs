@@ -126,6 +126,20 @@ pub fn folder_of(store: &Store, home: Option<&Path>, reg: &AgentRegistration) ->
     folder_of_meta(&block.meta, home, &reg.agent_id)
 }
 
+/// [`folder_of`] for the git probe: `None` for a container agent's pane, whose git facts are not read on the
+/// host.
+pub fn host_folder_of(store: &Store, home: Option<&Path>, reg: &AgentRegistration) -> Option<String> {
+    let block = store.get::<Block>(&reg.block_id).ok()??;
+    host_folder_of_meta(&block.meta, home, &reg.agent_id)
+}
+
+fn host_folder_of_meta(meta: &MetaMapType, home: Option<&Path>, agent_id: &str) -> Option<String> {
+    if crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta).is_container() {
+        return None;
+    }
+    folder_of_meta(meta, home, agent_id)
+}
+
 fn folder_of_meta(meta: &MetaMapType, home: Option<&Path>, agent_id: &str) -> Option<String> {
     let env = cmd_env_of(meta);
     let start = obj::meta_get_string(meta, META_KEY_CMD_CWD, "");

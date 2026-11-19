@@ -177,6 +177,7 @@ pub async fn refresh_once<F, Fut>(
 
 /// Keep every registered agent's git facts fresh. Never returns.
 pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
+    crate::backend::fs_ops::container_folders::install(&mstore);
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -191,7 +192,7 @@ pub async fn run_git_refresh_loop(mstore: Arc<Store>) {
             let home = dirs::home_dir();
             agents
                 .iter()
-                .filter_map(|a| super::folder_of(&store, home.as_deref(), a).map(|d| (a.block_id.clone(), d)))
+                .filter_map(|a| super::host_folder_of(&store, home.as_deref(), a).map(|d| (a.block_id.clone(), d)))
                 .collect::<Vec<_>>()
         })
         .await

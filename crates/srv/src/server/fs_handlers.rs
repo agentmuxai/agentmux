@@ -150,6 +150,8 @@ pub(crate) async fn fs_git_status(state: &AppState, cmd: FsPathReq) -> Result<Fs
     if super::files_root::is_confined(state, cmd.block_id.as_deref()) {
         return Ok(Default::default());
     }
+    // A container agent's folder has no markers: its git facts are not read on the host.
+    fs_ops::container_folders::install(&state.mstore);
     Ok(fs_ops::git::git_status(&cmd.path).await)
 }
 
