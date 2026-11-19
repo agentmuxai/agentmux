@@ -58,6 +58,9 @@ function fixture(panelStyle: object, panelLines: number): string {
 <div id="panel" class="agent-node-peek-overlay" style="${styleAttr(panelStyle)}">${lines}</div>`;
 }
 
+const scrollerMoved = (page: InputPage) => async () => (await page.evaluate<number>("document.getElementById('scroller').scrollTop")) > 0;
+const panelMoved = (page: InputPage) => async () => (await page.evaluate<number>("document.getElementById('panel').scrollTop")) > 0;
+
 /** Wait for the scroller to stop moving, then return where it is. */
 async function settledScrollTop(page: InputPage): Promise<number> {
     let last = -1;
@@ -89,7 +92,7 @@ describe.skipIf(!BROWSER)("the wheel over a row that shows a hover panel", () =>
             const hit = await page.evaluate<string[]>(
                 `document.elementsFromPoint(${POINTER.x}, ${POINTER.y}).map((e) => e.id || e.className)`
             );
-            await page.wheel(POINTER.x, POINTER.y, WHEEL);
+            await page.wheelUntil(POINTER.x, POINTER.y, WHEEL, scrollerMoved(page));
             return { panel, hit, scrollTop: await settledScrollTop(page) };
         });
         expect(out.panel.events).toBe("none");
@@ -108,7 +111,7 @@ describe.skipIf(!BROWSER)("the wheel over a row that shows a hover panel", () =>
         const html = fixture(peekFloatingStyle(hz, vt, false), 1);
         const scrollTop = await withInputPage(BROWSER!, html, VIEWPORT, async (page) => {
             await page.move(450, 10);
-            await page.wheel(450, 10, WHEEL);
+            await page.wheelUntil(450, 10, WHEEL, scrollerMoved(page));
             return settledScrollTop(page);
         });
         expect(scrollTop).toBe(WHEEL);
@@ -132,9 +135,9 @@ describe.skipIf(!BROWSER)("the wheel over a row that shows a hover panel", () =>
                 `(() => { const p = document.getElementById('panel'); const r = p.getBoundingClientRect();
                   return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2, events: getComputedStyle(p).pointerEvents }; })()`
             );
-            await page.wheel(POINTER.x, POINTER.y, WHEEL);
+            await page.wheelUntil(POINTER.x, POINTER.y, WHEEL, scrollerMoved(page));
             const onRow = await settledScrollTop(page);
-            await page.wheel(r.x, r.y, WHEEL);
+            await page.wheelUntil(r.x, r.y, WHEEL, panelMoved(page));
             const after = await settledScrollTop(page);
             const onPanel = await page.evaluate<number>("document.getElementById('panel').scrollTop");
             return { events: r.events, onRow, onPanel, after };
