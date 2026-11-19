@@ -49,6 +49,17 @@ describe("the Vault's stylesheets", () => {
         expect(css).toMatch(/\.vault-too-narrow\s*\{[^}]*display:\s*none;/);
     });
 
+    it("scrolls the requests when they are taller than the pane, so a card's buttons stay in reach", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        // The view never scrolls; the requests do, within the pane's height, and are not squeezed by the list.
+        expect(css).toMatch(/\.vault-view\s*\{[^}]*overflow:\s*hidden;/);
+        const requests = css.match(/\.vault-requests\s*\{([^}]*)\}/);
+        expect(requests).not.toBeNull();
+        expect(requests![1]).toMatch(/overflow-y:\s*auto;/);
+        expect(requests![1]).toMatch(/max-height:\s*100%;/);
+        expect(requests![1]).toMatch(/flex:\s*0 0 auto;/);
+    });
+
     it("clears a stacked cell's own line and padding with a rule that outranks the shared table's", () => {
         const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
         expect(css).toMatch(/\.vault-table tbody td\s*\{[^}]*padding:\s*0;[^}]*border-bottom:\s*0;/);
