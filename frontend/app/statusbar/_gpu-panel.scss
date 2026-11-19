@@ -1,0 +1,198 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The GPU readouts in the status bar ("GPU n%", "GFX HW", "UI n%") and the panel they open: sibling of
+// _cpu-cores-popover.scss and _disk-volumes-popover.scss, the same chrome.
+
+@use "../element/popover-frame" as popoverFrame;
+@use "./stat-button" as statButton;
+@use "../mixins.scss";
+
+.stat-gpu-button,
+.stat-gfx-button {
+    @include statButton.stat-button;
+}
+
+.gpu-panel {
+    // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
+    @include popoverFrame.readout-popover;
+    // Its width is the room there is, up to a comfortable table: the rows below narrow() fold on that width, not the
+    // window's, so they follow zoom as well.
+    width: min(420px, calc(100vw - 24px));
+    container-type: inline-size;
+
+    .gpu-panel-header {
+        @include popoverFrame.readout-popover-header;
+    }
+
+    .gpu-panel-title {
+        @include popoverFrame.readout-popover-title;
+    }
+
+    .gpu-gfx {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-2);
+        padding: var(--space-1-5) var(--space-3) 0;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+
+        &.gpu-gfx-warn {
+            color: var(--warning-text-color);
+        }
+    }
+
+    .gpu-renderer {
+        @include mixins.truncate;
+        flex: 1 1 100%;
+        font-family: var(--font-mono);
+        opacity: 0.8;
+    }
+
+    .gpu-panel-empty {
+        @include popoverFrame.readout-popover-empty($centered: false);
+    }
+
+    .gpu-adapters {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3) var(--space-1);
+    }
+
+    .gpu-adapter-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+    }
+
+    .gpu-adapter-name {
+        @include mixins.truncate;
+        flex: 1 1 auto;
+        color: var(--main-text-color);
+    }
+
+    .gpu-adapter-kind {
+        flex: 0 0 auto;
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-adapter-use {
+        @include popoverFrame.readout-value;
+    }
+
+    // The use bar: its fill is how busy the adapter's busiest engine is.
+    .gpu-bar {
+        @include popoverFrame.readout-bar;
+        display: block;
+        margin-top: var(--space-1);
+        background: color-mix(in srgb, var(--border-color) 60%, transparent);
+    }
+
+    .gpu-bar-fill {
+        @include popoverFrame.readout-bar-fill;
+        background: color-mix(in srgb, var(--accent-color) 45%, var(--secondary-text-color));
+    }
+
+    .gpu-adapter-memory {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 var(--space-3);
+        margin-top: var(--space-1);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-processes {
+        border-top: 1px solid var(--border-color);
+        margin-top: var(--space-1-5);
+    }
+
+    .gpu-section-title {
+        padding: var(--space-1-5) var(--space-3) var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-process-list {
+        max-height: 240px;
+        overflow-y: auto;
+    }
+
+    .gpu-process {
+        display: grid;
+        grid-template-columns: 1fr 4ch 8ch;
+        align-items: baseline;
+        gap: var(--space-2);
+        width: 100%;
+        padding: 2px var(--space-3);
+        font-size: var(--text-xs);
+    }
+
+    .gpu-process-head {
+        color: var(--secondary-text-color);
+    }
+
+    // AgentMux's own rows are the kit's row buttons (they open Tower): the grid above is the layout.
+    .gpu-process-own {
+        text-align: left;
+    }
+
+    .gpu-process-name {
+        @include mixins.truncate;
+        color: var(--main-text-color);
+    }
+
+    .gpu-process-label {
+        margin-left: var(--space-1-5);
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-process-use,
+    .gpu-process-mem {
+        font-family: var(--font-mono);
+        text-align: right;
+    }
+
+    .gpu-process-others .gpu-process-name {
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-footer {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-1-5) var(--space-3) 0;
+        margin-top: var(--space-1-5);
+        border-top: 1px solid var(--border-color);
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .gpu-footer-widened {
+        color: var(--warning-text-color);
+    }
+
+    .gpu-footer-ui {
+        flex: 0 0 auto;
+        font-family: var(--font-mono);
+        margin-left: auto;
+    }
+
+    // A narrow window: a row is its name and one figure.
+    @container (max-width: 340px) {
+        .gpu-process {
+            grid-template-columns: 1fr 4ch;
+        }
+
+        .gpu-process-mem {
+            display: none;
+        }
+
+        .gpu-adapter-kind {
+            display: none;
+        }
+    }
+}

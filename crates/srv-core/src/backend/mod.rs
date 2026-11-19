@@ -170,6 +170,7 @@ pub mod transcript;
 pub mod transcript_backfill;
 pub mod blocking;
 pub mod gh_guard;
+pub mod gpu;
 pub mod publish_guard;
 pub mod account_login_guard;
 pub mod pane_env;

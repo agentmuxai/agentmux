@@ -622,6 +622,8 @@ pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 // Tower, the read-only task manager pane (backend::tower::sampler). The
 // window's, not an agent API: a registered agent connection is refused.
 pub const COMMAND_TOWER_SAMPLE: &str = "tower.sample";
+/// The status bar's GPU panel (backend::gpu): the adapters' and the processes' use and memory.
+pub const COMMAND_GPU_SAMPLE: &str = "gpu.sample";
 pub const COMMAND_TOWER_PEERS: &str = "tower.peers";
 pub const COMMAND_TOWER_PAIR: &str = "tower.pair";
 pub const COMMAND_TOWER_FORGET: &str = "tower.forget";

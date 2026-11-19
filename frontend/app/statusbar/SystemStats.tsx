@@ -6,7 +6,7 @@ import { cpuColor } from "./cpu-color";
 import { CpuCoresPopover } from "./CpuCoresPopover";
 import { diskTooltip, watchVolumeColor } from "./disk-volumes";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
-import { GpuReadout, MemReadouts, RateReadouts } from "./SystemStatsParts";
+import { GpuReadout, MemReadouts, RateReadouts, UiBusyReadout } from "./SystemStatsParts";
 import { createSystemStats } from "./SystemStatsState";
 
 const SystemStats = (): JSX.Element => {
@@ -44,6 +44,7 @@ const SystemStats = (): JSX.Element => {
                     <Show when={cpuPanelOpen()}>
                         <CpuCoresPopover anchor={cpuButtonRef} onClose={() => setCpuPanelOpen(false)} />
                     </Show>
+                    <UiBusyReadout />
                     <GpuReadout s={s} />
                     <MemReadouts s={s} />
                     {/* Free-space share of the watched volume: the page-file drive on

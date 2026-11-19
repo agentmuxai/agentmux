@@ -12,6 +12,8 @@ import { parseDiskVolumes, type DiskVolume } from "./disk-volumes";
 export type SysStats = {
     cpu: number;
     gpu: number | null;
+    /** The fullest adapter's memory in use, percent: null where it is not known. */
+    gpuMem: number | null;
     memUsed: number;
     memTotal: number;
     commitUsed: number;
@@ -50,6 +52,7 @@ export function createSystemStats() {
                 setStats({
                     cpu: vals["cpu"] ?? 0,
                     gpu: vals["gpu"] != null ? vals["gpu"] : null,
+                    gpuMem: vals["gpu:mem"] != null ? vals["gpu:mem"] : null,
                     memUsed: vals["mem:used"] ?? 0,
                     memTotal: vals["mem:total"] ?? 0,
                     commitUsed: vals["mem:commit:used"] ?? 0,

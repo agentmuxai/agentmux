@@ -63,7 +63,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 /// This computer's sample, with the views the request asked for. Also what
 /// keeps the memory ledger: every sample that carries memory goes in it.
-async fn sample_local(state: &AppState, req: &TowerSampleReq) -> Result<TowerSnapshot, String> {
+pub(super) async fn sample_local(state: &AppState, req: &TowerSampleReq) -> Result<TowerSnapshot, String> {
     let renderers = renderer_map(&state.http_client, &state.host_ipc).await;
     let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
     let (want_host, want_panes, want_memory, want_history) = (

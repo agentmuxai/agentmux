@@ -114,7 +114,7 @@ pub const READ_ONLY: &[&str] = &[
     "session:export", "session:next_prompt_suggestion", "session:resume_preflight", "shell.list", "shellstatus",
     "skill.catalog.app_file", "skill.catalog.list", "skill.catalog.list_for_agent", "skill.catalog.list_for_bundle", "skill.get", "skill.list",
     "swarm.other-instances", "toolchain.env", "toolchain.resolve_install_command", "toolchain.versions",
-    "tower.peers", "tower.sample", "viewer.can-send", "viewer.devices", "voice.checkPath", "waveinfo",
+    "gpu.sample", "tower.peers", "tower.sample", "viewer.can-send", "viewer.devices", "voice.checkPath", "waveinfo",
     "widget.health", "widgets.catalog", "widgets.list", "widgets.readfile", "widgets.requests",
     "widgets.sectionentry", "wsllist",
 ];

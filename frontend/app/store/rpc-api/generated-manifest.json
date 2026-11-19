@@ -740,6 +740,10 @@
             "send": "data ?? {}"
         },
         {
+            "command": "gpu.sample",
+            "method": "GpuSampleCommand"
+        },
+        {
             "command": "hidenamedagent",
             "method": "HideNamedAgentCommand"
         },

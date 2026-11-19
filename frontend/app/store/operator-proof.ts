@@ -24,6 +24,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "browser_profiles.delete",
     "browser_profiles.update",
     "fleet.broadcast",
+    "gpu.sample",
     "history.agent_sessions",
     "history.agents",
     "history.locate",
