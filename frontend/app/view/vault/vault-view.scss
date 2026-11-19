@@ -667,6 +667,13 @@
     border: 1px solid var(--border-color);
 }
 
+// A chip's words in one box, so they wrap at spaces together. As loose parts of the chip (a name, then its note) each
+// was a flex item of its own, and a narrow column shrank the name to a letter before the note had wrapped: "Test / er".
+.vault-grant__text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 // An entry's expiry date, read against today; near or past it, in the warning colour.
 .vault-expiry {
     margin-top: var(--space-1);

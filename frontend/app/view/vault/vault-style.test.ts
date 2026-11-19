@@ -60,6 +60,14 @@ describe("the Vault's stylesheets", () => {
         expect(requests![1]).toMatch(/flex:\s*0 0 auto;/);
     });
 
+    it("keeps a chip's words in one box, so a narrow column wraps them at spaces and not inside the name", () => {
+        const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
+        const text = css.match(/\.vault-grant__text\s*\{([^}]*)\}/);
+        expect(text).not.toBeNull();
+        expect(text![1]).toMatch(/min-width:\s*0;/);
+        expect(text![1]).toMatch(/overflow-wrap:\s*anywhere;/);
+    });
+
     it("clears a stacked cell's own line and padding with a rule that outranks the shared table's", () => {
         const css = sass.compile(join(dir, "vault-view.scss"), { loadPaths: [join(dir, "../../..")] }).css;
         expect(css).toMatch(/\.vault-table tbody td\s*\{[^}]*padding:\s*0;[^}]*border-bottom:\s*0;/);
