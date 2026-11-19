@@ -220,7 +220,7 @@ export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?
     const entry = () => {
         const e = model.lastFleetResultAtom();
         if (!e || !props.quietWhenClean || e.action !== "broadcast") return e;
-        return e.result.failed.length > 0 || e.result.aborted_early ? e : null;
+        return e.result.failed.length > 0 || (e.result.held ?? []).length > 0 || e.result.aborted_early ? e : null;
     };
 
     return (
@@ -231,6 +231,7 @@ export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?
                         <span>
                             {FLEET_ACTION_TITLES[e().action]} — {e().result.succeeded.length} succeeded,{" "}
                             {e().result.failed.length} failed
+                            <Show when={(e().result.held ?? []).length > 0}>, {(e().result.held ?? []).length} kept</Show>
                             <Show when={e().result.aborted_early}> — staged rollout aborted early</Show>
                         </span>
                         <CloseButton size="sm" label="Dismiss" onClick={() => model.dismissFleetResult()} />
@@ -242,6 +243,13 @@ export function FleetResultPanel(props: { model: SwarmViewModel; quietWhenClean?
                             {(id) => (
                                 <div class="swarm-fleet-result-row swarm-fleet-result-row--ok">
                                     <i class="fa-solid fa-check" /> {e().labels[id] ?? id}
+                                </div>
+                            )}
+                        </For>
+                        <For each={e().result.held ?? []}>
+                            {(h) => (
+                                <div class="swarm-fleet-result-row swarm-fleet-result-row--held">
+                                    <i class="fa-solid fa-hourglass-half" /> {e().labels[h.id] ?? h.id} — {h.note}
                                 </div>
                             )}
                         </For>

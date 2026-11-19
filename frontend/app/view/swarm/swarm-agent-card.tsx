@@ -25,6 +25,7 @@ import { RegistrationBadge, type RegistrationFlag } from "./swarm-row-registrati
 import { SwarmSeatBadge } from "./swarm-seats";
 import { AgentStatusChip } from "./swarm-status-chip";
 import { setSupervisorMode, SupervisorChip } from "./swarm-supervisor";
+import { CheckNowButton } from "./swarm-check-limits";
 
 const fmtCtx = formatCompactNumber;
 
@@ -138,7 +139,14 @@ export function AgentCardHead(props: AgentCardHeadProps): JSX.Element {
                     />
                 }
             >
-                {(u) => <UnavailableChip unavailable={u()} now={rowNow} />}
+                {(u) => (
+                    <>
+                        <UnavailableChip unavailable={u()} now={rowNow} />
+                        <Show when={u().reason === "limited" && !u().routeCredits && node().blockId}>
+                            {(blockId) => <CheckNowButton blockId={blockId()} />}
+                        </Show>
+                    </>
+                )}
             </Show>
             <Show when={node().blockId}>
                 {(blockId) => (

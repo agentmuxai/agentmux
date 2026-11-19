@@ -519,6 +519,10 @@
             "method": "FleetBulkStopCommand"
         },
         {
+            "command": "fleet.check-limits",
+            "method": "FleetCheckLimitsCommand"
+        },
+        {
             "command": "supervisor.set-mode",
             "method": "SupervisorSetModeCommand"
         },

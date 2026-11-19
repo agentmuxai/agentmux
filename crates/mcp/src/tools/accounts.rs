@@ -93,6 +93,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         "IdentityAccounts" => run_identity_accounts(arguments, cx).await,
         "IdentityValidate" => run_identity_validate(arguments, cx).await,
         "IdentitySwitch" => run_identity_switch(arguments, cx).await,
+        "IdentityCheckLimits" => run_identity_check_limits(arguments, cx).await,
         _ => Err(not_in_family()),
     }
 }
@@ -151,6 +152,31 @@ async fn run_identity_validate(arguments: &Value, cx: &ToolCtx<'_>) -> Result<St
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+}
+
+/// Look again, now, at the agents marked out of quota (all of them, or those on `account`): a small turn
+/// on each, and one that works clears the limit. For when the plan was raised or the quota refilled before
+/// the provider's reset, which nothing else notices.
+async fn run_identity_check_limits(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
+    require_agent_env(local_url, auth_key, block_id)?;
+    let agent_id = agent_slug()?;
+    let url = format!("{}/api/v1/agent/identity/check-limits", local_url.trim_end_matches('/'));
+    let account = arguments.get("account").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty());
+    let resp = client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, auth_key)
+        .json(&json!({ "agent_id": agent_id, "account": account }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("identity/check-limits failed: HTTP {status} - {text}");
+    }
+    let result: Value = resp.json().await.map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
     Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
 }
 

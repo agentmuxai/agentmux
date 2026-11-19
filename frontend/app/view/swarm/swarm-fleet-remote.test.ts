@@ -112,7 +112,7 @@ describe("broadcast to a mixed selection", () => {
         const result = await vm.broadcastToSelection("merge on approval");
 
         expect(rpc.broadcast).toHaveBeenCalledTimes(1);
-        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: [LOAP, MANOZ, OPAZ], message: "merge on approval" });
+        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: [LOAP, MANOZ, OPAZ], message: "merge on approval" }, { timeout: 90_000 });
         expect(result.succeeded).toEqual([LOAP, MANOZ, OPAZ]);
         expect(result.failed).toEqual([{ id: ROOK, error: "can't message: no verified link to that machine yet" }]);
     });
@@ -140,7 +140,7 @@ describe("broadcast to a mixed selection", () => {
         const vm = await modelWith(both);
         vm.setManySelected(["blk-a", "blk-b"], true);
         const result = await vm.broadcastToSelection("hi");
-        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a", "blk-b"], message: "hi" });
+        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a", "blk-b"], message: "hi" }, { timeout: 90_000 });
         expect(result.failed).toEqual([]);
     });
 
@@ -148,7 +148,7 @@ describe("broadcast to a mixed selection", () => {
         const vm = await modelWith(both);
         vm.setManySelected(["blk-a", "blk-gone"], true);
         const result = await vm.broadcastToSelection("hi");
-        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a"], message: "hi" });
+        expect(rpc.broadcast).toHaveBeenCalledWith({}, { targets: ["blk-a"], message: "hi" }, { timeout: 90_000 });
         expect(result.failed).toEqual([{ id: "blk-gone", error: "can't message: no longer listed" }]);
     });
 });
