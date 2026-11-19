@@ -1,5 +1,64 @@
 # AgentMux Version History
 
+## 0.60.35 — 2026-11-18
+
+- The magnified pane size is held to 0.5 to 1 of the layout area, so a value like 3 no longer makes the pane larger than the window
+- The command palette keeps the row you move to with Up and Down in view, and a new search starts at the top of the list
+- A retried resume's continuation packet now lists the tasks an agent holds on the work queue's own store, as it does in a build where that store is separate.
+- Vault: in a very narrow pane the filter bar, the section heads and a row's action buttons wrap, so the list no longer scrolls sideways
+- Pane drag and drop: the drop guides are sized by the pane they are over, larger on a larger pane
+- The real-browser input tests wait until the page has been drawn before sending input, so the first test of a cold browser no longer misses its wheel notch
+- ci: the Windows, Linux and macOS builds install go-task from its pinned GitHub release (checksum, retries), and a step fails at once when a build tool is missing instead of minutes later
+- Container agent panes: a pasted or dropped image goes to the attachment tray, with its thumbnail, like a native pane
+- The menu logo in the top left sits a little lower in the title bar
+- Agent pane: a clicked image or video opens in a preview over the whole tab, with actual size, video enlarge and stepping through a message's media
+- ci: the dev port claim no longer relies on mkdir failing for the second caller (uutils mkdir, Ubuntu 26.04, let several picks take one port), which made vite-port.test.sh fail at random
+- The pane Backdrop menu is a panel of colour swatches like Pane Color, and the Pane Color and Backdrop menus stay open when you pick, so colours can be tried one after another
+- AgentMux Web: a headless server takes its one allowed browser origin from the AGENTMUX_ALLOWED_ORIGIN environment variable (https only, and it must agree with --allowed-origin if both are given), so a launcher can set it per run
+- ci: the shared build slot's claim no longer relies on mkdir failing for the second caller (uutils mkdir on Ubuntu 26.04 can report success to a caller that lost the race); build-slot.sh is version 10
+- Kanban: a board can keep its own stage set (names, colours, which columns it shows); API and Tasks board_edit only, the editor follows
+- Check for update now downloads the release it finds, so the Download click is no longer a second step
+- Status bar: a GPU meter beside CPU and Mem and a GPU panel (use and memory per adapter and per process, Windows), and a UI busy meter
+- Kanban: set your own stages: how many, their names and colours, in Settings → Kanban, opened from a cog on the board
+- A headless server answers its registered external host's signed calls for activity, a graceful shutdown and a stop notice (host routes, signed by the host)
+- CI: a PR that changes what the agentmux-cef crate is built from now runs that crate's tests (advisory, Linux)
+- The launcher logs one line each time it paints the splash: its version, channel, and why it is showing
+- An in-app upgrade of a setup.exe install shows an Updating to <version> window while the installer runs, so the screen is never empty of AgentMux
+- Agents can read their workspace's pending stop and ask for it to be put back (App workspace and keep_running)
+- Windows browser panes: during a window resize each pane's view stays at the page's last rect, inside the window, until the page lays out, instead of moving ahead of its frame
+- The nightly is green again: the docsite doctest imports the right crate, the macOS config-path test resolves the temp dir, and the nightly's timeouts fit its build time
+- Drone: three more starter drones, triage a failed nightly, re-run a flaky job once and flag a merged pull request whose task is still claimed; a template's trigger can use its parameters
+- The wheel test sends a notch again when the browser dropped it on a cold start, so the nightly stops failing on a slow runner
+- Window tab colours: the picker shows the tab it makes, one paint module for every state, no filter or !important on a coloured tab, a CI guard
+- Global Memory sync: an entry whose name another entry on the peer already holds is reported and skipped (a removed entry's name is freed), one failed entry no longer stops the rest, a write says which peers are not in step, and a provenance object needs no source
+- The agent pane's waiting-messages banner shows one clock: how long the oldest queued message has waited
+- A worker note is sent only for a turn that just ended, quotes only that turn's words, and Agents watch takes an agent's name as written
+- A message held for an agent that was refused at its spawn is released once the agent has a model endpoint of its own
+- Windows setup removes old versions' files from runtime\ in an all-users install, where the unelevated launcher cannot
+- Drone: a callee's spend is kept on its block across a restart, so the run's cost does not lose a failed call
+- Drone: a called drone's waits are shown on the caller, so the key that ends a wait on an event can be used
+- A temp file left by an interrupted registry write is removed at start once it is old, and is never read as an agent record
+- The audit totals warning now says why a file couldn't be read, and a day file that was pruned is not a warning
+- fix: two AppImage starts at once no longer lose a channel entry: the account-wide AppImage channel record is read, changed and written under a file lock
+- A container agent is now told to compact at a large context, as a host agent is: the same turn-end note, with no offer to start a fresh session there
+- On Linux, a click in a browser pane's page now closes the menus and popovers over it and selects the pane, also when the pane already had focus: the page reports the click itself instead of waiting for a focus change.
+- A browser pane names the agent that drives it, and the agent it can be given back to, by its name instead of its id
+- A slow websocket message in the log now names the slowest subscriber that handled it
+- Pointing an agent from one custom model server to another now starts a new conversation: a conversation is kept per server address, so the next launch cannot resume one held with the other server
+- The Restart-to-update panel no longer blinks every couple of seconds while it is open, and its text has room at the edges
+- CI pulls its Docker base images from a mirror that needs no sign-in, with retries, so Docker Hub's anonymous limit no longer fails a job
+- The magnified size entry in Settings stays in view when the Settings pane shrinks with it
+- Settings > Kanban: drag a stage row by its grip to reorder the stages (the up and down buttons stay)
+- Drone: a long saved drone name no longer pushes the toolbar buttons past the pane's edge in a thin pane
+- Agents list names a host agent by its definition when its row has no name of its own, so it is no longer a nameless entry
+- Memory: a version's history row wraps in a thin pane, so a Global or Personal entry no longer scrolls sideways
+- The TEAR OFF words read on the pale error reds of the Catppuccin and Tokyo Night themes
+- Headless srv: logs the fingerprint of the external host's public key it registered at boot (the key itself is never logged)
+- Pane tab pills take their fill, hover and bar from the same colour call as window tabs, so hover no longer turns a coloured pill white in the light theme, and the Pane Color menu's swatch shows the pill it makes
+- A container agent's gh no longer loses its GitHub login when the host's token mint is slow: srv waits longer, lets the mint finish, and logs a refused token
+- A Drone run restored from an old checkpoint no longer counts a branch skipped in a later loop pass as failed
+- Windows: the WebGPU shader compiler is not bundled for now (a revert; it returns after the next release)
+
 ## 0.60.34 — 2026-11-18
 
 - The Vault is one list of coloured sections, one per type of entry, under a single filter that narrows all of them; Kept by AgentMux and Activity are folded sections at its end
