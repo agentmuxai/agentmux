@@ -976,6 +976,8 @@ function createLayout(
             metrics: `${zoomRatio(refs).toFixed(3)}|${gapPx.toFixed(1)}|${refs.rowsRef ? getComputedStyle(refs.rowsRef).fontSize : ""}`,
             content: `${list.map((s) => s.key).join(",")}|${statsWidth() > 0}`,
         });
+        // TEMPORARY TRACE (not for merge): one entry per layout pass.
+        (((window as any).__latchTrace ??= []) as unknown[]).push({ t: Math.round(performance.now()), width, settling: wasSettling, fresh: fresh.rows.length, shown: latch.layout.rows.length, same: latch.layout === fresh, auth: widths.auth, ctx: widths.ctx });
         const began = !before || latch.width !== before.width || latch.metrics !== before.metrics || latch.content !== before.content;
         if (began || wasSettling) openSettle();
         return latch.layout;
