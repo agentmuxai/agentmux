@@ -40,6 +40,26 @@
     border-radius: var(--radius-sm);
 }
 
+.kanban-stages__history {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
+.kanban-stages__history-title {
+    margin: 0;
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.kanban-stages__history-list {
+    margin: 0;
+    padding-left: var(--space-4);
+}
+
 .kanban-stages__row[data-dragging] {
     opacity: 0.5;
 }
