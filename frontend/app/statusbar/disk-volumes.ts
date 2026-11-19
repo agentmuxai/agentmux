@@ -5,6 +5,8 @@
 // Kept free of Solid/DOM so the parsing/formatting is unit-testable
 // (same split as backend-uptime.ts and backend-dot.ts).
 
+import { t } from "@/app/i18n/i18n";
+
 export interface DiskVolume {
     /** Display label — mount point with a trailing backslash trimmed ("C:" from "C:\"). */
     label: string;
@@ -62,6 +64,15 @@ export function parseDiskVolumes(vals: Record<string, number>): DiskVolume[] {
     }
     out.sort((a, b) => a.label.localeCompare(b.label));
     return out;
+}
+
+/**
+ * The words of the status bar's Disk pill: "Disk 98% free". The figure is the FREE share of the watched volume, so the
+ * word is on the pill: a bare "Disk 98%" reads as 98% used, and a nearly empty disk reads as healthy the other way round.
+ * The colour (watchVolumeColor) turns on LOW free space, as before.
+ */
+export function diskPillLabel(freePct: number): string {
+    return t("statusBar.diskFree", { pct: Math.round(freePct) });
 }
 
 /** Free-space size for humans: 1.5T / 320.4G / 512M. */

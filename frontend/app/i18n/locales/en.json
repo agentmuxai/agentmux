@@ -653,6 +653,7 @@
     "agentNotice.openConnectors": "Open Connectors",
     "agentNotice.githubRefused": "GitHub access refused",
     "agentNotice.awsRefused": "AWS access refused",
+    "statusBar.diskFree": "Disk {{pct}}% free",
     "gpuMeter.label": "GPU",
     "gpuMeter.aria": "GPU use, click for the GPU panel",
     "gpuMeter.gfxAria": "Graphics acceleration status, click for the GPU panel",
