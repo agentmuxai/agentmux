@@ -212,6 +212,13 @@ describe("a container agent refused a credential", () => {
         expect(requestOf("agent-notice-line")).toBeUndefined();
     });
 
+    it("is named by what it is about in the dock's \"N more\" row, not by its whole sentence", () => {
+        onEvent!(REFUSED);
+        onEvent!({ ...REFUSED, id: "c3", kind: "aws", headline: "The host's AWS login for 'dev' has lapsed." });
+        const summaries = paneRequests.of("b1").map((r) => r.summary);
+        expect(summaries).toEqual(["GitHub access refused", "AWS access refused"]);
+    });
+
     it("says srv's sentence, with no countdown and no choice, and a way to Connectors for GitHub", () => {
         onEvent!(REFUSED);
         const r = requestOf("agent-notice-line")!;
