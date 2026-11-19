@@ -46,7 +46,9 @@
 
     // A sample of what is picked: the fill, with its bar along the top, as the selected tab draws them.
     &.palette-swatch--sample {
-        background: linear-gradient(var(--swatch-bar) 0 3px, var(--swatch-fill) 3px);
+        // Laid out over the border box, once: the default (padding box, repeating) painted the bar again under the
+        // bottom border, a thin line of the bar's colour along the lower edge.
+        background: linear-gradient(var(--swatch-bar) 0 3px, var(--swatch-fill) 3px) border-box no-repeat;
     }
 
     // The chosen swatch: a ring, and a mark that does not rely on its colour.
