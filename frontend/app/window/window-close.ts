@@ -150,9 +150,11 @@ export async function requestCloseWindow(): Promise<void> {
 export async function requestRemoveWindow(w: { windowId: string | null; label: string }, onRemoving?: () => void): Promise<void> {
     if (!w.windowId) {
         try {
+            onRemoving?.();
             await getApi().closeWindow(w.label);
         } catch (err) {
             notifyError("Couldn't remove the window", err);
+            throw err; // the caller undoes what it did on `onRemoving`
         }
         return;
     }
@@ -166,7 +168,12 @@ export async function requestRemoveWindow(w: { windowId: string | null; label: s
             return;
         }
         onRemoving?.();
-        await getApi().closeWindow(w.label);
+        try {
+            await getApi().closeWindow(w.label);
+        } catch (err) {
+            notifyError("Couldn't remove the window", err);
+            throw err; // the caller undoes what it did on `onRemoving`
+        }
     };
     if (!agents.some((a) => a.working)) {
         await remove();

@@ -400,6 +400,47 @@ describe("InstancePanel window slots", () => {
         expect(removeOpen).toHaveBeenCalledWith({ windowId: null, label: "window-2" }, expect.any(Function));
     });
 
+    it("a window removed from this panel leaves the list at once, before the host has dropped it, and the count follows", async () => {
+        twoOpen();
+        renderPanel();
+        await flush();
+        expect(heading().textContent).toContain("3 windows");
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        // the host still lists window-2 (it is being torn down), as it does for seconds, with its id already gone
+        expect(names()).toEqual(["Alpha", "Charlie"]);
+        expect(heading().textContent).toContain("2 windows");
+    });
+
+    it("the row is back if the close failed, and a label the host lists again after dropping it is shown again", async () => {
+        twoOpen();
+        renderPanel();
+        await flush();
+        removeOpen.mockImplementationOnce(async (_w, onRemoving) => {
+            onRemoving?.();
+            throw new Error("the window would not close");
+        });
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+        // removed for real this time: the host drops it, then a new window takes the label
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Charlie"]);
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-3", windowId: "win3" },
+        ]);
+        await flush();
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+            { label: "window-3", windowId: "win3" },
+        ]);
+        await flush();
+        expect(names()).toHaveLength(3);
+    });
+
     it("a closed window does not move when another one closes after it", async () => {
         vi.useFakeTimers();
         try {

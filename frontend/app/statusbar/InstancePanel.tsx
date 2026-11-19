@@ -29,7 +29,7 @@ import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opaci
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { type ClosedWindow } from "@/store/services";
 import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
-import { onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { isHeldWindow, useSlotKeys } from "./window-slot-keys";
 import { useClosedWindows } from "./useClosedWindows";
 import {
@@ -114,8 +114,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     reconcileWhenLauncherSilent();
 
     const { resolveEntryWindowId, resolveName } = useWindowIdentity(myLabel);
-    const { closed, refreshClosed } = useClosedWindows(() => entries().length, () => placeSlots());
-    const onlyOpenWindow = () => entries().length <= 1;
+    // Windows this panel has just removed, by label: the row goes at once, not when the host has finished
+    // tearing the window down (on macOS that took 8 to 13 s, the row meanwhile reading as a live window with no
+    // opacity slider, as the host drops its id first). A label leaves this set once the host no longer lists it.
+    const [trashed, setTrashed] = createSignal<ReadonlySet<string>>(new Set());
+    const visibleEntries = createMemo(() => entries().filter((e) => !trashed().has(e.label)));
+    createEffect(() => {
+        const listed = new Set(entries().map((e) => e.label));
+        const t = untrack(trashed);
+        if ([...t].some((l) => !listed.has(l))) setTrashed(new Set([...t].filter((l) => listed.has(l))));
+    });
+    const { closed, refreshClosed } = useClosedWindows(() => visibleEntries().length, () => placeSlots());
+    const onlyOpenWindow = () => visibleEntries().length <= 1;
     const reopen = (w: ClosedWindow) => {
         if (!isHeldWindow(w)) void reopenClosedWindow(w.workspaceid).then(refreshClosed);
     };
@@ -126,7 +136,14 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const removeOpen = (entry: WindowEntry) => {
         if (onlyOpenWindow()) return;
         // A row whose window id has not arrived (no opacity slider yet) is closed by its label, not ignored.
-        void requestRemoveWindow({ windowId: resolveEntryWindowId(entry), label: entry.label }, () => discard(entry)).then(refreshClosed);
+        const label = entry.label;
+        const hide = (on: boolean) => setTrashed((t) => new Set(on ? [...t, label] : [...t].filter((l) => l !== label)));
+        void requestRemoveWindow({ windowId: resolveEntryWindowId(entry), label }, () => {
+            discard(entry);
+            hide(true); // the window is certain to go: its row goes now
+        })
+            .catch(() => hide(false)) // the close failed (it said so): the window is still there
+            .then(refreshClosed);
     };
 
     const windowRename = useWindowRename(entries, resolveEntryWindowId);
@@ -148,8 +165,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         windowRename.flush();
     });
 
-    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(entries, closed, resolveEntryWindowId, resolveName);
-    const rowContext = { OpacityControl, entries, myLabel, rename: windowRename, resolveName, onlyOpenWindow, focusWindow, remove: removeOpen };
+    const { openByKey, closedByKey, slotKeys, placeSlots, discard } = useSlotKeys(visibleEntries, closed, resolveEntryWindowId, resolveName);
+    const rowContext = { OpacityControl, entries: visibleEntries, myLabel, rename: windowRename, resolveName, onlyOpenWindow, focusWindow, remove: removeOpen };
 
     return (
         // Portaled through AnchoredPopover like every other status bar panel.
@@ -168,7 +185,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             <AboutSection about={about} />
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
-                <WorkspaceTitle rename={workspaceRename} windowCount={() => entries().length + closed().length} />
+                <WorkspaceTitle rename={workspaceRename} windowCount={() => visibleEntries().length + closed().length} />
                 <WindowSlotList
                     slotKeys={slotKeys}
                     openByKey={openByKey}
