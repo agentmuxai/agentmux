@@ -56,8 +56,8 @@
     }
 
     // Just connected (§4.9): the card holds a success line and tint, with "✓ Connected" where the chevron goes, for a
-    // moment, then goes back. It is a held state, not an animation, so it shows on a machine whose animation effects are
-    // off (prefers-reduced-motion): the only thing the preference removes is the fade back.
+    // moment, then goes back. It is a held state, not an animation, so it shows on a machine whose OS animation effects are
+    // off: the motion policy only removes the fade back.
     &.is-flash,
     &.is-flash:hover {
         border-color: var(--success-color);
