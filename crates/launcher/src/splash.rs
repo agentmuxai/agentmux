@@ -251,6 +251,16 @@ pub fn dismiss_splash(event_name: &str) {
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
+/// Said in place of the first stage row on a crash-restart's splash.
+const RESTORING_HEADLINE: &str = "Restoring session...";
+
+/// Show the splash window, and tell an "Updating to <version>" window of an upgrade hand-off, if one is up, that
+/// the new version's own splash is here: its job is done.
+unsafe fn show_and_announce(hwnd: HWND) {
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    crate::updating_window::signal_new_splash();
+}
+
 unsafe fn run_splash(
     dismiss_ev: HANDLE,
     class_name: String,
@@ -326,7 +336,7 @@ unsafe fn run_splash(
         (SPLASH_W * SPLASH_H * 4) as usize,
     );
 
-    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    show_and_announce(hwnd);
 
     let info = crate::splash_info::SplashInfo::gather_and_log(if restoring { "restart" } else { "start" });
     let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
@@ -362,7 +372,7 @@ unsafe fn run_splash(
             // fires. (codex P2 on PR #3222.)
             if deferred_this_tick {
                 let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
-                composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring);
+                composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring.then_some(RESTORING_HEADLINE));
                 push_layered(hwnd, mem_dc, 255);
             }
 
@@ -404,7 +414,7 @@ unsafe fn run_splash(
             timeline.finalize_running(Instant::now());
 
             // Freeze: render final state with brain steady.
-            composite(dib_pixels, 200u8, &timeline.stages, Some(total_ms), &footer, restoring);
+            composite(dib_pixels, 200u8, &timeline.stages, Some(total_ms), &footer, restoring.then_some(RESTORING_HEADLINE));
             push_layered(hwnd, mem_dc, 255);
 
             // Summary hold — 2 s default, shortened for very fast starts.
@@ -420,7 +430,7 @@ unsafe fn run_splash(
         // Animate brain alpha: fade-in over 200 ms, then sine pulse.
         let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
 
-        composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring);
+        composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring.then_some(RESTORING_HEADLINE));
         push_layered(hwnd, mem_dc, 255);
 
         std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 fps
@@ -441,7 +451,7 @@ fn composite(
     stages: &[StageEntry],
     total_ms: Option<u64>,
     footer: &[String],
-    restoring: bool,
+    headline: Option<&str>,
 ) {
     // Opaque BG fill.
     for px in dib.chunks_exact_mut(4) {
@@ -474,7 +484,7 @@ fn composite(
     }
 
     // Stage telemetry list.
-    draw_stages(dib, stages, total_ms, restoring);
+    draw_stages(dib, stages, total_ms, headline);
 
     // Separator line between stage area and footer.
     let sep_y = BRAIN_AREA_H + STAGE_AREA_H - STAGE_PAD_BOTTOM / 2;
@@ -549,7 +559,7 @@ fn draw_detail_line(dib: &mut [u8], sub_x: i32, y: i32, text: &str, status: Star
     crate::splash_text::draw_text(dib, SPLASH_W, SPLASH_H, x, y, text, color, 1.0, true);
 }
 
-fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, restoring: bool) {
+fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, headline: Option<&str>) {
     use crate::splash_text::{draw_text, text_width};
 
     let y0 = BRAIN_AREA_H + STAGE_PAD_TOP;
@@ -565,10 +575,10 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
     // the only thing telling the user anything is happening. Takes row 0's
     // slot rather than growing `SPLASH_H`/`MAX_STAGE_ROWS` — the restart
     // splash never has more than one or two real rows anyway (if any).
-    if restoring {
+    if let Some(text) = headline {
         // ASCII only — the bitmap font (`splash_font::FIRST..=LAST`) only
         // covers 0x20-0x7E, so a real ellipsis (U+2026) would render as '?'.
-        draw_text(dib, SPLASH_W, SPLASH_H, x_label, y0, "Restoring session...", TIME_RUN_COLOR, 1.0, true);
+        draw_text(dib, SPLASH_W, SPLASH_H, x_label, y0, text, TIME_RUN_COLOR, 1.0, true);
         row += 1;
     }
 
@@ -711,6 +721,120 @@ unsafe fn fade_out(hwnd: HWND, mem_dc: HDC, _dib: &mut [u8]) {
 }
 
 
+/// Draw the "Updating to <version>" card until `updating_window::phase` says the window is done. `script` is the
+/// hand-off script's process (null once it can't be watched: then it counts as ended), `new_splash_ev` the event
+/// the new launcher's splash sets.
+unsafe fn show_updating(hwnd: HWND, mem_dc: HDC, pixels: &mut [u8], version: &str, dir: &std::path::Path, script: HANDLE, new_splash_ev: HANDLE) {
+    use crate::updating_window as uw;
+    let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
+    let started = Instant::now();
+    let mut script_ended_at: Option<Instant> = None;
+    loop {
+        if script_ended_at.is_none() && (script.is_null() || WaitForSingleObject(script, 0) == WAIT_OBJECT_0) {
+            script_ended_at = Some(Instant::now());
+        }
+        let p = uw::phase(&uw::Inputs {
+            elapsed: started.elapsed(),
+            script_ended_for: script_ended_at.map(|t| t.elapsed()),
+            new_splash: !new_splash_ev.is_null() && WaitForSingleObject(new_splash_ev, 0) == WAIT_OBJECT_0,
+            failed: script_ended_at.is_some() && uw::failed_marker(dir).exists(),
+        });
+        if p == uw::Phase::Close {
+            return;
+        }
+        let footer: Vec<String> = uw::footer(version, p).iter().map(|l| crate::splash_info::ellipsize(l, max_chars)).collect();
+        composite(pixels, brain_pulse_alpha(started.elapsed().as_secs_f32()), &[], None, &footer, Some(uw::headline(p)));
+        push_layered(hwnd, mem_dc, 255);
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+}
+
+/// The window of an in-app upgrade's hand-off (`updating_window`): the splash's card, with "Updating to
+/// <version>" in its footer, from the moment the old launcher is gone until the new launcher's splash is up. It
+/// runs in a copy of the old launcher (`--updating-window`) and ends by what `updating_window::phase` decides, so
+/// it can't outlive a failed install. Takes no focus.
+pub fn run_updating_window(version: &str, script_pid: u32, dir: &std::path::Path) {
+    use crate::updating_window as uw;
+    // The same line the splash writes, so the launcher log says which launcher painted this and why.
+    let _ = crate::splash_info::SplashInfo::gather_and_log("upgrade");
+    unsafe {
+        let class: Vec<u16> = "AgentMuxUpdating\0".encode_utf16().collect();
+        let hinst = GetModuleHandleW(std::ptr::null());
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: 0,
+            lpfnWndProc: Some(DefWindowProcW),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: hinst,
+            hIcon: std::ptr::null_mut(),
+            hCursor: std::ptr::null_mut(),
+            hbrBackground: std::ptr::null_mut(),
+            lpszMenuName: std::ptr::null(),
+            lpszClassName: class.as_ptr(),
+            hIconSm: std::ptr::null_mut(),
+        };
+        RegisterClassExW(&wc);
+        let x = (GetSystemMetrics(SM_CXSCREEN) - SPLASH_W) / 2;
+        let y = (GetSystemMetrics(SM_CYSCREEN) - SPLASH_H) / 2;
+        let hwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            class.as_ptr(),
+            std::ptr::null(),
+            WS_POPUP,
+            x, y, SPLASH_W, SPLASH_H,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            hinst,
+            std::ptr::null(),
+        );
+        if hwnd.is_null() {
+            return;
+        }
+        let screen_dc = GetDC(std::ptr::null_mut());
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = SPLASH_W;
+        bmi.bmiHeader.biHeight = -SPLASH_H;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB as u32;
+        let mut pixels_raw: *mut core::ffi::c_void = std::ptr::null_mut();
+        let dib = CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut pixels_raw, std::ptr::null_mut(), 0);
+        if dib.is_null() || pixels_raw.is_null() {
+            ReleaseDC(std::ptr::null_mut(), screen_dc);
+            DeleteDC(mem_dc);
+            DestroyWindow(hwnd);
+            return;
+        }
+        let old_obj = SelectObject(mem_dc, dib as _);
+        let pixels = std::slice::from_raw_parts_mut(pixels_raw as *mut u8, (SPLASH_W * SPLASH_H * 4) as usize);
+
+        // The new launcher's splash sets this when it is on screen; this window makes it before the script even
+        // sleeps its three seconds, so it exists long before the new launcher could look for it.
+        let ev_name: Vec<u16> = format!("{}\0", uw::event_name()).encode_utf16().collect();
+        let new_splash_ev = CreateEventW(std::ptr::null(), 1, 0, ev_name.as_ptr());
+        // A script already gone (or a process this can't open) counts as ended: the window then leaves on its own.
+        let script = OpenProcess(PROCESS_SYNCHRONIZE, 0, script_pid);
+
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        show_updating(hwnd, mem_dc, pixels, version, dir, script, new_splash_ev);
+        fade_out(hwnd, mem_dc, pixels);
+        SelectObject(mem_dc, old_obj);
+        DeleteObject(dib as _);
+        DeleteDC(mem_dc);
+        ReleaseDC(std::ptr::null_mut(), screen_dc);
+        DestroyWindow(hwnd);
+        if !script.is_null() {
+            CloseHandle(script);
+        }
+        if !new_splash_ev.is_null() {
+            CloseHandle(new_splash_ev);
+        }
+    }
+}
+
 #[cfg(test)]
 mod brain_tests {
     use super::*;
@@ -724,5 +848,49 @@ mod brain_tests {
         // Not blank, and the transparent background survived.
         assert!(px.chunks_exact(4).any(|p| p[3] == 255));
         assert!(px.chunks_exact(4).any(|p| p[3] == 0));
+    }
+}
+
+/// The "Updating to <version>" window's frames, drawn the way the window draws them but into memory: nothing is
+/// shown on any screen.
+#[cfg(test)]
+mod updating_window_frames {
+    use super::*;
+    use crate::updating_window::{footer, headline, Phase};
+
+    fn frame(version: &str, p: Phase) -> Vec<u8> {
+        let mut dib = vec![0u8; (SPLASH_W * SPLASH_H * 4) as usize];
+        let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
+        let lines: Vec<String> = footer(version, p).iter().map(|l| crate::splash_info::ellipsize(l, max_chars)).collect();
+        composite(&mut dib, 220, &[], None, &lines, Some(headline(p)));
+        dib
+    }
+
+    #[test]
+    fn each_phase_draws_the_card_and_says_something_different() {
+        let updating = frame("0.60.35", Phase::Updating);
+        // A card, not one flat colour: the logo and the text are on it.
+        assert!(updating.chunks_exact(4).any(|p| p[..3] != updating[..3]));
+        assert_ne!(updating, frame("0.60.35", Phase::Failed));
+        assert_ne!(updating, frame("0.60.35", Phase::Slow));
+        // The version it names is part of the picture.
+        assert_ne!(updating, frame("0.60.36", Phase::Updating));
+    }
+
+    /// `AGENTMUX_UPDATING_DUMP_DIR=<folder> cargo test -p agentmux-launcher dump_updating_window_pngs -- --ignored`:
+    /// each phase's frame as a PNG, for a pull request's pictures. Shows no window.
+    #[test]
+    #[ignore]
+    fn dump_updating_window_pngs() {
+        let dir = std::env::var("AGENTMUX_UPDATING_DUMP_DIR").expect("AGENTMUX_UPDATING_DUMP_DIR");
+        for (name, p) in [("updating", Phase::Updating), ("slow", Phase::Slow), ("failed", Phase::Failed)] {
+            let bgra = frame("0.60.35", p);
+            let rgba: Vec<u8> = bgra.chunks_exact(4).flat_map(|px| [px[2], px[1], px[0], px[3]]).collect();
+            let file = std::fs::File::create(std::path::Path::new(&dir).join(format!("updating-window-{name}.png"))).unwrap();
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), SPLASH_W as u32, SPLASH_H as u32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&rgba).unwrap();
+        }
     }
 }
