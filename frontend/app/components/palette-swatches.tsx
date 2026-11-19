@@ -37,6 +37,9 @@ export interface PaletteSwatchesProps {
      *  alone in the first column and the colours are two rows of 7 beside it (8 columns). A context that must narrow
      *  the grid with its pane's width leaves this out and sets `--palette-cols` in its own styles. */
     columns?: number;
+    /** What the swatch of a slot shows when picking it paints a fill with a bar (a window tab): that fill and bar, in the
+     *  theme now, the same call the surface itself draws from. Without it a swatch is the slot's identity colour. */
+    sample?: (slot: PaletteSlot) => { fill: string; bar: string };
     class?: string;
 }
 
@@ -44,10 +47,17 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
     const chosen = () => (p.value === null || p.value === undefined ? undefined : slotOf(p.value)?.id);
     // The check mark's colour. On a hue it is the theme's background; that is black on the black swatch of a dark
     // theme and white on the white swatch of a light one, so a neutral names its own: the other neutral's colour.
-    const swatchStyle = (slot: PaletteSlot): JSX.CSSProperties => ({
-        "background-color": slotSwatchColor(slot, isLightThemeActive()),
-        ...(slot.neutral && { "--palette-swatch-ink": PALETTE.find((s) => s.neutral && s.neutral !== slot.neutral)?.hex }),
-    });
+    const swatchStyle = (slot: PaletteSlot): JSX.CSSProperties => {
+        if (p.sample) {
+            const { fill, bar } = p.sample(slot);
+            // On the fill the mark takes the theme's text, as the tab's label does.
+            return { "--swatch-fill": fill, "--swatch-bar": bar, "--palette-swatch-ink": "var(--main-text-color)" } as JSX.CSSProperties;
+        }
+        return {
+            "background-color": slotSwatchColor(slot, isLightThemeActive()),
+            ...(slot.neutral && { "--palette-swatch-ink": PALETTE.find((s) => s.neutral && s.neutral !== slot.neutral)?.hex }),
+        };
+    };
     return (
         <div
             class={clsx("palette-swatches", p.noneLabel && "palette-swatches--with-none", p.class)}
@@ -73,7 +83,7 @@ export function PaletteSwatches(p: PaletteSwatchesProps): JSX.Element {
                     {(slot) => (
                         <Tooltip content={slot.name} placement="top" divClassName="palette-swatch-anchor">
                             <Button
-                                class="palette-swatch"
+                                class={clsx("palette-swatch", p.sample && "palette-swatch--sample")}
                                 style={swatchStyle(slot)}
                                 pressed={chosen() === slot.id}
                                 aria-label={slot.name}

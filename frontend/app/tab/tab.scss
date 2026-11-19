@@ -81,10 +81,14 @@
         }
     }
 
+    // An uncoloured tab's selected surface. A coloured tab's fill is its own (below), so no state rule here
+    // has to be outranked by it.
+    &.active:not(.tab-colored) .tab-inner {
+        background: var(--block-bg-color);
+    }
+
     &.active {
         .tab-inner {
-            background: var(--block-bg-color);
-
             &::after {
                 content: "";
                 position: absolute;
@@ -142,20 +146,14 @@
         transition: none;
     }
 
-    // Custom tab color — the pane-tab pill tones for the picked hue (tab.tsx
-    // sets --tab-bg, --tab-bg-active and --tab-underline). Quiet when
-    // inactive, a step stronger when selected; the label keeps the theme's
-    // text colour, so it reads in every theme.
+    // Custom tab color: the fills and the bar come from theme/paint.ts (tab.tsx sets --tab-bg, --tab-bg-hover,
+    // --tab-bg-active, --tab-bg-active-hover and --tab-underline). Quiet when inactive, a step stronger when
+    // selected; every state is a colour of its own, with no filter over it. The label keeps the theme's text
+    // colour, and paint.ts keeps each fill readable under it.
     &.tab-colored {
-        /* stylelint-disable declaration-no-important --
-           User-picked tab colour must beat the hover/active/dragging
-           state backgrounds declared further down; without
-           `!important` the later-declared hover selectors win and
-           the custom colour vanishes. */
         .tab-inner {
-            background: var(--tab-bg) !important;
+            background: var(--tab-bg);
         }
-        /* stylelint-enable declaration-no-important */
         .name {
             color: var(--secondary-text-color);
         }
@@ -163,7 +161,7 @@
 
     &.tab-colored.active {
         .tab-inner {
-            background: var(--tab-bg-active) !important; /* stylelint-disable-line declaration-no-important */
+            background: var(--tab-bg-active);
         }
         .name {
             color: var(--main-text-color);
@@ -179,18 +177,23 @@ body:not(.nohover) .tab.dragging {
     // (mousing around erased bars near the cursor). Per
     // SPEC_TAB_GAPS_AND_NAMING_2026_04_25.
 
-    .tab-inner {
-        background: rgb(from var(--main-text-color) r g b / 0.1);
-    }
     .close {
         visibility: visible;
     }
 }
 
+// The hover tint is an uncoloured tab's: a coloured tab has its own hover fill (below).
+body:not(.nohover) .tab:not(.tab-colored):hover,
+body:not(.nohover) .tab:not(.tab-colored).dragging {
+    .tab-inner {
+        background: rgb(from var(--main-text-color) r g b / 0.1);
+    }
+}
+
 // Active tab hover — keep the folder-surface bg so the active tab stays
 // continuous with the content below (the top accent carries the active
-// state; the colored-tab variant adds its own brightness on hover).
-body:not(.nohover) .tab.active:hover {
+// state; a coloured tab's hover is its own selected fill, below).
+body:not(.nohover) .tab.active:not(.tab-colored):hover {
     .tab-inner {
         background: var(--block-bg-color);
     }
@@ -220,8 +223,8 @@ body:not(.nohover) .tab.active:hover {
     animation: am-fade-in var(--duration-fast) forwards;
 }
 
-// Colored tab — the underline is the hue at full strength; hover lifts the
-// resting tone slightly and never swaps it for the generic tint.
+// Colored tab — the bar is the picked colour's own tone and never changes with the state; hover is the
+// resting fill one step on (--tab-bg-hover, --tab-bg-active-hover), never the generic tint and never a filter.
 .tab.tab-colored.active {
     .tab-inner::after {
         background: var(--tab-underline);
@@ -231,17 +234,14 @@ body:not(.nohover) .tab.active:hover {
 body:not(.nohover) .tab.tab-colored:hover,
 body:not(.nohover) .tab.tab-colored.dragging {
     .tab-inner {
-        /* Same override as the base `.tab-colored` rule above — user
-           tab colour must beat the hover background. */
-        background: var(--tab-bg) !important; /* stylelint-disable-line declaration-no-important */
-        filter: brightness(1.12);
+        background: var(--tab-bg-hover);
     }
 }
 
 body:not(.nohover) .tab.tab-colored.active:hover,
 body:not(.nohover) .tab.tab-colored.active.dragging {
     .tab-inner {
-        background: var(--tab-bg-active) !important; /* stylelint-disable-line declaration-no-important */
+        background: var(--tab-bg-active-hover);
     }
 }
 
