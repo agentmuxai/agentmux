@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 
 use super::mint::{self, clean_reason, MintCtx, MintError, Minted, Runner};
-use super::policy::{Grant, Policy};
+use super::policy::{Grant, Hold, Policy};
 use super::sessions::{SessionError, Sessions, Source};
 
 /// A refusal: the status it travels with, its code, and the sentence the agent is shown (spec §10).
@@ -61,6 +61,19 @@ fn list(names: &[&str]) -> String {
     }
 }
 
+/// The sentence for a grant that is new or wider than what was allowed (`record`).
+fn held_refusal(grant: &Grant, hold: Hold) -> Refusal {
+    let (code, what) = match hold {
+        Hold::Awaiting => ("GRANT_HELD", "was added or widened in the grants file and waits for a native agent or a person to allow it"),
+        Hold::Refused => ("GRANT_REFUSED", "was added or widened in the grants file and was refused"),
+    };
+    Refusal::new(
+        StatusCode::FORBIDDEN,
+        code,
+        format!("The grant '{}' {what}. A native agent can read the change with Identity aws_grants and answer it with aws_grant, saying why.", grant.name),
+    )
+}
+
 /// The checks of spec §5 in order, then the cache or the mint.
 pub async fn credentials_for<R: Runner>(
     policy: Result<Option<Arc<Policy>>, String>,
@@ -105,6 +118,9 @@ pub async fn credentials_for<R: Runner>(
         let why = grant.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default();
         return Err(Refusal::new(StatusCode::FORBIDDEN, "GRANT_DISABLED", format!("The grant '{}' is switched off on this machine.{why}", grant.name)));
     }
+    if let Some(hold) = grant.hold {
+        return Err(held_refusal(grant, hold));
+    }
     if !grant.open_to(ask.agent_slug) {
         let open: Vec<&str> = grant.agents.iter().map(String::as_str).collect();
         return Err(Refusal::new(
@@ -140,26 +156,31 @@ pub async fn credentials_for<R: Runner>(
                 grant.name
             ),
         )),
-        Err(SessionError::Mint(e)) => Err(match e {
-            MintError::CliMissing(why) => Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_CLI_MISSING", format!("{why}.")),
-            MintError::LoginNeeded(said) => {
-                let profile = match &grant.mint {
-                    super::policy::Mint::HostProfile { profile } => profile.clone(),
-                    super::policy::Mint::Command { .. } => grant.name.clone(),
-                };
-                Refusal::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "AWS_HOST_LOGIN_NEEDED",
-                    format!("The host's AWS login for '{profile}' has lapsed. A person runs `aws sso login --profile {profile}` on this computer. ({said})"),
-                )
-            }
-            MintError::Refused(said) => Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_HOST_REFUSED", format!("The host's AWS refused: {said}")),
-            MintError::TookTooLong => Refusal::new(
+        Err(SessionError::Mint(e)) => Err(mint_refusal(e, grant)),
+    }
+}
+
+/// What a failed mint is told to the agent as.
+fn mint_refusal(e: MintError, grant: &Grant) -> Refusal {
+    match e {
+        MintError::CliMissing(why) => Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_CLI_MISSING", format!("{why}.")),
+        MintError::LoginNeeded(said) => {
+            let profile = match &grant.mint {
+                super::policy::Mint::HostProfile { profile } => profile.clone(),
+                super::policy::Mint::Command { .. } => grant.name.clone(),
+            };
+            Refusal::new(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "AWS_TOOK_TOO_LONG",
-                format!("AWS credentials took too long ({} s). Try again in a minute.", mint::RECIPE_TIMEOUT.as_secs()),
-            ),
-        }),
+                "AWS_HOST_LOGIN_NEEDED",
+                format!("The host's AWS login for '{profile}' has lapsed. A person runs `aws sso login --profile {profile}` on this computer. ({said})"),
+            )
+        }
+        MintError::Refused(said) => Refusal::new(StatusCode::SERVICE_UNAVAILABLE, "AWS_HOST_REFUSED", format!("The host's AWS refused: {said}")),
+        MintError::TookTooLong => Refusal::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "AWS_TOOK_TOO_LONG",
+            format!("AWS credentials took too long ({} s). Try again in a minute.", mint::RECIPE_TIMEOUT.as_secs()),
+        ),
     }
 }
 

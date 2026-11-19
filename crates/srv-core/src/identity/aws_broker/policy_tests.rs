@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::identity::aws_broker::record;
 
 const GOOD: &str = r#"{
   "version": 1,
@@ -156,4 +157,71 @@ fn the_override_variable_points_at_another_file() {
     std::env::set_var(FILE_ENV, "/elsewhere/grants.json");
     assert_eq!(file_path(), Some(PathBuf::from("/elsewhere/grants.json")));
     std::env::remove_var(FILE_ENV);
+}
+
+/// A grants file with the one grant `deploy` for the agent `jcont`; `extra` is more grants, `, "name": {...}`.
+fn one_deploy(extra: &str) -> String {
+    format!(
+        r#"{{ "version": 1, "grants": {{ "read": {{ "tier": "read", "mint": {{ "kind": "host_profile", "profile": "p" }}, "agents": ["*"] }},
+        "deploy": {{ "tier": "write", "mint": {{ "kind": "command", "argv": ["/opt/escalate"] }}, "agents": ["jcont"] }}{extra} }} }}"#
+    )
+}
+
+const NEW_ADMIN: &str = r#", "admin": { "tier": "write", "mint": { "kind": "command", "argv": ["/opt/admin"] }, "agents": ["pulse"] }"#;
+
+#[test]
+fn a_write_grant_added_to_the_file_is_held_until_it_is_allowed_and_a_removed_one_stops_at_once() {
+    let _turn = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("aws-grants.json");
+    let record_path = record::path_beside(&path);
+    std::env::set_var(FILE_ENV, &path);
+
+    // The first read of a file there is no record of: it is the baseline, and everything in it is in force.
+    std::fs::write(&path, one_deploy("")).unwrap();
+    let p = current().unwrap().unwrap();
+    assert!(p.grants.values().all(|g| g.hold.is_none()));
+    let baseline = std::fs::read_to_string(&record_path).unwrap();
+    assert!(baseline.contains("baseline"), "{baseline}");
+
+    // The same file read again, and a stamp that changes with the same text: nothing is recorded.
+    assert!(current().unwrap().unwrap().grants.values().all(|g| g.hold.is_none()));
+    assert_eq!(std::fs::read_to_string(&record_path).unwrap(), baseline);
+
+    // A write grant added to the file: recorded, and not open to the agent it names.
+    std::fs::write(&path, one_deploy(NEW_ADMIN)).unwrap();
+    let p = current().unwrap().unwrap();
+    assert_eq!(p.grants["admin"].hold, Some(Hold::Awaiting));
+    assert_eq!(p.grants["deploy"].hold, None);
+    assert!(!p.open_to("pulse").contains(&"admin"), "held: not offered");
+    let listing = view().unwrap();
+    let admin = listing.grants.iter().find(|g| g.name == "admin").unwrap();
+    assert_eq!((admin.state, admin.tier.as_str()), ("held", "write"));
+    assert_eq!(listing.changes[0].kind, "added");
+
+    // Allowed with a reason: in force from the next read, recorded under the answerer's name.
+    let change = admin.change.clone();
+    let event = decide(&record::Decision { grant: "admin", change: &change, allow: true, by: "loap", reason: "the test says so" }).unwrap();
+    assert_eq!(event.by.as_deref(), Some("loap"));
+    assert_eq!(current().unwrap().unwrap().grants["admin"].hold, None);
+    let listing = view().unwrap();
+    let admin = listing.grants.iter().find(|g| g.name == "admin").unwrap();
+    assert_eq!((admin.state, admin.allowed_by.as_deref(), admin.allowed_reason.as_deref()), ("honoured", Some("loap"), Some("the test says so")));
+
+    // A grant taken out of the file stops working at once.
+    std::fs::write(&path, one_deploy("")).unwrap();
+    assert!(!current().unwrap().unwrap().grants.contains_key("admin"));
+    std::env::remove_var(FILE_ENV);
+}
+
+#[test]
+fn a_record_that_cannot_be_read_holds_every_grant_and_a_new_file_is_never_held_on_a_cleared_record() {
+    let _turn = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("aws-grants.json");
+    std::fs::write(&path, one_deploy("")).unwrap();
+    // A record that is there and does not parse: every grant is held, rather than none.
+    std::fs::write(record::path_beside(&path), "{ damaged").unwrap();
+    let p = load(&path).unwrap().unwrap();
+    assert!(p.grants.values().all(|g| g.hold == Some(Hold::Awaiting)), "{:?}", p.grants.values().map(|g| g.hold).collect::<Vec<_>>());
 }

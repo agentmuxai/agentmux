@@ -117,10 +117,10 @@ pub(crate) async fn serve<R: Runner>(
 }
 
 /// Whether a refusal is one the person can fix on this computer, so the agent's pane says so: the host's AWS login
-/// lapsed or was refused, or the grant is switched off. A wrong profile name, a missing reason, a cap or a slow mint is
+/// lapsed or was refused, the grant is switched off, or a new or wider grant waits to be allowed. A wrong profile name, a missing reason, a cap or a slow mint is
 /// the agent's own to correct or a bad moment.
 fn the_persons_to_fix(refusal: &Refusal) -> bool {
-    matches!(refusal.code, "AWS_HOST_LOGIN_NEEDED" | "AWS_HOST_REFUSED" | "GRANT_DISABLED")
+    matches!(refusal.code, "AWS_HOST_LOGIN_NEEDED" | "AWS_HOST_REFUSED" | "GRANT_DISABLED" | "GRANT_HELD")
 }
 
 /// What the request's profile is called in the audit row, the log and the refusal. The string is the container's to
