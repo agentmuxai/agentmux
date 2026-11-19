@@ -5,6 +5,7 @@
 import { isBlank } from "@/util/util";
 import { Emitter } from "@/util/emitter";
 import { sendRawRpcMessage } from "./ws";
+import { noteListenerTime } from "./ws-slow-handler";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
 import { isNoPayloadMuxEvent, type MuxEventPayloads } from "./mps-events.generated";
@@ -13,6 +14,8 @@ import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 type MuxEventSubject = {
     handler: (event: MuxEvent) => void;
     scope?: string;
+    /** The caller's own function when `handler` wraps it (onMuxEvent): what a slow-listener line quotes. */
+    source?: unknown;
 };
 
 type MuxEventSubjectContainer = MuxEventSubject & {
@@ -107,7 +110,12 @@ function muxEventSubscribe(...subscriptions: MuxEventSubscription[]): () => void
             subjects = [];
             muxEventSubjects.set(subscription.eventType, subjects);
         }
-        const subcont: MuxEventSubjectContainer = { id, handler: subscription.handler, scope: subscription.scope };
+        const subcont: MuxEventSubjectContainer = {
+            id,
+            handler: subscription.handler,
+            scope: subscription.scope,
+            source: subscription.source ?? subscription.handler,
+        };
         subjects.push(subcont);
         unsubs.push({ id, eventType: subscription.eventType });
         eventTypeSet.add(subscription.eventType);
@@ -184,17 +192,24 @@ function getFileSubject(zoneId: string, fileName: string): SubjectWithRef<WSFile
 // first; sysinfo DOM updates land in their own subsequent render pass.
 const DEFERRED_EVENTS = new Set(["sysinfo", "blockstats"]);
 
+/** Runs one subscriber and tells the slow-message log how long it took (ws-slow-handler.ts names the slowest). */
+function runSubscriber(scont: MuxEventSubjectContainer, event: MuxEvent) {
+    const start = performance.now();
+    scont.handler(event);
+    noteListenerTime(performance.now() - start, event.event, scont.scope, scont.source);
+}
+
 function dispatchToSubjects(event: MuxEvent) {
     const subjects = muxEventSubjects.get(event.event);
     if (subjects == null) return;
     for (const scont of subjects) {
         if (isBlank(scont.scope)) {
-            scont.handler(event);
+            runSubscriber(scont, event);
             continue;
         }
         if (event.scopes == null) continue;
         if (event.scopes.includes(scont.scope)) {
-            scont.handler(event);
+            runSubscriber(scont, event);
         }
     }
 }
@@ -219,6 +234,7 @@ function onMuxEvent<K extends keyof MuxEventPayloads>(
     return muxEventSubscribe({
         eventType,
         scope,
+        source: handler,
         handler: (event) => {
             if (event.data != null) handler(event.data as MuxEventPayloads[K], event);
             else if (isNoPayloadMuxEvent(eventType)) handler(null as MuxEventPayloads[K], event);
