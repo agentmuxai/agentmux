@@ -1,6 +1,6 @@
 # Spec: Connectors is one list, one connector per line, details on click, open at startup
 
-**Status:** draft, waiting for the operator's approval (task #48119; the build is #48120, which starts after it).
+**Status:** active — approved by the operator 2026-11-19; the list of cards, the reflow, details in place and the no-success-step flash (§4.1 to §4.7, §4.9) shipped in PR #7812 (task #48120); §4.8 (open at startup) is not started. Verified 2026-11-19.
 **Date:** 2026-11-19
 **Author:** Naki-2@narko
 **Verified against:** `agentmux` `main` @ `933c41a9fa` (code read 2026-11-19) and the vendor pages in §5, fetched 2026-11-19.
