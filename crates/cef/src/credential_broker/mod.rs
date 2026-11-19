@@ -191,16 +191,9 @@ pub(crate) async fn answer_approved(state: &Arc<AppState>, resolved: &approval::
             }
         }
         Err(e) => {
-            // The person already said yes; the secret just could not be read (credential deleted between approval and
-            // Fill, transient keychain/backend failure, srv restart). Cancelling here would render the bare 401 with no
-            // way to type credentials — strictly worse than pre-feature behaviour, and a direct violation of this
-            // feature's "can only make auth more automatic, never break the baseline" guarantee (codex P2 → reagent P1
-            // on PR #2824).
-            //
-            // So leave every callback PARKED in `browser_pane::auth` and emit the ordinary `browser-pane-auth-required`
-            // prompt for each, one per originating pane — coalesced requests can come from different panes. The manual
-            // prompt then resolves the very same parked callbacks, exactly as it does when no stored credential exists
-            // at all.
+            // The secret could not be read after the yes (deleted meanwhile, keychain or srv failure). Cancelling would
+            // leave a bare 401 with no way to type credentials, worse than before this feature (#2824). So keep every
+            // callback parked and show the ordinary prompt once per originating pane; it resolves the same callbacks.
             tracing::warn!(
                 "[credential-broker] Fill failed: {e} — falling {} parked auth request(s) through to the manual prompt",
                 resolved.auth_requests.len(),
