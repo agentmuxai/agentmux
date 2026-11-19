@@ -784,3 +784,89 @@ async fn a_turn_on_an_api_key_runs_on_a_token_of_its_own_or_is_refused_with_the_
     assert_eq!(token::grant_for(&gate_token), None, "and the token the spawn made for it ends: nothing holds it");
     token::revoke("kt-def", KEY_ROUTE_ID);
 }
+
+// ---- The turn-end context hint (SPEC_AGENT_SELF_COMPACTION §3.5): a container agent gets what a host agent gets,
+// ---- in the one wording that works where it runs.
+
+/// An assistant frame reporting a main-agent call that left `tokens` in context.
+fn call_of(id: &str, tokens: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":{}}},"content":[{{"type":"text","text":"pong"}}]}}}}"#,
+        tokens - 1002
+    )
+}
+
+/// What the agent's next message carries from srv's held notes.
+fn next_message(block: &str) -> String {
+    let (message, held) = crate::backend::reactive::held_notes::attach(block, "next");
+    held.delivered();
+    message.to_string()
+}
+
+/// One more turn of `cli` on `ctrl`, scripted as `frames`, run to its end.
+async fn another_turn(fake: &FakeDocker, ctrl: &Arc<SubprocessController>, cli: Vec<String>, frames: &[&str], code: i64) {
+    fake.script(vec![Turn::says(frames, code)]);
+    ctrl.spawn_container_turn(fake.manager(), unique("c"), cli, config("go")).expect("the turn is accepted");
+    wait_done(ctrl).await;
+}
+
+#[tokio::test]
+async fn a_container_claude_turn_that_ends_large_holds_the_compact_hint_once() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &big, RESULT_OK], 0).await;
+    let message = next_message(&block);
+    assert!(message.contains("[AgentMux] Your context is 500K") && message.contains("compact now"), "{message}");
+    assert!(!message.contains("Agents fresh"), "a container can't start fresh: {message}");
+
+    let again = call_of("m2", 510_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &again, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next", "not again while the context stays high");
+
+    let small = call_of("m3", 60_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &small, RESULT_OK], 0).await;
+    let crossed = call_of("m4", 450_000);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &crossed, RESULT_OK], 0).await;
+    assert!(next_message(&block).contains("compact now"), "again after it dropped and crossed");
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_container_turn_that_finished_a_task_is_never_told_to_start_fresh() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let mid = call_of("m1", 200_000);
+    crate::backend::context_reading::note_task_boundary(&block);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &mid, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next", "200K and a finished task: the host's fresh note would be refused here");
+    assert!(!crate::backend::context_reading::get(&block).unwrap().task_boundary, "the boundary ends with the turn");
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_failed_container_turn_gives_no_hint_and_clears_the_task_boundary() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    crate::backend::context_reading::note_task_boundary(&block);
+    another_turn(&fake, &ctrl, cli(), &[INIT, &big], 1).await;
+    assert_eq!(next_message(&block), "next");
+    assert!(!crate::backend::context_reading::get(&block).unwrap().task_boundary);
+    crate::backend::context_reading::forget(&block);
+}
+
+#[tokio::test]
+async fn a_container_codex_turn_gets_no_hint_since_it_cannot_compact_there() {
+    let fake = FakeDocker::start().await;
+    let block = unique("blk");
+    let ctrl = controller(&block, None);
+    let big = call_of("m1", 500_000);
+    let codex = vec!["codex".to_string(), "exec".to_string()];
+    another_turn(&fake, &ctrl, codex, &[INIT, &big, RESULT_OK], 0).await;
+    assert_eq!(next_message(&block), "next");
+    crate::backend::context_reading::forget(&block);
+}
