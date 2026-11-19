@@ -23,6 +23,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use tokio_util::sync::CancellationToken;
 
 use super::lease_token::{parse_public_keys, LeaseGate};
 use super::{start_from, Params, ROUTE};
@@ -37,10 +38,14 @@ const WORKSPACE_ENV: &str = "AGENTMUX_BROWSER_HOST_WORKSPACE";
 /// The header the lease token arrives in.
 pub const TOKEN_HEADER: &str = "x-agentmux-lease";
 
-/// What the server holds: the gate, and whether a connection is open.
+/// How long an open pane gets to end after the server is told to stop.
+const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// What the server holds: the gate, whether a connection is open, and the signal that ends the server and its pane.
 struct Host {
     gate: LeaseGate,
     open: AtomicBool,
+    stop: CancellationToken,
 }
 
 /// Was srv started as the browser host?
@@ -76,7 +81,17 @@ fn listen_from(args: &[String]) -> Result<SocketAddr, String> {
 fn host_from(env: impl Fn(&str) -> Option<String>) -> Result<Host, String> {
     let need = |name: &str| env(name).filter(|v| !v.trim().is_empty()).ok_or(format!("{name} is not set"));
     let keys = parse_public_keys(&need(KEYS_ENV)?)?;
-    Ok(Host { gate: LeaseGate::new(keys, need(LEASE_ENV)?, need(WORKSPACE_ENV)?), open: AtomicBool::new(false) })
+    Ok(Host { gate: LeaseGate::new(keys, need(LEASE_ENV)?, need(WORKSPACE_ENV)?), open: AtomicBool::new(false), stop: CancellationToken::new() })
+}
+
+/// A folder only this process can open, named at random: the browser's profile lives under it, and it is removed at exit.
+fn private_dir() -> Result<std::path::PathBuf, String> {
+    let dir = std::env::temp_dir().join(format!("agentmux-browser-{}", uuid::Uuid::new_v4()));
+    let mut make = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut make, 0o700);
+    make.create(&dir).map_err(|e| format!("cannot make the browser's profile folder: {e}"))?;
+    Ok(dir)
 }
 
 fn router(host: Arc<Host>) -> Router {
@@ -86,9 +101,14 @@ fn router(host: Arc<Host>) -> Router {
 async fn run(args: &[String]) -> Result<(), String> {
     let listen = listen_from(args)?;
     let host = Arc::new(host_from(|n| std::env::var(n).ok())?);
-    let profile = std::env::temp_dir().join(format!("agentmux-browser-{}", std::process::id()));
-    std::fs::create_dir_all(&profile).map_err(|e| format!("cannot make the browser's profile folder: {e}"))?;
-    super::chromium::use_profile_root(profile);
+    let profile = private_dir()?;
+    super::chromium::use_profile_root(profile.clone());
+    let served = serve(listen, host).await;
+    let _ = std::fs::remove_dir_all(&profile);
+    served
+}
+
+async fn serve(listen: SocketAddr, host: Arc<Host>) -> Result<(), String> {
     super::address_policy::note_ports_from_env();
     let listener = tokio::net::TcpListener::bind(listen).await.map_err(|e| format!("cannot listen on {listen}: {e}"))?;
     if let Ok(addr) = listener.local_addr() {
@@ -96,7 +116,20 @@ async fn run(args: &[String]) -> Result<(), String> {
         super::address_policy::note_own_port(addr.port());
     }
     eprintln!("agentmux-srv {FLAG}: listening on {listen}");
-    axum::serve(listener, router(host)).with_graceful_shutdown(shutdown()).await.map_err(|e| e.to_string())
+    let stop = host.stop.clone();
+    tokio::spawn({
+        let stop = stop.clone();
+        async move {
+            shutdown().await;
+            stop.cancel();
+        }
+    });
+    let served = axum::serve(listener, router(host)).with_graceful_shutdown(stop.clone().cancelled_owned());
+    // An open pane ends with the stop signal; the grace bounds the wait for one that does not.
+    tokio::select! {
+        r = served => r.map_err(|e| e.to_string()),
+        _ = async { stop.cancelled().await; tokio::time::sleep(STOP_GRACE).await } => Ok(()),
+    }
 }
 
 /// SIGTERM (a task being stopped) and SIGINT end the server; as a container's first process it has no default for them.
@@ -111,10 +144,6 @@ async fn shutdown() {
     }
     #[cfg(not(unix))]
     std::future::pending::<()>().await;
-}
-
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Releases the one open connection when the pane ends, however it ends.
@@ -148,13 +177,14 @@ async fn connect(
         return (StatusCode::CONFLICT, "this browser is already open").into_response();
     }
     let open = Open(host.clone());
-    if let Err(why) = host.gate.accept(token, now()) {
+    if let Err(why) = host.gate.accept(token, agentmux_common::time::now_secs_u64()) {
         tracing::warn!(?why, "browser host: a lease token was refused");
         return (StatusCode::FORBIDDEN, "the lease token was refused").into_response();
     }
+    let stop = host.stop.clone();
     super::upgrade(ws, start, async move {
         let _open = open;
-        std::future::pending::<()>().await
+        stop.cancelled().await
     })
 }
 
@@ -193,6 +223,35 @@ mod tests {
         assert_eq!(get(ROUTE, Some("lease1")).await, StatusCode::UPGRADE_REQUIRED, "a plain request is told to upgrade");
         for other in ["/", "/ws", "/agentmux/streamed-browser/x", "/api/anything"] {
             assert_eq!(get(other, None).await, StatusCode::NOT_FOUND, "{other}");
+        }
+    }
+
+    fn test_host() -> Arc<Host> {
+        let keys = r#"{"k1":"MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw="}"#;
+        Arc::new(host_from(|n| Some(if n == KEYS_ENV { keys } else { "x1234567890a" }.to_string())).unwrap())
+    }
+
+    #[tokio::test]
+    async fn it_ends_when_it_is_told_to_stop() {
+        let host = test_host();
+        let stop = host.stop.clone();
+        let served = tokio::spawn(serve("127.0.0.1:0".parse().unwrap(), host));
+        stop.cancel();
+        let ended = tokio::time::timeout(STOP_GRACE + std::time::Duration::from_secs(2), served).await;
+        assert!(matches!(ended, Ok(Ok(Ok(())))), "{ended:?}");
+    }
+
+    #[test]
+    fn the_profile_folder_is_new_each_time_and_private() {
+        let (a, b) = (private_dir().unwrap(), private_dir().unwrap());
+        assert_ne!(a, b);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        for d in [a, b] {
+            std::fs::remove_dir_all(d).unwrap();
         }
     }
 
