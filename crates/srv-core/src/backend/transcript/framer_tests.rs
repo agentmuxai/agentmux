@@ -53,13 +53,13 @@ fn a_pass_frames_what_is_old_enough_and_far_enough_from_the_end() {
     // 40 parts, 8 MiB (128 parts) margin: nothing in a 2.5 MiB file is far enough from its end.
     assert_eq!(report.frames, 0);
     assert!(report.done);
-    assert_eq!(user_version(&fs), 3, "stamped before looking for frames");
+    assert_eq!(user_version(&fs), 4, "stamped before looking for frames, with the deltas on");
 
     let more = transcript(&fs, "agent:c:current", 200 * P);
     let report = pass_with(&fs, &nobody_blocks, PASS_FRAMES, &mut skip, agentmux_common::time::now_ms()).unwrap();
     // 200 parts, 128 within the margin: 72 parts before it, 4 whole frames.
     assert_eq!(report.frames, 4);
-    assert_eq!(report.codec2, 4, "delta lines: codec 2");
+    assert_eq!(report.codec2, 4, "delta lines without a message id: codec 2, though codec 3 was asked for");
     assert!(report.stored_bytes * 5 < report.raw_bytes, "{} of {}", report.stored_bytes, report.raw_bytes);
     assert!(report.done);
     for (zone, d) in [("agent:a:current", &data), ("agent:b:current", &short), ("agent:c:current", &more)] {
@@ -70,11 +70,10 @@ fn a_pass_frames_what_is_old_enough_and_far_enough_from_the_end() {
     assert_eq!(again.frames, 0);
 }
 
-/// This build reads codec 3 but does not write it yet: a build rolled back one release must still read what the
-/// framer wrote and open the store, so a transcript of current CLI lines (with an `api_message_id`) is framed
-/// with codec 1, and the store stays at version 3.
+/// Current CLI lines carry an `api_message_id`: they are framed with codec 3 (deltas stored as uuid and length) and
+/// the store is stamped 4, so a build that reads only codecs 1 and 2 refuses it instead of reading a frame as damage.
 #[test]
-fn a_pass_does_not_write_codec_three_or_stamp_four_yet() {
+fn a_pass_writes_codec_three_for_current_cli_lines_and_stamps_four() {
     let (_dir, fs) = open();
     let mut data = Vec::new();
     for n in 0..(210 * P as u64 / 300) {
@@ -87,9 +86,12 @@ fn a_pass_does_not_write_codec_three_or_stamp_four_yet() {
     let mut skip = HashSet::new();
     let report = pass_with(&fs, &nobody_blocks, PASS_FRAMES, &mut skip, agentmux_common::time::now_ms()).unwrap();
     assert!(report.frames > 0, "something was framed: {report:?}");
-    assert_eq!(report.codec2, 0, "no frame took a line that carries a message id");
-    assert_eq!(user_version(&fs), 3, "and nothing stamped 4");
-    assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+    assert_eq!(report.codec2, report.frames, "every frame took the lines that carry a message id: {report:?}");
+    assert!(report.stored_bytes * 4 < report.raw_bytes, "the saving the older codec left on the table: {} of {}", report.stored_bytes, report.raw_bytes);
+    assert_eq!(user_version(&fs), 4, "stamped 4 before the first frame");
+    assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data, "and it reads back byte for byte");
+    let stored: i64 = fs.lock_conn().query_row("SELECT COUNT(*) FROM db_file_frame WHERE codec = 3", [], |r| r.get(0)).unwrap();
+    assert_eq!(stored, report.frames as i64, "the frames are codec 3");
 }
 
 #[test]
@@ -157,8 +159,10 @@ fn a_part_that_cant_be_framed_is_skipped_once() {
 
 #[test]
 fn a_readers_file_counts_only_for_its_own_process() {
-    let file = serde_json::json!({"pid": 7, "started_s": 1000, "version": "x", "codecs": [1, 2]}).to_string();
+    let file = serde_json::json!({"pid": 7, "started_s": 1000, "version": "x", "codecs": [1, 2, 3]}).to_string();
     assert!(reads_frames(file.as_bytes(), 1000));
+    let codec_one_two = serde_json::json!({"pid": 7, "started_s": 1000, "codecs": [1, 2]}).to_string();
+    assert!(!reads_frames(codec_one_two.as_bytes(), 1000), "a build that reads codecs 1 and 2 only would take a codec 3 frame for damage");
     assert!(reads_frames(file.as_bytes(), 1001), "start times are whole seconds");
     assert!(!reads_frames(file.as_bytes(), 2000), "a reused pid is another process");
     let codec1_only = serde_json::json!({"pid": 7, "started_s": 1000, "codecs": [1]}).to_string();

@@ -45,11 +45,11 @@ const MARGIN_MS: i64 = 24 * 60 * 60 * 1000;
 pub const PASS_FRAMES: usize = 64;
 /// The wait after each frame, so another srv's writes get the lock between frames.
 const FRAME_PAUSE: std::time::Duration = std::time::Duration::from_millis(40);
-/// The frame codecs this build reads, written in its readers file. It reads codec 3 (deltas with an
-/// `api_message_id`) a release before it writes it, so a build rolled back one release still opens the store.
+/// The frame codecs this build reads, written in its readers file. Codec 3 (deltas with an `api_message_id`) has been read
+/// since the release before the one that writes it, so a build rolled back one release still opens the store.
 const READS_CODECS: [i64; 3] = [CODEC_ZSTD, CODEC_DELTAS, CODEC_DELTA_API];
 /// The frame codecs the framer writes: every running srv must read all of them before it frames.
-const WRITES_CODECS: [i64; 2] = [CODEC_ZSTD, CODEC_DELTAS];
+const WRITES_CODECS: [i64; 3] = [CODEC_ZSTD, CODEC_DELTAS, CODEC_DELTA_API];
 
 static CONFIG: OnceLock<Arc<crate::backend::wconfig::ConfigState>> = OnceLock::new();
 
@@ -287,15 +287,23 @@ fn pass_into(
     }
     // Stamp first, then look again: a build that opened the store before the
     // stamp is a running process now, and one that starts after it refuses
-    // the store. This build reads codec 3 but does not write it yet (a release
-    // later it will, and stamp `GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION`
-    // first), so 3 is still all it stamps.
-    store.stamp_frames_version(crate::backend::storage::filestore::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION)?;
+    // the store. With the deltas on the framer may write codec 3, which a build
+    // that reads only codecs 1 and 2 would take for damage, so the store is
+    // stamped `GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION` (4) and such a build
+    // refuses it; with them off only codec 1 is written and 3 is enough.
+    let deltas = deltas_enabled();
+    store.stamp_frames_version(if deltas {
+        crate::backend::storage::filestore::GLOBAL_TRANSCRIPT_STORE_API_DELTAS_VERSION
+    } else {
+        crate::backend::storage::filestore::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION
+    })?;
     if let Some(who) = blocks() {
         report.waiting = Some(who);
         return Ok(());
     }
-    let codec = if deltas_enabled() { CODEC_DELTAS } else { CODEC_ZSTD };
+    // Asking for codec 3 is codec 2 that also takes the lines that carry an `api_message_id`: a frame with none of them
+    // is still codec 2, and a frame with no delta line at all is codec 1.
+    let codec = if deltas { CODEC_DELTA_API } else { CODEC_ZSTD };
     let pds = 65536i64;
     let step = FRAME_PARTS;
     for zone in store.zone_ids_with_prefix("agent:")? {
