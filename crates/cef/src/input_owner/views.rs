@@ -77,9 +77,25 @@ pub fn pane_clicked(state: &Arc<AppState>, block: &str) {
     }
 }
 
+/// A click in pane `block`'s page, reported by the page's own listener (Linux, `browser_pane/pane_click.js`)
+/// from the CDP event stream, so off the UI thread: the input owner is told by a post, and the window's page
+/// is told so it closes the menus over the pane and selects it (`browser-pane-clicked`). Linux has no hook
+/// into a page's mouse like the other platforms: CEF's `on_set_focus` fires only when a click changes which
+/// view has focus, so a click in the pane that already has focus, or in a session that gives a page no
+/// focus, never said anything (#47764). This is the click itself, once per button going down.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn pane_clicked_in_page(state: &Arc<AppState>, block: &str) {
+    crate::browser_api::last_input::note(block);
+    if let Some(window) = state.browser_pane_window_label(block) {
+        dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
+        crate::events::emit_event_to_window(state, &window, "browser-pane-clicked", &serde_json::json!({ "block_id": block }));
+    }
+}
+
 /// The user gave pane `block`'s page focus where no click hook sees it: the same
 /// as a click in it, posted. That is Linux, and Windows with Views panes, by
-/// CEF's `on_set_focus` with a user source. On Linux it also says `browser-pane-clicked`.
+/// CEF's `on_set_focus` with a user source. It is the choice of the pane (the keys go there), not a click:
+/// the click itself is `pane_clicked_in_page` on Linux, so that one click gives one `browser-pane-clicked`.
 /// Not while this adapter is focusing the pane itself, nor before the pane is
 /// live: Views focuses a new pane's browser as it is added, and CEF may report
 /// a focus set from code with the same source.
@@ -95,12 +111,6 @@ pub fn pane_chosen(state: &Arc<AppState>, block: &str) {
     }
     crate::browser_api::last_input::note(block);
     dispatch(state, &window, Event::PanePointerDown(block.to_string()), Run::Posted);
-    // Linux has no click hook either: the focus a click gave the page is all it shows of the click, and the
-    // window's page learns of a click in a pane's page by this event (it closes menus and popovers on it, and
-    // selects the pane). Windows' Views panes have the hook (`pane_clicked`), so they do not say it twice.
-    // A click in the pane that already has focus gives none: that stays as it was (#47764).
-    #[cfg(target_os = "linux")]
-    crate::events::emit_event_to_window(state, &window, "browser-pane-clicked", &serde_json::json!({ "block_id": block }));
 }
 
 thread_local! {

@@ -240,6 +240,25 @@ describe("UpdateStatus chip, once srv has staged the release by itself", () => {
         expect(screen.queryByRole("button", { name: "Restart now" })).toBeNull();
     });
 
+    it("a status srv pushes again while the panel is open redraws nothing: the same panel and rows stay in the page", async () => {
+        await openOn("waiting", { waiting_for: 1, waiting_on: on("Vmer") });
+        const panel = document.querySelector(".update-popover")!;
+        const title = screen.getByText("AgentMux 0.59.27 is ready");
+        const row = screen.getByText("Waiting for Vmer to finish its turn.");
+        const cancel = screen.getByRole("button", { name: "Cancel" });
+        const chip = screen.getByLabelText("Update: Restart to update");
+        for (let rev = 1; rev <= 5; rev++) {
+            acceptAppUpdate({ ...download("waiting", { folder: "C:/apps/x", waiting_for: 1, waiting_on: on("Vmer") }), rev: 2_000 + rev });
+            await Promise.resolve();
+        }
+        expect(screen.getByLabelText("Update: Restart to update")).toBe(chip);
+        expect(document.querySelector(".update-popover")).toBe(panel);
+        expect(panel.isConnected).toBe(true);
+        expect(screen.getByText("AgentMux 0.59.27 is ready")).toBe(title);
+        expect(screen.getByText("Waiting for Vmer to finish its turn.")).toBe(row);
+        expect(screen.getByRole("button", { name: "Cancel" })).toBe(cancel);
+    });
+
     it("a wait for two agents names both", async () => {
         await openOn("waiting", { waiting_for: 2, waiting_on: on("Vmer", "Deke") });
         expect(screen.getByText("Waiting for Vmer and Deke to finish their turn.")).toBeTruthy();

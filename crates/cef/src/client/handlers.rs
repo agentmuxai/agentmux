@@ -222,10 +222,12 @@ wrap_focus_handler! {
                 tracing::info!("[pane-focus] views focus on pane:{} in win={window}: {}", &block[..block.len().min(8)], crate::input_owner::views::focus_report(&self.state, &window));
             }
             // Linux, and Windows with Views panes, have no click hook into a
-            // pane's page (Windows' child-window panes and macOS do): focus
-            // the user gave the page (a click, Tab) is the user choosing that
-            // pane, not the page taking focus by itself (`pane_chosen` leaves
-            // out a pane being created and focus the input owner gave itself).
+            // pane's page (Windows' child-window panes and macOS do; Windows'
+            // Views panes get one from the message queue, Linux's page reports
+            // its own clicks: `pane_clicked_in_page`): focus the user gave the
+            // page (a click, Tab) is the user choosing that pane, not the page
+            // taking focus by itself (`pane_chosen` leaves out a pane being
+            // created and focus the input owner gave itself).
             #[cfg(not(target_os = "macos"))]
             if source == FocusSource::SYSTEM {
                 let block = browser.and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b));
