@@ -58,8 +58,16 @@ export function CheckNowButton(props: { blockId: string; check?: (blockIds: stri
                     "Looks at this agent again now, in case your quota is back before the reset. It starts a small turn; if it works, the agent can take messages again."
             )}
         >
-            <Button class="swarm-unavailable-check" tone="attention" density="compact" icon="rotate" busy={checking()} onClick={click}>
-                {checkNowText(checking(), error())}
+            <Button
+                class="swarm-unavailable-check"
+                tone="attention"
+                density="compact"
+                icon="rotate"
+                busy={checking()}
+                aria-label={checkNowText(checking(), error())}
+                onClick={click}
+            >
+                <span class="swarm-unavailable-check-text">{checkNowText(checking(), error())}</span>
             </Button>
         </span>
     );

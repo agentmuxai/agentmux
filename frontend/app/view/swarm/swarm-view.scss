@@ -1024,6 +1024,13 @@
     white-space: nowrap;
 }
 
+// In a narrow pane the button is its icon alone (its aria-label and the chip's tooltip carry the words), so the chip keeps its text.
+@container swarm-tree (max-width: 340px) {
+    .swarm-tree .swarm-unavailable-check .swarm-unavailable-check-text {
+        display: none;
+    }
+}
+
 // An agent another instance claims, or whose message was refused: the row's one warning (swarm-row-registration.tsx).
 .swarm-reg-badge {
     display: flex;
@@ -1314,6 +1321,7 @@
 
     // Kept for an agent that is out of quota: not sent yet, not failed.
     &--held {
+        align-items: flex-start;
         color: var(--warning-text-color);
     }
 }

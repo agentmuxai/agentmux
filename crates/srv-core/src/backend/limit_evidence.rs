@@ -18,7 +18,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use crate::agents::failure::{FailureClass, ROUTE_CREDITS_TITLE};
+use crate::agents::failure::{AgentFailure, FailureClass, ROUTE_CREDITS_TITLE};
 use crate::backend::agent_state::{failure_of_block, RUN_ACCOUNT_META_KEY};
 use crate::backend::eventbus::EventBus;
 use crate::backend::obj::Block;
@@ -49,6 +49,18 @@ pub fn note_limited_blocks(blocks: &[Block]) {
         return;
     }
     LIMITED_ACCOUNTS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).extend(accounts);
+}
+
+/// A usage limit is being stored for `block_id` (`persist_last_failure`, before the write): records the
+/// pane's account so a clean turn on it looks for the panes to clear. Reads the account from the pane,
+/// not the stored limit, which is not there yet.
+pub fn note_failure(block_id: &str, failure: &AgentFailure, store: &Store) {
+    if failure.code != FailureClass::UsageLimit || failure.title == ROUTE_CREDITS_TITLE {
+        return;
+    }
+    if let Some(account) = store.get::<Block>(block_id).ok().flatten().as_ref().and_then(account_of) {
+        LIMITED_ACCOUNTS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).insert(account);
+    }
 }
 
 fn is_noted(account: &str) -> bool {
@@ -197,5 +209,29 @@ mod tests {
         assert!(!stored(&limited), "the account's other pane is no longer limited");
         assert!(stored(&elsewhere), "another account is not spoken for");
         assert_eq!(clean_turn(&ran.oid, &mstore, &bus), 0, "the account is forgotten once nothing on it is limited");
+    }
+
+    #[test]
+    fn a_limit_stored_through_persist_last_failure_is_noted_before_it_is_written() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let account = format!("acct-{}", uuid::Uuid::new_v4());
+        let ran = pane(&store, Some(&account), None);
+        let hit = pane(&store, Some(&account), None);
+        let (mstore, bus) = (Some(store.clone()), None);
+        let failure: AgentFailure = serde_json::from_value(serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "stderrTail": "", "retryable": false})).unwrap();
+
+        // The pane hits the limit after startup: nothing was noted by hand.
+        crate::backend::blockcontroller::core::persist_last_failure(&hit.oid, Some(&failure), &mstore, &bus);
+        let stored = |b: &Block| store.get::<Block>(&b.oid).unwrap().unwrap().meta.contains_key("agent:last_failure");
+        assert!(stored(&hit));
+        // Made old enough for the grace window.
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        let mut f = store.get::<Block>(&hit.oid).unwrap().unwrap().meta["agent:last_failure"].clone();
+        f[crate::backend::blockcontroller::core::META_FAILURE_AT_MS] = serde_json::json!(1);
+        meta.insert("agent:last_failure".to_string(), f);
+        crate::backend::wcore::object_meta::update_object_meta(&store, &format!("block:{}", hit.oid), &meta).unwrap();
+
+        assert_eq!(clean_turn(&ran.oid, &mstore, &bus), 1, "a clean turn on the account clears the pane that hit the limit");
+        assert!(!stored(&hit));
     }
 }

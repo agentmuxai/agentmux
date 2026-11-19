@@ -90,16 +90,12 @@ fn limited_blocks(blocks: &[Block]) -> Vec<(String, u64)> {
 }
 
 /// A failure was just stored for `block_id` (`persist_last_failure`): if it's a
-/// usage limit with a reset, schedule the wake.
-pub fn on_failure(block_id: &str, failure: &AgentFailure) {
+/// usage limit, note its account (`limit_evidence`) and, with a reset, schedule the wake.
+pub fn on_failure(block_id: &str, failure: &AgentFailure, store: &Store) {
     if failure.code != FailureClass::UsageLimit {
         return;
     }
-    if let Some(ctx) = CONTEXT.get() {
-        if let Some(block) = ctx.mstore.get::<Block>(block_id).ok().flatten() {
-            super::limit_evidence::note_limited_blocks(&[block]);
-        }
-    }
+    super::limit_evidence::note_failure(block_id, failure, store);
     if let Some(resets_at_ms) = failure.resets_at_ms {
         schedule(block_id, resets_at_ms);
     }
