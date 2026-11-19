@@ -112,7 +112,9 @@ describe("Secrets in the Vault's Audit section", () => {
         const table = await screen.findByRole("table", { name: "Agents' use of secrets" });
         expect(within(table).getAllByRole("row")).toHaveLength(51);
         // Fewer lines than the read asked for: nothing older exists, so no claim that there is.
-        expect(screen.getByText(/Showing 50 of the 120 things agents did/)).toBeInTheDocument();
+        // ...and so no "newest N lines": the whole activity was read.
+        expect(screen.getByText(/Showing 50 of the 120 things agents did with secrets in the Vault's activity\./)).toBeInTheDocument();
+        expect(screen.queryByText(/newest/)).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: "Show more" }));
         await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(101));
         fireEvent.click(screen.getByRole("button", { name: "Show more" }));

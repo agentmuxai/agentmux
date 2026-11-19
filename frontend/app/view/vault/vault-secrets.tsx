@@ -67,7 +67,8 @@ function useAgentUses(visible: () => boolean) {
     const showMore = () => {
         // Every doing already read is on screen: read further back as well.
         const readMore = !moreLoaded() && moreToRead();
-        setShown((n) => n + PAGE);
+        // 50 more than are on screen now, never than were asked for: the count does not jump after a read further back.
+        setShown((n) => Math.min(n, found()?.length ?? 0) + PAGE);
         if (readMore) {
             setLines((n) => Math.min(n * 2, WINDOW_MAX));
             void load();
@@ -166,7 +167,10 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                     </tbody>
                 </table>
                 <p class="warden-manager-dim vault-secrets__coverage">
-                    {t("vault.secrets.coverage", { shown: rows()?.length ?? 0, found: found()?.length ?? 0, lines: lines() })}{" "}
+                    {/* A read that came back short has read the Vault's whole activity: no window to name. */}
+                    {readFull()
+                        ? t("vault.secrets.coverage", { shown: rows()?.length ?? 0, found: found()?.length ?? 0, lines: lines() })
+                        : t("vault.secrets.coverageAll", { shown: rows()?.length ?? 0, found: found()?.length ?? 0 })}{" "}
                     <Show when={readFull() && !moreToRead() && !moreLoaded()}>{t("vault.secrets.olderNotRead")}</Show>
                     <Show when={canShowMore()}>
                         <Button density="compact" onClick={showMore}>
