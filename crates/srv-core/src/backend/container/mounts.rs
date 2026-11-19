@@ -5,6 +5,8 @@ pub mod caches;
 pub mod credential_mode;
 pub mod dev_exec;
 pub mod host_name;
+pub mod read_exec;
+pub mod writable;
 pub(super) use self::host_name::host_name_for_new_container;
 
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
