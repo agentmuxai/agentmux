@@ -199,6 +199,16 @@ pub struct DownloadStatus {
     /// dev`), running 9 h"; `background_work`).
     #[serde(default)]
     pub stopping: Vec<String>,
+    /// After a restart that was asked for and then not confirmed (the user said No, nobody answered the launcher's
+    /// dialog, or an answer came too late): when, in Unix milliseconds. Gone with the next restart or download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub not_confirmed_at: Option<u64>,
+    /// Why, with `not_confirmed_at`: `no`, `timed_out`, `too_late`, or `unanswered` (nothing came back in time, so
+    /// the dialog may never have been shown). A word, not a sentence: it leaves the machine in a remote answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub not_confirmed: Option<String>,
 }
 
 impl AppUpdateStatus {
@@ -723,6 +733,8 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
                     waiting_for: 0,
                     waiting_on: Vec::new(),
                     stopping: Vec::new(),
+                    not_confirmed_at: None,
+                    not_confirmed: None,
                 }
             })
         }
@@ -1036,6 +1048,8 @@ mod tests {
             waiting_for: 0,
             waiting_on: Vec::new(),
             stopping: Vec::new(),
+            not_confirmed_at: None,
+            not_confirmed: None,
         };
         let newer = status_for("0.59.26", "stable", &release("v0.59.28"), 9, &InstallKind::Unknown);
         let same = status_for("0.59.26", "stable", &release("v0.59.27"), 9, &InstallKind::Unknown);
