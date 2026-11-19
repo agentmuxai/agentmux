@@ -114,7 +114,12 @@ const UpdateStatus = (): JSX.Element => {
             <div
                 ref={chipRef}
                 class={`status-bar-item${clickable() ? " clickable" : ""}`}
-                onClick={clickable() ? handleClick : undefined}
+                // Read when clicked, not when the chip is built: a read here would tie the whole chip and its
+                // panel to every status srv sends, and each one (every couple of seconds while a restart waits)
+                // would build them again, so the open panel blinked.
+                onClick={() => {
+                    if (clickable()) handleClick();
+                }}
                 // A chip with a panel (a staged release) has no tip: its label says it, and a tip already
                 // showing under the pointer would stay drawn over the panel's buttons once it opens.
                 // Screen readers still get the sentence, as the description.
