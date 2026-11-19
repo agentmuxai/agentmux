@@ -40,7 +40,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     segments: state.global_transcript_store.as_deref(),
                     ctx: Ctx { slug_of_uid: &slug_of_uid, uid_of_slug: &uid_of_slug, pane_of_agent: &pane_of_agent, block_exists: &block_exists },
                 };
-                audit_query::query(&src, &req)
+                let mut result = audit_query::query(&src, &req)?;
+                // The task each row's agent held at the time, and its PR: from the Kanban's history.
+                let held = audit_query::tasks::from_store(&state.identity_store);
+                audit_query::tasks::attach(&mut result.entries, &held);
+                Ok(result)
             })
             .await
             .map_err(|e| format!("audit.query: {e}"))?

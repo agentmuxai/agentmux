@@ -474,3 +474,29 @@ fn a_task_filed_for_an_agent_shortly_before_counts_for_its_filer_only() {
     assert!(s.work_filed_for_since("", "agentx", "uid-o", "other", 0).unwrap());
     assert!(!s.work_filed_for_since("", "", "uid-o", "other", 0).unwrap(), "an unnamed sender matches nothing");
 }
+
+
+fn event(s: &Store, work_id: &str, at: i64, actor: &str, kind: &str) {
+    s.work_event_add(&WorkEvent { work_id: work_id.into(), at, actor: actor.into(), kind: kind.into(), ..Default::default() }).unwrap();
+}
+
+#[test]
+fn the_task_an_agent_held_at_a_time_is_the_one_it_claimed_and_nothing_had_ended() {
+    let (s, _d) = store();
+    for id in ["a", "b"] {
+        s.work_queue_enqueue(&item(id, 1000)).unwrap();
+        s.work_card_create(id, &NewCard::default(), 1000).unwrap();
+    }
+    event(&s, "a", 2000, "loap", "claimed");
+    event(&s, "a", 5000, "loap", "completed");
+    event(&s, "b", 6000, "Loap", "claimed");
+    assert_eq!(s.work_held_at("loap", 1999).unwrap(), None, "before it claimed anything");
+    assert_eq!(s.work_held_at("loap", 2000).unwrap().as_deref(), Some("a"));
+    assert_eq!(s.work_held_at("loap", 4999).unwrap().as_deref(), Some("a"));
+    assert_eq!(s.work_held_at("loap", 5500).unwrap(), None, "a was completed and b not yet claimed");
+    assert_eq!(s.work_held_at("LOAP", 7000).unwrap().as_deref(), Some("b"), "names match without regard to case");
+    assert_eq!(s.work_held_at("naki", 7000).unwrap(), None, "another agent's");
+    event(&s, "b", 8000, "agentmux", "expired");
+    assert_eq!(s.work_held_at("loap", 9000).unwrap(), None, "a lease that expired is not held");
+    assert_eq!(s.work_held_at("loap", 7000).unwrap().as_deref(), Some("b"), "but it was, at 7000");
+}

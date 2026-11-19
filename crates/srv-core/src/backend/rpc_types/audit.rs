@@ -85,6 +85,25 @@ pub struct AuditLinks {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pane: Option<AuditPaneLink>,
+    /// The task the agent held when this happened, and its PR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task: Option<AuditTaskLink>,
+}
+
+/// A Kanban task, as an Audit row links to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditTaskLink {
+    /// The task's number on its board. Opened as `agentmux://task/<num>` on the default board (`task_ref` starts with `#`).
+    #[ts(type = "number")]
+    pub num: i64,
+    /// How the task is written on its board: `#12`, or `work#12` on another board.
+    pub task_ref: String,
+    /// Its PR, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pr_url: Option<String>,
 }
 
 /// One end of a jekt, or the target of an action.

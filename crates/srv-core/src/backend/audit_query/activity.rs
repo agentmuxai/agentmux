@@ -46,6 +46,7 @@ pub(super) fn entry_of(tag: char, day: &str, at: u64, row: &ActivityRow, ctx: &C
                 at_byte: row.byte,
             }),
             pane: Some(row.block.as_str()).filter(|b| !b.is_empty() && (ctx.block_exists)(b)).map(|b| AuditPaneLink { block_id: b.to_string() }),
+            task: None,
         },
         // Where the row was written, which a channel scope and the Audit's sections read.
         provenance: row.channel.as_ref().map(|c| AuditProvenance { channel: Some(c.clone()), ..Default::default() }),

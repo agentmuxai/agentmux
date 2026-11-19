@@ -64,7 +64,8 @@ pub(crate) const SCHEMA: &str = "
         to_state    TEXT NOT NULL DEFAULT '',
         body        TEXT NOT NULL DEFAULT ''
     );
-    CREATE INDEX IF NOT EXISTS idx_ids_work_events_work ON db_work_events(work_id, at);";
+    CREATE INDEX IF NOT EXISTS idx_ids_work_events_work ON db_work_events(work_id, at);
+    CREATE INDEX IF NOT EXISTS idx_ids_work_events_actor ON db_work_events(actor COLLATE NOCASE, kind, at);";
 
 /// How long a finished task's history is kept after it last changed.
 pub const EVENTS_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -472,6 +473,25 @@ impl Store {
             params![ev.work_id, ev.at, ev.actor, ev.actor_kind, ev.kind, ev.from_state, ev.to_state, ev.body],
         )?;
         Ok(())
+    }
+
+    /// The id of the task `agent` held at `at_ms`: the latest one it claimed or started by then that nothing had
+    /// ended (completed, submitted, released, expired, cancelled or given to another agent) before `at_ms`. What the
+    /// Audit links a row to. The history is kept 30 days after a task finishes, so an older row has none.
+    pub fn work_held_at(&self, agent: &str, at_ms: i64) -> Result<Option<String>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT e.work_id FROM db_work_events e
+                  WHERE e.kind IN ('claimed', 'started') AND e.actor = ?1 COLLATE NOCASE AND e.at <= ?2
+                    AND NOT EXISTS (SELECT 1 FROM db_work_events x
+                                     WHERE x.work_id = e.work_id AND x.at > e.at AND x.at <= ?2
+                                       AND x.kind IN ('completed', 'submitted', 'released', 'expired', 'cancelled', 'assigned'))
+                  ORDER BY e.at DESC, e.id DESC LIMIT 1",
+                params![agent, at_ms],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// A task's history, oldest first (the newest `limit`).
