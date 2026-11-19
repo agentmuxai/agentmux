@@ -807,9 +807,8 @@ describe("a Drone template's facts", () => {
 
     it("says whether it uses a credential and where, from the graph and trigger, whatever the manifest declares", () => {
         show(drone({ nodes: 2, agents: 0, writes_outside: [], credentials: ["trigger: {{param.credential}}"] }, { secrets: [] }));
-        const uses = pills(fact("Uses a credential"));
-        expect(uses.map((p) => p.textContent)).toEqual(["trigger: {{param.credential}}"]);
-        expect(fact("Uses a credential").textContent).toContain("yes, because of auth.vault");
+        expect(fact("Uses a credential").textContent).toBe("yes, because of auth.vault:trigger: {{param.credential}}");
+        expect(fact("Secrets").textContent).toBe("none declared (see Uses a credential)");
     });
 
     it("shows the graph's size, the agents it starts and the calls it makes outside AgentMux", () => {
