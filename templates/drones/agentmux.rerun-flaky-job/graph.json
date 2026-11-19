@@ -33,15 +33,38 @@
       }
     },
     {
-      "id": "tell",
+      "id": "ok",
       "position": {
         "x": 480,
         "y": -80
       },
       "data": {
+        "kind": "condition",
+        "expr": "{{rerun.status}} == 201"
+      }
+    },
+    {
+      "id": "tell",
+      "position": {
+        "x": 720,
+        "y": -160
+      },
+      "data": {
         "kind": "message",
         "to": "{{param.leader}}",
         "body": "Run {{trigger.key}} of {{trigger.item.name}} failed on its first attempt and was re-run once ({{trigger.item.html_url}}). No reply needed."
+      }
+    },
+    {
+      "id": "refused",
+      "position": {
+        "x": 720,
+        "y": 0
+      },
+      "data": {
+        "kind": "message",
+        "to": "{{param.leader}}",
+        "body": "Run {{trigger.key}} of {{trigger.item.name}} failed on its first attempt, but GitHub refused the re-run (status {{rerun.status}}), so nothing was re-run ({{trigger.item.html_url}}). It will not be tried again. No reply needed."
       }
     }
   ],
@@ -53,9 +76,21 @@
       "sourceHandle": "true"
     },
     {
-      "id": "rerun-tell",
+      "id": "rerun-ok",
       "source": "rerun",
-      "target": "tell"
+      "target": "ok"
+    },
+    {
+      "id": "ok-tell",
+      "source": "ok",
+      "target": "tell",
+      "sourceHandle": "true"
+    },
+    {
+      "id": "ok-refused",
+      "source": "ok",
+      "target": "refused",
+      "sourceHandle": "false"
     }
   ]
 }

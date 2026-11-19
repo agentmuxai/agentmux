@@ -367,6 +367,11 @@ mod tests {
         assert_eq!(ask("CI", 1).await, json!(true));
         assert_eq!(ask("CI", 2).await, json!(false), "a run that was already re-run");
         assert_eq!(ask("Docs", 1).await, json!(false), "another workflow");
+        let ok = cond("agentmux.rerun-flaky-job", "ok", json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }));
+        for (status, told) in [(201, true), (403, false), (404, false), (422, false)] {
+            let got = run(&ok, &scope_with(json!({ "rerun": { "status": status } }))).await.unwrap()["result"].clone();
+            assert_eq!(got, json!(told), "status {status}");
+        }
         // (d) only a merged pull request, and only with a task still claimed.
         let merged = cond("agentmux.merged-pr-still-claimed", "merged", json!({ "repo": "acme/site", "steward": "masty" }));
         let was = |merged_at: Value| {

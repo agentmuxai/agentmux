@@ -424,6 +424,12 @@ fn the_flaky_rerun_writes_outside_once_and_only_for_the_named_workflow_on_its_fi
     assert_eq!(data("flaky")["expr"], "{{trigger.item.run_attempt}} == 1 && {{trigger.item.name}} == 'CI'");
     assert_eq!(edges_from(&g, "flaky", Some("true")), ["rerun"]);
     assert!(edges_from(&g, "flaky", Some("false")).is_empty());
+    // GitHub answers 201 when it takes the re-run; any other answer is told as a refusal, never as a re-run.
+    assert_eq!(data("ok")["expr"], "{{rerun.status}} == 201");
+    assert_eq!(edges_from(&g, "rerun", None), ["ok"]);
+    assert_eq!(edges_from(&g, "ok", Some("true")), ["tell"]);
+    assert_eq!(edges_from(&g, "ok", Some("false")), ["refused"]);
+    assert!(data("refused")["body"].as_str().unwrap().contains("refused the re-run"));
     // The one write is the re-run, its address is constant but for the run's number (a number the poll read).
     assert_eq!(graph::summarize(&g).writes_outside, ["rerun: POST https://api.github.com/repos/acme/site/actions/runs/{{trigger.key}}/rerun-failed-jobs"]);
     assert_eq!(graph::summarize(&g).agents, 0, "no agent reads the run");
