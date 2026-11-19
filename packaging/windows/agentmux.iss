@@ -76,6 +76,8 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{a
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+#include "prune-old-versions.iss"
+
 // True when setup was started with /NOICONS (winget or a script may pass it).
 function NoIconsRequested: Boolean;
 var
@@ -85,4 +87,12 @@ begin
   for I := 1 to ParamCount do
     if CompareText(ParamStr(I), '/NOICONS') = 0 then
       Result := True;
+end;
+
+// An all-users install runs the launcher unelevated, so it cannot remove old versions' files from runtime\; setup
+// runs elevated there and does it once its own files are in place. A per-user install keeps the launcher's own prune.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and IsAdminInstallMode then
+    PruneOldVersions(ExpandConstant('{app}\runtime'), '{#AppVersion}');
 end;
