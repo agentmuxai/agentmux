@@ -82,8 +82,23 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     let (mstore, id_store, identity_store) =
         (state.mstore.clone(), state.id_store.clone(), state.identity_store.clone());
     let passed = tokio::task::spawn_blocking(move || {
-        crate::identity::inject_identity_env(mstore, id_store, identity_store, &block_id, &mut Default::default())
-            .is_ok()
+        // The spawn's own decision: an agent on a model server of its own is not refused for the account, so it
+        // is not held for it either (an endpoint set after the hold must release what was held).
+        let own_endpoint = mstore
+            .get::<Block>(&block_id)
+            .ok()
+            .flatten()
+            .is_some_and(|block| crate::backend::spawn_env::endpoint::own_claude_endpoint_of(&block.meta));
+        crate::identity::resolver::inject_identity_env_for_spawn(
+            mstore,
+            id_store,
+            identity_store,
+            None,
+            &block_id,
+            &mut Default::default(),
+            own_endpoint,
+        )
+        .is_ok()
     })
     .await
     // A panicked check never opens the gate.
@@ -456,3 +471,7 @@ mod tests {
 #[cfg(test)]
 #[path = "jekt_held_starting_tests.rs"]
 mod starting_tests;
+
+#[cfg(test)]
+#[path = "jekt_held_gate_tests.rs"]
+mod gate_tests;

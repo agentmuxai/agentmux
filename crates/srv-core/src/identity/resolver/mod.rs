@@ -53,7 +53,7 @@ pub mod secret;
 pub use errors::SpawnGateError;
 pub use inject::block_agent_id;
 pub use inject::{
-    inject_identity_env, inject_identity_env_async, resolve_account,
+    inject_identity_env, inject_identity_env_async, inject_identity_env_for_spawn, resolve_account,
     agent_has_identity_binding, resolve_bound_claude_config_dir_for_agent, resolve_bound_oauth_config_dir,
 };
 pub use effective_links::effective_identity_links;

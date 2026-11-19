@@ -130,6 +130,18 @@ fn is_claude(block_meta: &crate::backend::obj::MetaMapType) -> bool {
     written.trim().is_empty() || crate::backend::providers::resolve_provider_alias(written.trim()) == "claude"
 }
 
+/// Whether a spawn brings its own Claude endpoint: the pane runs Claude Code and `own` (its own environment,
+/// `cmd:env`) names a model server other than Anthropic's. The spawn and the quiet recheck of a held message's
+/// gate (`server/jekt_held.rs`) both ask this, so a held message is released exactly when the spawn would pass.
+pub fn own_claude_endpoint(block_meta: &crate::backend::obj::MetaMapType, own: &HashMap<String, String>) -> bool {
+    is_claude(block_meta) && requested(own).is_some()
+}
+
+/// [`own_claude_endpoint`] for a block's own `cmd:env`, as a spawn reads it.
+pub fn own_claude_endpoint_of(block_meta: &crate::backend::obj::MetaMapType) -> bool {
+    own_claude_endpoint(block_meta, &crate::backend::blockcontroller::cmd_env_of(block_meta))
+}
+
 /// The identity step of a spawn (the account's variables over the agent's own), then this step, then the
 /// note of which account the run uses. `base_env_vars` is the agent's own environment.
 pub(crate) async fn inject_identity(
@@ -143,7 +155,7 @@ pub(crate) async fn inject_identity(
 ) -> Result<HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
     let (own, mstore_after) = (base_env_vars.clone(), mstore.clone());
     // The account's login is discarded for this agent below, so the identity step neither injects nor requires it.
-    let own_claude_endpoint = is_claude(block_meta) && requested(&own).is_some();
+    let own_claude_endpoint = own_claude_endpoint(block_meta, &own);
     let mut env_vars = crate::identity::token_warmup::inject_after_warmup(
         mstore,
         id_store,
