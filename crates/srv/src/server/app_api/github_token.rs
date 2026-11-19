@@ -87,6 +87,7 @@ pub(crate) async fn handle_github_token(
     let mut host_error = None;
     if in_container {
         if crate::identity::github_tokens::container_git_hooks().is_none() {
+            tracing::warn!(target: "identity", agent = %slug, "identity.github: a container agent asked for a token where its git setup is off");
             return refuse(StatusCode::FORBIDDEN, "no GitHub token for a container agent on this machine".to_string());
         }
         let scope = scope_for(req.purpose.as_deref());
@@ -115,10 +116,16 @@ pub(crate) async fn handle_github_token(
                 .into_response();
             }
             // A gh-agent that cannot give a narrowed token is not a reason to give a container another one.
-            Err(e) if crate::identity::gh_agent_token::is_too_old(&e) => return refuse(StatusCode::FORBIDDEN, e),
+            Err(e) if crate::identity::gh_agent_token::is_too_old(&e) => {
+                tracing::warn!(target: "identity", agent = %slug, owner = %req.owner, repo = %req.repo, error = %e, "identity.github: a container agent's token was refused");
+                return refuse(StatusCode::FORBIDDEN, e);
+            }
             // Nor is a gh-agent that was only slow: a container that loads the machine must not be able to turn a slow answer
             // into the connection's token (below), which is per repository but can write contents.
-            Err(e) if crate::identity::gh_agent_token::is_took_too_long(&e) => return refuse(StatusCode::SERVICE_UNAVAILABLE, e),
+            Err(e) if crate::identity::gh_agent_token::is_took_too_long(&e) => {
+                tracing::warn!(target: "identity", agent = %slug, owner = %req.owner, repo = %req.repo, error = %e, "identity.github: a container agent's token was refused");
+                return refuse(StatusCode::SERVICE_UNAVAILABLE, e);
+            }
             // Any other failure of gh-agent (a repository its App does not cover, no identity for the agent) falls through to
             // the person's own GitHub connection, as it always did. That token is not narrowed by this change; it is the
             // Cloud-connected path, which a machine without gh-agent uses throughout.
