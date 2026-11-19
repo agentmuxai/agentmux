@@ -143,7 +143,7 @@ impl State {
         self.unstatted.clear();
         for dirent in std::fs::read_dir(root)? {
             let path = dirent?.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") || super::atomic::is_temp_file(&path) {
                 continue;
             }
             let Some(id) = path.file_stem().and_then(|s| s.to_str()).map(str::to_string) else {
