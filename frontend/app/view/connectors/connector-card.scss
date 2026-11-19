@@ -67,7 +67,7 @@
 
 .connector-card-flash {
     padding: 0 var(--space-1);
-    color: var(--success-color);
+    color: var(--success-text-color);
     font-size: var(--text-xs);
     font-weight: 600;
     white-space: nowrap;
@@ -137,7 +137,7 @@
     }
 
     &[data-tone="error"] {
-        color: var(--error-color);
+        color: var(--error-text-color);
     }
 }
 
