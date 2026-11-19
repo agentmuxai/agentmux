@@ -89,12 +89,21 @@ const BINDING: &str = "agentmuxSideButton";
 const MAX_FRAMES: usize = 9;
 /// The listener; see `side_button.js`.
 const SCRIPT: &str = include_str!("side_button.js");
+/// Linux only: the function `pane_click.js` calls when a button goes down in the page; added only to `WORLD`.
+const CLICK_BINDING: &str = "agentmuxPaneClick";
+/// The click listener of a Linux pane; see `pane_click.js`.
+const CLICK_SCRIPT: &str = include_str!("pane_click.js");
 
 /// The bindings the world gets: the sign-in listener's everywhere, the side
-/// buttons' where the window procedure doesn't take them.
+/// buttons' where the window procedure doesn't take them, and the click
+/// listener's on Linux, the one platform with no hook of its own into a pane's
+/// page (Windows has the window procedure and the message hook, macOS the
+/// event monitor).
 fn bindings() -> &'static [&'static str] {
     if cfg!(target_os = "windows") {
         &[super::signin_notice::BINDING]
+    } else if cfg!(target_os = "linux") {
+        &[BINDING, CLICK_BINDING, super::signin_notice::BINDING]
     } else {
         &[BINDING, super::signin_notice::BINDING]
     }
@@ -109,6 +118,8 @@ const BIND_EACH_WORLD: bool = cfg!(target_os = "windows");
 static SCRIPTS: LazyLock<String> = LazyLock::new(|| {
     if cfg!(target_os = "windows") {
         super::signin_notice::SCRIPT.to_string()
+    } else if cfg!(target_os = "linux") {
+        format!("{SCRIPT};\n{CLICK_SCRIPT};\n{}", super::signin_notice::SCRIPT)
     } else {
         format!("{SCRIPT};\n{}", super::signin_notice::SCRIPT)
     }
@@ -400,13 +411,29 @@ pub fn note_event(browser_id: i32, message: &[u8]) {
         return;
     }
     let params = msg.get("params");
-    if params.and_then(|p| p.get("name")).and_then(Value::as_str) != Some(BINDING) {
+    let name = params.and_then(|p| p.get("name")).and_then(Value::as_str);
+    if name == Some(CLICK_BINDING) {
+        on_page_click(browser_id);
+        return;
+    }
+    if name != Some(BINDING) {
         return;
     }
     let Some(payload) = params.and_then(|p| p.get("payload")).and_then(Value::as_str) else { return };
     let Some(press) = parse_press(payload) else { return };
     let Some(pane) = PANES.lock().get(&browser_id).cloned() else { return };
     act(&pane, press);
+}
+
+/// A trusted button went down in the page of the pane in `browser_id` (Linux; `pane_click.js`). The pane is
+/// named by the browser the call came from, never by anything the page sent, so a page can only ever speak for
+/// its own pane. Only the Linux world has the binding, so on the other platforms this is never called.
+fn on_page_click(browser_id: i32) {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let Some(pane) = PANES.lock().get(&browser_id).cloned() else { return };
+    crate::input_owner::views::pane_clicked_in_page(&pane.state, &pane.block_id);
 }
 
 /// Whether `message` is the DevTools event `method`.
@@ -593,5 +620,29 @@ mod tests {
         for needle in ["e.button !== 3 && e.button !== 4", "preventDefault", "stopImmediatePropagation", "pointerup", "mouseup"] {
             assert!(SCRIPT.contains(needle), "{needle}");
         }
+    }
+
+    #[test]
+    fn only_a_linux_pane_gets_the_click_listener() {
+        assert_eq!(bindings().contains(&CLICK_BINDING), cfg!(target_os = "linux"));
+        assert_eq!(SCRIPTS.contains(&format!("window.{CLICK_BINDING}(")), cfg!(target_os = "linux"));
+        // The listeners that were there stay as they were on every platform.
+        assert!(bindings().contains(&super::super::signin_notice::BINDING));
+        assert_eq!(bindings().contains(&BINDING), !cfg!(target_os = "windows"));
+    }
+
+    #[test]
+    fn the_click_listener_counts_only_trusted_clicks_and_sends_the_page_nothing_to_choose() {
+        for needle in ["e.isTrusted", "e.button < 0 || e.button > 2", "\"pointerdown\"", "capture: true"] {
+            assert!(CLICK_SCRIPT.contains(needle), "{needle}");
+        }
+        assert!(CLICK_SCRIPT.contains(&format!("window.{CLICK_BINDING}(\"\")")), "the call carries no payload");
+    }
+
+    #[test]
+    fn a_click_call_for_a_browser_with_no_pane_does_nothing() {
+        note_event(987_657, br#"{"method":"Runtime.bindingCalled","params":{"name":"agentmuxPaneClick","payload":""}}"#);
+        // Another name with the click's payload is not a click.
+        note_event(987_657, br#"{"method":"Runtime.bindingCalled","params":{"name":"somethingElse","payload":""}}"#);
     }
 }
