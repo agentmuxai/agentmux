@@ -1,0 +1,184 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A connector's card in Connectors' list (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.2, §4.7). Line style,
+// square corners, tokens only (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md L1, L2, L6). The card's layout follows
+// the card's own width: a row (icon, text, control at the right) from 340 px, stacked (the control under the text)
+// below it. The cell around the card is the container, so the layout never depends on the window or the column count.
+
+@use "../../mixins.scss";
+@use "../../element/ui/card-text" as cardText;
+
+.connectors-grid {
+    .ui-card-cell {
+        container-type: inline-size;
+
+        > .connector-card {
+            flex: 1;
+        }
+    }
+}
+
+.connector-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "icon text control";
+    align-items: center;
+    column-gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--tint-1);
+    color: var(--main-text-color);
+    text-align: left;
+    transition:
+        background var(--duration-decorative-fast) var(--ease-standard),
+        border-color var(--duration-decorative-fast) var(--ease-standard);
+
+    &.is-connected {
+        cursor: pointer;
+    }
+
+    &:hover {
+        border-color: var(--accent-color);
+        background: var(--hover-bg-color);
+    }
+
+    &.is-open {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-rest), transparent);
+    }
+
+    &.is-attention:not(.is-open) {
+        border-color: var(--ui-line-danger);
+    }
+}
+
+.connector-card-icon {
+    grid-area: icon;
+    @include mixins.flex-center(inline-flex);
+    width: 24px;
+    height: 24px;
+    color: var(--secondary-text-color);
+}
+
+.connector-card-text {
+    grid-area: text;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    line-height: 1.25;
+
+    // The disclosure is a row Button that looks like the text it wraps: no line, no padding, no tint of its own.
+    &.connector-card-disclosure,
+    &.connector-card-disclosure:hover:not(:disabled) {
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+    }
+}
+
+.connector-card-name {
+    @include cardText.card-title;
+    color: var(--main-text-color);
+}
+
+// The line says what the connector is for, or (connected) its state in words. It wraps to a second line rather than
+// ending in an ellipsis, so a thin pane never cuts it to a few letters.
+.connector-card-line {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+
+    .ui-status-dot {
+        display: inline-block;
+        margin-right: var(--space-1);
+        vertical-align: middle;
+    }
+
+    &[data-tone="warn"] {
+        color: var(--warning-text-color);
+    }
+
+    &[data-tone="error"] {
+        color: var(--error-color);
+    }
+}
+
+.connector-card-control {
+    grid-area: control;
+    display: inline-flex;
+    justify-self: end;
+}
+
+.connector-card-chevron {
+    display: inline-block;
+    padding: 0 var(--space-1);
+    color: var(--secondary-text-color);
+
+    &::before {
+        content: "›";
+        display: inline-block;
+        font-size: var(--text-lg);
+        line-height: 1;
+        transition: transform var(--duration-decorative-fast) var(--ease-standard);
+    }
+
+    &[data-open]::before {
+        transform: rotate(90deg);
+    }
+}
+
+// Under 340 px the card stacks: icon and name, the line, then the control under the text, at the bottom edge so the
+// controls of a row of cards line up.
+@container (max-width: 339px) {
+    .connector-card {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-rows: 1fr auto;
+        grid-template-areas:
+            "icon text"
+            ". control";
+        align-items: start;
+        row-gap: var(--space-1-5);
+    }
+
+    .connector-card-control {
+        justify-self: start;
+    }
+}
+
+// The foot of the list: "Looking for something else? Add a custom connector".
+.connectors-foot {
+    margin: var(--space-1) 0 0;
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
+// What opens under a connected card: its accounts, then Add another account.
+.connector-details {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    min-width: 0;
+}
+
+.connector-details-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+}

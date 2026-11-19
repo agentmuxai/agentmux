@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The cards Connectors' Accounts section shows for what is connected: one per
-// stored account, and AgentMux Cloud's session
-// (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5). An OAuth account's
+// The cards under a connected connector in Connectors' list: one per stored account
+// (docs/specs/SPEC_CONNECTORS_CARDS_2026_10_13.md §3.5, SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.5). An OAuth account's
 // card also shows its client, a partial grant, and Reconnect
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7).
 
@@ -26,8 +25,6 @@ import {
 } from "@/app/view/identity/identity-model";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { SERVICE_CATALOG } from "./accounts-catalog";
-import type { MuxBusController } from "./AgentMuxConnectPanel";
-import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "./muxbus-session";
 import { canReconnect, clientModeTag, oauthNote, partlyGrantedLine } from "./oauth-account-state";
 import { githubKindShort } from "./github-account-copy";
 import { brandForProvider } from "./provider-brand";
@@ -181,27 +178,6 @@ export function AccountCard(props: {
             onSelect={props.onSelect}
             onContextMenu={(e) => props.onContextMenu(e)}
             data-account-id={a().id}
-        />
-    );
-}
-
-export function AgentMuxCard(props: { status: ReturnType<MuxBusController["status"]>; onSelect: () => void }): JSX.Element {
-    const state = (): { tone: StatusTone; label: string } => {
-        const s = props.status;
-        if (isMuxBusSessionOk(s)) return { tone: "ok", label: "Connected" };
-        if (muxbusNeedsSignInAgain(s)) return { tone: "warn", label: "Sign in again" };
-        return { tone: "warn", label: "Token expired" };
-    };
-    return (
-        <Card
-            class="account-card account-card--agentmux"
-            aria-label={`AgentMux Cloud, ${state().label}`}
-            title={props.status?.email || "AgentMux Cloud"}
-            subtitle="AgentMux Cloud"
-            icon={<ProviderLogo provider="agentmux" size={18} />}
-            status={state()}
-            meta={[<span>Cloud session</span>]}
-            onSelect={props.onSelect}
         />
     );
 }

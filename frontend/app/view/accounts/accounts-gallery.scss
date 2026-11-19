@@ -1,27 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Connectors → Accounts gallery — brand tiles + per-tile connected count +
-// the OAuth/Key chooser. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
-
-// The brand chips are `Card size="chip"` and the connected accounts are
-// cards, both styled by element/ui/card.scss
-// (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2); this file keeps the chooser.
+// The add section under a connector's card in Connectors' list: the OAuth/Key chooser, the guide and the "Other agents"
+// lines. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3. (The brand-tile gallery that once held these
+// styles is gone: SPEC_CONNECTORS_ONE_LIST_2026_11_19.md.)
 
 @use "../../mixins.scss";
 @use "../../element/menu-frame";
-
-.accounts-gallery {
-    display: flex;
-    flex-direction: column;
-
-    // A tile's line says what the service is for ("Repos, Actions, PRs"): it wraps to a second line
-    // rather than ending in an ellipsis, which in a thin pane cut every one of them.
-    .account-tile .ui-card-subtitle {
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-}
 
 // The brand logo in the chooser's header.
 .account-tile-logo {

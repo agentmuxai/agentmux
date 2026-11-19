@@ -20,6 +20,7 @@ import { ProviderGuideDetails, ProviderGuideInside } from "./ProviderGuideDetail
 import { ProviderLoginPanel } from "./ProviderLoginPanel";
 import { guideFor, optionForMode, shown } from "./provider-guide";
 import { githubStatusLine } from "./github-account-copy";
+import "./accounts-gallery.scss";
 
 export function AddAccountSection(props: {
     tile: ServiceTile;

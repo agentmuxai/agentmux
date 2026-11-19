@@ -28,7 +28,7 @@ vi.mock("@/app/view/identity/bind-to-agent-menu", () => ({ buildAccountRowMenu: 
 import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { AccountDeleteNotice } from "@/app/view/identity/identity-accounts-tab";
 import { IdentityViewModel, type Account } from "@/app/view/identity/identity-model";
-import { AccountsManager } from "./accounts-manager";
+import { ConnectorsList } from "@/app/view/connectors/connectors-list";
 import { setOAuthNote } from "./oauth-account-state";
 
 const CAL = "https://www.googleapis.com/auth/calendar.events";
@@ -79,25 +79,29 @@ afterEach(() => {
 
 const card = () => screen.getByRole("button", { name: /^me@example\.com/ });
 
+/** Renders Connectors' list and opens the connected connector `key`: its account cards show. */
+async function openConnector(key: string) {
+    render(() => <ConnectorsList />);
+    await waitFor(() => expect(document.querySelector(`[data-connector="${key}"] .connector-card-disclosure`)).toBeTruthy());
+    fireEvent.click(document.querySelector(`[data-connector="${key}"] .connector-card-disclosure`)!);
+    await waitFor(() => expect(card()).toBeTruthy());
+}
+
 describe("a Google account's card", () => {
     it("shows the email, Connected, and the client it uses", async () => {
-        render(() => <AccountsManager />);
-        await waitFor(() => expect(card()).toBeTruthy());
+        await openConnector("google");
         expect(card().querySelector(".ui-card-title")?.textContent).toBe("me@example.com");
         // The display name only repeats the email, so the brand shows instead.
         expect(card().querySelector(".ui-card-subtitle")?.textContent).toBe("Google");
-        expect(screen.getByRole("img", { name: "Connected" })).toBeTruthy();
-        expect(screen.getByText("Your own client")).toBeTruthy();
+        expect(screen.getAllByRole("img", { name: "Connected" }).length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Your own client").length).toBeGreaterThan(0);
         expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
     });
 
-    it("says Reconnect needed, and its Reconnect re-runs the consent for the same account", async () => {
+    it("says Reconnect needed, and the connector's Reconnect re-runs the consent for the same account", async () => {
         rpc.ListIdentityAccountsCommand.mockResolvedValue([google({ status: "needs_reauth" })]);
-        render(() => <AccountsManager />);
-        await waitFor(() => expect(screen.getByRole("img", { name: "Reconnect needed" })).toBeTruthy());
-        expect(card().querySelector(".account-card-note")?.textContent).toBe("Reconnect needed");
-
-        fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+        render(() => <ConnectorsList />);
+        fireEvent.click(await screen.findByRole("button", { name: "Reconnect Google" }));
         await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
         expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toEqual({
             provider: "google",
@@ -106,14 +110,15 @@ describe("a Google account's card", () => {
             scopes: [CAL],
         });
         // It runs in the details, which show the browser prompt.
+        await waitFor(() => expect(card()).toBeTruthy());
         expect(card().getAttribute("aria-expanded")).toBe("true");
+        expect(card().querySelector(".account-card-note")?.textContent).toBe("Reconnect needed");
         expect(await screen.findByText(/Waiting for browser authorization/)).toBeTruthy();
     });
 
     it("says which permissions weren't granted", async () => {
         setOAuthNote("g1", { missingScopes: [CAL] });
-        render(() => <AccountsManager />);
-        await waitFor(() => expect(card()).toBeTruthy());
+        await openConnector("google");
         expect(card().querySelector(".account-card-note")?.textContent).toBe(
             "Partly granted: Calendar events wasn't allowed",
         );
@@ -121,18 +126,18 @@ describe("a Google account's card", () => {
 
     it("shows Blocked by your organization after a blocked sign-in", async () => {
         setOAuthNote("g1", { blocked: "blocked by your organization: … (admin_policy_enforced)." });
-        render(() => <AccountsManager />);
-        await waitFor(() => expect(screen.getByRole("img", { name: "Blocked by your organization" })).toBeTruthy());
+        await openConnector("google");
+        expect(screen.getAllByRole("img", { name: "Blocked by your organization" }).length).toBeGreaterThan(0);
         expect(card().classList.contains("is-attention")).toBe(true);
-        expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
+        expect(screen.getAllByRole("button", { name: "Reconnect" }).length).toBeGreaterThan(0);
     });
 
     it("keeps Valid for an API key", async () => {
         rpc.ListIdentityAccountsCommand.mockResolvedValue([
             google({ id: "o1", provider: "openai", kind: "api_key", context: { email: "me@example.com" } }),
         ]);
-        render(() => <AccountsManager />);
-        await waitFor(() => expect(screen.getByRole("img", { name: "Valid" })).toBeTruthy());
+        await openConnector("openai");
+        expect(screen.getAllByRole("img", { name: "Valid" }).length).toBeGreaterThan(0);
         expect(screen.queryByText("Your own client")).toBeNull();
     });
 });
