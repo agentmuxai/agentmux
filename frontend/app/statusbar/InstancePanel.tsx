@@ -138,12 +138,14 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         // A row whose window id has not arrived (no opacity slider yet) is closed by its label, not ignored.
         const label = entry.label;
         const hide = (on: boolean) => setTrashed((t) => new Set(on ? [...t, label] : [...t].filter((l) => l !== label)));
-        void requestRemoveWindow({ windowId: resolveEntryWindowId(entry), label }, () => {
-            discard(entry);
-            hide(true); // the window is certain to go: its row goes now
-        })
-            .catch(() => hide(false)) // the close failed (it said so): the window is still there
-            .then(refreshClosed);
+        void requestRemoveWindow(
+            { windowId: resolveEntryWindowId(entry), label },
+            () => {
+                discard(entry);
+                hide(true); // the window is certain to go: its row goes now
+            },
+            () => hide(false), // the close failed (it said so): the window is still there
+        ).then(refreshClosed);
     };
 
     const windowRename = useWindowRename(entries, resolveEntryWindowId);
