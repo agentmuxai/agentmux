@@ -303,6 +303,45 @@ pub const UPGRADE_PREFIX: &str = "AGENTMUXSRV-UPGRADE";
 /// other way to tell it), so the user can start the upgrade again at once.
 pub const UPGRADE_DECLINED_FILE: &str = "declined.txt";
 
+/// Why the restart question ended without a restart: the second line of [`UPGRADE_DECLINED_FILE`]
+/// (the first is the version). srv says it in words to the user and to the agents that asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Declined {
+    /// The user answered No.
+    No,
+    /// Nobody answered within the time the question is open: it closed itself, which counts as No.
+    TimedOut,
+    /// A Yes that came after the question had lapsed, or to an older question.
+    TooLate,
+}
+
+impl Declined {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Declined::No => "no",
+            Declined::TimedOut => "timed_out",
+            Declined::TooLate => "too_late",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [Declined::No, Declined::TimedOut, Declined::TooLate].into_iter().find(|d| d.as_str() == s.trim())
+    }
+}
+
+/// The contents of [`UPGRADE_DECLINED_FILE`]: the version, then why.
+pub fn declined_text(version: &str, why: Declined) -> String {
+    format!("{version}\n{}\n", why.as_str())
+}
+
+/// The version and the reason a [`UPGRADE_DECLINED_FILE`] holds. A file with only a version (an
+/// older launcher's) has no reason.
+pub fn parse_declined(text: &str) -> (&str, Option<Declined>) {
+    let mut lines = text.lines();
+    let version = lines.next().unwrap_or("").trim();
+    (version, lines.next().and_then(Declined::parse))
+}
+
 /// Where the Linux launcher leaves why a `.deb`/`.rpm` upgrade didn't happen,
 /// in `updates/<version>/` of the data folder: JSON `{"version": "<v>", "error":
 /// "<one line>"}`. Left when the password was refused or unavailable, the file
@@ -371,6 +410,16 @@ pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_decline_file_names_the_version_and_why_and_an_older_one_has_no_reason() {
+        for why in [Declined::No, Declined::TimedOut, Declined::TooLate] {
+            assert_eq!(parse_declined(&declined_text("0.60.35", why)), ("0.60.35", Some(why)));
+        }
+        assert_eq!(parse_declined("0.60.35\n"), ("0.60.35", None));
+        assert_eq!(parse_declined("0.60.35\nsomething else\n"), ("0.60.35", None));
+        assert_eq!(parse_declined(""), ("", None));
+    }
 
     #[test]
     fn the_shared_folder_held_line_round_trips_on_one_line() {

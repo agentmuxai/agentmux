@@ -15,7 +15,9 @@
 //! the only place to decide: srv can't reach it, so `restarting` can't be
 //! cancelled here (No in the dialog does). If nothing has happened three
 //! minutes later (declined, or an AgentMux that can't restart itself), the
-//! status goes back to ready and says so.
+//! status goes back to ready and says so: when and why the restart wasn't
+//! confirmed (`not_confirmed_at`, `not_confirmed`), and the agents that asked
+//! are told. The launcher says why in its answer file and its own log.
 //!
 //! What the wait is for, and nothing else: an agent whose process is alive
 //! and which is in the middle of a turn ([`busy_controllers`]). A turn held
@@ -77,7 +79,82 @@ fn set(d: &DownloadStatus, state: &str, waiting_on: Vec<WaitingOn>, error: Optio
 fn with_wait(d: &DownloadStatus, state: &str, waiting_on: Vec<WaitingOn>, error: Option<String>, stopping: Vec<String>) -> DownloadStatus {
     let waiting_on = if state == "waiting" { waiting_on } else { Vec::new() };
     let state = if state == "waiting" && waiting_on.is_empty() { "restarting" } else { state };
-    DownloadStatus { state: state.to_string(), waiting_for: waiting_on.len() as u32, waiting_on, error, stopping, ..d.clone() }
+    // A new wait, restart or ready state is not the last attempt's "not confirmed": it goes with it.
+    DownloadStatus {
+        state: state.to_string(),
+        waiting_for: waiting_on.len() as u32,
+        waiting_on,
+        error,
+        stopping,
+        not_confirmed_at: None,
+        not_confirmed: None,
+        ..d.clone()
+    }
+}
+
+/// The reason word a restart that nothing answered carries (no launcher answer in time).
+const UNANSWERED: &str = "unanswered";
+
+/// What happened, in words, for `why` (a `not_confirmed` word).
+fn why_words(why: &str) -> &'static str {
+    match why {
+        "no" => "the user answered No in the restart dialog",
+        "timed_out" => "nobody answered the restart dialog before it closed itself",
+        "too_late" => "an answer to the restart dialog came after it had lapsed",
+        UNANSWERED => "no answer came back from the launcher in time (the dialog may not have been shown, or this AgentMux can't restart itself)",
+        _ => "the restart was declined",
+    }
+}
+
+/// `ms` (Unix) as "16:33 UTC".
+fn clock(ms: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms as i64).map_or_else(|| "an unknown time".into(), |t| t.format("%H:%M UTC").to_string())
+}
+
+/// What the version panel and the status say after a restart that was not confirmed.
+fn not_confirmed_line(why: &str, at_ms: u64) -> String {
+    format!(
+        "The restart wasn't confirmed at {}: {}. It restarts only when someone answers the dialog on this computer, within {} s of it opening; start it again from the version panel when someone is there.",
+        clock(at_ms),
+        why_words(why),
+        DIALOG_SECONDS
+    )
+}
+
+/// What an agent that asked for the upgrade is told.
+fn not_confirmed_note(version: &str, why: &str, at_ms: u64) -> String {
+    format!(
+        "[AgentMux] The upgrade to {version} did not happen: the restart wasn't confirmed at {}: {}. The release is downloaded and waiting; it restarts when someone at that computer answers the restart dialog within {} s of it opening. Ask again when someone is there.",
+        clock(at_ms),
+        why_words(why),
+        DIALOG_SECONDS
+    )
+}
+
+/// How long the launcher's dialog stays open (`ANSWER_WITHIN` in `crates/launcher/src/upgrade_restart.rs`).
+const DIALOG_SECONDS: u64 = 150;
+
+/// The restart the launcher was asked for did not happen: back to `ready`, with why and when, and the agents that
+/// asked told. Only if `run` is still the current run.
+fn not_confirmed(run: u64, d: &DownloadStatus, why: &str, askers: &[String]) {
+    let at = agentmux_common::time::now_ms_u64();
+    let line = not_confirmed_line(why, at);
+    let marked = if_current(run, || {
+        crate::backend::background_work::write_for_launcher(&[]);
+        check::set_download(Some(DownloadStatus {
+            not_confirmed_at: Some(at),
+            not_confirmed: Some(why.to_string()),
+            ..with_wait(d, "ready", Vec::new(), Some(line.clone()), Vec::new())
+        }));
+    });
+    if !marked {
+        return;
+    }
+    tracing::info!(version = %d.version, why, "upgrade: the restart wasn't confirmed");
+    let note = not_confirmed_note(&d.version, why, at);
+    for block_id in askers {
+        crate::backend::upgrade_request::tell(block_id, &note);
+    }
 }
 
 /// [`stopping`] off the async threads.
@@ -195,8 +272,9 @@ fn staged(status: &AppUpdateStatus) -> Result<(DownloadStatus, UpgradeTarget), S
     Ok((d, UpgradeTarget::Installer { installer, sha256 }))
 }
 
-/// Start "Upgrade & restart".
-pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
+/// Start "Upgrade & restart". `askers` are the panes of the agents that asked for it: they are told if the restart
+/// is not confirmed (the user's own click has none).
+pub fn start(now: bool, askers: Vec<String>) -> Result<AppUpdateStatus, String> {
     let mut current = run_lock();
     let (d, target) = staged(&check::current_status())?;
     *current += 1;
@@ -205,7 +283,7 @@ pub fn start(now: bool) -> Result<AppUpdateStatus, String> {
     // What the restart stops follows from `run`, off the async threads.
     set(&d, "waiting", if now { Vec::new() } else { waited_for(&busy_now()) }, None, Vec::new());
     drop(current);
-    tokio::spawn(run(run_id, d, target, now));
+    tokio::spawn(run(run_id, d, target, now, askers));
     Ok(check::current_status())
 }
 
@@ -254,19 +332,21 @@ pub(crate) fn take_install_failure(updates: &Path, version: &str) -> Option<Stri
     (fresh && json.get("version")?.as_str()? == version && !error.is_empty()).then(|| format!("The install didn't finish: {error}"))
 }
 
-/// Whether the launcher answered No (or the question lapsed) for `version`:
-/// `file` names it. Each request clears the file before it asks and each answer
-/// is taken out as it is read, so one left by an earlier attempt can't answer a
-/// new question, however soon the user tries again.
-fn take_declined(file: &Path, version: &str) -> bool {
-    if std::fs::read_to_string(file).map(|v| v.trim() == version).unwrap_or(false) {
-        let _ = std::fs::remove_file(file);
-        return true;
+/// Why the launcher answered No (or the question lapsed) for `version`, as a `not_confirmed` word, if `file` names
+/// it. Each request clears the file before it asks and each answer is taken out as it is read, so one left by an
+/// earlier attempt can't answer a new question, however soon the user tries again. A file from a launcher that
+/// gives no reason says `declined`.
+fn take_declined(file: &Path, version: &str) -> Option<&'static str> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let (named, why) = agentmux_common::srv_stderr::parse_declined(&text);
+    if named != version {
+        return None;
     }
-    false
+    let _ = std::fs::remove_file(file);
+    Some(why.map_or("declined", |w| w.as_str()))
 }
 
-async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
+async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool, askers: Vec<String>) {
     // Waits for every agent to finish its turn for as long as that takes. It ends when nobody is in one, with
     // "Now", or when the user cancels (which supersedes this run). Who is waited for is read again each pass,
     // and logged whenever that changes, so a wait that doesn't end can be explained.
@@ -318,26 +398,20 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
             if_current(run_id, || set(&d, "ready", Vec::new(), Some(why), Vec::new()));
             return;
         }
-        if declined.as_deref().is_some_and(|f| take_declined(f, &d.version)) {
-            tracing::info!(version = %d.version, "upgrade: the restart was declined");
-            if_current(run_id, || set(&d, "ready", Vec::new(), None, Vec::new()));
+        if let Some(why) = declined.as_deref().and_then(|f| take_declined(f, &d.version)) {
+            tracing::info!(version = %d.version, why, "upgrade: the restart was declined");
+            not_confirmed(run_id, &d, why, &askers);
             return;
         }
     }
-    if_current(run_id, || {
-        set(
-            &d,
-            "ready",
-            Vec::new(),
-            Some("AgentMux didn't restart: the upgrade was declined or not answered in time, or this AgentMux can't restart itself. Try again, or install the new version from the release page.".into()),
-            Vec::new(),
-        )
-    });
+    // Nothing came back: say so the same way, with its own reason.
+    not_confirmed(run_id, &d, UNANSWERED, &askers);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agentmux_common::srv_stderr::{declined_text, Declined};
 
     fn controller(turn_active: bool, process: &str) -> BlockControllerRuntimeStatus {
         BlockControllerRuntimeStatus { turn_active, shellprocstatus: process.to_string(), ..Default::default() }
@@ -459,6 +533,8 @@ mod tests {
             waiting_for: 0,
             waiting_on: Vec::new(),
             stopping: Vec::new(),
+            not_confirmed_at: None,
+            not_confirmed: None,
         }
     }
 
@@ -494,16 +570,46 @@ mod tests {
     fn a_no_is_taken_once_and_only_for_the_version_asked() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(UPGRADE_DECLINED_FILE);
-        assert!(!take_declined(&file, "0.59.37"), "no answer yet");
-        std::fs::write(&file, "0.59.36
-").unwrap();
-        assert!(!take_declined(&file, "0.59.37"), "an answer about another version");
+        assert_eq!(take_declined(&file, "0.59.37"), None, "no answer yet");
+        std::fs::write(&file, "0.59.36\n").unwrap();
+        assert_eq!(take_declined(&file, "0.59.37"), None, "an answer about another version");
         assert!(file.exists(), "...is left alone");
-        std::fs::write(&file, "0.59.37
-").unwrap();
-        assert!(take_declined(&file, "0.59.37"));
+        // From a launcher that gives no reason.
+        std::fs::write(&file, "0.59.37\n").unwrap();
+        assert_eq!(take_declined(&file, "0.59.37"), Some("declined"));
         assert!(!file.exists(), "taken out as it is read");
-        assert!(!take_declined(&file, "0.59.37"), "so it can't answer a second question");
+        assert_eq!(take_declined(&file, "0.59.37"), None, "so it can't answer a second question");
+        // With the reason the launcher left.
+        for why in [Declined::No, Declined::TimedOut, Declined::TooLate] {
+            std::fs::write(&file, declined_text("0.59.37", why)).unwrap();
+            assert_eq!(take_declined(&file, "0.59.37"), Some(why.as_str()));
+        }
+    }
+
+    #[test]
+    fn a_restart_nobody_confirmed_says_so_with_why_and_when_and_clears_with_the_next_attempt() {
+        // 2026-11-19 16:33:41 UTC.
+        let at = 1_795_106_021_000u64;
+        for (why, words) in [
+            ("no", "answered No"),
+            ("timed_out", "nobody answered"),
+            ("too_late", "lapsed"),
+            (UNANSWERED, "no answer came back"),
+            ("declined", "was declined"),
+        ] {
+            let line = not_confirmed_line(why, at);
+            assert!(line.contains("16:33 UTC") && line.contains(words) && line.contains("150 s"), "{why}: {line}");
+            let note = not_confirmed_note("0.59.35", why, at);
+            assert!(note.starts_with("[AgentMux] The upgrade to 0.59.35 did not happen") && note.contains("16:33 UTC") && note.contains(words), "{why}: {note}");
+        }
+        // It is on the status as a word and a time (what a remote answer carries), and goes with the next wait or restart.
+        let d = download("ready", None);
+        assert_eq!((d.not_confirmed_at, d.not_confirmed.clone()), (None, None));
+        let marked = DownloadStatus { not_confirmed_at: Some(at), not_confirmed: Some("timed_out".into()), ..d.clone() };
+        for state in ["waiting", "restarting", "ready"] {
+            let next = with_wait(&marked, state, vec![on("Vmer", "turn")], None, Vec::new());
+            assert_eq!((next.not_confirmed_at, next.not_confirmed), (None, None), "{state}");
+        }
     }
 
     #[test]

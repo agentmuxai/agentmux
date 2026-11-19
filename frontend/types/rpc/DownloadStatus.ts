@@ -37,4 +37,14 @@ waiting_on?: Array<WaitingOn>,
  * restart stops, a line each ("Agent-1: an AgentMux instance (`task
  * dev`), running 9 h"; `background_work`).
  */
-stopping: Array<string>, };
+stopping: Array<string>, 
+/**
+ * After a restart that was asked for and then not confirmed (the user said No, nobody answered the launcher's
+ * dialog, or an answer came too late): when, in Unix milliseconds. Gone with the next restart or download.
+ */
+not_confirmed_at?: number, 
+/**
+ * Why, with `not_confirmed_at`: `no`, `timed_out`, `too_late`, or `unanswered` (nothing came back in time, so
+ * the dialog may never have been shown). A word, not a sentence: it leaves the machine in a remote answer.
+ */
+not_confirmed?: string, };
