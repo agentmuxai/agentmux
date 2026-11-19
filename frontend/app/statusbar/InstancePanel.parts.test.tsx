@@ -405,7 +405,7 @@ describe("when the panel is dismissed", () => {
 });
 
 describe("a window that has no id anywhere", () => {
-    it("shows its place in the list, cannot be renamed or removed, and says <null> in the console", async () => {
+    it("shows its place in the list, cannot be renamed, is closed by its label when removed, and says <null> in the console", async () => {
         h.ownOid = null;
         setEntries([
             { label: "main", windowId: null },

@@ -389,6 +389,17 @@ describe("InstancePanel window slots", () => {
         expect(names()).toEqual(["Alpha", "Charlie"]);
     });
 
+    it("the trash of a row whose window id has not arrived (no opacity slider yet) still removes it: by its label, never ignored", async () => {
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: null },
+        ]);
+        renderPanel();
+        await flush();
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        expect(removeOpen).toHaveBeenCalledWith({ windowId: null, label: "window-2" }, expect.any(Function));
+    });
+
     it("a closed window does not move when another one closes after it", async () => {
         vi.useFakeTimers();
         try {

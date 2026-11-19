@@ -7,6 +7,7 @@ PlaceWindowSlots ["w1"]
 console.debug [wave-panel] windowId=own label=main idx=0 displayName=Mine workspaceName=Main Space → name="Mine"
 PlaceWindowSlots ["w1"]
 names: Mine | Window 2
+requestRemoveWindow {"windowId":null,"label":"window-2"}
 removed the other one without an id
 requestRemoveWindow {"windowId":"own","label":"main"}
 removed this one
