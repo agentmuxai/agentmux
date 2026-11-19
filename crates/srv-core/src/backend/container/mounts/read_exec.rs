@@ -206,13 +206,16 @@ mod tests {
         let failed = cm.exec_read(name, &words(&["sh", "-c", "exit 3"]), &[], limit, 1024).await;
         let git = cm.exec_read(name, &words(&["git", "-C", "/nowhere", "rev-parse", "--show-toplevel"]), &[], limit, 1024).await;
         let began = std::time::Instant::now();
-        let slow = cm.exec_read(name, &words(&["sleep", "30"]), &[], Duration::from_secs(1), 1024).await;
+        let slow = cm.exec_read(name, &words(&["sleep", "31"]), &[], Duration::from_secs(1), 1024).await;
         let took = began.elapsed();
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let left = cm.exec_read(name, &words(&["sh", "-c", "pgrep -x sleep | wc -l"]), &[], limit, 1024).await;
+        // The slow command by its whole command line: the container's own idle process is a `sleep` too, and
+        // that one is counted to show the look sees a command that is still running.
+        let left = cm.exec_read(name, &words(&["sh", "-c", "pgrep -fx 'sleep 31' | wc -l"]), &[], limit, 1024).await;
+        let kept = cm.exec_read(name, &words(&["sh", "-c", "pgrep -fx 'sleep infinity' | wc -l"]), &[], limit, 1024).await;
         let big = cm.exec_read(name, &words(&["sh", "-c", "head -c 5000 /dev/zero"]), &[], limit, 1024).await;
         clean().await;
-        println!("both={both:?}\nwith_env={with_env:?}\nfailed={failed:?}\ngit={git:?}\nslow={slow:?} took={took:?}\nleft={left:?}\nbig={big:?}");
+        println!("both={both:?}\nwith_env={with_env:?}\nfailed={failed:?}\ngit={git:?}\nslow={slow:?} took={took:?}\nleft={left:?}\nkept={kept:?}\nbig={big:?}");
 
         let both = both.expect("a command that prints");
         assert_eq!(both.exit, Some(0));
@@ -227,6 +230,7 @@ mod tests {
         assert_eq!(slow.expect("a command that runs past its limit").exit, Some(TIMED_OUT_EXIT));
         assert!(took < limit + GRACE, "took {took:?}");
         assert_eq!(String::from_utf8_lossy(&left.expect("a look for what is left").stdout).trim(), "0", "the slow command was stopped inside the container");
+        assert_eq!(String::from_utf8_lossy(&kept.expect("a look for what is kept").stdout).trim(), "1", "the look counts a command that is still running");
         assert!(big.is_err(), "more output than asked for is refused: {big:?}");
     }
 
