@@ -470,6 +470,13 @@ struct ActRequest {
     readable: Option<bool>,
     #[serde(default)]
     agents: Option<Vec<String>>,
+    /// board_edit: the whole new stage set, a reset to the default, and the revision the editor read.
+    #[serde(default)]
+    stages: Option<Value>,
+    #[serde(default)]
+    stages_reset: Option<bool>,
+    #[serde(default)]
+    stages_rev: Option<i64>,
 }
 
 /// "#12, #15" for the history.
@@ -677,6 +684,9 @@ pub(crate) async fn act_as(state: &AppState, data: Value, actor: &Actor) -> Resu
             tier: None,
             readable: req.readable,
             agents: req.agents.clone(),
+            stages: req.stages.clone(),
+            stages_reset: req.stages_reset,
+            stages_rev: req.stages_rev,
         };
         return crate::server::work_boards::board_act(state, None, &actor.name, board_req);
     }

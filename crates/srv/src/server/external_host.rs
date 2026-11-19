@@ -24,6 +24,7 @@
 //! amx-conn/v1|<workspace>|<conn>                                  the connection header
 //! amx-attest/v1|<workspace>|<conn>|<nonce>|<person>|<valid_until> an attestation
 //! amx-revoke/v1|<workspace>|<conn>|<issued_at>                    ending a connection's proof
+//! amx-host/v1|<workspace>|<op>|<issued_at>|<args>                 a call of the host's own (`host_control`)
 //! ```
 
 use std::collections::HashMap;
@@ -47,11 +48,11 @@ pub const CONN_HEADER: &str = "x-amx-conn";
 const KEY_FILE_VERSION: u32 = 1;
 /// The longest lease srv grants, whatever the host signed: the host asks for five minutes.
 const MAX_LEASE_SECS: u64 = 6 * 60;
-/// How old a revocation may be.
+/// How old a revocation, or a call of the host's own, may be.
 const REVOKE_WINDOW_SECS: u64 = 60;
 
 /// Why a call was refused: the status and a line for the host.
-type Refusal = (StatusCode, &'static str);
+pub(crate) type Refusal = (StatusCode, &'static str);
 
 /// The registered host and the connections it proxied that are open now.
 pub(crate) struct Host {
@@ -185,6 +186,25 @@ impl Host {
             return Err((StatusCode::CONFLICT, "that connection is registered as an agent"));
         }
         Ok(req.person.clone())
+    }
+
+    /// A call of the host's own (`host_control`: what srv is doing, a stop notice, a graceful shutdown) is the host's
+    /// and nobody else's: it is signed over its operation and arguments, for this workspace, and no older than a minute.
+    /// The instance key is not enough, because every agent can read it.
+    pub(crate) fn check_call(&self, op: &str, workspace: &str, issued_at: u64, args: &str, sig: &str, now: u64) -> Result<(), Refusal> {
+        if !workspace_ok(workspace) || !plain(op, 1, 32, "-") || args.contains('|') {
+            return Err((StatusCode::BAD_REQUEST, "a field is not valid"));
+        }
+        if workspace != self.workspace {
+            return Err((StatusCode::FORBIDDEN, "signed for another workspace"));
+        }
+        if !self.verify(&format!("amx-host/v1|{workspace}|{op}|{issued_at}|{args}"), sig) {
+            return Err((StatusCode::FORBIDDEN, "the signature is not the registered host's"));
+        }
+        if now.abs_diff(issued_at) > REVOKE_WINDOW_SECS {
+            return Err((StatusCode::FORBIDDEN, "the call is too old"));
+        }
+        Ok(())
     }
 
     /// The host ends the proof of one connection (the person signed out). Idempotent.

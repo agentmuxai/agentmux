@@ -1070,7 +1070,7 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
     // They fade with the window on dismiss (window alpha ramps) and do not
     // pulse. macOS Y is bottom-up: line[0] (user@host) sits above line[1] (version).
     {
-        let info = crate::splash_info::SplashInfo::gather();
+        let info = crate::splash_info::SplashInfo::gather_and_log("start");
         let max_chars = ((SPLASH_W - 24.0) / 7.5) as usize; // ~7.5 px/char at 13px mono
         let lines = info.footer_lines(max_chars.max(8));
         let footer_color = {

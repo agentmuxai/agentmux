@@ -245,6 +245,8 @@ export const WpsEvent = {
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
+    /** A headless workspace will stop at a time, or will not after all (crates/srv/src/server/host_control.rs). */
+    WorkspaceStop: "workspace:stop",
     /** A sensitive request's countdown for the person to veto, and its end (crates/srv/src/sagas/sensitive_window.rs). */
     SensitivePending: "sensitive:pending",
     SensitiveCleared: "sensitive:cleared",

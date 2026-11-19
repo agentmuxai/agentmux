@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 
 use agentmux_common::time::now_ms;
 
+use crate::backend::storage::work_board_stages as stages;
 use crate::backend::storage::work_boards::{Board, BoardEdit, Deletion, DELETE_COUNTDOWN_MS};
 
 use super::AppState;
@@ -49,13 +50,30 @@ pub(crate) struct BoardsRequest {
     /// The agents that see the board (ids); an empty list means all agents.
     #[serde(default)]
     pub agents: Option<Vec<String>>,
+    /// edit: the whole new stage set (`{version, stages: [{id, name, colour, takes}]}`).
+    #[serde(default)]
+    pub stages: Option<Value>,
+    /// edit: clear the stages back to the default set.
+    #[serde(default)]
+    pub stages_reset: Option<bool>,
+    /// edit: the `stages_rev` the caller read; a different one is refused.
+    #[serde(default)]
+    pub stages_rev: Option<i64>,
 }
 
+/// A board as the routes show it. `stages` is the set in use: the stored one, or the default when none
+/// is stored or the stored one can't be used (`stages_error` then says why, and nothing is overwritten).
 pub(crate) fn board_json(b: &Board) -> Value {
+    let (set, error) = match stages::parse_stored(&b.stages) {
+        Ok(set) => (set, None),
+        Err(why) => (stages::default_set(), Some(why)),
+    };
     json!({
         "id": b.id, "slug": b.slug, "name": b.name, "tier": b.tier, "readable": b.readable,
         "agents": b.agents, "default": b.is_default, "archived": b.archived,
         "open": b.open, "total": b.total, "pending_delete_at": b.pending_delete_at,
+        "stages": set, "stages_rev": b.stages_rev,
+        "stages_default": b.stages.trim().is_empty() || error.is_some(), "stages_error": error,
     })
 }
 
@@ -82,6 +100,9 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
         tier: req.tier.clone(),
         readable: req.readable,
         agents: req.agents.clone(),
+        stages: req.stages.clone(),
+        stages_reset: req.stages_reset.unwrap_or(false),
+        stages_rev: req.stages_rev,
     };
     let out = match req.action.as_str() {
         "create" => {
@@ -125,7 +146,8 @@ pub(crate) fn board_act(state: &AppState, who: Option<(&str, &str)>, actor: &str
         }
         other => return Err(format!("unknown board action {other:?}: create, edit, archive, unarchive, delete, cancel_delete or default")),
     };
-    tracing::info!(target: "workqueue", actor, action = %req.action, board = ?req.board.as_deref().or(req.name.as_deref()), "board changed");
+    let stages_changed = req.action == "edit" && (req.stages.is_some() || req.stages_reset == Some(true));
+    tracing::info!(target: "workqueue", actor, action = %req.action, board = ?req.board.as_deref().or(req.name.as_deref()), stages_changed, "board changed");
     super::work_queue::publish_changed(state);
     Ok(out)
 }

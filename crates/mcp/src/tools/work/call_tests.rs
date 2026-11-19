@@ -78,7 +78,7 @@ fn cases() -> Vec<Case> {
             json!({}),
             "/agentmux/work/7/ask",
             json!({ "attempt": 1, "text": "Which one?" }),
-            &["Asked: task 7 now waits in the operator's Needs you column"],
+            &["Asked: task 7 now waits for the operator"],
         ),
         c(
             "WorkSubmit",
