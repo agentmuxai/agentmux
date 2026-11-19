@@ -339,6 +339,31 @@ impl Store {
         }
     }
 
+    /// The bundle that holds `name` (it is `UNIQUE`: at most one), whatever kind it is: a live or a
+    /// removed Global Memory entry, or an agent's bundle.
+    pub fn bundle_get_by_name(&self, name: &str) -> Result<Option<Bundle>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    instructions_by_provider, is_system
+             FROM db_bundles WHERE name = ?1",
+        )?;
+        match stmt.query_row(params![name], map_memory_row) {
+            Ok(m) => Ok(Some(m)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Give a removed Global Memory entry another name, so its old one is free for a live entry. Only
+    /// a row that is not global and not a system one; no version is recorded, so it stays removed.
+    pub fn bundle_rename_removed(&self, id: &str, new_name: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE db_bundles SET name = ?2 WHERE id = ?1 AND is_global = 0 AND is_system = 0", params![id, new_name])?;
+        Ok(())
+    }
+
     /// Look up just the `is_system` flag for `id`, without decoding a full
     /// `Bundle` row. Shared by every guard in this file that needs to know
     /// "is the EXISTING row (if any) a system entry" before deciding
