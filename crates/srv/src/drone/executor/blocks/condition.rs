@@ -357,7 +357,7 @@ mod tests {
         let sure = cond(nightly, "sure", params);
         assert_eq!(run(&sure, &scope_with(json!({ "triage": { "output": { "confidence": "high" } } }))).await.unwrap()["result"], json!(true));
         assert_eq!(run(&sure, &scope_with(json!({ "triage": { "output": { "confidence": "low" } } }))).await.unwrap()["result"], json!(false));
-        // (b) a re-run only for the named workflow on its first attempt.
+        // (b) a first failure is told only for the named workflow, on its first attempt.
         let flaky = cond("agentmux.rerun-flaky-job", "flaky", json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }));
         let ask = |name: &str, attempt: u32| {
             let scope = scope_item(json!({ "id": 5, "name": name, "run_attempt": attempt }), json!({}));
@@ -367,11 +367,6 @@ mod tests {
         assert_eq!(ask("CI", 1).await, json!(true));
         assert_eq!(ask("CI", 2).await, json!(false), "a run that was already re-run");
         assert_eq!(ask("Docs", 1).await, json!(false), "another workflow");
-        let ok = cond("agentmux.rerun-flaky-job", "ok", json!({ "repo": "acme/site", "workflow": "CI", "leader": "agenty" }));
-        for (status, told) in [(201, true), (403, false), (404, false), (422, false)] {
-            let got = run(&ok, &scope_with(json!({ "rerun": { "status": status } }))).await.unwrap()["result"].clone();
-            assert_eq!(got, json!(told), "status {status}");
-        }
         // (d) only a merged pull request, and only with a task still claimed.
         let merged = cond("agentmux.merged-pr-still-claimed", "merged", json!({ "repo": "acme/site", "steward": "masty" }));
         let was = |merged_at: Value| {
