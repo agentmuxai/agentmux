@@ -43,6 +43,14 @@ fn scope_for(purpose: Option<&str>) -> crate::identity::gh_agent_token::Scope {
     }
 }
 
+/// Whether a push token that failed is asked for again without workflows write: an App without it cannot give that, and the push
+/// token without it still pushes everything else. Not after a gh-agent that is too old (it would be again), and not after one
+/// that was slow: a second wait would run past the container's own, and its answer would never arrive.
+fn retry_without_workflows(workflows: bool, scope: crate::identity::gh_agent_token::Scope, failure: Option<&String>) -> bool {
+    use crate::identity::gh_agent_token::{is_too_old, is_took_too_long, Scope};
+    workflows && scope == Scope::Push && failure.is_some_and(|e| !is_too_old(e) && !is_took_too_long(e))
+}
+
 /// What an agent is told when the person isn't signed in to AgentMux Cloud (the Connect with GitHub design).
 const NEEDS_SIGN_IN_FOR_AGENT: &str = "GitHub needs the person to sign in to AgentMux Cloud (Connectors → Accounts)";
 
@@ -92,8 +100,7 @@ pub(crate) async fn handle_github_token(
         }
         let scope = scope_for(req.purpose.as_deref());
         let mut asked = crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo, scope, workflows).await;
-        // An App without workflows write cannot give that: the push token without it still pushes everything else.
-        if workflows && scope == crate::identity::gh_agent_token::Scope::Push && asked.as_ref().err().is_some_and(|e| !crate::identity::gh_agent_token::is_too_old(e)) {
+        if retry_without_workflows(workflows, scope, asked.as_ref().err()) {
             asked = crate::identity::gh_agent_token::token_for(&slug, &req.owner, &req.repo, scope, false).await;
         }
         match asked {
@@ -187,6 +194,18 @@ mod tests {
         for other in [None, Some("api"), Some(""), Some("push"), Some("GIT"), Some("admin"), Some("installation")] {
             assert_eq!(scope_for(other), Scope::Api, "{other:?}");
         }
+    }
+
+    #[test]
+    fn a_slow_push_mint_is_not_asked_again_without_workflows() {
+        use crate::identity::gh_agent_token::{took_too_long, Scope, GH_AGENT_TOO_OLD};
+        let other = "gh-agent gave no token for that repository".to_string();
+        assert!(retry_without_workflows(true, Scope::Push, Some(&other)));
+        assert!(!retry_without_workflows(true, Scope::Push, Some(&took_too_long())), "a second wait would outlast the container's");
+        assert!(!retry_without_workflows(true, Scope::Push, Some(&GH_AGENT_TOO_OLD.to_string())));
+        assert!(!retry_without_workflows(false, Scope::Push, Some(&other)));
+        assert!(!retry_without_workflows(true, Scope::Api, Some(&other)));
+        assert!(!retry_without_workflows(true, Scope::Push, None));
     }
 
     #[test]
