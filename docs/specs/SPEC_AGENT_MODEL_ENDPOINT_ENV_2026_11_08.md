@@ -58,9 +58,14 @@ own environment still wins:
   for a model route. Other providers' bindings, the instance lookup and the deleted-agent check stay.
 - `agent_runtime.rs` replaces srv's nominal `--model`/`--effort` with the endpoint's model
   (`ANTHROPIC_MODEL`, else the tier alias from `ANTHROPIC_DEFAULT_*_MODEL`).
-- The first switch away from Anthropic starts a fresh conversation, because the config directory changes.
-  Pointing an agent from one custom server to another keeps the directory, so its session is resumed on
-  the new server (follow-up: end the conversation when the address changes).
+- A conversation belongs to the server it was held with. `CLAUDE_CONFIG_DIR` is a private directory per
+  agent **and per server address** (`claude-endpoint/<slug>-<8 hex of the address>`; the address is
+  compared without case or a trailing slash). The first switch away from Anthropic therefore starts a
+  fresh conversation, and so does pointing an agent from one custom server to another: `--resume` looks
+  the session up in that directory, and the other server's directory does not hold it, so the next launch
+  cannot send A's history to B. Pointing the agent back to A returns it to A's own directory, which holds
+  only what was said to A. Changing a key, a model name or a timeout on the same address keeps the
+  directory.
 - The login variables (`CLAUDE_CODE_OAUTH_TOKEN`, and the token or key the endpoint did not give) are
   removed from the child command itself: the child inherits srv's own environment, which may hold the
   person's token.
