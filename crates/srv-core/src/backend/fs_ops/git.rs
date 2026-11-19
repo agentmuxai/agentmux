@@ -21,6 +21,10 @@
 //! object, and none may start a transport ([`NO_NETWORK_ENV`]). Those two are
 //! set in the environment, where no config file can change them.
 //!
+//! Git facts of a container agent's folder are not read on the host: no git
+//! is started for such a folder or anything inside it
+//! ([`super::container_folders`]).
+//!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
 //! decorations).
 
@@ -51,6 +55,9 @@ const SAFE_CONFIG: &[&str] = &[
 /// fetch an object the repository lacks, and no transport is allowed (an
 /// empty list of allowed protocols), whatever the repository's config says.
 pub const NO_NETWORK_ENV: &[(&str, &str)] = &[("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", "")];
+
+/// What a git run for a container agent's folder answers, without starting git.
+pub const NOT_READ_ON_THE_HOST: &str = "Git facts of a container agent's folder are not read on the host.";
 
 /// `fs.git_status` for `raw` (a folder the pane listed).
 pub async fn git_status(raw: &str) -> FsGitStatus {
@@ -184,6 +191,11 @@ pub fn filter_names(out: &str, scoped: bool) -> Vec<String> {
 
 /// Run git in `dir` with the safe settings; its stdout, or a sentence.
 async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
+    // Decided before any command is built; a check that can't finish counts as yes.
+    let asked = dir.to_string();
+    if tokio::task::spawn_blocking(move || super::container_folders::holds(&asked)).await.unwrap_or(true) {
+        return Err(GitError::Failed(NOT_READ_ON_THE_HOST.to_string()));
+    }
     let mut cmd = git_command(dir, args);
     let child = cmd.spawn().map_err(|e| GitError::Failed(format!("Couldn't run git: {e}")))?;
     match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
@@ -658,6 +670,45 @@ mod tests {
         let found = safe_git_line(&dir.path().to_string_lossy(), &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")]).await;
         assert_eq!(found, None, "the object is not there");
         assert!(!mark.exists(), "the ref check went to fetch the missing object");
+    }
+
+    /// A repository with a commit, a changed file and a new one: every read here has something to say about it.
+    fn repository_with_changes(dir: &std::path::Path) -> Option<()> {
+        test_git(dir, &["init", "-q"])?;
+        std::fs::write(dir.join("tracked.txt"), "a").unwrap();
+        test_git(dir, &["add", "."])?;
+        test_git(dir, &["commit", "-qm", "x"])?;
+        std::fs::write(dir.join("tracked.txt"), "b").unwrap();
+        std::fs::write(dir.join("new.txt"), "n").unwrap();
+        Some(())
+    }
+
+    /// No git is started for a container agent's folder, or for a folder inside it: the run answers before a
+    /// command exists, so the Files pane has no markers there and the one-line reads have nothing.
+    #[tokio::test]
+    async fn git_facts_of_a_container_agents_folder_are_not_read_on_the_host() {
+        let dir = tempfile::tempdir().unwrap();
+        if repository_with_changes(dir.path()).is_none() {
+            return; // No git on this machine.
+        }
+        let inner = dir.path().join("sub");
+        std::fs::create_dir_all(&inner).unwrap();
+        let (top, sub) = (dir.path().to_string_lossy().into_owned(), inner.to_string_lossy().into_owned());
+        // As any other folder, it has facts.
+        assert!(git_status(&top).await.in_repo);
+        assert!(safe_git_line(&sub, &["rev-parse", "--show-toplevel"]).await.is_some());
+
+        crate::backend::fs_ops::container_folders::add_for_test(dir.path());
+        for folder in [&top, &sub] {
+            match run_git(folder, &["rev-parse", "--show-toplevel"]).await {
+                Err(GitError::Failed(why)) => assert_eq!(why, NOT_READ_ON_THE_HOST),
+                other => panic!("git was started for {folder}: {other:?}"),
+            }
+            let s = git_status(folder).await;
+            assert!(!s.in_repo && s.entries.is_empty() && s.error.is_none(), "{s:?}");
+            assert_eq!(safe_git_line(folder, &["rev-parse", "--show-toplevel"]).await, None);
+            assert!(matches!(safe_status_porcelain(folder, &[]).await, Err(StatusError::Settings(_))), "no status run");
+        }
     }
 
     #[tokio::test]
