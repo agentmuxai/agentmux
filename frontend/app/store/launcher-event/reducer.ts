@@ -17,6 +17,7 @@ import {
     LauncherEventCommand,
     LauncherEventReducerEvent,
     LauncherEventState,
+    RECENT_CLOSE_MS,
     ReducerResult,
     WindowEntry,
 } from "./types";
@@ -93,8 +94,14 @@ function handleWindowOpened(state: LauncherEventState, label: string): ReducerRe
     const preservedWindowId = existing?.windowId != null;
     const next = new Map(state.knownEntries);
     next.set(label, { label, windowId: existing?.windowId ?? null });
+    // A window opening under a label closed a moment ago (labels are reused): its close no longer outweighs a snapshot.
+    let recentlyClosed = state.recentlyClosed;
+    if (recentlyClosed.has(label)) {
+        recentlyClosed = new Map(recentlyClosed);
+        (recentlyClosed as Map<string, number>).delete(label);
+    }
     return {
-        state: withDerived(state, next, state.closedBeforeSeed),
+        state: withDerived(state, next, state.closedBeforeSeed, recentlyClosed),
         events: [{ type: "window-opened", label, preservedWindowId }],
     };
 }
@@ -145,18 +152,21 @@ function handleWindowClosed(
     //     P2 PR #684 — was rebuilding `instances` array unnecessarily,
     //     causing redundant Solid subscriber re-runs)
     //  3. knownEntries changed → re-derive instances
-    if (!wasPresent && nextClosedBeforeSeed === state.closedBeforeSeed) {
+    // After seed, remember the close, so a snapshot taken while the host is still tearing the window
+    // down does not bring it back (see `recentlyClosed`).
+    const recentlyClosed = state.seedHasHappened ? withClosed(state.recentlyClosed, label, Date.now()) : state.recentlyClosed;
+    if (!wasPresent && nextClosedBeforeSeed === state.closedBeforeSeed && recentlyClosed === state.recentlyClosed) {
         return { state, events: [event] };
     }
     if (!wasPresent) {
         // Tombstone-only change — preserve instances reference.
         return {
-            state: { ...state, closedBeforeSeed: nextClosedBeforeSeed },
+            state: { ...state, closedBeforeSeed: nextClosedBeforeSeed, recentlyClosed },
             events: [event],
         };
     }
     return {
-        state: withDerived(state, nextKnown, nextClosedBeforeSeed),
+        state: withDerived(state, nextKnown, nextClosedBeforeSeed, recentlyClosed),
         events: [event],
     };
 }
@@ -260,6 +270,7 @@ function applySeed(
             knownEntries: next,
             seedHasHappened: true,
             closedBeforeSeed: null,
+            recentlyClosed: state.recentlyClosed,
             instances: deriveInstances(next),
         },
         events: [{ type: "seeded", addedCount: added, tombstonesSkipped }],
@@ -282,10 +293,22 @@ function reconcileFromSnapshot(
     // No tombstone handling: by the time reconcile runs, the seed
     // phase is over (`seedHasHappened: true`); pre-seed tombstones
     // are no longer relevant.
+    //
+    // Two things a snapshot must not do (it is a picture of the host, taken while the host is busy):
+    //   - bring back a window the launcher said closed a moment ago: the host lists a window until it has
+    //     finished tearing it down, so a snapshot in that time named it again, and the panel showed a
+    //     closed window's row coming back for a moment (or a held row blinking at the periodic resync);
+    //   - take away an id the stream has already given: the host's id table can lag the window, and a
+    //     null there rolled the window's row back to "no id yet" (no opacity slider) until the next event.
+    const now = Date.now();
     const next = new Map<string, WindowEntry>();
     for (const e of entries) {
         if (!isInstanceLabel(e.label)) continue;
-        next.set(e.label, { label: e.label, windowId: e.windowId });
+        // Only a label the stream no longer knows: one it knows again (assigned or id-registered after the
+        // close, with or without a window_opened) is a live window whatever was recorded before.
+        const closedAt = state.recentlyClosed.get(e.label);
+        if (closedAt !== undefined && now - closedAt < RECENT_CLOSE_MS && !state.knownEntries.has(e.label)) continue;
+        next.set(e.label, { label: e.label, windowId: e.windowId ?? state.knownEntries.get(e.label)?.windowId ?? null });
     }
     let added = 0;
     for (const label of next.keys()) {
@@ -295,11 +318,16 @@ function reconcileFromSnapshot(
     for (const label of state.knownEntries.keys()) {
         if (!next.has(label)) removed++;
     }
+    // Nothing differs (the periodic resync, most of the time): keep the same state, so nothing downstream redraws.
+    if (added === 0 && removed === 0 && [...next].every(([label, e]) => state.knownEntries.get(label)?.windowId === e.windowId)) {
+        return { state, events: [{ type: "reconciled", addedCount: 0, removedCount: 0, totalAfter: next.size }] };
+    }
     return {
         state: {
             knownEntries: next,
             seedHasHappened: state.seedHasHappened,
             closedBeforeSeed: state.closedBeforeSeed,
+            recentlyClosed: state.recentlyClosed,
             instances: deriveInstances(next),
         },
         events: [
@@ -332,13 +360,23 @@ function withDerived(
     state: LauncherEventState,
     knownEntries: ReadonlyMap<string, WindowEntry>,
     closedBeforeSeed: ReadonlySet<string> | null,
+    recentlyClosed: ReadonlyMap<string, number> = state.recentlyClosed,
 ): LauncherEventState {
     return {
         knownEntries,
         seedHasHappened: state.seedHasHappened,
         closedBeforeSeed,
+        recentlyClosed,
         instances: deriveInstances(knownEntries),
     };
+}
+
+/** `closed` with `label` noted as closed at `now`, and every close older than `RECENT_CLOSE_MS` forgotten. */
+function withClosed(closed: ReadonlyMap<string, number>, label: string, now: number): ReadonlyMap<string, number> {
+    const next = new Map<string, number>();
+    for (const [l, at] of closed) if (now - at < RECENT_CLOSE_MS) next.set(l, at);
+    next.set(label, now);
+    return next;
 }
 
 /**
