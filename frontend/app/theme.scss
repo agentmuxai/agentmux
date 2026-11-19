@@ -217,6 +217,11 @@
     --accent-text-color: #fff;  // text/icon color on an --accent-color-filled surface (e.g. active pill states)
     --button-color: #fff;       // text color on an --accent-color-filled primary button — distinct from --button-text-color below, which is for the brighter green/yellow buttons
     --error-text-color: #eb755d;
+    // Text and mark on an --error-color fill (the TEAR OFF place of a drag): white where the red is strong enough for it,
+    // and the theme's dark base where its red is pale (themes/on-error-text.test.ts holds every theme to 3:1). The edge
+    // that keeps the words legible on the lighter squares goes the other way, so it is --on-error-edge, not black.
+    --on-error-color: #fff;
+    --on-error-edge: #000;
     // The standard Windows close-button reds (hover, pressed) and its glyph. One
     // definition for the title bar (window-controls.win32.scss) and the pane
     // headers' close button (mixins.scss).
