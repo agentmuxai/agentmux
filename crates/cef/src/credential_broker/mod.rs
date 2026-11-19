@@ -175,6 +175,72 @@ pub(crate) fn fall_through_resolved(state: &Arc<AppState>, r: &approval::Resolve
     }
 }
 
+/// The person said yes (in the approval window, or earlier by choosing "always" for this agent): read the secret, answer
+/// every parked request riding the approval with it, and tell an agent driving a pane that it was answered.
+pub(crate) async fn answer_approved(state: &Arc<AppState>, resolved: &approval::ResolvedApproval) {
+    match fill_credential(state, &resolved.identity_id, &resolved.origin, &resolved.realm, resolved.is_proxy).await {
+        Ok((username, password)) => {
+            use cef::ImplAuthCallback;
+            let u = cef::CefString::from(username.as_str());
+            let p = cef::CefString::from(password.as_str());
+            for parked in &resolved.auth_requests {
+                if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
+                    cb.cont(Some(&u), Some(&p));
+                    tell_parked(state, parked, "auth_answered", resolved);
+                }
+            }
+        }
+        Err(e) => {
+            // The person already said yes; the secret just could not be read (credential deleted between approval and
+            // Fill, transient keychain/backend failure, srv restart). Cancelling here would render the bare 401 with no
+            // way to type credentials — strictly worse than pre-feature behaviour, and a direct violation of this
+            // feature's "can only make auth more automatic, never break the baseline" guarantee (codex P2 → reagent P1
+            // on PR #2824).
+            //
+            // So leave every callback PARKED in `browser_pane::auth` and emit the ordinary `browser-pane-auth-required`
+            // prompt for each, one per originating pane — coalesced requests can come from different panes. The manual
+            // prompt then resolves the very same parked callbacks, exactly as it does when no stored credential exists
+            // at all.
+            tracing::warn!(
+                "[credential-broker] Fill failed: {e} — falling {} parked auth request(s) through to the manual prompt",
+                resolved.auth_requests.len(),
+            );
+            fall_through_resolved(state, resolved);
+        }
+    }
+}
+
+/// Whether the Vault's Lookup answer says the person already chose "always" for this agent and profile, so no per-use
+/// approval window is shown. Anything other than the exact word `granted` (a missing field, `ask`, a typo) asks the
+/// person as before.
+fn is_granted(lookup: &serde_json::Value) -> bool {
+    lookup.get("approval").and_then(|v| v.as_str()) == Some("granted")
+}
+
+/// The person already chose "always" for this agent and profile: answer the prompt now, with no window. A request for a
+/// protection space whose approval window is already open rides that window instead of racing it.
+async fn answer_granted(
+    state: &Arc<AppState>,
+    identity_id: &str,
+    origin: &str,
+    host: &str,
+    port: i32,
+    realm: &str,
+    is_proxy: bool,
+    request_id: String,
+    block_id: String,
+) {
+    match approval::reserve_or_join(identity_id, origin, host, port, realm, is_proxy, request_id, block_id) {
+        approval::Reservation::Joined => {}
+        approval::Reservation::New { approval_id } => {
+            // Taken at once, so a challenge that joined in the meantime is answered with this one.
+            if let Some(resolved) = approval::take(&approval_id) {
+                answer_approved(state, &resolved).await;
+            }
+        }
+    }
+}
+
 async fn run_challenge(
     state: Arc<AppState>,
     request_id: String,
@@ -243,11 +309,11 @@ async fn run_challenge(
         fall_through();
         return;
     }
-    let masked_username = lookup
-        .get("username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    if is_granted(&lookup) {
+        answer_granted(&state, &identity_id, &origin, &host, port, &realm, is_proxy, request_id.clone(), block_id.clone()).await;
+        return;
+    }
+    let masked_username = lookup.get("username").and_then(|v| v.as_str()).unwrap_or("").to_string();
     // The person's yes is asked (below); an agent driving the pane is told that is what the page waits for.
     crate::client::agent_notice::auth_notice(&state, &block_id, "auth_waiting_approval", &host, port, &realm);
 
@@ -618,6 +684,16 @@ mod tests {
             assert!(reqwest::Url::parse(&url).is_ok(), "{url}");
         }
         assert!(reqwest::Url::parse("127.0.0.1:29705/agentmux/service").is_err(), "the bare form is what failed to build");
+    }
+
+    #[test]
+    fn only_the_word_granted_skips_the_approval_window() {
+        let a = |v: serde_json::Value| super::is_granted(&v);
+        assert!(a(serde_json::json!({ "found": true, "approval": "granted" })));
+        assert!(!a(serde_json::json!({ "found": true, "approval": "ask" })));
+        assert!(!a(serde_json::json!({ "found": true })), "an older srv sends no field: the person is asked");
+        assert!(!a(serde_json::json!({ "found": true, "approval": "Granted" })));
+        assert!(!a(serde_json::json!({ "found": true, "approval": true })));
     }
 
     use super::recent_fill;
