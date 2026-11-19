@@ -100,7 +100,7 @@ pub fn check_shareable(kind: &str, fields: &BTreeMap<String, String>) -> Result<
         return Err("only a login saved for a site can be shared".into());
     }
     if fields.contains_key(REALM) || fields.contains_key(super::signins::PROXY) {
-        return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared".into());
+        return Err("a sign-in for a site's HTTP prompt or a proxy is typed by the browser itself and can't be shared: the browser answers the prompt when the site asks, from an entry saved for the browser profile of the pane that meets it, so ask the person to save it for your profile in the Vault".into());
     }
     Ok(())
 }
