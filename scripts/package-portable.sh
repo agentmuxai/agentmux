@@ -221,6 +221,12 @@ cp dist/cef/libEGL.dll dist/cef/libGLESv2.dll dist/cef/d3dcompiler_47.dll "$PORT
 # Without these the GPU degrades to the disabled DOM renderer when hardware GL
 # can't boot. Paired with --enable-unsafe-swiftshader (app.rs) + the bundle step.
 cp dist/cef/vk_swiftshader.dll dist/cef/vulkan-1.dll dist/cef/vk_swiftshader_icd.json "$PORTABLE/runtime/" 2>/dev/null || true
+# WebGPU shader compiler: without dxcompiler.dll a page gets a WebGPU adapter but no
+# device. dxil.dll rides along when the runtime has it. The check fails the package
+# when dxcompiler.dll did not make it into runtime/.
+cp dist/cef/dxcompiler.dll "$PORTABLE/runtime/" 2>/dev/null || true
+cp dist/cef/dxil.dll "$PORTABLE/runtime/" 2>/dev/null || true
+bash scripts/verify-webgpu-libs.sh "$PORTABLE/runtime" dxcompiler.dll || exit 1
 
 # Resource paks
 cp dist/cef/chrome_100_percent.pak dist/cef/chrome_200_percent.pak dist/cef/resources.pak "$PORTABLE/runtime/" 2>/dev/null || true
