@@ -31,6 +31,7 @@ import { createEffect, createRoot } from "solid-js";
 import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { mayPlayFromBus, SOUNDS, type SoundDef, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
+import { afterGesture } from "./after-gesture";
 import { noteSound } from "./sound-history";
 import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
@@ -85,6 +86,21 @@ function busSound(ev: SoundEvent): SoundDef | null {
     return null;
 }
 
+/** Open the audio context, then hook the tool tones and any waiting players into it and its master gain. */
+async function primeNow(): Promise<void> {
+    await player.prime();
+    const ctx = player.getAudioContext();
+    const master = player.getMasterGain();
+    if (!ctx || !master) return;
+    // Made after the gesture, not inside it: the page's earlier gesture unlocks it, but make sure it is running.
+    if (ctx.state === "suspended") void ctx.resume?.().catch(() => {});
+    if (!toolTones.isAttached()) toolTones.attach(ctx, master);
+    // Attach any waiting players that were created before prime.
+    for (const wp of waitingTones.values()) {
+        if (!wp.isAttached()) wp.attach(ctx, master);
+    }
+}
+
 /**
  * The first-gesture handler that primes the AudioContext, then hooks the
  * tool-tones chain and any waiting players into it. It disarms itself, so it
@@ -105,20 +121,18 @@ function makePrimeOnce(): (e: Event) => Promise<void> {
     // pointerdown -- reagentx P1 on PR #2597). Removal is manual instead,
     // gated on isTrusted, so an untrusted event leaves both listeners armed
     // for the next real one.
-    const primeOnce = async (e: Event) => {
-        if (!e.isTrusted) return;
+    //
+    // The priming itself waits until the gesture is over (after-gesture.ts). Opening the audio device blocks
+    // the page for as long as the machine's audio stack takes (16 s once, on a debug build), and run inside
+    // the press it froze the pane drag that press was starting. The page has had its user gesture by then, and
+    // that is what the autoplay policy asks for.
+    const primeOnce = (e: Event): Promise<void> => {
+        if (!e.isTrusted) return Promise.resolve();
         document.removeEventListener("pointerdown", primeOnce, true);
         document.removeEventListener("keydown", primeOnce, true);
-        await player.prime();
-        const ctx = player.getAudioContext();
-        const master = player.getMasterGain();
-        if (ctx && master) {
-            if (!toolTones.isAttached()) toolTones.attach(ctx, master);
-            // Attach any waiting players that were created before prime.
-            for (const wp of waitingTones.values()) {
-                if (!wp.isAttached()) wp.attach(ctx, master);
-            }
-        }
+        return new Promise<void>((resolve) => {
+            afterGesture(e, () => void primeNow().finally(resolve));
+        });
     };
     return primeOnce;
 }
