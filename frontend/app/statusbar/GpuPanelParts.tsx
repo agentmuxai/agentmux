@@ -11,7 +11,7 @@ import type { GpuProcess } from "@/types/rpc/GpuProcess";
 import type { GpuSampleResult } from "@/types/rpc/GpuSampleResult";
 import type { GpuInfo } from "@/util/gpuutil";
 import { For, Index, Show, type JSX } from "solid-js";
-import { barWidth, formatGpuBytes, formatPct, gpuColor, memoryText } from "./gpu-format";
+import { barWidth, formatGpuBytes, formatPct, gpuColor, memoryText, osName } from "./gpu-format";
 import { MIN_POLL_MS } from "./gpu-panel-state";
 import { UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
 
@@ -24,7 +24,7 @@ function stateNotice(s: GpuSampleResult | null, failed: boolean): string | null 
         case "unavailable":
             return t("gpuPanel.unavailable");
         case "unsupported":
-            return t("gpuPanel.unsupported", { os: s.os });
+            return t("gpuPanel.unsupported", { os: osName(s.os) });
         default:
             return s.adapters.length === 0 ? t("gpuPanel.noAdapter") : null;
     }
@@ -46,7 +46,9 @@ export function GfxLine(props: { info: GpuInfo }): JSX.Element {
         <div class="gpu-gfx" classList={{ "gpu-gfx-warn": props.info.classification !== "hardware" }}>
             <span>{text()}</span>
             <Show when={props.info.renderer}>
-                <span class="gpu-renderer">{props.info.renderer}</span>
+                <span class="gpu-renderer" {...tip(props.info.renderer)}>
+                    {props.info.renderer}
+                </span>
             </Show>
         </div>
     );

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { barWidth, formatGpuBytes, formatPct, GPU_WARN_PCT, gpuColor, memoryText } from "./gpu-format";
+import { barWidth, formatGpuBytes, formatPct, GPU_WARN_PCT, gpuColor, memoryText, osName } from "./gpu-format";
 
 const WARN = "var(--warning-text-color)";
 const PLAIN = "var(--secondary-text-color)";
@@ -50,5 +50,14 @@ describe("the panel's figures", () => {
         expect(memoryText(2 * GB, undefined)).toBe("2.0 GB");
         expect(memoryText(2 * GB, 0)).toBe("2.0 GB");
         expect(memoryText(undefined, 8 * GB)).toBeNull();
+    });
+});
+
+describe("a system by its name", () => {
+    it("writes macOS, Linux and Windows as a person does, and an unknown id as it is", () => {
+        expect(osName("macos")).toBe("macOS");
+        expect(osName("linux")).toBe("Linux");
+        expect(osName("windows")).toBe("Windows");
+        expect(osName("freebsd")).toBe("freebsd");
     });
 });

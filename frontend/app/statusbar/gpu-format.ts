@@ -22,6 +22,13 @@ export function formatGpuBytes(bytes: number): string {
     return "0 MB";
 }
 
+const OS_NAMES: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** A system as a person writes it: srv's id ("macos") is not its name. An id it does not know is shown as it is. */
+export function osName(os: string): string {
+    return OS_NAMES[os] ?? os;
+}
+
 /** A percentage as the panel and the bar print it: whole, under 0.5 as "0%". */
 export function formatPct(pct: number): string {
     return `${Math.round(pct)}%`;

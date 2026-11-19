@@ -103,7 +103,7 @@ describe("the GPU panel", () => {
     it("says a system does not read GPU figures yet, by its name", async () => {
         h.sample.mockResolvedValue(result({ state: "unsupported", os: "macos", adapters: [], processes: [] }));
         const { container } = mount();
-        await waitFor(() => expect(container.textContent).toContain("does not read GPU figures on macos yet"));
+        await waitFor(() => expect(container.textContent).toContain("does not read GPU figures on macOS yet"));
     });
 
     it("says where only the adapter's figures are known", async () => {
