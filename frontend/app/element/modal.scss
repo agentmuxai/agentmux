@@ -73,6 +73,17 @@
         padding-top: 15vh;
     }
 
+    // Hangs from the top edge of the region, centred, 6px (real pixels: the root is not zoomed) down, with 8px of
+    // room each side (the command palette, SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md §3.1).
+    &[data-placement="dropdown"] {
+        align-items: start;
+        justify-items: center;
+        // The one column is as wide as the region's room, not as wide as the panel's own width: a panel wider than
+        // the window is then cut to it by its max-width and stays centred.
+        grid-template-columns: minmax(0, 1fr);
+        padding: 6px 8px 0;
+    }
+
     // The root itself is focusable as a last-resort target (when the
     // panel has no focusable children, `firstFocusable(panelRef)`
     // returns null and we fall back to panelRef. panelRef has
@@ -91,6 +102,15 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     animation: am-fade-in var(--duration-quick) var(--ease-out);
+}
+
+// No backdrop: the region behind is neither dimmed nor blurred. The element stays, transparent, to take the click
+// that closes the modal, so that click lands on nothing else.
+.modal-root[data-backdrop="none"] > .modal-backdrop {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    animation: none;
 }
 
 .modal-panel {

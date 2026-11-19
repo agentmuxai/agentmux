@@ -144,8 +144,13 @@ export const OperatorOnlyModals = createContext(false);
 // overlay layer, a step above the pane it covers (SPEC_PANE_BACKGROUND_THEMES_2026_11_15.md §7.4). A dialog that
 // is mounted outside every pane (window or tab scope), or in a pane with no backdrop, is left as it was.
 
-const ModalRootBindings: Component<{ getEl: Accessor<HTMLElement | null | undefined>; mount: HTMLElement }> = (p) => {
-    usePaneOverlay(p.getEl);
+const ModalRootBindings: Component<{
+    getEl: Accessor<HTMLElement | null | undefined>;
+    /** The element whose rect is cut out of native browser panes: the root, or the panel of a modal with no backdrop. */
+    getClipEl: Accessor<HTMLElement | null | undefined>;
+    mount: HTMLElement;
+}> = (p) => {
+    usePaneOverlay(p.getClipEl);
     onMount(() => {
         const el = p.getEl();
         const stop = el ? carryPaneScope(el, p.mount) : undefined;
@@ -189,10 +194,14 @@ export interface ModalProps {
     /** Width preset. `fit` = auto. Default `md`. */
     size?: "sm" | "md" | "lg" | "xl" | "fit";
     /** Vertical placement of the panel. `center` (default) centers
-     *  with the grid; `top` anchors near the top of the region —
-     *  matches command-palette-style surfaces that drop down from
-     *  the top of the screen. */
-    placement?: "center" | "top";
+     *  with the grid; `top` anchors near the top of the region, 15% of
+     *  its height down; `dropdown` hangs from the top edge, horizontally
+     *  centred, like VS Code's command palette. */
+    placement?: "center" | "top" | "dropdown";
+    /** What is behind the panel. `dim` (default) dims and blurs the region; `none` leaves it as it was, and cuts
+     *  only the panel's own rectangle out of native browser panes. A click on the empty region still closes the
+     *  modal and does nothing else. The command palette hangs from the top bar this way. */
+    backdrop?: "dim" | "none";
     /** Optional extra class on the panel — lets a caller apply
      *  component-specific layout without sidestepping the primitive. */
     panelClass?: string;
@@ -413,7 +422,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             class="modal-root"
                             data-scope={resolvedScope()}
                             data-scope-fallback={fellBackFrom() ?? undefined}
-                            data-placement={props.placement ?? "center"}
+                            data-placement={props.placement ?? "center"} data-backdrop={props.backdrop ?? "dim"}
                             data-operator-only={props.operatorOnly || forcedOperatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
@@ -423,7 +432,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             tabIndex={-1}
                             onKeyDown={handleKeyDown}
                         >
-                            <ModalRootBindings getEl={() => rootRef} mount={mount()} />
+                            <ModalRootBindings getEl={() => rootRef} getClipEl={() => (props.backdrop === "none" ? panelRef : rootRef)} mount={mount()} />
                             <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"

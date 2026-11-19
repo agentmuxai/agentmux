@@ -35,9 +35,13 @@ describe("dialogs and chrome zoom", () => {
         expect(ruleOf("modal.scss", ".modal-panel")).toMatch(/max-height: calc\(\(100vh - .*\) \/ var\(--zoomfactor\)\)/);
         const palette = ruleOf("../modals/command-palette.scss", ".modal-panel.command-palette-panel");
         expect(palette).toContain("/ var(--zoomfactor)");
-        // Its fixed 480px height is a zoomed length too (720 real px at 150%, off a 750 px window): capped by the
-        // window. It drops from the top (the overlay's padding-top is 15vh, its bottom padding 24px): 85vh - 24px.
-        expect(palette).toMatch(/max-height: min\(480px, calc\(\(85vh - 24px\) \/ var\(--zoomfactor\)\)\)/);
+        // It hangs from the top edge (6px down, 8px of room each side, all real pixels: the overlay is not zoomed),
+        // and keeps 8px of the window each side and 48px of its height, in the panel's own zoomed lengths.
+        expect(palette).toMatch(/max-height: calc\(\(100vh - 48px\) \/ var\(--zoomfactor\)\)/);
+        expect(palette).toMatch(/max-width: min\(100%, calc\(\(100vw - 16px\) \/ var\(--zoomfactor\)\)\)/);
+        expect(readFileSync(join(__dirname, "modal.scss"), "utf8")).toMatch(
+            /\[data-placement="dropdown"\] \{[^}]*padding: 6px 8px 0/
+        );
         expect(readFileSync(join(__dirname, "modal.scss"), "utf8")).toMatch(/\[data-placement="top"\] \{[^}]*padding-top: 15vh/);
         expect(ruleOf("../view/accounts/accounts-gallery.scss", ".modal-panel.accounts-chooser")).toContain("/ var(--zoomfactor)");
     });
