@@ -422,7 +422,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             class="modal-root"
                             data-scope={resolvedScope()}
                             data-scope-fallback={fellBackFrom() ?? undefined}
-                            data-placement={props.placement ?? "center"} data-backdrop={props.backdrop ?? "dim"}
+                            data-placement={props.placement ?? "center"} data-backdrop={props.backdrop === "none" ? "none" : undefined}
                             data-operator-only={props.operatorOnly || forcedOperatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
