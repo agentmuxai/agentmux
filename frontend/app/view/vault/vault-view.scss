@@ -37,6 +37,29 @@
         flex: 1 1 auto;
         min-height: 0;
     }
+
+    // The smallest width the Vault supports is 160px of this box (inside the pane's zoom: 240px of pane at 150%).
+    // Below it the Vaults row, the list and the dialogs cannot hold a word each, so one line says so instead.
+    container-type: inline-size;
+    container-name: vault-pane;
+}
+
+.vault-too-narrow {
+    display: none;
+    padding: var(--space-3);
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+@container vault-pane (max-width: 159px) {
+    .vault-view > :not(.vault-too-narrow) {
+        display: none;
+    }
+
+    .vault-too-narrow {
+        display: block;
+    }
 }
 
 // The list: the filter stays put, the sections scroll under it.
