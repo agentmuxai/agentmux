@@ -11,6 +11,7 @@ import {
     DEFAULT_KINDS,
     emptyFilter,
     entryLinks,
+    prNumber,
     isFailure,
     newPillLabel,
     requestKinds,
@@ -68,6 +69,26 @@ describe("a row's links", () => {
         const start = entry({ kind: "agent_start", agent_id: "korp", links: { history: history("korp"), pane: { block_id: "b1" } } });
         expect(entryLinks(start).map((i) => i.label)).toEqual(["In history", "In its pane"]);
         expect(entryLinks(entry({ kind: "registry", links: {} }))).toEqual([]);
+    });
+
+    it("gives a row the task its agent was on and the task's PR, for the default board only", () => {
+        const task = { num: 12, task_ref: "#12", pr_url: "https://github.com/o/r/pull/9" };
+        const items = entryLinks(entry({ kind: "tool", agent_id: "korp", links: { task } }));
+        expect(items.map((i) => [i.label, i.kind, (i as { href?: string }).href])).toEqual([
+            ["task #12", "task", "agentmux://task/12"],
+            ["PR #9", "pr", "https://github.com/o/r/pull/9"],
+        ]);
+        const noPr = entryLinks(entry({ kind: "tool", links: { task: { num: 3, task_ref: "#3" } } }));
+        expect(noPr.map((i) => i.label)).toEqual(["task #3"]);
+        expect(entryLinks(entry({ kind: "tool", links: { task: { num: 3, task_ref: "work#3", pr_url: "x" } } }))).toEqual([]);
+        const jekt = entryLinks(entry({ from: { agent_id: "korp", links: { task } }, to: { agent_id: "loap", links: { task: { num: 5, task_ref: "#5" } } } }));
+        expect(jekt.map((i) => i.label)).toEqual(["Sender's task #12", "Sender's PR #9", "Receiver's task #5"]);
+    });
+
+    it("reads a PR's number from its URL, or says nothing", () => {
+        expect(prNumber("https://github.com/o/r/pull/7802")).toBe("#7802");
+        expect(prNumber("https://github.com/o/r/pull/7802/files?x=1")).toBe("");
+        expect(prNumber("https://example.com/pr")).toBe("");
     });
 
     it("gives an action its actor's links and its target's", () => {

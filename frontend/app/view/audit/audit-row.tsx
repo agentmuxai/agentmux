@@ -9,6 +9,7 @@ import { For, Show, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
 import { Button, Pill } from "@/app/element/ui";
 import { UiIcon } from "@/app/element/ui/shared";
+import { onLinkClick } from "@/app/element/link-open";
 import { revealBlock } from "@/app/util/reveal-block";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { makeHistoryAt } from "@/app/view/agent/history/history-start-at";
@@ -22,7 +23,8 @@ const kindLabel = (kind: string): string => KIND_CHIPS.find((c) => c.kind === ki
 export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: string; sound?: boolean; lit?: boolean }): JSX.Element => {
     const failed = () => isFailure(props.entry);
 
-    const open = async (item: AuditLinkItem) => {
+    const open = async (item: AuditLinkItem, event: MouseEvent) => {
+        if (item.kind === "task" || item.kind === "pr") return void onLinkClick(event, item.href);
         if (item.kind === "pane") return void revealBlock(item.blockId, { source: "audit" });
         const { link } = item;
         // The reader parses the transcript by the agent's provider, and a time-only link is in whichever
@@ -64,7 +66,7 @@ export const AuditRow = (props: { entry: AuditEntry; now: number; paneBlockId: s
             <span class="audit-row-links">
                 <For each={entryLinks(props.entry)}>
                     {(item) => (
-                        <Button tone="quiet" density="compact" onClick={() => void open(item)}>
+                        <Button tone="quiet" density="compact" onClick={(e) => void open(item, e)}>
                             {item.label}
                         </Button>
                     )}
