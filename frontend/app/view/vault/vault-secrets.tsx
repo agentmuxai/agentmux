@@ -14,7 +14,8 @@ import { t } from "@/app/i18n/i18n";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import { formatWhen } from "./vault-format";
 import { openVault } from "./open-vault";
-import { grantText } from "./vault-grant-labels";
+import { createAgentNames } from "./vault-agent-names";
+import { grantText, SIGNIN_GRANT } from "./vault-grant-labels";
 import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, type GrantedEntry } from "./vault-store";
 
 /** How many of the agents' doings to list at first, and how many more each "Show more" adds. */
@@ -103,6 +104,43 @@ function useAgentUses(visible: () => boolean) {
     return { found, rows, granted, error, setError, lines, load, showMore, moreLoaded, moreToRead, readFull, canShowMore: () => moreLoaded() || moreToRead() };
 }
 
+/** Where each entry may be used without asking, with a button to stop each. */
+function StandingGrants(props: { granted: GrantedEntry[]; revoke: (entryId: string, grant: string) => void | Promise<void> }): JSX.Element {
+    // A shared login's sign-in grant holds the agent's id; any entry's share list names every agent.
+    const names = createAgentNames(() => props.granted.find((e) => e.grants.some((g) => g.startsWith(SIGNIN_GRANT)))?.id ?? false);
+    return (
+        <Show when={props.granted.length > 0}>
+            <table class="warden-manager-table" aria-label="Standing permissions">
+                <thead>
+                    <tr>
+                        <th>Entry</th>
+                        <th>May be used without asking</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <For each={props.granted}>
+                        {(e) => (
+                            <tr data-entry={e.id}>
+                                <td>{e.label}</td>
+                                <td>
+                                    <For each={e.grants}>
+                                        {(g) => (
+                                            <span class="vault-grant" data-origin={g}>
+                                                {grantText(g, names)}
+                                                <CloseButton size="sm" label={`Stop ${grantText(g, names)} for ${e.label}`} onClick={() => void props.revoke(e.id, g)} />
+                                            </span>
+                                        )}
+                                    </For>
+                                </td>
+                            </tr>
+                        )}
+                    </For>
+                </tbody>
+            </table>
+        </Show>
+    );
+}
+
 /** `visible`: this is the Audit section's shown. Opening the Vault's list opens its key and can ask the
  *  person (a keychain, a locked keyring), so nothing is loaded until the section is looked at. */
 export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
@@ -129,35 +167,7 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
-            <Show when={granted().length > 0}>
-                <table class="warden-manager-table" aria-label="Standing permissions">
-                    <thead>
-                        <tr>
-                            <th>Entry</th>
-                            <th>May be used without asking</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For each={granted()}>
-                            {(e) => (
-                                <tr data-entry={e.id}>
-                                    <td>{e.label}</td>
-                                    <td>
-                                        <For each={e.grants}>
-                                            {(g) => (
-                                                <span class="vault-grant" data-origin={g}>
-                                                    {grantText(g)}
-                                                    <CloseButton size="sm" label={`Stop ${grantText(g)} for ${e.label}`} onClick={() => void revoke(e.id, g)} />
-                                                </span>
-                                            )}
-                                        </For>
-                                    </td>
-                                </tr>
-                            )}
-                        </For>
-                    </tbody>
-                </table>
-            </Show>
+            <StandingGrants granted={granted()} revoke={revoke} />
             <Show
                 when={(rows() ?? []).length > 0}
                 fallback={<NoUses loading={rows() === null} readFull={readFull()} lines={lines()} canReadMore={moreToRead()} onMore={showMore} />}

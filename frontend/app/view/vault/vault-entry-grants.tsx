@@ -9,6 +9,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { CloseButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
+import { createAgentNames } from "./vault-agent-names";
 import { COMMAND_GRANT, commandGrantLabel, isSiteGrant, SETTING_GRANT, settingGrantLabel, SIGNIN_GRANT, signinGrantLabel } from "./vault-grant-labels";
 import { EntryShares } from "./vault-share";
 import { siteOf } from "./vault-use-question";
@@ -35,6 +36,9 @@ function GrantList(props: { grants: string[]; label: string; lead: string; name:
 export function EntryGrants(props: { entry: VaultEntryInfo; revoke: (grant: string) => void }): JSX.Element {
     const label = () => props.entry.label;
     const starting = (prefix: string) => props.entry.grants.filter((g) => g.startsWith(prefix));
+    // A shared login's sign-in grant holds the agent's id: read the names only for an entry that has such a grant.
+    const names = createAgentNames(() => starting(SIGNIN_GRANT).length > 0 && props.entry.id);
+    const signin = (g: string) => signinGrantLabel(g, names);
     return (
         <>
             <GrantList
@@ -57,8 +61,8 @@ export function EntryGrants(props: { entry: VaultEntryInfo; revoke: (grant: stri
                 grants={starting(SIGNIN_GRANT)}
                 label={`Agents that may sign in with ${label()} without asking`}
                 lead="Agents may sign in with it: "
-                name={signinGrantLabel}
-                stop={(g) => `Stop signing in with ${label()} without asking for ${signinGrantLabel(g)}`}
+                name={signin}
+                stop={(g) => `Stop signing in with ${label()} without asking for ${signin(g)}`}
                 revoke={props.revoke}
             />
             <GrantList
