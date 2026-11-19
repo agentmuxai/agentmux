@@ -140,11 +140,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
             // A row with no name of its own (one made before names were stored on it) is listed under its
             // definition's, so it isn't a nameless entry that no name reaches.
             let name = listed_name(&i.instance_name, runtime.get(&i.id).map(|r| r.name.as_str()));
-            let live_block = if name.is_empty() {
-                None
-            } else {
-                reachable_block.get(&name.to_lowercase()).cloned()
-            };
+            let live_block = (!name.is_empty()).then(|| reachable_block.get(&name.to_lowercase()).cloned()).flatten();
             // By the agent's UID, not its name: two agents can share a display name, and a name
             // the registry normalised ("Loap #3") misses the name-keyed map above.
             let availability_block = super::availability_view::block_of_uid(&state.reactive_handler, &i.id);
