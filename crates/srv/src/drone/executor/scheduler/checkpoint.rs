@@ -216,13 +216,7 @@ impl<'a> Scheduler<'a> {
         let finished = c.position.finished.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?;
         let failed = match &c.position.failed {
             Some(ids) => ids.iter().map(|id| node(id)).collect::<Result<HashSet<_>, _>>()?,
-            // Written before the set was kept: a block that finished with a handled failure said so
-            // as its output (`failed: true` and the error), and that is still what it says.
-            None => finished
-                .iter()
-                .copied()
-                .filter(|id| c.outputs.get(*id).is_some_and(|o| o.get("failed").and_then(serde_json::Value::as_bool) == Some(true) && o.get("error").is_some()))
-                .collect(),
+            None => self.legacy_failed(c, &finished, &decided),
         };
         let held = c.position.held.iter().map(|id| edge(id)).collect::<Result<Vec<_>, _>>()?;
         let mut rounds = HashMap::new();
@@ -280,6 +274,33 @@ impl<'a> Scheduler<'a> {
         self.scope.vars = c.state.vars.iter().map(|(name, tv)| (name.clone(), tv.v.clone())).collect();
         self.scope.state = RunState::from_snapshot(c.state.clone());
         Ok(())
+    }
+
+    /// The blocks that failed in this pass, for a checkpoint written before the set was kept. A block that
+    /// finished with a handled failure said so as its output (`failed: true` and the error), but a block that
+    /// failed in one pass of a loop and was skipped in the next keeps that output too. So the output counts
+    /// only for a block that ran this pass: a root, or one an edge into it was taken for, or a Join that a
+    /// branch (found the same way) failed into.
+    fn legacy_failed(&self, c: &Checkpoint, finished: &HashSet<&'a str>, decided: &HashMap<&'a str, bool>) -> HashSet<&'a str> {
+        let says_failed = |id: &str| c.outputs.get(id).is_some_and(|o| o.get("failed").and_then(serde_json::Value::as_bool) == Some(true) && o.get("error").is_some());
+        let ran = |id: &str| {
+            let ins = self.incoming.get(id).map(Vec::as_slice).unwrap_or_default();
+            ins.is_empty() || ins.iter().any(|e| decided.get(e.id.as_str()) == Some(&true))
+        };
+        let is_join = |id: &str| self.node_of.get(id).is_some_and(|n| kind_of(n).is_ok_and(|k| k == BlockKind::Join));
+        let mut failed: HashSet<&'a str> = finished.iter().copied().filter(|id| says_failed(id) && ran(id)).collect();
+        loop {
+            let more: Vec<&'a str> = finished
+                .iter()
+                .copied()
+                .filter(|id| !failed.contains(id) && says_failed(id) && is_join(id))
+                .filter(|id| self.incoming.get(id).is_some_and(|ins| ins.iter().any(|e| failed.contains(e.source.as_str()))))
+                .collect();
+            if more.is_empty() {
+                return failed;
+            }
+            failed.extend(more);
+        }
     }
 
     /// Show what the restored blocks did, as the run's own block states, so what
