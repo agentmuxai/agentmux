@@ -89,8 +89,18 @@
 .drone-bar-actions {
     display: flex;
     gap: 6px;
-    flex-shrink: 0;
+    // Never wider than the bar: the buttons wrap onto a second line, and the "Open…" list (which a browser
+    // sizes to its longest saved name) is capped, so a long drone name cannot push them past the pane's edge.
+    flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
     margin-left: auto;
+
+    > select.drone-btn {
+        min-width: 0;
+        max-width: min(100%, 16em);
+        text-overflow: ellipsis;
+    }
 }
 
 // Narrow: name and buttons share the first row, the node types take the full row under them.
@@ -117,7 +127,6 @@
     }
     .drone-bar-actions {
         flex: 1 1 100%;
-        flex-wrap: wrap;
         margin-left: 0;
     }
 }
