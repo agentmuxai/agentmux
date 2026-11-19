@@ -1064,9 +1064,7 @@ impl StdoutReader {
             );
             // A large context when the work may continue: one note
             // for the next turn (SPEC_AGENT_SELF_COMPACTION §3.5).
-            if let Some(note) = crate::backend::context_reading::take_turn_end_hint(&self.block_id_read) {
-                crate::backend::reactive::held_notes::hold(&self.block_id_read, crate::backend::context_reading::HINT_NOTE_KEY, &note);
-            }
+            crate::backend::context_reading::hold_turn_end_hint(&self.block_id_read, true);
         }
     }
 }
