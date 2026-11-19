@@ -201,6 +201,12 @@ function handleBackendWindowIdRegistered(
         return filteredOut(state, label, "non-instance-label");
     }
     const existing = state.knownEntries.get(label);
+    // A window that has just closed goes back to the host's pool, which then registers a window id for its label
+    // again for a moment (and unregisters it 200 to 300 ms later): that is no window opening, so no row.
+    const closedAt = state.recentlyClosed.get(label);
+    if (!existing && closedAt !== undefined && Date.now() - closedAt < RECENT_CLOSE_MS) {
+        return { state, events: [{ type: "backend-window-id-registered", label, windowId, changed: false }] };
+    }
     const changed = !existing || existing.windowId !== windowId;
     if (existing && !changed) {
         // Skip recompute if windowId actually didn't change AND the

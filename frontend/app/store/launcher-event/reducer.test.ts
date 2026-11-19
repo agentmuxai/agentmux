@@ -381,14 +381,32 @@ describe("launcher-event reducer", () => {
             expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-3"));
         });
 
-        it("a window the stream knows again after its close (assigned or id-registered, no window_opened) stays through a snapshot", () => {
+        it("a window the stream assigns again after its close (no window_opened) stays through a snapshot, and takes its id", () => {
             const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
             const assigned = update(base, { type: "ApplyEvent", event: evt({ event: "window_instance_assigned", label: "window-x" }) }).state;
             const afterAssign = update(assigned, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-5")] });
             expect(afterAssign.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-5"));
-            const registered = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) }).state;
-            const afterRegister = update(registered, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", null)] });
-            expect(afterRegister.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+            const registered = update(assigned, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) }).state;
+            expect(registered.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+        });
+
+        it("the id the host registers for a label it has just closed (the window going back to its pool) does not list the window", () => {
+            const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            const r = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) });
+            expect(r.state).toBe(base);
+            expect(r.state.instances.map((e) => e.label)).toEqual(["main"]);
+        });
+
+        it("an id registered for a label closed more than RECENT_CLOSE_MS ago lists the window", () => {
+            vi.useFakeTimers();
+            try {
+                const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+                vi.advanceTimersByTime(RECENT_CLOSE_MS + 1);
+                const r = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) });
+                expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         it("forgets a close after RECENT_CLOSE_MS, so a stale label can't hide a window for good", () => {
