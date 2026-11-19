@@ -13,6 +13,7 @@ import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { endedByEscape } from "./native-cancel";
+import { dragWasStalled } from "./drag-stall";
 import { maybeDroppedInAnotherWindow } from "./foreign-drop";
 import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
@@ -70,6 +71,12 @@ function CrossWindowDragMonitor(): JSX.Element {
             const dropEffect = e.dataTransfer?.dropEffect;
             if (dragSession?.escaped || (await endedByEscape(dropEffect))) {
                 Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+                return;
+            }
+            // The page was frozen for seconds during the drag (drag-stall.ts): it drew no guides, so where the
+            // person let go is not a choice, and nothing is torn off.
+            if (dragWasStalled()) {
+                Logger.info("dnd:cross", "cross-window drag cancelled: the page was frozen during it");
                 return;
             }
 
