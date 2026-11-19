@@ -47,39 +47,16 @@ export interface ConnectorsState {
     openIn: (items: Accessor<ConnectorEntry[]>) => string | null;
 }
 
-export function useConnectorsState(): ConnectorsState {
-    // Block-free: account CRUD goes through the module-level RPC and cache, so the blockId and nodeModel are inert.
-    const model = new IdentityViewModel("connectors:accounts", {} as BlockNodeModel);
-    onCleanup(() => model.dispose());
-
-    const muxbus = useMuxBusStatus();
-    onMount(() => void muxbus.refresh());
-    const [agents] = useAgentDefinitions();
-    const usedBy = useAccountUseCounts(() => agents());
-
-    const [filter, setFilter] = createSignal("");
-    const [openKey, setOpenKey] = createSignal<string | null>(null);
-    const [adding, setAdding] = createSignal(false);
-
-    const entries = createMemo(() => connectorEntries(model.accountsAtom(), muxbus.status()));
-    const shown = createMemo(() => entries().filter((e) => connectorMatches(e, filter(), muxbus.status()?.email)));
-    const connected = () => shown().filter((e) => e.connected);
-    const available = () => shown().filter((e) => !e.connected);
-
-    const close = () => {
-        const was = untrack(openKey);
-        if (was != null && awaiting.has(was)) awaiting.set(was, Date.now() + CONNECT_GRACE_MS);
-        setOpenKey(null);
-        setAdding(false);
-        model.setSelectedAccount(null);
-    };
-
-    // A connect succeeding has no success step to read and dismiss (§4.9): the Connect section closes and the card,
-    // now in Connected, shows "Connected" once, in place. Only a card whose Connect section the person opened here
-    // counts, so the first load of the list, where every account appears at once, flashes nothing.
-    // A Connect section that closes keeps its place for a moment: saving the account closes the section, and the account
-    // reaches the list a beat later. After that a connector that connects some other way (the agent pane's sign-in) does
-    // not flash here, since no connect was started in this pane.
+/**
+ * A connect succeeding has no success step to read and dismiss (§4.9): the Connect section closes and the card, now in
+ * Connected, shows "Connected" once, in place. Only a card whose Connect section the person opened here counts, so the
+ * first load of the list, where every account appears at once, flashes nothing. A Connect section that closes keeps its
+ * place for a moment: saving the account closes the section, and the account reaches the list a beat later. After that a
+ * connector that connects some other way (the agent pane's sign-in) does not flash here, since no connect was started in
+ * this pane. Also closes the open card when it stops being connected (its last account was deleted), rather than its
+ * Connect section opening by itself under it.
+ */
+function useConnectFlash(entries: Accessor<ConnectorEntry[]>, openKey: Accessor<string | null>, close: () => void) {
     const awaiting = new Map<string, number>();
     const [flash, setFlash] = createSignal<ReadonlySet<string>>(new Set());
     const timers: number[] = [];
@@ -105,15 +82,50 @@ export function useConnectorsState(): ConnectorsState {
             );
         }
     });
-    // The open card stops being connected (its last account was deleted): its details close, rather than the card's Connect
-    // section opening by itself under it. A card opened through Connect is waiting to connect and is left alone.
     createEffect(() => {
         const key = openKey();
         const e = key == null ? undefined : entries().find((x) => x.key === key);
         if (e && !e.connected && !untrack(() => awaiting.has(key!))) close();
     });
+    return {
+        flash,
+        /** Its Connect section opened: a connect that follows is one the person started here. */
+        waiting: (key: string) => void awaiting.set(key, Infinity),
+        /** Its section closed (a key, or none): a connect within the grace period still counts. */
+        parked: (key: string | null) => {
+            if (key != null && awaiting.has(key)) awaiting.set(key, Date.now() + CONNECT_GRACE_MS);
+        },
+    };
+}
+
+export function useConnectorsState(): ConnectorsState {
+    // Block-free: account CRUD goes through the module-level RPC and cache, so the blockId and nodeModel are inert.
+    const model = new IdentityViewModel("connectors:accounts", {} as BlockNodeModel);
+    onCleanup(() => model.dispose());
+
+    const muxbus = useMuxBusStatus();
+    onMount(() => void muxbus.refresh());
+    const [agents] = useAgentDefinitions();
+    const usedBy = useAccountUseCounts(() => agents());
+
+    const [filter, setFilter] = createSignal("");
+    const [openKey, setOpenKey] = createSignal<string | null>(null);
+    const [adding, setAdding] = createSignal(false);
+
+    const entries = createMemo(() => connectorEntries(model.accountsAtom(), muxbus.status()));
+    const shown = createMemo(() => entries().filter((e) => connectorMatches(e, filter(), muxbus.status()?.email)));
+    const connected = () => shown().filter((e) => e.connected);
+    const available = () => shown().filter((e) => !e.connected);
+
+    const close = () => {
+        flashes.parked(untrack(openKey));
+        setOpenKey(null);
+        setAdding(false);
+        model.setSelectedAccount(null);
+    };
+    const flashes = useConnectFlash(entries, openKey, () => close());
     const open = (e: ConnectorEntry, withAdd = false) => {
-        if (!e.connected) awaiting.set(e.key, Infinity);
+        if (!e.connected) flashes.waiting(e.key);
         model.setSelectedAccount(null);
         setAdding(withAdd);
         setOpenKey(e.key);
@@ -131,7 +143,7 @@ export function useConnectorsState(): ConnectorsState {
         shownCount: () => shown().length,
         connectedCount: () => entries().filter((e) => e.connected).length,
         openKey,
-        flash,
+        flash: flashes.flash,
         adding,
         setAdding,
         close,
