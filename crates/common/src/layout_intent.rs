@@ -22,6 +22,17 @@ pub struct LayoutResizeOp {
     pub size: f64,
 }
 
+/// Where a pane that is moved to the layout's edge goes: a band across the whole top or the whole bottom of the
+/// layout, or across its middle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export_to = "../../../frontend/types/rpc/"))]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutEdge {
+    Top,
+    Bottom,
+    Middle,
+}
+
 /// A layout edit, applied by srv's reducer to its own tree for the tab.
 /// Nodes the intent adds (`node`, `newNode`) carry the id the sender gave
 /// them; branches srv creates on the way get ids derived from the command's
@@ -69,6 +80,14 @@ pub enum LayoutIntent {
         index: i64,
         #[serde(rename = "insertAtRoot", default)]
         insert_at_root: bool,
+    },
+    /// Move a pane to be a band across the whole layout: its width is the layout's, at the top, the bottom or the
+    /// middle of it, and the other panes keep their arrangement in the space that is left.
+    #[serde(rename = "movetoedge")]
+    MoveToEdge {
+        #[serde(rename = "nodeId")]
+        node_id: String,
+        edge: LayoutEdge,
     },
     /// Swap two nodes; each slot keeps its size.
     Swap {
@@ -150,6 +169,7 @@ impl LayoutIntent {
             Self::InsertAtIndex { .. } => "insertatindex",
             Self::Delete { .. } => "delete",
             Self::Move { .. } => "move",
+            Self::MoveToEdge { .. } => "movetoedge",
             Self::Swap { .. } => "swap",
             Self::Resize { .. } => "resize",
             Self::Replace { .. } => "replace",

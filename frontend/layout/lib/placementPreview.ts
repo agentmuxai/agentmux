@@ -37,8 +37,8 @@ import {
     type LayoutTreeSetPendingAction,
     type LayoutTreeStayAction,
 } from "./types";
-import { GUIDE_GRACE_MS, activeFor, guideSpotsFor, hideAllGuides, hideGuide, markGuideActive, onGuidesShown, showGuide, spotAt } from "./dropGuides";
-import { computeFor, dropOptionsOf, dropsBySplit, layoutShape, resetDropOptions, splitFor, type DropSubject } from "./dropOptions";
+import { GUIDE_GRACE_MS, activeFor, guideSpotsFor, hideAllGuides, hideGuide, markGuideActive, onGuidesShown, showGuide, spotAt, wideSpotsFor, wideZoneAt, withWideSpots } from "./dropGuides";
+import { computeFor, dropOptionsOf, dropsBySplit, layoutShape, resetDropOptions, splitFor, wideOptionsOf, type DropSubject } from "./dropOptions";
 
 export { layoutShape, sideOfDirection, type PlacementSide } from "./dropOptions";
 
@@ -64,7 +64,11 @@ export function placementDirection(model: LayoutModel, input: PlacementInput): D
         hideGuide(model);
         return chip;
     }
-    const spots = guideSpotsFor(model, input.rect, input.targetId, dropOptionsOf(model, input));
+    // At the layout top centre or bottom centre, the wide guides show beside the hovered pane's own: a band across the layout.
+    const zone = inTree ? wideZoneAt(model, input.offset) : undefined;
+    const wide = zone ? wideOptionsOf(model, input) : [];
+    const own = guideSpotsFor(model, input.rect, input.targetId, dropOptionsOf(model, input));
+    const spots = zone && wide.length ? withWideSpots(own, wideSpotsFor(model, zone, input.targetId, wide)) : own;
     const direction = spotAt(spots, input.offset)?.direction;
     showGuide(model, { targetId: input.targetId, spots, active: activeFor(spots, direction) });
     return direction;
