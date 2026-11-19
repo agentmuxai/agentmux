@@ -11,4 +11,10 @@ agents: number,
 /**
  * Every call that writes outside AgentMux, as `node id: METHOD url`.
  */
-writes_outside: Array<string>, };
+writes_outside: Array<string>, 
+/**
+ * Every place the template reads a credential from the Vault (an `auth.vault`), as `where: entry`, found in the
+ * graph and the trigger themselves, not in what the manifest declares. [`summarize`] leaves it empty:
+ * whoever has the trigger fills it in with [`credentials`].
+ */
+credentials: Array<string>, };

@@ -395,7 +395,7 @@ async fn run_cli<R: Runner>(runner: &R, args: Vec<String>, source: &Source, via:
     let spec = RunSpec { program, args, env, timeout: RECIPE_TIMEOUT };
     let out = match runner.run(spec).await {
         Ok(out) => out,
-        Err(RunError::TimedOut) => return Err("AWS took too long to answer (25 s). Try again in a minute.".into()),
+        Err(RunError::TimedOut) => return Err(format!("AWS took too long to answer ({} s). Try again in a minute.", RECIPE_TIMEOUT.as_secs())),
         Err(RunError::Spawn(_)) => return Err("couldn't run the AWS CLI on this computer".into()),
     };
     let stdout = Zeroizing::new(out.stdout);

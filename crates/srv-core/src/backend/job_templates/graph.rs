@@ -34,6 +34,11 @@ pub struct DroneSummary {
     pub agents: u32,
     /// Every call that writes outside AgentMux, as `node id: METHOD url`.
     pub writes_outside: Vec<String>,
+    /// Every place the template reads a credential from the Vault (an `auth.vault`), as `where: entry`, found in the
+    /// graph and the trigger themselves, not in what the manifest declares. [`summarize`] leaves it empty:
+    /// whoever has the trigger fills it in with [`credentials`].
+    #[serde(default)]
+    pub credentials: Vec<String>,
 }
 
 /// `graph.json` read and checked.
@@ -105,6 +110,33 @@ pub fn summarize(graph: &DroneGraph) -> DroneSummary {
         }
     }
     out
+}
+
+/// Every Vault entry the template reads a credential from, as `where: entry`: an `auth.vault` on a node or
+/// anywhere in the trigger (its poll's filter), whether the entry is a literal id or a `{{param.x}}`. This is
+/// what the template does, whatever its manifest's `secrets` says.
+pub fn credentials(graph: &DroneGraph, trigger: Option<&Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(t) = trigger {
+        vault_refs(t, "trigger", &mut out);
+    }
+    for node in &graph.nodes {
+        vault_refs(&node.data, &format!("node {}", node.id), &mut out);
+    }
+    out
+}
+
+fn vault_refs(v: &Value, at: &str, out: &mut Vec<String>) {
+    match v {
+        Value::Object(map) => {
+            if let Some(entry) = map.get("auth").and_then(|a| a.get("vault")) {
+                out.push(format!("{at}: {}", entry.as_str().map(str::to_string).unwrap_or_else(|| entry.to_string())));
+            }
+            map.values().for_each(|child| vault_refs(child, at, out));
+        }
+        Value::Array(items) => items.iter().for_each(|i| vault_refs(i, at, out)),
+        _ => {}
+    }
 }
 
 // ── Parameters ──────────────────────────────────────────────────────────────

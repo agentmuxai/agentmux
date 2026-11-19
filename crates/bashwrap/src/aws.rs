@@ -20,8 +20,10 @@ use serde_json::{json, Value};
 
 use crate::mps_client::WpsClient;
 
-/// srv may wait on the host's AWS for 25 seconds; a stuck call must not hold a deploy forever.
-const ASK_TIMEOUT: Duration = Duration::from_secs(30);
+/// srv may wait on the host's AWS for 50 seconds (`RECIPE_TIMEOUT` in `identity::aws_broker::mint`), and a slow
+/// mint of 20 to 26 seconds is real. This waits longer than srv does, so srv's answer, credentials or the reason
+/// there are none, is always the one the SDK sees; a stuck call still must not hold a deploy forever.
+const ASK_TIMEOUT: Duration = Duration::from_secs(65);
 
 /// What the route answered.
 #[derive(Debug, PartialEq, Eq)]
