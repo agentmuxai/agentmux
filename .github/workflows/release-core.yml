@@ -954,6 +954,11 @@ jobs:
     runs-on: windows-latest
     environment: release-store
     continue-on-error: true
+    # Which step failed, for `ms-store-note`: a continue-on-error job reports success to its dependents whatever happened in it.
+    outputs:
+      failed_step: ${{ steps.failed.outputs.step }}
+      # Set by the submit step only after `msstore publish` succeeded: the one positive sign that something reached the Store.
+      submitted: ${{ steps.submit.outputs.sent }}
     permissions:
       contents: read
       id-token: write
@@ -963,6 +968,7 @@ jobs:
       STORE_PRODUCT_ID: 9P9QCXNNCRK3
     steps:
       - name: The run is for the release tag
+        id: tag
         shell: bash
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -975,6 +981,7 @@ jobs:
 
       # The file the release published, so the Store gets what GitHub has.
       - name: Download the MSIX from the GitHub Release
+        id: download
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -993,6 +1000,7 @@ jobs:
       # credentials. The command below is for this CLI version (v0.4.3): the MSIX file
       # itself is the path, and the app id is given because there is no project to read it from.
       - name: Install the Microsoft Store Developer CLI
+        id: cli
         uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
         with:
           version: v0.4.3
@@ -1004,6 +1012,7 @@ jobs:
       # checks them again. The token is short-lived, so it is fetched just before
       # it is used, and never printed.
       - name: Get the identity token for the Store app
+        id: token
         shell: pwsh
         run: |
           $uri = "$($env:ACTIONS_ID_TOKEN_REQUEST_URL)&audience=api://AzureADTokenExchange"
@@ -1021,6 +1030,7 @@ jobs:
           "MSSTORE_CLIENT_ASSERTION=$token" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Configure the CLI with the Store app
+        id: configure
         shell: pwsh
         env:
           MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
@@ -1040,6 +1050,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Submit to the Microsoft Store
+        id: submit
         shell: pwsh
         env:
           MSSTORE_COMMIT: ${{ vars.MSSTORE_COMMIT }}
@@ -1051,3 +1062,76 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $what = if ($commit) { 'sent to the Store for certification' } else { 'left as a draft in Partner Center: check it there and send it' }
           "Microsoft Store: $($msix.Name) $what." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          'sent=true' | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      # Names the step that failed, for `ms-store-note`. Runs only on a failure and carries no secret: it reads the steps' outcomes.
+      - name: Say which step failed
+        id: failed
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          O_TAG: ${{ steps.tag.outcome }}
+          O_DOWNLOAD: ${{ steps.download.outcome }}
+          O_CLI: ${{ steps.cli.outcome }}
+          O_TOKEN: ${{ steps.token.outcome }}
+          O_CONFIGURE: ${{ steps.configure.outcome }}
+          O_SUBMIT: ${{ steps.submit.outcome }}
+        run: |
+          step="a step of the job"
+          [ "$O_TAG" = failure ] && step="the check that the run is for the release tag"
+          [ "$O_DOWNLOAD" = failure ] && step="downloading the MSIX from the GitHub Release"
+          [ "$O_CLI" = failure ] && step="installing the Microsoft Store Developer CLI"
+          [ "$O_TOKEN" = failure ] && step="getting the identity token for the Store app"
+          [ "$O_CONFIGURE" = failure ] && step="configuring the CLI with the Store app"
+          [ "$O_SUBMIT" = failure ] && step="submitting to the Microsoft Store"
+          echo "step=$step" >> "$GITHUB_OUTPUT"
+
+  # One line, on every release, for what happened to the Store: the Store job above is skipped when its switch is off and is
+  # continue-on-error, so by itself a release that never reached the Store looks the same as one that did. This changes nothing
+  # about whether anything is submitted. It sends nothing out of the run and holds no token beyond reading the repository.
+  ms-store-note:
+    name: Microsoft Store line of the run summary
+    needs: [gate, publish, ms-store]
+    if: ${{ always() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      RESULT: ${{ needs.ms-store.result }}
+      FAILED_STEP: ${{ needs.ms-store.outputs.failed_step }}
+      SUBMITTED: ${{ needs.ms-store.outputs.submitted }}
+      COMMIT: ${{ vars.MSSTORE_COMMIT }}
+    steps:
+      - name: Say what happened to the Store submission
+        shell: bash
+        run: |
+          msix="AgentMux_${TAG#v}_x64.msix"
+          if [ -n "$FAILED_STEP" ] || [ "$RESULT" = failure ]; then
+            line="failed: ${FAILED_STEP:-the Store job failed}. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
+            warn=1
+          elif [ "$RESULT" = success ] && [ "$SUBMITTED" != true ]; then
+            # A continue-on-error job reads as success even when it stopped before any step ran (an environment approval that was
+            # refused, a runner that never started): only the submit step's own output says something was sent.
+            line="failed: the Store job did not reach the submission. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand, or fix the job and re-run it."
+            warn=1
+          elif [ "$RESULT" = skipped ]; then
+            line="skipped: Store submission is switched off. $TAG is on GitHub but was not sent to the Microsoft Store: upload $msix by hand."
+            warn=1
+          elif [ "$RESULT" = cancelled ]; then
+            line="cancelled: the Store job was cancelled. $TAG was not sent to the Microsoft Store: upload $msix by hand."
+            warn=1
+          elif [ "$COMMIT" = true ]; then
+            line="submitted: $TAG was sent to the Microsoft Store for certification."
+            warn=0
+          else
+            line="submitted as a draft: $TAG is in Partner Center as a draft, not yet sent to certification. Check it there and send it."
+            warn=1
+          fi
+          {
+            echo "### Microsoft Store"
+            echo ""
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$warn" = 1 ]; then echo "::warning title=Microsoft Store::$line"; else echo "$line"; fi

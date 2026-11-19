@@ -1,0 +1,68 @@
+# Store listing check: is the Microsoft Store behind the latest release?
+#
+# Daily. Reads the Store listing's public product data (its last-updated time) and the repository's published releases
+# (scripts/check-store-listing.mjs), and keeps ONE issue open while more than a release is missing from the Store or the
+# oldest missing release is more than two days old; it closes the issue when the Store catches up. No secret: both are public.
+#
+# NOT A GATE, and it changes nothing about whether anything is submitted: nothing needs this workflow and no release waits
+# for it. If the Store listing cannot be read the job fails (shown in red, and the issue is left as it is): that says nothing
+# about whether the Store is behind.
+name: Store listing check
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # every day, 06:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: store-listing-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: The Store listing against the latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ISSUE_TITLE: The Microsoft Store is behind the latest release
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/check-store-listing.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Read the Store listing and the releases
+        id: read
+        run: node scripts/check-store-listing.mjs --repo "$GITHUB_REPOSITORY" --out store-check
+
+      - name: Open, update or close the one issue
+        env:
+          VERDICT: ${{ steps.read.outputs.verdict }}
+        run: |
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty")
+          if [ "$VERDICT" = behind ]; then
+            if [ -n "$existing" ]; then
+              gh issue edit "$existing" --body-file store-check/body.md
+              echo "The Store is behind: updated issue #$existing" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              url=$(gh issue create --title "$ISSUE_TITLE" --body-file store-check/body.md)
+              echo "The Store is behind: opened $url" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "The Store listing is not behind the latest release." | tee -a "$GITHUB_STEP_SUMMARY"
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "The Store has caught up: its listing was updated after the latest release. Closed by the Store listing check."
+              echo "Closed issue #$existing" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
