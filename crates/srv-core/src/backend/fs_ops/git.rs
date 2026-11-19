@@ -17,6 +17,10 @@
 //! (`--no-optional-locks`), prompts for nothing, and is killed after a few
 //! seconds on a huge repository.
 //!
+//! Every run here reads what is already on the disk: none fetches a missing
+//! object, and none may start a transport ([`NO_NETWORK_ENV`]). Those two are
+//! set in the environment, where no config file can change them.
+//!
 //! Spec: docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §12 (Phase 2, git
 //! decorations).
 
@@ -42,6 +46,11 @@ const SAFE_CONFIG: &[&str] = &[
     "-c",
     "core.untrackedCache=false",
 ];
+
+/// Set on every git run here: a read of the folder as it is. git does not
+/// fetch an object the repository lacks, and no transport is allowed (an
+/// empty list of allowed protocols), whatever the repository's config says.
+pub const NO_NETWORK_ENV: &[(&str, &str)] = &[("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", "")];
 
 /// `fs.git_status` for `raw` (a folder the pane listed).
 pub async fn git_status(raw: &str) -> FsGitStatus {
@@ -175,16 +184,7 @@ pub fn filter_names(out: &str, scoped: bool) -> Vec<String> {
 
 /// Run git in `dir` with the safe settings; its stdout, or a sentence.
 async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
-    let mut cmd = tokio::process::Command::new("git");
-    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
-    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .no_window();
-    // git needs nothing of this instance's identity.
-    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    let mut cmd = git_command(dir, args);
     let child = cmd.spawn().map_err(|e| GitError::Failed(format!("Couldn't run git: {e}")))?;
     match tokio::time::timeout(GIT_TIMEOUT, child.wait_with_output()).await {
         Err(_) => Err(GitError::Failed("git took too long to answer.".to_string())),
@@ -195,6 +195,25 @@ async fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, GitError> {
             _ => Err(GitError::Failed(String::from_utf8_lossy(&out.stderr).trim().to_string())),
         },
     }
+}
+
+/// The one git command this module runs: the safe settings, no prompt, no
+/// optional lock, no fetch and no transport, and nothing of this instance's
+/// identity.
+fn git_command(dir: &str, args: &[&str]) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("-C").arg(dir).args(SAFE_CONFIG).arg("--no-optional-locks").args(args);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0").env("GIT_TERMINAL_PROMPT", "0");
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .no_window();
+    // git needs nothing of this instance's identity.
+    crate::backend::pane_env::sanitize_external_command(&mut cmd);
+    // Last, so nothing above can take them off.
+    cmd.envs(NO_NETWORK_ENV.iter().copied());
+    cmd
 }
 
 #[derive(Debug)]
@@ -560,6 +579,85 @@ mod tests {
         let s = git_status(&dir.path().to_string_lossy()).await;
         assert!(s.entries.is_empty(), "{s:?}");
         assert!(!s.in_repo || s.error.is_some(), "{s:?}");
+    }
+
+    fn test_git(dir: &std::path::Path, args: &[&str]) -> Option<String> {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.email=a@b", "-c", "user.name=a"])
+            .args(args)
+            .current_dir(dir)
+            .no_window()
+            .output()
+            .ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    /// A repository whose own settings say where a missing object comes from
+    /// and allow every transport, with one object of its HEAD missing. The
+    /// program it names for that would leave `mark`. The missing object's id,
+    /// or `None` without git (or when the object isn't a loose file).
+    fn repository_missing_an_object(dir: &std::path::Path, mark: &std::path::Path) -> Option<String> {
+        test_git(dir, &["init", "-q"])?;
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        test_git(dir, &["add", "."])?;
+        test_git(dir, &["commit", "-qm", "x"])?;
+        let tree = test_git(dir, &["rev-parse", "HEAD^{tree}"])?;
+        let source = dir.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let slashes = |p: &std::path::Path| p.display().to_string().replace('\\', "/");
+        for (key, value) in [
+            ("core.repositoryformatversion", "1".to_string()),
+            ("extensions.partialClone", "origin".to_string()),
+            ("remote.origin.url", slashes(&source)),
+            ("remote.origin.promisor", "true".to_string()),
+            ("remote.origin.uploadpack", format!("echo ran > '{}' ; true", slashes(mark))),
+            ("protocol.allow", "always".to_string()),
+            ("protocol.file.allow", "always".to_string()),
+        ] {
+            test_git(dir, &["config", key, &value])?;
+        }
+        let object = dir.join(".git").join("objects").join(&tree[..2]).join(&tree[2..]);
+        std::fs::remove_file(object).ok()?;
+        Some(tree)
+    }
+
+    #[test]
+    fn every_git_run_is_set_to_fetch_nothing_and_allow_no_transport() {
+        let cmd = git_command(".", &["status"]);
+        let env: std::collections::HashMap<String, Option<String>> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        assert_eq!(env.get("GIT_NO_LAZY_FETCH"), Some(&Some("1".to_string())));
+        assert_eq!(env.get("GIT_ALLOW_PROTOCOL"), Some(&Some(String::new())), "set, and empty: no protocol is allowed");
+    }
+
+    /// The status read fetches nothing and starts no transport, whatever the
+    /// repository's own config allows.
+    #[tokio::test]
+    async fn a_status_read_never_fetches_and_allows_no_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("fetch-ran");
+        if repository_missing_an_object(dir.path(), &mark).is_none() {
+            return; // No git on this machine.
+        }
+        let s = git_status(&dir.path().to_string_lossy()).await;
+        assert!(s.in_repo && s.entries.is_empty(), "{s:?}");
+        assert!(!mark.exists(), "the status read went to fetch the missing object");
+    }
+
+    /// The same for the one-line reads (the checks of a ref the work facts make).
+    #[tokio::test]
+    async fn a_ref_check_never_fetches_and_allows_no_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("fetch-ran");
+        let Some(tree) = repository_missing_an_object(dir.path(), &mark) else {
+            return; // No git on this machine.
+        };
+        let found = safe_git_line(&dir.path().to_string_lossy(), &["rev-parse", "--verify", "--quiet", &format!("{tree}^{{tree}}")]).await;
+        assert_eq!(found, None, "the object is not there");
+        assert!(!mark.exists(), "the ref check went to fetch the missing object");
     }
 
     #[tokio::test]
