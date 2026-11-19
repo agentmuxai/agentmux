@@ -323,6 +323,16 @@ fn spawn_sampling_loops(
     tokio::spawn(async move {
         backend::work_facts::git::run_git_refresh_loop(work_facts_mstore).await;
     });
+
+    // The AWS grants file for container agents: a change to it is compared with the record and recorded when it is
+    // made, not only when the next container asks (identity::aws_broker::record).
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            tick.tick().await;
+            let _ = tokio::task::spawn_blocking(crate::identity::aws_broker::policy::current).await;
+        }
+    });
 }
 
 /// Wires the global reactive handler to the controllers and creates its poller.

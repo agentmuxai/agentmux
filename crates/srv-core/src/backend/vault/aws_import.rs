@@ -298,6 +298,9 @@ pub fn check_grant(policy: &Result<Option<Arc<Policy>>, String>, profile: Option
     if grant.disabled {
         return Err(format!("The grant '{profile}' is switched off on this machine."));
     }
+    if grant.hold.is_some() {
+        return Err(format!("The grant '{profile}' was added or widened in the grants file and has not been allowed yet. A native agent can allow it (Identity aws_grants)."));
+    }
     if !grant.open_to(slug) {
         return Err(format!("The grant '{profile}' isn't open to you. Ask the person to add you to it."));
     }

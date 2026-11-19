@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 
 use super::mint::{self, clean_reason, MintCtx, MintError, Minted, Runner};
-use super::policy::{Grant, Policy};
+use super::policy::{Grant, Hold, Policy};
 use super::sessions::{SessionError, Sessions, Source};
 
 /// A refusal: the status it travels with, its code, and the sentence the agent is shown (spec §10).
@@ -104,6 +104,17 @@ pub async fn credentials_for<R: Runner>(
     if grant.disabled {
         let why = grant.note.as_deref().map(|n| format!(" {n}")).unwrap_or_default();
         return Err(Refusal::new(StatusCode::FORBIDDEN, "GRANT_DISABLED", format!("The grant '{}' is switched off on this machine.{why}", grant.name)));
+    }
+    if let Some(hold) = grant.hold {
+        let (code, what) = match hold {
+            Hold::Awaiting => ("GRANT_HELD", "was added or widened in the grants file and waits for a native agent or a person to allow it"),
+            Hold::Refused => ("GRANT_REFUSED", "was added or widened in the grants file and was refused"),
+        };
+        return Err(Refusal::new(
+            StatusCode::FORBIDDEN,
+            code,
+            format!("The grant '{}' {what}. A native agent can read the change with Identity aws_grants and answer it with aws_grant, saying why.", grant.name),
+        ));
     }
     if !grant.open_to(ask.agent_slug) {
         let open: Vec<&str> = grant.agents.iter().map(String::as_str).collect();

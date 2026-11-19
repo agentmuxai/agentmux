@@ -9,6 +9,7 @@
 use super::*;
 
 mod accounts;
+mod aws_grants;
 mod agents_tool;
 mod app_record;
 mod app_workspace;

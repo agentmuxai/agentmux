@@ -14,6 +14,8 @@ use std::time::SystemTime;
 
 use serde::Deserialize;
 
+use super::record;
+
 /// STS refuses a session shorter than 15 minutes, and the roles AgentMux fleets use allow at most an hour.
 pub const MIN_SECONDS: u64 = 900;
 pub const MAX_SECONDS: u64 = 3600;
@@ -40,6 +42,15 @@ impl Tier {
     }
 }
 
+/// Why a grant in the file is not honoured yet (`record`): it is new or wider than what was last allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hold {
+    /// Waiting for a native agent or a person to allow it.
+    Awaiting,
+    /// Someone said it must not be used.
+    Refused,
+}
+
 /// How srv gets the credentials (spec §7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mint {
@@ -62,6 +73,8 @@ pub struct Grant {
     pub max_mints_per_hour: u32,
     pub disabled: bool,
     pub note: Option<String>,
+    /// Set when the file's version of this grant has not been allowed: it is refused. Always none from `parse`.
+    pub hold: Option<Hold>,
 }
 
 impl Grant {
@@ -216,6 +229,7 @@ impl Policy {
                     max_mints_per_hour,
                     disabled: g.disabled,
                     note: g.note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+                    hold: None,
                 },
             );
         }
@@ -234,7 +248,7 @@ impl Policy {
 
     /// The names of the grants open to `slug`.
     pub fn open_to(&self, slug: &str) -> Vec<&str> {
-        self.grants.values().filter(|g| !g.disabled && g.open_to(slug)).map(|g| g.name.as_str()).collect()
+        self.grants.values().filter(|g| !g.disabled && g.hold.is_none() && g.open_to(slug)).map(|g| g.name.as_str()).collect()
     }
 
     /// The AWS config a container reads: one profile per grant, `default` when the policy names one. Names and the
@@ -263,8 +277,10 @@ pub fn file_path() -> Option<PathBuf> {
 struct Cached {
     path: PathBuf,
     stamp: Option<(SystemTime, u64)>,
-    /// The version that last parsed.
+    /// The version that last parsed, as the broker honours it: a new or wider grant is held (`record`).
     good: Option<Arc<Policy>>,
+    /// The same version as the file says it, to work the holds out again when a grant is allowed.
+    raw: Option<Arc<Policy>>,
     /// What the current file said, once, so a bad edit is logged when it is made and not on every request.
     error: Option<String>,
 }
@@ -287,13 +303,13 @@ fn stamp_of(path: &Path) -> Option<(SystemTime, u64)> {
 
 fn load(path: &Path) -> Result<Option<Arc<Policy>>, String> {
     let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    let cached = guard.get_or_insert_with(|| Cached { path: path.to_path_buf(), stamp: None, good: None, error: None });
+    let cached = guard.get_or_insert_with(|| Cached { path: path.to_path_buf(), stamp: None, good: None, raw: None, error: None });
     if cached.path != path {
-        *cached = Cached { path: path.to_path_buf(), stamp: None, good: None, error: None };
+        *cached = Cached { path: path.to_path_buf(), stamp: None, good: None, raw: None, error: None };
     }
     let Some(stamp) = stamp_of(path) else {
         // Gone: nothing is shared any more.
-        *cached = Cached { path: path.to_path_buf(), stamp: None, good: None, error: None };
+        *cached = Cached { path: path.to_path_buf(), stamp: None, good: None, raw: None, error: None };
         return Ok(None);
     };
     if cached.stamp != Some(stamp) {
@@ -304,7 +320,9 @@ fn load(path: &Path) -> Result<Option<Arc<Policy>>, String> {
         match Policy::parse(&text) {
             Ok(policy) => {
                 tracing::info!(target: "identity", grants = policy.grants.len(), "identity.aws: the grants file was read");
-                cached.good = Some(Arc::new(policy));
+                let sha = record::sha256_hex(&text);
+                cached.good = Some(Arc::new(guarded(path, &policy, &sha)));
+                cached.raw = Some(Arc::new(policy));
                 cached.error = None;
             }
             Err(e) => {
@@ -318,6 +336,66 @@ fn load(path: &Path) -> Result<Option<Arc<Policy>>, String> {
         (None, Some(e)) => Err(format!("{}: {e}", path.display())),
         (None, None) => Ok(None),
     }
+}
+
+/// The audit action of a change to the grants file, and of an answer to a held grant.
+pub const AUDIT_ACTION: &str = "aws.grants";
+
+/// The file's grants compared with the record: what changed is recorded in the Audit view, the record is brought up to
+/// date, and the policy comes back with every new or wider grant held. A record that can't be read holds everything.
+fn guarded(path: &Path, policy: &Policy, sha: &str) -> Policy {
+    let record_path = record::path_beside(path);
+    let old = match record::read(&record_path) {
+        Ok(old) => old,
+        Err(e) => {
+            tracing::warn!(target: "identity", error = %e, "identity.aws: the grants record can't be read, so every grant is held");
+            return record::hold_all(policy);
+        }
+    };
+    let (rec, events) = record::sync(old.clone(), policy, sha, agentmux_common::time::now_ms());
+    if old.as_ref() != Some(&rec) {
+        if let Err(e) = record::write(&record_path, &rec) {
+            tracing::warn!(target: "identity", error = %e, "identity.aws: the grants record was not saved");
+        }
+    }
+    emit(&events);
+    record::effective(policy, &rec)
+}
+
+/// Puts each event in the Audit view: a held grant as a failure, so the view marks it; never a credential.
+fn emit(events: &[record::Event]) {
+    let handler = crate::backend::reactive::get_global_handler();
+    for e in events {
+        let target = e.grant.as_deref().unwrap_or("aws grants");
+        let error = e.held.then_some("held");
+        handler.log_fleet_action_audit(Some(e.by.as_deref().unwrap_or("agentmux")), target, "", AUDIT_ACTION, !e.held, error, &e.id, Some(&e.text));
+        tracing::info!(target: "identity", kind = e.kind, held = e.held, "identity.aws: {}", e.text);
+    }
+}
+
+/// Answers a held grant: allows it or refuses it, with the reason, by an agent or a person, and puts that in the record
+/// and the Audit view. The grant works (or stays refused) from the next request.
+pub fn decide(d: &record::Decision<'_>) -> Result<record::Event, String> {
+    let path = file_path().ok_or_else(|| "this AgentMux has no data folder".to_string())?;
+    current()?;
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cached = guard.as_mut().ok_or_else(|| "the grants file has not been read".to_string())?;
+    let raw = cached.raw.clone().ok_or_else(|| "there is no grants file to answer for".to_string())?;
+    let record_path = record::path_beside(&path);
+    let mut rec = record::read(&record_path)?.ok_or_else(|| "there is no record of the grants file yet".to_string())?;
+    let event = record::decide(&mut rec, d, agentmux_common::time::now_ms())?;
+    record::write(&record_path, &rec)?;
+    cached.good = Some(Arc::new(record::effective(&raw, &rec)));
+    emit(std::slice::from_ref(&event));
+    Ok(event)
+}
+
+/// The grants as the record has them, with what changed lately: when each was added and by which change.
+pub fn view() -> Result<record::View, String> {
+    let path = file_path().ok_or_else(|| "this AgentMux has no data folder".to_string())?;
+    current()?;
+    let rec = record::read(&record::path_beside(&path))?;
+    Ok(rec.map(|r| record::view(&r)).unwrap_or(record::View { grants: Vec::new(), changes: Vec::new() }))
 }
 
 /// The policy cache and `AGENTMUX_AWS_GRANTS_FILE` are one per process: tests that use either take turns.

@@ -138,6 +138,7 @@ mod supervisor;
 mod attachments;
 pub(crate) mod connections;
 pub(crate) mod aws_credentials;
+pub(crate) mod aws_grants;
 pub(crate) mod github_token;
 pub(crate) mod pr_merge;
 pub(crate) mod push_scan;
