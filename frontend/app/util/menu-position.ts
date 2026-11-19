@@ -291,7 +291,10 @@ export async function computeMenuPosition(
                 alignmentAxis: request.offsetAlignmentAxis,
             }),
             flip({ ...overflowOpts }),
-            shift({ ...overflowOpts }),
+            // A menu opened beside its anchor (a submenu: right-start, left-start) is flipped to the roomier side,
+            // and when neither side has room for it (a narrow window) it slides across its anchor to stay inside
+            // the window, covering the parent menu, rather than being cut off at the edge.
+            shift({ ...overflowOpts, crossAxis: /^(left|right)/.test(placement) }),
             size({
                 ...overflowOpts,
                 apply({ availableWidth, availableHeight }) {
