@@ -700,6 +700,10 @@ impl Turn {
         // delivered its memory but no summary).
         if run_failure.is_none() {
             crate::backend::continuity_state::after_successful_turn(mstore.clone(), block_id.clone());
+            self.hold_context_hint();
+        } else {
+            // A turn that ended in failure gives no hint, and the task it finished does not carry over.
+            crate::backend::context_reading::clear_task_boundary(block_id);
         }
 
         // Surface the classified failure cause to the pane. persist:1 so
@@ -707,6 +711,23 @@ impl Turn {
         // separate meta read (belt-and-suspenders with the meta write above).
         if let (Some(failure), Some(b)) = (run_failure.as_ref(), broker.as_ref()) {
             b.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
+        }
+    }
+
+    /// A large context when the work may continue: the same turn-end note the persistent reader holds for a
+    /// host agent (SPEC_AGENT_SELF_COMPACTION §3.5), held for this agent's next message. Only a Claude agent
+    /// is told: it is the one whose compaction a container can run, and a container agent can't start a
+    /// fresh session, so its note names compaction alone.
+    fn hold_context_hint(&self) {
+        let runs_claude = self
+            .base_cmd_for_drain
+            .first()
+            .and_then(|cmd| std::path::Path::new(cmd).file_stem())
+            .is_some_and(|stem| stem == "claude");
+        if runs_claude {
+            crate::backend::context_reading::hold_turn_end_hint(&self.block_id, false);
+        } else {
+            crate::backend::context_reading::clear_task_boundary(&self.block_id);
         }
     }
 

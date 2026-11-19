@@ -63,13 +63,24 @@ pub fn requested(own: &HashMap<String, String>) -> Option<Endpoint> {
     Some(Endpoint { base_url, auth_token: nonempty(own, "ANTHROPIC_AUTH_TOKEN"), api_key: nonempty(own, "ANTHROPIC_API_KEY") })
 }
 
-/// Where the CLI's private config directory is for this agent: beside the shared one, never in it,
-/// so no sign-in is ever visible there.
-pub fn private_config_dir(shared_auth_dir: &str, agent_slug: &str) -> String {
+/// Where the CLI's private config directory is for this agent on the server at `base_url`: beside the shared
+/// one, never in it, so no sign-in is ever visible there. The address is part of the name, so a conversation
+/// belongs to the server it was held with: pointing the agent at another server (or back) gives the CLI a
+/// directory that does not hold it, and the next launch cannot resume it there (`--resume` is a lookup in
+/// this directory), where one folder per agent would send A's history to B.
+pub fn private_config_dir(shared_auth_dir: &str, agent_slug: &str, base_url: &str) -> String {
     let safe: String = agent_slug.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let shared = std::path::Path::new(shared_auth_dir);
     let base = shared.parent().unwrap_or(shared);
-    base.join("claude-endpoint").join(if safe.is_empty() { "agent".to_string() } else { safe }).to_string_lossy().into_owned()
+    let name = if safe.is_empty() { "agent".to_string() } else { safe };
+    base.join("claude-endpoint").join(format!("{name}-{}", address_key(base_url))).to_string_lossy().into_owned()
+}
+
+/// A short, stable key for a server address: the same server written with a different case or a trailing
+/// slash is the same key.
+fn address_key(base_url: &str) -> String {
+    let normal = base_url.trim().trim_end_matches('/').to_ascii_lowercase();
+    crate::backend::memory::record::sha256_hex(normal.as_bytes()).chars().take(8).collect()
 }
 
 /// Takes the account's login out of `env` and gives the CLI the endpoint and the keys the agent's
@@ -194,7 +205,7 @@ pub(crate) async fn guard(
         let who = who_of(&mstore, &block, &env);
         let slug = who.as_ref().map(|w| w.slug.clone()).unwrap_or_default();
         let shared = crate::backend::providers::default_auth_dir(provider).unwrap_or_default();
-        let dir = private_config_dir(&shared, &slug);
+        let dir = private_config_dir(&shared, &slug, &endpoint.base_url);
         if let Err(e) = crate::backend::providers::prepare_provider_auth_dir(provider, &dir) {
             tracing::warn!(block_id = %block, dir = %dir, error = %e, "endpoint: could not prepare the agent's private config directory");
         }
@@ -407,12 +418,52 @@ mod tests {
     }
 
     #[test]
-    fn the_private_config_directory_is_beside_the_shared_one_per_agent() {
+    fn the_private_config_directory_is_beside_the_shared_one_per_agent_and_server() {
         // Windows joins with a backslash; the layout is what matters.
-        let dir = |shared: &str, slug: &str| private_config_dir(shared, slug).replace(std::path::MAIN_SEPARATOR, "/");
-        assert_eq!(dir("C:/h/shared/providers/claude", "lolly"), "C:/h/shared/providers/claude-endpoint/lolly");
-        assert_eq!(dir("/h/shared/providers/claude", "../evil/x"), "/h/shared/providers/claude-endpoint/___evil_x");
-        assert_eq!(dir("/h/shared/providers/claude", ""), "/h/shared/providers/claude-endpoint/agent");
-        assert!(!dir("/h/shared/providers/claude", "lolly").starts_with("/h/shared/providers/claude/"));
+        let dir = |shared: &str, slug: &str, url: &str| private_config_dir(shared, slug, url).replace(std::path::MAIN_SEPARATOR, "/");
+        let a = "http://192.0.2.68:11434";
+        let key = address_key(a);
+        assert_eq!(key.len(), 8);
+        assert_eq!(dir("C:/h/shared/providers/claude", "lolly", a), format!("C:/h/shared/providers/claude-endpoint/lolly-{key}"));
+        assert_eq!(dir("/h/shared/providers/claude", "../evil/x", a), format!("/h/shared/providers/claude-endpoint/___evil_x-{key}"));
+        assert_eq!(dir("/h/shared/providers/claude", "", a), format!("/h/shared/providers/claude-endpoint/agent-{key}"));
+        assert!(!dir("/h/shared/providers/claude", "lolly", a).starts_with("/h/shared/providers/claude/"));
+    }
+
+    #[test]
+    fn a_conversation_belongs_to_the_server_it_was_held_with() {
+        let shared = "/h/shared/providers/claude";
+        let (a, b) = ("http://192.0.2.68:11434", "https://proxy.example.com");
+        let dir = |slug: &str, url: &str| private_config_dir(shared, slug, url);
+        assert_ne!(dir("lolly", a), dir("lolly", b), "another server, another directory");
+        assert_eq!(dir("lolly", a), dir("lolly", a), "the same server, the same one, back from B as before");
+        assert_eq!(dir("lolly", a), dir("lolly", "HTTP://192.0.2.68:11434/"), "case and a trailing slash are not another server");
+        assert_ne!(dir("lolly", a), dir("brio", a), "two agents on one server keep their own");
+        assert_ne!(dir("lolly", "http://192.0.2.68:11434"), dir("lolly", "http://192.0.2.68:11435"), "a port is part of the address");
+    }
+
+    /// The next launch resumes by looking the session up in the spawn's config directory
+    /// (`session_backfill::session_is_reachable`): a session taken on A is not there after the agent is pointed at
+    /// B, and is not there for B's own session when it is pointed back.
+    #[test]
+    fn a_session_taken_on_one_server_cannot_be_resumed_on_another() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = tmp.path().join("providers").join("claude");
+        let shared = shared.to_string_lossy().into_owned();
+        let (a, b) = ("http://192.0.2.68:11434", "https://proxy.example.com");
+        let work = "/work/lolly";
+        let (dir_a, dir_b) = (private_config_dir(&shared, "lolly", a), private_config_dir(&shared, "lolly", b));
+        let take = |dir: &str, sid: &str| {
+            let file = crate::backend::session_backfill::session_file_path(dir, work, sid).unwrap();
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "{\"type\":\"user\"}\n").unwrap();
+        };
+        let reachable = |dir: &str, sid: &str| crate::backend::session_backfill::session_is_reachable(dir, work, sid);
+        take(&dir_a, "sid-a");
+        assert!(reachable(&dir_a, "sid-a"), "resumable where it was taken");
+        assert!(!reachable(&dir_b, "sid-a"), "pointed at B: the next launch does not find it");
+        take(&dir_b, "sid-b");
+        assert!(!reachable(&dir_a, "sid-b"), "and what B took is not A's");
+        assert!(!reachable(&private_config_dir(&shared, "lolly", "https://api.example.org"), "sid-a"), "a third server finds neither");
     }
 }

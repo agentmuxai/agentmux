@@ -286,7 +286,21 @@ impl<'a> Scheduler<'a> {
     /// a person sees of a resumed run is not blank where blocks already ran.
     pub(super) async fn show_restored(&self) {
         for id in &self.finished {
-            let output = self.scope.outputs.get(*id).cloned();
+            let mut output = self.scope.outputs.get(*id).cloned();
+            // A Drone block's callee may have spent money the output does not say: a callee that spent and
+            // then failed (the error edge's output is only the error), or one that ended after the call
+            // was given up on. That spend is kept as the position's `spent_by`, and the ledger sums the
+            // blocks' `cost_usd`, so it goes back on the state.
+            let drone = self.node_of.get(*id).is_some_and(|n| kind_of(n).is_ok_and(|k| k == BlockKind::Drone));
+            let spent = self.spent_by.get(*id).copied().unwrap_or(0.0);
+            if let (true, Some(out)) = (drone && spent > 0.0, output.as_mut()) {
+                let counted = out.get("cost_usd").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                if spent > counted {
+                    if let Some(map) = out.as_object_mut() {
+                        map.insert("cost_usd".to_string(), serde_json::json!(spent));
+                    }
+                }
+            }
             let status = if output.is_some() { "done" } else { "skipped" };
             mark_state(self.states, id, BlockState { status: status.to_string(), output, error: None, started_at: None, completed_at: Some(agentmux_common::time::now_ms()) }).await;
         }

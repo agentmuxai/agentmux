@@ -7,7 +7,7 @@
  * box, as the Animations numbers do (when the field is left, if it is being typed in). A value from an old config shows as the layout reads it.
  */
 
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { t } from "@/app/i18n/i18n";
 import { clampMagnifiedSize, MAGNIFIED_SIZE_MAX, MAGNIFIED_SIZE_MIN } from "@/layout/lib/magnified-size";
 import { NumberControl, set, SettingRow } from "../settings-controls";
@@ -16,6 +16,9 @@ const KEY = "window:magnifiedblocksize";
 
 /** How far from 0 an entry can be and still reach the handler, which holds it to the range and says so. */
 const MAX_ENTRY = 1_000_000;
+
+/** How long after an entry the row is brought into view once more: the Settings pane has taken its new size by then, ms. */
+const REVEAL_AGAIN_MS = 250;
 
 export function MagnifiedSizeRow(props: {
     s: () => any;
@@ -42,7 +45,23 @@ export function MagnifiedSizeRow(props: {
         if (moved) showStored(raw);
         else setHeld(null);
         set(KEY, next);
+        reveal();
     };
+    // A Settings pane that is itself magnified changes size with the entry (at 0.5 its list is a few rows high), which can
+    // leave the row, and the message under it, below what is shown. So after an entry the row (or its message, which comes
+    // under it) is scrolled into view, and again once the pane has taken its new size.
+    let message: HTMLParagraphElement | undefined;
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const scrollToRow = () => {
+        const target = message?.isConnected ? message : document.getElementById(`setting-${props.row.id}`);
+        target?.scrollIntoView?.({ block: "nearest" });
+    };
+    const reveal = () => {
+        scrollToRow();
+        clearTimeout(later);
+        later = setTimeout(scrollToRow, REVEAL_AGAIN_MS);
+    };
+    onCleanup(() => clearTimeout(later));
     // The corrected number goes back in the box. Not while the person is still typing in it: a pause after
     // "0" would turn it into 0.5 under the caret, and the ".75" that follows would land after it (0.575).
     // The message already says what was used; the box shows it when the field is left.
@@ -82,7 +101,7 @@ export function MagnifiedSizeRow(props: {
                 }
             />
             <Show when={snapped()}>
-                <p class="setting-snap" role="status" data-testid="magnified-size-snap">
+                <p class="setting-snap" role="status" data-testid="magnified-size-snap" ref={message}>
                     {snapped()}
                 </p>
             </Show>
