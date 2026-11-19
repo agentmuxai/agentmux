@@ -78,6 +78,19 @@ fn the_key_file_is_checked() {
 }
 
 #[test]
+fn the_fingerprint_names_the_public_key_and_nothing_else() {
+    // The key made from the seed [7; 32]; the same value the host's own tests check, so the two sides name a key alike.
+    let fp = host().fingerprint();
+    assert_eq!(fp, "fe812c12f3ab4ce6");
+    assert_eq!(fp.len(), 16);
+    let other = host_for(&SigningKey::from_bytes(&[8u8; 32]), WORKSPACE).fingerprint();
+    assert_ne!(fp, other, "another key has another fingerprint");
+    // Nothing of the private key or the whole public key is in it.
+    assert!(!fp.contains(&hex::encode(signer().to_bytes())[..8]));
+    assert!(!hex::encode(signer().verifying_key().to_bytes()).starts_with(&fp));
+}
+
+#[test]
 fn a_second_registration_is_refused() {
     let cell = OnceLock::new();
     assert!(set_once(&cell, host()).is_ok());

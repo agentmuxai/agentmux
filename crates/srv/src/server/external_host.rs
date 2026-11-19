@@ -39,6 +39,7 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::backend::rpc::engine::WshRpcEngine;
 
@@ -66,6 +67,14 @@ static HOST: OnceLock<Host> = OnceLock::new();
 /// The registered external host, if srv was started with one.
 pub(crate) fn host() -> Option<&'static Host> {
     HOST.get()
+}
+
+/// Say in the log, once logging is up, that an external host key was registered at boot. Only the public key's fingerprint
+/// is written: a person comparing it with what the host reports can tell the two hold the same key.
+pub(crate) fn log_registered() {
+    if let Some(host) = host() {
+        tracing::info!(workspace = %host.workspace, fingerprint = %host.fingerprint(), "external host key registered");
+    }
 }
 
 /// Register the external host from its key file, once, at boot. A second registration is refused.
@@ -119,6 +128,12 @@ impl Host {
         let bytes: [u8; 32] = bytes.try_into().map_err(|_| "the public key is not 32 bytes".to_string())?;
         let key = VerifyingKey::from_bytes(&bytes).map_err(|_| "the public key is not a valid Ed25519 key".to_string())?;
         Ok(Host { workspace: file.workspace, key, live: Mutex::new(HashMap::new()) })
+    }
+
+    /// A short name for the public key: the first 8 bytes of the SHA-256 of its 32 bytes, as 16 hex characters. The key is
+    /// public, and this is all a log line says of it.
+    pub(crate) fn fingerprint(&self) -> String {
+        hex::encode(&Sha256::digest(self.key.as_bytes())[..8])
     }
 
     fn verify(&self, text: &str, signature_b64: &str) -> bool {
