@@ -25,7 +25,7 @@ const { rename, closedList, listClosed, removeOpen, reopen, removeClosed, showCo
         rename: vi.fn(async (_id: string, _name: string) => {}),
         closedList,
         listClosed: vi.fn(async () => closedList.current),
-        removeOpen: vi.fn(async (_w: { windowId: string; label: string }, onRemoving?: () => void) => {
+        removeOpen: vi.fn(async (_w: { windowId: string | null; label: string }, onRemoving?: () => void, _onFailed?: () => void) => {
             onRemoving?.();
         }),
         reopen: vi.fn(async (_ws: string) => {}),
@@ -259,7 +259,7 @@ describe("InstancePanel closed windows", () => {
         const slots = screen.getAllByRole("button", { name: "Remove from workspace" });
         expect(slots).toHaveLength(2);
         fireEvent.click(slots[1]);
-        expect(removeOpen).toHaveBeenCalledWith({ windowId: "win2", label: "window-2" }, expect.any(Function));
+        expect(removeOpen).toHaveBeenCalledWith({ windowId: "win2", label: "window-2" }, expect.any(Function), expect.any(Function));
     });
 
     it("the only open window's slot is disabled, closed windows or not", async () => {
@@ -397,7 +397,48 @@ describe("InstancePanel window slots", () => {
         renderPanel();
         await flush();
         fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
-        expect(removeOpen).toHaveBeenCalledWith({ windowId: null, label: "window-2" }, expect.any(Function));
+        expect(removeOpen).toHaveBeenCalledWith({ windowId: null, label: "window-2" }, expect.any(Function), expect.any(Function));
+    });
+
+    it("a window removed from this panel leaves the list at once, before the host has dropped it, and the count follows", async () => {
+        twoOpen();
+        renderPanel();
+        await flush();
+        expect(heading().textContent).toContain("3 windows");
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        // the host still lists window-2 (it is being torn down), as it does for seconds, with its id already gone
+        expect(names()).toEqual(["Alpha", "Charlie"]);
+        expect(heading().textContent).toContain("2 windows");
+    });
+
+    it("the row is back if the close failed, and a label the host lists again after dropping it is shown again", async () => {
+        twoOpen();
+        renderPanel();
+        await flush();
+        removeOpen.mockImplementationOnce(async (_w, onRemoving, onFailed) => {
+            onRemoving?.();
+            onFailed?.(); // closeWindow refused
+        });
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Bravo", "Charlie"]);
+        // removed for real this time: the host drops it, then a new window takes the label
+        fireEvent.click(screen.getAllByRole("button", { name: "Remove from workspace" })[1]);
+        await flush();
+        expect(names()).toEqual(["Alpha", "Charlie"]);
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-3", windowId: "win3" },
+        ]);
+        await flush();
+        setEntries([
+            { label: "main", windowId: "win1" },
+            { label: "window-2", windowId: "win2" },
+            { label: "window-3", windowId: "win3" },
+        ]);
+        await flush();
+        expect(names()).toHaveLength(3);
     });
 
     it("a closed window does not move when another one closes after it", async () => {
