@@ -22,6 +22,12 @@ export interface InputPage {
     evaluate<T>(expression: string): Promise<T>;
     /** One wheel notch of `deltaY` px with the pointer at (x, y), in CSS px of the window. */
     wheel(x: number, y: number, deltaY: number): Promise<void>;
+    /**
+     * A wheel notch that is sent again, after a short wait, until `moved()` says it took effect or `tries` notches have
+     * been sent; resolves with how many were sent. A notch sent before the browser has built its scroll tree is dropped
+     * (a cold start on a busy machine, seen on the nightly's runner), and a dropped notch leaves nothing to add up.
+     */
+    wheelUntil(x: number, y: number, deltaY: number, moved: () => Promise<boolean>, tries?: number): Promise<number>;
     /** Move the pointer to (x, y). */
     move(x: number, y: number): Promise<void>;
 }
@@ -105,7 +111,7 @@ async function connectPage(port: number): Promise<{ send: Send; socket: WebSocke
 }
 
 function inputPage(send: Send): InputPage {
-    return {
+    const page: InputPage = {
         async evaluate<V>(expression: string) {
             const r = (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })) as {
                 result: { value: V };
@@ -117,10 +123,22 @@ function inputPage(send: Send): InputPage {
         async wheel(x, y, deltaY) {
             await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY });
         },
+        async wheelUntil(x, y, deltaY, moved, tries = 8) {
+            for (let sent = 1; ; sent++) {
+                await page.wheel(x, y, deltaY);
+                // Give a notch that was taken time to show; one that was dropped never does.
+                for (let i = 0; i < 8; i++) {
+                    await sleep(50);
+                    if (await moved()) return sent;
+                }
+                if (sent >= tries) return sent;
+            }
+        },
         async move(x, y) {
             await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         },
     };
+    return page;
 }
 
 /** Open `html` in `browser`, run `fn` with a page that takes real input, and stop the browser. */
