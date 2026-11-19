@@ -1435,6 +1435,13 @@ pub struct LanDiscoveryController {
     /// longer than one `apply`. It stays `true` when a start fails, which is how
     /// the watchdog tells "wanted but down" (retry) from "off" (leave alone).
     desired: std::sync::atomic::AtomicBool,
+    /// Whether `start_daemon` may open a real mDNS daemon. Always `true` in a
+    /// product build. A test build's controller starts with `false`: a started
+    /// daemon registers a service on the real multicast group, so a test that
+    /// called `apply(true)` was announced to, and listed by, the instance
+    /// installed on the same machine (a fake "test-host" peer with version
+    /// `0.0.0-test`). The want/stop/restart logic is the same either way.
+    may_start_daemon: bool,
     instance_id: String,
     hostname: String,
     version: String,
@@ -1579,6 +1586,7 @@ impl LanDiscoveryController {
         Self {
             slot: Arc::new(RwLock::new(None)),
             desired: std::sync::atomic::AtomicBool::new(false),
+            may_start_daemon: !cfg!(any(test, feature = "test-support")),
             instance_id,
             hostname,
             version,
@@ -1874,6 +1882,9 @@ impl LanDiscoveryController {
     }
 
     fn start_daemon(&self) -> Result<Arc<LanDiscovery>, String> {
+        if !self.may_start_daemon {
+            return Err("no mDNS daemon in a test build: a test must never announce on the real network".to_string());
+        }
         LanDiscovery::start(
             self.instance_id.clone(),
             self.hostname.clone(),
@@ -2363,6 +2374,29 @@ mod tests {
         controller.apply(false);
         assert!(!controller.is_wanted());
         assert!(!controller.restart_if_wanted(), "switched off again: must not restart");
+        assert!(controller.health().is_none());
+    }
+
+    /// A test's controller never opens a real mDNS daemon: that would register a
+    /// service on the real multicast group and show up as a fake peer in the
+    /// AgentMux installed on the same machine. Asking for LAN still records the
+    /// want (so the restart logic is exercised) and tells the UI why it is not up.
+    #[tokio::test]
+    async fn a_test_controller_never_opens_a_daemon() {
+        let controller = super::LanDiscoveryController::new(
+            "test-instance".to_string(),
+            "test-host".to_string(),
+            "0.0.0-test".to_string(),
+            54325,
+            Arc::new(crate::backend::eventbus::EventBus::new()),
+            "test-key".to_string(),
+        );
+        assert!(!controller.may_start_daemon, "a test build's controller starts with the network off");
+        controller.apply(true);
+        assert!(controller.is_wanted(), "the want is recorded");
+        assert!(controller.health().is_none(), "but no daemon is running, so nothing was announced");
+        assert!(!controller.restart_if_wanted(), "a restart cannot start one either");
+        assert!(!controller.rebuild());
         assert!(controller.health().is_none());
     }
 
