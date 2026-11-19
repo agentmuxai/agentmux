@@ -699,6 +699,7 @@ impl Turn {
         // persistent reader does this; without it a container agent never got one, so a compaction
         // delivered its memory but no summary).
         if run_failure.is_none() {
+            crate::backend::limit_evidence::clean_turn(block_id, mstore, event_bus);
             crate::backend::continuity_state::after_successful_turn(mstore.clone(), block_id.clone());
             self.hold_context_hint();
         } else {

@@ -187,7 +187,7 @@ describe("FleetResultPanel", () => {
     it("names each target with its machine, and never prints a key", () => {
         const entry: FleetResultEntry = {
             action: "broadcast",
-            result: { succeeded: [LOAP], failed: [{ id: MANOZ, error: "can't message: no verified link to other machines yet" }], aborted_early: false, pending: [] },
+            result: { succeeded: [LOAP], failed: [{ id: MANOZ, error: "can't message: no verified link to other machines yet" }], aborted_early: false, pending: [], held: [] },
             labels: { [LOAP]: "Loap · narko · dev", [MANOZ]: "Manoz · Area54" },
         };
         const model = { lastFleetResultAtom: () => entry, dismissFleetResult: () => {} } as unknown as SwarmViewModel;
@@ -200,7 +200,7 @@ describe("FleetResultPanel", () => {
     it("falls back to the id for a target with no label", () => {
         const entry: FleetResultEntry = {
             action: "bulk-stop",
-            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [] },
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [], held: [] },
             labels: {},
         };
         const model = { lastFleetResultAtom: () => entry, dismissFleetResult: () => {} } as unknown as SwarmViewModel;
@@ -211,7 +211,7 @@ describe("FleetResultPanel", () => {
     it("follows the section while it stays mounted: quiet for a clean result in Broadcast, shown for a failure", () => {
         const clean: FleetResultEntry = {
             action: "broadcast",
-            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [] },
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [], held: [] },
             labels: {},
         };
         const [entry, setEntry] = createSignal<FleetResultEntry>(clean);
@@ -221,7 +221,7 @@ describe("FleetResultPanel", () => {
         expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
         setQuiet(true);
         expect(document.querySelector(".swarm-fleet-result-panel")).toBeNull();
-        setEntry({ ...clean, result: { succeeded: [], failed: [{ id: "blk-y", error: "gone" }], aborted_early: false, pending: [] } });
+        setEntry({ ...clean, result: { succeeded: [], failed: [{ id: "blk-y", error: "gone" }], aborted_early: false, pending: [], held: [] } });
         expect(document.querySelector(".swarm-fleet-result-panel")).not.toBeNull();
         setQuiet(false);
         setEntry(clean);
@@ -231,7 +231,7 @@ describe("FleetResultPanel", () => {
     it("is dismissed with its Dismiss button", () => {
         const entry: FleetResultEntry = {
             action: "bulk-stop",
-            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [] },
+            result: { succeeded: ["blk-x"], failed: [], aborted_early: false, pending: [], held: [] },
             labels: {},
         };
         const dismissFleetResult = vi.fn();

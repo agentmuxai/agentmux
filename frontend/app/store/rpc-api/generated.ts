@@ -174,6 +174,7 @@ import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatu
 import type { CommandEventReadHistoryData } from "@/types/rpc/CommandEventReadHistoryData";
 import type { CommandFleetBroadcastData } from "@/types/rpc/CommandFleetBroadcastData";
 import type { CommandFleetBulkStopData } from "@/types/rpc/CommandFleetBulkStopData";
+import type { CommandFleetCheckLimitsData } from "@/types/rpc/CommandFleetCheckLimitsData";
 import type { CommandFleetGroupCreateData } from "@/types/rpc/CommandFleetGroupCreateData";
 import type { CommandFleetGroupDeleteData } from "@/types/rpc/CommandFleetGroupDeleteData";
 import type { CommandFleetGroupListData } from "@/types/rpc/CommandFleetGroupListData";
@@ -1396,6 +1397,14 @@ export const GeneratedApi = {
   // command "fleet.bulk-stop"
   FleetBulkStopCommand(client: RpcClient, data: CommandFleetBulkStopData, opts?: RpcOpts): Promise<FleetActionResult> {
     return client.rpcCall("fleet.bulk-stop", data, opts);
+  },
+  // command "fleet.check-limits"
+  FleetCheckLimitsCommand(
+    client: RpcClient,
+    data: CommandFleetCheckLimitsData,
+    opts?: RpcOpts
+  ): Promise<FleetActionResult> {
+    return client.rpcCall("fleet.check-limits", data, opts);
   },
   // command "supervisor.set-mode"
   SupervisorSetModeCommand(

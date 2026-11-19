@@ -16,6 +16,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "accounts", tool: "IdentityAccounts", rename: &[] },
     Act { action: "validate", tool: "IdentityValidate", rename: &[] },
     Act { action: "switch", tool: "IdentitySwitch", rename: &[] },
+    Act { action: "check_limits", tool: "IdentityCheckLimits", rename: &[] },
     Act { action: "signin", tool: "IdentitySignin", rename: &[] },
     Act { action: "aws_grants", tool: "IdentityAwsGrants", rename: &[] },
     Act { action: "aws_grant", tool: "IdentityAwsGrant", rename: &[] },

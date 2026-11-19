@@ -724,6 +724,7 @@ fn memory_and_identity_routes() -> Router<AppState> {
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/identity/check-limits", post(handle_agent_identity_check_limits))
         .route("/api/v1/agent/identity/signin/notice", post(signin_notice::handle_agent_signin_notice))
         .route("/api/v1/agent/skill", post(handle_agent_skill))
 }

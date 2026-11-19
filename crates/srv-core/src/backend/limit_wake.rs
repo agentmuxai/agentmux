@@ -67,6 +67,7 @@ pub fn install(mstore: Arc<Store>, identity: Arc<Store>, event_bus: Arc<EventBus
         return;
     }
     let blocks = mstore.get_all::<Block>().unwrap_or_default();
+    super::limit_evidence::note_limited_blocks(&blocks);
     let mut scheduled = 0;
     for (block_id, resets_at_ms) in limited_blocks(&blocks) {
         schedule(&block_id, resets_at_ms);
@@ -89,11 +90,12 @@ fn limited_blocks(blocks: &[Block]) -> Vec<(String, u64)> {
 }
 
 /// A failure was just stored for `block_id` (`persist_last_failure`): if it's a
-/// usage limit with a reset, schedule the wake.
-pub fn on_failure(block_id: &str, failure: &AgentFailure) {
+/// usage limit, note its account (`limit_evidence`) and, with a reset, schedule the wake.
+pub fn on_failure(block_id: &str, failure: &AgentFailure, store: &Store) {
     if failure.code != FailureClass::UsageLimit {
         return;
     }
+    super::limit_evidence::note_failure(block_id, failure, store);
     if let Some(resets_at_ms) = failure.resets_at_ms {
         schedule(block_id, resets_at_ms);
     }
@@ -154,6 +156,30 @@ async fn wake(block_id: &str, resets_at_ms: u64) {
     if !cleared {
         return;
     }
+    nudge_when_registered(&block, mstore, identity).await;
+}
+
+/// The note to continue, for a pane whose limit was just cleared (by the reset or by a clean turn on its
+/// account, `limit_evidence`): `delay_ms` from now, so the agents of one account don't all start at once.
+/// Nothing before [`install`].
+pub(crate) fn nudge_after(block_id: &str, delay_ms: u64) {
+    let Some(ctx) = CONTEXT.get() else { return };
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+    let (mstore, identity, block) = (ctx.mstore.clone(), ctx.identity.clone(), block_id.to_string());
+    runtime.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        nudge_when_registered(&block, mstore, identity).await;
+    });
+}
+
+/// How far apart the notes to the agents of one account go (a cleared limit's continue notes).
+pub(crate) const NUDGE_STAGGER_MS: u64 = 2_000;
+
+/// Waits for the agent of `block` to register, then tells it once to continue its claimed tasks, unless a
+/// replay of what was held for it did that already ([`nudge_for`]).
+async fn nudge_when_registered(block: &str, mstore: Arc<Store>, identity: Arc<Store>) {
+    let block_id = block;
+    let block = block.to_string();
     // The agent may not be registered yet (srv just started and its resume is staggered, or it is slow to
     // start): the note waits for it instead of being dropped.
     // A message held for the agent replays the moment it registers and deletes its row, so what is held is
