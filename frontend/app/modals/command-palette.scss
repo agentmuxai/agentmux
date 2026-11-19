@@ -151,6 +151,14 @@
     white-space: nowrap;
 }
 
+// The kit's key cap is sized for a hint in a sentence; in a row it is as small as the text beside it.
+.command-palette-item .ui-kbd {
+    min-width: 0;
+    padding: 0 var(--space-1);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+}
+
 // One step of a chord: its caps side by side.
 .command-palette-item-step {
     display: inline-flex;
