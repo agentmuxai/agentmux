@@ -158,5 +158,15 @@ else
     bad "the app is notarized and stapled before the DMG is made" "app at '${app_at:-none}', DMG at '${dmg_at:-none}'"
 fi
 
+# The release workflow states the id it expects, as a literal, in both the build step and the signing step, so the
+# identity check does not depend on the channel variable it is guarding.
+WORKFLOW="$HERE/../.github/workflows/build-macos.yml"
+n="$(grep -c '^ *AGENTMUX_EXPECT_BUNDLE_ID: ai.agentmux.stable$' "$WORKFLOW" || true)"
+if [ "$n" -ge 2 ]; then
+    ok "the release workflow sets AGENTMUX_EXPECT_BUNDLE_ID in the build and signing steps"
+else
+    bad "the release workflow sets AGENTMUX_EXPECT_BUNDLE_ID in the build and signing steps" "found $n, wanted 2"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
