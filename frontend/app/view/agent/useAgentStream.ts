@@ -51,8 +51,8 @@ import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { createPaneFlushQueue, paneCursorHold, releaseCursorWhenShown } from "./stream-flush-rate";
+import { createPaneInbox } from "./stream-inbox";
 import { createRekeyAccepted } from "./rekey-accepted";
-import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { CATCH_UP_META_KEY, clearCatchUpRequest, parseCatchUpRequest } from "./catch-up-request";
 import { markTitleStale } from "@/app/store/title-stale";
@@ -254,7 +254,7 @@ export function useAgentStream({
     const readsUsage = readsMainAgentUsage(outputFormat);
 
     const memoryReinjectionController = createStreamMemoryReinjection({ blockId, agentName, model, contextWindow: currentContextWindow });
-    const queue = createHidingStreamFlushQueue(rawQueue, memoryReinjectionController.isHiding);
+    const { queue, subscribe: subscribeThroughInbox } = createPaneInbox<TranscriptFileEvent>(blockId, rawQueue, memoryReinjectionController.isHiding);
 
     // A deferred reinjection or catch-up fires when the pane goes quiet, by whatever route: a turn
     // the controller dropped (an account switch) ends with no session_end, and nothing else would drain it.
@@ -395,7 +395,7 @@ export function useAgentStream({
                 level === "warn" ? console.warn(`[useAgentStream] ${message}`) : console.debug(`[useAgentStream] ${message}`),
         });
         const unregisterCursorStats = agentPerfStore.registerTranscriptCursor(blockId, cursor.stats);
-        const subscription = fileSubject.subscribe((msg: TranscriptFileEvent) => cursor.push(msg));
+        const stopInbox = subscribeThroughInbox(fileSubject, (msg) => cursor.push(msg)); // once per frame, stream-inbox.ts
         releaseCursorWhenShown(cursor, cursorHold, offScreen);
         const stopWaiting = waitForHistory(cursor, transcriptSettle);
 
@@ -408,7 +408,7 @@ export function useAgentStream({
             cursorHold.cancel();
             unregisterCursorStats();
             queue.cancelScheduledFlush();
-            subscription.unsubscribe();
+            stopInbox();
             // (the tool_chunk subscription is torn down by its own body-scope onCleanup, so it is
             // cleaned up even when this onMount early-returns.)
             // StreamUnsubscribe moves a working turn into the Disconnected phase, so a crash or exit
