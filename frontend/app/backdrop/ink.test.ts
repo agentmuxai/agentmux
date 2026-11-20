@@ -132,38 +132,66 @@ describe("the 14 built-ins", () => {
     });
 });
 
-describe("any colour", () => {
-    it("is held to the targets across a sweep of 4,096 colours, or reports what it could not reach", () => {
-        let nudged = 0;
-        let readable = 0;
-        const bad: string[] = [];
-        for (let hi = 0; hi < 16; hi++) {
-            for (let ci = 0; ci < 8; ci++) {
-                for (let li = 0; li < 32; li++) {
-                    const hex = oklchToHex(0.03 + (li / 31) * 0.95, (ci / 7) * 0.3, hi * 22.5);
-                    const d = deriveInk(hex);
-                    if (d.nudged) nudged++;
-                    if (d.level === "readable") readable++;
-                    if (d.unmet.length) bad.push(`${hex}: ${d.unmet.join(",")}`);
-                    for (const layer of layers(d)) {
-                        const floor = d.level === "high" ? INK_TARGETS.text.floor : 4.5;
-                        if (contrastRatio(d.ink.text, layer) < floor) bad.push(`${hex}: text on ${layer}`);
-                        // The text keeps 4.5:1 over a hovered and a selected row, at every level.
-                        for (const token of [d.ink.hover, d.ink.selected]) {
-                            if (contrastRatio(d.ink.text, washed(layer, d.ink.text, alphaOf(token))) < 4.5) bad.push(`${hex}: text on ${layer} washed ${token}`);
-                        }
-                    }
-                    expect(d.chosen).toBe(hex);
+/** One hue of the sweep: 8 chromas by 32 lightnesses, 256 colours. */
+interface HueSweep {
+    nudged: number;
+    readable: number;
+    bad: string[];
+}
+
+/** Each hue's result is kept, so the totals below add up what the hue tests already measured. */
+const sweeps = new Map<number, HueSweep>();
+
+function sweepHue(hi: number): HueSweep {
+    const cached = sweeps.get(hi);
+    if (cached) return cached;
+    const out: HueSweep = { nudged: 0, readable: 0, bad: [] };
+    for (let ci = 0; ci < 8; ci++) {
+        for (let li = 0; li < 32; li++) {
+            const hex = oklchToHex(0.03 + (li / 31) * 0.95, (ci / 7) * 0.3, hi * 22.5);
+            const d = deriveInk(hex);
+            if (d.nudged) out.nudged++;
+            if (d.level === "readable") out.readable++;
+            if (d.unmet.length) out.bad.push(`${hex}: ${d.unmet.join(",")}`);
+            for (const layer of layers(d)) {
+                const floor = d.level === "high" ? INK_TARGETS.text.floor : 4.5;
+                if (contrastRatio(d.ink.text, layer) < floor) out.bad.push(`${hex}: text on ${layer}`);
+                // The text keeps 4.5:1 over a hovered and a selected row, at every level.
+                for (const token of [d.ink.hover, d.ink.selected]) {
+                    if (contrastRatio(d.ink.text, washed(layer, d.ink.text, alphaOf(token))) < 4.5) out.bad.push(`${hex}: text on ${layer} washed ${token}`);
                 }
             }
+            if (d.chosen !== hex) out.bad.push(`${hex}: chose ${d.chosen}`);
         }
-        expect(bad.slice(0, 10)).toEqual([]);
+    }
+    sweeps.set(hi, out);
+    return out;
+}
+
+// The sweep of 4,096 colours is 16 tests of 256, one per hue. As one test it took about 2 s on a quiet machine and
+// 3.4 to 5.3 s on a merge-queue runner, so vitest's 5 s default dropped four runs on the one test; a longer limit
+// would only hide how close it sits. In pieces each test is about a sixteenth of that and the default limit keeps
+// its meaning.
+describe("any colour", () => {
+    for (let hi = 0; hi < 16; hi++) {
+        it(`is held to the targets across a sweep of 256 colours at hue ${hi * 22.5}, or reports what it could not reach`, () => {
+            expect(sweepHue(hi).bad.slice(0, 10)).toEqual([]);
+        });
+    }
+
+    it("nudges some of the 4,096 colours and not most, and leaves few of them only readable", () => {
+        let nudged = 0;
+        let readable = 0;
+        for (let hi = 0; hi < 16; hi++) {
+            nudged += sweepHue(hi).nudged;
+            readable += sweepHue(hi).readable;
+        }
         // The dead zone is real: some colours are nudged, and the nudge is not the common case.
         expect(nudged).toBeGreaterThan(0);
         expect(nudged).toBeLessThan(4096 / 2);
         // Past the cap only the middle of the dead zone (and the overlay layer's step) is left, a small share of all colours.
         expect(readable).toBeLessThan(4096 * 0.2);
-        // About 2 s on a quiet machine; a loaded merge-queue runner took over vitest's 5 s default.
+        // Run alone (`-t`) it measures every hue itself, which takes the time the whole sweep did.
     }, 60_000);
 
     it("nudges a mid-tone colour the smallest amount that gets primary text to 7:1, and says so", () => {

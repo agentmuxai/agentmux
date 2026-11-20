@@ -45,6 +45,13 @@ describe("applyDownloadUpdate", () => {
         expect(cancelled[0].state).toBe("cancelled");
     });
 
+    it("keeps a saved download's note, such as that it was saved without asking", () => {
+        const note = "saved without asking: the Save As window could not open";
+        const done = applyDownloadUpdate([], upd({ state: "done", path: "/d/report.pdf", reason: note }));
+        expect(done[0].reason).toBe(note);
+        expect(applyDownloadUpdate([], upd({ state: "done", path: "/d/report.pdf" }))[0].reason).toBeUndefined();
+    });
+
     it("does not bring a finished row back with a late running update", () => {
         const done = applyDownloadUpdate([], upd({ state: "done", path: "/x/report.pdf" }));
         expect(applyDownloadUpdate(done, upd({ state: "running" }))).toBe(done);

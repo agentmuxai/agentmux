@@ -35,10 +35,13 @@ new_app() {
     return 0
 }
 
+# EXPECT_ID (a global, empty by default) is passed as AGENTMUX_EXPECT_BUNDLE_ID, the way the release jobs set it.
+EXPECT_ID=""
+
 # run <name> <expected exit> <output substring or ""> <app dir> [--signed] [requirement]
 run() {
     local name="$1" want="$2" needle="$3" dir="$4" mode="${5-}" dr="${6-}" out rc
-    out="$(FAKE_DR="$dr" CODESIGN="$TMP/bin/codesign" bash "$SCRIPT" "$dir/AgentMux.app" $mode 2>&1)"; rc=$?
+    out="$(AGENTMUX_EXPECT_BUNDLE_ID="${EXPECT_ID-}" FAKE_DR="$dr" CODESIGN="$TMP/bin/codesign" bash "$SCRIPT" "$dir/AgentMux.app" $mode 2>&1)"; rc=$?
     if [ "$rc" != "$want" ]; then
         bad "$name" "exit $rc, wanted $want: $out"
     elif [ -n "$needle" ] && [[ "$out" != *"$needle"* ]]; then
@@ -74,6 +77,23 @@ run "an ad hoc requirement (no Developer ID anchor) fails" 1 "<none>" "$d" --sig
 
 d="$TMP/no-plist"; mkdir -p "$d/AgentMux.app/Contents"
 run "an app without an Info.plist fails" 1 "no Info.plist" "$d"
+
+# The release jobs say what they expect: the id must then be exactly that, whatever it starts with.
+EXPECT_ID="ai.agentmux.stable"
+d="$TMP/lost-channel"; new_app "$d" ai.agentmux.local-main-b28b7a-c2426d68.0.60.1 no
+run "release: a per-version id from a lost channel variable fails, naming both ids" 1 "must produce 'ai.agentmux.stable'" "$d"
+
+d="$TMP/lost-flag"; new_app "$d" ai.agentmux.stable.0.60.36
+run "release: the stable channel's versioned id fails" 1 "must produce 'ai.agentmux.stable'" "$d"
+
+d="$TMP/other-channel-id"; new_app "$d" ai.agentmux.dev
+run "release: another channel's fixed id fails" 1 "must produce 'ai.agentmux.stable'" "$d"
+
+d="$TMP/release-ok"; new_app "$d" ai.agentmux.stable
+run "release: the expected id passes" 0 "bundle id: ai.agentmux.stable" "$d"
+run "release: the expected id passes signed, with its requirement" 0 "designated requirement names" "$d" --signed "$GOOD"
+EXPECT_ID=""
+run "without an expected id a local build is still left alone" 0 "left as it is" "$TMP/lost-channel"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

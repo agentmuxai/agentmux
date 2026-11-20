@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
     opened: [] as [string, string | undefined][],
     editor: [] as string[],
     created: [] as unknown[],
+    refuse: undefined as string | undefined,
 }));
 
 vi.mock("@/app/element/local-media", async () => {
@@ -25,6 +26,7 @@ vi.mock("@/app/element/local-media", async () => {
         // Both reads say the file is over the inline cap, which leaves a card to click and nothing else to settle.
         fetchMediaBlob: async (path: string, opts: { blockId?: string }) => {
             h.reads.push({ what: "blob", path, blockId: opts?.blockId });
+            if (h.refuse) throw new actual.MediaFetchError(403, "Forbidden", h.refuse);
             throw new actual.MediaTooLargeError(300_000_000);
         },
         fetchMediaRange: async (path: string, _s: number, _e: number, opts: { blockId?: string }) => {
@@ -53,6 +55,7 @@ const card = (container: HTMLElement) => container.querySelector(".am-media-card
 
 beforeEach(() => {
     h.reads.length = h.opened.length = h.editor.length = h.created.length = 0;
+    h.refuse = undefined;
 });
 afterEach(cleanup);
 
@@ -91,6 +94,16 @@ describe("a container agent's message", () => {
         fireEvent.click(card(container));
         expect(h.editor).toEqual([]);
         expect(h.opened).toHaveLength(1);
+    });
+});
+
+describe("a file srv refuses to show", () => {
+    it("says in srv's words why it isn't shown", async () => {
+        h.refuse = "This file isn't in a folder the agent shares with its container.";
+        const { container } = render(() => <MarkdownImg props={imgProps("/home/me/secret.png")} media={{ baseDir: "/ws", blockId: "pane-1", confined: true }} />);
+        await vi.waitFor(() => expect(container.textContent).toContain("image not found"));
+        expect(container.textContent).toContain("/home/me/secret.png");
+        expect(container.textContent).toContain("isn't in a folder the agent shares");
     });
 });
 

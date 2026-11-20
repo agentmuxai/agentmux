@@ -8,8 +8,9 @@ diagnostics wired to lsp#1
 run editor:togglePreview -> false
 run editor:find -> true
 search panel open: true
-rpc WriteEditorFile {"path":"/home/u/a.ts","content":"// edit\nexport const a = 1;\n","encoding":"UTF-8","bom":"none","line_ending":"lf"}
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
 run editor:save -> true
+rpc WriteEditorFile {"path":"/home/u/a.ts","content":"// edit\nexport const a = 1;\n","encoding":"UTF-8","bom":"none","line_ending":"lf"}
 lsp#1 didChange /home/u/a.ts "// edit\nexport const a = 1;\n"
 probe after save: doc="// edit\nexport const a = 1;\n" caret=8 dirty=false views=1 tab=null
 run editor:saveAs -> false

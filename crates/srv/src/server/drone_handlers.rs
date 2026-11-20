@@ -354,8 +354,19 @@ pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
 /// `rundrone`: reads the drone definition from id_store (global), writes the
 /// run rows to mstore (per-channel).
 pub(crate) async fn start_drone_run(state: &AppState, cmd: RunDroneReq) -> Result<RunResp, String> {
-    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None).await?;
+    let run_id = launch_run(state, &cmd.drone_id, cmd.input.unwrap_or_default(), None, None, None).await?;
     Ok(RunResp { run_id })
+}
+
+/// Start a run an agent fires with `Drone` `fire`: the ledger row says which agent did it (`by_agent`
+/// is the agent's id), not the operator.
+pub(crate) async fn start_agent_drone_run(
+    state: &AppState,
+    drone_id: &str,
+    input: serde_json::Value,
+    by_agent: &str,
+) -> Result<String, String> {
+    launch_run(state, drone_id, input, None, None, Some(by_agent)).await
 }
 
 /// Start the run a job's `drone` action asks for. `job_run_id` is the job
@@ -368,7 +379,7 @@ pub(crate) async fn start_job_drone_run(
     trigger: serde_json::Value,
     (job_run_id, run_cap_usd): (&str, Option<f64>),
 ) -> Result<String, String> {
-    launch_run(state, drone_id, trigger, Some(job_run_id), run_cap_usd).await
+    launch_run(state, drone_id, trigger, Some(job_run_id), run_cap_usd, None).await
 }
 
 /// The graph a run starts on: its hash, and the number of the saved version
@@ -386,13 +397,14 @@ fn graph_ref_of(state: &AppState, wf: &DroneDefinition) -> GraphRef {
 
 /// Start a run of `drone_id` with `trigger` as its input. With a
 /// `job_run_id` the ledger row is that job run's; without one the run
-/// gets a `manual` row of its own.
+/// gets a `manual` row of its own, started by `by_agent` when an agent fired it, else the operator.
 async fn launch_run(
     state: &AppState,
     drone_id: &str,
     trigger: serde_json::Value,
     job_run_id: Option<&str>,
     run_cap_usd: Option<f64>,
+    by_agent: Option<&str>,
 ) -> Result<String, String> {
     let size = trigger.to_string().len();
     if size > MAX_INPUT_BYTES {
@@ -425,7 +437,10 @@ async fn launch_run(
             l.drone_attached(job_run, &run_id, &trigger, started_at);
             Some((l.clone(), job_run.to_string()))
         }
-        None => l.drone_started(&run_id, &drone_id, &wf.name, started_at, &trigger).map(|id| (l.clone(), id)),
+        None => {
+            let by = by_agent.unwrap_or(crate::backend::jobs::BY_OPERATOR);
+            l.drone_started_by(&run_id, &drone_id, &wf.name, started_at, &trigger, by).map(|id| (l.clone(), id))
+        }
     });
 
     spawn_run_drain(state, handle, drone_id, started_at, ledger_run);

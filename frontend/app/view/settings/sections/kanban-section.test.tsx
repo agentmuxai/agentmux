@@ -95,6 +95,24 @@ describe("Settings → Kanban", () => {
         expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", name: "Waiting", colour: "muted", takes: ["backlog"] });
     });
 
+    it("picks a colour from a menu of named swatches, and Apply sends the role name", async () => {
+        await shown();
+        const button = screen.getByRole("button", { name: "Colour: Muted" });
+        expect(button.textContent).toContain("Muted");
+        fireEvent.click(button);
+        const rows = await screen.findAllByRole("menuitemradio");
+        expect(rows.map((r) => r.textContent)).toEqual(["Muted", "Research", "Info", "Active", "Attention", "Review", "Done", "Shipped"]);
+        expect(rows[0].getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(rows[5]);
+        // The default eight use every colour, so the Review stage already shows "Review": two buttons now.
+        expect(screen.getAllByRole("button", { name: "Colour: Review" })).toHaveLength(2);
+        expect(screen.queryByRole("button", { name: "Colour: Muted" })).toBeNull();
+        expect(h.acts).toEqual([]);
+        fireEvent.click(apply());
+        await waitFor(() => expect(h.acts).toHaveLength(1));
+        expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", colour: "review" });
+    });
+
     it("keeps Apply off, and says why, while a name is empty or taken", async () => {
         await shown();
         const inputs = screen.getAllByLabelText("Stage name");
@@ -214,6 +232,16 @@ describe("Settings → Kanban", () => {
         await waitFor(() => expect(h.acts).toHaveLength(1));
         expect(h.acts[0]).toMatchObject({ action: "board_edit", board: "main", stages_reset: true, stages_rev: 3 });
         expect(h.acts[0].stages).toBeUndefined();
+    });
+
+    it("shows only the sentence of a stale refusal, not the stage set srv adds for an agent's retry", async () => {
+        await shown();
+        h.actFails =
+            'the stages changed since you read them (now revision 2). The stages are now {"version":1,"stages":[]}. Apply your change to that and send it with stages_rev 2.';
+        fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
+        fireEvent.click(apply());
+        await screen.findByText("The stages changed since you read them (now revision 2).");
+        expect(document.body.textContent).not.toContain('"version":1');
     });
 
     it("shows why Apply was refused and keeps the draft", async () => {

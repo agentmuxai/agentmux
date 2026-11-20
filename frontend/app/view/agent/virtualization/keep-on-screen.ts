@@ -174,6 +174,9 @@ export interface RestoreOnScreen {
 
 /** One restore: put the rows back where they were. True when nothing needed moving. */
 function restoreOnce(o: RestoreOnScreen): boolean {
+    // Nothing on screen to hold (a pane at the bottom, which the follow flow keeps): there is nothing to put back, and
+    // reading the scroller below would lay out the rows the change has just written, in every pane, on every change.
+    if (o.rows.length === 0 && !o.dom) return true;
     const snap = snapshotLayout(o.blockId);
     if (!snap) return true;
     const nodes = o.nodes ?? [];

@@ -340,6 +340,9 @@ fn agent_routes(state: &AppState) -> Router<AppState> {
         // A sensitive operation: the agent asks, the super agent decides, the person can veto
         // (SPEC_SUPER_AGENT_2026_10_25.md).
         .route("/api/v1/sensitive/:action", post(sensitive_handlers::handle_sensitive))
+        // The Drone tool: an agent lists and reads the drones here, fires one with a payload and reads its
+        // runs; a fire is recorded as that agent (SPEC_DRONE_REAL_WORLD_JOBS_2026_11_11.md §6.5).
+        .route("/api/v1/drone/:action", post(drone_agent::handle_drone))
         // Presence claims and posts to a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
         .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))

@@ -828,7 +828,9 @@ fn the_channel_scope_keeps_what_this_channel_wrote_and_what_names_no_channel() {
     assert_eq!(totals("channel").totals.unwrap().entries, 2);
     assert_eq!(totals("machine").totals.unwrap().entries, 3);
     assert_eq!(totals("channel").channel.as_deref(), Some("dev"));
-    assert!(world.run(AuditQueryReq { scope: Some("lan".into()), ..Default::default() }).unwrap_err().contains("unknown scope"));
+    assert!(world.run(AuditQueryReq { scope: Some("planet".into()), ..Default::default() }).unwrap_err().contains("unknown scope"));
+    // `lan` reads the rows of every channel here, as `machine` does: the paired computers' are asked for by the caller.
+    assert_eq!(stamps(Some("lan")), vec![3_000, 2_000, 1_000]);
 }
 
 #[test]

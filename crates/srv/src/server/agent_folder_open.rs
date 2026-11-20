@@ -29,7 +29,7 @@ type Turned = (CommandPaneOpenData, Option<Snapshot>);
 /// `pane.open` where it leads into a container agent's folder: `cmd` is turned to open the read-only copy (or
 /// the confined Files pane). The copy taken is returned, for the caller to note to the pane that opens.
 pub(crate) async fn bind(state: &AppState, cmd: &mut CommandPaneOpenData) -> Result<Option<Snapshot>, String> {
-    // A file clicked in a container agent's message: found in the agent's own folders, whatever else the open names.
+    // A file or a link clicked in a container agent's message: found in the agent's own folders, whatever else the open names.
     // For a pane that is not a container agent's the open goes on as asked.
     if let Some(pane) = cmd.message_of.take() {
         if let Some(meta) = crate::server::agent_media_files::pane_meta(state, &pane) {
@@ -42,7 +42,7 @@ pub(crate) async fn bind(state: &AppState, cmd: &mut CommandPaneOpenData) -> Res
             .map_err(|e| format!("filesystem task failed: {e}"))?;
             let (turned, snapshot) = turned?;
             *cmd = turned;
-            return Ok(Some(snapshot));
+            return Ok(snapshot);
         }
     }
     let from_pane = crate::server::files_root::bind_pane_open(state, cmd).await?;
@@ -82,22 +82,30 @@ fn called(within: &Path, file: &Path, place: &dyn Fn(&str) -> Place) -> String {
     rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
-/// A file clicked in a message of the container agent whose pane is `meta`: the file the agent's own folders hold
-/// under that path, as a read-only copy named as the container names it. A path anywhere else, and one that leads out
-/// of the folder through a link, is refused with the reason; so is an open on another computer.
-fn from_message(mut cmd: CommandPaneOpenData, meta: &crate::backend::obj::MetaMapType, snapshots: Option<&Path>) -> Result<(CommandPaneOpenData, Snapshot), String> {
+/// A file or a link clicked in a message of the container agent whose pane is `meta`: the file the agent's own folders
+/// hold under that path, as a read-only copy named as the container names it, or a folder of them, as a Files pane
+/// confined to it. A path anywhere else, and one that leads out of the folder through a link, is refused with the
+/// reason; so is an open on another computer.
+fn from_message(mut cmd: CommandPaneOpenData, meta: &crate::backend::obj::MetaMapType, snapshots: Option<&Path>) -> Result<Turned, String> {
     if cmd.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local") {
         return Err("A file of an agent's message is on this computer; it isn't opened from another one.".to_string());
     }
     let asked = cmd.file.clone().unwrap_or_default();
     let found = crate::server::agent_media_files::resolve(meta, &asked)?;
-    cmd.view = "editor".into();
     // The copy does not change when the file does, so there is no folder to follow; and the open is no link.
     cmd.follow_folder = None;
     cmd.from_link = None;
+    if found.file.is_dir() {
+        // A Files pane that lists and navigates inside the folder and changes nothing.
+        cmd.view = "files".into();
+        cmd.file = None;
+        cmd.meta = Some(crate::server::files_root::confined_meta(&found.file, &found.of));
+        return Ok((cmd, None));
+    }
+    cmd.view = "editor".into();
     cmd.meta = None;
     let snapshot = container_pane_snapshot::for_person(&mut cmd, snapshots, &found.root, &found.file, found.of)?;
-    Ok((cmd, snapshot))
+    Ok((cmd, Some(snapshot)))
 }
 
 /// A link in a message. A path no container agent can write opens as asked, and so does anything that is not
@@ -278,6 +286,7 @@ mod tests {
         std::fs::write(ws.join("pic.png"), "the agent's picture").unwrap();
         for asked in ["/workspace/pic.png".to_string(), format!("{}/pic.png", ws.to_string_lossy())] {
             let (open, snapshot) = from_message(clicked(&asked), &agent_pane(&ws), Some(&snaps)).unwrap();
+            let snapshot = snapshot.unwrap();
             let copy = PathBuf::from(open.file.clone().unwrap());
             assert!(copy.starts_with(&snaps), "{asked}: the pane is given the copy, never the folder's path");
             assert_eq!(std::fs::read_to_string(&copy).unwrap(), "the agent's picture");
@@ -285,6 +294,22 @@ mod tests {
             assert!(open.title.clone().unwrap().starts_with("/workspace/pic.png (read-only snapshot, "));
             assert_eq!((open.view.as_str(), open.follow_folder, open.from_link, open.meta.is_none()), ("editor", None, None, true));
             assert_eq!(snapshot.of, "/workspace/pic.png");
+        }
+    }
+
+    #[test]
+    fn a_folder_linked_in_a_container_agents_message_opens_in_a_files_pane_confined_to_it() {
+        let (_tmp, ws, private, snaps) = folders();
+        let pane = agent_pane(&ws);
+        for asked in ["/workspace/src".to_string(), format!("{}/src/", ws.to_string_lossy()), "/workspace".to_string()] {
+            let (open, snapshot) = from_message(clicked(&asked), &pane, Some(&snaps)).unwrap();
+            assert!(snapshot.is_none(), "{asked}: a folder is not copied");
+            assert_eq!((open.view.as_str(), open.file.is_none(), open.from_link), ("files", true, None));
+            assert!(open.meta.is_some(), "{asked}: the pane is confined to the folder");
+        }
+        // The person's own folder is not the agent's, however it is spelled.
+        for asked in [private.to_string_lossy().into_owned(), "/workspace/../private".into(), "~".into()] {
+            assert_eq!(from_message(clicked(&asked), &pane, Some(&snaps)).unwrap_err(), crate::server::agent_media_files::OUTSIDE, "{asked}");
         }
     }
 

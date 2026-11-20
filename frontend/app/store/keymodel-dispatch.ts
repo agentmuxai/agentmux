@@ -350,10 +350,12 @@ export const OPERATOR_PROMPT_OPEN =
 /**
  * An approval or grant addressed to the person is showing (`Modal` `operatorOnly`, a request marked `operatorOnly`)
  * in pane `blockId`, or over the window or a tab, which cover every pane. One open in another pane is no reason to
- * hold this pane's commands back. With no pane given, any prompt counts.
+ * hold this pane's commands back. With no pane given, any prompt counts. An element marked `data-operator-item` as well
+ * is the person's own control (the status bar's Vault badge and its list), not a prompt over the panes: agents still
+ * cannot read or click it, but it holds nothing back.
  */
 export function operatorPromptOpen(blockId?: string | null): boolean {
-    for (const el of document.querySelectorAll("[data-operator-only]")) {
+    for (const el of document.querySelectorAll("[data-operator-only]:not([data-operator-item])")) {
         const host = el.closest("[data-blockid]");
         if (!host || !blockId || host.getAttribute("data-blockid") === blockId) return true;
     }

@@ -10,16 +10,17 @@ import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Ac
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
+import type { AuditPeerRows } from "@/types/rpc/AuditPeerRows";
 import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
 import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { AuditTotals } from "@/types/rpc/AuditTotals";
 import { serial, useAuditLive } from "./audit-live";
-import { buildRequest, countNew, pageEntries, reuseRows, type AuditFilter } from "./audit-shared";
+import { buildRequest, countNew, isAsked, pageEntries, reuseRows, type AuditFilter } from "./audit-shared";
 
 /** The most pages `reachBack` adds for one ask (50 entries each). */
 const MAX_REACH_PAGES = 20;
 
-/** How often the newest page is read again while the `machine` scope lists the other channels, which push nothing. */
+/** How often the newest page is read again while the other channels and computers are listed, which push nothing. */
 const OTHER_CHANNELS_EVERY_MS = 10_000;
 
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
@@ -70,6 +71,8 @@ function createListState() {
     const [pending, setPending] = createSignal<AuditQueryResult | null>(null);
     // The channel that answered: what an entry with no channel of its own belongs to.
     const [channel, setChannel] = createSignal<string | undefined>();
+    // The paired computers asked for this page (the `lan` scope): the sections they are, and why some gave no rows.
+    const [peers, setPeers] = createSignal<AuditPeerRows[]>([]);
     const following = () => !paused() && !olderLoaded();
     const newCount = createMemo(() => countNew(entries(), pending() ? pageEntries(pending()!) : []));
 
@@ -79,6 +82,7 @@ function createListState() {
         setTotals(res.totals ?? null);
         setNotRecorded(res.not_recorded);
         setChannel(res.channel);
+        setPeers(res.peers ?? []);
         setOlderLoaded(false);
         setPending(null);
         setError(null);
@@ -91,19 +95,19 @@ function createListState() {
     };
 
     return {
-        channel, entries, setEntries, cursor, setCursor, totals, notRecorded, error, setError, loading, setLoading,
+        channel, peers, entries, setEntries, cursor, setCursor, totals, notRecorded, error, setError, loading, setLoading,
         loadingMore, setLoadingMore, paused, setPaused, setOlderLoaded, pending, setPending, following, newCount, showPage, holdPage,
     };
 }
 
 /**
  * Look at the newest entries again when srv says a row was written. The other channels on this computer push
- * nothing, so while they are listed (the `machine` scope) it also looks every few seconds.
+ * nothing, so while they are listed (the `machine` and `lan` scopes) it also looks every few seconds.
  */
 function keepFresh(filter: Accessor<AuditFilter>, visible: () => boolean, look: () => void) {
     useAuditLive(visible, look);
     createEffect(() => {
-        if (filter().scope !== "machine" || !visible()) return;
+        if (!isAsked(filter().scope) || !visible()) return;
         const timer = setInterval(look, OTHER_CHANNELS_EVERY_MS);
         onCleanup(() => clearInterval(timer));
     });
@@ -206,6 +210,6 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
     });
     keepFresh(filter, visible, () => void refresh());
 
-    const { totals, notRecorded, loading, paused, newCount, channel } = state;
-    return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
+    const { totals, notRecorded, loading, paused, newCount, channel, peers } = state;
+    return { channel, peers, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
 }

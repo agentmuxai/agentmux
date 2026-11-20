@@ -168,6 +168,7 @@ vi.mock("./lsp/lsp-extensions", () => ({
 import { EditorViewComponent } from "./editor-view";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { EditorViewModel } from "./editor-model";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { undo } from "@codemirror/commands";
 import { language } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
@@ -1084,8 +1085,8 @@ describe("renaming a file from its tab", () => {
             return resolveContextMenuRegion(tabEl(v, id))!.items!();
         };
         // A file on disk can be shown in another viewer; an Untitled document has only its text.
-        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", "Show As", "Move to New Pane", "Close Tab"]);
-        expect(menuOf(fileTab)[1].submenu!.map((i) => i.label)).toEqual(["Text", "File info", "Hex"]);
+        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", revealInFileManagerLabel(), "Show As", "Move to New Pane", "Close Tab"]);
+        expect(menuOf(fileTab)[2].submenu!.map((i) => i.label)).toEqual(["Text", "File info", "Hex"]);
         expect(menuOf(scratchTab).map((i) => i.label)).toEqual(["Save As…", "Move to New Pane", "Close Tab"]);
 
         // Ctrl+S on the Untitled tab opens its Save As box; Rename on the other tab closes it.
@@ -1097,6 +1098,20 @@ describe("renaming a file from its tab", () => {
         expect(v.container.querySelector(".editor-tab-saveas-input:not(.editor-tab-name-input)")).toBeNull();
         expect(v.model.activeIdAtom()).toBe(fileTab);
         expect(box(v)?.value).toBe("a.ts");
+    });
+
+    it("the tab's menu shows the file in the computer's file manager, through the call the Files pane uses", async () => {
+        const v = await mountView();
+        const fileTab = await open(v.model, "/home/u/a.ts");
+        fireEvent.contextMenu(tabEl(v, fileTab));
+        const items = resolveContextMenuRegion(tabEl(v, fileTab))!.items!();
+        const reveal = items.find((i) => i.label === revealInFileManagerLabel())!;
+        expect(reveal.enabled).toBe(true);
+        reveal.click!();
+        await settle();
+        const calls = h.log.filter((l) => l.startsWith("rpc FsReveal "));
+        expect(calls).toHaveLength(1);
+        expect(JSON.parse(calls[0].slice("rpc FsReveal ".length))).toMatchObject({ path: "/home/u/a.ts", block_id: v.model.blockId });
     });
 
     it("an Untitled document shows where it will be saved, and Enter saves it there", async () => {

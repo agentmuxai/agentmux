@@ -51,7 +51,7 @@ export interface HostPopoverPanelProps {
 export function createHostPanel(props: HostPopoverPanelProps) {
     // Data-path link → OS file manager. Errors surface inline (a headless
     // Linux box with no handler would otherwise look like a dead link).
-    const fileManagerLabel = revealInFileManagerLabel;
+    const fileManagerLabel = () => revealInFileManagerLabel("folder");
     const [openDirError, setOpenDirError] = createSignal<string | null>(null);
     const openDataDir = async () => {
         setOpenDirError(null);
