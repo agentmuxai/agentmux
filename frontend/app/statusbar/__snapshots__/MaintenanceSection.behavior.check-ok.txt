@@ -3,38 +3,46 @@ rpc AppUpdateStatus
 <div>
   <div class="instance-panel-section-title">
     "Maintenance"
-  <div class="maintenance-update-row">
-    <span class="maintenance-row-text maintenance-row-text--dim">
-      "v0.59.27 is up to date (checked <time>)"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Check for update"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span class="maintenance-row-text maintenance-row-text--dim">
+        "v0.59.27 is up to date (checked <time>)"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Check for update"
 rpc AppUpdateCheck
 -- checking
 <div>
   <div class="instance-panel-section-title">
     "Maintenance"
-  <div class="maintenance-update-row">
-    <span class="maintenance-row-text maintenance-row-text--dim">
-      "v0.59.27 is up to date (checked <time>)"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
-      "Checking…"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span class="maintenance-row-text maintenance-row-text--dim">
+        "v0.59.27 is up to date (checked <time>)"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn" disabled="">
+        "Checking…"
 -- a release found
 <div>
   <div class="instance-panel-section-title">
     "Maintenance"
     <span class="maintenance-badge">
       "↓ 0.59.27"
-  <div class="maintenance-update-row">
-    <span class="maintenance-icon maintenance-icon--update">
-      "↓"
-    <span class="maintenance-row-text">
-      "v0.59.27 is out"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "What's new"
-    <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
-      "Open the download page"
-  <div class="maintenance-update-row">
-    <span class="maintenance-row-text maintenance-row-text--dim">
-      "Checked <time>"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Check again"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span aria-hidden="true" class="maintenance-icon maintenance-icon--update">
+        "↓"
+      <span class="maintenance-row-text">
+        "v0.59.27 is out"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "What's new"
+      <button type="button" class="ui-button ui-tone-accent ui-density-compact maintenance-btn maintenance-btn--primary">
+        "Open the download page"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span class="maintenance-row-text maintenance-row-text--dim">
+        "Checked <time>"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Check again"

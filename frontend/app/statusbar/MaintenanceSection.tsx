@@ -3,8 +3,9 @@
 
 import { Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
-import { CheckRow, Notices, UpdateRow } from "./maintenance-parts";
+import { MessageRows } from "./maintenance-rows";
 import { createMaintenance } from "./maintenance-state";
+import { CHECK_ROWS, NOTICE_ROWS, STORE_ROWS, UPDATE_ROWS } from "./maintenance-table";
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,11 @@ export const MaintenanceSection = (): JSX.Element => {
                 </Show>
             </div>
 
-            {/* ── Update row ─────────────────────────────────────────────── */}
-            <UpdateRow m={m} />
-            <Notices m={m} />
-            <CheckRow m={m} />
+            {/* The update, what keeps it from going ahead, the Store's lines, then Check for update. */}
+            <MessageRows m={m} defs={UPDATE_ROWS} />
+            <MessageRows m={m} defs={NOTICE_ROWS} />
+            <MessageRows m={m} defs={STORE_ROWS} />
+            <MessageRows m={m} defs={CHECK_ROWS} />
         </>
     );
 };
