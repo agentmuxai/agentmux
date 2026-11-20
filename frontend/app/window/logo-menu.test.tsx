@@ -245,7 +245,7 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("AgentMux logo menu sh
             await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(1));
 
             menuItem(spec.label).onClick(new MouseEvent("click"));
-            expect(action).toHaveBeenCalledTimes(2);
+            await vi.waitFor(() => expect(action).toHaveBeenCalledTimes(2));
             expect(action.mock.calls[1]).toEqual(action.mock.calls[0]);
         });
 
