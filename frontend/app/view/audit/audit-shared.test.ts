@@ -14,6 +14,7 @@ import {
     prNumber,
     isFailure,
     newPillLabel,
+    pageEntries,
     requestKinds,
     reuseRows,
     sectionsOf,
@@ -151,8 +152,37 @@ describe("the scope", () => {
     });
 });
 
+describe("a page with the other channels' rows", () => {
+    const row = (id: string, ts_ms: number, channel?: string) => entry({ id, ts_ms, provenance: channel ? { channel } : undefined });
+    const other = (...entries: AuditEntry[]) => [{ channel: "dev", entries, more: false }];
+
+    it("is this channel's entries when no other channel answered", () => {
+        const res = { entries: [row("a", 30)], not_recorded: [] };
+        expect(pageEntries(res)).toBe(res.entries);
+        expect(pageEntries({ ...res, other_channels: [] })).toBe(res.entries);
+    });
+
+    it("puts the other channels' rows among this channel's by time, newest first", () => {
+        const res = { entries: [row("a", 30), row("c", 10)], not_recorded: [], other_channels: other(row("dev:b", 20, "dev"), row("dev:d", 5, "dev")) };
+        expect(pageEntries(res).map((e) => e.id)).toEqual(["a", "dev:b", "c", "dev:d"]);
+    });
+
+    it("leaves out rows older than the page's end while this channel has older pages to come", () => {
+        const res = { entries: [row("a", 30), row("c", 10)], next_cursor: "next", not_recorded: [], other_channels: other(row("dev:b", 20, "dev"), row("dev:d", 5, "dev")) };
+        expect(pageEntries(res).map((e) => e.id)).toEqual(["a", "dev:b", "c"]);
+    });
+
+    it("sections list them under their own channel", () => {
+        const res = { entries: [row("a", 30, "stable")], channel: "stable", not_recorded: [], other_channels: other(row("dev:b", 20, "dev")) };
+        expect(sectionsOf(pageEntries(res), res.channel).map((s) => [s.key, s.entries.map((e) => e.id)])).toEqual([
+            ["stable", ["a"]],
+            ["dev", ["dev:b"]],
+        ]);
+    });
+});
+
 describe("sections", () => {
-    const from = (id: string, channel?: string, extra = {}) => entry({ id, provenance: channel === undefined ? undefined : { channel, ...extra } });
+    const from =(id: string, channel?: string, extra = {}) => entry({ id, provenance: channel === undefined ? undefined : { channel, ...extra } });
 
     it("cut the list into one section per channel, in the order each first appears, keeping the list's order within one", () => {
         const sections = sectionsOf([from("a", "stable"), from("b", "dev"), from("c", "stable"), from("d", "dev")], "dev");

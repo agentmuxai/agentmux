@@ -14,6 +14,7 @@ pub mod activity;
 pub mod jekt_file;
 pub mod message_stats;
 pub mod ordered;
+pub mod other_channels;
 pub mod provenance;
 pub mod segments;
 pub mod tasks;
@@ -498,7 +499,7 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
     });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
-    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()) })
+    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()), other_channels: None })
 }
 
 #[cfg(test)]

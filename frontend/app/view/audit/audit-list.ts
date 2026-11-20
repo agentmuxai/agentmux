@@ -5,7 +5,7 @@
 // At the newest entries it follows new ones as srv writes them; paused, or once older ones are loaded, the list
 // holds still and the newest page is fetched on the side, so a pill can count what is new (audit-live.ts).
 
-import { createEffect, createMemo, createSignal, on, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -14,10 +14,13 @@ import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
 import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { AuditTotals } from "@/types/rpc/AuditTotals";
 import { serial, useAuditLive } from "./audit-live";
-import { buildRequest, countNew, reuseRows, type AuditFilter } from "./audit-shared";
+import { buildRequest, countNew, pageEntries, reuseRows, type AuditFilter } from "./audit-shared";
 
 /** The most pages `reachBack` adds for one ask (50 entries each). */
 const MAX_REACH_PAGES = 20;
+
+/** How often the newest page is read again while the `machine` scope lists the other channels, which push nothing. */
+const OTHER_CHANNELS_EVERY_MS = 10_000;
 
 const fetchAuditPage = (req: AuditQueryReq): Promise<AuditQueryResult> => RpcApi.AuditQueryCommand(TabRpcClient, req);
 
@@ -68,10 +71,10 @@ function createListState() {
     // The channel that answered: what an entry with no channel of its own belongs to.
     const [channel, setChannel] = createSignal<string | undefined>();
     const following = () => !paused() && !olderLoaded();
-    const newCount = createMemo(() => countNew(entries(), pending()?.entries ?? []));
+    const newCount = createMemo(() => countNew(entries(), pending() ? pageEntries(pending()!) : []));
 
     const showPage = (res: AuditQueryResult) => {
-        setEntries(reuseRows(untrack(entries), res.entries));
+        setEntries(reuseRows(untrack(entries), pageEntries(res)));
         setCursor(res.next_cursor);
         setTotals(res.totals ?? null);
         setNotRecorded(res.not_recorded);
@@ -189,6 +192,13 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         return untrack(following) ? loadFirst(true, true) : peek();
     });
     useAuditLive(visible, () => void refresh());
+
+    // The other channels on this computer are asked, not pushed: while they are listed, look again every few seconds.
+    createEffect(() => {
+        if (filter().scope !== "machine" || !visible()) return;
+        const timer = setInterval(() => void refresh(), OTHER_CHANNELS_EVERY_MS);
+        onCleanup(() => clearInterval(timer));
+    });
 
     const { totals, notRecorded, loading, paused, newCount, channel } = state;
     return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
