@@ -454,9 +454,14 @@ fn next_stages(board: &Board, edit: &BoardEdit) -> Result<(String, i64), BoardEr
         return refused(format!("board {} is archived, so its stages can't be changed; unarchive it first", board.slug));
     }
     if edit.stages_rev.is_some_and(|rev| rev != board.stages_rev) {
+        // The refusal carries the set as it is now, so the caller can retry without a separate read of the board.
+        let now = match stages::parse_stored(&board.stages) {
+            Ok(set) => format!(" The stages are now {}.", serde_json::to_string(&set).unwrap_or_default()),
+            Err(_) => String::new(),
+        };
         return refused(format!(
-            "the stages changed since you read them (now revision {}); read the board again and apply your change to that",
-            board.stages_rev
+            "the stages changed since you read them (now revision {rev}).{now} Apply your change to that and send it with stages_rev {rev}.",
+            rev = board.stages_rev
         ));
     }
     let text = match &edit.stages {

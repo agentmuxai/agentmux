@@ -921,6 +921,10 @@
     // Let paired devices see this computer's processes in their Tower.
     // "tower:sharewithpaired": false,
 
+    // Let paired computers on your network read this computer's Audit in theirs: which agents
+    // did what, never message text.
+    // "audit:sharewithpaired": false,
+
     // -- Messaging --
 
     // Connect the Discord bridge at startup.

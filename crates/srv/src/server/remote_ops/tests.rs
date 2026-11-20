@@ -680,3 +680,32 @@ async fn app_disk_cleanup_needs_a_certificate_and_an_srv_that_cleans() {
     let forbidden = run(&state, PEER, ask("n-dc4", json!({ "status": other.id }))).await;
     assert!(forbidden.result["error"].as_str().unwrap_or_default().contains("FORBIDDEN"), "{forbidden:?}");
 }
+
+#[tokio::test]
+async fn audit_query_needs_an_approved_install_and_the_owner_sharing_it() {
+    use crate::server::remote_ops::op::MAX_PARAMS_BYTES;
+    let (public, private) = keys(42);
+    let (state, audience) = state_with_peer("rop-aud", &public);
+    let ask = |nonce: &str| request_with("rop-aud", nonce, "audit.query", json!({ "limit": 5 }), &audience, &private, MAX_PARAMS_BYTES);
+    // The rows name agents and what they did: a first-seen pin alone is not enough to read them.
+    let refused = run(&state, PEER, ask("n-aud1")).await;
+    assert_eq!(refused.refused_reason.as_deref(), Some("needs_certificate"), "{refused:?}");
+    let (_dir, cert) = certificate("rop-aud", &public, NOW);
+    let instance = cert.instance_id.clone();
+    state.lan_discovery.seed_lan_cert_for_test("rop-aud", cert);
+    trust_install(&state, &instance);
+    // Approved, but the owner has not shared the Audit.
+    let off = run(&state, PEER, ask("n-aud2")).await;
+    assert_eq!(off.refused_reason.as_deref(), Some("not_shared"), "{off:?}");
+    // Shared: the first page of this computer's rows, at most the limit asked.
+    let mut settings = state.config_watcher.get_settings();
+    settings.extra.insert("audit:sharewithpaired".to_string(), json!(true));
+    state.config_watcher.update_settings(settings);
+    let shared = run(&state, PEER, ask("n-aud3")).await;
+    assert_eq!(shared.status, OpStatus::Done, "{shared:?}");
+    assert!(shared.result["entries"].is_array(), "{shared:?}");
+    assert!(shared.result["entries"].as_array().unwrap().len() <= 5, "{shared:?}");
+    // No answer, refused or done, is a row in the Audit: it asks again on every row, so a row would be a loop.
+    let log = serde_json::to_string(&state.reactive_handler.get_audit_log(usize::MAX)).unwrap();
+    assert!(!log.contains("audit.query"), "a read of the Audit wrote a row: {log}");
+}

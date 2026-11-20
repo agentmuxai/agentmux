@@ -11,6 +11,7 @@ import {
     DEFAULT_KINDS,
     emptyFilter,
     entryLinks,
+    isAsked,
     prNumber,
     isFailure,
     newPillLabel,
@@ -149,6 +150,11 @@ describe("the scope", () => {
         expect(emptyFilter().scope).toBe("channel");
         expect(buildRequest(emptyFilter(), 5000).scope).toBe("channel");
         expect(buildRequest({ ...emptyFilter(), scope: "machine" }, 5000).scope).toBe("machine");
+        expect(buildRequest({ ...emptyFilter(), scope: "lan" }, 5000).scope).toBe("lan");
+    });
+
+    it("looks again every few seconds for every scope that asks other channels or computers", () => {
+        expect(["channel", "machine", "lan"].map((s) => isAsked(s as "channel"))).toEqual([false, true, true]);
     });
 });
 
@@ -170,6 +176,14 @@ describe("a page with the other channels' rows", () => {
     it("leaves out rows older than the page's end while this channel has older pages to come", () => {
         const res = { entries: [row("a", 30), row("c", 10)], next_cursor: "next", not_recorded: [], other_channels: other(row("dev:b", 20, "dev"), row("dev:d", 5, "dev")) };
         expect(pageEntries(res).map((e) => e.id)).toEqual(["a", "dev:b", "c"]);
+    });
+
+    it("puts a paired computer's rows among the others by time", () => {
+        const peer = (id: string, ts_ms: number) => entry({ id, ts_ms, provenance: { host: "beta", channel: "stable" } });
+        const res = { entries: [row("a", 30)], not_recorded: [], peers: [{ host: "beta", entries: [peer("beta/p1", 20)], more: false }] };
+        expect(pageEntries(res).map((e) => e.id)).toEqual(["a", "beta/p1"]);
+        // A computer that gave no rows adds none, and its note is for the feed.
+        expect(pageEntries({ ...res, peers: [{ host: "beta", entries: [], more: false, note: "it did not answer" }] })).toBe(res.entries);
     });
 
     it("sections list them under their own channel", () => {
@@ -198,6 +212,18 @@ describe("sections", () => {
             ["dev", ["a", "b"]],
             ["stable", ["c"]],
         ]);
+    });
+
+    it("keep a paired computer's channel apart from this computer's channel of the same name", () => {
+        const dot = "·";
+        const peers = new Set(["beta"]);
+        const sections = sectionsOf([from("a", "stable", { host: "alpha" }), from("b", "stable", { host: "beta" }), from("c", "stable", { host: "alpha" })], "stable", peers);
+        expect(sections.map((s) => [s.key, s.label, s.entries.map((e) => e.id)])).toEqual([
+            ["stable", `alpha ${dot} stable`, ["a", "c"]],
+            ["beta/stable", `beta ${dot} stable`, ["b"]],
+        ]);
+        // Without the peers named, one channel name is one section, as before.
+        expect(sectionsOf([from("a", "stable", { host: "alpha" }), from("b", "stable", { host: "beta" })], "stable").length).toBe(1);
     });
 
     it("are labelled host, channel and version as far as the entries say", () => {
