@@ -23,12 +23,12 @@ label: string,
 /**
  * `valid`, `ok`, `unknown`, `expired`, `needs_reauth` or `invalid`.
  */
-sign_in: string, quota: AccountQuota,
+sign_in: string, quota: AccountQuota, 
 /**
  * How much of each usage window is used and when it resets, from the provider's own report
  * (`backend::account_usage`); `not_reported` for a provider whose CLI reports none.
  */
-usage: AccountUsage,
+usage: AccountUsage, 
 /**
  * Marked "never fail over to this": no agent is moved onto it by itself (`failover`).
  */
