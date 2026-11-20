@@ -885,3 +885,7 @@ mod tests {
         token::revoke("agent-keep-key", KEY_ROUTE_ID);
     }
 }
+
+#[cfg(test)]
+#[path = "core_tests.rs"]
+mod core_tests;
