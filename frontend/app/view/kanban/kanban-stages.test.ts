@@ -112,7 +112,7 @@ describe("validateStages", () => {
 
     it("needs two to eight stages", () => {
         expect(why(defaultStages().slice(0, 1)).join()).toContain("at least 2");
-        expect(why([...defaultStages(), { id: "x", name: "Extra", colour: "grey", takes: [] }]).join()).toContain("at most 8");
+        expect(why([...defaultStages(), { id: "x", name: "Extra", colour: "muted", takes: [] }]).join()).toContain("at most 8");
     });
 
     it("needs every source shown by exactly one stage", () => {
@@ -153,7 +153,7 @@ describe("the draft edits", () => {
     it("rename, recolour and move", () => {
         const s = defaultStages();
         expect(renameStage(s, "review", "Checking")[5].name).toBe("Checking");
-        expect(recolourStage(s, "review", "blue")[5].colour).toBe("blue");
+        expect(recolourStage(s, "review", "shipped")[5].colour).toBe("shipped");
         expect(moveStage(s, "review", -1).map((x) => x.id).slice(3, 7)).toEqual(["progress", "review", "needs", "merged"]);
         expect(moveStage(s, "backlog", -1)).toEqual(s);
         expect(moveStage(s, "released", 3)).toEqual(s);
@@ -219,15 +219,24 @@ describe("stagesOfBoard", () => {
         expect(stagesOfBoard({ stages: { version: 2 as unknown as 1, stages: [] } })).toEqual(defaultStages());
     });
 
-    it("is the stored set when it is whole, with an unknown colour as grey and an unknown source dropped", () => {
+    it("is the stored set when it is whole, with an unknown colour as muted and an unknown source dropped", () => {
         const set = toStageSet(merged());
         expect(stagesOfBoard({ stages: set })).toEqual(merged());
         const odd = toStageSet(merged());
         (odd.stages[0] as { colour: string }).colour = "chartreuse";
         (odd.stages[0].takes as string[]).push("future");
         const got = stagesOfBoard({ stages: odd });
-        expect(got[0].colour).toBe("grey");
+        expect(got[0].colour).toBe("muted");
         expect(got[0].takes).toEqual(["backlog", "specd"]);
+    });
+
+    it("reads a set stored with the first build's hue names as the role names", () => {
+        const stored = toStageSet(merged());
+        const hues = ["grey", "cyan", "violet", "magenta", "amber", "yellow", "green", "blue"];
+        stored.stages.forEach((s, i) => ((s as { colour: string }).colour = hues[i]));
+        expect(stagesOfBoard({ stages: stored }).map((s) => s.colour)).toEqual(
+            ["muted", "research", "info", "active", "attention", "review", "done", "shipped"].slice(0, stored.stages.length),
+        );
     });
 
     it("falls back to the default when the stored set breaks a rule", () => {

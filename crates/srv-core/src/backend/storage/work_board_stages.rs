@@ -31,8 +31,29 @@ pub const SOURCES: [&str; 8] = ["backlog", "research", "specd", "progress", "nee
 pub const NEEDS: &str = "needs";
 /// The words that belong to the stage taking `needs`.
 const NEEDS_NAME: &str = "needs you";
-/// The palette: names of the theme colours a stage may use (spec §9.1).
-pub const COLOURS: [&str; 8] = ["grey", "cyan", "violet", "magenta", "amber", "yellow", "green", "blue"];
+/// The palette: the role names of the theme colours a stage may use (spec §9.1).
+pub const COLOURS: [&str; 8] = ["muted", "research", "info", "active", "attention", "review", "done", "shipped"];
+/// The first build named the palette by hue. Those names still read, and are written back as the role name.
+const LEGACY_COLOURS: [(&str, &str); 8] = [
+    ("grey", "muted"),
+    ("cyan", "research"),
+    ("violet", "info"),
+    ("magenta", "active"),
+    ("amber", "attention"),
+    ("yellow", "review"),
+    ("green", "done"),
+    ("blue", "shipped"),
+];
+
+/// A stored or sent colour as the palette names it: trimmed, lower case, and a hue name from the first build as
+/// its role name. Anything else is returned as it is, for `validate` to refuse.
+pub fn canonical_colour(colour: &str) -> String {
+    let c = colour.trim().to_ascii_lowercase();
+    match LEGACY_COLOURS.iter().find(|(old, _)| *old == c) {
+        Some((_, role)) => (*role).to_string(),
+        None => c,
+    }
+}
 
 /// One stage.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,14 +87,14 @@ pub fn default_set() -> StageSet {
     StageSet {
         version: STAGES_VERSION,
         stages: vec![
-            stage("backlog", "Backlog", "grey"),
-            stage("research", "In Research", "cyan"),
-            stage("specd", "Spec'd", "violet"),
-            stage("progress", "In progress", "magenta"),
-            stage("needs", "Needs you", "amber"),
-            stage("review", "Review", "yellow"),
-            stage("merged", "Merged", "green"),
-            stage("released", "Released", "blue"),
+            stage("backlog", "Backlog", "muted"),
+            stage("research", "In Research", "research"),
+            stage("specd", "Spec'd", "info"),
+            stage("progress", "In progress", "active"),
+            stage("needs", "Needs you", "attention"),
+            stage("review", "Review", "review"),
+            stage("merged", "Merged", "done"),
+            stage("released", "Released", "shipped"),
         ],
     }
 }
@@ -83,7 +104,7 @@ pub fn clean(mut set: StageSet) -> StageSet {
     for s in &mut set.stages {
         s.name = s.name.trim().to_string();
         s.id = s.id.trim().to_string();
-        s.colour = s.colour.trim().to_ascii_lowercase();
+        s.colour = canonical_colour(&s.colour);
         s.kinds = s.kinds.iter().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
         let mut seen = Vec::new();
         s.takes.retain(|t| !seen.contains(t) && { seen.push(t.clone()); true });
@@ -186,7 +207,11 @@ pub fn parse_stored(text: &str) -> Result<StageSet, String> {
     if text.trim().is_empty() {
         return Ok(default_set());
     }
-    let set: StageSet = serde_json::from_str(text).map_err(|e| format!("the stored stages can't be read: {e}"))?;
+    let mut set: StageSet = serde_json::from_str(text).map_err(|e| format!("the stored stages can't be read: {e}"))?;
+    // A set stored by the first build names its colours by hue: read them as the role names.
+    for s in &mut set.stages {
+        s.colour = canonical_colour(&s.colour);
+    }
     let why = validate(&set);
     if why.is_empty() { Ok(set) } else { Err(why.join("; ")) }
 }
