@@ -138,7 +138,7 @@ pub(super) async fn bundle_import_for_agent_impl(
 /// The agent's memory directory (None when it has no resolvable working directory), after
 /// refreshing the mirror from it when it is a verified one.
 ///
-/// reagent P0, PR #2527: the "zero existing memory" guard only
+/// The "zero existing memory" guard only (#2527)
 /// consults db_agent_native_memory (the mirror) — a live file that was
 /// written autonomously but never viewed through the Stash Bundle tab
 /// is NOT in the mirror yet, so the check would pass and the write
