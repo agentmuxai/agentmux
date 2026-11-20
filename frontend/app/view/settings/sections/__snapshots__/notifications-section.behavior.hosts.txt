@@ -65,9 +65,10 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="false">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="false">
+              <span data-cb="onChange">
+                "toggle"
 -- on again
 <div>
   <div class="settings-section-body">
@@ -352,9 +353,10 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="false">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="false">
+              <span data-cb="onChange">
+                "toggle"
 getAutostartStatus
 -- a host with a tray only
 <div>
@@ -889,9 +891,10 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="false">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="false">
+              <span data-cb="onChange">
+                "toggle"
 getAutostartStatus
 -- a host with neither
 <div>
