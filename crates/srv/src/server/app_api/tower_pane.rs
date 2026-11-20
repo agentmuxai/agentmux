@@ -157,8 +157,16 @@ fn spawn_record_timer(state: &AppState) {
                 tick.tick().await;
                 let req = TowerSampleReq { memory: Some(true), ..Default::default() };
                 match sample_local(&state, &req).await {
-                    // The append is a file write: off the async workers.
-                    Ok(snap) => drop(tokio::task::spawn_blocking(move || record.note(&snap))),
+                    // The append is a file write: off the async workers. When the line began a new hour the rules
+                    // looked, and what they found is said from the same thread (`record_notice`).
+                    Ok(snap) => {
+                        let (broker, mstore) = (state.broker.clone(), state.mstore.clone());
+                        drop(tokio::task::spawn_blocking(move || {
+                            if let Some(looked) = record.note(&snap) {
+                                crate::backend::record_notice::tell(&broker, &mstore, &looked);
+                            }
+                        }));
+                    }
                     Err(e) => tracing::debug!(error = %e, "[record] the sample for the record failed"),
                 }
             }
