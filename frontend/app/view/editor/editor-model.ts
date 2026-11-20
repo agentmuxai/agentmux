@@ -19,6 +19,7 @@
 // Tab behaviour: SPEC_DOCUMENT_TABS_2026_10_02.md, the reducer in
 // frontend/app/store/editor-pane-state-store.ts and its tests. Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
+import { editorCopyMenuItems } from "./editor-media-copy";
 import type { PaneTabHostContext } from "@/app/store/pane-tab-registry";
 import type { EditorView } from "codemirror";
 import { pushNotification, useBlockAtom } from "@/app/store/global";
@@ -207,6 +208,8 @@ export class EditorViewModel {
 
     // Probes and revisions of the tabs' files (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.1).
     readonly viewerTabs = new ViewerTabs();
+    /** The pane menu's Copy for an image, a video or a PDF, which have no text selection to copy (editor-media-copy.ts). */
+    readonly getCopyMenuItems = (selection: string): ContextMenuItem[] => editorCopyMenuItems(this, selection);
 
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
