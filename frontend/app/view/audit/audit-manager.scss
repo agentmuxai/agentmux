@@ -174,8 +174,10 @@
 }
 
 // In the wide table too, a long unbroken value (a path, an entry's name) wraps in its cell: the table shrinks to the
-// pane instead of growing a sideways scrollbar just above the stacking width.
-.vault-uses td {
+// pane instead of growing a sideways scrollbar just above the stacking width. Only the two cells that hold such values:
+// on every cell the table would shrink the short columns to nothing and break ordinary words ("comman / d").
+.vault-uses td.vault-uses__entry,
+.vault-uses td.vault-uses__where {
     overflow-wrap: anywhere;
 }
 

@@ -268,7 +268,8 @@ describe("the Secrets list in a narrow pane", () => {
     it("leaves the wide table to the shared table's own rules, but for wrapping a long unbroken value in its cell", () => {
         const wide = scss.slice(0, scss.indexOf("@container audit (max-width: 720px)"));
         const rules = [...wide.matchAll(/^\.vault-uses[^{}]*\{[^}]*\}/gm)].map((m) => m[0].replace(/\s+/g, " ").trim());
-        expect(rules).toEqual([".vault-uses td { overflow-wrap: anywhere; }"]);
+        // Only the entry and where cells: on every cell the short columns shrink to nothing and break ordinary words.
+        expect(rules).toEqual([".vault-uses td.vault-uses__entry, .vault-uses td.vault-uses__where { overflow-wrap: anywhere; }"]);
     });
 
     it("answers the width queries on the element that carries the pane's zoom, so a zoomed pane measures its laid-out width", () => {
