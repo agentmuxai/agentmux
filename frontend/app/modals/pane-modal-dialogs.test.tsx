@@ -54,13 +54,13 @@ const dialogs: { name: string; open: (blockId: string, onGone: () => void, answe
         name: "Shut down agent",
         title: "Shut down Korp?",
         open: (blockId, onGone, answer) =>
-            openPaneModal(blockId, ShutdownConfirm, { title: "Shut down Korp?", description: "x", onConfirm: answer }, { source: "shutdown", waits: false, onGone }),
+            openPaneModal(blockId, ShutdownConfirm, { title: "Shut down Korp?", description: "x", onConfirm: answer }, { source: "shutdown", waits: false, operatorOnly: false, onGone }),
     },
     {
         name: "Replace this pane",
         title: "Replace this pane with Shortcuts?",
         open: (blockId, onGone, answer) =>
-            openPaneModal(blockId, ReplacePaneConfirm, { onConfirm: answer }, { source: "replace-pane", waits: false, onGone }),
+            openPaneModal(blockId, ReplacePaneConfirm, { onConfirm: answer }, { source: "replace-pane", waits: false, operatorOnly: false, onGone }),
     },
 ];
 
@@ -85,6 +85,13 @@ describe.each(dialogs)("$name, as a pane modal", ({ title, open }) => {
         fireEvent.keyDown(document.querySelector(".modal-panel")!, { key: "Escape" });
         expect(screen.queryByText(title)).toBeNull();
         expect(answer).not.toHaveBeenCalled();
+    });
+
+    it("is the person's own 'are you sure?', so nothing on it is marked operator-only: an agent's Escape (and the shortcut API) can cancel it", () => {
+        render(() => <TwoPanes />);
+        open("a", () => {}, () => {});
+        expect(screen.queryByText(title)).not.toBeNull();
+        expect(document.querySelector("[data-operator-only]")).toBeNull();
     });
 
     it("closing the pane while it is open takes it away and runs the safe answer", async () => {

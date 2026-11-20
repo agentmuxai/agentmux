@@ -549,6 +549,8 @@ impl Record {
             gate.rolled_hour = Some(hour);
         }
         roll_up(&self.dir, now_ms);
+        // The rules read the hour just folded, and what they find is written beside the stalls.
+        super::record_flags::look(&self.dir, now_ms);
     }
 
     /// The nearest folder that exists, for the drive's free space (the record's own folder may not exist yet).

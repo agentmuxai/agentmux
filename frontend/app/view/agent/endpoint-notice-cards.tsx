@@ -35,6 +35,8 @@ export function showNotice(e: EndpointNoticeEvent, now: number = Date.now()): vo
     const shown = blocksOf(e.agent_id).map((blockId) =>
         paneRequests.push(blockId, {
             source: "endpoint-notice",
+            // Tells the person of a change and offers to undo it: an undo gives their own setting back.
+            operatorOnly: false,
             Component: EndpointNoticeCard,
             props: { notice: e },
             summary: `${e.agent_name}: model server changed`,

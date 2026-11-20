@@ -99,7 +99,7 @@ export function VaultRequestCard(props: { request: VaultRequest } & PaneRequestP
                 <Button tone="quiet" onClick={() => void declineRequest(r.id).catch(() => {})}>
                     Not now
                 </Button>
-                <Button tone="accent" onClick={() => openPaneModal(r.block_id, RequestForm, { request: r }, { source: "vault-request-form", waits: false })}>
+                <Button tone="accent" onClick={() => openPaneModal(r.block_id, RequestForm, { request: r }, { source: "vault-request-form", waits: false, operatorOnly: true })}>
                     Add it
                 </Button>
             </div>
@@ -137,9 +137,9 @@ export function startVaultRequestCards(): void {
     followVault();
     createRoot(() => {
         follow(vaultUses, (u) =>
-            paneRequests.push(u.block_id, { source: "vault-use", what: "asks to use a secret", Component: VaultUseCard, props: { use: u }, summary: clip(u.entry_label, CLIP.label), deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
+            paneRequests.push(u.block_id, { source: "vault-use", operatorOnly: true, what: "asks to use a secret", Component: VaultUseCard, props: { use: u }, summary: clip(u.entry_label, CLIP.label), deadlineMs: u.goes_ahead ? u.deadline_ms : undefined, waits: false })
         );
-        follow(vaultRequests, (r) => paneRequests.push(r.block_id, { source: "vault-request", Component: VaultRequestCard, props: { request: r }, summary: clip(r.label, CLIP.label), waits: false }));
+        follow(vaultRequests, (r) => paneRequests.push(r.block_id, { source: "vault-request", operatorOnly: true, Component: VaultRequestCard, props: { request: r }, summary: clip(r.label, CLIP.label), waits: false }));
     });
     // Requests made before this window started. Only the requests: reading the
     // entries could make the keychain ask the person at startup.

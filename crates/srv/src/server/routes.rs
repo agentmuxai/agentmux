@@ -259,6 +259,9 @@ fn reactive_routes() -> Router<AppState> {
     Router::new()
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
+        // What this channel keeps in its own audit file, for another channel on this computer listing every channel
+        // (SPEC_AUDIT_LIVE_LOG_OF_EVERY_AGENT_ACTION_2026_11_03.md §3.6 point 5).
+        .route("/agentmux/audit/own", post(app_api::audit_query::handle_audit_own))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
         // Holder side of a takeover — full auth only, never LAN (spec §4.6).
         .route("/agentmux/agent/release", post(agent_takeover::handle_agent_release))
