@@ -2142,8 +2142,7 @@ $tool-name-colors: (
         }
     }
 
-    // A long label (a list of names) wraps inside the row; it is never cut at the pane's edge. The radius is
-    // half a one-line label's height: a pill on one line, rounded corners once it wraps.
+    // A long label (a list of names) wraps inside the row; it is never cut at the pane's edge.
     .agent-cli-notice-label {
         flex: 0 1 auto;
         min-width: 0;
@@ -2155,7 +2154,7 @@ $tool-name-colors: (
         color: var(--cli-notice-tone);
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: 11px;
+        border-radius: var(--radius-full);
         background: var(--panel-bg-color);
     }
 
