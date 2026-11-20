@@ -117,7 +117,7 @@
 182 crates/launcher/src/splash.rs::run_splash
 163 crates/launcher/src/splash_linux/x11.rs::run
 105 crates/launcher/src/splash_mac.rs::Splash::run_until_dismissed
-233 crates/launcher/src/splash_mac.rs::build_window
+189 crates/launcher/src/splash_mac.rs::build_window_with
 109 crates/launcher/src/splash_mac.rs::flatten_rows
 238 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
