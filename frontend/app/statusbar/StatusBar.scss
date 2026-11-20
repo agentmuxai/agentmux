@@ -10,6 +10,7 @@
 @use "./instance-panel";
 @use "./cpu-cores-popover";
 @use "./disk-volumes-popover";
+@use "./low-disk-notice";
 @use "./gpu-panel";
 @use "./maintenance-section";
 @use "./health-notices";
