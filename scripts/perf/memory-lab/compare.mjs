@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { allocatorsTable, compareAllocators } from "./lib/allocators.mjs";
 import { measuresComparison } from "./lib/measures.mjs";
 import { compareRuns, DEFAULT_MARGINS, runsTable } from "./lib/summary.mjs";
 
@@ -123,6 +124,8 @@ function main() {
         `${head[0].layout.panes} agents, ${head[0].rounds} rounds, forced GC, private working set (MB) and CPU seconds over the workload.`,
         "",
         runsTable(compareRuns(base, head, margins), baseLabel, headLabel),
+        // Which allocator of the page's renderer a memory change is in, and whether more is alive or more is only held (lib/allocators.mjs).
+        ...allocatorsTable(compareAllocators(base, head), baseLabel, headLabel).flatMap((line, i) => (i === 0 ? ["", line] : [line])),
     ].join("\n");
     console.log(out);
     if (md) writeFileSync(md, out + "\n");
