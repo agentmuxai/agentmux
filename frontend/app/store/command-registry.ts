@@ -20,6 +20,7 @@ import { zoomPartCommands } from "@/app/store/zoom-part-commands";
 import { openPane } from "@/app/store/palette-open-pane";
 import { openWidgetCommands, widgetEntries } from "@/app/store/palette-open-commands";
 import { keyCommandEntries } from "@/app/store/palette-key-commands";
+import { clearRecentEntry } from "@/app/store/palette-recent";
 import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/store/section-panes";
@@ -747,7 +748,7 @@ function registerAppCommands(): void {
 
 /** The entries that follow the widget bar and the shortcut table (palette-open-commands.ts, palette-key-commands.ts). */
 function registerBarAndKeyCommands(): void {
-    for (const entry of [...openWidgetCommands(), ...keyCommandEntries()]) commandRegistry.register(entry);
+    for (const entry of [...openWidgetCommands(), ...keyCommandEntries(), clearRecentEntry]) commandRegistry.register(entry);
     commandRegistry.addProvider(widgetEntries);
 }
 
