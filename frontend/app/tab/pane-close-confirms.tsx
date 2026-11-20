@@ -93,7 +93,7 @@ export function askInPane<P extends object>(
             host,
             Component as (props: Record<string, unknown> & PaneRequestProps) => JSX.Element,
             { ...props, onAnswer: resolve },
-            { source, onGone: () => resolve(false), text: "Closing this pane needs your answer", what: "asks before closing this pane" }
+            { source, operatorOnly: false, onGone: () => resolve(false), text: "Closing this pane needs your answer", what: "asks before closing this pane" }
         );
     }).finally(() => asking.delete(key));
     asking.set(key, answered);

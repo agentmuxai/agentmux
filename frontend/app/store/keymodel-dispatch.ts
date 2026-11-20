@@ -338,12 +338,24 @@ async function caretArrives(blockId: string, ms = 500): Promise<boolean> {
  */
 /** Why a command or key is held back while a prompt for the person is on screen. */
 export const OPERATOR_PROMPT_OPEN =
-    "a prompt for the user is open (an approval or a grant); only they can answer it, so no command or key is sent until it is closed";
+    "a prompt for the user is open here (an approval or a grant); only they can answer it, so nothing but a cancel (Escape) is sent into this pane until it is closed";
 
-/** An approval or grant addressed to the person is showing (`Modal` `operatorOnly`). */
-export function operatorPromptOpen(): boolean {
-    return document.querySelector("[data-operator-only]") != null;
+/**
+ * An approval or grant addressed to the person is showing (`Modal` `operatorOnly`, a request marked `operatorOnly`)
+ * in pane `blockId`, or over the window or a tab, which cover every pane. One open in another pane is no reason to
+ * hold this pane's commands back. With no pane given, any prompt counts.
+ */
+export function operatorPromptOpen(blockId?: string | null): boolean {
+    for (const el of document.querySelectorAll("[data-operator-only]")) {
+        const host = el.closest("[data-blockid]");
+        if (!host || !blockId || host.getAttribute("data-blockid") === blockId) return true;
+    }
+    return false;
 }
+
+/** Cancelling is always open to the shortcut API: Escape closes what is open and answers none of it. */
+const CANCEL_COMMAND = "app:escape";
+const isCancelKey = (keys: string): boolean => keys.trim().toLowerCase() === "escape";
 
 export function installShortcutApi() {
     const focusedBlockId = (): string | null => getLayoutModelForStaticTab().focusedNode?.()?.data?.blockId ?? null;
@@ -356,11 +368,13 @@ export function installShortcutApi() {
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
         list: () => listShortcuts(keyPlatform()),
         run: (command: string, target?: string): RunResult | Promise<RunResult> =>
-            operatorPromptOpen() ? { ran: false, reason: OPERATOR_PROMPT_OPEN } : runCommand(command, target || undefined, deps()),
+            command !== CANCEL_COMMAND && operatorPromptOpen(target || focusedBlockId())
+                ? { ran: false, reason: OPERATOR_PROMPT_OPEN }
+                : runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
-            if (operatorPromptOpen()) return { reason: OPERATOR_PROMPT_OPEN };
+            if (!isCancelKey(keys) && operatorPromptOpen(target ?? focusedBlockId())) return { reason: OPERATOR_PROMPT_OPEN };
             if (target) {
                 const focused = await focusPaneResult(target);
                 if (isFailure(focused)) return { reason: focusRefusal(target, focused) };
@@ -375,9 +389,9 @@ export function installShortcutApi() {
         // SetShortcut and ResetShortcuts: an agent's change to the person's keys, which they are told of and can undo.
         // The store that writes and tells the person loads when an agent first asks, not with every key handler.
         set: async (req: AgentSetRequest, agent: string): Promise<AgentEditResult | { changed: false; reason: string }> =>
-            operatorPromptOpen() ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentSetShortcut(req, agent),
+            operatorPromptOpen(focusedBlockId()) ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentSetShortcut(req, agent),
         reset: async (req: AgentResetRequest, agent: string): Promise<AgentEditResult | { changed: false; reason: string }> =>
-            operatorPromptOpen() ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentResetShortcuts(req, agent),
+            operatorPromptOpen(focusedBlockId()) ? { changed: false, reason: OPERATOR_PROMPT_OPEN } : (await import("@/app/store/keybinding-agent-edit")).agentResetShortcuts(req, agent),
         focus: (blockId: string): Promise<boolean> => focusPaneForApi(blockId),
         focused: focusedBlockId,
         last: () => lastResolvedCommand(),
