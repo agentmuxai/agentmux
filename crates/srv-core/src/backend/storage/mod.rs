@@ -30,6 +30,7 @@ pub mod lan_peer_pubkey_pins;
 pub mod lan_peer_uid_pins;
 pub mod agents;
 pub mod agents_consolidate;
+pub mod background_container_calls;
 pub mod background_tasks;
 pub mod content;
 pub mod bulletins;

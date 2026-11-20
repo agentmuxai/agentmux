@@ -125,23 +125,72 @@ pub fn macos_answer(success: bool, stdout: &str, stderr: &str) -> Option<bool> {
     }
 }
 
-/// macOS: ask in a native dialog whose default is to keep running, through `osascript` (as the
+/// The macOS question as an alert, for `osascript -l JavaScript`: the arguments are the text, the Quit
+/// and Keep running titles and the icon's path (empty for none), and it prints `button returned:<title>`
+/// as `display dialog` did, so [`macos_answer`] reads either. Keep running is the first button: the
+/// default (Return), and the answer for anything that is not a click on Quit. It is an alert and not
+/// `display dialog` so that it carries the app's own icon. Its keys are the ones `display dialog` had:
+/// Return, and the mouse (Tab and Space reach Quit only with the system's Full Keyboard Access on).
+/// Escape, and a key for Quit, do not work in an alert shown by `osascript` (tried on macOS 26: no key
+/// equivalent on the Quit button fires, and a button titled Cancel gets Escape only now and then and
+/// loses Return and the default highlight).
+#[cfg(any(target_os = "macos", test))]
+const MACOS_ALERT: &str = r#"ObjC.import('AppKit');
+function run(argv) {
+  var body = argv[0], quitTitle = argv[1], keepTitle = argv[2], iconPath = argv[3] || '';
+  var app = $.NSApplication.sharedApplication;
+  app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
+  var alert = $.NSAlert.alloc.init;
+  alert.alertStyle = $.NSAlertStyleWarning;
+  var parts = body.split('\n\n');
+  alert.messageText = parts[0];
+  alert.informativeText = parts.slice(1).join('\n\n');
+  if (iconPath !== '') {
+    try {
+      var img = $.NSImage.alloc.initWithContentsOfFile(iconPath);
+      if (img) { alert.icon = img; }
+    } catch (e) { }
+  }
+  alert.addButtonWithTitle(keepTitle);
+  alert.addButtonWithTitle(quitTitle);
+  app.activateIgnoringOtherApps(true);
+  var response = (typeof alert.runModal === 'function') ? alert.runModal() : alert.runModal;
+  return 'button returned:' + (response == 1001 ? quitTitle : keepTitle);
+}"#;
+
+/// The app's icon, for the alert: `Contents/Resources/AgentMux.icns` of the `.app` that `exe` is in
+/// (`package-macos.sh` writes it there), when `exists` says it is there. A build run from a folder has
+/// none, and the alert then carries the system's default icon.
+#[cfg(any(target_os = "macos", test))]
+fn app_icon(exe: &std::path::Path, exists: impl Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
+    let mut bundle = std::path::PathBuf::new();
+    for part in exe.components() {
+        bundle.push(part);
+        if part.as_os_str().to_string_lossy().ends_with(".app") {
+            let icon = bundle.join("Contents").join("Resources").join("AgentMux.icns");
+            return exists(&icon).then_some(icon);
+        }
+    }
+    None
+}
+
+/// macOS: ask in a native alert whose default is to keep running, through `osascript` (as the
 /// upgrade question does). The text goes to it as arguments, never into the script, so nothing in
 /// it is parsed. `Ok(true)`: quit. `Ok(false)`: keep running. `Err`: no dialog was answered, and
 /// why, for the caller's log; the quit then goes ahead.
 #[cfg(target_os = "macos")]
 pub fn confirm_macos(body: &str) -> Result<bool, String> {
-    let script = format!(
-        "on run argv\n\
-         display dialog (item 1 of argv) with title (item 2 of argv) buttons {{\"{KEEP_RUNNING}\", \"{QUIT}\"}} \
-         default button \"{KEEP_RUNNING}\" cancel button \"{KEEP_RUNNING}\" with icon caution\n\
-         end run"
-    );
+    let icon = std::env::current_exe()
+        .ok()
+        .and_then(|exe| app_icon(&exe, |p| p.is_file()))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let out = std::process::Command::new("/usr/bin/osascript")
-        .arg("-e")
-        .arg(script)
+        .args(["-l", "JavaScript", "-e", MACOS_ALERT])
         .arg(body)
-        .arg(DIALOG_TITLE)
+        .arg(QUIT)
+        .arg(KEEP_RUNNING)
+        .arg(icon)
         .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("couldn't open osascript to ask: {e}"))?;
@@ -217,6 +266,34 @@ mod tests {
         assert_eq!(macos_answer(false, "", "execution error: No user interaction allowed. (-1713)"), None);
         assert_eq!(macos_answer(false, "", ""), None);
         assert_eq!(macos_answer(true, "", ""), None);
+    }
+
+    #[test]
+    fn the_alert_prints_what_display_dialog_printed_and_keeps_running_unless_quit_was_clicked() {
+        // `macos_answer` reads the alert's output as it read the old dialog's.
+        assert!(MACOS_ALERT.contains("'button returned:' + (response == 1001 ? quitTitle : keepTitle)"));
+        let printed = format!("button returned:{QUIT}\n");
+        assert_eq!(macos_answer(true, &printed, ""), Some(true));
+        // The first button (Keep running) is the default, the second is Quit.
+        let keep_at = MACOS_ALERT.find("addButtonWithTitle(keepTitle)").expect("keep button");
+        let quit_at = MACOS_ALERT.find("addButtonWithTitle(quitTitle)").expect("quit button");
+        assert!(keep_at < quit_at, "Return must pick Keep running");
+        // The text, the titles and the icon come as arguments, never as script text.
+        assert!(!MACOS_ALERT.contains(KEEP_RUNNING) && !MACOS_ALERT.contains("AgentMux"), "no text in the script");
+    }
+
+    #[test]
+    fn the_icon_is_the_one_in_the_app_the_program_runs_from() {
+        use std::path::{Path, PathBuf};
+        let in_app = Path::new("/Applications/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        let icon = PathBuf::from("/Applications/AgentMux.app/Contents/Resources/AgentMux.icns");
+        assert_eq!(app_icon(in_app, |p| p == icon), Some(icon.clone()));
+        assert_eq!(app_icon(in_app, |_| false), None, "an icon that is not there is not offered");
+        // Inside a helper app of the bundle, the outer app's icon is still the one.
+        let helper = Path::new("/Applications/AgentMux.app/Contents/Frameworks/AgentMux Helper.app/Contents/MacOS/AgentMux Helper");
+        assert_eq!(app_icon(helper, |p| p == icon), Some(icon.clone()));
+        // A build run from a folder has no app, so the system's icon stays.
+        assert_eq!(app_icon(Path::new("/Users/me/agentmux/target/debug/agentmux-launcher"), |_| true), None);
     }
 
     #[test]
