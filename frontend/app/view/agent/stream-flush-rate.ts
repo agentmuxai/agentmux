@@ -19,7 +19,7 @@ import { createEffect, untrack } from "solid-js";
 import { getFocusedBlockId, isBlockDormant } from "@/app/store/block-component-registry";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
-import type { FlushRate } from "./stream-scheduler";
+import { cancelStreamFlush, requestStreamFlush, type FlushRate } from "./stream-scheduler";
 
 export function paneFlushRate(blockId: string): FlushRate {
     if (isBlockDormant(blockId)()) return "hidden";
@@ -37,12 +37,30 @@ export function paneFlushRate(blockId: string): FlushRate {
  * pane's tab is shown again, what it gathered flushes at its new rate at once, not at the slow hidden one: asking
  * again re-arms the scheduler, which reads the rate afresh.
  */
-export function createPaneFlushQueue(model: AgentPaneModel, blockId: string): StreamFlushQueue {
-    const queue = createStreamFlushQueue(model, () => paneFlushRate(blockId));
-    const dormant = isBlockDormant(blockId);
+export function createPaneFlushQueue(model: AgentPaneModel, blockId: string, offScreen?: () => boolean): StreamFlushQueue {
+    // `offScreen` is the wider signal (also a pane whose window tab is not shown); without it only the pane stack's dormancy counts.
+    const stackDormant = isBlockDormant(blockId);
+    const hidden = offScreen ?? stackDormant;
+    const queue = createStreamFlushQueue(model, () => (hidden() ? "hidden" : paneFlushRate(blockId)));
     createEffect(() => {
         // Untracked: asking reads every pending pane's rate (their dormancy, the focus), and a focus change must not re-ask.
-        if (blockId && !dormant()) untrack(() => queue.scheduleFlush());
+        if (blockId && !hidden()) untrack(() => queue.scheduleFlush());
     });
     return queue;
+}
+
+/**
+ * What the transcript cursor needs to hold a pane's incoming records while nobody can see it
+ * (transcript-cursor.ts `hold` / `wake`): they are queued undecoded and unparsed, and placed in one pass when the
+ * scheduler's slow slot comes (about every HIDDEN_DELAY_MS, one hidden pane a frame) or at once when the pane is shown.
+ * Nothing is dropped: the pane's data is late, not lost, as for its flushes.
+ */
+export function paneCursorHold(blockId: string, offScreen: () => boolean) {
+    const id = `${blockId}#cursor`;
+    return {
+        hold: offScreen,
+        wake: (drain: () => void) => requestStreamFlush(id, drain, () => "hidden"),
+        /** The pane is shown (or going away): the slow slot is not needed. */
+        cancel: () => cancelStreamFlush(id),
+    };
 }

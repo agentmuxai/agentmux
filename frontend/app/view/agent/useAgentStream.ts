@@ -36,7 +36,7 @@
  */
 
 import { getFileSubject } from "@/app/store/mps";
-import { batch, createEffect, onCleanup, onMount, type Accessor } from "solid-js";
+import { batch, createEffect, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { readsMainAgentUsage } from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
@@ -49,7 +49,8 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { workingFromPhase, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createPaneFlushQueue } from "./stream-flush-rate";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { createPaneFlushQueue, paneCursorHold } from "./stream-flush-rate";
 import { createRekeyAccepted } from "./rekey-accepted";
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
@@ -199,7 +200,11 @@ export function useAgentStream({
     // createHidingStreamFlushQueue BEFORE anything below sees it: `memoryReinjectionController.isHiding`
     // then gates every push uniformly, for every producer, with no change to any of them
     // (SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3).
-    const rawQueue = createPaneFlushQueue(model, blockId);
+    // Nobody can see the pane: its tab is hidden, or its window tab is not the displayed one. Its flushes take the
+    // slow slot, and the cursor below holds its incoming records, placing them in one pass (stream-flush-rate.ts).
+    const paneVisibility = usePaneTabVisibility(blockId);
+    const offScreen = (): boolean => paneVisibility() !== "active";
+    const rawQueue = createPaneFlushQueue(model, blockId, offScreen);
 
     // The pane's context window for memory sizing: the meter's own reading when it has one; the
     // last-seen model's table entry next; FALLBACK_CONTEXT_WINDOW (shared with memory-reinjection.ts's
@@ -343,7 +348,9 @@ export function useAgentStream({
         // dropped, gaps read, and nothing parsed before the history it follows. An echo (the user
         // message the controller wrote to the agent's stdin, whose node the pane already shows) is not
         // parsed; the ledger pairs it with that node.
+        const cursorHold = paneCursorHold(blockId, offScreen);
         const cursor = new TranscriptCursor({
+            ...cursorHold,
             deliver: (text, from) => parseRecords(pipeline, text, from),
             echo: (text, from) => echoLedger.echoed(text, from),
             isOwnEcho: (line, at) => echoLedger.isOwnEcho(line, at),
@@ -361,6 +368,12 @@ export function useAgentStream({
         });
         const unregisterCursorStats = agentPerfStore.registerTranscriptCursor(blockId, cursor.stats);
         const subscription = fileSubject.subscribe((msg: TranscriptFileEvent) => cursor.push(msg));
+        // The pane is shown: what it held is placed now, in one step, and the slow slot is given back.
+        createEffect(() => {
+            if (offScreen()) return;
+            cursorHold.cancel();
+            untrack(() => cursor.release());
+        });
 
         // Live records wait for the history load (the pane is covered until then). A load that never
         // reports doesn't hold them for good: after HISTORY_HOLD_MAX_MS they are placed from the first event on.
@@ -380,6 +393,7 @@ export function useAgentStream({
             stopPoll();
             stopWaiting();
             cursor.dispose();
+            cursorHold.cancel();
             unregisterCursorStats();
             queue.cancelScheduledFlush();
             subscription.unsubscribe();
