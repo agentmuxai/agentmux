@@ -265,7 +265,16 @@ describe("the Secrets list in a narrow pane", () => {
         expect(narrow).not.toMatch(/td[^{]*\{[^}]*display:\s*none/);
     });
 
-    it("leaves the wide table to the shared table's own rules", () => {
-        expect(scss.slice(0, scss.indexOf("@container audit (max-width: 720px)")).includes(".vault-uses")).toBe(false);
+    it("leaves the wide table to the shared table's own rules, but for wrapping a long unbroken value in its cell", () => {
+        const wide = scss.slice(0, scss.indexOf("@container audit (max-width: 720px)"));
+        const rules = [...wide.matchAll(/^\.vault-uses[^{}]*\{[^}]*\}/gm)].map((m) => m[0].replace(/\s+/g, " ").trim());
+        expect(rules).toEqual([".vault-uses td { overflow-wrap: anywhere; }"]);
+    });
+
+    it("answers the width queries on the element that carries the pane's zoom, so a zoomed pane measures its laid-out width", () => {
+        const block = (selector: string) => scss.slice(scss.indexOf(`\n${selector} {`), scss.indexOf("\n}\n", scss.indexOf(`\n${selector} {`)));
+        expect(block(".audit-pane")).toContain("container-type: inline-size");
+        expect(block(".audit-pane")).toContain("container-name: audit");
+        expect(block(".audit-container")).not.toContain("container-type");
     });
 });
