@@ -29,12 +29,27 @@ use crate::backend::base::expand_home_dir_safe;
 /// — the repository's main checkout, for a subdirectory or a linked
 /// worktree), sanitized by [`crate::backend::claude_layout::project_dir_name`].
 pub fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
+    memory_dir_for_cwd_with(
+        claude_config_dir,
+        working_directory,
+        &crate::backend::fs_ops::container_folders::written_by_a_container_agent,
+    )
+}
+
+/// [`memory_dir_for_cwd`], with `written` saying whether a container agent can
+/// write a folder: such a folder is named after its own path alone
+/// ([`crate::backend::claude_layout::memory_project_root_with`]).
+pub fn memory_dir_for_cwd_with(
+    claude_config_dir: &str,
+    working_directory: &str,
+    written: &dyn Fn(&std::path::Path) -> bool,
+) -> PathBuf {
     // Claude names the project folder from the absolute cwd, so `~` must be
     // expanded first — a spawn segment records the block's `cmd:cwd`
     // unexpanded (`~/.agentmux/agents/<slug>` for an agent.open default),
     // and `--agentmux-agents-…` is a folder Claude never writes (#3603).
     let working_directory = expand_home_dir_safe(working_directory);
-    let root = crate::backend::claude_layout::memory_project_root(&working_directory);
+    let root = crate::backend::claude_layout::memory_project_root_with(&working_directory, written);
     let folder_name = crate::backend::claude_layout::project_dir_name(&root.to_string_lossy());
 
     let base = if claude_config_dir.is_empty() {

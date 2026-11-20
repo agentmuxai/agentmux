@@ -25,8 +25,8 @@ use crate::backend::obj::{self, Block};
 use crate::backend::storage::store::Store;
 use crate::backend::work_facts::paths::{normalize_path, relative_to};
 
-/// How long one read of the store's panes is reused.
-const REUSE: Duration = Duration::from_secs(2);
+/// How long one read of the store's panes is reused: a new container agent's folders are known this soon.
+const REUSE: Duration = Duration::from_millis(250);
 
 /// One bound folder: its host spellings (as written, and as it resolves when that differs), the container
 /// it is bound into (empty when the pane names no agent) and its place there.
@@ -131,8 +131,9 @@ fn spellings(dir: &Path) -> Vec<String> {
     all
 }
 
-/// The host folder of the Personal Memory of the agent of a container pane, as its container's mounts name it.
-fn memory_of(store: &Store, meta: &obj::MetaMapType) -> Option<PathBuf> {
+/// The host folder of the Personal Memory of the agent of a container pane, as its container's mounts name it:
+/// after the workspace's own path (`written` says which folders a container agent can write).
+fn memory_of(store: &Store, meta: &obj::MetaMapType, written: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
     if !crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta).is_container() {
         return None;
     }
@@ -142,7 +143,7 @@ fn memory_of(store: &Store, meta: &obj::MetaMapType) -> Option<PathBuf> {
         return None;
     }
     let config = crate::backend::memory::native_files::agent_claude_config_dir(store, &agent);
-    Some(crate::backend::memory::native_files::memory_dir_for_cwd(&config, cwd.trim()))
+    Some(crate::backend::memory::native_files::memory_dir_for_cwd_with(&config, cwd.trim(), written))
 }
 
 /// The folders the pane `meta` binds writable into its agent's container.
@@ -156,8 +157,12 @@ fn folders_of_pane(meta: &obj::MetaMapType, memory: Option<&Path>) -> Vec<Folder
 
 /// Every folder a container agent of `store` can write.
 fn folders_of(store: &Store) -> Result<Vec<Folder>, crate::backend::storage::StoreError> {
+    let panes = store.get_all::<Block>()?;
+    // The workspaces and volumes first: they say which folders a memory folder may not be named from.
+    let bound: Vec<Folder> = panes.iter().flat_map(|b| folders_of_pane(&b.meta, None)).collect();
+    let written = |dir: &Path| inside_of(&spellings(dir), &bound).is_some();
     let mut folders: Vec<Folder> =
-        store.get_all::<Block>()?.iter().flat_map(|b| folders_of_pane(&b.meta, memory_of(store, &b.meta).as_deref())).collect();
+        panes.iter().flat_map(|b| folders_of_pane(&b.meta, memory_of(store, &b.meta, &written).as_deref())).collect();
     folders.sort_by(|a, b| a.container.cmp(&b.container));
     Ok(folders)
 }
@@ -191,26 +196,47 @@ fn inside_of(asked: &[String], folders: &[Folder]) -> Option<Inside> {
 /// Reads the disk and the store (blocking): call it off the async workers. When the panes can't be read and
 /// never were, the answer is [`Place::Unknown`]: no git runs anywhere until they can.
 pub fn place(dir: &str) -> Place {
+    thread_local! {
+        /// Set while this thread reads the panes.
+        static READING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
     let asked = spellings(Path::new(dir));
-    let mut s = state().lock();
     #[cfg(test)]
-    if let Some(inside) = inside_of(&asked, &s.for_tests) {
+    if let Some(inside) = inside_of(&asked, &state().lock().for_tests) {
         return Place::Inside(inside);
     }
-    let Some(store) = s.store.clone() else {
+    let (store, stale) = {
+        let s = state().lock();
+        (s.store.clone(), s.read_at.is_none_or(|at| at.elapsed() >= REUSE))
+    };
+    let Some(store) = store else {
         return Place::Host;
     };
-    if s.read_at.is_none_or(|at| at.elapsed() >= REUSE) {
-        match folders_of(&store) {
+    if stale {
+        // The panes are read with no lock held. Asked again from inside that reading: not known.
+        if READING.replace(true) {
+            return Place::Unknown;
+        }
+        let read = folders_of(&store);
+        READING.set(false);
+        let mut s = state().lock();
+        match read {
             Ok(folders) => s.folders = Some(folders),
             Err(e) => tracing::warn!(error = %e, "container folders: can't read the panes; keeping the last list"),
         }
         s.read_at = Some(Instant::now());
     }
+    let s = state().lock();
     match &s.folders {
         Some(folders) => inside_of(&asked, folders).map_or(Place::Host, Place::Inside),
         None => Place::Unknown,
     }
+}
+
+/// Whether a container agent can write `dir`: it is a folder bound writable into an agent's container, or
+/// inside one. Yes while that can't be told. Reads the disk and the store (see [`place`]).
+pub fn written_by_a_container_agent(dir: &Path) -> bool {
+    !matches!(place(&dir.to_string_lossy()), Place::Host)
 }
 
 /// Count `folder` as bound writable into `container` at `target`, for the tests of this crate (each test
@@ -302,8 +328,9 @@ mod tests {
         assert_eq!(at(shared.path()).expect("a writable volume is the agent's").dir, "/data");
         assert_eq!(at(docs.path()), None, "a read-only volume is not");
         assert_eq!(at(host.path()), None, "a host agent's folder is not");
-        let memory = memory_of(&store, &pane("container", "aria", &text(&work), "[]").meta).expect("the agent has a memory folder");
+        let own = |dir: &Path| dir.starts_with(work.path());
+        let memory = memory_of(&store, &pane("container", "aria", &text(&work), "[]").meta, &own).expect("the agent has a memory folder");
         assert_eq!(at(&memory).expect("its memory folder is the agent's").dir, crate::backend::container::mounts::container_memory_dir());
-        assert_eq!(memory_of(&store, &pane("host", "hugo", &text(&host), "[]").meta), None);
+        assert_eq!(memory_of(&store, &pane("host", "hugo", &text(&host), "[]").meta, &own), None);
     }
 }
