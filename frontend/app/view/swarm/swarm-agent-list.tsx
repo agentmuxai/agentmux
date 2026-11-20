@@ -10,6 +10,7 @@ import { MOS, atoms } from "@/app/store/global";
 import { awaitsBrowserAnswer, isAwaitingUser } from "@/app/store/swarm-line";
 import { readZoom } from "@/app/store/zoom-factor";
 import { selectTrace } from "@/app/util/select-trace";
+import { createFrameMemo } from "@/util/frame-memo";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
 import { For, Show, createEffect, createMemo, type Accessor, type JSX } from "solid-js";
@@ -77,12 +78,15 @@ export function useSwarmAgents(model: SwarmViewModel, ctx: PaneTabHostContext): 
     // A Swarm pane nobody can see (another window tab, or a pane tab behind its
     // siblings) keeps its last list and rebuilds once when it is shown: every
     // agent event rebuilt every Swarm pane in the window, hidden ones included
-    // (150 to 380 rebuilds a minute across four panes in one busy window).
-    const listing = createMemo<Listing>((prev) => {
-        if (ctx.visibility() !== "active") return prev ?? NOTHING_LISTED;
-        const listed = oneRowPerAgent(model.buildTree());
+    // (150 to 380 rebuilds a minute across four panes in one busy window). A visible pane
+    // rebuilds at most once a frame: a burst of agent events (a broadcast starting a turn on
+    // many agents) used to rebuild once per event, 161 times in one measured minute.
+    let last: Listing = NOTHING_LISTED;
+    const listing = createFrameMemo<Listing>(() => {
+        if (ctx.visibility() !== "active") return last;
+        last = oneRowPerAgent(model.buildTree());
         selectTrace.rebuilt();
-        return listed;
+        return last;
     });
     const tree = createMemo(() => listing().rows);
     // The list is keyed by block id, so a rebuild with the same agents updates the
