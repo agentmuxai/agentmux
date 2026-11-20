@@ -63,10 +63,11 @@ fn a_release_that_would_not_download_or_verify_ends_it() {
 }
 
 #[test]
-fn a_machine_that_does_not_answer_is_waited_for_before_the_operation_ran_and_asked_its_version_after() {
+fn a_machine_that_does_not_answer_is_asked_its_version_in_either_phase() {
     for answer in [RemoteOpResult::failed("couldn't reach that machine: timed out"), RemoteOpResult::refused("remote_ops_off")] {
-        assert_eq!(read_status(Phase::Open, &answer, "0.60.36"), Step::Wait(Phase::Open));
-        assert_eq!(read_status(Phase::Ran, &answer, "0.60.36"), Step::CheckVersion, "it may have restarted, and forgotten the request");
+        for phase in [Phase::Open, Phase::Ran] {
+            assert_eq!(read_status(phase, &answer, "0.60.36"), Step::CheckVersion, "{phase:?}: it may have restarted, and forgotten the request");
+        }
     }
 }
 
@@ -83,6 +84,9 @@ fn only_the_answer_to_filing_a_request_starts_a_watch() {
     let filed = RemoteOpResult::done(json!({ "status": "requested", "version": "0.60.36", "id": "r1", "review": "x" }));
     let w = watch_for("qtest", "uid-1", " narko ", &json!({ "reason": "newer" }), &filed).expect("a request just filed is followed");
     assert_eq!((w.slug.as_str(), w.uid.as_str(), w.host.as_str(), w.id.as_str(), w.version.as_str()), ("qtest", "uid-1", "narko", "r1", "0.60.36"));
+
+    let two = watch_for("qtest", "uid-1", "narko/dev/windows-store", &json!({}), &filed).expect("followed");
+    assert_eq!(two.host, "narko/dev/windows-store", "named as the agent named it, so a read reaches the same instance when two share a machine");
 
     assert!(watch_for("qtest", "uid-1", "narko", &json!({ "status": "r1" }), &filed).is_none(), "a read of a request is not a new one");
     let up_to_date = RemoteOpResult::done(json!({ "status": "up_to_date", "current": "0.60.36" }));

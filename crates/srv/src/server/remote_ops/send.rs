@@ -154,7 +154,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
         crate::server::task_flow_notes::note_remote_filed(slug, &peer.hostname, &target, &result.result);
     }
     if op == "app.upgrade" {
-        super::upgrade_watch::note_asked(state, slug, uid, peer.hostname.trim(), &envelope_params, &result);
+        super::upgrade_watch::note_asked(state, slug, uid, host, &envelope_params, &result);
     }
     let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));

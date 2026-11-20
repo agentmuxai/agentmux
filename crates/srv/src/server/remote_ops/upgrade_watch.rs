@@ -75,8 +75,8 @@ pub(super) enum Phase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Step {
     Wait(Phase),
-    /// The request is gone from the machine, or the machine does not answer, after the operation ran: it may
-    /// have restarted, which its version says.
+    /// The request is gone from the machine, or the machine does not answer: it may have restarted, which its
+    /// version says. The phase stays what it was.
     CheckVersion,
     End(Ended),
 }
@@ -84,7 +84,9 @@ pub(super) enum Step {
 /// One read of `app.upgrade` with `status`, in `phase`, for the release `version`.
 pub(super) fn read_status(phase: Phase, answer: &RemoteOpResult, version: &str) -> Step {
     if answer.status != OpStatus::Done {
-        return if phase == Phase::Ran { Step::CheckVersion } else { Step::Wait(phase) };
+        // The machine may have restarted into the release since the last read and forgotten the request (its
+        // requests are kept in memory), whatever the request was doing then: its version says.
+        return Step::CheckVersion;
     }
     let r = &answer.result;
     match r.get("status").and_then(Value::as_str).unwrap_or_default() {
@@ -156,6 +158,8 @@ pub(super) struct Watch {
     pub slug: String,
     /// Its uid on this machine: whom the note goes to.
     pub uid: String,
+    /// The machine as the agent named it (`machine`, or `machine/channel/install` to tell two instances of
+    /// one machine apart): every read names it the same way, so each one reaches the instance that was asked.
     pub host: String,
     pub id: String,
     pub version: String,
@@ -239,8 +243,6 @@ async fn run(state: &AppState, w: &Watch) {
                     let version = send::call(state, &w.slug, &w.host, "app.version", json!({}), READ_REASON).await;
                     if read_version(&version, &w.version) {
                         ended = Some(Ended::Restarted);
-                    } else {
-                        phase = Phase::Ran;
                     }
                 }
             }
