@@ -137,3 +137,27 @@ describe("build-server-package.yml: the hand-offs are bound by digest", () => {
         }
     });
 });
+
+describe("build-server-package.yml: a dispatch can ask for signing, on main only, and uploads nothing to a release", () => {
+    it("has a boolean `sign` input on the dispatch, off by default", () => {
+        expect(source).toMatch(/workflow_dispatch:[\s\S]*?\n {6}sign:\n[\s\S]*?type: boolean\n {8}default: false/);
+    });
+
+    it("the plan signs a dispatch only for a run on main building ref main, and a call only for main or a tag at its own commit", () => {
+        const plan = stepsOf("plan").find((s) => /id: sign/.test(s));
+        expect(plan).toMatch(/EVENT: \$\{\{ github\.event_name \}\}/);
+        expect(plan).toMatch(/\[ "\$EVENT" = workflow_dispatch \]/);
+        expect(plan).toMatch(/\[ "\$RUN_REF" = refs\/heads\/main \] && \[ "\$BUILD_REF" = main \]/);
+        expect(plan).toMatch(/\[ "\$BUILD_REF" = "\$RUN_SHA" \]/);
+    });
+
+    it("the signing job refuses a dispatch that is not on main, whatever the plan said", () => {
+        const identity = stepsOf("sign-macos").find((s) => /The identity token names build-server-package\.yml on main/.test(s));
+        expect(identity).toMatch(/event_name\)" = workflow_dispatch \] && \[ "\$REF" != refs\/heads\/main \]/);
+    });
+
+    it("never uploads to a release", () => {
+        expect(code(source)).not.toMatch(/gh release|release upload|release create|softprops\/action-gh-release/);
+        expect(code(source)).not.toMatch(/contents: write/);
+    });
+});

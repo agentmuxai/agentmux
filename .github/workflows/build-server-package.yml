@@ -20,7 +20,8 @@ name: build-server-package
 # A release without it says so in its summary, and `install.sh --headless` says that version has no Headless package for the
 # platform.
 #
-# `sign` (only a release asks for it, once the repository variable SERVER_PACKAGE_MACOS_SIGNING is 'true'; release-core.yml):
+# `sign` (a release asks for it, once the repository variable SERVER_PACKAGE_MACOS_SIGNING is 'true'; release-core.yml; a dispatch on main
+# building ref main can ask for it too, to prove the signing without a release, and this file uploads nothing to a release):
 # the macOS programs are signed with the Developer ID certificate and notarized before they are packed, as the desktop
 # app's are (build-macos.yml, scripts/package-macos.sh). Without it they carry only the linker's ad-hoc signature, which
 # Gatekeeper rejects for a tarball a browser downloaded. On the macOS leg the work is three jobs: `package` builds the
@@ -45,7 +46,7 @@ on:
         type: string
         default: all
       sign:
-        description: "Developer ID sign and notarize the macOS programs (a call from a release; there is no such input on a dispatch)"
+        description: "Developer ID sign and notarize the macOS programs (a call from a release)"
         required: false
         type: boolean
         default: false
@@ -59,6 +60,11 @@ on:
         description: "release (the legs on runner kinds a release already waits for) or all"
         required: false
         default: all
+      sign:
+        description: "Developer ID sign and notarize the macOS programs. Only a run on main building ref main signs; nothing is uploaded to a release (this file never uploads to one)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     paths:
       - '.github/workflows/build-server-package.yml'
@@ -100,17 +106,23 @@ jobs:
       - id: sign
         env:
           WANT: ${{ inputs.sign }}
+          EVENT: ${{ github.event_name }}
           RUN_REF: ${{ github.ref }}
           RUN_SHA: ${{ github.sha }}
           BUILD_REF: ${{ inputs.ref }}
         run: |
           sign=false
           if [ "$WANT" = true ]; then
-            case "$RUN_REF" in
-              refs/heads/main | refs/tags/v*)
-                if [ "$BUILD_REF" = "$RUN_SHA" ]; then sign=true; else echo "::warning::not signing: the ref to build ($BUILD_REF) is not the commit of this run ($RUN_SHA)"; fi ;;
-              *) echo "::warning::not signing: a run on '$RUN_REF' is not main or a release tag" ;;
-            esac
+            if [ "$EVENT" = workflow_dispatch ]; then
+              # A dispatch (the proving run of the signing): only a run on main that builds ref main.
+              if [ "$RUN_REF" = refs/heads/main ] && [ "$BUILD_REF" = main ]; then sign=true; else echo "::warning::not signing: a dispatch signs only a run on main building ref main (run on '$RUN_REF', ref '$BUILD_REF')"; fi
+            else
+              case "$RUN_REF" in
+                refs/heads/main | refs/tags/v*)
+                  if [ "$BUILD_REF" = "$RUN_SHA" ]; then sign=true; else echo "::warning::not signing: the ref to build ($BUILD_REF) is not the commit of this run ($RUN_SHA)"; fi ;;
+                *) echo "::warning::not signing: a run on '$RUN_REF' is not main or a release tag" ;;
+              esac
+            fi
           fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
           echo "sign=$sign"
@@ -575,6 +587,11 @@ jobs:
             refs/heads/main|refs/tags/v*) ;;
             *) echo "::error::the identity token's ref is '$REF': only main and v* tags are signed"; exit 1 ;;
           esac
+          # A dispatch signs only on main (the plan refuses anything else too; the role's trust and the environment's policy are the
+          # other two checks).
+          if [ "$(echo "$CLAIMS" | jq -r .event_name)" = workflow_dispatch ] && [ "$REF" != refs/heads/main ]; then
+            echo "::error::a dispatch signs only a run on main (this one is on '$REF')"; exit 1
+          fi
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
