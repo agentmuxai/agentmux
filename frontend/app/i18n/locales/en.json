@@ -273,6 +273,7 @@
     "settings.search.empty": "No settings match \"{{query}}\"",
     "settings.rail.label": "Settings section",
     "settings.errors.fix": "Fix in editor",
+    "settings.errors.line": "line {{line}}",
     "settings.footer.openRaw": "Open raw {{file}}",
     "settings.animations.preset.label": "Animations",
     "settings.animations.preset.description": "Turn animations off, or make them quicker, smoother or slower. Applies at once in every window.",
