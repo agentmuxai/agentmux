@@ -64,3 +64,16 @@ export function paneCursorHold(blockId: string, offScreen: () => boolean) {
         cancel: () => cancelStreamFlush(id),
     };
 }
+
+/** The pane is shown: what its cursor held is placed now, in one step, and the slow slot is given back. */
+export function releaseCursorWhenShown(
+    cursor: { release(): void },
+    hold: ReturnType<typeof paneCursorHold>,
+    offScreen: () => boolean,
+): void {
+    createEffect(() => {
+        if (offScreen()) return;
+        hold.cancel();
+        untrack(() => cursor.release());
+    });
+}

@@ -384,7 +384,7 @@
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
-229 frontend/app/view/agent/useAgentStream.ts::useAgentStream
+219 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 102 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton
