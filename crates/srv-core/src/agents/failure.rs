@@ -172,10 +172,18 @@ pub fn classify(
 fn names_plan_limit(hay: &str) -> bool {
     hay.contains("usage limit")
         || hay.contains("weekly limit")
-        || hay.contains("hit your limit")
-        || hay.contains("hit your session limit")
+        || hay.contains("session limit")
         || hay.contains("spend limit")
         || hay.contains("out of credits")
+        // "You've hit your limit", "hit your 5-hour limit", "hit your Opus limit": whatever window it names.
+        || hay.find("hit your").is_some_and(|at| hay[at..].contains("limit"))
+        || ["5-hour limit", "five-hour limit", "5 hour limit", "daily limit", "monthly limit"].iter().any(|w| hay.contains(w))
+}
+
+/// Whether `hay` (lower-cased) is the server's own throttle, which says in so many words that it is not the plan's
+/// limit ("temporarily limiting requests (not your usage limit)"): it contains "usage limit" and must not read as one.
+fn names_server_throttle(hay: &str) -> bool {
+    hay.contains("not your usage limit") || hay.contains("not your plan limit") || hay.contains("not your quota")
 }
 
 /// Whether `hay` (lower-cased) is a provider saying the key's balance is empty: HTTP 402 with a credit or balance

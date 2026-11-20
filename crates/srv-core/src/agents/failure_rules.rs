@@ -83,10 +83,16 @@ fn killed(ev: &Evidence<'_>) -> Option<AgentFailure> {
     None
 }
 
-/// Server-side rate limit: transient, and not the account quota.
+/// Server-side rate limit: transient, and not the account quota. A 429 that names the plan's own limit ("HTTP 429
+/// You've hit your 5-hour limit") is the quota, whatever the status says: it stays for `usage_limit`.
 fn rate_limited(ev: &Evidence<'_>) -> Option<AgentFailure> {
+    if names_plan_limit(&ev.hay) && !names_server_throttle(&ev.hay) {
+        return None;
+    }
     if ev.hay.contains("rate limited")
         || ev.hay.contains("temporarily limiting requests")
+        || ev.hay.contains("rate limit exceeded")
+        || ev.hay.contains("too many requests")
         || ev.hay.contains("rate_limit")
         || mentions_http_status(&ev.hay, "429")
     {
