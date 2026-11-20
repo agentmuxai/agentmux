@@ -47,7 +47,7 @@ const DEFAULT_FUZZY_OPTIONS: Partial<IFuseOptions<unknown>> = {
 export function fuzzySearch<T>(items: T[], query: string, options: IFuseOptions<T>): T[] {
     const q = query.trim();
     if (!q) return items;
-    const fuse = new Fuse(items, { ...DEFAULT_FUZZY_OPTIONS, ...options });
+    const fuse = new Fuse<T>(items, { ...DEFAULT_FUZZY_OPTIONS, ...options });
     return fuse.search(q).map((r) => r.item);
 }
 
