@@ -62,7 +62,10 @@
                 align-items: baseline;
 
                 .agent-pending-header-text {
-                    flex: 1 1 30em;
+                    // Never wider than the room beside the dot (7px, _control-bar.scss) and the gap: in a pane
+                    // under about 30em the sentence would otherwise take a row of its own and leave the dot
+                    // alone on the row above it.
+                    flex: 1 1 min(30em, calc(100% - 7px - var(--space-1-5) - 1px));
                     white-space: normal;
                     overflow: visible;
                 }
