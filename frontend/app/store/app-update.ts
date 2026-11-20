@@ -250,6 +250,11 @@ export function acceptStoreProgress(next: unknown): void {
     // While the Store asks, its own earlier states (pending, a finished download) don't take the question off the row.
     if (storeProgress()?.phase === "asking" && (p.phase === "pending" || p.phase === "downloading")) return;
     const percent = typeof p.percent === "number" && Number.isFinite(p.percent) ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+    // Within one download the figure only goes forward: a report that reads lower than the last one (an out-of-order
+    // event, a Store that restarts its count for the next package) or has no figure is dropped, not shown. A new
+    // download starts from `pending` or from a cleared row (setStoreProgress(null)), never from the last one's figure.
+    const last = storeProgress();
+    if (p.phase === "downloading" && last?.phase === "downloading" && last.percent !== null && (percent === null || percent < last.percent)) return;
     setStoreProgress({ phase: p.phase as StoreProgress["phase"], percent, doneBytes: Number(p.doneBytes) || 0, totalBytes: Number(p.totalBytes) || 0 });
 }
 
