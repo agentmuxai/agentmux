@@ -107,15 +107,20 @@ jobs:
       - id: sign
         env:
           WANT: ${{ inputs.sign }}
-          EVENT: ${{ github.event_name }}
+          # In a workflow called by another, `github.event_name` is the caller's event and `github.workflow_ref` the caller's
+          # file: a release started by a dispatch of release.yml is a call, not a dispatch of this file.
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          REPO: ${{ github.repository }}
           RUN_REF: ${{ github.ref }}
           RUN_SHA: ${{ github.sha }}
           BUILD_REF: ${{ inputs.ref }}
         run: |
           sign=false
+          direct=false
+          case "$WORKFLOW_REF" in "$REPO"/.github/workflows/build-server-package.yml@*) direct=true ;; esac
           if [ "$WANT" = true ]; then
-            if [ "$EVENT" = workflow_dispatch ]; then
-              # A dispatch (the proving run of the signing): only a run on main that builds ref main.
+            if [ "$direct" = true ]; then
+              # A dispatch of this file (the proving run of the signing): only a run on main that builds ref main.
               if [ "$RUN_REF" = refs/heads/main ] && [ "$BUILD_REF" = main ]; then sign=true; else echo "::warning::not signing: a dispatch signs only a run on main building ref main (run on '$RUN_REF', ref '$BUILD_REF')"; fi
             else
               case "$RUN_REF" in
@@ -592,11 +597,12 @@ jobs:
             refs/heads/main|refs/tags/v*) ;;
             *) echo "::error::the identity token's ref is '$REF': only main and v* tags are signed"; exit 1 ;;
           esac
-          # A dispatch signs only on main (the plan refuses anything else too; the role's trust and the environment's policy are the
-          # other two checks).
-          if [ "$(echo "$CLAIMS" | /usr/bin/jq -r .event_name)" = workflow_dispatch ] && [ "$REF" != refs/heads/main ]; then
-            echo "::error::a dispatch signs only a run on main (this one is on '$REF')"; exit 1
-          fi
+          # A run of this file itself (a dispatch) signs only on main (the plan refuses anything else too; the role's trust and
+          # the environment's policy are the other two checks). A call from a release has the release workflow's own ref here.
+          case "$(echo "$CLAIMS" | /usr/bin/jq -r .workflow_ref)" in
+            "${GITHUB_REPOSITORY}"/.github/workflows/build-server-package.yml@*)
+              [ "$REF" = refs/heads/main ] || { echo "::error::a dispatch signs only a run on main (this one is on '$REF')"; exit 1; } ;;
+          esac
 
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:

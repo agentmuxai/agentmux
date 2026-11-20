@@ -159,15 +159,19 @@ describe("build-server-package.yml: a dispatch can ask for signing, on main only
 
     it("the plan signs a dispatch only for a run on main building ref main, and a call only for main or a tag at its own commit", () => {
         const plan = stepsOf("plan").find((s) => /id: sign/.test(s));
-        expect(plan).toMatch(/EVENT: \$\{\{ github\.event_name \}\}/);
-        expect(plan).toMatch(/\[ "\$EVENT" = workflow_dispatch \]/);
+        // a call from release.yml's own dispatch has the caller's event: the run of this file itself is told by workflow_ref
+        expect(plan).toMatch(/WORKFLOW_REF: \$\{\{ github\.workflow_ref \}\}/);
+        expect(plan).toMatch(/"\$REPO"\/\.github\/workflows\/build-server-package\.yml@\*\) direct=true/);
+        expect(plan).toMatch(/\[ "\$direct" = true \]/);
+        expect(code(plan)).not.toMatch(/event_name|EVENT/);
         expect(plan).toMatch(/\[ "\$RUN_REF" = refs\/heads\/main \] && \[ "\$BUILD_REF" = main \]/);
         expect(plan).toMatch(/\[ "\$BUILD_REF" = "\$RUN_SHA" \]/);
     });
 
     it("the signing job refuses a dispatch that is not on main, whatever the plan said", () => {
         const identity = stepsOf("sign-macos").find((s) => /The identity token names build-server-package\.yml on main/.test(s));
-        expect(identity).toMatch(/event_name\)" = workflow_dispatch \] && \[ "\$REF" != refs\/heads\/main \]/);
+        expect(identity).toMatch(/jq -r \.workflow_ref\)" in\n\s+"\$\{GITHUB_REPOSITORY\}"\/\.github\/workflows\/build-server-package\.yml@\*\)\n\s+\[ "\$REF" = refs\/heads\/main \] \|\|/);
+        expect(code(identity)).not.toMatch(/\.event_name/);
     });
 
     it("never uploads to a release", () => {
