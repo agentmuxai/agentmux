@@ -10,7 +10,8 @@
 //! carries them.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -23,6 +24,13 @@ use crate::backend::rpc_types::{AuditPeerRows, AuditQueryReq, AuditQueryResult};
 /// How long the Audit waits for one computer: it is a list on screen, and the others should not wait on a slow one.
 const ASK_FOR: Duration = Duration::from_secs(4);
 const REASON: &str = "list its Audit";
+/// How long the last answer of the paired computers is reused. The Audit asks again every ten seconds and on every
+/// row written here, and a computer need not be asked more often than this.
+const REUSE_FOR: Duration = Duration::from_secs(5);
+
+/// What the paired computers last said, for which request, and when.
+type LastAsked = Option<(String, Instant, Vec<AuditPeerRows>)>;
+static LAST_ASKED: LazyLock<Mutex<LastAsked>> = LazyLock::new(Default::default);
 
 fn shares(state: &AppState) -> bool {
     state.config_watcher.get_settings().extra.get(SETTING_AUDIT_SHARE).and_then(Value::as_bool).unwrap_or(false)
@@ -87,8 +95,14 @@ pub(crate) async fn ask_peers(state: &AppState, req: &AuditQueryReq) -> Vec<Audi
     }
     let Some(slug) = super::fleet_sync::signer(state) else { return Vec::new() };
     let params = serde_json::to_value(peers::request_for_peer(req)).unwrap_or(Value::Null);
+    let key = params.to_string();
+    if let Some((asked, at, rows)) = LAST_ASKED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *asked == key && at.elapsed() < REUSE_FOR {
+            return rows.clone();
+        }
+    }
     let hosts = lan_hosts(&state.lan_discovery.get_instances());
-    futures_util::future::join_all(hosts.into_iter().map(|(name, host)| {
+    let rows = futures_util::future::join_all(hosts.into_iter().map(|(name, host)| {
         let (slug, params) = (slug.clone(), params.clone());
         async move {
             match tokio::time::timeout(ASK_FOR, super::send::call(state, &slug, &host, QUERY_OP, params, REASON)).await {
@@ -97,7 +111,9 @@ pub(crate) async fn ask_peers(state: &AppState, req: &AuditQueryReq) -> Vec<Audi
             }
         }
     }))
-    .await
+    .await;
+    *LAST_ASKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, Instant::now(), rows.clone()));
+    rows
 }
 
 #[cfg(test)]

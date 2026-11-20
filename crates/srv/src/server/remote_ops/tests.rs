@@ -705,4 +705,7 @@ async fn audit_query_needs_an_approved_install_and_the_owner_sharing_it() {
     assert_eq!(shared.status, OpStatus::Done, "{shared:?}");
     assert!(shared.result["entries"].is_array(), "{shared:?}");
     assert!(shared.result["entries"].as_array().unwrap().len() <= 5, "{shared:?}");
+    // No answer, refused or done, is a row in the Audit: it asks again on every row, so a row would be a loop.
+    let log = serde_json::to_string(&state.reactive_handler.get_audit_log(usize::MAX)).unwrap();
+    assert!(!log.contains("audit.query"), "a read of the Audit wrote a row: {log}");
 }
