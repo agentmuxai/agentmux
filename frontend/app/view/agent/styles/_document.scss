@@ -225,7 +225,7 @@
         &::before {
             content: "";
             display: block;
-            height: min(100%, 72px);
+            height: 100%;
             border-radius: var(--radius-sm);
             background: var(--tint-1);
         }
