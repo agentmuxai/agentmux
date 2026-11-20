@@ -64,8 +64,10 @@ fn start_is_confirmed(layout: &ov::Layout) -> bool {
             return false;
         };
         let source = db_of(from);
+        // A source an earlier pass already removed ends the chain, as an unmarked origin does: that pass was confirmed,
+        // and nothing older is left to lose. Older data still on disk behind a gone source cannot be vouched for.
         if !source.join("objects.db").is_file() {
-            return false;
+            return has_older_data(from_core).is_ok_and(|older| !older);
         }
         marker = std::fs::read_to_string(source.join(CARRIED_FROM_FILE));
         if marker.is_err() {
@@ -219,11 +221,23 @@ mod tests {
         assert!(!start_is_confirmed(&l));
     }
 
+    /// After a pass: 0.60.33 (the origin) was removed, 0.60.34 still names it, and the running 0.60.35 carried 0.60.34.
+    /// Every later start must still be confirmed, or the cleanup never runs twice.
     #[test]
-    fn a_start_whose_source_folder_is_gone_is_not_confirmed() {
+    fn a_chain_whose_origin_an_earlier_pass_removed_is_still_confirmed() {
         let root = tempfile::tempdir().unwrap();
         let l = carried_from_old(root.path());
-        assert!(!start_is_confirmed(&l));
+        version_with_data(&l, "0.60.34", Some("0.60.33"));
+        assert!(start_is_confirmed(&l));
+    }
+
+    /// A source that is gone with older data still on disk behind it is not vouched for.
+    #[test]
+    fn a_source_folder_that_is_gone_with_older_data_behind_it_is_not_confirmed() {
+        let root = tempfile::tempdir().unwrap();
+        let l = carried_from_old(root.path());
+        version_with_data(&l, "0.60.33", None);
+        assert!(!start_is_confirmed(&l), "0.60.34 is gone, 0.60.33 is still there");
     }
 
     /// A failed copy leaves the new version to start with empty databases: the old folders may hold the only good copy.
