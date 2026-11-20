@@ -151,7 +151,7 @@ An `IconButton` (`gear`, label "Kanban settings") at the right end of the Kanban
 
 ### 8.2 Settings, a Kanban section
 
-A new section `kanban` (rail icon `table-columns`, label `t("settings.sections.kanban")`), placed after Agents and before Advanced. It also takes the two Kanban rows now listed in Advanced (`kanban:closeonmerge`, `kanban:reviewlimit`); the search index moves them with it. The review limit's words change from "Review" to "the stage that shows Review".
+A new section `kanban` (rail icon `table-columns`, label `t("settings.sections.kanban")`), placed after Agents and before Advanced. It also takes the two Kanban settings (`kanban:closeonmerge`, `kanban:reviewlimit`), which had no row in Settings before: a switch and a number under the stages, with entries in the search index. The review limit's words change from "Review" to "the stage that shows Review".
 
 The editor is compact (UI kit `density="compact"`, as the Kanban toolbar):
 
