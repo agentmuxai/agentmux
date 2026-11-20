@@ -18,8 +18,14 @@
 #   - with --signed: the designated requirement is `identifier "ai.agentmux.stable" and anchor apple generic ...`.
 # Another channel's app (`ai.agentmux.<channel>.<version>`, a local build) is not touched: it keeps its own id.
 #
+# The release's own build and signing jobs say what they expect: AGENTMUX_EXPECT_BUNDLE_ID=ai.agentmux.stable (set in
+# .github/workflows/build-macos.yml, as a literal, not derived from the channel variable). With it set the app's id must
+# be exactly that, whatever it starts with, so a build that lost its channel variable and came out as
+# `ai.agentmux.<other>.<version>` fails here instead of passing as "another channel's app". Local builds leave it unset.
+#
 # Usage:  verify-app-identity-darwin.sh <AgentMux.app> [--signed]
 #   CODESIGN names the codesign to run (tests).
+#   AGENTMUX_EXPECT_BUNDLE_ID the id the app must have, exactly (the release jobs).
 #
 # Exit:   0  the app passes (or is not a stable-channel app)
 #         1  it does not, or the app or its id could not be read
@@ -30,6 +36,7 @@ APP="${1:-}"
 MODE="${2:-}"
 CODESIGN="${CODESIGN:-codesign}"
 STABLE_ID="ai.agentmux.stable"
+EXPECT="${AGENTMUX_EXPECT_BUNDLE_ID:-}"
 
 [ -d "$APP" ] || { echo "❌ app identity check: not a directory: ${APP:-<none>}" >&2; exit 1; }
 PLIST="$APP/Contents/Info.plist"
@@ -38,6 +45,12 @@ PLIST="$APP/Contents/Info.plist"
 # CFBundleIdentifier from the XML plist (the key and its string may be on one line or two).
 id="$(tr '\n' ' ' < "$PLIST" | sed -n 's/.*<key>CFBundleIdentifier<\/key>[[:space:]]*<string>\([^<]*\)<\/string>.*/\1/p')"
 [ -n "$id" ] || { echo "❌ app identity check: no CFBundleIdentifier in $PLIST" >&2; exit 1; }
+
+if [ -n "$EXPECT" ] && [ "$id" != "$EXPECT" ]; then
+    echo "❌ app identity check: the app's bundle id is '$id', but this build must produce '$EXPECT'." >&2
+    echo "   The release build sets the channel (RELEASE_CHANNEL=stable) and AGENTMUX_STABLE_BUNDLE_ID=1; one of them was lost." >&2
+    exit 1
+fi
 
 case "$id" in
     "$STABLE_ID"|"$STABLE_ID".*) ;;
