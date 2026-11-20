@@ -7,6 +7,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
+import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import {
     accountsWithReading,
@@ -34,7 +35,7 @@ export function AccountUsageRows(props: { usage: AccountUsage }): JSX.Element {
                 <For each={windowsOf(props.usage)}>
                     {([key, w]) => (
                         <li class="account-usage__row" data-tone={usageTone(w)}>
-                            <span class="account-usage__name" title={windowName(key)}>
+                            <span class="account-usage__name" {...tip(windowName(key))}>
                                 {windowName(key)}
                             </span>
                             <span
