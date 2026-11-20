@@ -85,6 +85,13 @@ export interface TranscriptCursorDeps {
     /** Read lines `[offset, offset + limit)` of generation `expectGen`. */
     readRange(offset: number, limit: number, expectGen: string): Promise<CursorReadResult>;
     log(message: string, level?: "warn"): void;
+    /**
+     * True while nobody can see the pane. Events are then only queued (no decode, no parse), and `wake` is asked to
+     * drain them later in one pass; `release` drains them at once. Absent: records are always placed on arrival.
+     */
+    hold?(): boolean;
+    /** Asks for `drain` to run later, while held (the app-wide scheduler's slow, one-pane-a-frame slot). */
+    wake?(drain: () => void): void;
 }
 
 export type { TranscriptCursorStats } from "@/app/agent-model/transcript-stats";
@@ -115,6 +122,11 @@ export class TranscriptCursor {
     private queue: Item[] = [];
     private draining = false;
     private disposed = false;
+    /** Records of one drain pass, waiting to go to the parser as one text (see `deliver`). */
+    private batch: { text: string; from?: { stream: string; gen: string; line: number } } | null = null;
+    private batching = false;
+    /** A drain has been asked of `wake` and has not run yet. */
+    private wakeAsked = false;
     readonly stats: TranscriptCursorStats = {
         delivered: 0,
         duplicates: 0,
@@ -152,13 +164,27 @@ export class TranscriptCursor {
         } else {
             this.unpinned = pin === "empty" ? "empty" : "unknown";
         }
-        this.drain();
+        this.requestDrain();
     }
 
     push(ev: TranscriptFileEvent): void {
         if (this.disposed) return;
         this.queue.push({ kind: "event", ev });
-        this.drain();
+        this.requestDrain();
+    }
+
+    /**
+     * The pane is visible again: what it held is placed now, in one pass. A pane that was never held has nothing
+     * queued, so this is a no-op for it.
+     */
+    release(): void {
+        this.wakeAsked = false; // the caller withdraws the scheduler's request
+        this.drain(true);
+    }
+
+    /** How many items wait to be placed, for tests and diagnostics. */
+    queued(): number {
+        return this.queue.length;
     }
 
     /**
@@ -169,7 +195,7 @@ export class TranscriptCursor {
     observeCount(count: number, stream: string, gen: string): void {
         if (this.disposed) return;
         this.queue.push({ kind: "count", count, stream, gen });
-        this.drain();
+        this.requestDrain();
     }
 
     dispose(): void {
@@ -177,33 +203,77 @@ export class TranscriptCursor {
         this.queue = [];
     }
 
+    /** Place the queue now, or, while the pane is held, ask to be drained later. */
+    private requestDrain(): void {
+        if (this.held()) {
+            // One request at a time: a burst of events while held asks once.
+            if (this.settled && !this.draining && !this.wakeAsked) {
+                this.wakeAsked = true;
+                this.deps.wake!(() => {
+                    this.wakeAsked = false;
+                    this.drain(true);
+                });
+            }
+            return;
+        }
+        this.drain();
+    }
+
+    private held(): boolean {
+        return !!this.deps.hold && !!this.deps.wake && this.deps.hold();
+    }
+
     /**
      * Handles queued items in order. Synchronous until an item needs a read;
-     * then the rest wait for it, and draining resumes when it settles.
+     * then the rest wait for it, and draining resumes when it settles. The
+     * records one pass places go to the parser as one text where their
+     * positions run on, so a pass that catches up many events (a pane that was
+     * held, or a burst) is one parse, not one per event.
+     * `force`: the pane was held and is now being drained.
      */
-    private drain(): void {
+    private drain(force = false): void {
         if (this.draining || !this.settled) return;
+        if (!force && this.held()) return;
         this.draining = true;
-        while (this.queue.length > 0 && !this.disposed) {
-            const item = this.queue.shift()!;
-            let pending: Promise<void> | void;
-            try {
-                pending = item.kind === "event" ? this.handleEvent(item.ev) : this.handleCount(item);
-            } catch (err) {
-                // A parser throw mustn't wedge the queue: the item is consumed
-                // (its lines were counted before delivery), the rest go on.
-                this.logError(err);
-                continue;
+        this.batching = true;
+        try {
+            while (this.queue.length > 0 && !this.disposed) {
+                const item = this.queue.shift()!;
+                let pending: Promise<void> | void;
+                try {
+                    pending = item.kind === "event" ? this.handleEvent(item.ev) : this.handleCount(item);
+                } catch (err) {
+                    // A parser throw mustn't wedge the queue: the item is consumed
+                    // (its lines were counted before delivery), the rest go on.
+                    this.logError(err);
+                    continue;
+                }
+                if (pending) {
+                    this.flushBatch();
+                    pending.catch((err) => this.logError(err)).finally(() => {
+                        this.draining = false;
+                        this.requestDrain();
+                    });
+                    return;
+                }
             }
-            if (pending) {
-                pending.catch((err) => this.logError(err)).finally(() => {
-                    this.draining = false;
-                    this.drain();
-                });
-                return;
-            }
+            this.flushBatch();
+        } finally {
+            this.batching = false;
         }
         this.draining = false;
+    }
+
+    /** Sends the waiting records on now: at the end of a pass, and before anything that must not overtake them. */
+    private flushBatch(): void {
+        const b = this.batch;
+        if (!b) return;
+        this.batch = null;
+        try {
+            this.deps.deliver(b.text, b.from);
+        } catch (err) {
+            this.logError(err);
+        }
     }
 
     private logError(err: unknown): void {
@@ -212,6 +282,7 @@ export class TranscriptCursor {
 
     private handleEvent(ev: TranscriptFileEvent): Promise<void> | void {
         if (ev.fileop === "truncate" || ev.fileop === "delete") {
+            this.flushBatch();
             this.deps.reset(ev.fileop);
             // The stream starts again from nothing.
             this.pin = null;
@@ -219,6 +290,7 @@ export class TranscriptCursor {
             return;
         }
         if (ev.fileop === "replace") {
+            this.flushBatch();
             this.deps.reset("replace");
             // The new content is history, not live: join after it.
             const p = this.pick(ev.pos);
@@ -233,6 +305,7 @@ export class TranscriptCursor {
             this.stats.unpositioned++;
             if (ev.echo) {
                 this.stats.echoes++;
+                this.flushBatch();
                 this.deps.echo(decode(ev.data64));
                 return;
             }
@@ -305,6 +378,7 @@ export class TranscriptCursor {
         if (!text) return;
         if (ev.echo) {
             this.stats.echoes++;
+            this.flushBatch();
             this.deps.echo(text, { gen: p.gen, line: firstLine });
             return;
         }
@@ -371,7 +445,23 @@ export class TranscriptCursor {
 
     private deliver(text: string, from?: { stream: string; gen: string; line: number }): void {
         this.stats.delivered++;
-        this.deps.deliver(text, from);
+        if (!this.batching) {
+            this.deps.deliver(text, from);
+            return;
+        }
+        const b = this.batch;
+        // Joins the waiting records only when it starts exactly where they end, line by line, so the parser numbers
+        // every line as it would have if each event had come alone.
+        if (
+            b?.from && from && b.text.endsWith("\n") &&
+            from.stream === b.from.stream && from.gen === b.from.gen &&
+            from.line === b.from.line + countNewlines(b.text)
+        ) {
+            b.text += text;
+            return;
+        }
+        this.flushBatch();
+        this.batch = { text, from };
     }
 
     /**
@@ -530,6 +620,12 @@ export function historyPin(
     if (!resp?.stream || !resp.gen) return null;
     const start = typeof resp.total === "number" ? Math.min(offset, resp.total) : offset;
     return { stream: resp.stream, gen: resp.gen, next: start + (resp.lines?.length ?? 0) };
+}
+
+function countNewlines(text: string): number {
+    let n = 0;
+    for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1)) n++;
+    return n;
 }
 
 function decode(data64: string): string {

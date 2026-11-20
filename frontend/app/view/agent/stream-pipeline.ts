@@ -526,7 +526,12 @@ export function parseRecords(p: StreamPipeline, text: string, from?: { stream: s
             console.warn(`[useAgentStream] JSON parse failed, len=${trimmed.length}`);
             continue;
         }
-        processFrame(p, rawEvent);
+        // One bad line must not drop the lines after it: the cursor hands over a pass's records as one text.
+        try {
+            processFrame(p, rawEvent);
+        } catch (err) {
+            console.warn(`[useAgentStream] line failed: ${(err as Error)?.message ?? String(err)}`);
+        }
     }
     st.parser.setSourceLine(null);
     st.parser.setIdLine(null);
