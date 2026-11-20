@@ -94,13 +94,21 @@ pub struct Device {
     /// Its PCI slot, in the spelling the kernel uses (`0000:01:00.0`): how it is matched to the card sysfs lists.
     pub pdev: String,
     pub name: String,
-    /// `None` for a device that was asleep and left alone (reading it would have woken it), or one that said nothing.
+    /// `Some(0.0)` for a device that was asleep and left alone (asleep means idle, as for AMD; reading it would have woken
+    /// it), `None` for one that said nothing.
     pub use_pct: Option<f64>,
     pub memory_total: Option<u64>,
     pub memory_used: Option<u64>,
     /// The processes that have the device open, with what they hold of its memory and how busy they keep it. Only read
     /// when the panel is open.
     pub processes: Vec<Process>,
+}
+
+impl Device {
+    /// A device the kernel has powered down: idle, and nothing else is known without waking it.
+    fn asleep(pdev: String) -> Self {
+        Self { pdev, name: String::new(), use_pct: Some(0.0), memory_total: None, memory_used: None, processes: Vec::new() }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -213,18 +221,18 @@ impl Nvml {
         for index in 0..self.slots.len() {
             if let Some(slot) = self.slots[index].clone() {
                 if asleep(&slot) {
-                    out.push(Device { pdev: slot, name: String::new(), use_pct: None, memory_total: None, memory_used: None, processes: Vec::new() });
+                    out.push(Device::asleep(slot));
                     continue;
                 }
             }
-            if let Some(d) = self.read_device(index, full) {
+            if let Some(d) = self.read_device(index, full, asleep) {
                 out.push(d);
             }
         }
         out
     }
 
-    fn read_device(&mut self, index: usize, full: bool) -> Option<Device> {
+    fn read_device(&mut self, index: usize, full: bool, asleep: &dyn Fn(&str) -> bool) -> Option<Device> {
         let mut handle: Handle = std::ptr::null_mut();
         // SAFETY: a valid out-parameter and an index below the count NVML gave.
         if unsafe { (self.api.handle)(index as c_uint, &mut handle) } != SUCCESS || handle.is_null() {
@@ -246,6 +254,11 @@ impl Nvml {
             format!("nvml:{index}")
         };
         self.slots[index] = Some(pdev.clone());
+        // The slot is known only now, from the first read: that read must not go on to ask a device the kernel has
+        // powered down for its name, use and memory, which would wake it.
+        if asleep(&pdev) {
+            return Some(Device::asleep(pdev));
+        }
         let mut name_buf = [0 as c_char; 96];
         // SAFETY: the buffer is as long as the length says.
         let name = if unsafe { (self.api.name)(handle, name_buf.as_mut_ptr(), name_buf.len() as c_uint) } == SUCCESS {
@@ -459,7 +472,21 @@ mod tests {
         nvml.read(false, &|_| false);
         let devices = nvml.read(true, &|slot| slot == "0000:01:00.0");
         assert_eq!(devices.len(), 1);
-        assert_eq!((devices[0].use_pct, devices[0].memory_used, devices[0].processes.len()), (None, None, 0));
+        assert_eq!((devices[0].use_pct, devices[0].memory_used, devices[0].processes.len()), (Some(0.0), None, 0));
         assert_eq!(devices[0].pdev, "0000:01:00.0");
+    }
+
+    #[test]
+    fn a_device_asleep_at_its_first_read_is_not_asked_its_name_use_or_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(lib) = build_fake(dir.path()) else { return };
+        let mut nvml = Nvml::load_from(lib.as_os_str()).unwrap();
+        // No slot is known yet, so the handle and its PCI id are read to find it; it is asleep, so nothing more is.
+        let devices = nvml.read(true, &|slot| slot == "0000:01:00.0");
+        assert_eq!(devices.len(), 1);
+        let d = &devices[0];
+        assert_eq!(d.pdev, "0000:01:00.0");
+        // The fake answers 42 % and 8 GiB to anyone who asks: getting none of it shows it was not asked.
+        assert_eq!((d.name.as_str(), d.use_pct, d.memory_total, d.memory_used, d.processes.len()), ("", Some(0.0), None, None, 0));
     }
 }
