@@ -94,6 +94,7 @@ function desktopOnlyApi() {
     return {
         getHostCaps: () => NO_HOST_CAPS,
         getAutostartStatus: notInBrowser("Start at login"),
+        openLoginItems: notInBrowser("Login Items"),
         openSettingsFileInEditor: notInBrowser("Opening the settings file"),
         ensureSettingsFile: notInBrowser("The settings file"),
         browserPanes: unavailableHostApi<BrowserPaneHostApi>(

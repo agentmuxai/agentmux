@@ -180,12 +180,22 @@ window, is unchanged.
 
 ### 3.7 Platform-native registration where one exists
 
-- **macOS: `SMAppService.mainApp`.** It is the only path that shows in Login Items and respects the
-  user's approval there. It needs a **stable bundle id for the release channel** (drop the version from
-  `CFBundleIdentifier`; keep it in `CFBundleVersion`), objc2 bindings, and a signed bundle. When the
-  status is `requiresApproval`, Settings says "Allow AgentMux in System Settings → Login Items" and
-  offers `SMAppService.openSystemSettingsLoginItems()`. The LaunchAgent stays as the fallback for
-  unsigned and dev builds, with a stable path per §3.1.
+- **macOS: a login agent registered with `SMAppService`.** It is the only path that shows in Login Items and
+  respects the user's approval there. A bundle with a stable `CFBundleIdentifier` (no version; the release
+  channel, once the identity question in §7 is decided: `AGENTMUX_STABLE_BUNDLE_ID=1` in
+  `scripts/package-macos.sh`) ships `Contents/Library/LaunchAgents/<id>.login.plist`, and the launcher registers it
+  (`autostart/login_item.rs`). The job is the launcher's own `--login-start` shim (a signed Mach-O: launchd's launch
+  constraints refuse a script): it opens the app through LaunchServices with `--background` unless it already runs,
+  then exits. `SMAppService.mainApp` was not used: it cannot carry `--background`, and an agent whose job is the
+  app itself is stopped when the entry is switched off (unregistering boots the job out), which Settings does from
+  inside that very app. Going through `open` also keeps the login-started app able to post notifications (a
+  `launchd`-started process is refused by `UNUserNotificationCenter`). When the status is `requiresApproval`,
+  `--autostart-status --json` says `needs_approval`, Settings says "Allow AgentMux in System Settings > General >
+  Login Items & Extensions" and its button runs `--open-login-items`
+  (`SMAppService.openSystemSettingsLoginItems()`). Registering replaces the LaunchAgent plist an earlier build wrote
+  (no double start, no orphan); switching off, or an uninstaller's `--disable-autostart`, removes both. The
+  LaunchAgent plist stays for a bundle without the agent (unsigned, dev, test and per-version builds), with a
+  stable path per §3.1.
 - **Windows MSIX: `windows.startupTask`** in the manifest (`Enabled="false"`, toggled through
   `StartupTask.RequestEnableAsync`). Packaged apps cannot rely on a Scheduled Task pointing into their
   versioned install path. Removing the package removes the task.
@@ -197,7 +207,7 @@ window, is unchanged.
 `{ state: "off" | "on" | "broken" | "needs_approval", target, owner_channel, this_channel, movable }`,
 where `broken` means the entry exists but its target does not, and `movable` means another channel (or
 none) owns the entry and this build can take it over. `needs_approval` is for the macOS Login Items
-approval (phase 4) and is not produced yet. Settings renders that status next to the switch: a broken
+approval (phase 4): a registered login item whose status is `requiresApproval`. Settings renders that status next to the switch: a broken
 entry shows **Repair**, another build's entry shows its channel and **Use this build**. Both write
 `app:startatlogin` off and then on again (400 ms apart), which the launcher reconciles like any change
 (`autostart::plan` writes for a missing target and for another channel's entry), so there is no second

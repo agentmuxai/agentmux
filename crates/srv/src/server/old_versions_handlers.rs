@@ -19,7 +19,7 @@ async fn respond(state: AppState, dry_run: bool, only: Option<Vec<String>>) -> J
     let Some(layout) = ov::layout_from_env() else {
         return Json(json!({ "error": "this AgentMux has no per-version folders (a dev build or a test home)" }));
     };
-    let policy = crate::backend::old_versions_service::policy(&state.config_watcher);
+    let policy = crate::backend::old_versions_service::policy(&state.config_watcher, crate::server::external_host::host().is_some());
     let shown = layout.clone();
     let run = tokio::task::spawn_blocking(move || ov::run(&layout, &policy, dry_run, only.as_deref(), std::time::SystemTime::now())).await;
     match run {

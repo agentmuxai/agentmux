@@ -20,6 +20,12 @@
         border-radius: var(--radius-md);
         box-shadow: var(--shadow-lg);
         color: var(--main-text-color);
+        // A pane too small for the whole sign-in: the card scrolls inside the pane, with its bar, and gives way to
+        // the conversation above it, like the request stack's panels (pane-requests.scss). Nothing is cut off.
+        max-height: 70%;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
     }
 
     // Auth-recovery error notice: shown when a login action failed visibly

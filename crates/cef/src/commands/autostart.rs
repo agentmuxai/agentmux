@@ -88,6 +88,23 @@ pub async fn autostart_status() -> Result<serde_json::Value, String> {
     Ok(res.unwrap_or_else(|_| serde_json::json!({ "available": false, "enabled": false })))
 }
 
+/// The Settings-UI autostart commands: `autostart_status`, and `autostart_open_login_items` (macOS: open System Settings
+/// at Login Items, where a login item that waits for the person's approval is allowed).
+pub async fn route(cmd: &str) -> Result<serde_json::Value, String> {
+    match cmd {
+        "autostart_open_login_items" => open_login_items().await,
+        _ => autostart_status().await,
+    }
+}
+
+/// `autostart_open_login_items`: ask the launcher to open System Settings at Login Items (macOS), where a start-at-login
+/// entry that needs the person's approval is allowed. Errors say why, for the Settings row to show.
+pub async fn open_login_items() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(|| run_launcher(&["--open-login-items"]).map(|_| serde_json::Value::Null))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
