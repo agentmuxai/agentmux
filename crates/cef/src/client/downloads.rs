@@ -310,8 +310,11 @@ thread_local! {
 
 /// Whether the Save As dialog is ours (`rfd`) rather than CEF's. On Linux CEF's chooser answered
 /// "cancel" within milliseconds with no dialog on the packaged build (2026-11-06, D0), so Linux asks
-/// with the same dialog library the Vault export and layout dialogs use (spec §4.3).
-const OWN_SAVE_DIALOG: bool = cfg!(target_os = "linux");
+/// with the same dialog library the Vault export and layout dialogs use (spec §4.3). macOS asks that way too:
+/// CEF's chooser drops the folder of the path it is given, so its first dialog opened in the home folder
+/// whatever the default was (#196, macOS D0); `rfd` opens where we say. Windows keeps CEF's own until its
+/// first dialog is checked there.
+const OWN_SAVE_DIALOG: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 thread_local! {
     /// The callbacks of downloads whose `rfd` dialog is open, by (pane, id). Not `Send`, so they stay on
@@ -320,26 +323,7 @@ thread_local! {
         std::cell::RefCell::new(HashMap::new());
 }
 
-/// What the Save As dialog came to.
-#[derive(Clone, Debug, PartialEq)]
-enum SaveAnswer {
-    /// The person picked this file.
-    Chosen(PathBuf),
-    /// The person closed the dialog.
-    Cancelled,
-    /// The dialog could not open or died (a panic in its thread, a missing portal): nobody answered.
-    Failed,
-}
-
-/// Run the blocking dialog `ask` so that a panic inside it is an answer too. Without this a dead dialog thread
-/// never posted anything back: the download waited for an answer for good, and so did every download behind it.
-fn ask_guarded(ask: impl FnOnce() -> Option<PathBuf>) -> SaveAnswer {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(ask)) {
-        Ok(Some(path)) => SaveAnswer::Chosen(path),
-        Ok(None) => SaveAnswer::Cancelled,
-        Err(_) => SaveAnswer::Failed,
-    }
-}
+use super::save_answer::{ask_guarded, SaveAnswer};
 
 wrap_task! {
     struct SaveAnswerTask {
@@ -372,15 +356,16 @@ wrap_task! {
     }
 }
 
-/// Ask where to save with `rfd` on its own thread (the dialog blocks), then answer on the UI thread. A
-/// dialog can't be closed from outside, so one still open when its pane closes stays until the person
-/// answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
+/// Ask where to save with `rfd` (the dialog blocks), then answer on the UI thread. The dialog runs on the app's
+/// Tokio runtime ([`crate::commands::file_dialog`]): on Linux its portal needs a reactor, which a plain thread
+/// does not have. A dialog can't be closed from outside, so one still open when its pane closes stays until the
+/// person answers; the answer is then dropped (`SaveAnswerTask` finds no callback).
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
     let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    std::thread::spawn(move || {
-        let answer = ask_guarded(|| {
+    crate::commands::file_dialog::spawn(move || {
+        let answer = ask_guarded(crate::commands::file_dialog::can_ask(), || {
             let mut dialog = rfd::FileDialog::new().set_title("Save as");
             if let Some(name) = path.file_name() {
                 dialog = dialog.set_file_name(name.to_string_lossy());
@@ -568,6 +553,15 @@ pub(crate) fn update_payload(block_id: &str, id: u32, snap: &DownloadSnapshot) -
         v["reason"] = serde_json::json!(snap.reason.clone().unwrap_or_else(|| "The download failed.".into()));
     }
     v
+}
+
+/// An update with no path (a download turned away in the Save As window ends so) gets the name it was offered
+/// under, so its strip row reads `notes-2.csv cancelled` and not `download cancelled`.
+fn name_a_pathless_update(payload: &mut serde_json::Value, offered: Option<&str>) {
+    let unnamed = payload["name"].as_str().unwrap_or("").is_empty();
+    if let (true, Some(name)) = (unnamed, offered) {
+        payload["name"] = serde_json::json!(name);
+    }
 }
 
 /// The strip's line for a page that started more downloads than may wait
@@ -821,6 +815,8 @@ wrap_download_handler! {
                 return 0;
             }
 
+            // If the person turns it away, CEF reports it cancelled with no path: keep the name for its strip row.
+            super::download_place::remember_asked_name(&block_id, id, &safe_download_name(&suggested));
             // One dialog at a time per pane: a second would cancel itself and the open one.
             let parked = (suggested.clone(), cb.clone());
             match SAVE_DIALOGS.with(|d| d.borrow_mut().offer(&block_id, id, parked)) {
@@ -872,6 +868,7 @@ wrap_download_handler! {
             });
             // Read before the end below forgets it: a download saved because the Save As window could not open.
             let fallback_note = block_id.as_deref().and_then(|b| super::download_place::fallback_note(b, id));
+            let asked_name = block_id.as_deref().and_then(|b| super::download_place::asked_name(b, id));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
@@ -934,6 +931,7 @@ wrap_download_handler! {
                     .then(|| failure_reason(&format!("{:?}", item.interrupt_reason()))),
             };
             let mut payload = update_payload(&block_id, id, &snap);
+            name_a_pathless_update(&mut payload, asked_name.as_deref());
             if let Some(note) = fallback_note.filter(|_| state == DownloadState::Done) {
                 payload["reason"] = serde_json::json!(note);
             }
@@ -945,6 +943,24 @@ wrap_download_handler! {
 #[cfg(test)]
 mod save_dialog_tests {
     use super::*;
+
+    #[test]
+    fn a_download_turned_away_in_the_dialog_is_named_for_its_strip_row() {
+        let cancelled = DownloadSnapshot { state: DownloadState::Cancelled, path: String::new(), received: 0, total: -1, reason: None };
+        let mut payload = update_payload("blk", 3, &cancelled);
+        assert_eq!(payload["name"], "", "CEF reports it with no path");
+        name_a_pathless_update(&mut payload, Some("notes-2.csv"));
+        assert_eq!(payload["name"], "notes-2.csv");
+        // A download that has a path keeps the name of that file.
+        let saved = DownloadSnapshot { state: DownloadState::Done, path: "/d/other.csv".into(), received: 5, total: 5, reason: None };
+        let mut payload = update_payload("blk", 3, &saved);
+        name_a_pathless_update(&mut payload, Some("notes-2.csv"));
+        assert_eq!(payload["name"], "other.csv");
+        // Nothing was offered: nothing to add.
+        let mut payload = update_payload("blk", 4, &cancelled);
+        name_a_pathless_update(&mut payload, None);
+        assert_eq!(payload["name"], "");
+    }
 
     #[test]
     fn only_the_multiple_downloads_prompt_is_answered_for_downloads() {
@@ -1258,16 +1274,6 @@ mod tests {
         assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
         assert!(w.release("p1", 1));
         assert!(w.has_room("p1"));
-    }
-
-    #[test]
-    fn a_dialog_that_panics_is_an_answer_not_a_wait_for_ever() {
-        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/a.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/a.txt")));
-        assert_eq!(ask_guarded(|| None), SaveAnswer::Cancelled);
-        // The Linux portal panic of 2026-11-20: "there is no reactor running".
-        assert_eq!(ask_guarded(|| panic!("there is no reactor running")), SaveAnswer::Failed);
-        // And a dialog thread that has failed once does not stop the next one.
-        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/b.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/b.txt")));
     }
 
     #[test]
