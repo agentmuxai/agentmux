@@ -1,6 +1,6 @@
 # SPEC: Right-click an Editor document tab to show the file in the computer's file manager
 
-**Status:** implemented; approved and built with this spec. Written 2026-11-17 against main `b32b24746f`. Everything in §2 was read from the code, not run.
+**Status:** implemented in #7892; approved and built with this spec. Written 2026-11-17 against main `b32b24746f`. Everything in §2 was read from the code, not run.
 
 ## 1. The request
 
