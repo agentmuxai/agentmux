@@ -18,7 +18,7 @@ import { CONFINED_MENU } from "./files-view-text";
 const forHost = (model: FilesModel, items: ContextMenuItem[]): ContextMenuItem[] => {
     if (model.root()) return items.filter((i) => i.type !== "action" || CONFINED_MENU.test(i.label));
     if (!model.connection()) return items;
-    const local = /^(Open with default app|Reveal in |Move .*to Trash)/;
+    const local = /^(Open with default app|Reveal in |Open Containing Folder|Open in File Manager|Move .*to Trash)/;
     return items.filter((i) => i.type !== "action" || !local.test(i.label));
 };
 
