@@ -21,6 +21,12 @@
     &--chip {
         gap: var(--space-1);
     }
+
+    // A grid with a column or width limit: the tracks are set inline from the measured column count, and a very wide
+    // grid keeps its cards at the left rather than stretching them.
+    &--capped {
+        justify-content: start;
+    }
 }
 
 .ui-card-cell {
@@ -47,6 +53,10 @@
 
     @include mixins.when-motion-reduced(transition) {
         animation: none;
+    }
+
+    &:focus {
+        outline: none;
     }
 
     &::before {

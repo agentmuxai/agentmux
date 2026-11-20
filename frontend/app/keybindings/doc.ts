@@ -87,7 +87,7 @@ export function keybindingsDoc(): string {
         "",
         "- `key`: modifiers `ctrl`, `shift`, `alt`, `meta` and `mod` (⌘ on macOS, Ctrl elsewhere), then a key: a letter, a digit, punctuation, or a name such as `Enter`, `Tab`, `ArrowLeft`, `F6`, `PageUp`. Two keys separated by a space make a chord.",
         "- `command`: the command to run (the ids are in the help pane's list and the command palette). Prefix it with `-` to unbind it: every key, or just the `key` you give. An unbind removes the defaults and your own entries above it, so put a new key for the same command after it.",
-        "- `when` (optional): `textInputFocus`, `terminalFocus`, `docTabsHost`, `viewType == <pane>` or `viewType != <pane>`, each optionally negated with `!`, joined with `&&`.",
+        "- `when` (optional): `textInputFocus`, `textInputFilled` (the focused field holds text), `terminalFocus`, `docTabsHost`, `viewType == <pane>` or `viewType != <pane>`, each optionally negated with `!`, joined with `&&`.",
         "- `platform` (optional): `mac` or `other` (Windows and Linux). Both when omitted.",
         "",
         "An entry that can't be used (an unknown command, a bad key or `when`) is skipped and the rest still apply.",

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CommandEntry } from "@/app/store/command-registry";
-import { paletteRows, sortCommands } from "./palette-groups";
+import { paletteRows, paletteSegments, sortCommands } from "./palette-groups";
 
 const cmd = (id: string, label: string, category: string) => ({ id, label, category, execute: () => {} }) as CommandEntry;
 
@@ -48,5 +48,33 @@ describe("paletteRows", () => {
 
     it("gives nothing for no commands", () => {
         expect(paletteRows([], false)).toEqual([]);
+    });
+});
+
+describe("paletteSegments", () => {
+    const cmds = sortCommands([cmd("1", "A", "Open"), cmd("2", "B", "Open"), cmd("3", "C", "Tab"), cmd("4", "D", "Dev")]);
+
+    it("cuts the list into its groups, each named", () => {
+        const segments = paletteSegments(paletteRows(cmds, false));
+        expect(segments.map((s) => [s.label, s.rows.map((r) => r.cmd.id)])).toEqual([
+            ["open", ["1", "2"]],
+            ["tab", ["3"]],
+            ["dev", ["4"]],
+        ]);
+    });
+
+    it("makes one unnamed segment of a typed list", () => {
+        const segments = paletteSegments(paletteRows(cmds, true));
+        expect(segments).toHaveLength(1);
+        expect(segments[0].label).toBeUndefined();
+        expect(segments[0].rows).toHaveLength(4);
+    });
+
+    it("gives each row its place in the whole list", () => {
+        expect(paletteRows(cmds, false).map((r) => r.index)).toEqual([0, 1, 2, 3]);
+    });
+
+    it("gives nothing for no rows", () => {
+        expect(paletteSegments([])).toEqual([]);
     });
 });

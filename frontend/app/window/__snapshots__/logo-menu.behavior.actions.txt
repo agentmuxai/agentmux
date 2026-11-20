@@ -11,7 +11,7 @@ createTab
 press 2 New Window
 openNewWindowFromHere
 press 8 Command Palette
-openModal CommandPaletteModal
+openCommandPalette
 press 9 DevTools
 toggleDevtools
 press 10 Online Docs

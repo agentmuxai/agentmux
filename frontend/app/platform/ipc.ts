@@ -7,7 +7,7 @@
 // CEF host: HTTP POST to localhost IPC server for commands (JS→Rust),
 //           CustomEvent dispatch for events (Rust→JS).
 
-import { recordIpcRoundtrip } from "@/perf";
+import { hostCallTiming, recordIpcRoundtrip } from "@/perf";
 
 /**
  * Detect the current host environment.
@@ -74,7 +74,8 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
                             "Content-Type": "application/json",
                             Authorization: `Bearer ${token}`,
                         },
-                        body: JSON.stringify({ cmd, args: args ?? {} }),
+                        // `sent_ms`: the host answers with how long the call waited before it began it.
+                        body: JSON.stringify({ cmd, args: args ?? {}, sent_ms: Date.now() }),
                     });
                 } catch (e) {
                     // Network/transport error: the POST may have already reached the
@@ -100,7 +101,8 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
                     throw new Error(`IPC HTTP error: ${resp.status} ${resp.statusText}`);
                 }
                 const parsed = await resp.json();
-                recordIpcRoundtrip(cmd, performance.now() - t0);
+                // The split is against the whole roundtrip, so only a call answered at its first attempt has one.
+                recordIpcRoundtrip(cmd, performance.now() - t0, attempt === 1 ? hostCallTiming(parsed) : undefined);
                 if (parsed.success) {
                     return parsed.data as T;
                 }

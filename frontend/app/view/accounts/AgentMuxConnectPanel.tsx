@@ -9,12 +9,12 @@
  * session — NOT a pluralizable IdentityAccount — so it never goes through the
  * generic service-OAuth path (`oauth_client.rs` / `account.oauth.*`).
  *
- * `AgentMuxConnectPanel` is the Connectors → Accounts gallery tile.
+ * `AgentMuxConnectPanel` is AgentMux Cloud's connect section in Connectors.
  *
- * The gallery additionally projects the signed-in session into the connected
- * list as a read-only row; that projection lives in `accounts-manager.tsx` and
- * reads the same controller (`useMuxBusStatus`) so connect/disconnect refresh
- * the tile, the row, and the panel together.
+ * Connectors' list shows the signed-in session as AgentMux Cloud's card; that
+ * card (`connectors/connector-entries.ts`) reads the same controller
+ * (`useMuxBusStatus`) so connect/disconnect refresh the card and the panel
+ * together.
  *
  * See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md and muxbus/pkce.rs.
  */

@@ -32,3 +32,12 @@ export function keyCaps(label: string): string[][] {
         .map((step) => capsOfStep(step.trim()))
         .filter((caps) => caps.length > 0);
 }
+
+const SYMBOL_WORDS: Record<string, string> = { "⌃": "Control", "⌥": "Option", "⇧": "Shift", "⌘": "Command" };
+
+/** A shortcut label in words, for a screen reader: "Control Shift P", the steps of a chord joined by "then". */
+export function keyCapsWords(label: string): string {
+    return keyCaps(label)
+        .map((caps) => caps.map((c) => SYMBOL_WORDS[c] ?? c).join(" "))
+        .join(" then ");
+}

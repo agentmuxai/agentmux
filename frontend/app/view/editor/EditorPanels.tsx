@@ -20,7 +20,7 @@ import type { LspState } from "./lsp/lsp-client";
 export function EditorModeToolbar(props: { model: EditorViewModel }): JSX.Element {
     const model = props.model;
     return (
-        <div class="editor-mode-toolbar">
+        <div class="editor-mode-toolbar" data-zoom-scope="chrome">
             <SegmentedControl<EditorMode>
                 density="compact"
                 ariaLabel="View mode"
