@@ -1,0 +1,71 @@
+getAutostartStatus
+-- an entry of this build that works: no button
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
+    <div class="ui-field-control">
+      <div data-stand="ToggleControl" data-checked="true">
+        <span data-cb="onChange">
+          "toggle"
+getAutostartStatus
+-- an entry whose file is gone
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is on, but the file it runs is gone, so nothing starts at login. Repair points it at this build."
+    <div class="ui-field-control">
+      <span data-stand="Button" data-cb="onClick">
+        "Repair"
+      <div data-stand="ToggleControl" data-checked="true">
+        <span data-cb="onChange">
+          "toggle"
+== Repair
+set app:startatlogin false
+-- 399 ms later: only the off write so far
+set app:startatlogin true
+-- 400 ms later: switched on again
+getAutostartStatus
+-- another build's entry
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is on for local-x. This build can take it over."
+    <div class="ui-field-control">
+      <span data-stand="Button" data-cb="onClick">
+        "Use this build"
+      <div data-stand="ToggleControl" data-checked="true">
+        <span data-cb="onChange">
+          "toggle"
+getAutostartStatus
+-- an entry from before owners were recorded
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is on for another build. This build can take it over."
+    <div class="ui-field-control">
+      <span data-stand="Button" data-cb="onClick">
+        "Use this build"
+      <div data-stand="ToggleControl" data-checked="true">
+        <span data-cb="onChange">
+          "toggle"
