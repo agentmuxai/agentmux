@@ -102,6 +102,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Exact("/agentmux/reactive/ensure-signing-key"), Audience::AppOnly(APP_ONLY)),
     (Match::Exact("/agentmux/reactive/agents"), Audience::AppOnly(APP_ONLY)),
     (Match::Exact("/agentmux/reactive/audit"), Audience::AppOnly(APP_ONLY)),
+    (Match::Exact("/agentmux/audit/own"), Audience::AppOnly(APP_ONLY)),
     (Match::Exact("/agentmux/agent/holding"), Audience::AppOnly(APP_ONLY)),
     (Match::Exact("/agentmux/diag/sagas"), Audience::AppOnly(APP_ONLY)),
     (Match::Prefix("/api/messaging/"), Audience::AppOnly(APP_ONLY)),

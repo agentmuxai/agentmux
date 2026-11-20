@@ -27,6 +27,8 @@ export function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
 
 export interface PaletteRowModel {
     cmd: CommandEntry;
+    /** The row's place in the whole list: what selection and the option ids count by. */
+    index: number;
     /** The group's name, in lower case, on the group's first row only; undefined elsewhere and while typing. */
     group?: string;
     /** The first row of a group below the first: a hairline above it. */
@@ -40,6 +42,22 @@ export interface PaletteRowModel {
 export function paletteRows(cmds: CommandEntry[], typing: boolean): PaletteRowModel[] {
     return cmds.map((cmd, i) => {
         const starts = !typing && (i === 0 || cmds[i - 1].category !== cmd.category);
-        return { cmd, group: starts ? cmd.category.toLowerCase() : undefined, divider: starts && i > 0 };
+        return { cmd, index: i, group: starts ? cmd.category.toLowerCase() : undefined, divider: starts && i > 0 };
     });
+}
+
+/** A run of rows the screen reader reads as one named group (R26). Typing, the list is one run with no name. */
+export interface PaletteSegment {
+    label?: string;
+    rows: PaletteRowModel[];
+}
+
+/** `rows` cut into their groups: a group begins at the row that names it. */
+export function paletteSegments(rows: PaletteRowModel[]): PaletteSegment[] {
+    const out: PaletteSegment[] = [];
+    for (const row of rows) {
+        if (row.group !== undefined || out.length === 0) out.push({ label: row.group, rows: [row] });
+        else out[out.length - 1].rows.push(row);
+    }
+    return out;
 }

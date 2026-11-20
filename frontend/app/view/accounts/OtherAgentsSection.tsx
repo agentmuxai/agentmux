@@ -13,6 +13,7 @@ import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { For, Show, type JSX } from "solid-js";
 import { OTHER_AGENTS, shown, sourceTip, type AgentKeyPointer, type OtherAgent } from "./provider-guide";
+import "./accounts-gallery.scss";
 
 /** The agents of the list the catalog knows, in the list's order. */
 export function otherAgentsShown(): OtherAgent[] {

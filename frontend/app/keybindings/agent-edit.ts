@@ -107,7 +107,7 @@ export function planAgentSet(entries: unknown[], req: AgentSetRequest, platform:
     const plan = planChange(entries, command, keys.map((key) => ({ key, ...(when ? { when } : {}) })), platform);
     const written = plan.entries.filter((e) => !entries.includes(e));
     if (written.some((e) => validEntries([e]).length === 0)) {
-        return refuse(`"${req.when}" is not a place a shortcut can work: use textInputFocus, terminalFocus, docTabsHost or viewType == <pane>, each optionally with !, joined with &&`);
+        return refuse(`"${req.when}" is not a place a shortcut can work: use textInputFocus, textInputFilled, terminalFocus, docTabsHost or viewType == <pane>, each optionally with !, joined with &&`);
     }
     const blocking = plan.conflicts.filter((c) => c.blocking);
     if (blocking.length > 0) {

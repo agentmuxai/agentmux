@@ -15,7 +15,7 @@ rpc ReadEditorFile {"path":"/tmp/scratch-1.md"}
 diagnostics of lsp#1 unwired
 lsp#1 state unsubscribed
 lsp#1 dispose
-<div class="doc-tab-strip" role="presentation">
+<div class="doc-tab-strip" role="presentation" data-zoom-scope="chrome">
 <div class="pane-tab-strip" style="--pane-tab-strip-zoom: 1; transition: none;">
 <div class="pane-tab-strip-inner">
 <div class="pane-tab-tip">
@@ -62,7 +62,7 @@ lsp#1 dispose
 </div>
 run editor:saveAs -> true
 -- while its Save As box is open
-<div class="doc-tab-strip" role="presentation">
+<div class="doc-tab-strip" role="presentation" data-zoom-scope="chrome">
 <div class="pane-tab-strip" style="--pane-tab-strip-zoom: 1; transition: none;">
 <div class="pane-tab-strip-inner">
 <div class="pane-tab-tip">

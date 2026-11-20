@@ -1107,6 +1107,11 @@ pub struct FullConfigType {
     #[serde(rename = "configerrors", default, skip_serializing_if = "Vec::is_empty")]
     pub config_errors: Vec<ConfigError>,
 
+    /// The keys of `settings.json` that are not settings (the Settings view lists them, with a
+    /// suggestion for a typo, and offers to remove each).
+    #[serde(rename = "unrecognized", default, skip_serializing_if = "Vec::is_empty")]
+    pub unrecognized: Vec<super::unrecognized::UnrecognizedSetting>,
+
     /// The browser pane's configured start page — `None` until the user
     /// sets one via the bookmarks menu's "Set as Start Page" row. Global
     /// across channels (`~/.agentmux/shared/browser-start-page.json`, NOT

@@ -601,3 +601,12 @@
         mask-image: linear-gradient(to right, transparent, #000 #{$width}, #000 calc(100% - #{$width}), transparent);
     }
 }
+
+// A bar drawn at the chrome's zoom inside a box that carries a pane's zoom: the box's zoom is divided out, then the
+// chrome's is applied, so the bar is the chrome's size whatever level the pane has (never the product of the two).
+// The box publishes its level as the custom property named by `$box-zoom-var`; with none set (a bar outside any
+// zoomed box) the divisor is 1 and the bar is the chrome's all the same. The bar says so to a Ctrl+wheel with
+// `data-zoom-scope="chrome"` (store/chrome-zoom-target.ts).
+@mixin chrome-zoom-inside($box-zoom-var) {
+    zoom: calc(var(--zoomfactor) / var(#{$box-zoom-var}, 1));
+}

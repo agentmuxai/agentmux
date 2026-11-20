@@ -14,9 +14,11 @@
 //! per version, so the new version's own would read as a first start. A
 //! start on a newer version than the one recorded is an upgrade; a first
 //! start, the same version or an older one (a downgrade, or the older build
-//! started again) is not. The record keeps the upgrade, and the panes already
+//! started again) is not. The record keeps the upgrade, and the agents already
 //! told, for [`PENDING_FOR`]: a crash or another restart soon after still
-//! tells the agents not yet told, and never one twice.
+//! tells the agents not yet told, and never one twice. An agent is named by its
+//! definition id, not its pane: a quit deletes the panes, and a restart restores
+//! each agent into a pane with a new id.
 //!
 //! Every agent that registers with the reactive handler, whatever runs it, is
 //! a candidate ([`on_registered`]): the note goes to one whose pane has a
@@ -257,6 +259,9 @@ struct State {
     /// Where a pane's block says whether it has a session ([`has_session`]).
     store: Arc<crate::backend::storage::store::Store>,
     noted: Mutex<HashSet<String>>,
+    /// The agents already told of this upgrade (or being told), by [`told_key`]: the agent, not its pane, because a
+    /// quit deletes the panes and a restart restores each agent into a pane with a new id.
+    told: Mutex<HashSet<String>>,
     /// Panes being (or already) told to carry on. Apart from `noted`: a pane
     /// told of an upgrade earlier (and kept across a later restart on the
     /// same version) still gets told its turn was cut off.
@@ -299,7 +304,13 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             return None;
         }
         if let Some(upgraded) = &upgraded {
-            tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
+            // Said once, by the start that made the upgrade: a restart within the hour still tells the agents not yet
+            // told, but it has no news to log.
+            if upgraded.at_ms == now {
+                tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
+            } else {
+                tracing::debug!(from = %upgraded.from, to = %upgraded.to, told = upgraded.notified.len(), "upgrade notice: still announcing an earlier start's upgrade");
+            }
             // This start made the upgrade: its data must be the previous version's,
             // or nothing that version's quit saved (windows, tabs, panes) comes back.
             if upgraded.at_ms == now {
@@ -313,6 +324,7 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             tracing::info!(count = cut_off.agents.len(), "upgrade notice: agents whose turn the last quit cut off will be told to carry on");
         }
         let noted = Mutex::new(upgraded.iter().flat_map(|u| u.notified.iter().cloned()).collect());
+        let told = Mutex::new(upgraded.iter().flat_map(|u| u.notified.iter().cloned()).collect());
         Some(State {
             upgraded,
             interrupted: Mutex::new(cut_off.agents.into_iter().collect()),
@@ -320,6 +332,7 @@ pub fn init(store: Arc<crate::backend::storage::store::Store>) {
             dir,
             store,
             noted,
+            told,
             continuing: Mutex::new(HashSet::new()),
         })
     });
@@ -349,6 +362,17 @@ fn has_session(store: &crate::backend::storage::store::Store, block_id: &str) ->
         .ok()
         .flatten()
         .is_some_and(|b| !crate::backend::obj::meta_get_string(&b.meta, "agent:sessionid", "").trim().is_empty())
+}
+
+/// What the record and the told list call an agent: its definition id, which a restored pane keeps, else the pane's
+/// block id (a pane that is no agent's).
+fn told_key(agent: &str, block_id: &str) -> String {
+    if agent.is_empty() { block_id.to_string() } else { agent.to_string() }
+}
+
+/// Takes `key` as told: `true` for the first caller, `false` when the agent was told already (or is being told).
+fn claim_told(told: &Mutex<HashSet<String>>, key: &str) -> bool {
+    told.lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_string())
 }
 
 /// Why a note wasn't delivered: the pane is gone, or it may be ready later.
@@ -417,9 +441,19 @@ pub fn on_registered(block_id: &str) {
         let agent = agent_id_of(&state.store, &block_id);
         let cut_off = want_continue && !agent.is_empty() && state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).contains(&agent);
         let upgrade = state.upgraded.as_ref().filter(|_| upgrade_open);
+        // Once per agent per upgrade: an agent told in an earlier pane (a restart restores it into a new one) is not told again.
+        let key = told_key(&agent, &block_id);
+        let mut claimed_here = false;
         let text = if cut_off {
+            // The carry-on text also says what happened, so the agent needs no note after it.
+            claimed_here = upgrade.is_some() && claim_told(&state.told, &key);
             continue_text(upgrade, state.quit_ms)
         } else if let (true, Some(u)) = (want_note, upgrade) {
+            if !claim_told(&state.told, &key) {
+                tracing::debug!(block_id = %block_id, "upgrade notice: this agent was told already");
+                return;
+            }
+            claimed_here = true;
             note_text(u)
         } else {
             forget(want_note, want_continue);
@@ -450,7 +484,7 @@ pub fn on_registered(block_id: &str) {
                 let what = if cut_off { "upgrade notice: the agent was told to carry on" } else { "upgrade notice: held for the agent's next message" };
                 tracing::info!(block_id = %block_id, cut_off, "{}", what);
                 if state.upgraded.is_some() {
-                    record_notified(&state.dir, &block_id);
+                    record_notified(&state.dir, &key);
                 }
                 if cut_off {
                     state.interrupted.lock().unwrap_or_else(|e| e.into_inner()).remove(&agent);
@@ -461,6 +495,9 @@ pub fn on_registered(block_id: &str) {
                 tracing::info!(block_id = %block_id, error = %e, "upgrade notice: not delivered; the next registration tries again");
                 // Not told: the next registration tries again.
                 forget(want_note, want_continue);
+                if claimed_here {
+                    state.told.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+                }
             }
         }
     });
@@ -502,6 +539,44 @@ mod tests {
         // An hour after the upgrade, it's just this version starting.
         assert_eq!(observe_start(dir.path(), "0.59.27", 1_000 + hour), None);
         assert_eq!(observe_start(dir.path(), "0.59.27", 2_000 + hour), None);
+    }
+
+    #[test]
+    fn an_agent_told_once_is_not_told_again_in_the_pane_a_restart_restores_it_into() {
+        let dir = tempfile::tempdir().unwrap();
+        observe_start(dir.path(), "0.59.26", 0);
+        observe_start(dir.path(), "0.59.27", 1_000);
+        let told = Mutex::new(HashSet::new());
+        // First start on the new version: the agent resumes in pane "before" and is told; the record keeps who.
+        assert!(claim_told(&told, &told_key("def-a", "before")));
+        record_notified(dir.path(), &told_key("def-a", "before"));
+        // A restart soon after: the quit deleted the panes, and the agent comes back in pane "after".
+        let again = observe_start(dir.path(), "0.59.27", 2_000).unwrap();
+        assert_eq!(again.at_ms, 1_000, "this start made no upgrade: it only goes on announcing the earlier one");
+        let told = Mutex::new(again.notified.iter().cloned().collect::<HashSet<_>>());
+        assert!(!claim_told(&told, &told_key("def-a", "after")), "told already, under its new pane id");
+        // A third restart: still once.
+        let third = observe_start(dir.path(), "0.59.27", 3_000).unwrap();
+        assert_eq!(third.notified, vec!["def-a".to_string()]);
+    }
+
+    #[test]
+    fn an_agent_not_running_at_the_first_start_is_told_once_when_it_next_resumes() {
+        let dir = tempfile::tempdir().unwrap();
+        observe_start(dir.path(), "0.59.26", 0);
+        observe_start(dir.path(), "0.59.27", 1_000);
+        // Agent a resumed and was told; agent b was stopped.
+        record_notified(dir.path(), &told_key("def-a", "pane-1"));
+        let later = observe_start(dir.path(), "0.59.27", 2_000).unwrap();
+        let told = Mutex::new(later.notified.iter().cloned().collect::<HashSet<_>>());
+        assert!(!claim_told(&told, &told_key("def-a", "pane-9")));
+        assert!(claim_told(&told, &told_key("def-b", "pane-2")), "b is told when it first resumes");
+        assert!(!claim_told(&told, &told_key("def-b", "pane-3")), "and only once, though it registers again");
+        // A pane that is no agent's is told by its block id.
+        assert_eq!(told_key("", "pane-4"), "pane-4");
+        // Past the hour nothing is announced, so nobody is told and the start has no upgrade to log.
+        let hour = PENDING_FOR.as_millis() as i64;
+        assert_eq!(observe_start(dir.path(), "0.59.27", 1_000 + hour), None);
     }
 
     #[test]

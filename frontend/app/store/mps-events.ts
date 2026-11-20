@@ -241,6 +241,8 @@ export const WpsEvent = {
      *  (crates/srv/src/server/account_episodes/mod.rs). */
     AccountAvailability: "accountavailability",
     JektHeld: "jektheld",
+    /** One more delivery of a broadcast this window sent has ended (crates/srv/src/server/app_api/fleet_pacing.rs). */
+    FleetBroadcastProgress: "fleetbroadcastprogress",
     AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",

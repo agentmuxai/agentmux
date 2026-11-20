@@ -400,6 +400,8 @@ mod spawn_site_coverage {
          "sanitized: `agentmux-srv open` starts the person's browser (Linux) at the sign-in line, sanitize_external_std_command"),
         ("src/server/files_root.rs", "\"cmd\"", 1,
          "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link swapped in after a pane opened is refused"),
+        ("src/server/agent_folder_open.rs", "\"cmd\"", 1,
+         "test: Windows only; makes a junction in a temp folder with mklink /J to prove a link opened from a pane is followed to where it leads before it is placed"),
         ("src/backend/blockcontroller/subprocess/container_spawn.rs", "&argv[0]", 1,
          "test: Unix only; runs the container turn launcher on the host to prove an exported function reaches the provider"),
         ("src/agents/runner.rs", "bin", 1,

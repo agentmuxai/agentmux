@@ -21,6 +21,17 @@ export interface CardGridProps<T> {
     minCardWidth?: number;
     /** `chip`: the denser grid of an Add gallery. */
     size?: "card" | "chip";
+    /** At most this many columns, however wide the grid is (Connectors: four). */
+    maxColumns?: number;
+    /** A card is at most this wide, in px. With `maxColumns`, a very wide grid leaves its right side empty, so cards
+     *  never stretch into long bars (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.7). */
+    maxCardWidth?: number;
+    /** The id of the details panel, for the open card's `aria-controls`. */
+    detailId?: string;
+    /** Names the details panel as a region ("GitHub details"); without it the panel has no role. */
+    detailLabel?: (item: T) => string;
+    /** Move focus to the details panel when a card opens, so Tab continues in them (the panel follows the card's row). */
+    focusDetails?: boolean;
     class?: string;
     ariaLabel?: string;
 }
@@ -37,6 +48,31 @@ export function columnsFor(width: number, min: number, gap: number): number {
     return Math.max(1, Math.floor((width + gap) / (min + gap)));
 }
 
+/** The grid's tracks when it has a column or width limit: the measured column count, each at most `maxCardWidth` px. */
+function trackStyle(columns: number, maxCardWidth?: number): JSX.CSSProperties {
+    return { "grid-template-columns": `repeat(${columns}, minmax(0, ${maxCardWidth ? `${maxCardWidth}px` : "1fr"}))` };
+}
+
+/** How many columns the grid fits, from its own width (so a thin pane in a wide window drops columns), at most `max`. */
+function useColumnCount(grid: () => HTMLElement | undefined, min: () => number, max: () => number | undefined) {
+    const [columns, setColumns] = createSignal(1);
+    const measure = () => {
+        const el = grid();
+        if (!el) return;
+        const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+        setColumns(Math.min(columnsFor(el.clientWidth, min(), gap), max() ?? Infinity));
+    };
+    onMount(() => {
+        measure();
+        const el = grid();
+        if (typeof ResizeObserver === "undefined" || !el) return;
+        const ro = new ResizeObserver(() => measure());
+        ro.observe(el);
+        onCleanup(() => ro.disconnect());
+    });
+    return columns;
+}
+
 /**
  * Cards in an auto-fill grid. An open card's details take a full-width row
  * after the last card of its row, so the row stays together
@@ -45,20 +81,7 @@ export function columnsFor(width: number, min: number, gap: number): number {
 export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
     let gridRef: HTMLDivElement | undefined;
     const min = () => props.minCardWidth ?? (props.size === "chip" ? 124 : 200);
-    const [columns, setColumns] = createSignal(1);
-
-    const measure = () => {
-        if (!gridRef) return;
-        const gap = parseFloat(getComputedStyle(gridRef).columnGap) || 0;
-        setColumns(columnsFor(gridRef.clientWidth, min(), gap));
-    };
-    onMount(() => {
-        measure();
-        if (typeof ResizeObserver === "undefined" || !gridRef) return;
-        const ro = new ResizeObserver(() => measure());
-        ro.observe(gridRef);
-        onCleanup(() => ro.disconnect());
-    });
+    const columns = useColumnCount(() => gridRef, min, () => props.maxColumns);
 
     const keys = createMemo(() => props.items.map((item) => props.keyOf(item)));
     const byKey = createMemo(() => new Map(props.items.map((item) => [props.keyOf(item), item] as const)));
@@ -84,20 +107,25 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
             | undefined;
 
     let detailRef: HTMLDivElement | undefined;
-    // Bring the details into view without moving the card above them out of it (detail-reveal.ts).
-    createEffect(
-        on(
-            () => props.selectedKey,
-            (key) => {
-                if (key == null) return;
-                requestAnimationFrame(() => {
-                    const card = cellOf(key);
-                    if (detailRef && card) revealDetail(detailRef, card);
-                });
-            },
-            { defer: true },
-        ),
-    );
+    // Bring the details into view without moving the card above them out of it (detail-reveal.ts). It runs again when a
+    // resize changes the column count, which moves the panel to the end of the card's new row.
+    const reveal = (key: string | null | undefined, focus: boolean) => {
+        if (key == null) return;
+        requestAnimationFrame(() => {
+            const card = cellOf(key);
+            if (detailRef && card) revealDetail(detailRef, card);
+            if (focus && props.focusDetails) detailRef?.focus({ preventScroll: true });
+        });
+    };
+    createEffect(on(() => props.selectedKey, (key) => reveal(key, true), { defer: true }));
+    createEffect(on(columns, () => reveal(props.selectedKey, false), { defer: true }));
+    const capped = () => props.maxColumns !== undefined || props.maxCardWidth !== undefined;
+
+    const detailName = () => {
+        const key = props.selectedKey;
+        const item = key == null ? undefined : byKey().get(key);
+        return item !== undefined ? props.detailLabel?.(item) : undefined;
+    };
 
     const closeFromDetail = (e: KeyboardEvent) => {
         if (e.key !== "Escape" || !props.onClose) return;
@@ -114,8 +142,8 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
     return (
         <div
             ref={gridRef}
-            class={clsx("ui-card-grid", props.size === "chip" && "ui-card-grid--chip", props.class)}
-            style={{ "--ui-card-min": `${min()}px` }}
+            class={clsx("ui-card-grid", props.size === "chip" && "ui-card-grid--chip", capped() && "ui-card-grid--capped", props.class)}
+            style={{ "--ui-card-min": `${min()}px`, ...(capped() ? trackStyle(columns(), props.maxCardWidth) : {}) }}
             role={props.ariaLabel ? "group" : undefined}
             aria-label={props.ariaLabel}
         >
@@ -133,7 +161,11 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
                         <Show when={index() === detailAfter()}>
                             <div
                                 ref={detailRef}
+                                id={props.detailId}
                                 class="ui-card-detail"
+                                role={props.detailLabel ? "region" : undefined}
+                                aria-label={detailName()}
+                                tabIndex={props.focusDetails ? -1 : undefined}
                                 style={{ "--ui-card-caret-left": caretLeft() }}
                                 onKeyDown={closeFromDetail}
                             >

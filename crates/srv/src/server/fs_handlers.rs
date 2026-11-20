@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::backend::fs_ops;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
+    FsAgentFolder, FsCreateReq, FsDeleteReq, FsEmptyResult, FsGitStatus, FsListReq, FsListResult, FsOpCancelReq, FsOpResolveReq,
     FsOpResult, FsOpResults, FsOpStartReq, FsOpStartResult, FsPathReq, FsPlace, FsPlaceKind, FsPlacesReq, FsPlacesResult,
     FsCreateResult, FsRenameReq, FsRenameResult, FsRestoreReq, FsTrashReq, FsUnwatchReq, FsWatchReq,
     FsWatchResult,
@@ -91,6 +91,13 @@ pub(crate) async fn fs_list(state: &AppState, mut cmd: FsListReq) -> Result<FsLi
     }
     fs_ops::ensure_cursor_sweeper();
     blocking(move || fs_ops::list_page(&cmd)).await
+}
+
+/// `fs.agent_folder` → whether a path is in a folder a container agent can write. A window asks before it
+/// opens a linked file itself: such a file is opened by srv, as a read-only copy.
+pub(crate) async fn fs_agent_folder(cmd: FsPathReq) -> Result<FsAgentFolder, String> {
+    let Ok(path) = fs_ops::resolve_request_path(&cmd.path) else { return Ok(FsAgentFolder::default()) };
+    blocking(move || FsAgentFolder { agent_folder: fs_ops::container_folders::written_by_a_container_agent(&path) }).await
 }
 
 /// `fs.places` → home, known folders, drives and WSL distros. Known folders
@@ -333,6 +340,7 @@ fn register_fs_browsing(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let s = s.clone();
         async move { fs_git_status(&s, cmd).await }
     });
+    engine.register_typed("fs.agent_folder", |cmd: FsPathReq, _ctx| async move { fs_agent_folder(cmd).await });
 }
 
 fn register_fs_mutations(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -432,6 +440,7 @@ mod tests {
             ("fs.op.resolve", "FsOpResolveReq", "FsEmptyResult"),
             ("fs.op.cancel", "FsOpCancelReq", "FsEmptyResult"),
             ("fs.git_status", "FsPathReq", "FsGitStatus"),
+            ("fs.agent_folder", "FsPathReq", "FsAgentFolder"),
         ] {
             let row = find(cmd);
             assert_eq!(row["requestName"], req, "{cmd} request");

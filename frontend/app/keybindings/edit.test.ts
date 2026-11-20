@@ -87,7 +87,7 @@ describe("planChange: the smallest list of entries", () => {
 
     it("pins to other on Linux, and uses Linux's own default column", () => {
         // The default's context comes with its key: a key with no `when` is a different binding.
-        const swap = { key: "ctrl+shift+s shift+ArrowUp", when: "!textInputFocus" };
+        const swap = { key: "ctrl+shift+s shift+ArrowUp", when: "!textInputFilled" };
         expect(planChange([], "pane:swap:up", [{ key: swap.key }], "linux").entries).toHaveLength(2);
         expect(planChange([], "pane:swap:up", [swap], "linux").entries).toEqual([]);
         expect(planChange([], "pane:swap:up", [swap], "other").entries).toEqual([

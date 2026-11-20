@@ -5,4 +5,10 @@
  * per-agent selection unit) — resolved server-side to each block's
  * registered agent name before delivery.
  */
-export type CommandFleetBroadcastData = { targets: Array<string>, message: string, };
+export type CommandFleetBroadcastData = { targets: Array<string>, message: string, 
+/**
+ * A name the sender chose for this broadcast. With it, srv publishes
+ * `fleetbroadcastprogress` as each delivery ends, so the sender can show
+ * how far a paced broadcast has got.
+ */
+progress_id?: string, };

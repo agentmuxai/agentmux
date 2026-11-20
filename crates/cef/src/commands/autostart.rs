@@ -68,6 +68,7 @@ pub fn parse_status_json(stdout: &str) -> Option<serde_json::Value> {
         "ownerChannel": text("owner_channel"),
         "thisChannel": text("this_channel"),
         "movable": v.get("movable").and_then(|x| x.as_bool()).unwrap_or(false),
+        "package": text("package"),
     }))
 }
 
@@ -88,6 +89,23 @@ pub async fn autostart_status() -> Result<serde_json::Value, String> {
     Ok(res.unwrap_or_else(|_| serde_json::json!({ "available": false, "enabled": false })))
 }
 
+/// The Settings-UI autostart commands: `autostart_status`, and `autostart_open_login_items` (macOS: open System Settings
+/// at Login Items, where a login item that waits for the person's approval is allowed).
+pub async fn route(cmd: &str) -> Result<serde_json::Value, String> {
+    match cmd {
+        "autostart_open_login_items" => open_login_items().await,
+        _ => autostart_status().await,
+    }
+}
+
+/// `autostart_open_login_items`: ask the launcher to open System Settings at Login Items (macOS), where a start-at-login
+/// entry that needs the person's approval is allowed. Errors say why, for the Settings row to show.
+pub async fn open_login_items() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(|| run_launcher(&["--open-login-items"]).map(|_| serde_json::Value::Null))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,8 +123,11 @@ mod tests {
         let on = parse_status_json(r#"{"state":"on","target":"/a/AgentMux","owner_channel":"local-x","this_channel":"stable","movable":true}"#).unwrap();
         assert_eq!(
             on,
-            serde_json::json!({ "available": true, "enabled": true, "state": "on", "target": "/a/AgentMux", "ownerChannel": "local-x", "thisChannel": "stable", "movable": true })
+            serde_json::json!({ "available": true, "enabled": true, "state": "on", "target": "/a/AgentMux", "ownerChannel": "local-x", "thisChannel": "stable", "movable": true, "package": null })
         );
+        // The Store package's startup task, as Windows says it: the person turned it off there.
+        let pkg = parse_status_json(r#"{"state":"needs_approval","target":null,"owner_channel":null,"this_channel":"stable","movable":false,"package":"disabled_by_user","activation":"launch"}"#).unwrap();
+        assert_eq!((pkg["state"].clone(), pkg["package"].clone()), ("needs_approval".into(), "disabled_by_user".into()));
         let off = parse_status_json(r#"{"state":"off","target":null,"owner_channel":null,"this_channel":"stable","movable":false}"#).unwrap();
         assert_eq!((off["enabled"].clone(), off["state"].clone(), off["ownerChannel"].clone()), (false.into(), "off".into(), serde_json::Value::Null));
         assert_eq!(parse_status_json(r#"{"state":"broken","this_channel":"s"}"#).unwrap()["enabled"], true, "broken still has an entry");

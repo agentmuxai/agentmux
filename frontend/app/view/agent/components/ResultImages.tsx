@@ -12,6 +12,7 @@
  * docs/analysis/ANALYSIS_READ_TOOL_PREVIEW_2026_10_01.md §6.
  */
 
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { openMediaInEditor } from "@/app/element/markdown-media";
 import { createSignal, For, type JSX } from "solid-js";
 import type { ResultImage } from "../providers/claude-translator";
@@ -51,6 +52,7 @@ function ResultImageView(props: { image: ResultImage; path?: string; width?: num
                     : undefined
             }
             onClick={() => (props.path ? openMediaInEditor(props.path) : setFull((v) => !v))}
+            onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(e.currentTarget.src, { mime: props.image.mediaType, path: props.path }))}
         />
     );
 }

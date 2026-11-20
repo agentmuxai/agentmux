@@ -6,6 +6,7 @@
 import type { PaneTabHostContext, PaneTabInstance } from "@/app/store/pane-tab-registry";
 import { registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
 import { editorDocTabHost } from "./editor-doc-tabs";
+import { editorCopyMenuItems } from "./editor-media-copy";
 import { EditorViewModel } from "./editor-model";
 import { EditorViewComponent } from "./editor-view";
 
@@ -18,6 +19,7 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
         liveTitle: () => ({ text: model.viewName() }),
         headerText: () => model.viewText(),
         contextMenu: () => model.getBodyContextMenuItems(),
+        copyMenu: (selection) => editorCopyMenuItems(model, selection),
         focus: () => model.giveFocus(),
         dispose: () => {
             unregisterHost();

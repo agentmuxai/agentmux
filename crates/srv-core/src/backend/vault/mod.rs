@@ -431,6 +431,7 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
     if fields.contains_key(shares::SHARED) {
         return Err("a login is shared with an agent after it is saved (the Share button on its card), never when it is made".into());
     }
+    signins::normalize_site(kind.name, &mut fields);
     signins::settle_profile(kind.name, &mut fields);
     card::settle(kind.name, &mut fields, &mut entry.parts)?;
     validate(kind, &entry.label, &fields, &entry.tags, &entry.parts)?;
@@ -563,6 +564,7 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {} has an unknown kind", row.id))?;
     drop_empty(&mut change.parts);
     let mut fields = trimmed(std::mem::take(&mut change.fields));
+    signins::normalize_site(kind.name, &mut fields);
     signins::settle_profile(kind.name, &mut fields);
     let old_fields: BTreeMap<String, String> = serde_json::from_str(&row.fields).unwrap_or_default();
     // Who a login is shared with changes only by `shares::add` and `shares::remove`, which check the Vault and end an

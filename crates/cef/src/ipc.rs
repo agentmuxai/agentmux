@@ -31,6 +31,8 @@ use tower_http::services::ServeDir;
 use crate::commands;
 use crate::state::AppState;
 
+mod timing;
+
 /// IPC command request from the frontend.
 #[derive(Debug, serde::Deserialize)]
 pub struct IpcRequest {
@@ -39,6 +41,9 @@ pub struct IpcRequest {
     /// Command arguments as JSON.
     #[serde(default)]
     pub args: serde_json::Value,
+    /// The page's clock (`Date.now()`) when it sent the call, for `timing`.
+    #[serde(default)]
+    pub sent_ms: Option<f64>,
 }
 
 /// IPC response back to the frontend.
@@ -52,6 +57,9 @@ pub struct IpcResponse {
     /// Error message (on failure).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// How long the call waited and how long the host took (`timing`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<timing::IpcTiming>,
 }
 
 /// Health check response.
@@ -135,6 +143,7 @@ async fn handle_ipc(
     headers: HeaderMap,
     Json(req): Json<IpcRequest>,
 ) -> (StatusCode, Json<IpcResponse>) {
+    let clock = timing::CallClock::begin(req.sent_ms);
     // The operator's token opens every command; the forwarding token only the
     // launcher's (ipc_forward/mod.rs).
     let presented = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
@@ -146,6 +155,7 @@ async fn handle_ipc(
                 success: false,
                 data: None,
                 error: Some("Unauthorized: invalid or missing IPC token".to_string()),
+                timing: None,
             }),
         );
     }
@@ -159,6 +169,7 @@ async fn handle_ipc(
     }
 
     let result = route_command(&state, &req.cmd, &req.args).await;
+    let timing = Some(clock.finish(&req.cmd));
 
     match result {
         Ok(data) => (
@@ -167,6 +178,7 @@ async fn handle_ipc(
                 success: true,
                 data: Some(data),
                 error: None,
+                timing,
             }),
         ),
         Err(error) => (
@@ -175,6 +187,7 @@ async fn handle_ipc(
                 success: false,
                 data: None,
                 error: Some(error),
+                timing,
             }),
         ),
     }
@@ -235,7 +248,7 @@ async fn route_command(
         // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
         // _2026_09_24 §4.1). Kept separate from background mode on purpose —
         // tray spec §7.4.
-        "autostart_status" => commands::autostart::autostart_status().await,
+        "autostart_status" | "autostart_open_login_items" => commands::autostart::route(cmd).await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
@@ -469,6 +482,7 @@ async fn route_command(
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
+        "write_clipboard_image" => commands::clipboard_image::write_clipboard_image(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
 
         // ---- Tier 3: Provider/CLI management ----
@@ -1267,7 +1281,7 @@ mod access_tests {
         if let Some(b) = bearer {
             headers.insert("authorization", format!("Bearer {b}").parse().unwrap());
         }
-        let req = IpcRequest { cmd: cmd.to_string(), args: serde_json::Value::Null };
+        let req = IpcRequest { cmd: cmd.to_string(), args: serde_json::Value::Null, sent_ms: None };
         let (status, _) = handle_ipc(State(Arc::new(AppState::default())), headers, Json(req)).await;
         status
     }
@@ -1295,8 +1309,10 @@ mod access_tests {
         assert_ne!(state.ipc_token, crate::ipc_forward::forward_token());
         let mut headers = HeaderMap::new();
         headers.insert("authorization", format!("Bearer {}", state.ipc_token).parse().unwrap());
-        let req = IpcRequest { cmd: "no_such_command".to_string(), args: serde_json::Value::Null };
-        let (status, _) = handle_ipc(State(state), headers, Json(req)).await;
+        let req = IpcRequest { cmd: "no_such_command".to_string(), args: serde_json::Value::Null, sent_ms: None };
+        let (status, Json(answer)) = handle_ipc(State(state), headers, Json(req)).await;
         assert_eq!(status, StatusCode::OK);
+        // An answered call says how long the host took; with no send time from the page, no wait.
+        assert_eq!(answer.timing.map(|t| t.waited_ms), Some(None));
     }
 }

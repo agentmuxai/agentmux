@@ -31,10 +31,16 @@ import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
-export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }): JSX.Element {
+/** An error that carries a line and does not already say so in its text (a bad value does not; a parse error does). */
+function lineToShow(e: { err: string; line?: number }): number | undefined {
+    return e.line != null && !/\bline \d/i.test(e.err) ? e.line : undefined;
+}
+
+export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile, line?: number) => void }): JSX.Element {
     const errors = () => fullConfigAtom()?.configerrors ?? [];
-    // The file the first error is about: a mistake in widgets.json opens widgets.json, anything else settings.json.
-    const openRaw = () => props.onOpen(/widgets\.json$/i.test(errors()[0]?.file ?? "") ? "widgets.json" : "settings.json");
+    // The file the first error is about: a mistake in widgets.json opens widgets.json, anything else settings.json, and
+    // the Editor opens it on that error's line when srv knows it.
+    const openRaw = () => props.onOpen(/widgets\.json$/i.test(errors()[0]?.file ?? "") ? "widgets.json" : "settings.json", errors()[0]?.line);
     return (
         <Show when={errors().length > 0}>
             <div class="settings-config-errors">
@@ -45,6 +51,9 @@ export function ConfigErrorsBanner(props: { onOpen: (file: ConfigFile) => void }
                             {" "}{e.err}
                             <Show when={e.file}>
                                 {" "}<span class="mono">{e.file}</span>
+                            </Show>
+                            <Show when={lineToShow(e)}>
+                                {(line) => <>{" "}<span class="mono">{t("settings.errors.line", { line: line() })}</span></>}
                             </Show>
                         </div>
                     )}
@@ -100,7 +109,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         focusWhenRendered(() => container.querySelector<HTMLInputElement>("[data-testid='settings-search-input']"), { select: true });
     };
 
-    const openFile = (file: ConfigFile) => openConfigFileOrTell(file);
+    const openFile = (file: ConfigFile, line?: number) => openConfigFileOrTell(file, { line });
     const openRaw = () => openFile("settings.json");
 
     function handleSelectResult(entry: SettingsIndexEntry) {
@@ -140,7 +149,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         setQuery={props.model.setQuery}
                         onSelectResult={handleSelectResult}
                     />
-                    <ConfigErrorsBanner onOpen={(f) => void openFile(f)} />
+                    <ConfigErrorsBanner onOpen={(f, line) => void openFile(f, line)} />
                     <Dynamic component={SECTION_VIEWS[section()]} model={props.model} />
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>

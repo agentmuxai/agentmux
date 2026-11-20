@@ -151,7 +151,7 @@ function registerPaneActionKeys() {
             blockId,
             ReplacePaneConfirm,
             { onConfirm: () => replaceBlock(blockId, { meta: { view: "shortcuts" } }, true) },
-            { source: REPLACE_PANE_SOURCE, waits: false }
+            { source: REPLACE_PANE_SOURCE, waits: false, operatorOnly: false }
         );
         return true;
     });
