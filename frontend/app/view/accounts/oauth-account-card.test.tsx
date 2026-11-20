@@ -89,7 +89,7 @@ async function openConnector(key: string) {
 
 describe("a Google account's card", () => {
     it("shows the email, Connected, and the client it uses", async () => {
-        await openConnector("google");
+        await openConnector("gmail");
         expect(card().querySelector(".ui-card-title")?.textContent).toBe("me@example.com");
         // The display name only repeats the email, so the brand shows instead.
         expect(card().querySelector(".ui-card-subtitle")?.textContent).toBe("Google");
@@ -101,7 +101,7 @@ describe("a Google account's card", () => {
     it("says Reconnect needed, and the connector's Reconnect re-runs the consent for the same account", async () => {
         rpc.ListIdentityAccountsCommand.mockResolvedValue([google({ status: "needs_reauth" })]);
         render(() => <ConnectorsList />);
-        fireEvent.click(await screen.findByRole("button", { name: "Reconnect Google" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Reconnect Gmail" }));
         await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
         expect(rpc.AccountOAuthStartCommand.mock.calls[0][1]).toEqual({
             provider: "google",
@@ -118,7 +118,7 @@ describe("a Google account's card", () => {
 
     it("says which permissions weren't granted", async () => {
         setOAuthNote("g1", { missingScopes: [CAL] });
-        await openConnector("google");
+        await openConnector("gmail");
         expect(card().querySelector(".account-card-note")?.textContent).toBe(
             "Partly granted: Calendar events wasn't allowed",
         );
@@ -126,7 +126,7 @@ describe("a Google account's card", () => {
 
     it("shows Blocked by your organization after a blocked sign-in", async () => {
         setOAuthNote("g1", { blocked: "blocked by your organization: … (admin_policy_enforced)." });
-        await openConnector("google");
+        await openConnector("gmail");
         expect(screen.getAllByRole("img", { name: "Blocked by your organization" }).length).toBeGreaterThan(0);
         expect(card().classList.contains("is-attention")).toBe(true);
         expect(screen.getAllByRole("button", { name: "Reconnect" }).length).toBeGreaterThan(0);

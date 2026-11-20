@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Connectors' list as cards (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4, §8).
+// Connectors' list as cards (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4, §8, §4.10).
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,10 @@ const rpc = vi.hoisted(() => ({
     MuxBusStatusCommand: vi.fn(),
     MuxBusCloudConfigCommand: vi.fn(),
     GithubConnectionCommand: vi.fn(),
+    AccountOAuthClientGetCommand: vi.fn(),
+    AccountOAuthStartCommand: vi.fn(),
+    AccountOAuthPollCommand: vi.fn(),
+    AccountOAuthCancelCommand: vi.fn(),
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -25,6 +29,7 @@ vi.mock("@/app/element/ui/open-menu-at", async (original) => ({
     openMenuAt: menu.show,
 }));
 
+import { SERVICES } from "@/app/view/accounts/google-services";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { ConnectorsList } from "./connectors-list";
 import { CONNECTED_FLASH_MS } from "./connectors-state";
@@ -45,6 +50,11 @@ function account(id: string, provider: string, email: string, extra: Record<stri
     };
 }
 
+/** A Google account that has Gmail on, as srv records it: the scopes its token was granted. */
+const GOOGLE = account("g1", "google", "me@example.com", {
+    context: { email: "me@example.com", granted_scopes: SERVICES.find((x) => x.service === "gmail")!.readScopes },
+});
+
 const ACCOUNTS = [
     account("a1", "github", "octo@example.com", { kind: "pat", status: "expired" }),
     account("a2", "claude", "me@example.com"),
@@ -61,6 +71,9 @@ beforeEach(() => {
     rpc.MuxBusStatusCommand.mockResolvedValue({ connected: true, valid: true, email: "cloud@example.com" });
     rpc.MuxBusCloudConfigCommand.mockResolvedValue({});
     rpc.GithubConnectionCommand.mockResolvedValue({});
+    rpc.AccountOAuthClientGetCommand.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["gmail", "calendar", "drive"] });
+    // A sign-in that stops at once: what is asked of Google is what the test reads.
+    rpc.AccountOAuthStartCommand.mockResolvedValue({ error: "stopped by the test" });
     menu.build.mockReturnValue([]);
 });
 afterEach(() => {
@@ -82,7 +95,7 @@ describe("Connectors as cards", () => {
         render(() => <ConnectorsList />);
         await ready();
         expect(connectedNames()).toEqual(["AgentMux Cloud", "GitHub", "AWS", "Anthropic"]);
-        expect(availableNames()).toEqual(["Google", "OpenAI", "Slack", "Custom", "xAI", "Moonshot"]);
+        expect(availableNames()).toEqual(["Gmail", "Calendar", "Drive", "OpenAI", "Slack", "Custom", "xAI", "Moonshot"]);
     });
 
     it("says each state in words, and what each other connector is for", async () => {
@@ -93,7 +106,7 @@ describe("Connectors as cards", () => {
         expect(line("github")).toContain("Needs sign-in again · octo@example.com");
         expect(line("aws")).toContain("Couldn't connect · ops@example.com");
         expect(line("anthropic")).toContain("Connected · me@example.com");
-        expect(line("google")).toBe("Gmail, Calendar and Drive for your agents");
+        expect(line("gmail")).toBe("Search and read your mail");
         // No Connect button for an agent that signs in inside its own pane.
         expect(screen.queryByRole("button", { name: "Connect xAI" })).toBeNull();
         expect(screen.getByRole("button", { name: "How to connect xAI" })).toBeTruthy();
@@ -334,13 +347,60 @@ describe("Connect", () => {
         expect(await screen.findByRole("group", { name: "Connect xAI" })).toBeTruthy();
     });
 
-    it("opens Add another account in a connected card's details", async () => {
+    it("keeps Connect on a connected card, to add another account under its accounts (§4.10)", async () => {
         render(() => <ConnectorsList />);
         await ready();
-        fireEvent.click(disclosure(/^GitHub/));
-        await screen.findByRole("region", { name: "GitHub details" });
-        fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
-        expect(await screen.findByRole("group", { name: "Connect GitHub" })).toBeTruthy();
+        const connect = () => screen.getByRole("button", { name: "Connect another GitHub account" });
+        expect(connect().getAttribute("aria-expanded")).toBe("false");
+        fireEvent.click(connect());
+        const section = await screen.findByRole("group", { name: "Connect GitHub" });
+        expect(section.closest(".ui-card-detail")).toBeTruthy();
+        // Its accounts stay in view above the section, and Connect says it is open.
+        expect(screen.getByRole("region", { name: "GitHub details" }).querySelector(".connector-accounts")).toBeTruthy();
+        expect(connect().getAttribute("aria-expanded")).toBe("true");
+        // Connect again closes the section.
+        fireEvent.click(connect());
+        await waitFor(() => expect(screen.queryByRole("group", { name: "Connect GitHub" })).toBeNull());
+        expect(connect().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("has no Connect on AgentMux Cloud, which has one sign-in", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        expect(document.querySelector('[data-connector="agentmux"] .connector-card-control button')).toBeNull();
+        expect(document.querySelector('[data-connector="agentmux"] .connector-card-chevron')).toBeTruthy();
+        expect(document.querySelector('[data-connector="aws"] .connector-card-control button')?.textContent).toBe("Connect");
+    });
+
+    it("flashes Connected in place when another account is added, and leaves its accounts open", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(screen.getByRole("button", { name: "Connect another GitHub account" }));
+        await screen.findByRole("group", { name: "Connect GitHub" });
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+            rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, account("a5", "github", "two@example.com", { kind: "pat" })]);
+            await refreshAccountCache();
+            await vi.waitFor(() => expect(document.querySelector('[data-connector="github"] .connector-card-line')?.textContent).toContain("2 accounts"));
+            const card = document.querySelector('[data-connector="github"]')!;
+            expect(card.classList.contains("is-flash")).toBe(true);
+            expect(card.querySelector(".connector-card-flash")?.textContent).toContain("Connected");
+            // Not closed under it: the person can see the account that was added.
+            expect(screen.getByRole("region", { name: "GitHub details" })).toBeTruthy();
+            await vi.advanceTimersByTimeAsync(CONNECTED_FLASH_MS + 50);
+            expect(document.querySelector('[data-connector="github"]')!.classList.contains("is-flash")).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not flash a card that gains an account while its Connect was never opened", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, account("a5", "github", "two@example.com", { kind: "pat" })]);
+        await refreshAccountCache();
+        await waitFor(() => expect(document.querySelector('[data-connector="github"] .connector-card-line')?.textContent).toContain("2 accounts"));
+        expect(document.querySelector(".connector-card.is-flash")).toBeNull();
     });
 
     it("opens Add a custom connector from the foot", async () => {
@@ -359,7 +419,7 @@ describe("the filter", () => {
         await waitFor(() => expect(connectedNames()).toEqual(["GitHub"]));
         expect(availableNames()).toEqual([]);
         fireEvent.input(screen.getByPlaceholderText("Filter connectors"), { target: { value: "gmail" } });
-        await waitFor(() => expect(availableNames()).toEqual(["Google"]));
+        await waitFor(() => expect(availableNames()).toEqual(["Gmail"]));
         fireEvent.input(screen.getByPlaceholderText("Filter connectors"), { target: { value: "nobody" } });
         await waitFor(() => expect(screen.getByText(/No connectors match/)).toBeTruthy());
     });
@@ -370,10 +430,62 @@ describe("with nothing connected", () => {
         rpc.ListIdentityAccountsCommand.mockResolvedValue([]);
         rpc.MuxBusStatusCommand.mockResolvedValue({ connected: false, valid: false });
         render(() => <ConnectorsList />);
-        await waitFor(() => expect(availableNames()).toHaveLength(10));
+        await waitFor(() => expect(availableNames()).toHaveLength(12));
         expect(availableNames()).toEqual([
-            "AgentMux Cloud", "GitHub", "Google", "AWS", "OpenAI", "Anthropic", "Slack", "Custom", "xAI", "Moonshot",
+            "AgentMux Cloud", "GitHub", "Gmail", "Calendar", "Drive", "AWS", "OpenAI", "Anthropic", "Slack", "Custom", "xAI", "Moonshot",
         ]);
         expect(document.querySelector('[aria-label="Connected"]')).toBeNull();
+    });
+});
+
+describe("Gmail, Calendar and Drive (§4.10)", () => {
+    it("are three cards: the one a Google account has on is connected, the others offer Connect", async () => {
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, GOOGLE]);
+        render(() => <ConnectorsList />);
+        await waitFor(() => expect(connectedNames()).toContain("Gmail"));
+        expect(connectedNames()).toEqual(["AgentMux Cloud", "GitHub", "Gmail", "AWS", "Anthropic"]);
+        expect(availableNames()).toEqual(["Calendar", "Drive", "OpenAI", "Slack", "Custom", "xAI", "Moonshot"]);
+        expect(screen.getByRole("button", { name: "Connect another Gmail account" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Connect Calendar" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Connect Drive" })).toBeTruthy();
+    });
+
+    it("Connect on a service asks Google for that service's scopes, and for a new account", async () => {
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(screen.getByRole("button", { name: "Connect Calendar" }));
+        const section = await screen.findByRole("group", { name: "Connect Calendar" });
+        const go = await within(section).findByRole("button", { name: "Connect Google" });
+        await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(go);
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+        const request = rpc.AccountOAuthStartCommand.mock.calls[0][1];
+        expect(request.provider).toBe("google");
+        expect(request.accountId).toBeUndefined();
+        expect(request.scopes).toEqual(SERVICES.find((x) => x.service === "calendar")!.readScopes);
+    });
+
+    it("offers Connect again on a connected service, to add another Google account", async () => {
+        rpc.ListIdentityAccountsCommand.mockResolvedValue([...ACCOUNTS, GOOGLE]);
+        render(() => <ConnectorsList />);
+        await waitFor(() => expect(connectedNames()).toContain("Gmail"));
+        fireEvent.click(screen.getByRole("button", { name: "Connect another Gmail account" }));
+        const section = await screen.findByRole("group", { name: "Connect Gmail" });
+        const go = await within(section).findByRole("button", { name: "Connect Google" });
+        await waitFor(() => expect((go as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(go);
+        await waitFor(() => expect(rpc.AccountOAuthStartCommand).toHaveBeenCalledTimes(1));
+        expect(rpc.AccountOAuthStartCommand.mock.calls[0][1].scopes).toEqual(SERVICES.find((x) => x.service === "gmail")!.readScopes);
+    });
+
+    it("says a service this build doesn't offer yet, with no sign-in to start", async () => {
+        rpc.AccountOAuthClientGetCommand.mockResolvedValue({ saved: false, hasSecret: false, builtinAvailable: true, offeredServices: ["drive"] });
+        render(() => <ConnectorsList />);
+        await ready();
+        fireEvent.click(screen.getByRole("button", { name: "Connect Calendar" }));
+        const section = await screen.findByRole("group", { name: "Connect Calendar" });
+        expect(await within(section).findByText("Calendar isn't available in this version of AgentMux yet.")).toBeTruthy();
+        expect(within(section).queryByRole("button", { name: "Connect Google" })).toBeNull();
+        expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
     });
 });

@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What opens under a connected connector's card (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.5): its accounts,
-// the "instances", each with its own details; Add another account; and, for AgentMux Cloud, its session. Nothing here is
-// new: the account cards and their details are the ones Connectors' Accounts section showed, moved under the connector.
+// the "instances", each with its own details; the Connect section its card's Connect opens, to add another account
+// (§4.10); and, for AgentMux Cloud, its session. Nothing here is new: the account cards and their details are the ones
+// Connectors' Accounts section showed, moved under the connector.
 
 import { Show, type Accessor, type JSX } from "solid-js";
 
 import { t } from "@/app/i18n/i18n";
-import { Button, CardGrid, openMenuAt } from "@/app/element/ui";
+import { CardGrid, openMenuAt } from "@/app/element/ui";
 import { AccountCard } from "@/app/view/accounts/account-card";
 import { AddAccountSection } from "@/app/view/accounts/AddAccountSection";
 import { AgentMuxConnectBody, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
@@ -26,7 +27,7 @@ export interface ConnectorDetailsProps {
     muxbus: MuxBusController;
     /** How many agents use each account. */
     usedBy: Accessor<Map<string, number>>;
-    /** The Add another account section is open. */
+    /** The Connect section, to add another account, is open. */
     adding: Accessor<boolean>;
     setAdding: (open: boolean) => void;
 }
@@ -82,14 +83,11 @@ export function ConnectorDetails(props: ConnectorDetailsProps): JSX.Element {
         >
             <div class="connector-details">
                 <Accounts {...props} />
-                <div class="connector-details-actions">
-                    <Button density="compact" icon="plus" onClick={() => props.setAdding(!props.adding())}>
-                        {t("connectors.addAnother")}
-                    </Button>
-                </div>
                 <Show when={props.adding()}>
                     <AddAccountSection
                         tile={props.entry().tile}
+                        name={props.entry().name}
+                        service={props.entry().service}
                         model={props.model}
                         muxbus={props.muxbus}
                         onClose={() => props.setAdding(false)}

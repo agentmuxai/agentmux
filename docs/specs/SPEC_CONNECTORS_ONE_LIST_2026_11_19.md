@@ -60,7 +60,7 @@ Each has my recommendation; the rest of the spec is written to it.
 | D2 | Where does it sit? | **Still a third column on the right**: `agent (5) | [sysinfo / swarm] (3) | connectors (2)`. Checked again with cards: at 2 of 10 on a 1920 px window the column is about 380 px, one column of cards that reads like the list; on a 1366 px window it is about 270 px, the thin layout, so thin is the everyday case on a small screen and is designed first (§4.7). A person who maximises or widens the pane gets more columns of cards. Stacking it under swarm would make a short, wide strip and squeeze swarm, so it is not recommended. Sizes are tuned on the debug build you try before merge. |
 | D3 | What are "instances"? | Each **account** of a connector (two GitHub accounts, two Google accounts), with which agents use it. If you meant something else (a remote machine, a running server), say so. |
 | D4 | Do MCP servers join the list? | **Yes, as cards** ("Tool server" in the one-line description). The two MCP groups go away with the Accounts gallery. **Remotes stays its own section**: a machine you reach is not an account you sign in to. |
-| D5 | Google: one card or three? | **One card** ("Google"). Gmail, Calendar and Drive share one account and one sign-in, and each is turned on inside the opened card. Three cards would show three Connect buttons that all start the same sign-in. |
+| D5 | Google: one card or three? | **Three cards**, Gmail, Calendar and Drive (changed after approval, §4.10). The first draft had one "Google" card. A Google account is still one sign-in; each card lists the accounts that have its service on. |
 | D6 | Order | **Connected first, then Available**, each in a fixed order (AgentMux Cloud first, then the catalog's order). Not by use, so cards don't reshuffle. |
 
 ## 4. Design
@@ -138,7 +138,7 @@ Clicking a connected card opens its details in a panel the full width of the gri
 1. **Accounts (the instances).** One line per account: label, how it is connected ("AgentMux GitHub App", "Personal access token", "ChatGPT sign-in"), its state word, "used by N agents". One account: its full details (today's `AccountDetailPanel`) show directly; more than one: each line opens its own details. Per account: **Reconnect**, Edit, Bind to agent, **Disconnect…** (the delete confirm opens in the details, with the agents it names).
 2. **Parts the connector has:** a Google account's services and who may use them; a GitHub account's installations; CLI sign-in status. These are today's `GoogleServicesSection`, `GithubInstallationsSection` and `CliSignInSection`, moved, not rewritten.
 3. **Other ways to connect:** the ways the connector offers that this account did not use (a token for GitHub, a key for Anthropic), each with its one-line explanation and an **Add** button. This is the 11-14 spec's "every way to connect", kept.
-4. **Add another account** (the same Connect section, opened here).
+4. **Add another account:** the card's own Connect, which stays on a connected card (§4.10); its section opens here, under the accounts.
 5. **What it can do and can't** (one or two lines, from the guide data), where the guide has them.
 
 ### 4.6 Nothing a person can do today is lost
@@ -206,7 +206,7 @@ The new pane starts on the list (`connectors:section` unset means `accounts`).
 
 ### 4.9 No success step: the card flashes "Connected"
 
-Added after approval, from the operator's words relayed by AgentY on 2026-11-19: no success step after "Connected", in the agent pane and in Connectors; "we can tell from the UI"; in Connectors, flash "connected" inside the pane.
+Added after approval, from the operator's direction relayed on 2026-11-19: no success step after a connect, in the agent pane and in Connectors, since the interface and the agent's progress already show it worked; in Connectors, flash "Connected" inside the pane.
 
 - **When a connect succeeds, nothing is left to read and dismiss.** No modal, no "Signed in" panel with Done or OK. The Connect section collapses at once (a sign-in that worked, or an account saved).
 - **The card flashes, once, in place.** The card is now in Connected; for about 2.8 seconds it holds a success-coloured line and tint with "✓ Connected" where the chevron goes, then goes back to its connected state. The state word under the name ("Connected · <account>") is there throughout and stays.
@@ -215,6 +215,20 @@ Added after approval, from the operator's words relayed by AgentY on 2026-11-19:
 - **Only a connect the person started here flashes.** A card flashes when its Connect section was opened in this pane and the connector then becomes connected. The first load of the list, where every connected card appears at once, flashes nothing.
 - **A failure still shows its reason** in the section, with Retry, as today. Only the success step is gone.
 - **The agent pane side** (the in-pane sign-in panel closing by itself on success) is #48130, Agent1's. It is one shared component (`SignedIn` in `provider-login-view.tsx`), so that task removes it; Connectors does not depend on it, because its own sections close the panel as soon as the sign-in reports success.
+
+### 4.10 Connect stays; Gmail, Calendar and Drive are three cards
+
+Added after approval, from the operator's direction on 2026-11-20: every sign-in connector gets the same Connect button; Gmail, Calendar and Drive each get their own; a person can connect several accounts, so the button generally stays; only AgentMux has one login.
+
+- **Connect stays once connected.** On every connector except AgentMux Cloud the card keeps a **Connect** button after it is connected. Its label for a screen reader is "Connect another <name> account". Pressing it opens the Connect section under the connector's accounts (§4.5.4); pressing it again closes the section. The chevron stays beside it, and clicking the card still opens its accounts.
+- **Reconnect replaces Connect only when a sign-in has run out** and can be re-run from here (§4.3): one account that needs it. With several accounts, or a sign-in that cannot be re-run, Connect stays and the account's own card carries its Reconnect.
+- **AgentMux Cloud is the one single login.** It has no Connect once connected: its control is the chevron, and Reconnect when its session needs a sign-in again.
+- **No duplicate control.** The "Add another account" button inside the opened card is gone; the card's Connect does that.
+- **A card that gains an account flashes, as a first connect does (§4.9).** The person opened Connect on a card that already had accounts, and one more arrives: the card shows "Connected" for the same moment, and its accounts stay open so the new one can be seen.
+- **Gmail, Calendar and Drive are three cards, in that order, where the single Google card was.** Each lists the Google accounts that have that service on (read access granted), so one Google account can appear under more than one card. A card with no such account is Available, with Connect. A Google account with no service on (signed in before a service was asked for) is listed under Gmail, the first card, so it can still be opened, have a service turned on, or be deleted; it appears under no other card.
+- **A service's Connect asks Google for that service's access only,** and makes a new Google account with that service on. It has no choice of how to connect: the sign-in is the only way. Signing in again with the same Google email makes a separate account row, which an account's own "Turn on" avoids when the person wants another service on an account they already have.
+- **A service this build is not approved for yet says so** in the Connect section ("<name> isn't available in this version of AgentMux yet") instead of offering a sign-in that would be refused, as an account's "Turn on" does.
+- **Text-only agents (xAI, Moonshot) are unchanged:** they sign in inside the agent, so they have How to connect and nothing to add.
 
 ## 5. Research: what other harnesses do
 
@@ -232,7 +246,7 @@ Read 2026-11-19, each page fetched. Practices are paraphrased. **Not found:** th
 
 ### Practices not to adopt
 
-1. **Remove and add again as the only way to change or repair a connector.** Claude's custom connectors are changed by removing and re-adding them, and a re-add without a remove leaves two. <https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp> → we keep Reconnect, Edit and Add another.
+1. **Remove and add again as the only way to change or repair a connector.** Claude's custom connectors are changed by removing and re-adding them, and a re-add without a remove leaves two. <https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp> → we keep Reconnect, Edit and Connect (to add another).
 2. **Raw rule names or a config file as the permission screen.** Claude Code writes tools as `mcp__<server>__<tool>` and Zed as `mcp:<server>:<tool>` in settings, and VS Code shows some servers as read-only JSON. <https://code.claude.com/docs/en/permissions>, <https://zed.dev/docs/ai/mcp>, <https://code.visualstudio.com/docs/agents/run/manage-mcp-servers> → plain names and controls.
 3. **A coloured dot with a hover tooltip as the only status.** Zed shows a dot and a tooltip. A hover is unavailable at 280 px, to a keyboard and to a screen reader (this last point is my inference, not the page's). <https://zed.dev/docs/ai/mcp> → a word beside any dot (§4.3).
 

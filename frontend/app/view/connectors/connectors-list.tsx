@@ -3,7 +3,8 @@
 //
 // Connectors' list (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md): one card per connector, Connected first, then
 // Available. The cards reflow with the pane's width: one column when thin, up to four when wide (§4.7). A card that is not
-// connected has Connect, which opens the add section under its row of cards; a connected one opens its accounts there.
+// connected has Connect, which opens the add section under its row of cards; a connected one opens its accounts there and
+// keeps its Connect, to add another account (§4.10).
 // It replaces the Accounts section's two lists, the add gallery and the Connected cards. Its section id stays `accounts`.
 
 import { createUniqueId, Show, type Accessor, type JSX } from "solid-js";
@@ -56,8 +57,10 @@ function Group(props: {
                         entry={e}
                         open={s.openKey() === e.key}
                         flash={s.flash().has(e.key)}
+                        adding={s.openKey() === e.key && s.adding()}
                         detailId={props.detailId}
                         onToggle={() => s.toggle(e)}
+                        onConnect={() => s.connect(e)}
                         onReconnect={() => s.reconnect(e)}
                     />
                 )}
@@ -108,7 +111,7 @@ export function ConnectorsList(): JSX.Element {
                         detailId={`connectors-${uid}-available`}
                         items={s.available}
                         renderDetail={(e) => (
-                            <AddAccountSection tile={e.tile} model={s.model} muxbus={s.muxbus} onClose={s.close} />
+                            <AddAccountSection tile={e.tile} name={e.name} service={e.service} model={s.model} muxbus={s.muxbus} onClose={s.close} />
                         )}
                     />
                     <Show when={s.filter() && s.shownCount() === 0}>

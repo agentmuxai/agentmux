@@ -10,6 +10,7 @@ import { matchesEveryWord } from "@/app/util/fuzzysearch";
 import { accountSearchText, cardStatus, sortAccounts } from "@/app/view/accounts/account-card";
 import { SERVICE_CATALOG, type ServiceTile } from "@/app/view/accounts/accounts-catalog";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
+import { SERVICES, serviceState, type GoogleService } from "@/app/view/accounts/google-services";
 import { canReconnect } from "@/app/view/accounts/oauth-account-state";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 import { accountLabel, type Account } from "@/app/view/identity/identity-model";
@@ -22,7 +23,10 @@ export interface CloudSession {
     email?: string;
 }
 
-/** The one control at the card's right (§4.2). */
+/**
+ * The one control at the card's right (§4.2). `connect` is Connect: on a card that is not connected it starts the first
+ * sign-in, and on one that is it stays, to add another account (§4.10).
+ */
 export type ConnectorControl = "connect" | "howto" | "open" | "reconnect";
 
 export interface ConnectorEntry {
@@ -44,6 +48,10 @@ export interface ConnectorEntry {
     reconnect?: Account;
     /** No way to connect from here: the agent signs in inside its own pane (xAI, Moonshot). */
     textOnly: boolean;
+    /** Another account can be connected, so its Connect stays once it is connected (§4.10). Not AgentMux Cloud: one sign-in. */
+    canAdd: boolean;
+    /** A Google service's card (Gmail, Calendar, Drive): which service it is, and so what its Connect asks for. */
+    service?: GoogleService;
 }
 
 /** AgentMux Cloud's card is named for the service, not the catalog's short name. */
@@ -58,8 +66,12 @@ export function connectorLine(id: string): string {
             return t("connectors.line.agentmux");
         case "github":
             return t("connectors.line.github");
-        case "google":
-            return t("connectors.line.google");
+        case "gmail":
+            return t("connectors.line.gmail");
+        case "calendar":
+            return t("connectors.line.calendar");
+        case "drive":
+            return t("connectors.line.drive");
         case "aws":
             return t("connectors.line.aws");
         case "openai":
@@ -123,34 +135,61 @@ function cloudState(s: CloudSession): { tone: StatusTone; state: string; signIn:
     return { tone: "warn", state: t("connectors.state.needsSignIn"), signIn: muxbusNeedsSignInAgain(s) || !s.valid };
 }
 
+/** The Google cards, in this order, from Google's services (§4.10). */
+const GOOGLE_CARDS: GoogleService[] = ["gmail", "calendar", "drive"];
+
+interface Face {
+    key: string;
+    name: string;
+    line: string;
+    accounts: Account[];
+    service?: GoogleService;
+}
+
+/**
+ * The cards one catalog tile makes: one, except Google, which is one account per sign-in but three connectors (§4.10).
+ * A Google service's card holds the accounts that have that service on, so one account can show under several cards. An
+ * account with none on (signed in before a service was asked for) is listed under Gmail, the first, so it can still be
+ * opened, turned on or deleted.
+ */
+function facesOf(tile: ServiceTile, sorted: readonly Account[]): Face[] {
+    const mine = tile.id === "agentmux" ? [] : sorted.filter((a) => brandForProvider(a.provider) === tile.id);
+    if (tile.id !== "google") return [{ key: tile.id, name: connectorName(tile), line: connectorLine(tile.id), accounts: mine }];
+    const on = (a: Account, service: GoogleService) =>
+        serviceState(SERVICES.find((x) => x.service === service)!, a.context.granted_scopes ?? []) !== "off";
+    return GOOGLE_CARDS.map((service, i) => {
+        const info = SERVICES.find((x) => x.service === service)!;
+        const accounts = mine.filter((a) => on(a, service) || (i === 0 && !GOOGLE_CARDS.some((s) => on(a, s))));
+        return { key: service, name: info.label, line: connectorLine(service), accounts, service };
+    });
+}
+
 /**
  * Every connector as a card entry: Connected first (AgentMux Cloud, then the catalog's order), then Available in the
  * catalog's order with the text-only agents last (§3, D6). Not by use, so cards don't reshuffle.
  */
 export function connectorEntries(accounts: readonly Account[], cloud: CloudSession | null | undefined): ConnectorEntry[] {
     const sorted = sortAccounts(accounts);
-    const entries = SERVICE_CATALOG.map((tile): ConnectorEntry => {
-        const mine = tile.id === "agentmux" ? [] : sorted.filter((a) => brandForProvider(a.provider) === tile.id);
-        const base = {
-            key: tile.id,
-            tile,
-            name: connectorName(tile),
-            line: connectorLine(tile.id),
-            accounts: mine,
-            textOnly: tile.id !== "agentmux" && tile.authModes.length === 0,
-        };
-        if (tile.id === "agentmux" && cloud?.connected) {
-            const c = cloudState(cloud);
-            return { ...base, connected: true, tone: c.tone, state: c.state, control: c.signIn ? "reconnect" : "open" };
-        }
-        if (mine.length > 0) {
-            const s = accountsState(mine);
-            const needing = mine.filter((a) => accountState(a).tone !== "ok" && canReconnect(a));
-            const reconnect = mine.length === 1 && needing.length === 1 ? needing[0] : undefined;
-            return { ...base, connected: true, tone: s.tone, state: s.state, control: reconnect ? "reconnect" : "open", reconnect };
-        }
-        return { ...base, connected: false, tone: "idle", state: null, control: base.textOnly ? "howto" : "connect" };
-    });
+    const entries = SERVICE_CATALOG.flatMap((tile) =>
+        facesOf(tile, sorted).map((face): ConnectorEntry => {
+            const mine = face.accounts;
+            const textOnly = tile.id !== "agentmux" && tile.authModes.length === 0;
+            const base = { ...face, tile, textOnly, canAdd: tile.id !== "agentmux" && !textOnly };
+            if (tile.id === "agentmux" && cloud?.connected) {
+                const c = cloudState(cloud);
+                return { ...base, connected: true, tone: c.tone, state: c.state, control: c.signIn ? "reconnect" : "open" };
+            }
+            if (mine.length > 0) {
+                const s = accountsState(mine);
+                const needing = mine.filter((a) => accountState(a).tone !== "ok" && canReconnect(a));
+                const reconnect = mine.length === 1 && needing.length === 1 ? needing[0] : undefined;
+                // Reconnect stands in for Connect while a sign-in has run out; otherwise Connect stays (§4.10).
+                const control = reconnect ? "reconnect" : base.canAdd ? "connect" : "open";
+                return { ...base, connected: true, tone: s.tone, state: s.state, control, reconnect };
+            }
+            return { ...base, connected: false, tone: "idle", state: null, control: textOnly ? "howto" : "connect" };
+        })
+    );
     const rank = (e: ConnectorEntry) => (e.connected ? 0 : e.textOnly ? 2 : 1);
     return entries
         .map((e, i) => ({ e, i }))

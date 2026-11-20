@@ -3,9 +3,9 @@
 //
 // One connector's card in Connectors' list (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.2): an icon, the
 // name, one line, and one control. A card that is not connected says what the connector is for and has Connect; a
-// connected one says its state in words and opens its details when clicked. The disclosure and the control are
-// separate buttons, never nested (§4.7). The card's layout follows its own width (connector-card.scss), not the
-// window's or the column count.
+// connected one says its state in words and opens its details when clicked. Connect stays on a connected card, to add
+// another account, except AgentMux Cloud's, which has one sign-in (§4.10). The disclosure and the control are separate
+// buttons, never nested (§4.7). The layout follows the card's own width (connector-card.scss), not the window's.
 
 import { Show, type JSX } from "solid-js";
 
@@ -21,9 +21,12 @@ export interface ConnectorCardProps {
     open: boolean;
     /** It has just connected: it shows "Connected" in place for a moment (§4.9). */
     flash?: boolean;
+    /** Its Connect section is showing (a connected card's, to add another account). */
+    adding?: boolean;
     /** The id of the panel it opens, for `aria-controls`. */
     detailId: string;
     onToggle: () => void;
+    onConnect: () => void;
     onReconnect: () => void;
 }
 
@@ -42,38 +45,46 @@ function Control(props: ConnectorCardProps): JSX.Element {
     const named = () => {
         switch (e().control) {
             case "connect":
-                return t("connectors.control.connectNamed", { name: e().name });
+                return e().connected
+                    ? t("connectors.control.addNamed", { name: e().name })
+                    : t("connectors.control.connectNamed", { name: e().name });
             case "howto":
                 return t("connectors.control.howToNamed", { name: e().name });
             default:
                 return t("connectors.control.reconnectNamed", { name: e().name });
         }
     };
+    const chevron = () => <span class="connector-card-chevron" aria-hidden="true" data-open={props.open ? "" : undefined} />;
+    // What the button opens: a card's Connect section, or its details for the one that has no Connect section.
+    const expanded = () => (e().control === "connect" && e().connected ? props.adding : props.open);
+    const press = () => {
+        if (e().control === "reconnect") props.onReconnect();
+        else if (e().control === "connect") props.onConnect();
+        else props.onToggle();
+    };
     return (
         <Show
-            when={e().control !== "open"}
+            when={!props.flash}
             fallback={
-                <Show
-                    when={props.flash}
-                    fallback={<span class="connector-card-chevron" aria-hidden="true" data-open={props.open ? "" : undefined} />}
-                >
-                    <span class="connector-card-flash" aria-hidden="true">
-                        {t("connectors.flash.connected")}
-                    </span>
-                </Show>
+                <span class="connector-card-flash" aria-hidden="true">
+                    {t("connectors.flash.connected")}
+                </span>
             }
         >
-            <Button
-                density="compact"
-                tone={e().control === "howto" ? "neutral" : "accent"}
-                icon={e().control === "reconnect" ? "rotate-right" : undefined}
-                aria-label={named()}
-                aria-expanded={e().control === "reconnect" ? undefined : props.open ? "true" : "false"}
-                aria-controls={e().control === "reconnect" ? undefined : props.detailId}
-                onClick={() => (e().control === "reconnect" ? props.onReconnect() : props.onToggle())}
-            >
-                {label()}
-            </Button>
+            <Show when={e().control !== "open"} fallback={chevron()}>
+                <Button
+                    density="compact"
+                    tone={e().control === "howto" ? "neutral" : "accent"}
+                    icon={e().control === "reconnect" ? "rotate-right" : undefined}
+                    aria-label={named()}
+                    aria-expanded={e().control === "reconnect" ? undefined : expanded() ? "true" : "false"}
+                    aria-controls={e().control === "reconnect" ? undefined : props.detailId}
+                    onClick={press}
+                >
+                    {label()}
+                </Button>
+                <Show when={e().connected}>{chevron()}</Show>
+            </Show>
         </Show>
     );
 }

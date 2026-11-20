@@ -144,6 +144,7 @@
 .connector-card-control {
     grid-area: control;
     display: inline-flex;
+    align-items: center;
     justify-self: end;
 }
 
@@ -190,17 +191,11 @@
     font-size: var(--text-xs);
 }
 
-// What opens under a connected card: its accounts, then Add another account.
+// What opens under a connected card: its accounts, then the Connect section when its Connect is pressed.
 .connector-details {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-2);
     min-width: 0;
-}
-
-.connector-details-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1-5);
 }
