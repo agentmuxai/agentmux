@@ -1078,9 +1078,59 @@ unsafe fn build_window_with(footer: Option<&[String]>, activate: bool) -> (id, i
 
     send_void_id(backdrop, sel(b"addSubview:\0"), image_view);
 
-    // Footer: native NSTextField labels in the bottom band (muted, centered).
-    // They fade with the window on dismiss (window alpha ramps) and do not
-    // pulse. macOS Y is bottom-up: line[0] (user@host) sits above line[1] (version).
+    let footer_labels = add_footer(backdrop, footer);
+
+    // Stage-telemetry rows: MAX_STAGE_ROWS pre-allocated (label, time) field
+    // pairs between the footer band and the brain region, hidden/empty until
+    // update_stage_fields fills them in. Row 0 sits at the top of the panel
+    // (closest to the brain); later rows go downward (macOS Y decreases).
+    let stage_font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 11.0);
+    let area_top = FOOTER_BAND_H + STAGE_AREA_H;
+    let name_w = SPLASH_W * STAGE_NAME_FRAC - STAGE_MARGIN_L;
+    let time_x = SPLASH_W * STAGE_NAME_FRAC;
+    let time_w = SPLASH_W - STAGE_MARGIN_R - time_x;
+    let mut stage_fields: Vec<(id, id)> = Vec::with_capacity(MAX_STAGE_ROWS);
+    for i in 0..MAX_STAGE_ROWS {
+        let y = area_top - STAGE_PAD_TOP - (i as f64 + 1.0) * STAGE_ROW_H;
+        let name_rect = CGRect {
+            origin: CGPoint { x: STAGE_MARGIN_L, y },
+            size: CGSize { width: name_w, height: STAGE_ROW_H },
+        };
+        let time_rect = CGRect {
+            origin: CGPoint { x: time_x, y },
+            size: CGSize { width: time_w, height: STAGE_ROW_H },
+        };
+        let name_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
+        send_void_rect(name_field, sel(b"setFrame:\0"), name_rect);
+        send_void_id(name_field, sel(b"setFont:\0"), stage_font);
+        send_void_bool(name_field, sel(b"setHidden:\0"), 1);
+        send_void_id(backdrop, sel(b"addSubview:\0"), name_field);
+
+        let time_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
+        send_void_rect(time_field, sel(b"setFrame:\0"), time_rect);
+        send_void_id(time_field, sel(b"setFont:\0"), stage_font);
+        send_void_i64(time_field, sel(b"setAlignment:\0"), 2); // NSTextAlignmentRight
+        send_void_bool(time_field, sel(b"setHidden:\0"), 1);
+        send_void_id(backdrop, sel(b"addSubview:\0"), time_field);
+
+        stage_fields.push((name_field, time_field));
+    }
+
+    send_void_id(window, sel(b"setContentView:\0"), backdrop);
+
+    // Bring the app + window up immediately.
+    send_void(app, sel(b"finishLaunching\0"));
+    if activate {
+        send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
+    }
+    send_void(window, sel(b"orderFrontRegardless\0"));
+    (window, image_view, stage_fields, footer_labels)
+}
+
+/// The footer: native NSTextField labels in the bottom band (muted, centered), `footer`'s lines or, with none given,
+/// the identity strip. They fade with the window on dismiss (window alpha ramps) and do not pulse. macOS Y is
+/// bottom-up: line[0] (user@host) sits above line[1] (version). Returns the labels, so they can be changed.
+unsafe fn add_footer(backdrop: id, footer: Option<&[String]>) -> Vec<id> {
     let mut footer_labels: Vec<id> = Vec::new();
     {
         let max_chars = ((SPLASH_W - 24.0) / 7.5) as usize; // ~7.5 px/char at 13px mono
@@ -1129,52 +1179,7 @@ unsafe fn build_window_with(footer: Option<&[String]>, activate: bool) -> (id, i
             footer_labels.push(label);
         }
     }
-
-    // Stage-telemetry rows: MAX_STAGE_ROWS pre-allocated (label, time) field
-    // pairs between the footer band and the brain region, hidden/empty until
-    // update_stage_fields fills them in. Row 0 sits at the top of the panel
-    // (closest to the brain); later rows go downward (macOS Y decreases).
-    let stage_font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 11.0);
-    let area_top = FOOTER_BAND_H + STAGE_AREA_H;
-    let name_w = SPLASH_W * STAGE_NAME_FRAC - STAGE_MARGIN_L;
-    let time_x = SPLASH_W * STAGE_NAME_FRAC;
-    let time_w = SPLASH_W - STAGE_MARGIN_R - time_x;
-    let mut stage_fields: Vec<(id, id)> = Vec::with_capacity(MAX_STAGE_ROWS);
-    for i in 0..MAX_STAGE_ROWS {
-        let y = area_top - STAGE_PAD_TOP - (i as f64 + 1.0) * STAGE_ROW_H;
-        let name_rect = CGRect {
-            origin: CGPoint { x: STAGE_MARGIN_L, y },
-            size: CGSize { width: name_w, height: STAGE_ROW_H },
-        };
-        let time_rect = CGRect {
-            origin: CGPoint { x: time_x, y },
-            size: CGSize { width: time_w, height: STAGE_ROW_H },
-        };
-        let name_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
-        send_void_rect(name_field, sel(b"setFrame:\0"), name_rect);
-        send_void_id(name_field, sel(b"setFont:\0"), stage_font);
-        send_void_bool(name_field, sel(b"setHidden:\0"), 1);
-        send_void_id(backdrop, sel(b"addSubview:\0"), name_field);
-
-        let time_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
-        send_void_rect(time_field, sel(b"setFrame:\0"), time_rect);
-        send_void_id(time_field, sel(b"setFont:\0"), stage_font);
-        send_void_i64(time_field, sel(b"setAlignment:\0"), 2); // NSTextAlignmentRight
-        send_void_bool(time_field, sel(b"setHidden:\0"), 1);
-        send_void_id(backdrop, sel(b"addSubview:\0"), time_field);
-
-        stage_fields.push((name_field, time_field));
-    }
-
-    send_void_id(window, sel(b"setContentView:\0"), backdrop);
-
-    // Bring the app + window up immediately.
-    send_void(app, sel(b"finishLaunching\0"));
-    if activate {
-        send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
-    }
-    send_void(window, sel(b"orderFrontRegardless\0"));
-    (window, image_view, stage_fields, footer_labels)
+    footer_labels
 }
 
 // The "Updating to <version>" window of a `.dmg` upgrade's hand-off: its own file.
