@@ -413,7 +413,9 @@ mod tests {
         r.client(4242, 9, &info(1_000_000_000));
         let mut gpu = Gpu::open_with(r.fs()).unwrap();
         assert!(matches!(gpu.read(true).unwrap(), Read::Warming));
-        // The engine ran for 0.3 s more over (about) the 0.3 s that passed: a reading that is about whole.
+        // The engine ran for 0.3 s more, over at least the 0.3 s that passed: some use, never over the whole. The exact
+        // figure depends on how long a loaded machine took to wake, so only its bounds are asserted (the arithmetic is
+        // pinned with fixed intervals in drm.rs).
         std::thread::sleep(Duration::from_millis(300));
         r.client(4242, 9, &info(1_300_000_000));
         let reading = reading(gpu.read(true).unwrap());
@@ -422,7 +424,7 @@ mod tests {
         let p = &reading.processes[0];
         assert_eq!((p.pid, p.dedicated), (4242, Some(200 << 20)));
         let use_pct = p.use_pct.expect("two reads give a use");
-        assert!((50.0..=100.0).contains(&use_pct), "{use_pct}");
+        assert!(use_pct > 0.0 && use_pct <= 100.0, "{use_pct}");
     }
 
     #[test]
@@ -459,10 +461,10 @@ mod tests {
         r.card("0000:01:00.0", "0x10de", "0x2484", "nvidia");
         let mut gpu = Gpu::open_with(r.fs()).unwrap();
         // This test machine may have NVIDIA's library; the card is only ever read through it, so either way no panic and
-        // the row is there.
+        // the row is there, with the name the id database gives it.
         let reading = reading(gpu.read(true).unwrap());
         assert_eq!(reading.adapters.len(), 1);
-        assert!(reading.adapters[0].name.contains("GeForce RTX 3070") || !reading.adapters[0].name.is_empty());
+        assert_eq!(reading.adapters[0].name, "NVIDIA GeForce RTX 3070");
     }
 
     #[test]

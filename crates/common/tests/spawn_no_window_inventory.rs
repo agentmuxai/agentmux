@@ -72,6 +72,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv-core/src/http_client_tests.rs", "std::env::current_exe(", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/srv-core/src/backend/gpu/nvml.rs", "\"cc\"", 1,
+     "test: Linux-only unit test compiles a fake NVIDIA library in a temp folder, never on a user machine"),
     ("crates/srv-core/src/identity/gh_agent_token.rs", "&exe", 3,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv-core/src/identity/aws_broker/mint.rs", "&spec.program", 1,
