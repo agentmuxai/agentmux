@@ -31,36 +31,48 @@ pub fn policy(config: &ConfigState, hosted: bool) -> Policy {
 
 /// A hosted pass is skipped when this version started without the data of the one before it, or carried forward a copy
 /// that was itself empty. Then the old folders may hold the only good copy of the person's data, so none of them is
-/// judged. A version that was carried forward records where from (`carried-from`). That source counts only when it is
-/// the origin of the data (the pre-versioning copy, or a version with no older data) or was carried forward itself:
-/// a version that started fresh after a failed copy has neither, yet looks like a source to the next start.
+/// judged. A version that was carried forward records where from (`carried-from`), but a marker proves a copy happened,
+/// not that its source held good data: a copy of an empty fresh start has one too. So the chain is followed back from the
+/// running version, and every hop must hold data and lead, hop by hop, to the origin of the data (the pre-versioning copy,
+/// or a version with no older data). A version that started fresh after a failed copy has no marker and older data
+/// behind it, so any chain through it fails.
 fn start_is_confirmed(layout: &ov::Layout) -> bool {
     use crate::migrations::carry_forward::{version_core, CARRIED_FROM_FILE, PRE_VERSIONING};
     let db_of = |name: &str| layout.versions_root.join(name).join("data").join("db");
-    let Ok(from) = std::fs::read_to_string(db_of(&layout.running).join(CARRIED_FROM_FILE)) else {
-        return false;
-    };
-    let from = from.trim();
-    if from == PRE_VERSIONING {
-        return true;
-    }
-    let Some(from_core) = version_core(from) else {
-        return false;
-    };
-    let source = db_of(from);
-    if !source.join("objects.db").is_file() {
-        return false;
-    }
-    if source.join(CARRIED_FROM_FILE).is_file() {
-        return true;
-    }
-    let has_older_data = std::fs::read_dir(&layout.versions_root).map(|d| {
-        d.filter_map(|e| e.ok()).any(|e| {
-            let name = e.file_name();
-            name.to_str().and_then(version_core).is_some_and(|v| v < from_core) && db_of(&name.to_string_lossy()).join("objects.db").is_file()
+    let has_older_data = |than: (u64, u64, u64)| {
+        std::fs::read_dir(&layout.versions_root).map(|d| {
+            d.filter_map(|e| e.ok()).any(|e| {
+                let name = e.file_name();
+                name.to_str().and_then(version_core).is_some_and(|v| v < than) && db_of(&name.to_string_lossy()).join("objects.db").is_file()
+            })
         })
-    });
-    has_older_data.is_ok_and(|older| !older)
+    };
+    let Some(mut at) = version_core(&layout.running) else {
+        return false;
+    };
+    let mut marker = std::fs::read_to_string(db_of(&layout.running).join(CARRIED_FROM_FILE));
+    // Each hop goes to a strictly older version, so the walk ends; a marker naming anything else fails.
+    loop {
+        let Ok(text) = marker else {
+            return false;
+        };
+        let from = text.trim();
+        if from == PRE_VERSIONING {
+            return true;
+        }
+        let Some(from_core) = version_core(from).filter(|v| *v < at) else {
+            return false;
+        };
+        let source = db_of(from);
+        if !source.join("objects.db").is_file() {
+            return false;
+        }
+        marker = std::fs::read_to_string(source.join(CARRIED_FROM_FILE));
+        if marker.is_err() {
+            return has_older_data(from_core).is_ok_and(|older| !older);
+        }
+        at = from_core;
+    }
 }
 
 fn pass(config: &ConfigState, hosted: bool) {
@@ -173,6 +185,27 @@ mod tests {
         let l = layout(root.path());
         std::fs::write(db_dir(&l).join(crate::migrations::carry_forward::CARRIED_FROM_FILE), crate::migrations::carry_forward::PRE_VERSIONING).unwrap();
         assert!(start_is_confirmed(&l));
+    }
+
+    /// A marker proves a copy, not good data: 0.60.35 copied the empty 0.60.34 and so has a marker, and 0.60.36 copied that.
+    /// The chain back from 36 passes 35 (marked) but ends at 34, which has no marker and older data behind it.
+    #[test]
+    fn a_chain_through_a_copy_of_an_empty_fresh_start_is_not_confirmed() {
+        let root = tempfile::tempdir().unwrap();
+        let l = layout(root.path());
+        version_with_data(&l, "0.60.33", None);
+        version_with_data(&l, "0.60.34", None);
+        version_with_data(&l, "0.60.35", Some("0.60.34"));
+        std::fs::write(db_dir(&l).join(crate::migrations::carry_forward::CARRIED_FROM_FILE), "0.60.35").unwrap();
+        assert!(!start_is_confirmed(&l));
+    }
+
+    #[test]
+    fn a_marker_that_does_not_name_an_older_version_is_not_confirmed() {
+        let root = tempfile::tempdir().unwrap();
+        let l = carried_from_old(root.path());
+        version_with_data(&l, "0.60.34", Some("0.60.34"));
+        assert!(!start_is_confirmed(&l), "a loop back to itself");
     }
 
     /// The data-loss case: 0.60.34 started fresh after a failed copy (empty databases, no record), and this version then
