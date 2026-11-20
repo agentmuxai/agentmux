@@ -8,7 +8,7 @@
  */
 
 import { Menu, type MenuEntry, type MenuProps } from "@/app/element/ui/Menu";
-import { createSignal, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
 export interface MenuTriggerProps extends Pick<MenuProps, "placement" | "alignIcons" | "containWithin" | "alignToAnchorSide" | "aria-label" | "class" | "testId"> {
     items: MenuEntry[];
@@ -27,13 +27,23 @@ export function MenuTrigger(props: MenuTriggerProps): JSX.Element {
         setOpen(next);
         props.onOpenChange?.(next);
     };
+    const triggerElement = () => anchor?.querySelector<HTMLElement>("button, [tabindex]") ?? null;
     const toggle = () => {
         if (!open()) {
             const active = document.activeElement;
-            opener = active instanceof HTMLElement && anchor?.contains(active) ? active : (anchor?.querySelector<HTMLElement>("button, [tabindex]") ?? null);
+            opener = active instanceof HTMLElement && anchor?.contains(active) ? active : triggerElement();
         }
         set(!open());
     };
+    // The trigger says whether its menu is open, and that it opens one, so a screen reader announces both. The
+    // caller's own `aria-haspopup`, when it set one, is kept.
+    createEffect(() => {
+        const expanded = open();
+        const el = triggerElement();
+        if (!el) return;
+        el.setAttribute("aria-expanded", String(expanded));
+        if (!el.hasAttribute("aria-haspopup")) el.setAttribute("aria-haspopup", "menu");
+    });
     const close = () => {
         set(false);
         // After a pick has run: focus that fell to <body> goes back to the trigger. A pick that moved it keeps it.

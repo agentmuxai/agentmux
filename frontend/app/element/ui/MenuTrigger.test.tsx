@@ -66,6 +66,29 @@ describe("MenuTrigger", () => {
         expect(onOpenChange).toHaveBeenLastCalledWith(false);
     });
 
+    it("tells a screen reader that the trigger opens a menu, and whether it is open now", async () => {
+        const trigger = mount();
+        expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.click(trigger);
+        await placed();
+        expect(trigger.getAttribute("aria-expanded")).toBe("true");
+        fireEvent.keyDown(window, { key: "Escape" });
+        await Promise.resolve();
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("keeps an aria-haspopup the caller set", () => {
+        render(() => (
+            <MenuTrigger items={[{ label: "One", testId: "one" }]} aria-label="Things">
+                <button type="button" data-testid="own" aria-haspopup="listbox">
+                    Open
+                </button>
+            </MenuTrigger>
+        ));
+        expect(screen.getByTestId("own").getAttribute("aria-haspopup")).toBe("listbox");
+    });
+
     it("closes on a pick and runs it, and on an outside press", async () => {
         const onPick = vi.fn();
         const trigger = mount({ onPick });
