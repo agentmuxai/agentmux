@@ -92,7 +92,7 @@ const UpdateStatus = (): JSX.Element => {
     const handleClick = () => {
         // A release srv staged: What's new / Restart now / Later, and what a restart under way
         // waits for. A release srv found but did not stage: the version panel, which has the rest.
-        // The click itself installs nothing: Restart now still ends in the launcher's own dialog.
+        // The click itself installs nothing: Restart now starts srv's wait, then the restart.
         if (hasPanel()) {
             setPanelOpen(!panelOpen());
             return;
