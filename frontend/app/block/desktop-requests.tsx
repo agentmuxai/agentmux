@@ -49,6 +49,7 @@ async function decideRequest(r: DesktopRequest, choice: DesktopChoice): Promise<
 function showCard(r: DesktopRequest): PaneRequestHandle {
     return paneRequests.push(r.block_id, {
         source: "desktop",
+        operatorOnly: true,
         Component: DesktopRequestCard,
         props: { request: r, decide: (choice: DesktopChoice) => decideRequest(r, choice) },
         summary: `${r.agent}: control ${r.app}`,

@@ -79,6 +79,7 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
 function showCard(r: WidgetInstallRequest): PaneRequestHandle {
     return paneRequests.push(r.block_id, {
         source: "widget-install",
+        operatorOnly: true,
         Component: WidgetInstallCard,
         props: { request: r, decide: (approve: boolean) => decide(r, approve) },
         summary: `${r.agent}: install ${r.name}`,

@@ -51,15 +51,15 @@ afterEach(() => {
 
 describe("paneRequests", () => {
     it("keeps each pane's requests to itself, in the order they came", () => {
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "one" } });
-        paneRequests.push("b", { source: "vault-use", Component: Card, props: { label: "other pane" } });
-        paneRequests.push("a", { source: "vault-request", Component: Card, props: { label: "two" } });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "one" } });
+        paneRequests.push("b", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "other pane" } });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-request", Component: Card, props: { label: "two" } });
         expect(paneRequests.of("a").map((r) => r.props.label)).toEqual(["one", "two"]);
         expect(paneRequests.of("b").map((r) => r.props.label)).toEqual(["other pane"]);
     });
 
     it("is one waiting source per request, ended when it is answered, once", () => {
-        const h = paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" }, text: "Builder wants GitHub token", what: "asks to use a secret" });
+        const h = paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "x" }, text: "Builder wants GitHub token", what: "asks to use a secret" });
         expect(started).toHaveBeenCalledWith("a", expect.stringContaining("vault-use"), "Builder wants GitHub token", {
             what: "asks to use a secret",
         });
@@ -72,15 +72,15 @@ describe("paneRequests", () => {
     });
 
     it("starts no wait for a request nothing waits on", () => {
-        paneRequests.push("a", { source: "info", Component: Card, props: { label: "x" }, waits: false });
+        paneRequests.push("a", { operatorOnly: true, source: "info", Component: Card, props: { label: "x" }, waits: false });
         expect(started).not.toHaveBeenCalled();
     });
 
     it("gives the safe answer when its pane is closed, and only for that pane", async () => {
         const goneA = vi.fn();
         const goneB = vi.fn();
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" }, onGone: goneA });
-        paneRequests.push("b", { source: "vault-use", Component: Card, props: { label: "y" }, onGone: goneB });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "x" }, onGone: goneA });
+        paneRequests.push("b", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "y" }, onGone: goneB });
         pane("a")[1](undefined);
         await Promise.resolve();
         await Promise.resolve();
@@ -92,7 +92,7 @@ describe("paneRequests", () => {
 
     it("an answered request gives no safe answer later", async () => {
         const gone = vi.fn();
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" }, onGone: gone }).close();
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "x" }, onGone: gone }).close();
         pane("a")[1](undefined);
         await Promise.resolve();
         await Promise.resolve();
@@ -105,7 +105,7 @@ describe("paneRequests", () => {
         const dispose = createRoot((d) => {
             createEffect(() => {
                 runs++;
-                const h = paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: label() } });
+                const h = paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: label() } });
                 if (label() === "two") h.close();
             });
             return d;
@@ -125,9 +125,9 @@ describe("PaneRequestDock", () => {
     });
 
     it("shows the first card in full and the rest as lines, operator-only, and a line shows its card", () => {
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "GitHub token" }, summary: "GitHub token" });
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "Stripe key" }, summary: "Stripe key (0:12)" });
-        paneRequests.push("a", { source: "modal", Component: Card, props: { label: "a modal" }, presentation: "modal" });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "GitHub token" }, summary: "GitHub token" });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "Stripe key" }, summary: "Stripe key (0:12)" });
+        paneRequests.push("a", { operatorOnly: true, source: "modal", Component: Card, props: { label: "a modal" }, presentation: "modal" });
         const r = render(() => <PaneRequestDock blockId="a" />);
         const dock = r.getByTestId("pane-request-dock");
         expect(dock.hasAttribute("data-operator-only")).toBe(true);
@@ -136,6 +136,17 @@ describe("PaneRequestDock", () => {
         fireEvent.click(r.getByText("Stripe key (0:12)"));
         expect(r.getAllByTestId("card").map((c) => c.textContent)).toEqual([expect.stringContaining("Stripe key")]);
         expect(r.getByTestId("pane-request-more").textContent).toContain("GitHub token");
+    });
+
+    it("marks the dock operator-only only while the card shown answers an agent's ask, and a line only when its card does", () => {
+        paneRequests.push("a", { operatorOnly: false, source: "endpoint-notice", Component: Card, props: { label: "a notice" }, summary: "notice" });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "a secret" }, summary: "secret" });
+        const r = render(() => <PaneRequestDock blockId="a" />);
+        expect(r.getByTestId("pane-request-dock").hasAttribute("data-operator-only")).toBe(false);
+        expect(r.getByText("secret").closest("button")?.hasAttribute("data-operator-only")).toBe(true);
+        fireEvent.click(r.getByText("secret"));
+        expect(r.getByTestId("pane-request-dock").hasAttribute("data-operator-only")).toBe(true);
+        expect(r.getByText("notice").closest("button")?.hasAttribute("data-operator-only")).toBe(false);
     });
 
     it("never takes the focus from the composer", () => {
@@ -147,14 +158,14 @@ describe("PaneRequestDock", () => {
         ));
         const composer = r.getByTestId("composer") as HTMLTextAreaElement;
         composer.focus();
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "x" } });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "x" } });
         expect(r.getByTestId("card")).toBeTruthy();
         expect(document.activeElement).toBe(composer);
     });
 
     it("a card's own close takes it away and shows the next", () => {
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "first" } });
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "second" } });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "first" } });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "second" } });
         const r = render(() => <PaneRequestDock blockId="a" />);
         fireEvent.click(r.getByText("Done"));
         expect(r.getAllByTestId("card").map((c) => c.textContent)).toEqual([expect.stringContaining("second")]);
@@ -163,19 +174,27 @@ describe("PaneRequestDock", () => {
 });
 
 describe("PaneRequestModals", () => {
-    it("makes every modal it draws operator-only, whatever the caller passed", () => {
+    it("draws a modal operator-only when its request says so, and not otherwise", () => {
         const Probe = (_: PaneRequestProps) => <div data-testid="probe">{String(useContext(OperatorOnlyModals))}</div>;
-        openPaneModal("a", Probe, {});
+        openPaneModal("a", Probe, {}, { operatorOnly: true });
         const r = render(() => <PaneRequestModals blockId="a" />);
         expect(r.getByTestId("probe").textContent).toBe("true");
         const outside = render(() => <Probe close={() => {}} />);
         expect(outside.container.querySelector("[data-testid=probe]")?.textContent).toBe("false");
     });
 
+    it("gives each modal its own request's mark: the person's own 'are you sure?' is left open to the shortcut API beside an approval", () => {
+        const Probe = (p: { name: string } & PaneRequestProps) => <div data-testid="probe">{`${p.name}:${useContext(OperatorOnlyModals)}`}</div>;
+        openPaneModal("a", Probe, { name: "approval" }, { operatorOnly: true });
+        openPaneModal("a", Probe, { name: "replace-pane" }, { operatorOnly: false });
+        const r = render(() => <PaneRequestModals blockId="a" />);
+        expect(r.getAllByTestId("probe").map((p) => p.textContent)).toEqual(["approval:true", "replace-pane:false"]);
+    });
+
     it("draws only its pane's modal requests", () => {
-        openPaneModal("a", Card, { label: "sign in" });
-        openPaneModal("b", Card, { label: "elsewhere" });
-        paneRequests.push("a", { source: "vault-use", Component: Card, props: { label: "a card" } });
+        openPaneModal("a", Card, { label: "sign in" }, { operatorOnly: true });
+        openPaneModal("b", Card, { label: "elsewhere" }, { operatorOnly: true });
+        paneRequests.push("a", { operatorOnly: true, source: "vault-use", Component: Card, props: { label: "a card" } });
         const r = render(() => <PaneRequestModals blockId="a" />);
         expect(r.getAllByTestId("card").map((c) => c.textContent)).toEqual([expect.stringContaining("sign in")]);
     });

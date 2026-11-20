@@ -390,7 +390,8 @@ describe("selecting agents on the map", () => {
         fireEvent.input(container.querySelector(".swarm-broadcast-input")!, { target: { value: "ship it" } });
         fireEvent.click(container.querySelector(".swarm-fleet-btn--primary")!);
         await Promise.resolve();
-        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it");
+        // The second argument is the id the composer follows the send's progress by.
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));
     });
 
     it("stops the selection only after the Swarm's own confirmation", async () => {
