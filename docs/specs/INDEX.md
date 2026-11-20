@@ -255,6 +255,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 |---|---|---|---|---|
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18`](SPEC_PICKED_COLOUR_IS_THE_COLOUR_SEEN_2026_11_18.md) | SPEC: the colour you pick is the colour you see (tabs first), with the filters and overlays audited | active | 2026-11-18 |  |
+| [`SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17`](SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md) | Command palette: top centre, plain rows, every shortcut shown | active | 2026-11-17 |  |
 | [`SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17`](SPEC_MEMORY_DELIVERY_INDEX_NOT_FULL_TEXT_2026_11_17.md) | Spec: Memory after a compaction or a rebuilt session: an index of Personal Memory, nothing sent twice, nothing cut silently | active | 2026-11-17 |  |
 | [`SPEC_MENU_SURFACES_STAND_OUT_2026_11_17`](SPEC_MENU_SURFACES_STAND_OUT_2026_11_17.md) | Spec: menus that stand out from the background, in every theme | implemented | 2026-11-17 |  |
 | [`SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16`](SPEC_AGENT_PANE_API_KEY_ACCOUNT_SWITCH_2026_11_16.md) | Spec: an Anthropic API key as an account in the agent pane's menu (first slice) | active | 2026-11-16 |  |

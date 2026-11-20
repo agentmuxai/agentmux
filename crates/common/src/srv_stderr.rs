@@ -365,28 +365,44 @@ pub enum UpgradeTarget {
 pub struct UpgradeRequest {
     pub version: String,
     pub target: UpgradeTarget,
+    /// srv says the restart is already decided (`confirmed:1`): a person's own click or turn, or an approved
+    /// request whose in-app countdown ran out with no veto. The launcher then asks nothing more.
+    pub confirmed: bool,
 }
 
-/// The path goes last: it can hold spaces.
-pub fn upgrade_line(version: &str, target: &UpgradeTarget) -> String {
+/// The path goes last: it can hold spaces. `confirmed` adds `confirmed:1` after the version: the restart is
+/// already decided, so the launcher asks nothing more ([`UpgradeRequest::confirmed`]).
+pub fn upgrade_line(version: &str, target: &UpgradeTarget, confirmed: bool) -> String {
+    let decided = if confirmed { " confirmed:1" } else { "" };
     match target {
-        UpgradeTarget::Launcher(p) => format!("{} version:{} launcher:{}", UPGRADE_PREFIX, version, p.display()),
+        UpgradeTarget::Launcher(p) => format!("{} version:{}{} launcher:{}", UPGRADE_PREFIX, version, decided, p.display()),
         UpgradeTarget::Installer { installer, sha256 } => {
-            format!("{} version:{} sha256:{} installer:{}", UPGRADE_PREFIX, version, sha256, installer.display())
+            format!("{} version:{}{} sha256:{} installer:{}", UPGRADE_PREFIX, version, decided, sha256, installer.display())
         }
     }
 }
 
 /// Parse an `UPGRADE_PREFIX` line. `None` for any other line, or one missing
-/// a field (an installer needs its 64-hex-digit `sha256:`). An `approved:<how>:<id>`
-/// token after `version:` is skipped.
+/// a field (an installer needs its 64-hex-digit `sha256:`). A `confirmed:1`
+/// token after `version:` sets [`UpgradeRequest::confirmed`] (any other value of it does not); an
+/// `approved:<how>:<id>` token is skipped.
 pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
     let rest = line.strip_prefix(UPGRADE_PREFIX)?.trim_start();
     let (version, rest) = rest.strip_prefix("version:")?.split_once(' ')?;
     let mut rest = rest.trim_start();
-    // `approved:<how>:<id>` (who approved the restart) may come before the target; the launcher doesn't use it.
-    if let Some(approved) = rest.strip_prefix("approved:") {
-        rest = approved.split_once(' ')?.1.trim_start();
+    let mut confirmed = false;
+    // Tokens that may come before the target, in either order: `confirmed:<1>`, and `approved:<how>:<id>` (who
+    // approved the restart; the launcher doesn't use it).
+    loop {
+        if let Some(c) = rest.strip_prefix("confirmed:") {
+            let (value, after) = c.split_once(' ')?;
+            confirmed = value == "1";
+            rest = after.trim_start();
+        } else if let Some(approved) = rest.strip_prefix("approved:") {
+            rest = approved.split_once(' ')?.1.trim_start();
+        } else {
+            break;
+        }
     }
     let target = if let Some(p) = rest.strip_prefix("launcher:") {
         UpgradeTarget::Launcher(p.trim().into())
@@ -404,7 +420,7 @@ pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
     if version.is_empty() || empty {
         return None;
     }
-    Some(UpgradeRequest { version: version.to_string(), target })
+    Some(UpgradeRequest { version: version.to_string(), target, confirmed })
 }
 
 #[cfg(test)]
@@ -502,19 +518,45 @@ mod tests {
     }
 
     #[test]
+    fn a_confirmed_restart_says_so_on_the_line_and_only_with_the_one_value() {
+        let sha = "ab".repeat(32);
+        let setup = UpgradeTarget::Installer { installer: r"C:\Users\A User\updates\0.60.35\AgentMux-0.60.35-x64-setup.exe".into(), sha256: sha.clone() };
+        let launcher = UpgradeTarget::Launcher("/opt/a b/agentmux.sh".into());
+        for target in [setup, launcher] {
+            let line = upgrade_line("0.60.35", &target, true);
+            assert!(line.starts_with("AGENTMUXSRV-UPGRADE version:0.60.35 confirmed:1 "), "{line}");
+            assert_eq!(parse_upgrade_line(&line), Some(UpgradeRequest { version: "0.60.35".into(), target: target.clone(), confirmed: true }));
+            // Not said, not confirmed: the launcher then asks as it always did.
+            assert!(!upgrade_line("0.60.35", &target, false).contains("confirmed"));
+            assert!(!parse_upgrade_line(&upgrade_line("0.60.35", &target, false)).unwrap().confirmed);
+        }
+        // Only `confirmed:1` confirms, whatever else it says, and it may sit beside the `approved:` token in either order.
+        let line = format!("AGENTMUXSRV-UPGRADE version:0.60.35 confirmed:0 sha256:{sha} installer:/u/a.deb");
+        assert!(!parse_upgrade_line(&line).unwrap().confirmed);
+        let line = format!("AGENTMUXSRV-UPGRADE version:0.60.35 confirmed:yes sha256:{sha} installer:/u/a.deb");
+        assert!(!parse_upgrade_line(&line).unwrap().confirmed);
+        let line = format!("AGENTMUXSRV-UPGRADE version:0.60.35 approved:agent:agenty confirmed:1 sha256:{sha} installer:/u/a.deb");
+        assert!(parse_upgrade_line(&line).unwrap().confirmed);
+        let line = format!("AGENTMUXSRV-UPGRADE version:0.60.35 confirmed:1 approved:agent:agenty sha256:{sha} installer:/u/a.deb");
+        assert!(parse_upgrade_line(&line).unwrap().confirmed);
+        // The token alone is not a target.
+        assert_eq!(parse_upgrade_line("AGENTMUXSRV-UPGRADE version:0.60.35 confirmed:1 "), None);
+    }
+
+    #[test]
     fn upgrade_line_round_trips_a_path_with_spaces() {
         let path = std::path::Path::new(r"C:\Users\A User\Apps\agentmux-0.59.27-x64-portable\agentmux.exe");
         let target = UpgradeTarget::Launcher(path.to_path_buf());
-        let line = upgrade_line("0.59.27", &target);
-        assert_eq!(parse_upgrade_line(&line), Some(UpgradeRequest { version: "0.59.27".into(), target }));
+        let line = upgrade_line("0.59.27", &target, false);
+        assert_eq!(parse_upgrade_line(&line), Some(UpgradeRequest { version: "0.59.27".into(), target, confirmed: false }));
         let sha = "ab".repeat(32);
         let setup = UpgradeTarget::Installer {
             installer: r"C:\Users\A User\updates\0.59.27\AgentMux-0.59.27-x64-setup.exe".into(),
             sha256: sha.clone(),
         };
         assert_eq!(
-            parse_upgrade_line(&upgrade_line("0.59.27", &setup)),
-            Some(UpgradeRequest { version: "0.59.27".into(), target: setup })
+            parse_upgrade_line(&upgrade_line("0.59.27", &setup, false)),
+            Some(UpgradeRequest { version: "0.59.27".into(), target: setup, confirmed: false })
         );
         assert_eq!(parse_upgrade_line(&format!("AGENTMUXSRV-UPGRADE version:0.59.27 sha256:{sha} installer:")), None);
         // An installer without its digest, or with a malformed one, is refused.

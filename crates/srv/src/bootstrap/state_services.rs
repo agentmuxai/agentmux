@@ -297,6 +297,11 @@ pub fn spawn_state_services(state: &AppState) {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // A container agent's turn that ended well is when srv's compaction backstop looks at its context.
+    let backstop_state = state.clone();
+    backend::context_reading::observe_container_turn_ends(Box::new(move |block_id| {
+        crate::server::compact_backstop::after_container_turn(&backstop_state, block_id);
+    }));
     backend::container::limits::install_config(Arc::clone(&state.config_watcher));
     // The Claude CLI's own cross-session messaging is off unless `agent:climessaging` is true.
     backend::cli_messaging::install_config(Arc::clone(&state.config_watcher));

@@ -152,6 +152,22 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// End every `running` row of `block_id` that has no pid, each at its own last sighting, and return how many
+    /// ended. For a pane whose processes ran somewhere that is gone (a container that was started again or made
+    /// anew): a row with no pid can't be checked, so nothing else would ever say it ended. Ending it at its last
+    /// sighting, not now, keeps a long-dead task from reading as one that just stopped. A row with a pid is left
+    /// to the liveness sweep.
+    pub fn background_task_end_unchecked_for_block(&self, block_id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_background_tasks
+             SET status = 'stopped', ended_at_ms = last_seen_ms
+             WHERE block_id = ?1 AND status = 'running' AND pid IS NULL",
+            params![block_id],
+        )?;
+        Ok(rows)
+    }
+
     pub fn background_task_get(&self, id: &str) -> Result<Option<BackgroundTask>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM db_background_tasks WHERE id = ?1"))?;

@@ -13,7 +13,7 @@ import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { toolActivities } from "../../../agent-model/tool-adapter";
-import { EXIT_FLASH_MS, RETENTION_MS, type ActivityStatus, type PinnedActivity } from "../../../agent-model/activity-types";
+import { EXIT_FLASH_MS, RETENTION_MS, retentionStartedAt, type ActivityStatus, type PinnedActivity } from "../../../agent-model/activity-types";
 import type { DocumentNode } from "../../../agent-model/types";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
@@ -103,10 +103,11 @@ function createRetention(
         const activities = allActivities();
         let maxExpiry = 0;
         for (const a of activities) {
-            if (a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null) {
+            const from = retentionStartedAt(a);
+            if (a.status !== "running" && RETENTION_MS[a.status] !== Infinity && from != null) {
                 // + EXIT_FLASH_MS: the row stays in `visible` a bit past its nominal
                 // retention so the departure flash (below) has time to play.
-                maxExpiry = Math.max(maxExpiry, a.endedAt + RETENTION_MS[a.status] + EXIT_FLASH_MS);
+                maxExpiry = Math.max(maxExpiry, from + RETENTION_MS[a.status] + EXIT_FLASH_MS);
             }
         }
         const remaining = maxExpiry - Date.now();
@@ -129,7 +130,8 @@ function createRetention(
             if (a.status === "running") return true;
             const ret = RETENTION_MS[a.status];
             if (ret === Infinity) return true;
-            return a.endedAt != null && t - a.endedAt < ret + EXIT_FLASH_MS;
+            const from = retentionStartedAt(a);
+            return from != null && t - from < ret + EXIT_FLASH_MS;
         });
     });
 
@@ -138,10 +140,11 @@ function createRetention(
     // the flash and stays out of the way of D4's actual removal logic above.
     const isLeaving = (id: string): boolean => {
         const a = activityById().get(id);
-        if (!a || a.status === "running" || a.endedAt == null) return false;
+        const from = a ? retentionStartedAt(a) : undefined;
+        if (!a || a.status === "running" || from == null) return false;
         const ret = RETENTION_MS[a.status];
         if (ret === Infinity) return false;
-        return (hasExpiring() ? (tick(), Date.now()) : Date.now()) - a.endedAt >= ret;
+        return (hasExpiring() ? (tick(), Date.now()) : Date.now()) - from >= ret;
     };
 
     return { visible, isLeaving };

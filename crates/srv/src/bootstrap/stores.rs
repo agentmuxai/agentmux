@@ -132,6 +132,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let identity_store = open_identity_store(&mstore);
     let (work_store, cron_store) = open_work_store(&identity_store, shared_store.clone(), &db_dir);
     backend::work_store_handle::attach(work_store.clone());
+    // Which folders a container agent can write is read from the panes here: named before anything asks.
+    backend::fs_ops::container_folders::install(&mstore);
     // #3603: memory resolution finds the account an agent is linked to (the
     // directory its spawn runs Claude in) through these, read-only.
     crate::server::native_memory_handlers::attach_identity_stores(

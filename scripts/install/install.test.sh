@@ -269,6 +269,24 @@ else
     PLACES="$(command -v openssl)" expect "and a wrong signature is refused there" 1 "signature does not match" run_libre "$W/badsig"
     expect "the real openssl: the message names Ed25519 and the version" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_install "$W/good"
 
+    # ---- "latest" is never below the floor the script ships with, unless its Ed25519 signature is checked ----
+    mkdir -p "$W/latest"
+    printf '#!/bin/sh\nprintf "https://github.com/agentmuxai/agentmux/releases/tag/v%%s" "$FAKE_LATEST"\n' > "$W/latest/curl"; chmod +x "$W/latest/curl"
+    run_latest() { # <release dir> [args...]: no --version, so the version is what the (fake) network says is the latest: $VER
+        rel="$1"; shift
+        rm -rf "$W/h" && mkdir -p "$W/h"
+        FAKE_LATEST="$VER" HOME="$W/h" PATH="$W/latest:${LPATH:-$PATH}" AGENTMUX_INSTALL_ROOT="$W/none" AGENTMUX_INSTALL_OS=Linux AGENTMUX_INSTALL_ARCH=x86_64 AGENTMUX_INSTALL_PM=none \
+            AGENTMUX_INSTALL_TEST_KEYS="${KEYS:-$TESTKEYS}" AGENTMUX_INSTALL_RELEASE_BASE="$rel" sh "$SCRIPT" --no-launch --method download "$@"
+    }
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 expect "stale latest: a latest below the floor is installed when its Ed25519 signature is checked" 0 "signature of the release checked: Ed25519, with OpenSSL 3" run_latest "$W/good"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" expect "stale latest: a latest below the floor that can only be checked by its hashes is refused" 1 "is older than 99.0.0, which this script ships with" run_latest "$W/good"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" expect "stale latest: the refusal says how to install an older release on purpose" 1 "Give the version with --version" run_latest "$W/good"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" refuses_to_contain "stale latest: the refusal comes before anything is downloaded" "+ download" run_latest "$W/good"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" refuses_to_contain "stale latest: nothing is installed on hashes alone" "matches the manifest" run_latest "$W/good"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" expect "stale latest: --require-signature refuses too" 1 "not installing" run_latest "$W/good" --require-signature
+    AGENTMUX_INSTALL_SSHSIG_FLOOR=99.0.0 LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" expect "an explicit older version still installs as before, with the honest text" 0 "signature NOT checked" run_latest "$W/good" --version "$VER"
+    AGENTMUX_INSTALL_SSHSIG_FLOOR="$VER" LPATH="$W/libre:$PATH" AGENTMUX_INSTALL_OPENSSL_PLACES="$W/nowhere" refuses_to_contain "a latest at the floor is not stale" "which this script ships with" run_latest "$W/good"
+
     # ---- the SSH signature of the same envelope, checked with the system's ssh-keygen (what a stock Mac can do) ----
     if [ -n "${CI:-}" ] && ! command -v ssh-keygen > /dev/null 2>&1; then fail "ssh-keygen is installed where CI runs (a skip here would hide these checks)"; fi
     if ! command -v ssh-keygen > /dev/null 2>&1; then

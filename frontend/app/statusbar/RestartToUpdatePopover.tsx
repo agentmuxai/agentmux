@@ -6,8 +6,8 @@
  * once srv has downloaded, verified and staged the newer release by itself
  * (`update/auto.rs`). What's new, Restart now, Later. Restart now is the same
  * request as the version panel's Upgrade & restart: srv waits for agents to
- * finish their turn, then the launcher asks in a dialog of its own, so a click
- * here is never the whole consent.
+ * finish their turn, then the launcher restarts with no dialog of its own: the
+ * click is the consent.
  *
  * While srv waits, the panel names who it waits for and offers Cancel and
  * Restart anyway; once the wait ends the restart starts by itself and the
