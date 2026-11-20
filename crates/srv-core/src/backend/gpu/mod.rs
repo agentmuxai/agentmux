@@ -15,10 +15,18 @@
 //! `cost_tests` measures a read (run in CI, and on a machine of its own: `cargo test -p agentmux-srv-core gpu::cost
 //! -- --ignored --nocapture`).
 //!
-//! Windows reads the PDH counters (`pdh`); Linux and macOS are later phases and report [`GpuSampleState::Unsupported`].
+//! Windows reads the PDH counters (`pdh`). Linux reads what the kernel and the driver publish (`linux`: AMD's sysfs files,
+//! NVIDIA through NVML loaded at run time, `fdinfo` for the processes, Intel's memory only). macOS is a later phase and
+//! reports [`GpuSampleState::Unsupported`].
 
 pub mod aggregate;
+#[cfg(any(target_os = "linux", test))]
+pub mod drm;
+#[cfg(target_os = "linux")]
+mod linux;
 pub mod names;
+#[cfg(target_os = "linux")]
+mod nvml;
 #[cfg(windows)]
 mod pdh;
 
@@ -98,6 +106,8 @@ impl Sample {
 struct Inner {
     #[cfg(windows)]
     gpu: Option<pdh::Gpu>,
+    #[cfg(target_os = "linux")]
+    gpu: Option<linux::Gpu>,
     /// Counters could not be opened or read: not before this.
     retry_at: Option<Instant>,
     failures: u32,
@@ -121,7 +131,7 @@ impl GpuSampler {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(Inner {
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "linux"))]
                 gpu: None,
                 retry_at: None,
                 failures: 0,
@@ -191,12 +201,12 @@ impl Inner {
         sample
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn drop_counters(&mut self) {
         self.gpu = None;
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     fn drop_counters(&mut self) {}
 
     #[cfg(windows)]
@@ -218,7 +228,26 @@ impl Inner {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    fn read_now(&mut self, full: bool) -> Result<(GpuSampleState, Reading), String> {
+        if self.gpu.is_none() {
+            match linux::Gpu::open() {
+                Ok(gpu) => self.gpu = Some(gpu),
+                Err(why) => {
+                    self.retry_at = Some(Instant::now() + UNAVAILABLE_RETRY);
+                    tracing::debug!(error = %why, "gpu: no counters on this computer");
+                    return Ok((GpuSampleState::Unavailable, Reading::default()));
+                }
+            }
+        }
+        let gpu = self.gpu.as_mut().expect("opened above");
+        match gpu.read(full)? {
+            linux::Read::Warming => Ok((GpuSampleState::Warming, Reading::default())),
+            linux::Read::Reading(reading) => Ok((GpuSampleState::Ok, reading)),
+        }
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     fn read_now(&mut self, _full: bool) -> Result<(GpuSampleState, Reading), String> {
         Ok((GpuSampleState::Unsupported, Reading::default()))
     }
@@ -303,10 +332,13 @@ impl MemoryLimits {
     }
 }
 
-/// Whether a process is worth a row: it uses the GPU, or holds a megabyte of its memory.
+/// Whether a process is worth a row: it uses the GPU, or holds a megabyte of its memory. Where the use is not known at
+/// all (Intel's GPUs say none), the machine's memory it holds is the one thing there is to show.
 fn active(f: &ProcessFigures) -> bool {
     const MEMORY: u64 = 1 << 20;
-    f.use_pct.is_some_and(|u| u >= 0.5) || f.dedicated.unwrap_or(0) >= MEMORY
+    f.use_pct.is_some_and(|u| u >= 0.5)
+        || f.dedicated.unwrap_or(0) >= MEMORY
+        || (f.use_pct.is_none() && f.shared.unwrap_or(0) >= MEMORY)
 }
 
 /// The rows of the panel: AgentMux's own processes and the biggest [`OTHERS_LISTED`] others, sorted by use and then
