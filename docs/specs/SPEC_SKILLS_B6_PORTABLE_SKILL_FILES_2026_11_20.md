@@ -1,6 +1,6 @@
 # Spec: Skills B6, portable skill files for non-Claude agents
 
-**Status:** implemented, 2026-11-20, in #PRNUMBER
+**Status:** implemented, 2026-11-20, in #7834
 
 Follows the skills spec (#8050), which is not on `origin/main` (checked at 0.60.35, commit 1c35884: no document under `docs/specs` defines item B6). This defines the missing part, written from the code as it is today.
 
