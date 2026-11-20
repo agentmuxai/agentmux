@@ -465,6 +465,7 @@ jobs:
           path: signing-scripts
           persist-credentials: false
           sparse-checkout: |
+            scripts/unpack-macos-app.sh
             scripts/sign-macos-app.sh
             scripts/notarize-macos.sh
             scripts/make-macos-dmg.sh
@@ -569,15 +570,17 @@ jobs:
           # Everything that needed the secret has read it: the file goes now, not at the end.
           rm -f "$APPLE_SIGNING_FILE"
 
+      # The zip is input from code that ran in another job: unpack-macos-app.sh refuses an entry outside AgentMux.app (an
+      # absolute path, `..`), anything at the top besides AgentMux.app, a file that is not a regular file, folder or symlink,
+      # and a symlink that leaves the app. It starts nothing from the archive.
       - name: Unpack the unsigned app
         id: app
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$WORK/app" && mkdir -p "$WORK/app"
-          ditto -x -k "$WORK/in/AgentMux-unsigned-app.zip" "$WORK/app"
+          rm -rf "$WORK/app"
+          bash signing-scripts/scripts/unpack-macos-app.sh "$WORK/in/AgentMux-unsigned-app.zip" "$WORK/app"
           APP="$WORK/app/AgentMux.app"
-          [ -d "$APP/Contents" ] || { echo "::error::the build job's artifact holds no AgentMux.app"; exit 1; }
           # The version comes out of the app, and names the DMG: shape-checked, as it came from the build job.
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$ ]] || { echo "::error::the app's version is not a version"; exit 1; }
@@ -645,8 +648,11 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write   # needed to upload release assets via GITHUB_TOKEN
+    env:
+      # The team id of our Developer ID certificate (a repository variable: it is in every signed copy, and not a secret).
+      EXPECTED_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: macos-dmg-signed
           path: signed
@@ -663,6 +669,10 @@ jobs:
           [ "${#pending[@]}" = 1 ] || { echo "::error::expected one signed DMG, found ${#pending[@]}"; exit 1; }
           DMG="${pending[0]%.pending}"
           mv "${pending[0]}" "$DMG"
+          # Whose signature it is, not only that Apple accepts it: "Notarized Developer ID" is true of any developer's app.
+          [[ "$EXPECTED_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::the repository variable APPLE_TEAM_ID is not a team id"; exit 1; }
+          team_of() { codesign -dv --verbose=2 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+          [ "$(team_of "$DMG")" = "$EXPECTED_TEAM_ID" ] || { echo "::error::the DMG is not signed by our team"; exit 1; }
           xcrun stapler validate "$DMG"
           codesign --verify --strict --verbose=2 "$DMG"
           # Gatekeeper's verdict on a downloaded disk image.
@@ -673,6 +683,7 @@ jobs:
           trap 'hdiutil detach "$MNT" > /dev/null 2>&1 || true' EXIT
           APP="$MNT/AgentMux.app"
           # The app inside carries its own ticket (the first launch needs no network), is signed and is accepted.
+          [ "$(team_of "$APP")" = "$EXPECTED_TEAM_ID" ] || { echo "::error::the app is not signed by our team"; exit 1; }
           xcrun stapler validate "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           spctl -a -t exec -vv "$APP" 2>&1 | tee "$RUNNER_TEMP/spctl.txt"
@@ -683,7 +694,7 @@ jobs:
 
       # ── Upload to GitHub Actions artifacts (always) ────────────────────────
       - name: Upload DMG as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: macos-dmg
           path: ${{ steps.dmg.outputs.path }}

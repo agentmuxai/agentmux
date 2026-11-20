@@ -556,7 +556,14 @@ jobs:
       - name: Flatten artifact tree
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
+          # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
+          # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
+          if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
+            echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
@@ -698,7 +705,14 @@ jobs:
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
+          # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
+          # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
+          if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
+            echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
           for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done

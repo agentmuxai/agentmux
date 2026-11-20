@@ -164,6 +164,16 @@ describe("the signing job runs nothing from the built commit", () => {
         expect(checkouts[0]).toMatch(/persist-credentials: false/);
     });
 
+    it("unpacks the build job's zip with the checking script before it signs anything", () => {
+        const names = stepsOf("sign").map((s) => (/- name: (.*)/.exec(s) ?? [])[1] ?? "");
+        const unpack = names.findIndex((n) => /^Unpack the unsigned app/.test(n));
+        const sign = names.findIndex((n) => /^Sign the app/.test(n));
+        expect(unpack).toBeGreaterThan(-1);
+        expect(sign).toBeGreaterThan(unpack);
+        expect(text).toMatch(/bash signing-scripts\/scripts\/unpack-macos-app\.sh /);
+        expect(text).not.toMatch(/ditto -x/);
+    });
+
     it("runs only scripts from that checkout, and no package manager or build tool", () => {
         for (const m of text.matchAll(/\bbash (\S+)/g)) expect(m[1], `bash ${m[1]}`).toMatch(/^signing-scripts\/scripts\//);
         expect(text).not.toMatch(/\b(npm|npx|cargo|task|node)\b\s/);
@@ -209,9 +219,44 @@ describe("what the release picks up", () => {
         expect(steps[check]).toMatch(/source=Notarized Developer ID/);
     });
 
+    it("checks in `publish` whose signature it is: the team of the DMG and of the app, from the repository variable", () => {
+        const check = stepsOf("publish").find((s) => /name: Check the DMG as a Mac would/.test(s));
+        expect(jobText("publish")).toMatch(/EXPECTED_TEAM_ID: \$\{\{ vars\.APPLE_TEAM_ID \}\}/);
+        expect(check).toMatch(/team_of "\$DMG"\)" = "\$EXPECTED_TEAM_ID"/);
+        expect(check).toMatch(/team_of "\$APP"\)" = "\$EXPECTED_TEAM_ID"/);
+        expect(check).toMatch(/\^\[A-Z0-9\]\{10\}\$/);
+    });
+
+    it("pins every third-party action of `sign` and `publish` by commit", () => {
+        for (const job of ["sign", "publish"]) {
+            for (const step of stepsOf(job)) {
+                const uses = /^\s*(?:- )?uses: (\S+)/m.exec(step);
+                if (uses) expect(uses[1], `${job}: ${uses[1]}`).toMatch(/@[0-9a-f]{40}$/);
+            }
+        }
+    });
+
     it("runs no repository code in `publish`", () => {
         const text = code(jobText("publish"));
         expect(text).not.toMatch(/actions\/checkout/);
         expect(text).not.toMatch(/\bbash scripts\/|\bnode scripts\/|\bnpm\b|\bcargo\b/);
+    });
+});
+
+// release-core.yml gathers the files of a release from the run's artifacts. A build job runs the built commit's code and can
+// upload an artifact of its own, so a .dmg is taken from the artifact the publish job uploads and from no other.
+describe("release-core.yml takes the macOS DMG from the macos-dmg artifact only", () => {
+    const releaseCore = readFileSync(join(ROOT, ".github/workflows/release-core.yml"), "utf8").replace(/\r\n/g, "\n");
+    const finds = releaseCore.split("\n").filter((l) => /^\s+find release-artifacts -type f \\\(/.test(l));
+
+    it("has the two flatten steps (sign-release and publish), neither selecting *.dmg generally", () => {
+        expect(finds).toHaveLength(2);
+        for (const f of finds) expect(f).not.toContain('-name "*.dmg"');
+    });
+
+    it("stops the release on a .dmg in any other artifact, in both steps", () => {
+        const guard = "find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*'";
+        expect(releaseCore.split(guard)).toHaveLength(3);
+        expect(releaseCore.split('find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/').length).toBe(3);
     });
 });
