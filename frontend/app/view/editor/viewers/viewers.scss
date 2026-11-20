@@ -31,10 +31,18 @@
     gap: var(--space-3);
     flex-wrap: wrap;
     margin-left: auto;
+    min-width: 0;
+    max-width: 100%;
     color: var(--secondary-text-color);
     font-size: 0.9em;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+
+    // A fact stays on one line while the bar has room; in a bar narrower than one (a narrow pane at a large chrome
+    // zoom) it breaks rather than running past the pane's edge.
+    > span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
 }
 
 .editor-viewer-message {

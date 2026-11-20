@@ -32,7 +32,7 @@ export interface ViewerBarProps {
 
 export function ViewerBar(props: ViewerBarProps): JSX.Element {
     return (
-        <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+        <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
             <Show when={props.start}>
                 <div class="editor-viewer-bar-group">{props.start}</div>
             </Show>

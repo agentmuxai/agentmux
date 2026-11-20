@@ -679,6 +679,11 @@ describe("live reconfiguration", () => {
         h.log.push(`root zoom: ${JSON.stringify(root.style.zoom)} scope=${root.dataset.zoomScope}`);
         h.log.push(`document zoom: ${JSON.stringify(main.style.zoom)} part=${main.dataset.zoomPart} scope=${main.dataset.zoomScope}`);
         h.log.push(`tree zoom: ${JSON.stringify(tree.style.zoom)} part=${tree.dataset.zoomPart} scope=${tree.dataset.zoomScope}`);
+        // The control bars are the chrome's, not the pane's: each says so to a Ctrl+wheel, and the two parts publish their
+        // levels so a bar inside divides it out (editor-view.scss).
+        const scopeOf = (sel: string) => v.container.querySelector<HTMLElement>(sel)?.dataset.zoomScope;
+        h.log.push(`published levels: document=${main.style.getPropertyValue("--editor-main-zoom")} tree=${tree.style.getPropertyValue("--editor-tree-zoom")}`);
+        h.log.push(`bars: tree toolbar=${scopeOf(".file-tree-toolbar")} tab strip=${scopeOf(".doc-tab-strip")}`);
         await expect(out()).toMatchFileSnapshot(snap("live-zoom"));
     });
 });
@@ -888,6 +893,25 @@ describe("the tree, the tab bar and the dialogs", () => {
         await settle();
         h.log.push(`zoom after: ${v.model.zoomAtom()} style=${JSON.stringify(root.style.zoom)} tree=${v.model.treeZoomAtom()}`);
         await expect(out()).toMatchFileSnapshot(snap("zoom-wheel"));
+    });
+
+    it("leaves a Ctrl+scroll over a control bar to the window's chrome zoom: neither the pane's level nor the tree's moves, and the wheel is not taken", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        const unregister = registerPaneTab({ apiVersion: 1, view: "editor", label: "Editor", icon: "file", capabilities: { paneZoom: EDITOR_ZOOM }, create: () => ({}) as never });
+        registerBlockComponentModel(v.model.blockId, { viewModel: { viewType: "editor" } } as never);
+        try {
+            for (const sel of [".file-tree-toolbar", ".doc-tab-strip"]) {
+                const bar = v.container.querySelector<HTMLElement>(sel)!;
+                const ev = new WheelEvent("wheel", { deltaY: -100, metaKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+                bar.dispatchEvent(ev);
+                await settle();
+                expect([sel, ev.defaultPrevented, v.model.zoomAtom(), v.model.treeZoomAtom()]).toEqual([sel, false, 1, 1]);
+            }
+        } finally {
+            unregisterBlockComponentModel(v.model.blockId);
+            unregister();
+        }
     });
 
     it("zooms the tree on its own with Ctrl+scroll over it, and the document with Ctrl+scroll over that", async () => {

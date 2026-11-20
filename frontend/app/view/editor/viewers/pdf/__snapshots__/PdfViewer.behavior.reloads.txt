@@ -15,7 +15,7 @@ viewer.currentPageNumber = 4
 viewer.currentPageNumber = 5
 --- on page 5
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
@@ -59,7 +59,7 @@ task#1.destroy
 viewer.setDocument null
 --- reloading
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
@@ -109,7 +109,7 @@ viewer.currentScaleValue = page-width
 viewer.currentPageNumber = 3
 --- reloaded with fewer pages
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
@@ -159,7 +159,7 @@ viewer.currentScaleValue = page-width
 viewer.currentPageNumber = 3
 --- another file
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">
@@ -206,7 +206,7 @@ viewer.setDocument pages=3
 linkService.setDocument pages=3 base=null
 --- a dropped file
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button">

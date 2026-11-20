@@ -67,7 +67,7 @@ onFileClick /home/a/docs/notes.txt
 -- after moving about
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
