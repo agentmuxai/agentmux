@@ -1179,6 +1179,22 @@
           "description": "At the end of a turn whose context is at least agent:compacthintat tokens, give the agent one [AgentMux] note suggesting it compact itself (Agents compact, with what to keep) if its next work continues the task. Once per crossing: again only after the context has dropped below 250,000 tokens. Set false to turn the notes off. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5.",
           "x-section": "Agents"
         },
+        "agent:usagenoticeat": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 75,
+          "description": "The percent of an account's usage window (the 5-hour or the weekly one, as Claude Code reports it with every request) from which the leaders of the agents on that account get one [AgentMux] note, once per window. The note is held for the leader's next turn and never starts one. 0 turns it off. Identity accounts shows the same figures any time.",
+          "x-section": "Agents"
+        },
+        "agent:usagenoticehighat": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 90,
+          "description": "The percent of an account's usage window from which the leaders of its agents get a second, stronger note (agent:usagenoticeat is the first), once per window. 0 turns it off.",
+          "x-section": "Agents"
+        },
         "agent:freshhintat": {
           "type": "integer",
           "minimum": 0,

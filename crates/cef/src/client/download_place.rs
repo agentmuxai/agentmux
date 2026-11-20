@@ -119,6 +119,7 @@ pub(crate) fn answer_quietly(
         }
         Quiet::TooMany => {
             tracing::warn!(target: "pane-download", %block_id, id, "dropping download: this pane already has {MAX_QUIET_PER_PANE} running");
+            super::downloads::note_skipped(block_id, id);
             crate::events::emit_browser_pane_event(state, block_id, UPDATE_EVENT, &ignored_payload(block_id));
             // `cont` is never called, so CEF cancels the download.
             true

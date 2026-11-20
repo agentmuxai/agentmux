@@ -443,6 +443,8 @@ fn a_stage_set_is_kept_cleaned_and_survives_a_reopen() {
     let set = crate::backend::storage::work_board_stages::parse_stored(&b.stages).unwrap();
     assert_eq!(set.stages.len(), 5);
     assert_eq!(set.stages[1].name, "Doing", "names are trimmed");
+    assert_eq!(set.stages[1].colour, "active", "a hue name is kept as its role name");
+    assert!(!b.stages.contains("magenta"), "{}", b.stages);
     drop(s);
     let s = Store::open_identity_store(&d.path().join("identity-store.db")).unwrap();
     let again = s.work_board_resolve(Some("main"), 6).unwrap();

@@ -169,9 +169,23 @@ fn default_save_path(suggested: &str) -> PathBuf {
 #[derive(Default)]
 pub(crate) struct WaitingDownloads {
     by_pane: HashMap<String, HashSet<u32>>,
+    /// Downloads this handler refused after CEF gave them an id (too many waiting or running). CEF still
+    /// reports each as cancelled; the strip already says they were skipped, so that report is not sent on
+    /// as a "cancelled" row of its own (a burst of ten would stack seven).
+    skipped: HashSet<(String, u32)>,
 }
 
 impl WaitingDownloads {
+    /// `id` of `pane` was refused: its cancelled report is for the skipped line, not a row.
+    pub(crate) fn mark_skipped(&mut self, pane: &str, id: u32) {
+        self.skipped.insert((pane.to_string(), id));
+    }
+
+    /// Whether `id` of `pane` was a skipped download; true once, so a reused id is not hidden later.
+    pub(crate) fn take_skipped(&mut self, pane: &str, id: u32) -> bool {
+        self.skipped.remove(&(pane.to_string(), id))
+    }
+
     /// Can this pane have another download wait for its dialog?
     pub(crate) fn has_room(&self, pane: &str) -> bool {
         self.by_pane.get(pane).map_or(0, HashSet::len) < MAX_WAITING_PER_PANE
@@ -206,7 +220,19 @@ impl WaitingDownloads {
     /// The pane closed: nothing of its can still be waiting.
     pub(crate) fn clear_pane(&mut self, pane: &str) {
         self.by_pane.remove(pane);
+        self.skipped.retain(|(p, _)| p != pane);
     }
+}
+
+/// A download this handler refused after CEF numbered it: the pane's strip gets the skipped line, and the
+/// cancelled report CEF sends for it afterwards is dropped (see `WaitingDownloads::skipped`).
+pub(crate) fn note_skipped(block_id: &str, id: u32) {
+    with_waiting(|w| w.mark_skipped(block_id, id));
+}
+
+/// Whether a pane's cancelled report is one of its skipped downloads' (true once per skip).
+fn was_skipped(block_id: &str, id: u32) -> bool {
+    with_waiting(|w| w.take_skipped(block_id, id))
 }
 
 /// Whether a permission prompt is exactly Chromium's "this page wants to download more files".
@@ -755,6 +781,7 @@ wrap_download_handler! {
             // slipped in between; the add is the check that counts.
             if !with_waiting(|w| w.add(&block_id, id)) {
                 tracing::warn!(target: "pane-download", %block_id, id, "dropping download — too many waiting");
+                note_skipped(&block_id, id);
                 crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &ignored_payload(&block_id));
                 return 0;
             }
@@ -834,6 +861,10 @@ wrap_download_handler! {
                 );
             }
             let Some(block_id) = block_id else { return };
+            // A download this handler refused: the strip's skipped line already says so.
+            if ended && was_skipped(&block_id, id) {
+                return;
+            }
             super::agent_downloads::updated(&self.state, browser.as_deref(), &block_id, item, callback.as_deref());
 
             // Keep the callback while it runs so Cancel can reach it; drop it
@@ -1191,6 +1222,23 @@ mod tests {
         assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
         assert!(w.release("p1", 1));
         assert!(w.has_room("p1"));
+    }
+
+    #[test]
+    fn a_skipped_download_hides_its_cancelled_report_once() {
+        let mut w = WaitingDownloads::default();
+        w.mark_skipped("p1", 7);
+        // Another pane's id 7, and an id never skipped, are shown as usual.
+        assert!(!w.take_skipped("p2", 7));
+        assert!(!w.take_skipped("p1", 8));
+        assert!(w.take_skipped("p1", 7));
+        assert!(!w.take_skipped("p1", 7), "a later download that reuses the id is not hidden");
+        // The pane closing forgets its skipped ids.
+        w.mark_skipped("p1", 9);
+        w.mark_skipped("p2", 9);
+        w.clear_pane("p1");
+        assert!(!w.take_skipped("p1", 9));
+        assert!(w.take_skipped("p2", 9));
     }
 
     #[test]

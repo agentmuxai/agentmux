@@ -55,7 +55,8 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureActions, type FailureRow, type FailureViewState } from "../failure/failure-accessory";
-import { agoLabel, failureVerdict, isAccountCause, type AccountState, type FailureVerdict, type JudgedFailure } from "../failure/failure-verdict";
+import { formatResetTime } from "@/app/store/agent-unavailable";
+import { agoLabel, failureVerdict, inLabel, isAccountCause, type AccountState, type FailureVerdict, type JudgedFailure } from "../failure/failure-verdict";
 import { forgetRefusedSend, refusedSendOf } from "../failure/refused-send";
 import { restoreRefusedSend } from "../failure/refused-send-restore";
 import { IN_FLIGHT_BLOCKER, registerRecycleBlocker } from "@/app/store/recycle-blockers";
@@ -108,6 +109,22 @@ export function jitteredBackoffSeconds(baseSeconds: number, rand: () => number =
 
 /** How long a persisted account failure waits for srv's state of the agent before it is shown. */
 export const SEED_WAIT_MS = 1500;
+
+/**
+ * A turn that ends with a failure still ends: the stream's `session_end` makes the pane say `turn-ended completed`,
+ * a moment before or after the failure event. That is no success, so a completion counts only once this long has
+ * passed with no failure beside it. Counting it restarted the retry ladder on every attempt: it reset the budget and
+ * healed the row, so a throttled turn was retried every few seconds for as long as it failed.
+ */
+export const COMPLETION_GRACE_MS = 4000;
+/** A failure this close before a `turn-ended` is that turn's own. */
+const FAILURE_BEFORE_END_MS = 2000;
+
+/** A usage limit's automatic resend comes this long after the reset, like srv's wake (`limit_wake.rs`), plus jitter. */
+export const RESEND_AFTER_RESET_MS = 60_000;
+export const RESEND_JITTER_MS = 120_000;
+/** How often the quota line's "in N min" is refreshed. */
+const QUOTA_LINE_TICK_MS = 60_000;
 
 export interface UseAgentFailureOptions {
     blockId: string;
@@ -240,6 +257,12 @@ interface FailureHookState {
     selfInitiatedClear: boolean;
     // True while the failure showing was read back from block meta at mount.
     failureFromMeta: boolean;
+    // A `turn-ended completed` waiting out COMPLETION_GRACE_MS, and when the last live failure arrived.
+    completionTimer: ReturnType<typeof setTimeout> | undefined;
+    lastFailureAt: number;
+    // The usage limit's one automatic resend: its timer, and the reset it was last made for (one per reset).
+    resendTimer: ReturnType<typeof setTimeout> | undefined;
+    resentReset: number | undefined;
 }
 
 function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState {
@@ -271,7 +294,16 @@ function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState 
         autoRetries: 0,
         selfInitiatedClear: false,
         failureFromMeta: false,
+        completionTimer: undefined,
+        lastFailureAt: 0,
+        resendTimer: undefined,
+        resentReset: undefined,
     };
+}
+
+function cancelResend(s: FailureHookState) {
+    clearTimeout(s.resendTimer);
+    s.resendTimer = undefined;
 }
 
 function cancelCountdown(s: FailureHookState) {
@@ -419,6 +451,7 @@ function onLiveFailure(s: FailureHookState, f: AgentFailure, settleSeed: () => v
     // Reducer-side: records state.failure AND unconditionally ends
     // a still-working turn — see FailureObserved's reducer case.
     s.failureFromMeta = false;
+    s.lastFailureAt = Date.now();
     raiseFailure(opts.model, { source: "live", failure: f, at: Date.now() });
     // A failure that finds the ladder spent is the end of it: the row becomes the lapsed note.
     s.setLadderEnded(isTransient(f.code) && s.autoRetries >= AUTO_RETRY_BACKOFF_S.length);
@@ -441,10 +474,21 @@ function onLiveFailure(s: FailureHookState, f: AgentFailure, settleSeed: () => v
 // never misfire on a failure.
 function onPaneEvent(s: FailureHookState, settleSeed: () => void, blockId: string, event: AgentPaneEvent) {
     if (blockId !== s.opts.blockId) return;
-    if (event.type === "turn-started") settleSeed();
+    if (event.type === "turn-started") {
+        settleSeed();
+        // A turn begun here (the person's own send) takes the place of a resend waiting for a reset.
+        cancelResend(s);
+    }
     if (event.type === "turn-ended" && event.outcome === "completed") {
-        s.autoRetries = 0;
-        s.setCompletedTurnAt(Date.now());
+        // A turn that failed ends too (see COMPLETION_GRACE_MS): it counts as done only if no failure comes beside it.
+        const endedAt = Date.now();
+        clearTimeout(s.completionTimer);
+        s.completionTimer = setTimeout(() => {
+            s.completionTimer = undefined;
+            if (s.lastFailureAt >= endedAt - FAILURE_BEFORE_END_MS) return;
+            s.autoRetries = 0;
+            s.setCompletedTurnAt(Date.now());
+        }, COMPLETION_GRACE_MS);
     }
 }
 
@@ -587,18 +631,54 @@ function verdictOf(s: FailureHookState, pf: JudgedFailure): FailureVerdict {
 // A usage limit ends when its reset passes, with no event to say so: look again then.
 function watchUsageReset(s: FailureHookState) {
     createEffect(() => {
-        const reset = s.opts.failure()?.data.resetsAtMs;
+        const failure = s.opts.failure()?.data;
+        const reset = failure?.resetsAtMs;
         if (reset == null) return;
         const wait = reset - Date.now();
         if (wait <= 0 || wait > 2 ** 31 - 1) return;
         const timer = setTimeout(() => s.setClockTick((n) => n + 1), wait + 1000);
-        onCleanup(() => clearTimeout(timer));
+        // A usage limit's row says how long is left, so it is redrawn as the minutes go.
+        const tick = failure?.code === "usage_limit" ? setInterval(() => s.setClockTick((n) => n + 1), QUOTA_LINE_TICK_MS) : undefined;
+        onCleanup(() => {
+            clearTimeout(timer);
+            clearInterval(tick);
+        });
+    });
+}
+
+/** The usage limit's row in plain words, or undefined when the reset is not known or has passed. */
+export function quotaLine(f: AgentFailure, now: number): string | undefined {
+    if (f.code !== "usage_limit" || f.resetsAtMs == null || f.resetsAtMs <= now) return undefined;
+    return `Out of quota until ${formatResetTime(f.resetsAtMs, now)}, ${inLabel(f.resetsAtMs, now)}`;
+}
+
+// Nothing is sent while a usage limit holds. When its reset has passed, the message the limit stopped is sent once,
+// by the pane that showed it: not again for the same reset, and not if the person sent something else meanwhile (a new
+// turn, or a dismiss) or a turn has completed since (the account moved and it went through). It outlives the row,
+// which heals at the reset itself. The delay is srv's wake's, with jitter, so panes on one account do not all go at once.
+function watchUsageResend(s: FailureHookState) {
+    createEffect(() => {
+        const pf = s.opts.failure();
+        const reset = pf?.data.code === "usage_limit" ? pf.data.resetsAtMs : undefined;
+        if (!pf || reset == null || pf.turnAttempted === false || s.resentReset === reset || s.resendTimer) return;
+        const wait = reset + RESEND_AFTER_RESET_MS + Math.random() * RESEND_JITTER_MS - Date.now();
+        if (wait > 2 ** 31 - 1) return;
+        s.resendTimer = setTimeout(() => {
+            s.resendTimer = undefined;
+            const done = s.completedTurnAt();
+            if (done != null && done > pf.at) return;
+            s.resentReset = reset;
+            s.opts.onRetry();
+        }, Math.max(wait, 0));
     });
 }
 
 /** The row's view flags: what is expanded, counting down, armed or copied, and what the recovery says. */
 function rowViewState(s: FailureHookState, pf: PaneFailure, verdict: FailureVerdict | null): FailureViewState {
     const { opts } = s;
+    // Read here, not only in the verdict: the verdict's value does not change as the minutes go, so a row that follows
+    // only it never redraws, and a usage limit's "in 24 min" would stand still.
+    s.clockTick();
     return {
         expanded: s.expanded(),
         autoRetryIn: s.autoRetryIn(),
@@ -614,6 +694,8 @@ function rowViewState(s: FailureHookState, pf: PaneFailure, verdict: FailureVerd
         notSent: pf.data.code === "open_in_other_pane" ? refusedSendOf(opts.blockId)?.text : undefined,
         verdict: verdict ?? undefined,
         agoLabel: agoLabel(pf.at, Date.now()),
+        quotaLine: quotaLine(pf.data, Date.now()),
+        tries: s.autoRetries,
     };
 }
 
@@ -629,6 +711,8 @@ function dismissRow(s: FailureHookState, f: PaneFailure["data"]) {
     // Before the row clears: a clear the recovery didn't hear
     // about first reads as the operator's send, not a dismiss.
     opts.reconnect?.failureDismissed();
+    // Dismissed is the person's answer: the limit's resend is not made behind it.
+    cancelResend(s);
     // A message this pane refused for another pane has nobody to send it now: it goes
     // back to the composer. Any other row is not about it, so a kept one is stale.
     if (f.code === "open_in_other_pane") void restoreRefusedSend(opts.blockId);
@@ -681,11 +765,14 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             cancelCountdown(s);
             disarmTakeover(s);
             clearTimeout(s.copyResetTimer);
+            clearTimeout(s.completionTimer);
+            cancelResend(s);
         });
     });
 
     watchFailureCleared(s);
     watchAccount(s);
+    watchUsageResend(s);
     const verdict = createMemo((): FailureVerdict | null => {
         const pf = opts.failure();
         return pf ? verdictOf(s, pf) : null;

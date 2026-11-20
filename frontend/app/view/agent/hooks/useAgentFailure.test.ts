@@ -61,7 +61,17 @@ vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: setBlockMetaMock }));
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
-import { jitteredBackoffSeconds, SEED_WAIT_MS, TAKEOVER_CONFIRM_MS, useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
+import {
+    COMPLETION_GRACE_MS,
+    jitteredBackoffSeconds,
+    quotaLine,
+    RESEND_AFTER_RESET_MS,
+    RESEND_JITTER_MS,
+    SEED_WAIT_MS,
+    TAKEOVER_CONFIRM_MS,
+    useAgentFailure,
+    type UseAgentFailureResult,
+} from "./useAgentFailure";
 import type { AccountState } from "../failure/failure-verdict";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 
@@ -78,8 +88,13 @@ const failingTurn = () => fire("agentfailure", transient());
 // (real agent-pane-state-store multicast, matching production wiring —
 // see `unsubTurnEnded` in useAgentFailure.ts). A failed turn goes through
 // FailureObserved instead and never emits this, so it can't misfire here.
-const successfulTurnEnded = () =>
+const turnEnded = () =>
     fireEvent(BLOCK_ID, { type: "turn-ended", outcome: "completed", statsMerged: false, stoppingCleared: false });
+// A turn-ended counts as a success once COMPLETION_GRACE_MS has passed with no failure beside it.
+const successfulTurnEnded = () => {
+    turnEnded();
+    vi.advanceTimersByTime(COMPLETION_GRACE_MS);
+};
 const hasRetryCountdown = (ui: UseAgentFailureResult) =>
     (ui.row()?.actions ?? []).some((a) => a.label === "Retry now (5s)");
 
@@ -356,6 +371,188 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
 
 // The countdown runs to a fixed deadline, whether or not the pane is visible
 // (docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2).
+describe("useAgentFailure — a failed turn ends too, and that is not a success (#48173)", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+        vi.useFakeTimers();
+        vi.spyOn(Math, "random").mockReturnValue(0.5);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    it("the ladder grows when each failed attempt also ends its turn, whichever event comes first", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry);
+            await Promise.resolve();
+
+            failingTurn();
+            turnEnded(); // the failure first, then the turn's end
+            vi.advanceTimersByTime(COMPLETION_GRACE_MS);
+            vi.advanceTimersByTime(LADDER_MS[0] - COMPLETION_GRACE_MS);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+
+            turnEnded(); // the turn's end first, then its failure
+            vi.advanceTimersByTime(500);
+            failingTurn();
+            vi.advanceTimersByTime(COMPLETION_GRACE_MS);
+            expect(ui.row()).not.toBeNull(); // a failure beside the end does not heal the row
+            vi.advanceTimersByTime(LADDER_MS[1] - 1000 - COMPLETION_GRACE_MS);
+            expect(onRetry).toHaveBeenCalledTimes(1); // 15 s, not the first rung's 5 s again
+            vi.advanceTimersByTime(1000 + COMPLETION_GRACE_MS);
+            expect(onRetry).toHaveBeenCalledTimes(2);
+
+            // Attempts three to five, each one's turn ending beside its failure: it never starts over.
+            for (let i = 2; i < LADDER_MS.length; i++) {
+                failingTurn();
+                turnEnded();
+                vi.advanceTimersByTime(LADDER_MS[i] - 1000);
+                expect(onRetry).toHaveBeenCalledTimes(i);
+                vi.advanceTimersByTime(1000);
+                expect(onRetry).toHaveBeenCalledTimes(i + 1);
+            }
+            failingTurn();
+            turnEnded();
+            vi.advanceTimersByTime(600000);
+            expect(onRetry).toHaveBeenCalledTimes(LADDER_MS.length); // spent: manual from here
+            expect(ui.verdict()).toBe("lapsed");
+
+            dispose();
+        });
+    });
+
+    it("the row says it in its title, which wraps in a narrow pane: tried 3 times, next in 30 s", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(() => {});
+            await Promise.resolve();
+            failingTurn();
+            vi.advanceTimersByTime(LADDER_MS[0]);
+            failingTurn();
+            vi.advanceTimersByTime(LADDER_MS[1]);
+            failingTurn();
+            expect(ui.row()?.title).toBe("Throttled, tried 3 times, next in 30 s");
+            expect(ui.row()?.meta).toBe("rate_limited · retryable");
+            dispose();
+        });
+    });
+});
+
+describe("useAgentFailure — a usage limit waits for its reset (#48173)", () => {
+    const limit = (resetsAtMs?: number): AgentFailure => ({
+        code: "usage_limit",
+        title: "Usage limit reached",
+        detail: "",
+        retryable: false,
+        ...(resetsAtMs != null ? { resetsAtMs } : {}),
+    });
+    const NOW = Date.UTC(2026, 10, 20, 2, 0, 0);
+
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+        vi.useFakeTimers();
+        vi.setSystemTime(NOW);
+        vi.spyOn(Math, "random").mockReturnValue(0);
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+    });
+
+    it("sends nothing before the reset, then the waiting message once, and not again", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry);
+            await Promise.resolve();
+            const reset = NOW + 70 * 60_000;
+            fire("agentfailure", limit(reset));
+            expect(ui.row()?.title).toMatch(/^Out of quota until .+, in 1 h$/);
+            expect(hasRetryCountdown(ui)).toBe(false); // no timed retry for a quota
+
+            vi.advanceTimersByTime(70 * 60_000 + RESEND_AFTER_RESET_MS - 1000);
+            expect(onRetry).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+            vi.advanceTimersByTime(24 * 3600_000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+
+            dispose();
+        });
+    });
+
+    it("the row counts the minutes down on its own, without anything else redrawing it", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(() => {});
+            await Promise.resolve();
+            fire("agentfailure", limit(NOW + 24 * 60_000));
+            expect(ui.row()?.title).toMatch(/, in 24 min$/);
+            vi.advanceTimersByTime(60_000);
+            expect(ui.row()?.title).toMatch(/, in 23 min$/);
+            vi.advanceTimersByTime(3 * 60_000);
+            expect(ui.row()?.title).toMatch(/, in 20 min$/);
+            dispose();
+        });
+    });
+
+    it("the jitter spreads panes on one account over RESEND_JITTER_MS after the reset", async () => {
+        vi.spyOn(Math, "random").mockReturnValue(0.999);
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            mkUI(onRetry);
+            await Promise.resolve();
+            fire("agentfailure", limit(NOW + 60_000));
+            vi.advanceTimersByTime(60_000 + RESEND_AFTER_RESET_MS + RESEND_JITTER_MS - 1000);
+            expect(onRetry).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1000);
+            expect(onRetry).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("a message the person sent meanwhile, or a dismiss, takes the place of the resend", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry);
+            await Promise.resolve();
+            fire("agentfailure", limit(NOW + 60_000));
+            fireEvent(BLOCK_ID, { type: "turn-started", at: NOW } as AgentPaneEvent);
+            vi.advanceTimersByTime(3600_000);
+            expect(onRetry).not.toHaveBeenCalled();
+
+            fire("agentfailure", limit(NOW + 2 * 3600_000));
+            ui.row()!.actions.find((a) => (a as { close?: boolean }).close)!.onClick!();
+            vi.advanceTimersByTime(4 * 3600_000);
+            expect(onRetry).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("a limit with no known reset shows its own title and waits for the person", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry);
+            await Promise.resolve();
+            fire("agentfailure", limit());
+            expect(ui.row()?.title).toBe("Usage limit reached");
+            vi.advanceTimersByTime(24 * 3600_000);
+            expect(onRetry).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("says the limit in plain words only for a usage limit whose reset is still ahead", () => {
+        expect(quotaLine(limit(NOW + 24 * 60_000), NOW)).toMatch(/^Out of quota until .+, in 24 min$/);
+        expect(quotaLine(limit(NOW - 1000), NOW)).toBeUndefined();
+        expect(quotaLine(limit(), NOW)).toBeUndefined();
+        expect(quotaLine({ ...transient(), resetsAtMs: NOW + 60_000 }, NOW)).toBeUndefined();
+    });
+});
+
 describe("useAgentFailure auto-retry deadline", () => {
     beforeEach(() => {
         hub.handlers.clear();

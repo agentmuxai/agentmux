@@ -507,7 +507,7 @@ impl Record {
         }
     }
 
-    /// This is the process's record, in `dir` (the data directory's `record` folder). Set once.
+    /// This is the process's record, in `dir` (the channel's `record` folder). Set once.
     pub fn global(dir: impl FnOnce() -> Option<PathBuf>, version: &str) -> Option<&'static Record> {
         static GLOBAL: std::sync::OnceLock<Option<Record>> = std::sync::OnceLock::new();
         GLOBAL.get_or_init(|| dir().map(|d| Record::new(d, version))).as_ref()
@@ -549,6 +549,8 @@ impl Record {
             gate.rolled_hour = Some(hour);
         }
         roll_up(&self.dir, now_ms);
+        // The rules read the hour just folded, and what they find is written beside the stalls.
+        super::record_flags::look(&self.dir, now_ms);
     }
 
     /// The nearest folder that exists, for the drive's free space (the record's own folder may not exist yet).
@@ -640,7 +642,7 @@ pub fn events_to_remove(files: &[(String, u64)], today: &str, keep_days: i64) ->
         .collect()
 }
 
-/// Where this machine keeps its record: the `record` folder of the data directory.
+/// Where this AgentMux keeps its record: the `record` folder of its channel, which an upgrade keeps.
 pub fn default_dir() -> Option<PathBuf> {
     agentmux_common::record_events::record_dir()
 }

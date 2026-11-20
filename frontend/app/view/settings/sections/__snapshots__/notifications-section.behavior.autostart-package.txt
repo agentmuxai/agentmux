@@ -1,0 +1,48 @@
+getAutostartStatus
+-- the person turned it off in Windows
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is turned off for AgentMux in Windows. Turn it on in Windows Settings > Apps > Startup; AgentMux cannot change it."
+    <div class="ui-field-control">
+      <div class="setting-control-pair">
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
+getAutostartStatus
+-- off by the organisation's policy
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is turned off for AgentMux by your organisation's policy, so this switch has no effect."
+    <div class="ui-field-control">
+      <div class="setting-control-pair">
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
+getAutostartStatus
+-- on, as Windows says
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
+    <div class="ui-field-control">
+      <div class="setting-control-pair">
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"

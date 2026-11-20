@@ -230,7 +230,7 @@ pub struct SeededLaunch {
 }
 
 /// The value of `--flag value` or `--flag=value` in `flags`, if present; the last one when it repeats.
-fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
+pub(crate) fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
     // The LAST occurrence wins, as the CLI reads a repeated flag (observed on CLI
     // 2.1.285: `--model opus --model haiku` sends Haiku, and the reverse sends Opus;
     // the frontend's `modelFromFlags` agrees). Returning the first decided on Opus
@@ -569,39 +569,7 @@ pub fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> 
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let listed = account_listed_models(crate::backend::providers::resolve_provider_alias(&raw_provider));
     let args = with_runtime_flags_listed(meta, args, &listed);
-    with_mcp_config_flag(meta, args)
-}
-
-/// Point a Claude turn at the agent's MCP config when it lives outside the working directory
-/// (#3680): a launch into the user's own project writes it under AgentMux's data root, which
-/// Claude does not find on its own. `--mcp-config` adds it to whatever Claude already reads, so
-/// the project's own `.mcp.json` keeps reaching it. Every other harness is handed the servers by
-/// srv (`mcp_config_file::read_for_turn`), so it needs no flag.
-///
-/// Never overrides a `--mcp-config` already in the argv (an agent's own provider flags), and
-/// idempotent, so a pane that spawns through more than one of the paths gets one flag.
-fn with_mcp_config_flag(meta: &MetaMapType, mut args: Vec<String>) -> Vec<String> {
-    let provider = crate::backend::providers::resolve_provider_alias(&crate::backend::obj::meta_get_string(meta, "agentProvider", ""));
-    if provider != "claude" || flag_value(&args, &["--mcp-config"]).is_some() {
-        return args;
-    }
-    let work_dir = crate::backend::obj::meta_get_string(meta, "cmd:cwd", "");
-    if work_dir.trim().is_empty() {
-        return args;
-    }
-    let Some(path) = crate::backend::mcp_config_file::relocated_path(&work_dir) else {
-        return args;
-    };
-    if !path.is_file() {
-        return args;
-    }
-    let runtime = crate::backend::runtime_adapter::RuntimeKind::of_block_meta(meta);
-    let shown = runtime
-        .adapter()
-        .map_mount(crate::backend::runtime_adapter::MountRole::McpConfig, &path.to_string_lossy());
-    args.push("--mcp-config".to_string());
-    args.push(shown);
-    args
+    crate::backend::agent_mcp_flag::with_mcp_config_flag(meta, args)
 }
 
 /// [`with_runtime_flags`], given the models the provider's accounts list.

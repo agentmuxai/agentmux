@@ -476,7 +476,7 @@ export interface SessionOutcomeNode {
 export interface CliNoticeNode {
     type: "cli_notice";
     id: string;
-    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "container_start" | "container_image" | "container_limit" | "container_caches" | "agent_ready";
+    kind: "install" | "version_changed" | "compaction_failed" | "mcp_health" | "mcp_left_out" | "container_start" | "container_image" | "container_limit" | "container_caches" | "agent_ready";
     /** Provider id, e.g. `"claude"`. */
     provider: string;
     /** `install`: the version being installed. */
@@ -517,6 +517,8 @@ export interface CliNoticeNode {
     /** `container_caches`: how much the agent's cache volumes hold, in bytes (`agentId` and `agentName` as for
      *  `container_limit`). */
     cacheBytes?: number;
+    /** `mcp_left_out`: the MCP servers of the folder's own `.mcp.json` this host agent is not given, by name. */
+    servers?: string[];
     /** `mcp_health`: where the repair of the agent's AgentMux MCP server is. */
     mcpState?: "healing" | "restarting" | "ok" | "gave_up";
     /** `mcp_health`, while `healing`: which reconnect. */

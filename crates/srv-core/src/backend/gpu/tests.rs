@@ -146,12 +146,33 @@ fn a_dedicated_figure_that_is_more_than_the_card_has_is_not_a_number() {
     assert!(others.is_none());
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 #[test]
 fn where_the_figures_are_not_read_yet_the_sampler_says_so() {
     let (sample, _, _) = GpuSampler::new().sample_for_panel();
     assert_eq!(sample.state, GpuSampleState::Unsupported);
     assert_eq!(CompactPoller::default().poll(&GpuSampler::new()), None);
+}
+
+/// Linux reads figures, so it never says "not yet": a computer is read, warming, or has nothing to read.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_reads_what_it_has_or_says_there_is_nothing_never_that_it_is_unsupported() {
+    let (sample, _, _) = GpuSampler::new().sample_for_panel();
+    assert_ne!(sample.state, GpuSampleState::Unsupported);
+    if sample.state != GpuSampleState::Ok {
+        assert!(sample.reading.adapters.is_empty() && sample.reading.processes.is_empty(), "nothing is invented");
+    }
+}
+
+/// Intel's GPUs say nothing of use, so a process of theirs is worth a row for the machine's memory it holds.
+#[test]
+fn a_process_with_no_known_use_is_listed_for_the_machine_memory_it_holds() {
+    let holds = |use_pct, dedicated, shared| ProcessFigures { pid: 5, use_pct, dedicated, shared };
+    assert!(active(&holds(None, None, Some(8 << 20))));
+    assert!(!active(&holds(None, None, Some(1 << 10))), "a few kilobytes is not worth a row");
+    // Where the use is known and nil, shared memory alone is every windowed program's: not a row (as on Windows).
+    assert!(!active(&holds(Some(0.0), Some(0), Some(8 << 20))));
 }
 
 #[test]

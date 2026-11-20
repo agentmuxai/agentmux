@@ -130,8 +130,9 @@ pub(crate) fn realign_workspace_mcp_json(
     }
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
     // A user's project keeps its own `.mcp.json` (#3680): the agent's file is AgentMux's
-    // relocated one, and that is the one a spawn may realign.
-    if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+    // relocated one, and that is the one a spawn may realign. So is the file of a host agent in a
+    // folder a container agent can write.
+    if let Some(path) = crate::backend::mcp_config_file::host_relocated_path(&expanded) {
         let Ok(content) = std::fs::read_to_string(&path) else {
             return;
         };
@@ -144,6 +145,7 @@ pub(crate) fn realign_workspace_mcp_json(
             tracing::warn!(work_dir, agent_id = slug, "spawn: signing keys unavailable; the agent's MCP config left as it was");
             return;
         };
+        let body = crate::backend::mcp_config_file::host_content(&expanded, body);
         if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
             return;
         }

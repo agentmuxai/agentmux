@@ -12,8 +12,8 @@ fn minimal() -> StageSet {
     StageSet {
         version: STAGES_VERSION,
         stages: vec![
-            stage("needs", "Needs you", "amber", &["needs"]),
-            stage("st-all", "Everything", "grey", &["backlog", "research", "specd", "progress", "review", "merged", "released"]),
+            stage("needs", "Needs you", "attention", &["needs"]),
+            stage("st-all", "Everything", "muted", &["backlog", "research", "specd", "progress", "review", "merged", "released"]),
         ],
     }
 }
@@ -47,7 +47,7 @@ fn r1_two_to_eight_stages() {
     one.stages.truncate(1);
     assert!(reasons(&one).contains("at least 2 stages"), "{}", reasons(&one));
     let mut nine = default_set();
-    nine.stages.push(stage("st-extra", "Extra", "grey", &["backlog"]));
+    nine.stages.push(stage("st-extra", "Extra", "muted", &["backlog"]));
     assert!(reasons(&nine).contains("at most 8 stages"), "{}", reasons(&nine));
 }
 
@@ -180,4 +180,36 @@ fn clean_trims_names_and_drops_repeated_sources() {
     assert_eq!(cleaned.stages[1].name, "Everything");
     assert_eq!(cleaned.stages[1].takes.iter().filter(|t| t.as_str() == "backlog").count(), 1);
     assert!(validate(&cleaned).is_empty());
+}
+
+#[test]
+fn colours_are_role_names_and_the_first_builds_hue_names_still_read() {
+    assert!(default_set().stages.iter().all(|s| COLOURS.contains(&s.colour.as_str())));
+    for (old, role) in LEGACY_COLOURS {
+        assert!(COLOURS.contains(&role), "{old} maps to a name in the palette");
+        assert_eq!(canonical_colour(old), role);
+    }
+    let mut legacy = minimal();
+    legacy.stages[0].colour = "amber".into();
+    legacy.stages[1].colour = " Grey ".into();
+    let cleaned = clean(legacy);
+    assert_eq!((cleaned.stages[0].colour.as_str(), cleaned.stages[1].colour.as_str()), ("attention", "muted"));
+    assert!(validate(&cleaned).is_empty(), "{:?}", validate(&cleaned));
+}
+
+#[test]
+fn a_stored_set_with_hue_names_reads_as_role_names() {
+    let mut stored = minimal();
+    stored.stages[0].colour = "amber".into();
+    stored.stages[1].colour = "grey".into();
+    let got = parse_stored(&serde_json::to_string(&stored).unwrap()).unwrap();
+    assert_eq!(got, minimal());
+}
+
+#[test]
+fn an_unknown_colour_is_refused_naming_the_palette() {
+    let mut set = minimal();
+    set.stages[1].colour = "pink".into();
+    let why = reasons(&set);
+    assert!(why.contains("colour \"pink\" is not one of muted, research, info, active, attention, review, done, shipped"), "{why}");
 }

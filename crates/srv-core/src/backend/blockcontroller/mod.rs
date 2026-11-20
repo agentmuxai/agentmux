@@ -1140,3 +1140,6 @@ mod cmd_env_tests {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod folder_rule_tests;

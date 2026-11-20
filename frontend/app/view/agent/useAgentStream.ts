@@ -49,7 +49,8 @@ import { CompactionSummaryTracker } from "./context-delivery";
 import { workingFromPhase, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { createPaneFlushQueue } from "./stream-flush-rate";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { createPaneFlushQueue, paneCursorHold, releaseCursorWhenShown } from "./stream-flush-rate";
 import { createPaneInbox } from "./stream-inbox";
 import { createRekeyAccepted } from "./rekey-accepted";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
@@ -73,7 +74,13 @@ import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { agentPerfStore } from "../../agent-model/perf-probe";
 import { parseHistoryLines } from "./parseHistoryLines";
-import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
+import {
+    EchoLedger,
+    TranscriptCursor,
+    type TranscriptCursorDeps,
+    type TranscriptFileEvent,
+    type TranscriptSettleLatch,
+} from "./transcript-cursor";
 import { createStreamPipeline, createStreamState, parseRecords, pushReleasedJekts, resetStream } from "./stream-pipeline";
 
 export { fillCompactionCard, pushContextCompactedNodes } from "./compaction-cards";
@@ -163,6 +170,35 @@ interface UseAgentStreamOpts {
     transcriptSettle?: TranscriptSettleLatch;
 }
 
+/** Reads transcript lines `[offset, offset + limit)` of one generation, for the cursor's gap fills. */
+function transcriptRangeReader(blockId: string): TranscriptCursorDeps["readRange"] {
+    return async (offset, limit, expectGen) => {
+        const resp = await RpcApi.BlockfileReadRangeCommand(
+            TabRpcClient,
+            { block_id: blockId, filename: OutputFileName, offset, limit, expect_gen: expectGen },
+            { timeout: 15_000 },
+        );
+        return { lines: resp?.lines ?? [], stream: resp?.stream, gen: resp?.gen, genMismatch: resp?.gen_mismatch };
+    };
+}
+
+/**
+ * Live records wait for the history load (the pane is covered until then). A load that never reports doesn't hold
+ * them for good: after HISTORY_HOLD_MAX_MS they are placed from the first event on. Returns the stop.
+ */
+function waitForHistory(cursor: TranscriptCursor, settle: TranscriptSettleLatch | undefined): () => void {
+    const stopWaiting = settle ? settle.onSettle((outcome) => cursor.settle(outcome)) : (cursor.settle(null), () => {});
+    const holdTimer = setTimeout(() => {
+        if (cursor.isSettled()) return;
+        console.warn(`[useAgentStream] no history outcome after ${HISTORY_HOLD_MAX_MS}ms; placing live records from the next one`);
+        cursor.settle(null);
+    }, HISTORY_HOLD_MAX_MS);
+    return () => {
+        clearTimeout(holdTimer);
+        stopWaiting();
+    };
+}
+
 /** A resumed conversation is a new stretch of work: the session title is judged afresh at the next message. */
 function retitleThen<T>(blockId: string, run: () => T): T {
     markTitleStale(blockId);
@@ -199,7 +235,11 @@ export function useAgentStream({
     // createHidingStreamFlushQueue BEFORE anything below sees it: `memoryReinjectionController.isHiding`
     // then gates every push uniformly, for every producer, with no change to any of them
     // (SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §3.3).
-    const rawQueue = createPaneFlushQueue(model, blockId);
+    // Nobody can see the pane: its tab is hidden, or its window tab is not the displayed one. Its flushes take the
+    // slow slot, and the cursor below holds its incoming records, placing them in one pass (stream-flush-rate.ts).
+    const paneVisibility = usePaneTabVisibility(blockId);
+    const offScreen = (): boolean => paneVisibility() !== "active";
+    const rawQueue = createPaneFlushQueue(model, blockId, offScreen);
 
     // The pane's context window for memory sizing: the meter's own reading when it has one; the
     // last-seen model's table entry next; FALLBACK_CONTEXT_WINDOW (shared with memory-reinjection.ts's
@@ -343,43 +383,29 @@ export function useAgentStream({
         // dropped, gaps read, and nothing parsed before the history it follows. An echo (the user
         // message the controller wrote to the agent's stdin, whose node the pane already shows) is not
         // parsed; the ledger pairs it with that node.
+        const cursorHold = paneCursorHold(blockId, offScreen);
         const cursor = new TranscriptCursor({
+            ...cursorHold,
             deliver: (text, from) => parseRecords(pipeline, text, from),
             echo: (text, from) => echoLedger.echoed(text, from),
             isOwnEcho: (line, at) => echoLedger.isOwnEcho(line, at),
             reset: (fileop) => resetStream(pipeline, fileop),
-            readRange: async (offset, limit, expectGen) => {
-                const resp = await RpcApi.BlockfileReadRangeCommand(
-                    TabRpcClient,
-                    { block_id: blockId, filename: OutputFileName, offset, limit, expect_gen: expectGen },
-                    { timeout: 15_000 },
-                );
-                return { lines: resp?.lines ?? [], stream: resp?.stream, gen: resp?.gen, genMismatch: resp?.gen_mismatch };
-            },
+            readRange: transcriptRangeReader(blockId),
             log: (message, level) =>
                 level === "warn" ? console.warn(`[useAgentStream] ${message}`) : console.debug(`[useAgentStream] ${message}`),
         });
         const unregisterCursorStats = agentPerfStore.registerTranscriptCursor(blockId, cursor.stats);
         const stopInbox = subscribeThroughInbox(fileSubject, (msg) => cursor.push(msg)); // once per frame, stream-inbox.ts
-
-        // Live records wait for the history load (the pane is covered until then). A load that never
-        // reports doesn't hold them for good: after HISTORY_HOLD_MAX_MS they are placed from the first event on.
-        const stopWaiting = transcriptSettle
-            ? transcriptSettle.onSettle((outcome) => cursor.settle(outcome))
-            : (cursor.settle(null), () => {});
-        const holdTimer = setTimeout(() => {
-            if (cursor.isSettled()) return;
-            console.warn(`[useAgentStream] no history outcome after ${HISTORY_HOLD_MAX_MS}ms; placing live records from the next one`);
-            cursor.settle(null);
-        }, HISTORY_HOLD_MAX_MS);
+        releaseCursorWhenShown(cursor, cursorHold, offScreen);
+        const stopWaiting = waitForHistory(cursor, transcriptSettle);
 
         const stopPoll = startSharedZonePoll(blockId, OutputFileName, cursor);
 
         onCleanup(() => {
-            clearTimeout(holdTimer);
             stopPoll();
             stopWaiting();
             cursor.dispose();
+            cursorHold.cancel();
             unregisterCursorStats();
             queue.cancelScheduledFlush();
             stopInbox();

@@ -54,10 +54,12 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     },
 }));
 
+import { clearRecentCommands } from "@/app/store/palette-recent";
 import { CommandPaletteModal } from "./command-palette";
 
 afterEach(() => {
     cleanup();
+    clearRecentCommands();
     h.agents = [];
     h.ran = [];
     h.keys = {};
@@ -487,5 +489,55 @@ describe("CommandPaletteModal roles", () => {
         fireEvent.mouseEnter(rows[3]);
         expect(rows[3].getAttribute("aria-selected")).toBe("false");
         expect(rows[0].getAttribute("aria-selected")).toBe("true");
+    });
+});
+
+describe("recently used (R29 to R31)", () => {
+    const labels = () => Array.from(document.querySelectorAll(".command-palette-item-label")).map((el) => el.textContent ?? "");
+    const groups = () => Array.from(document.querySelectorAll(".command-palette-item-group")).map((el) => el.textContent ?? "").filter(Boolean);
+
+    /** Opens the palette, picks the row with `label` by click, and closes it. */
+    function pick(label: string): void {
+        render(() => <CommandPaletteModal close={() => {}} />);
+        fireEvent.click(screen.getByText(label));
+        cleanup();
+    }
+
+    it("lists what was picked first, in a group of its own, and not again in its category", () => {
+        pick("Close Pane");
+        render(() => <CommandPaletteModal close={() => {}} />);
+        expect(labels()[0]).toBe("Close Pane");
+        expect(labels().filter((l) => l === "Close Pane")).toHaveLength(1);
+        expect(groups()[0]).toBe("recently used");
+    });
+
+    it("lists the newest pick first", () => {
+        pick("New Tab");
+        pick("Split Right");
+        render(() => <CommandPaletteModal close={() => {}} />);
+        expect(labels().slice(0, 2)).toEqual(["Split Right", "New Tab"]);
+    });
+
+    it("typing, puts a recent match under recently used and the rest under other commands", () => {
+        pick("Close Pane");
+        expect(typeQuery("close")[0]).toBe("Close Pane");
+        expect(groups()).toEqual(["recently used", "other commands"]);
+    });
+
+    it("skips a remembered command that is gone, and does not forget it", () => {
+        pick("Close Tab");
+        const gone = h.commands.splice(h.commands.findIndex((c) => c.id === "tab:close"), 1);
+        render(() => <CommandPaletteModal close={() => {}} />);
+        expect(labels()).not.toContain("Close Tab");
+        expect(groups()[0]).not.toBe("recently used");
+        cleanup();
+        h.commands.push(...gone);
+        render(() => <CommandPaletteModal close={() => {}} />);
+        expect(labels()[0]).toBe("Close Tab");
+    });
+
+    it("lists nothing as recent before anything is picked", () => {
+        render(() => <CommandPaletteModal close={() => {}} />);
+        expect(groups()).not.toContain("recently used");
     });
 });
