@@ -90,6 +90,7 @@ function show(q: PaneConfirmView): void {
         { question: q, decide: (approve: boolean, checkbox: boolean) => decide(q, approve, checkbox) },
         {
             source: "pane-confirm",
+            operatorOnly: true,
             deadlineMs: q.deadline_ms,
             summary: q.title,
             waits: false,

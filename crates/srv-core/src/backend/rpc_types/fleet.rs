@@ -64,6 +64,29 @@ pub struct CommandFleetCheckLimitsData {
 pub struct CommandFleetBroadcastData {
     pub targets: Vec<String>,
     pub message: String,
+    /// A name the sender chose for this broadcast. With it, srv publishes
+    /// `fleetbroadcastprogress` as each delivery ends, so the sender can show
+    /// how far a paced broadcast has got.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub progress_id: Option<String>,
+}
+
+/// The event a broadcast's sender follows while its deliveries are paced.
+pub const EVENT_FLEET_BROADCAST_PROGRESS: &str = "fleetbroadcastprogress";
+
+/// `fleetbroadcastprogress`: one more delivery of a broadcast has ended, delivered or failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FleetBroadcastProgressEvent {
+    /// The `progress_id` the sender gave.
+    pub id: String,
+    /// Deliveries that have ended so far.
+    #[ts(type = "number")]
+    pub sent: u32,
+    /// Targets in all.
+    #[ts(type = "number")]
+    pub total: u32,
 }
 
 /// Input for supervisor.set-mode: the Swarm Supervisor's mode for each target
@@ -187,6 +210,7 @@ mod req_shape_tests {
             serde_json::from_value(json!({"targets": ["b1", "b2"], "message": "go"}))
                 .expect("fleet.broadcast must accept targets and message");
         assert_eq!(r.targets.len(), 2);
+        assert!(r.progress_id.is_none(), "an older page sends no progress id and gets no progress events");
     }
 
     // swarm-model.ts's `bulkStopSelection` spreads `...opts`, so bulk-stop is

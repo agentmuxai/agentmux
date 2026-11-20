@@ -48,8 +48,7 @@ vi.mock("@/util/util", () => ({
         Promise.resolve(f()).catch(() => {});
     },
 }));
-vi.mock("@/app/store/modalmodel", () => ({ openModal: (m: unknown) => log(`openModal ${(m as { name?: string }).name}`) }));
-vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: { name: "CommandPaletteModal" } }));
+vi.mock("@/app/store/open-command-palette", () => ({ openCommandPalette: () => log("openCommandPalette") }));
 vi.mock("@/app/store/window-appearance", () => ({
     currentWindowLabel: () => h.label[0](),
     currentWindowOpacity: () => h.opacity[0](),
