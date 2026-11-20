@@ -12,6 +12,9 @@
 // stall lasts, and once more when the thread runs again, with how long it was away.
 //
 // Cost: one empty task posted and one atomic read per second; the context is read only during a stall.
+// The ping itself touches nothing that can wait: it stores three numbers. (It used to ask the filesystem for
+// the thread's id every time, on every platform; on Windows that lookup has held the UI thread for seconds,
+// and the stall was then written with a length of 0, because the ping had started on time.)
 // Logging only: nothing here acts on a stall.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
@@ -33,7 +36,7 @@ const REPEAT_EVERY: Duration = Duration::from_secs(15);
 pub(super) enum Event {
     /// The UI thread has not answered for `waited`. `repeat` is false for the first line of a stall.
     Stalled { waited: Duration, repeat: bool },
-    /// It answered; the last ping took `latency`.
+    /// It answered. The stall lasted `latency`: what the ping measured, and never less than the probe saw it wait.
     Recovered { latency: Duration },
     /// A ping took `latency` to run and was answered between two looks, so no stall was seen while it lasted
     /// (the probe thread was held up with the UI thread).
@@ -47,6 +50,8 @@ pub(super) struct StallTracker {
     stalled: Option<(Instant, Instant)>,
     /// The latest answered ping already looked at.
     seen_ack: u64,
+    /// The longest the probe has seen this stall's ping wait.
+    longest: Duration,
 }
 
 impl StallTracker {
@@ -60,19 +65,23 @@ impl StallTracker {
                     return None;
                 }
                 self.stalled = Some((now, now));
+                self.longest = waited;
                 Some(Event::Stalled { waited, repeat: false })
             }
             (Some(sent), Some((first, last))) => {
+                let waited = now.saturating_duration_since(sent);
+                self.longest = self.longest.max(waited);
                 if now.saturating_duration_since(last) < REPEAT_EVERY {
                     return None;
                 }
                 self.stalled = Some((first, now));
-                Some(Event::Stalled { waited: now.saturating_duration_since(sent), repeat: true })
+                Some(Event::Stalled { waited, repeat: true })
             }
             (None, Some(_)) => {
                 self.stalled = None;
                 self.seen_ack = acked;
-                Some(Event::Recovered { latency })
+                // A stall the probe watched for seconds is never said to have lasted less.
+                Some(Event::Recovered { latency: latency.max(std::mem::take(&mut self.longest)) })
             }
             (None, None) => {
                 let fresh = acked != self.seen_ack;
@@ -101,6 +110,20 @@ impl Beat {
     fn elapsed_ms(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
     }
+
+    /// What the UI thread does for ping `seq`: how late it ran, and that it ran. The answer is stored before
+    /// anything else is done, so nothing can stand between the ping running and the probe seeing it. `tid` (the
+    /// thread's OS id) is asked for only until it is known.
+    fn answer(&self, seq: u64, tid: impl FnOnce() -> Option<u64>) {
+        let latency = self.elapsed_ms().saturating_sub(self.sent_at_ms.load(Ordering::Relaxed));
+        self.latency_ms.store(latency, Ordering::Relaxed);
+        self.acked.store(seq, Ordering::Release);
+        if self.ui_tid.load(Ordering::Relaxed) == 0 {
+            if let Some(tid) = tid() {
+                self.ui_tid.store(tid, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 cef::wrap_task! {
@@ -111,19 +134,18 @@ cef::wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let latency = self.beat.elapsed_ms().saturating_sub(self.beat.sent_at_ms.load(Ordering::Relaxed));
-            self.beat.latency_ms.store(latency, Ordering::Relaxed);
-            if let Some(tid) = current_tid() {
-                self.beat.ui_tid.store(tid, Ordering::Relaxed);
-            }
-            self.beat.acked.store(self.seq, Ordering::Release);
+            self.beat.answer(self.seq, current_tid);
         }
     }
 }
 
-/// This thread's OS id: `/proc/thread-self` links to `<pid>/task/<tid>`. Written so every platform compiles it (the
-/// CI legs that build this crate are not Linux ones); elsewhere the link is not there and the answer is none.
+/// This thread's OS id, on Linux: `/proc/thread-self` links to `<pid>/task/<tid>`. Written so every platform
+/// compiles it (the CI legs that build this crate are not Linux ones). Elsewhere there is no such link and the
+/// filesystem is not asked: the ping runs on the UI thread, and a file lookup there can wait for seconds.
 fn current_tid() -> Option<u64> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
     let link = std::fs::read_link("/proc/thread-self").ok()?;
     link.file_name()?.to_str()?.parse().ok()
 }
@@ -410,6 +432,61 @@ mod tests {
         let mut t = StallTracker::default();
         assert_eq!(t.observe(at(t0, 2), Some(at(t0, 0)), 0, Duration::ZERO), None);
         assert_eq!(t.observe(at(t0, 3), None, 0, Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn a_stall_the_probe_watched_is_never_said_to_be_shorter_than_it_saw() {
+        let t0 = Instant::now();
+        let mut t = StallTracker::default();
+        // The ping started on time and was then held inside its own work: it measured nothing, the probe saw 6 s.
+        let sent = at(t0, 0);
+        assert_eq!(
+            t.observe(at(t0, 3), Some(sent), 0, Duration::ZERO),
+            Some(Event::Stalled { waited: Duration::from_secs(3), repeat: false })
+        );
+        assert_eq!(t.observe(at(t0, 6), Some(sent), 0, Duration::ZERO), None);
+        assert_eq!(t.observe(at(t0, 7), None, 1, Duration::ZERO), Some(Event::Recovered { latency: Duration::from_secs(6) }));
+        // The next stall starts from nothing: what the ping measured is said when it is the longer.
+        assert_eq!(
+            t.observe(at(t0, 23), Some(at(t0, 20)), 1, Duration::ZERO),
+            Some(Event::Stalled { waited: Duration::from_secs(3), repeat: false })
+        );
+        assert_eq!(
+            t.observe(at(t0, 24), None, 2, Duration::from_millis(3_500)),
+            Some(Event::Recovered { latency: Duration::from_millis(3_500) })
+        );
+    }
+
+    #[test]
+    fn a_ping_answers_before_it_asks_for_the_threads_id_and_asks_only_until_it_is_known() {
+        let beat = Beat {
+            epoch: Instant::now(),
+            sent: AtomicU64::new(0),
+            acked: AtomicU64::new(0),
+            sent_at_ms: AtomicU64::new(0),
+            latency_ms: AtomicU64::new(0),
+            ui_tid: AtomicU64::new(0),
+        };
+        let mut asked = 0;
+        // Not known yet: it is asked for, and by then the ping has answered.
+        beat.answer(1, || {
+            asked += 1;
+            assert_eq!(beat.acked.load(Ordering::Acquire), 1);
+            None
+        });
+        beat.answer(2, || {
+            asked += 1;
+            assert_eq!(beat.acked.load(Ordering::Acquire), 2);
+            Some(4_242)
+        });
+        // Known: the third ping does not ask.
+        beat.answer(3, || {
+            asked += 1;
+            Some(1)
+        });
+        assert_eq!(asked, 2);
+        assert_eq!(beat.acked.load(Ordering::Acquire), 3);
+        assert_eq!(beat.ui_tid.load(Ordering::Relaxed), 4_242);
     }
 
     #[test]
