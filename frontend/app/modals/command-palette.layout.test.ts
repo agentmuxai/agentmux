@@ -37,10 +37,10 @@ const tokens = (zoom: number) => `:root{--zoomfactor:${zoom};--z-modal:1000;--ma
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:#111;color:#ddd;font:13px Arial,sans-serif}`;
 
-function row(label: string, keys: string[], group = ""): string {
-    const caps = keys.length
-        ? `<span class="command-palette-item-shortcut"><span class="command-palette-item-step">${keys.map((k) => `<kbd class="ui-kbd">${k}</kbd>`).join("")}</span></span>`
-        : "";
+function row(label: string, keys: string[], group = "", then: string[] = []): string {
+    const step = (ks: string[]) =>
+        `<span class="command-palette-item-step">${ks.map((k) => `<kbd class="ui-kbd">${k}</kbd>`).join("")}</span>`;
+    const caps = keys.length ? `<span class="command-palette-item-shortcut">${step(keys)}${then.length ? step(then) : ""}</span>` : "";
     return `<div class="command-palette-item"><span class="command-palette-item-text"><span class="command-palette-item-label">${label}</span></span>${caps}<span class="command-palette-item-group">${group}</span></div>`;
 }
 
@@ -131,10 +131,15 @@ describe.skipIf(!BROWSER)("command palette place and size", () => {
             row("Split Down", ["Ctrl", "Alt", "Shift", "D"], "split"),
             row("Open Agent", ["Ctrl", "Shift", "A"], "open"),
             row("New Pane", ["Ctrl", "Shift", "N"], "window"),
+            // A chord: two steps, seven keys.
+            row("Swap Pane Down", ["Ctrl", "Shift", "S"], "pane", ["Shift", "\u2193"]),
+            row("Move Tab Right", ["Ctrl", "Shift", "T"], "tab", ["Shift", "\u2192"]),
         ].join("");
         const m = await measureInBrowser<Measured>(BROWSER!, page(1.5, rows), { width: 400, height: 700 });
         expect(Math.min(...m.labelWidths)).toBeGreaterThanOrEqual(40);
         expect(m.listScrollW).toBeLessThanOrEqual(m.listClientW);
+        // No shortcut is cut by the right edge of its row.
+        expect(m.capsRights.every((r: number) => r <= m.panelRight)).toBe(true);
         // The panel is narrower than 440 css px here: the group's name is left out.
         expect(m.groupShown).toBe(false);
     }, 60_000);

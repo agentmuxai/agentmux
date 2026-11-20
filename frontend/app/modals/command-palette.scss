@@ -35,6 +35,31 @@
     }
 }
 
+// In a very narrow panel a chord's caps (two steps, up to seven keys) do not fit beside even a short label: the row
+// wraps, the shortcut on a line of its own at the right, and the caps are a little smaller. Nothing is cut and the
+// list does not scroll sideways (R14).
+@container command-palette (max-width: 340px) {
+    .command-palette-item {
+        flex-wrap: wrap;
+        padding-block: var(--space-1);
+        row-gap: 2px;
+    }
+
+    .command-palette-item-text {
+        flex: 1 1 8ch;
+    }
+
+    .command-palette-item-shortcut {
+        margin-left: auto;
+        gap: var(--space-1);
+
+        .ui-kbd {
+            padding: 0 2px;
+            font-size: var(--text-2xs);
+        }
+    }
+}
+
 .command-palette-container {
     display: flex;
     flex-direction: column;
