@@ -70,6 +70,9 @@ pub struct BackgroundTask {
     pub owner_tool_use_id: Option<String>,
 }
 
+/// The label a row has until something describes the call: the renderer's tool name.
+pub const GENERIC_LABEL: &str = "Bash";
+
 const COLUMNS: &str =
     "id, block_id, label, pid, started_at_ms, status, last_seen_ms, ended_at_ms, owner_tool_use_id";
 
@@ -97,7 +100,30 @@ impl Store {
             "UPDATE db_background_tasks SET last_seen_ms = ?1 WHERE id = ?2 AND status = 'running'",
             params![now_ms, id],
         )?;
+        // What the container agent said about the call, filed before this row existed, replaces the generic label.
+        conn.execute(
+            "UPDATE db_background_tasks
+             SET label = (SELECT c.description FROM db_background_container_calls c
+                          WHERE c.block_id = db_background_tasks.block_id AND c.id = db_background_tasks.id)
+             WHERE id = ?1 AND label = ?2
+               AND EXISTS (SELECT 1 FROM db_background_container_calls c
+                           WHERE c.block_id = db_background_tasks.block_id AND c.id = db_background_tasks.id
+                             AND c.description IS NOT NULL)",
+            params![id, GENERIC_LABEL],
+        )?;
         Ok(())
+    }
+
+    /// Give the row `id` of `block_id` the call's own `label` when it still has the renderer's generic one
+    /// (the CLI's own description, set by [`Self::background_task_describe`], is never replaced). `false`
+    /// when there is no such row or its label is already specific.
+    pub fn background_task_describe_if_generic(&self, block_id: &str, id: &str, label: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_background_tasks SET label = ?1 WHERE id = ?2 AND block_id = ?3 AND label = ?4",
+            params![label, id, block_id, GENERIC_LABEL],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Record the OS pid once known (bashwrap/process_tracker learn it
