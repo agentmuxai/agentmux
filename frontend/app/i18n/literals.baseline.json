@@ -413,5 +413,5 @@
     "frontend/app/window/window-controls.win32.tsx": 6,
     "frontend/app/window/workspace-modals.tsx": 12,
     "frontend/app/workspace/floating-pane-workspace.tsx": 1,
-    "frontend/app/workspace/workspace.tsx": 3
+    "frontend/app/workspace/workspace.tsx": 1
 }

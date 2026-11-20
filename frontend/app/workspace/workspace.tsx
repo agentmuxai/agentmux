@@ -12,7 +12,7 @@ import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { runInViewTransition } from "@/app/util/view-transition";
 import { shouldReduceMotion } from "@/app/motion/motion";
-import { atoms, getApi } from "@/store/global";
+import { atoms } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
     WindowTabIdProvider,
@@ -33,9 +33,12 @@ import { creatingTabId, switchIntentTabId } from "@/store/tab-actions";
 import { focusManager } from "@/store/focusManager";
 import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
 import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/app/platform/window-resize";
-import { Button } from "@/app/element/ui/Button";
 import { startAgentPrewarm } from "./agent-prewarm-driver";
 import { createDisplayWatchdog } from "./display-watchdog";
+import { createPaneWatchdog } from "./pane-watchdog";
+import { chosenReloadOffer, WindowReloadOffer } from "./window-reload-offer";
+import { peekLayoutModelForTab } from "@/layout/index";
+import { onWindowErrorBurst } from "@/app/util/window-error-burst";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -238,8 +241,28 @@ function WorkspaceElem(): JSX.Element {
         withdrawOffer: () => setTabDisplayStuck(false),
         log: (message) => console.warn(message),
     });
+    // The panes the displayed tab's layout holds against the ones the page has mounted (pane-watchdog.ts), and a burst of
+    // errors the window could not contain: each offers the same reload, and none reloads on its own.
+    const [panesMissing, setPanesMissing] = createSignal(false);
+    const [errorBurst, setErrorBurst] = createSignal(false);
+    onCleanup(onWindowErrorBurst(() => setErrorBurst(true)));
+    const paneWatchdog = createPaneWatchdog({
+        expected: () => peekLayoutModelForTab(untrack(displayTabId))?.leafOrder().map((e) => e.blockid) ?? [],
+        mounted: () => {
+            const ids = new Set<string>();
+            const tabEl = tabEls.get(untrack(displayTabId));
+            tabEl?.querySelectorAll(".block-frame-default[data-blockid]:not(.block-preview)").forEach((el) => ids.add(el.getAttribute("data-blockid")!));
+            return ids;
+        },
+        inFlight: () => untrack(() => tabSwitching() || switchIntentTabId() != null || gateTargetTabId() != null || creatingTabId() != null || displayTabId() !== targetTabId()),
+        offerReload: () => setPanesMissing(true),
+        withdrawOffer: () => setPanesMissing(false),
+        log: (message) => console.warn(message),
+    });
     const watchdogTimer = setInterval(() => {
-        if (!document.hidden) watchdog.check();
+        if (document.hidden) return;
+        watchdog.check();
+        paneWatchdog.check();
     }, 1000);
     onCleanup(() => clearInterval(watchdogTimer));
     // Draws never-shown tabs' agent panes while the window is idle, when the
@@ -326,30 +349,10 @@ function WorkspaceElem(): JSX.Element {
                     "view-transition-name": "workspace-tab-content",
                 }}
             >
-                <Show when={tabDisplayStuck()}>
-                    <div
-                        role="alert"
-                        class="flex flex-row items-center gap-3"
-                        style={{
-                            position: "absolute",
-                            bottom: "16px",
-                            left: "50%",
-                            "white-space": "nowrap",
-                            transform: "translateX(-50%)",
-                            "z-index": 20,
-                            padding: "6px 10px",
-                            "border-radius": "6px",
-                            border: "1px solid var(--warning-color)",
-                            background: "var(--modal-bg-color)",
-                            "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.4)",
-                        }}
-                    >
-                        <span>This window stopped switching tabs.</span>
-                        <Button tone="accent" density="compact" icon="rotate-right" onClick={() => getApi().reloadWindow()}>
-                            Reload
-                        </Button>
-                    </div>
-                </Show>
+                <WindowReloadOffer
+                    reason={() => chosenReloadOffer({ tabs: tabDisplayStuck(), panes: panesMissing(), errors: errorBurst() })}
+                    onDismiss={() => setErrorBurst(false)}
+                />
                 <ErrorBoundary>
                     <Show when={allTabIds().length > 0} fallback={<CenteredDiv>No Active Tab</CenteredDiv>}>
                         <For each={allTabIds()}>
