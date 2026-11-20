@@ -23,7 +23,7 @@ set -euo pipefail
 KIND="${1:-}"
 TARGET="${2:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-notarytool}"
-LOG="${NOTARY_LOG:-$(mktemp -t agentmux-notary).log}"
+LOG="${NOTARY_LOG:-$(mktemp "${TMPDIR:-/tmp}/agentmux-notary.XXXXXX")}"
 
 case "$KIND" in
     app) [ -d "$TARGET/Contents" ] || { echo "❌ notarize: not an .app: ${TARGET:-<none>}" >&2; exit 1; } ;;
