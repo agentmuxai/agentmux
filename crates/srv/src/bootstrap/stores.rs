@@ -210,6 +210,20 @@ fn carry_forward_or_stop(db_dir: &std::path::Path, code_version: &str) -> Result
     }
 }
 
+/// [`carry_forward_or_stop`] for the start path: a copy that failed while an older version has data is NOT a fresh start. With no
+/// launcher to show a dialog (this path is the headless and hosted one), the person would see an empty workspace while the previous
+/// version's folder still holds their data. srv stops, says why, and leaves that folder as it was.
+fn carry_forward_or_exit(db_dir: &std::path::Path, code_version: &str) -> bool {
+    match carry_forward_or_stop(db_dir, code_version) {
+        Ok(carried) => carried,
+        Err(message) => {
+            tracing::error!("startup: refusing to start: {}", message);
+            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&message));
+            std::process::exit(1);
+        }
+    }
+}
+
 /// What an unsupervised srv does before opening its stores: copy a previous
 /// version's data forward, snapshot, and run pending migrations (the same
 /// work `agentmux-srv migrate --prepare` does for the launcher).
@@ -245,17 +259,7 @@ pub(super) fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::p
     // A new version's first start begins from the previous version's data,
     // then migrates it like any upgrade (carry_forward.rs). No snapshot after
     // a copy-forward: the previous version's folder is that data, untouched.
-    // A copy that failed while an older version has data is NOT a fresh start: with no launcher to show a dialog (this path is
-    // the headless and hosted one), the person would see an empty workspace while the previous version's folder still holds
-    // their data. srv stops, says why, and leaves that folder as it was.
-    let carried = match carry_forward_or_stop(&db_dir, &code_version) {
-        Ok(carried) => carried,
-        Err(message) => {
-            tracing::error!("startup: refusing to start: {}", message);
-            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&message));
-            std::process::exit(1);
-        }
-    };
+    let carried = carry_forward_or_exit(&db_dir, &code_version);
     let snapshot = if carried {
         Ok(None)
     } else {
