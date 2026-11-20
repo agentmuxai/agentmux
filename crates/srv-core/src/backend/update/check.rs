@@ -355,6 +355,12 @@ pub(crate) fn is_dev_build(channel: &str) -> bool {
 /// The status for a release GitHub reported, seen from `current` on `channel`
 /// for an install of `kind`.
 pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms: i64, kind: &InstallKind) -> AppUpdateStatus {
+    status_for_arch(current, channel, release, now_ms, kind, std::env::consts::ARCH)
+}
+
+/// [`status_for`] for a computer with CPU `arch` (`std::env::consts::ARCH`'s names), so a test of the file chosen for one arch
+/// gives the same answer on any runner (an Apple Silicon runner is `aarch64`, not `x86_64`).
+pub(crate) fn status_for_arch(current: &str, channel: &str, release: &Release, now_ms: i64, kind: &InstallKind, arch: &str) -> AppUpdateStatus {
     let latest = release.tag_name.trim().trim_start_matches('v').to_string();
     let state = if release.draft || release.prerelease {
         // `releases/latest` never returns these; treat one as no news.
@@ -375,7 +381,7 @@ pub(crate) fn status_for(current: &str, channel: &str, release: &Release, now_ms
         }
         b[..end].to_string()
     });
-    let asset = kind.asset_name(&latest, std::env::consts::ARCH).and_then(|n| find_asset(release, &n));
+    let asset = kind.asset_name(&latest, arch).and_then(|n| find_asset(release, &n));
     // Older than the release upgrades from: install the floor first.
     let install_first = release
         .body
