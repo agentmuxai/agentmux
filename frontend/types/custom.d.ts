@@ -492,6 +492,8 @@ declare global {
          *  composer's right-click Paste, which has no `paste` event. */
         readClipboardAttachments(): Promise<{ text: string; paths: string[] }>;
         writeClipboardText(text: string): Promise<void>;
+        /** Put an image on the clipboard as an image: a PNG, base64 (`writeImage` in util/clipboard.ts). A host without it leaves the page's own clipboard. */
+        writeClipboardImage?(png: string): Promise<void>;
         /** Local paths of the files an OS drag just dropped into this window (`nativeFileDrop`). */
         consumeDroppedFilePaths(): Promise<string[]>;
         /** The same paths while the drag is still hovering; doesn't consume them. */
@@ -1114,6 +1116,12 @@ declare global {
             canGoBack?: boolean;
             canGoForward?: boolean;
         }) => ContextMenuItem[];
+        /**
+         * The pane menu's Copy, for a view whose content isn't text (an image, a video): items that stand in for the
+         * plain Copy, which only a text selection enables. `selection` is the text selected in the pane. Omitted or
+         * empty: the plain Copy.
+         */
+        getCopyMenuItems?: (selection: string) => ContextMenuItem[];
         giveFocus?: () => boolean;
         keyDownHandler?: (e: MuxKeyboardEvent) => boolean;
         /** Fired by the host (block.tsx) when this tab becomes visible to the

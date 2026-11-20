@@ -202,6 +202,14 @@ pub struct FsUnwatchReq {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsEmptyResult {}
 
+/// The answer of `fs.agent_folder`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FsAgentFolder {
+    /// The path is in a folder a container agent can write. True while that can't be told.
+    pub agent_folder: bool,
+}
+
 /// Request for `fs.rename`: a new name in the same folder.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

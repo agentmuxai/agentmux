@@ -14,6 +14,7 @@ import { createMemo, Match, Show, Switch, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { copyEditorMedia } from "../editor-media-copy";
 import type { EditorViewModel } from "../editor-model";
 import { createFollowFolder } from "./follow-folder";
 import { AvViewer } from "./media/av-viewer";
@@ -126,6 +127,7 @@ function ViewerFor(props: { model: EditorViewModel; tabId: string; viewer: Viewe
                     mime={mime()}
                     size={probe()?.size}
                     bar={bar()}
+                    onCopy={() => copyEditorMedia(model)}
                     onStep={dropped() ? undefined : (d) => void neighbourInFolder(path(), props.viewer, d).then((p) => p && model.retargetTab(props.tabId, p)).catch(() => {})}
                 />
             </Match>

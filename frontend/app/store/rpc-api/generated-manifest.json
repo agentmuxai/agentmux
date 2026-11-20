@@ -559,6 +559,10 @@
             "method": "FsDeleteCommand"
         },
         {
+            "command": "fs.agent_folder",
+            "method": "FsAgentFolderCommand"
+        },
+        {
             "command": "fs.git_status",
             "method": "FsGitStatusCommand"
         },
