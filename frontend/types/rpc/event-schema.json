@@ -593,6 +593,15 @@
     }
   },
   {
+    "event": "fleetbroadcastprogress",
+    "payloadTs": {
+      "imports": [
+        "FleetBroadcastProgressEvent"
+      ],
+      "name": "FleetBroadcastProgressEvent"
+    }
+  },
+  {
     "event": "fs:renamed",
     "payloadTs": {
       "imports": [

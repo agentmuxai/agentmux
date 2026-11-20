@@ -273,4 +273,22 @@ pub struct AuditQueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub channel: Option<String>,
+    /// What the other channels on this computer keep in their own files, asked over loopback: the first page of a
+    /// `machine` scope only, and only the rows this channel cannot read itself (a channel that gave the shared folder
+    /// up writes its rows to its own file). One entry per channel that answered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub other_channels: Option<Vec<AuditChannelRows>>,
+}
+
+/// The newest rows another channel on this computer keeps in its own file (`audit.query`, `other_channels`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditChannelRows {
+    /// The channel's name, as the host-global registry has it.
+    pub channel: String,
+    /// Newest first. Each `id` is prefixed with the channel, so it cannot equal a row of another store.
+    pub entries: Vec<AuditEntry>,
+    /// The channel holds older rows than these. They are not paged: ask the channel's own Audit.
+    pub more: bool,
 }

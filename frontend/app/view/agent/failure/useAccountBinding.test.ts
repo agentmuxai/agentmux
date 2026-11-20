@@ -92,7 +92,7 @@ describe("useAccountBinding", () => {
         const items = m.showPicker.mock.calls[0][0] as ContextMenuItem[];
         items.find((i) => i.label === "Sign in with another account…")!.click!();
         // The person opened it themselves: no waiting tone, badge or OS notification for it.
-        expect(openPaneModal).toHaveBeenCalledWith("block-9", expect.any(Function), expect.any(Object), { source: "signin", waits: false });
+        expect(openPaneModal).toHaveBeenCalledWith("block-9", expect.any(Function), expect.any(Object), { source: "signin", waits: false, operatorOnly: true });
         m.dispose();
     });
 

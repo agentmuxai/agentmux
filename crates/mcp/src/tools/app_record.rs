@@ -293,14 +293,54 @@ fn stalls(events: &[Value], matched: usize, now_ms: i64) -> String {
     out
 }
 
-/// `series`/`export` of kind events: each stall, oldest first.
+fn is_flag(e: &Value) -> bool {
+    e["kind"].as_str() == Some("flag")
+}
+
+/// What one flag of the record's rules says (srv's `record_flags`): which rule, about what, with its numbers.
+fn flag_words(e: &Value) -> String {
+    let key = e["key"].as_str().unwrap_or("?");
+    let n = |field: &str| e[field].as_u64().unwrap_or(0);
+    let stalled = if key == "ui_stall" { "the window host's UI thread" } else { "srv's runtime" };
+    match e["rule"].as_str().unwrap_or("") {
+        "stalls" => format!("{stalled} stalled {} times for 5 s or more in one hour, the longest {}", n("n"), span(n("worst_ms"))),
+        "long_stall" => format!("{stalled} stalled for {}", span(n("worst_ms"))),
+        "growth" => {
+            let amount = |v: u64| match e["unit"].as_str() {
+                Some("bytes") => mb(v),
+                Some("mb") => format!("{v} MB"),
+                _ => format!("{v} elements"),
+            };
+            let content = e["content_pct"].as_i64().map_or(String::new(), |p| format!("; its rows changed by {p}% in that day"));
+            format!("{key} grew two days running: about +{} a day at {} (the day before +{}){content}", amount(n("rise")), amount(n("level")), amount(n("rise_before")))
+        }
+        other => format!("{other} {key}"),
+    }
+}
+
+/// The flags the record's rules wrote in the window: how many, and the newest three.
+fn flags(events: &[Value], now_ms: i64) -> String {
+    let mine: Vec<&Value> = events.iter().filter(|e| is_flag(e)).collect();
+    if mine.is_empty() {
+        return "Flags in that time: none (the rules that read the record found nothing).".to_string();
+    }
+    let mut out = format!("Flags in that time: {} (found by the rules that read the record; view \"series\" with kind \"events\" lists them all). Newest:", mine.len());
+    for e in mine.iter().rev().take(3) {
+        out.push_str(&format!("\n- {} ago: {}", ago(now_ms, &e["t"]), flag_words(e)));
+    }
+    out
+}
+
+/// `series`/`export` of kind events: each stall and each flag, oldest first.
 pub(super) fn describe_events(events: &[Value], matched: usize, now_ms: i64) -> String {
     if events.is_empty() {
         return "The record has no stall in that window.".to_string();
     }
-    let mut out = String::from("Stalls, oldest first:");
+    let mut out = String::from(if events.iter().any(is_flag) { "Stalls and flags, oldest first:" } else { "Stalls, oldest first:" });
     for e in events {
-        let what = if s(e, "kind") == "ui_stall" {
+        let what = if is_flag(e) {
+            format!("flag: {}", flag_words(e))
+        } else if s(e, "kind") == "ui_stall" {
             let host = e["host_mb"].as_u64().map_or(String::new(), |mb| format!(" (host {mb} MB private)"));
             format!("the window host's UI thread did not run for {}{host}", span(e["ms"].as_u64().unwrap_or(0)))
         } else {
@@ -333,6 +373,8 @@ pub(super) fn describe_summary(inventory: &Value, newest: Option<&Value>, rolls:
     out.push_str(&trend(rolls, now_ms));
     out.push('\n');
     out.push_str(&stalls(events, matched, now_ms));
+    out.push('\n');
+    out.push_str(&flags(events, now_ms));
     out.push_str("\nView \"series\" lists the hours or lines, \"export\" returns them as stored, to attach to a bug.");
     out
 }
@@ -430,6 +472,29 @@ mod tests {
         assert!(text.contains("60 min ago: srv's runtime stopped for 5 s (cause machine, worst 5 s late, 2 merged)"), "{text}");
         assert!(describe_events(&[], 0, 0).contains("no stall"));
         assert!(describe_events(&events, 40, now as i64).contains("newest 2 of the 40"));
+    }
+
+    #[test]
+    fn a_flag_is_said_in_words_among_the_events_and_counted_in_the_summary() {
+        let now = 1_000 * H;
+        let events = vec![
+            json!({ "t": now - 30 * H, "kind": "flag", "rule": "long_stall", "key": "srv_stall", "n": 1, "worst_ms": 42_000 }),
+            json!({ "t": now - 3 * H, "kind": "ui_stall", "ms": 7_000, "host_mb": 310 }),
+            json!({ "t": now - 2 * H, "kind": "flag", "rule": "stalls", "key": "ui_stall", "n": 5, "worst_ms": 9_000 }),
+            json!({ "t": now - H, "kind": "flag", "rule": "growth", "key": "page:main:heap", "unit": "mb", "level": 306, "rise": 72, "rise_before": 70, "content_pct": 0 }),
+        ];
+        let text = describe_events(&events, 4, now as i64);
+        assert!(text.starts_with("Stalls and flags, oldest first:"), "{text}");
+        assert!(text.contains("flag: srv's runtime stalled for 42 s"), "{text}");
+        assert!(text.contains("flag: the window host's UI thread stalled 5 times for 5 s or more in one hour, the longest 9 s"), "{text}");
+        assert!(text.contains("60 min ago: flag: page:main:heap grew two days running: about +72 MB a day at 306 MB (the day before +70 MB); its rows changed by 0% in that day"), "{text}");
+        // A flag is not counted as a stall.
+        assert!(stalls(&events, 4, now as i64).contains("- 1 where the window host's UI thread did not run"), "{}", stalls(&events, 4, now as i64));
+        let said = flags(&events, now as i64);
+        assert!(said.starts_with("Flags in that time: 3 "), "{said}");
+        assert!(said.find("page:main:heap").unwrap() < said.find("stalled 5 times").unwrap(), "{said}");
+        assert!(flags(&events[1..2], now as i64).contains("none"));
+        assert!(describe_events(&events[1..2], 1, now as i64).starts_with("Stalls, oldest first:"));
     }
 
     #[test]

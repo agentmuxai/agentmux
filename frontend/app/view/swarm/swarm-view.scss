@@ -1504,9 +1504,21 @@
     flex-wrap: wrap;
 }
 
+// The hint and, while a paced broadcast goes out, the count shown in its place. Both sit in one grid
+// cell and the hint stays laid out (hidden) under the count, so the row keeps the hint's height where
+// the hint wraps to two lines and the count is one.
 .swarm-broadcast-hint {
+    display: grid;
     color: var(--secondary-text-color);
     font-size: var(--text-sm);
+}
+
+.swarm-broadcast-hint > * {
+    grid-area: 1 / 1;
+}
+
+.swarm-broadcast-hint-text.is-covered {
+    visibility: hidden;
 }
 
 .swarm-broadcast-recent-row {
