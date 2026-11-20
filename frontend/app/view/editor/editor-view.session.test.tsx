@@ -895,6 +895,25 @@ describe("the tree, the tab bar and the dialogs", () => {
         await expect(out()).toMatchFileSnapshot(snap("zoom-wheel"));
     });
 
+    it("leaves a Ctrl+scroll over a control bar to the window's chrome zoom: neither the pane's level nor the tree's moves, and the wheel is not taken", async () => {
+        const v = await mountView();
+        await open(v.model, "/home/u/a.ts");
+        const unregister = registerPaneTab({ apiVersion: 1, view: "editor", label: "Editor", icon: "file", capabilities: { paneZoom: EDITOR_ZOOM }, create: () => ({}) as never });
+        registerBlockComponentModel(v.model.blockId, { viewModel: { viewType: "editor" } } as never);
+        try {
+            for (const sel of [".file-tree-toolbar", ".doc-tab-strip"]) {
+                const bar = v.container.querySelector<HTMLElement>(sel)!;
+                const ev = new WheelEvent("wheel", { deltaY: -100, metaKey: true, bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+                bar.dispatchEvent(ev);
+                await settle();
+                expect([sel, ev.defaultPrevented, v.model.zoomAtom(), v.model.treeZoomAtom()]).toEqual([sel, false, 1, 1]);
+            }
+        } finally {
+            unregisterBlockComponentModel(v.model.blockId);
+            unregister();
+        }
+    });
+
     it("zooms the tree on its own with Ctrl+scroll over it, and the document with Ctrl+scroll over that", async () => {
         const v = await mountView();
         const unregister = registerPaneTab({ apiVersion: 1, view: "editor", label: "Editor", icon: "file", capabilities: { paneZoom: EDITOR_ZOOM }, create: () => ({}) as never });
