@@ -486,6 +486,8 @@ describe("Gmail, Calendar and Drive (§4.10)", () => {
         const section = await screen.findByRole("group", { name: "Connect Calendar" });
         expect(await within(section).findByText("Calendar isn't available in this version of AgentMux yet.")).toBeTruthy();
         expect(within(section).queryByRole("button", { name: "Connect Google" })).toBeNull();
+        // Google's guide is about the coding agents that sign in inside the agent: not what a service's Connect is.
+        expect(within(section).queryByText(/coding agents/i)).toBeNull();
         expect(rpc.AccountOAuthStartCommand).not.toHaveBeenCalled();
     });
 });

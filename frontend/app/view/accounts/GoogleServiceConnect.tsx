@@ -21,14 +21,20 @@ export function GoogleServiceConnect(props: { info: ServiceInfo; onClose: () => 
         <Show when={!client.loading}>
             <Show
                 when={offered()}
-                fallback={<div class="identity-detail-hint">{t("connectors.google.notOffered", { name: props.info.label })}</div>}
+                fallback={
+                    <div class="accounts-add-status">
+                        <p>{t("connectors.google.notOffered", { name: props.info.label })}</p>
+                    </div>
+                }
             >
-                <OAuthConnectPanel
-                    provider="google"
-                    scopes={props.info.readScopes}
-                    onConnected={() => props.onClose()}
-                    onCancel={() => props.onClose()}
-                />
+                <div class="accounts-add-status">
+                    <OAuthConnectPanel
+                        provider="google"
+                        scopes={props.info.readScopes}
+                        onConnected={() => props.onClose()}
+                        onCancel={() => props.onClose()}
+                    />
+                </div>
             </Show>
         </Show>
     );

@@ -67,7 +67,8 @@ export function AddAccountSection(props: {
     // preset to the provider and kind.
     const [mode, setMode] = createSignal<AuthMode | null>(null);
     const signInProvider = () => (tile.signIn && mode() === "oauth" ? PROVIDERS[tile.signIn.provider] : undefined);
-    const guide = guideFor(tile.id);
+    // A Google service's sign-in has nothing to choose, and Google's guide is about the coding agents that sign in inside the agent.
+    const guide = scoped ? undefined : guideFor(tile.id);
     // A way to connect says what it is in the guide's words; a tile with none keeps the generic two.
     const labelFor = (m: AuthMode) => {
         const o = optionForMode(guide, m);
