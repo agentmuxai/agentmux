@@ -306,7 +306,7 @@
 138 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
-108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
+109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff

@@ -57,9 +57,11 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                         controls
                         playsinline
                         aria-label={s.item()?.alt || s.item()?.name}
-                        onContextMenu={(e) =>
-                            showMediaCopyMenu(e, sourceFromUrl(src(), { kind: "video", path: s.item()?.path, element: () => e.currentTarget }))
-                        }
+                        onContextMenu={(e) => {
+                            // Read now: by the time a menu item is picked the event is over and has no currentTarget.
+                            const video = e.currentTarget;
+                            showMediaCopyMenu(e, sourceFromUrl(src(), { kind: "video", path: s.item()?.path, element: () => video }));
+                        }}
                         onLoadedMetadata={(e) =>
                             s.setSize(s.item()!.path, e.currentTarget.videoWidth, e.currentTarget.videoHeight)
                         }
