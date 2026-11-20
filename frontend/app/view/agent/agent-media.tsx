@@ -25,17 +25,30 @@ import { isContainerAgentType, isContainerRuntime, parseRuntimeKind } from "@/ut
 /** Outside an agent pane: no inline media. */
 const AgentMediaContext = createContext<Accessor<MarkdownMediaOpts | undefined>>(() => undefined);
 
-export function AgentMediaProvider(props: { baseDir: Accessor<string>; children: JSX.Element }): JSX.Element {
+export function AgentMediaProvider(props: {
+    baseDir: Accessor<string>;
+    /** The agent pane: srv reads a container agent's message paths from its own folders (see `MediaOwner`). */
+    blockId?: Accessor<string | undefined>;
+    /** A file of the message is opened by srv, not as a path of this computer: any agent not known to run on this host. */
+    confined?: Accessor<boolean>;
+    children: JSX.Element;
+}): JSX.Element {
     // The preview that steps through one message's images and videos, over the whole tab: one per pane, opened by
     // a click on an image or a video's enlarge button.
     const [gallery, setGallery] = createSignal<MediaGallery>();
-    const media = (): MarkdownMediaOpts => ({ baseDir: props.baseDir(), openGallery: setGallery });
+    const media = (): MarkdownMediaOpts => ({
+        baseDir: props.baseDir(),
+        openGallery: setGallery,
+        blockId: props.blockId?.(),
+        confined: props.confined?.() ?? false,
+    });
     return (
         <AgentMediaContext.Provider value={media}>
             {props.children}
             <Show when={gallery()}>
                 {(g) => (
                     <MessageImageLightbox
+                        blockId={props.blockId?.()}
                         items={g().items}
                         index={g().index}
                         start={g().start}
@@ -45,7 +58,7 @@ export function AgentMediaProvider(props: { baseDir: Accessor<string>; children:
                         }}
                         onOpenEditor={(path) => {
                             setGallery(undefined);
-                            openMediaInEditor(path);
+                            openMediaInEditor(path, { blockId: props.blockId?.(), confined: props.confined?.() ?? false });
                         }}
                     />
                 )}
@@ -91,7 +104,7 @@ export function AgentPaneProviders(props: {
     };
     return (
         <AgentDormancyProvider dormant={props.dormant}>
-            <AgentMediaProvider baseDir={baseDir}>
+            <AgentMediaProvider baseDir={baseDir} blockId={() => props.block()?.oid} confined={() => !onHost()}>
                 <AgentPaneFilesProvider files={files}>
                     {props.loadToolResult ? (
                         <ToolResultLoaderProvider load={props.loadToolResult}>{props.children}</ToolResultLoaderProvider>

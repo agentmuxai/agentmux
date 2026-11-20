@@ -10,8 +10,8 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-/// `file`, which lies under `root` (a canonical path), opened to read.
-fn open_beneath(root: &Path, file: &Path) -> Result<std::fs::File, String> {
+/// `file`, which lies under `root` (a canonical path), opened to read, without following a link on the way.
+pub fn open_beneath(root: &Path, file: &Path) -> Result<std::fs::File, String> {
     #[cfg(unix)]
     return super::widget::beneath::file_beneath(root, file).map_err(|e| format!("{} can't be read from the workspace: {e}", file.display()));
     #[cfg(not(unix))]

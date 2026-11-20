@@ -136,6 +136,16 @@ class MediaFetchError extends Error {
     }
 }
 
+/**
+ * Whose message a file path comes from: the agent pane showing it. srv reads the path of a container agent's pane
+ * from that agent's own folders only (`blockId`); `confined` says a click on it must be opened by srv the same way,
+ * not as a path on this computer. A pane not known to be a native agent's counts as confined.
+ */
+export interface MediaOwner {
+    blockId?: string;
+    confined?: boolean;
+}
+
 export interface FetchMediaOpts {
     /** Refuse, before downloading the body, anything larger. */
     maxBytes?: number;
