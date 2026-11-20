@@ -23,7 +23,7 @@ const CSS = [
 const TOKENS = `:root{--space-1:4px;--space-1-5:6px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;
 --text-sm:12px;--text-md:14px;--zoomfactor:1;--border-color:#444;--tint-2:#222;--main-bg-color:#111;--main-text-color:#eee;
 --secondary-text-color:#aaa;--modal-bg-color:#222;--radius-sm:2px;--radius-md:4px;--radius-lg:6px}
-*{box-sizing:border-box}body{margin:0;font:13px sans-serif;background:#111;color:#eee}button{font:inherit}`;
+*{box-sizing:border-box}body{margin:0;font:13px sans-serif;background:#111;color:#eee}button{font:inherit;white-space:nowrap}`;
 
 const URL_TEXT = "https://claude.ai/oauth/authorize?code=true&client_id=abc&state=" + "x".repeat(260);
 const steps = `
@@ -87,7 +87,7 @@ describe.skipIf(!BROWSER)("sign-in dialog over an agent pane", () => {
     it("scrolls inside the pane, follows the pane's zoom, wraps its buttons, and the docked card scrolls too", async () => {
         const html =
             `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${CSS}</style>` +
-            `${dialog("z1", 1, 380, 260)}${dialog("z2", 2, 380, 260)}${docked("docked", 400)}` +
+            `${dialog("z1", 1, 380, 260)}${dialog("z2", 2, 380, 260)}${dialog("narrow", 2, 277, 369)}${docked("docked", 400)}` +
             `<script>window.addEventListener("load",()=>{${MEASURE}})</script>`;
         const r = await measureInBrowser<Record<string, Measured>>(BROWSER!, html, { width: 1300, height: 1400 });
 
@@ -98,6 +98,9 @@ describe.skipIf(!BROWSER)("sign-in dialog over an agent pane", () => {
             expect(r[k].buttonsInside).toBe(true); // the rows wrapped
             expect(r[k].topReachable).toBe(true);
         }
+        // A narrow pane at zoom 2 (about 128 px of room): a button wider than that wraps its label, it is not cut off.
+        expect(r.narrow.buttonsInside).toBe(true);
+
         // The pane's zoom 2 draws the same line twice as tall as zoom 1 does.
         expect(r.z2.hint / r.z1.hint).toBeGreaterThan(1.8);
         expect(r.z2.hint / r.z1.hint).toBeLessThan(2.2);
