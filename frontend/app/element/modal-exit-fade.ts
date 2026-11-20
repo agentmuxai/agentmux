@@ -24,7 +24,7 @@ const SLACK_MS = 60;
  * transitions or the duration scales to nothing.
  */
 export function fadeOutBackdrop(root: HTMLElement | null | undefined, mount: HTMLElement | null | undefined): void {
-    if (!root || !mount || shouldReduceMotion("transition")) return;
+    if (!root || !mount || root.getAttribute("data-backdrop") === "none" || shouldReduceMotion("transition")) return;
     const ms = scaledMs(DURATION_QUICK_MS);
     if (ms <= 0) return;
     const copy = root.ownerDocument.createElement("div");

@@ -1,25 +1,63 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Command-palette specific styles. Outer chrome (backdrop, z-index,
-// scroll lock, inert) is provided by the canonical `<Modal>`; this
+// Command-palette specific styles. Outer chrome (z-index, scroll lock, inert, the
+// placement from the top edge and the missing backdrop) is provided by the
+// canonical `<Modal>` (`placement="dropdown"`, `backdrop="none"`); this
 // file only styles the panel sizing + inner search row + result list.
+// SPEC_COMMAND_PALETTE_TOP_CENTRE_2026_11_17.md §3.
 
 // Override the default panel width for the palette. Applied via the
 // `panelClass="command-palette-panel"` prop passed to Modal.
 
 @use "../mixins.scss";
 .modal-panel.command-palette-panel {
-    width: 560px;
-    max-width: min(100%, calc(92vw / var(--zoomfactor)));
-    // 480px is a zoomed length (720 real px at 150%): cap it by the window's height, in the same lengths. The
-    // palette drops from the top (`data-placement="top"`: the overlay's padding-top is 15vh, its bottom padding
-    // 24px), so what is left for it is 85vh - 24px.
-    max-height: min(480px, calc((85vh - 24px) / var(--zoomfactor)));
+    // A row's least height. The list shows at most twelve of them (R2).
+    --palette-row-h: 30px;
+    width: 600px;
+    // The panel is zoomed with the chrome and the root is not: a length from the window (vw, vh) is divided by the
+    // zoom so the scaled panel keeps 8px of the window each side and 48px of its height.
+    max-width: min(100%, calc((100vw - 16px) / var(--zoomfactor)));
+    max-height: calc((100vh - 48px) / var(--zoomfactor));
     padding: 0;
-    // Panel content manages its own scrolling in the list area, so
-    // let overflow fall through.
-    overflow: hidden;
+    // Panel content manages its own scrolling in the list area. `clip`, not `hidden`: a hidden box can still be
+    // scrolled by a script (a row's scrollIntoView in a window shorter than the panel moved the search row up).
+    overflow: clip;
+    // What the rows are laid out against (below): the panel's own width, whatever the window's.
+    container: command-palette / inline-size;
+}
+
+// In a narrow panel the caps and the label need the room the group's name takes: the name is left out, and the
+// groups keep their hairlines and their names to a screen reader (R12, R14).
+@container command-palette (max-width: 440px) {
+    .command-palette-item-group {
+        display: none;
+    }
+}
+
+// In a very narrow panel a chord's caps (two steps, up to seven keys) do not fit beside even a short label: the row
+// wraps, the shortcut on a line of its own at the right, and the caps are a little smaller. Nothing is cut and the
+// list does not scroll sideways (R14).
+@container command-palette (max-width: 340px) {
+    .command-palette-item {
+        flex-wrap: wrap;
+        padding-block: var(--space-1);
+        row-gap: 2px;
+    }
+
+    .command-palette-item-text {
+        flex: 1 1 8ch;
+    }
+
+    .command-palette-item-shortcut {
+        margin-left: auto;
+        gap: var(--space-1);
+
+        .ui-kbd {
+            padding: 0 2px;
+            font-size: var(--text-2xs);
+        }
+    }
 }
 
 .command-palette-container {
@@ -38,7 +76,7 @@
     align-items: center;
     box-sizing: border-box;
     min-height: var(--ui-height);
-    // As much room right of ESC as the cell leaves left of the glyph: (40px cell - the glyph's 10px) / 2.
+    // As much room right of the input as the cell leaves left of the glyph: (40px cell - the glyph's 10px) / 2.
     padding: 0 15px 0 0;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -64,21 +102,13 @@
     }
 }
 
-.command-palette-esc-hint {
-    font-size: var(--text-2xs);
-    color: var(--secondary-text-color);
-    background: var(--panel-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    padding: 1px 5px;
-    flex-shrink: 0;
-    font-family: var(--font-sans);
-}
-
 .command-palette-list {
     overflow-y: auto;
     flex: 1;
     padding: var(--space-1) 0;
+    overflow-x: hidden;
+    // Twelve rows, then it scrolls and the search row stays (R2).
+    max-height: calc(12 * var(--palette-row-h) + 2 * var(--space-1));
 
     &::-webkit-scrollbar-track {
         background: transparent;
@@ -93,16 +123,24 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 7px 14px;
+    box-sizing: border-box;
+    min-height: var(--palette-row-h);
+    padding: 0 14px;
     cursor: default;
     user-select: none;
+
+    // The row under the pointer and the row Enter runs are two things (R16): the pointer only lights its row.
+    &:hover {
+        background: var(--hover-bg-color);
+    }
 
     &.selected {
         background: var(--highlight-bg-color);
     }
 
-    &:hover:not(.selected) {
-        background: var(--hover-bg-color);
+    // The first row of a group below the first: a hairline above it (R12).
+    &.group-start {
+        border-top: 1px solid var(--border-color);
     }
 }
 
@@ -117,7 +155,8 @@
 // The label, then what is said about it (an agent's seat and state), on one line that gives way to the category.
 .command-palette-item-text {
     flex: 1;
-    min-width: 0;
+    // The label keeps some room however long the shortcut is; the row cuts the rest of it.
+    min-width: 6ch;
     display: flex;
     align-items: baseline;
     gap: var(--space-2);
@@ -139,20 +178,41 @@
     @include mixins.truncate;
 }
 
-// The command's shortcut, from the shortcut table (keybindings/defaults.ts).
+// The command's shortcut, from the shortcut table (keybindings/defaults.ts), as key caps (R11). It never shrinks,
+// wraps or is cut (R14).
 .command-palette-item-shortcut {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
     flex-shrink: 0;
     white-space: nowrap;
 }
 
-.command-palette-item-category {
+// The kit's key cap is sized for a hint in a sentence; in a row it is as small as the text beside it.
+.command-palette-item .ui-kbd {
+    min-width: 0;
+    padding: 0 var(--space-1);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+}
+
+// One step of a chord: its caps side by side.
+.command-palette-item-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+// The group's name, on its first row, muted and in lower case, after the shortcut (R12). Every row keeps the room,
+// empty, so the shortcuts line up down the list.
+.command-palette-item-group {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 9ch;
+    text-align: right;
+    white-space: nowrap;
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
-    flex-shrink: 0;
-    @include mixins.label-caps;
 }
 
 .command-palette-empty {
@@ -160,5 +220,4 @@
     text-align: center;
     color: var(--secondary-text-color);
     font-size: var(--text-base);
-    font-style: italic;
 }
