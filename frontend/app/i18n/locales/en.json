@@ -1128,5 +1128,7 @@
     "templateApproval.usesCredential": "Uses a credential",
     "templateApproval.usesCredentialYes": "yes, because of auth.vault:",
     "templateApproval.usesCredentialNo": "no",
-    "templateApproval.secretsNoneDeclared": "none declared (see Uses a credential)"
+    "templateApproval.secretsNoneDeclared": "none declared (see Uses a credential)",
+    "editor.lsp.dismissBanner": "Dismiss banner for this session",
+    "editor.lsp.notOnHost": "A container agent can write in this folder, so no language server runs on the host for it."
 }
