@@ -31,6 +31,13 @@ use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    register_definition_handlers(engine, state);
+    register_container_handlers(engine, state);
+    register_content_handlers(engine, state);
+    register_import_export_handlers(engine, state);
+}
+
+fn register_definition_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // listagents → return all agent definitions, optionally filtered by
     // `is_seeded`. Filter input is backward-compatible: callers that
     // pass `null` / `{}` (every existing caller) get the full list.
@@ -58,217 +65,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // is still `Vec<AgentDefinition>`, which IS generated -- that is where the
     // drift risk lived.
     engine.register_typed(COMMAND_LIST_AGENTS, move |data: serde_json::Value, _ctx| {
-        let mstore = mstore_lfa.clone();
-        async move {
-                // unwrap_or_default — both `null` and `{}` deserialize
-                // to the default (no filter). Anything malformed falls
-                // back to no-filter rather than erroring; older clients
-                // never sent a body for this RPC and we can't know
-                // which JSON shape they're on.
-                let cmd: CommandListAgentDefinitionsData =
-                    serde_json::from_value(data).unwrap_or_default();
-                let agents = mstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
-                let is_seeded_filter = cmd.is_seeded;
-                let include_hidden = cmd.include_hidden;
-                let filtered: Vec<_> = agents
-                    .into_iter()
-                    .filter(|a| match is_seeded_filter {
-                        Some(flag) => a.is_seeded == flag,
-                        None => true,
-                    })
-                    // Default behaviour: drop hidden templates. The
-                    // settings panel opts back in with include_hidden.
-                    // User-owned rows (is_seeded == 0) are never
-                    // hideable; the conditional below is a no-op for
-                    // them.
-                    .filter(|a| {
-                        include_hidden || a.is_seeded != 1 || a.user_hidden == 0
-                    })
-                    .collect();
-                let mut filtered = filtered;
-                // A spawned worker with no seat of its own shows its leader
-                // as its lead (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §2).
-                crate::backend::agent_seat::apply_effective_seats(&mstore, &mut filtered);
-                Ok(filtered)
-        }
+        list_agents(data, mstore_lfa.clone())
     });
 
     // createagent → insert new agent, broadcast agents:changed
     let mstore_cfa = state.mstore.clone();
     let broker_cfa = state.broker.clone();
-    engine.register_typed(
-        COMMAND_CREATE_AGENT,
-        move |cmd: CommandCreateAgentDefinitionData, _ctx| {
-            let mstore = mstore_cfa.clone();
-            let broker = broker_cfa.clone();
-            async move {
-                let now = agentmux_common::time::now_ms();
-                // slug is empty here — agent_def_insert auto-derives it
-                // from name AND collision-resolves AND mutates the
-                // struct so we serialize the resolved value back to
-                // the frontend (not "").
-                let mut agent = AgentDefinition {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    slug: String::new(),
-                    name: cmd.name,
-                    icon: cmd.icon,
-                    provider: cmd.provider,
-                    description: cmd.description,
-                    working_directory: cmd.working_directory,
-                    shell: cmd.shell,
-                    provider_flags: cmd.provider_flags,
-                    auto_start: cmd.auto_start,
-                    restart_on_crash: cmd.restart_on_crash,
-                    idle_timeout_minutes: cmd.idle_timeout_minutes,
-                    created_at: now,
-                    agent_type: cmd.agent_type,
-                    environment: cmd.environment,
-                    agent_bus_id: cmd.agent_bus_id,
-                    is_seeded: 0,
-                    accounts: String::new(),
-                    parent_id: String::new(),
-                    branch_label: String::new(),
-                    updated_at: now,
-                    user_hidden: 0,
-                    container_image: String::new(),
-                    container_volumes: "[]".to_string(),
-                    container_name: String::new(),
-                    // Inert (see the field's doc); always 0.
-                    use_ambient_login: 0,
-                    // Not settable via this RPC yet — only `agent.define`
-                    // (the App-API/MCP path) can set a model vendor override.
-                    model_vendor_base_url: String::new(),
-                    memory_id: String::new(),
-                    seat: None,
-                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
-                };
-                mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
-                // Assign the agent its display color at creation
-                // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
-                // here shouldn't fail the create — agent.open assigns a
-                // color on first open as the fallback.
-                let _ = mstore.agent_content_set(&crate::backend::storage::store::AgentContent {
-                    agent_id: agent.id.clone(),
-                    content_type: "ui:color".to_string(),
-                    content: crate::backend::agent_color::color_for_new_agent(&mstore, &agent.id),
-                    updated_at: now,
-                });
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                Ok(agent)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_CREATE_AGENT, move |cmd: CommandCreateAgentDefinitionData, _ctx| {
+        create_agent(cmd, mstore_cfa.clone(), broker_cfa.clone())
+    });
 
     // updateagent → update existing agent, broadcast agents:changed
     let mstore_ufa = state.mstore.clone();
     let broker_ufa = state.broker.clone();
-    engine.register_typed(
-        COMMAND_UPDATE_AGENT,
-        move |cmd: CommandUpdateAgentDefinitionData, _ctx| {
-            let mstore = mstore_ufa.clone();
-            let broker = broker_ufa.clone();
-            async move {
-                // Fetch existing to preserve created_at
-                let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
-                let old = existing.iter().find(|a| a.id == cmd.id)
-                    .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
-                crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
-                    .and_then(|()| crate::server::app_api::check_volumes(&cmd.container_volumes)).map_err(|e| format!("updateagent: {e}"))?;
-                // Model vendor base URL: `None` (omitted) preserves the
-                // stored value; `Some(url)` overrides it (including
-                // `Some("")` to explicitly clear). Validated against the
-                // (possibly also-updated) `cmd.provider` — same check
-                // `agent.define` applies.
-                let chosen_model_vendor_base_url = match &cmd.model_vendor_base_url {
-                    Some(url) => {
-                        crate::server::app_api::validate_vendor_base_url(&cmd.provider, url)
-                            .map_err(|e| format!("updateagent: {e}"))?;
-                        url.clone()
-                    }
-                    None => old.model_vendor_base_url.clone(),
-                };
-                // slug is preserved from the existing row — it's
-                // immutable after creation. The update path never
-                // accepts a new slug from the client.
-                let mut agent = AgentDefinition {
-                    id: cmd.id,
-                    slug: old.slug.clone(),
-                    name: cmd.name,
-                    icon: cmd.icon,
-                    provider: cmd.provider,
-                    description: cmd.description,
-                    working_directory: cmd.working_directory,
-                    shell: cmd.shell,
-                    provider_flags: cmd.provider_flags,
-                    auto_start: cmd.auto_start,
-                    restart_on_crash: cmd.restart_on_crash,
-                    idle_timeout_minutes: cmd.idle_timeout_minutes,
-                    created_at: old.created_at,
-                    agent_type: cmd.agent_type,
-                    environment: cmd.environment,
-                    agent_bus_id: cmd.agent_bus_id,
-                    is_seeded: old.is_seeded,
-                    // Preserve existing accounts when the caller omits the field
-                    // (cmd.accounts defaults to "" via #[serde(default)]). Callers
-                    // that only update name/icon/etc. (AgentDefForm, AgentPicker rename)
-                    // don't carry accounts, so falling back to old.accounts prevents
-                    // silently wiping saved assignments.
-                    accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
-                    // parent_id + branch_label describe provenance and
-                    // are immutable post-insert (forks are separate rows,
-                    // not in-place edits).
-                    parent_id: old.parent_id.clone(),
-                    branch_label: old.branch_label.clone(),
-                    // Placeholder — agent_def_update self-stamps the real
-                    // timestamp and writes it back into `agent` below, so
-                    // the response body carries the fresh value.
-                    updated_at: old.updated_at,
-                    // Preserve user_hidden — updateagent edits the
-                    // definition payload, not the per-user view-state
-                    // flag. Hide/unhide go through their dedicated RPCs
-                    // (`agentdefhide` / `agentdefunhide`). Phase 2 of
-                    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
-                    user_hidden: old.user_hidden,
-                    // Preserve existing container config when the caller omits the field
-                    // (cmd.container_image defaults to "" via #[serde(default)]). Callers
-                    // that only update name/icon/etc. (AgentDefForm) don't carry container
-                    // fields, so falling back to old values prevents silently wiping a
-                    // container agent's image and volumes — same guard as `accounts` above.
-                    container_image: if cmd.container_image.is_empty() { old.container_image.clone() } else { cmd.container_image },
-                    container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
-                    // container_name is server-managed; preserve the existing value.
-                    container_name: old.container_name.clone(),
-                    // Inert; carried over unchanged (see the field's doc).
-                    use_ambient_login: old.use_ambient_login,
-                    model_vendor_base_url: chosen_model_vendor_base_url,
-                    // Immutable post-insert, same as slug/parent_id/branch_label
-                    // above — agent_def_update's SET clause doesn't even
-                    // touch this column, but the in-memory struct still
-                    // needs the real value: it's what gets serialized back
-                    // to the frontend as the "updated" agent.
-                    memory_id: old.memory_id.clone(),
-                    // Not this RPC's: a seat is set only by `agent.setSeat`, and
-                    // the mirror write keeps the stored one whatever this says.
-                    seat: old.seat.clone(),
-                    // Not yet exposed by this RPC's own command schema
-                    // (CommandUpdateAgentData has no conversation_visibility
-                    // field) — preserve the existing value, same as
-                    // memory_id just above, rather than silently resetting
-                    // a configured agent back to the default on an
-                    // unrelated name/icon/accounts edit.
-                    conversation_visibility: old.conversation_visibility.clone(),
-                };
-                let found = mstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
-                if !found {
-                    return Err(format!("updateagent: agent {} not found", agent.id));
-                }
-                // The seat `listagents` would show.
-                agent.seat = crate::backend::agent_seat::effective_seat(&mstore, &agent);
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                Ok(agent)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_UPDATE_AGENT, move |cmd: CommandUpdateAgentDefinitionData, _ctx| {
+        update_agent(cmd, mstore_ufa.clone(), broker_ufa.clone())
+    });
 
     // deleteagent → delete agent by id, broadcast agents:changed
     let state_dfa = state.clone();
@@ -279,7 +91,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move { delete_agent_definition(&state, &cmd.id, "deleteagent").await }
         },
     );
+}
 
+fn register_container_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // containerruntimeavailable → does the Docker DAEMON answer a ping
     // right now? Returns `{ available: bool }`. The create-from-template
     // modal (via the frontend's shared toolchain-capabilities store) uses
@@ -375,7 +189,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
 
+fn register_content_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // getagentcontent → return a single content blob for an agent
     let mstore_gfc = state.mstore.clone();
     engine.register_typed(
@@ -439,103 +255,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // importagentfromclaw → read claw workspace, create agent + content
     let mstore_ifc = state.mstore.clone();
     let broker_ifc = state.broker.clone();
-    engine.register_typed(
-        COMMAND_IMPORT_AGENT_FROM_CLAW,
-        move |cmd: CommandImportAgentFromClawData, _ctx| {
-            let mstore = mstore_ifc.clone();
-            let broker = broker_ifc.clone();
-            async move {
-
-                let workspace_path = std::path::Path::new(&cmd.workspace_path);
-                if !workspace_path.exists() {
-                    return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
-                }
-
-                let now = agentmux_common::time::now_ms();
-
-                // Detect provider from .claude/settings.json if present
-                let mut provider = "claude".to_string();
-                let settings_path = workspace_path.join(".claude").join("settings.json");
-                if settings_path.exists() {
-                    if let Ok(settings_str) = std::fs::read_to_string(&settings_path) {
-                        if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&settings_str) {
-                            if let Some(p) = settings.get("provider").and_then(|v| v.as_str()) {
-                                provider = p.to_string();
-                            }
-                        }
-                    }
-                }
-
-                // Create the agent — slug is empty, agent_def_insert will
-                // auto-derive from agent_name and mutate the struct
-                // so the resolved slug is returned to the frontend.
-                let mut agent = AgentDefinition {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    slug: String::new(),
-                    name: cmd.agent_name.clone(),
-                    icon: "\u{2726}".to_string(),
-                    provider,
-                    description: format!("Imported from {}", cmd.workspace_path),
-                    working_directory: cmd.workspace_path.clone(),
-                    shell: String::new(),
-                    provider_flags: String::new(),
-                    auto_start: 0,
-                    restart_on_crash: 0,
-                    idle_timeout_minutes: 0,
-                    created_at: now,
-                    agent_type: "standalone".to_string(),
-                    environment: String::new(),
-                    agent_bus_id: String::new(),
-                    is_seeded: 0,
-                    accounts: String::new(),
-                    parent_id: String::new(),
-                    branch_label: String::new(),
-                    updated_at: now,
-                    user_hidden: 0,
-                    container_image: String::new(),
-                    container_volumes: "[]".to_string(),
-                    container_name: String::new(),
-                    use_ambient_login: 0,
-                    model_vendor_base_url: String::new(),
-                    memory_id: String::new(),
-                    seat: None,
-                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
-                };
-                mstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
-
-                // Read CLAUDE.md → agentmd content
-                let claude_md_path = workspace_path.join("CLAUDE.md");
-                if claude_md_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&claude_md_path) {
-                        let fc = AgentContent {
-                            agent_id: agent.id.clone(),
-                            content_type: "agentmd".to_string(),
-                            content,
-                            updated_at: now,
-                        };
-                        let _ = mstore.agent_content_set(&fc);
-                    }
-                }
-
-                // Read .mcp.json → mcp content
-                let mcp_path = workspace_path.join(".mcp.json");
-                if mcp_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&mcp_path) {
-                        let fc = AgentContent {
-                            agent_id: agent.id.clone(),
-                            content_type: "mcp".to_string(),
-                            content,
-                            updated_at: now,
-                        };
-                        let _ = mstore.agent_content_set(&fc);
-                    }
-                }
-
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-                Ok(agent)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_IMPORT_AGENT_FROM_CLAW, move |cmd: CommandImportAgentFromClawData, _ctx| {
+        import_agent_from_claw(cmd, mstore_ifc.clone(), broker_ifc.clone())
+    });
 
     // reseedagents → delete all seeded agents and re-run seed from manifest
     let mstore_rsfa = state.mstore.clone();
@@ -563,189 +285,508 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
 
+fn register_import_export_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // importagents — bulk import from JSON export format
     let mstore_ifa = state.mstore.clone();
     let broker_ifa = state.broker.clone();
-    engine.register_typed(
-        COMMAND_IMPORT_AGENTS,
-        move |cmd: CommandImportAgentDefinitionsData, _ctx| {
-            let mstore = mstore_ifa.clone();
-            let broker = broker_ifa.clone();
-            async move {
-
-                let now = agentmux_common::time::now_ms();
-
-                let mut imported: Vec<String> = Vec::new();
-                let mut skipped: Vec<String> = Vec::new();
-                let mut failed: Vec<String> = Vec::new();
-
-                for agent_import in cmd.agents {
-                    // Check for existing agent by slug (id field from export)
-                    let existing = mstore.agent_def_list()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .any(|a| a.slug == agent_import.id);
-
-                    if existing {
-                        skipped.push(agent_import.name.clone());
-                        continue;
-                    }
-
-                    let mut agent = AgentDefinition {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        slug: agent_import.id.clone(),
-                        name: agent_import.name.clone(),
-                        icon: agent_import.icon.clone(),
-                        provider: agent_import.provider.clone(),
-                        description: agent_import.description.clone(),
-                        working_directory: agent_import.working_directory.clone(),
-                        shell: agent_import.shell.clone(),
-                        provider_flags: String::new(),
-                        auto_start: 0,
-                        restart_on_crash: if agent_import.restart_on_crash { 1 } else { 0 },
-                        idle_timeout_minutes: 0,
-                        created_at: now,
-                        agent_type: agent_import.agent_type.clone(),
-                        environment: agent_import.environment.clone(),
-                        agent_bus_id: agent_import.agent_bus_id.clone(),
-                        is_seeded: 0,
-                        accounts: String::new(),
-                        parent_id: String::new(),
-                        branch_label: String::new(),
-                        updated_at: now,
-                        user_hidden: 0,
-                        container_image: String::new(),
-                        container_volumes: "[]".to_string(),
-                        container_name: String::new(),
-                        use_ambient_login: 0,
-                        model_vendor_base_url: String::new(),
-                        memory_id: String::new(),
-                        seat: None,
-                        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
-                    };
-
-                    if let Err(e) = mstore.agent_def_insert(&mut agent) {
-                        failed.push(format!("{}: {e}", agent_import.name));
-                        continue;
-                    }
-
-                    // Insert content types
-                    let mut content_ok = true;
-                    for (content_type, content) in &agent_import.content {
-                        let fc = AgentContent {
-                            agent_id: agent.id.clone(),
-                            content_type: content_type.clone(),
-                            content: content.clone(),
-                            updated_at: now,
-                        };
-                        if let Err(e) = mstore.agent_content_set(&fc) {
-                            tracing::warn!("import: failed to set content for agent {}: {e}", agent.id);
-                            content_ok = false;
-                        }
-                    }
-
-                    // Insert skills
-                    let mut skills_ok = true;
-                    for skill_import in &agent_import.skills {
-                        let skill = AgentSkill {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            agent_id: agent.id.clone(),
-                            name: skill_import.name.clone(),
-                            trigger: skill_import.trigger.clone(),
-                            skill_type: skill_import.skill_type.clone(),
-                            description: skill_import.description.clone(),
-                            content: skill_import.content.clone(),
-                            created_at: now,
-                        };
-                        if let Err(e) = mstore.agent_skill_insert(&skill) {
-                            tracing::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
-                            skills_ok = false;
-                        }
-                    }
-
-                    if content_ok && skills_ok {
-                        imported.push(agent_import.name.clone());
-                    } else {
-                        failed.push(agent_import.name.clone());
-                    }
-                }
-
-                broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
-
-                let result = ImportAgentDefinitionsResult { imported, skipped, failed };
-                Ok(result)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_IMPORT_AGENTS, move |cmd: CommandImportAgentDefinitionsData, _ctx| {
+        import_agents(cmd, mstore_ifa.clone(), broker_ifa.clone())
+    });
 
     // exportagents — export all agent definitions with content and skills
     let mstore_efa = state.mstore.clone();
     let id_store_efa = state.id_store.clone();
-    engine.register_typed(
-        COMMAND_EXPORT_AGENTS,
-        move |_cmd: Option<CommandExportAgentsData>, _ctx| {
-            let mstore = mstore_efa.clone();
-            let id_store = id_store_efa.clone();
-            async move {
-                let agents = mstore.agent_def_list()
-                    .map_err(|e| format!("exportagents: list: {e}"))?;
+    engine.register_typed(COMMAND_EXPORT_AGENTS, move |_cmd: Option<CommandExportAgentsData>, _ctx| {
+        export_agents(mstore_efa.clone(), id_store_efa.clone())
+    });
+}
 
-                let mut agent_exports: Vec<AgentDefinitionExport> = Vec::new();
+async fn list_agents(
+    data: serde_json::Value,
+    mstore: Arc<crate::backend::storage::store::Store>,
+) -> Result<Vec<AgentDefinition>, String> {
+    // unwrap_or_default — both `null` and `{}` deserialize
+    // to the default (no filter). Anything malformed falls
+    // back to no-filter rather than erroring; older clients
+    // never sent a body for this RPC and we can't know
+    // which JSON shape they're on.
+    let cmd: CommandListAgentDefinitionsData =
+        serde_json::from_value(data).unwrap_or_default();
+    let agents = mstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
+    let is_seeded_filter = cmd.is_seeded;
+    let include_hidden = cmd.include_hidden;
+    let filtered: Vec<_> = agents
+        .into_iter()
+        .filter(|a| match is_seeded_filter {
+            Some(flag) => a.is_seeded == flag,
+            None => true,
+        })
+        // Default behaviour: drop hidden templates. The
+        // settings panel opts back in with include_hidden.
+        // User-owned rows (is_seeded == 0) are never
+        // hideable; the conditional below is a no-op for
+        // them.
+        .filter(|a| {
+            include_hidden || a.is_seeded != 1 || a.user_hidden == 0
+        })
+        .collect();
+    let mut filtered = filtered;
+    // A spawned worker with no seat of its own shows its leader
+    // as its lead (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §2).
+    crate::backend::agent_seat::apply_effective_seats(&mstore, &mut filtered);
+    Ok(filtered)
+}
 
-                for agent in agents {
-                    let content_map = mstore.agent_content_get_all(&agent.id)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|fc| (fc.content_type, fc.content))
-                        .collect::<std::collections::HashMap<String, String>>();
+async fn create_agent(
+    cmd: CommandCreateAgentDefinitionData,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    broker: Arc<crate::backend::mps::Broker>,
+) -> Result<AgentDefinition, String> {
+    let now = agentmux_common::time::now_ms();
+    // slug is empty here — agent_def_insert auto-derives it
+    // from name AND collision-resolves AND mutates the
+    // struct so we serialize the resolved value back to
+    // the frontend (not "").
+    let mut agent = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        slug: String::new(),
+        name: cmd.name,
+        icon: cmd.icon,
+        provider: cmd.provider,
+        description: cmd.description,
+        working_directory: cmd.working_directory,
+        shell: cmd.shell,
+        provider_flags: cmd.provider_flags,
+        auto_start: cmd.auto_start,
+        restart_on_crash: cmd.restart_on_crash,
+        idle_timeout_minutes: cmd.idle_timeout_minutes,
+        created_at: now,
+        agent_type: cmd.agent_type,
+        environment: cmd.environment,
+        agent_bus_id: cmd.agent_bus_id,
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: now,
+        user_hidden: 0,
+        container_image: String::new(),
+        container_volumes: "[]".to_string(),
+        container_name: String::new(),
+        // Inert (see the field's doc); always 0.
+        use_ambient_login: 0,
+        // Not settable via this RPC yet — only `agent.define`
+        // (the App-API/MCP path) can set a model vendor override.
+        model_vendor_base_url: String::new(),
+        memory_id: String::new(),
+        seat: None,
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+    };
+    mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
+    // Assign the agent its display color at creation
+    // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
+    // here shouldn't fail the create — agent.open assigns a
+    // color on first open as the fallback.
+    let _ = mstore.agent_content_set(&crate::backend::storage::store::AgentContent {
+        agent_id: agent.id.clone(),
+        content_type: "ui:color".to_string(),
+        content: crate::backend::agent_color::color_for_new_agent(&mstore, &agent.id),
+        updated_at: now,
+    });
+    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    Ok(agent)
+}
 
-                    let skills = mstore.agent_skill_list(&agent.id)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|s| AgentSkillExport {
-                            name: s.name,
-                            trigger: s.trigger,
-                            skill_type: s.skill_type,
-                            description: s.description,
-                            content: s.content,
-                        })
-                        .collect::<Vec<_>>();
+async fn update_agent(
+    cmd: CommandUpdateAgentDefinitionData,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    broker: Arc<crate::backend::mps::Broker>,
+) -> Result<AgentDefinition, String> {
+    // Fetch existing to preserve created_at
+    let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
+    let old = existing.iter().find(|a| a.id == cmd.id)
+        .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
+    crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
+        .and_then(|()| crate::server::app_api::check_volumes(&cmd.container_volumes)).map_err(|e| format!("updateagent: {e}"))?;
+    // Model vendor base URL: `None` (omitted) preserves the
+    // stored value; `Some(url)` overrides it (including
+    // `Some("")` to explicitly clear). Validated against the
+    // (possibly also-updated) `cmd.provider` — same check
+    // `agent.define` applies.
+    let chosen_model_vendor_base_url = match &cmd.model_vendor_base_url {
+        Some(url) => {
+            crate::server::app_api::validate_vendor_base_url(&cmd.provider, url)
+                .map_err(|e| format!("updateagent: {e}"))?;
+            url.clone()
+        }
+        None => old.model_vendor_base_url.clone(),
+    };
+    let mut agent = updated_definition(cmd, old, chosen_model_vendor_base_url);
+    let found = mstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
+    if !found {
+        return Err(format!("updateagent: agent {} not found", agent.id));
+    }
+    // The seat `listagents` would show.
+    agent.seat = crate::backend::agent_seat::effective_seat(&mstore, &agent);
+    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    Ok(agent)
+}
 
-                    // The provider the agent runs, from the shared resolver
-                    // (#2594; SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1): `importagents` gives it to the new
-                    // agent, so the import runs the same CLI.
-                    let effective_provider = id_store.resolve_effective_provider_id(&agent);
-                    agent_exports.push(AgentDefinitionExport {
-                        id: agent.slug.clone(),
-                        name: agent.name,
-                        icon: agent.icon,
-                        description: agent.description,
-                        provider: effective_provider,
-                        shell: agent.shell,
-                        working_directory: agent.working_directory,
-                        agent_bus_id: agent.agent_bus_id,
-                        agent_type: agent.agent_type,
-                        environment: agent.environment,
-                        restart_on_crash: agent.restart_on_crash != 0,
-                        content: content_map,
-                        skills,
-                    });
+/// The definition an `updateagent` writes: the caller's fields over the stored row, keeping what the call does not carry.
+fn updated_definition(
+    cmd: CommandUpdateAgentDefinitionData,
+    old: &AgentDefinition,
+    chosen_model_vendor_base_url: String,
+) -> AgentDefinition {
+        // slug is preserved from the existing row — it's
+        // immutable after creation. The update path never
+        // accepts a new slug from the client.
+        AgentDefinition {
+            id: cmd.id,
+            slug: old.slug.clone(),
+            name: cmd.name,
+            icon: cmd.icon,
+            provider: cmd.provider,
+            description: cmd.description,
+            working_directory: cmd.working_directory,
+            shell: cmd.shell,
+            provider_flags: cmd.provider_flags,
+            auto_start: cmd.auto_start,
+            restart_on_crash: cmd.restart_on_crash,
+            idle_timeout_minutes: cmd.idle_timeout_minutes,
+            created_at: old.created_at,
+            agent_type: cmd.agent_type,
+            environment: cmd.environment,
+            agent_bus_id: cmd.agent_bus_id,
+            is_seeded: old.is_seeded,
+            // Preserve existing accounts when the caller omits the field
+            // (cmd.accounts defaults to "" via #[serde(default)]). Callers
+            // that only update name/icon/etc. (AgentDefForm, AgentPicker rename)
+            // don't carry accounts, so falling back to old.accounts prevents
+            // silently wiping saved assignments.
+            accounts: if cmd.accounts.is_empty() { old.accounts.clone() } else { cmd.accounts },
+            // parent_id + branch_label describe provenance and
+            // are immutable post-insert (forks are separate rows,
+            // not in-place edits).
+            parent_id: old.parent_id.clone(),
+            branch_label: old.branch_label.clone(),
+            // Placeholder — agent_def_update self-stamps the real
+            // timestamp and writes it back into `agent` below, so
+            // the response body carries the fresh value.
+            updated_at: old.updated_at,
+            // Preserve user_hidden — updateagent edits the
+            // definition payload, not the per-user view-state
+            // flag. Hide/unhide go through their dedicated RPCs
+            // (`agentdefhide` / `agentdefunhide`). Phase 2 of
+            // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+            user_hidden: old.user_hidden,
+            // Preserve existing container config when the caller omits the field
+            // (cmd.container_image defaults to "" via #[serde(default)]). Callers
+            // that only update name/icon/etc. (AgentDefForm) don't carry container
+            // fields, so falling back to old values prevents silently wiping a
+            // container agent's image and volumes — same guard as `accounts` above.
+            container_image: if cmd.container_image.is_empty() { old.container_image.clone() } else { cmd.container_image },
+            container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
+            // container_name is server-managed; preserve the existing value.
+            container_name: old.container_name.clone(),
+            // Inert; carried over unchanged (see the field's doc).
+            use_ambient_login: old.use_ambient_login,
+            model_vendor_base_url: chosen_model_vendor_base_url,
+            // Immutable post-insert, same as slug/parent_id/branch_label
+            // above — agent_def_update's SET clause doesn't even
+            // touch this column, but the in-memory struct still
+            // needs the real value: it's what gets serialized back
+            // to the frontend as the "updated" agent.
+            memory_id: old.memory_id.clone(),
+            // Not this RPC's: a seat is set only by `agent.setSeat`, and
+            // the mirror write keeps the stored one whatever this says.
+            seat: old.seat.clone(),
+            // Not yet exposed by this RPC's own command schema
+            // (CommandUpdateAgentData has no conversation_visibility
+            // field) — preserve the existing value, same as
+            // memory_id just above, rather than silently resetting
+            // a configured agent back to the default on an
+            // unrelated name/icon/accounts edit.
+            conversation_visibility: old.conversation_visibility.clone(),
+        }
+}
+
+async fn import_agent_from_claw(
+    cmd: CommandImportAgentFromClawData,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    broker: Arc<crate::backend::mps::Broker>,
+) -> Result<AgentDefinition, String> {
+    let workspace_path = std::path::Path::new(&cmd.workspace_path);
+    if !workspace_path.exists() {
+        return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
+    }
+
+    let now = agentmux_common::time::now_ms();
+
+    // Detect provider from .claude/settings.json if present
+    let mut provider = "claude".to_string();
+    let settings_path = workspace_path.join(".claude").join("settings.json");
+    if settings_path.exists() {
+        if let Ok(settings_str) = std::fs::read_to_string(&settings_path) {
+            if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&settings_str) {
+                if let Some(p) = settings.get("provider").and_then(|v| v.as_str()) {
+                    provider = p.to_string();
                 }
-
-                let exported_at = Utc::now().to_rfc3339();
-
-                let result = ExportAgentDefinitionsResult {
-                    version: 4,
-                    exported_at,
-                    source: "agentmux-export".to_string(),
-                    agents: agent_exports,
-                };
-                Ok(result)
             }
-        },
-    );
+        }
+    }
 
+    // Create the agent — slug is empty, agent_def_insert will
+    // auto-derive from agent_name and mutate the struct
+    // so the resolved slug is returned to the frontend.
+    let mut agent = AgentDefinition {
+        id: uuid::Uuid::new_v4().to_string(),
+        slug: String::new(),
+        name: cmd.agent_name.clone(),
+        icon: "\u{2726}".to_string(),
+        provider,
+        description: format!("Imported from {}", cmd.workspace_path),
+        working_directory: cmd.workspace_path.clone(),
+        shell: String::new(),
+        provider_flags: String::new(),
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: now,
+        agent_type: "standalone".to_string(),
+        environment: String::new(),
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: now,
+        user_hidden: 0,
+        container_image: String::new(),
+        container_volumes: "[]".to_string(),
+        container_name: String::new(),
+        use_ambient_login: 0,
+        model_vendor_base_url: String::new(),
+        memory_id: String::new(),
+        seat: None,
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+    };
+    mstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
+
+    // Read CLAUDE.md → agentmd content
+    let claude_md_path = workspace_path.join("CLAUDE.md");
+    if claude_md_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&claude_md_path) {
+            let fc = AgentContent {
+                agent_id: agent.id.clone(),
+                content_type: "agentmd".to_string(),
+                content,
+                updated_at: now,
+            };
+            let _ = mstore.agent_content_set(&fc);
+        }
+    }
+
+    // Read .mcp.json → mcp content
+    let mcp_path = workspace_path.join(".mcp.json");
+    if mcp_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&mcp_path) {
+            let fc = AgentContent {
+                agent_id: agent.id.clone(),
+                content_type: "mcp".to_string(),
+                content,
+                updated_at: now,
+            };
+            let _ = mstore.agent_content_set(&fc);
+        }
+    }
+
+    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+    Ok(agent)
+}
+
+async fn import_agents(
+    cmd: CommandImportAgentDefinitionsData,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    broker: Arc<crate::backend::mps::Broker>,
+) -> Result<ImportAgentDefinitionsResult, String> {
+    let now = agentmux_common::time::now_ms();
+
+    let mut imported: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+
+    for agent_import in cmd.agents {
+            // Check for existing agent by slug (id field from export)
+            let existing = mstore.agent_def_list()
+                .unwrap_or_default()
+                .into_iter()
+                .any(|a| a.slug == agent_import.id);
+
+            if existing {
+                skipped.push(agent_import.name.clone());
+                continue;
+            }
+
+        let mut agent = agent_from_import(&agent_import, now);
+
+        if let Err(e) = mstore.agent_def_insert(&mut agent) {
+            failed.push(format!("{}: {e}", agent_import.name));
+            continue;
+        }
+
+        if import_content_and_skills(&mstore, &agent, &agent_import, now) {
+            imported.push(agent_import.name.clone());
+        } else {
+            failed.push(agent_import.name.clone());
+        }
+    }
+
+    broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+
+    let result = ImportAgentDefinitionsResult { imported, skipped, failed };
+    Ok(result)
+}
+
+/// The new user-owned definition for one row of an `importagents` payload (its id becomes the slug).
+fn agent_from_import(agent_import: &crate::backend::rpc_types::AgentDefinitionImport, now: i64) -> AgentDefinition {
+            AgentDefinition {
+                id: uuid::Uuid::new_v4().to_string(),
+                slug: agent_import.id.clone(),
+                name: agent_import.name.clone(),
+                icon: agent_import.icon.clone(),
+                provider: agent_import.provider.clone(),
+                description: agent_import.description.clone(),
+                working_directory: agent_import.working_directory.clone(),
+                shell: agent_import.shell.clone(),
+                provider_flags: String::new(),
+                auto_start: 0,
+                restart_on_crash: if agent_import.restart_on_crash { 1 } else { 0 },
+                idle_timeout_minutes: 0,
+                created_at: now,
+                agent_type: agent_import.agent_type.clone(),
+                environment: agent_import.environment.clone(),
+                agent_bus_id: agent_import.agent_bus_id.clone(),
+                is_seeded: 0,
+                accounts: String::new(),
+                parent_id: String::new(),
+                branch_label: String::new(),
+                updated_at: now,
+                user_hidden: 0,
+                container_image: String::new(),
+                container_volumes: "[]".to_string(),
+                container_name: String::new(),
+                use_ambient_login: 0,
+                model_vendor_base_url: String::new(),
+                memory_id: String::new(),
+                seat: None,
+                conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            }
+}
+
+/// Insert an imported agent's content blobs and skills; false when any of them failed (all are tried).
+fn import_content_and_skills(
+    mstore: &Arc<crate::backend::storage::store::Store>,
+    agent: &AgentDefinition,
+    agent_import: &crate::backend::rpc_types::AgentDefinitionImport,
+    now: i64,
+) -> bool {
+            // Insert content types
+            let mut content_ok = true;
+            for (content_type, content) in &agent_import.content {
+                let fc = AgentContent {
+                    agent_id: agent.id.clone(),
+                    content_type: content_type.clone(),
+                    content: content.clone(),
+                    updated_at: now,
+                };
+                if let Err(e) = mstore.agent_content_set(&fc) {
+                    tracing::warn!("import: failed to set content for agent {}: {e}", agent.id);
+                    content_ok = false;
+                }
+            }
+
+            // Insert skills
+            let mut skills_ok = true;
+            for skill_import in &agent_import.skills {
+                let skill = AgentSkill {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    agent_id: agent.id.clone(),
+                    name: skill_import.name.clone(),
+                    trigger: skill_import.trigger.clone(),
+                    skill_type: skill_import.skill_type.clone(),
+                    description: skill_import.description.clone(),
+                    content: skill_import.content.clone(),
+                    created_at: now,
+                };
+                if let Err(e) = mstore.agent_skill_insert(&skill) {
+                    tracing::warn!("import: failed to insert skill '{}' for agent {}: {e}", skill.name, agent.id);
+                    skills_ok = false;
+                }
+            }
+    content_ok && skills_ok
+}
+
+async fn export_agents(
+    mstore: Arc<crate::backend::storage::store::Store>,
+    id_store: Arc<crate::backend::storage::store::Store>,
+) -> Result<ExportAgentDefinitionsResult, String> {
+    let agents = mstore.agent_def_list()
+        .map_err(|e| format!("exportagents: list: {e}"))?;
+
+    let mut agent_exports: Vec<AgentDefinitionExport> = Vec::new();
+
+    for agent in agents {
+        let content_map = mstore.agent_content_get_all(&agent.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|fc| (fc.content_type, fc.content))
+            .collect::<std::collections::HashMap<String, String>>();
+
+        let skills = mstore.agent_skill_list(&agent.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| AgentSkillExport {
+                name: s.name,
+                trigger: s.trigger,
+                skill_type: s.skill_type,
+                description: s.description,
+                content: s.content,
+            })
+            .collect::<Vec<_>>();
+
+        // The provider the agent runs, from the shared resolver
+        // (#2594; SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1): `importagents` gives it to the new
+        // agent, so the import runs the same CLI.
+        let effective_provider = id_store.resolve_effective_provider_id(&agent);
+        agent_exports.push(AgentDefinitionExport {
+            id: agent.slug.clone(),
+            name: agent.name,
+            icon: agent.icon,
+            description: agent.description,
+            provider: effective_provider,
+            shell: agent.shell,
+            working_directory: agent.working_directory,
+            agent_bus_id: agent.agent_bus_id,
+            agent_type: agent.agent_type,
+            environment: agent.environment,
+            restart_on_crash: agent.restart_on_crash != 0,
+            content: content_map,
+            skills,
+        });
+    }
+
+    let exported_at = Utc::now().to_rfc3339();
+
+    let result = ExportAgentDefinitionsResult {
+        version: 4,
+        exported_at,
+        source: "agentmux-export".to_string(),
+        agents: agent_exports,
+    };
+    Ok(result)
 }
 
 /// Deletes the agent definition `id` with everything that belongs to it: its parked block (which stops it), its
