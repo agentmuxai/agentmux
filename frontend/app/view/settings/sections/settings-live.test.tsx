@@ -26,7 +26,7 @@ import { fullConfigAtom, setFullConfigAtom } from "@/app/store/config-signals";
 import { ADVANCED_SETTINGS, AdvancedSection } from "./advanced-section";
 import { ConfigErrorsBanner } from "../settings-view";
 
-const config = (settings: Record<string, unknown>, configerrors: Array<{ file: string; err: string }> = []) =>
+const config = (settings: Record<string, unknown>, configerrors: Array<{ file: string; err: string; line?: number; column?: number }> = []) =>
     ({ settings, configerrors }) as unknown as FullConfigType;
 
 const rowOf = (label: string): HTMLElement => {
@@ -75,6 +75,37 @@ describe("Settings shows a widgets.json that does not parse", () => {
         expect(screen.getByText(/at line 3 column 12/)).toBeInTheDocument();
         screen.getByRole("button").click();
         expect(opened).toEqual(["widgets.json"]);
+        setFullConfigAtom(config({}));
+    });
+});
+
+describe("Settings shows where in settings.json a problem is", () => {
+    it("shows the line of a bad value, and its Fix button opens the file on that line", () => {
+        const opened: [string, number | undefined][] = [];
+        setFullConfigAtom(config({}, [{ file: "settings.json", err: "term:fontsize: expected a number, got \"big\"; using its default", line: 7 }]));
+        render(() => <ConfigErrorsBanner onOpen={(f, line) => opened.push([f, line])} />);
+        expect(screen.getByText("line 7")).toBeInTheDocument();
+        screen.getByRole("button").click();
+        expect(opened).toEqual([["settings.json", 7]]);
+        setFullConfigAtom(config({}));
+    });
+
+    it("does not say the line twice when the message already does, and still opens on it", () => {
+        const opened: [string, number | undefined][] = [];
+        setFullConfigAtom(config({}, [{ file: "settings.json", err: "JSON parse error: expected `,` at line 3 column 12", line: 3, column: 12 }]));
+        render(() => <ConfigErrorsBanner onOpen={(f, line) => opened.push([f, line])} />);
+        expect(screen.queryByText("line 3")).toBeNull();
+        screen.getByRole("button").click();
+        expect(opened).toEqual([["settings.json", 3]]);
+        setFullConfigAtom(config({}));
+    });
+
+    it("opens with no line when srv did not say one", () => {
+        const opened: [string, number | undefined][] = [];
+        setFullConfigAtom(config({}, [{ file: "settings.json", err: "the file must be one JSON object" }]));
+        render(() => <ConfigErrorsBanner onOpen={(f, line) => opened.push([f, line])} />);
+        screen.getByRole("button").click();
+        expect(opened).toEqual([["settings.json", undefined]]);
         setFullConfigAtom(config({}));
     });
 });

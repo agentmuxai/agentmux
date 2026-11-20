@@ -33,7 +33,7 @@ pub(super) fn run_for_version(data_dir: &Path, home: &Path, shared_store_path: &
     // the new version without the user's data. Failing leaves this version
     // without an objects.db, so the next start asks for preparation again.
     if let Err(e) = crate::migrations::carry_forward::try_from_previous_version(&data_dir.join("db"), version) {
-        let msg = format!("copying the previous version's data failed: {e}");
+        let msg = crate::migrations::carry_forward::stop_message(&e);
         write_error_log(home, &msg);
         eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&msg));
         return 1;

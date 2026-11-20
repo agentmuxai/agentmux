@@ -96,6 +96,8 @@ export async function ensureConfigFile(file: ConfigFile, knownSettingsPath?: str
 export interface OpenConfigFileOptions {
     /** The pane the person acted in, to find the tab's Editor and to place a new one beside. Default: the focused pane. */
     fromBlockId?: string;
+    /** A 1-based line to put the cursor on once the file is open (a problem srv found in it). Ignored when the file opens in the system editor. */
+    line?: number;
 }
 
 /** A pane of the tab on screen (not of a background tab), for srv to find the tab by when nothing has the focus. */
@@ -135,6 +137,7 @@ export async function openConfigFileInEditor(file: ConfigFile, opts: OpenConfigF
             view: "editor",
             file: path,
             reuse_editor_pane: true,
+            ...(Number.isInteger(opts.line) && (opts.line as number) >= 1 ? { line: opts.line } : {}),
             ...(from
                 ? { split_reference_block_id: from, split_direction: "right" }
                 : { origin_tab_id: atoms.activeTabId() }),

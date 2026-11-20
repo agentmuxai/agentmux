@@ -1,5 +1,73 @@
 # AgentMux Version History
 
+## 0.60.36 — 2026-11-20
+
+- The composer strip keeps its tallest line count at a pane width until the width changes, so the CPU and memory readout changing by a character no longer flips it between one and two rows
+- A message waiting behind a container agent's background command offers "Stop it and send now" in the pane
+- Windows: the installer and portable build now include the WebGPU shader compiler (dxcompiler.dll, about 24.6 MB), so WebGPU pages get a working device instead of an adapter with none
+- The history store writes codec 3: delta lines that carry an api_message_id are cleaned too, and the store is stamped version 4
+- AgentMux no longer writes a Bash(agentmux-bashwrap *) allow entry into each agent's project settings: it had no effect, and the CLI ignores it while the workspace is untrusted
+- Removing a window from the instance panel works on a row whose window id has not arrived yet, instead of doing nothing
+- The Vault pane shows one line, "too narrow", below 160 px of its own width instead of a cut-off Vaults row and a list one word wide
+- A toast stays at the bottom right when the only blocks in its way are in a window tab that is not shown: it no longer comes up in the middle of the window over a pane
+- A menu that opens beside its anchor, such as the Pane Color submenu, now stays inside a narrow window instead of being cut off at the edge
+- Kanban boards keep a history line when their stages change, listed under the editor in Settings > Kanban
+- Container agents can create, change, pause, delete and run their own message and task jobs in Schedule; a spawn or Drone job is refused with a reason and what to do instead
+- A Drone template that reads a Vault credential in its graph or trigger now counts it for the Rule of Two, and its approval prompt says so
+- Browser panes: an agent driving a pane is told when a page asks for an HTTP sign-in (the site, the realm, and whether a saved sign-in waits for the person's approval, was used, was refused or was denied), a refused saved sign-in is no longer deleted in such a pane, and the refusals for an HTTP-prompt sign-in say what to do instead
+- The Audit's Secrets list shows everything an agent did with an entry (sign-ins, rotations, captures, imports and shares as well as fills and commands), shows more on request and says how far back it reads
+- A container agent's AWS credentials wait up to 50 s for the host's mint (a slow mint of 20 to 26 s used to be stopped and refused), and the refusal names the wait
+- Vault: a sign-in for a site's HTTP prompt or a proxy can be shared with an agent; the browser answers the prompt in the agent's own browser profile, asking the person each time or, if they chose Always, without asking
+- An agent's HTTP sign-in prompt is answered from the Vault without a per-use approval window when the person already chose always for that agent and profile
+- A container agent that is refused its GitHub token or AWS credentials now has the reason in its pane (a line that stays until the credential works again, with a link to Connectors for GitHub)
+- Two timing-dependent tests that failed on a slow macOS runner no longer race their own clocks
+- agentmux-srv can run as a server that serves one person's streamed browser pane and nothing else, opened only with a signed lease token that works once
+- The streamed browser's image has Noto fonts, so pages in Arabic, Chinese, Japanese, Korean and other scripts show text instead of empty boxes
+- Vault: a request card taller than the pane (a long card in a narrow, zoomed pane) scrolls, so its buttons can always be reached
+- Vault: a login's list of sign-in grants names a shared agent by its name, not its id, and says which sign-in prompt a grant answers
+- The shipped Docker images' base images are pinned by digest, and a weekly check opens an issue when a tag moves
+- Vault: the Shared-with chip of a login no longer breaks an agent's name in a narrow pane; its words wrap at spaces
+- An agent marked out of quota is looked at again as soon as anyone shows the plan works: a clean turn on its account, a Check now on its row or Identity check_limits; a Swarm broadcast to it is kept and sent when it can work instead of refused
+- The windows list no longer brings back a window just closed, or blinks a held row at the periodic refresh
+- The status bar's disk pill says what the figure is: Disk 98% free, not a bare Disk 98%
+- A window removed from the instance panel leaves the list at once, instead of staying as a row with no opacity slider until the host has finished closing it
+- Instance panel: a window the host has just closed no longer reappears for a moment when the host registers its label again (#48099)
+- A release that does not reach the Microsoft Store now says so in its run summary, and a daily check keeps one issue open while the Store is behind
+- A change to the AWS grants file that container agents use is recorded in the Audit view, and a new or wider grant is held until an agent or person allows it
+- The Store listing check only treats an issue the Actions bot opened as its own, so a same-titled issue from anyone else is never edited or closed
+- Git reads for the Files pane and agents' work facts never fetch a missing object and allow no transport.
+- The Audit links each row to the Kanban task its agent was working on and that task's PR
+- Git facts of a container agent's folder are not read on the host. A temporary limit until they are read inside its container: a container agent has no git facts or overlap notes, and its folder has no git markers in the Files pane.
+- Git facts of a container agent are read inside its container: its work facts, its overlap and PR notes and the git markers of its folder in the Files pane come from git run in the agent's container, for every folder the agent can write (its workspace, its memory folder, its writable volumes). No git is started on the host for such a folder; there are no facts while the container is not running.
+- A container agent's memory folder is named from its workspace path alone, never from files inside the workspace. A workspace that is not a repository, or is a repository of its own, keeps the folder it had; a workspace below a repository's top, or a linked worktree, gets the folder of its own path in place of the repository's shared one.
+- No language server is started on the host for a file in a container agent's folder; the Editor says so
+- Dragging a pane to the top centre or bottom centre of a tab shows a second set of guides for placing it across the whole top, bottom or middle
+- The first press in a window no longer freezes the page while the sound system opens the audio device, and a drag during which the page was frozen is cancelled instead of tearing the pane off into a window
+- Upgrade: a restart nobody confirmed says so: the launcher logs how its dialog ended, the status and App version say when and why, and the agents that asked are told (#48125)
+- Upgrade: an approved upgrade restarts after the in-app countdown with no second launcher dialog; the spec's rule that a restart always takes the user's own Yes is replaced (#48126)
+- The command palette hangs from the top of the window with no backdrop, in plain rows with key caps and the group named once
+- Tests no longer announce a fake LAN peer on the real network: a test build's discovery controller never opens an mDNS daemon, so a developer's test run can't add an entry to the peer list of an AgentMux on the same machine
+- A container agent's compaction now runs ahead of its message queue, and the compaction backstop covers container agents; the context size is logged with the note and the compaction
+- A container agent's dock no longer keeps stale background-task rows: they end when its container is started again, and a row nobody can vouch for reads "seen X ago" and leaves the dock 10 minutes after it turned unknown
+- The macOS release build compiles in one job and signs in another, and the app inside the DMG now carries its own notarization ticket, so a Mac that is offline can open a fresh download. A notarization that Apple does not accept now fails the macOS leg of a release instead of shipping a signed-only DMG: the release has no macOS DMG until that is fixed, and the leg can be re-run
+- CI: the shell-gate tests no longer read the pull request's base branch from the environment, so a stacked pull request is not red for a reason that is not its change
+- install.sh refuses a "latest" below the SSH-signature floor unless its Ed25519 signature is checked; the signature parser refuses length fields that run past the end; a test keeps the tests-only ssh-keygen switch out of the workflows
+- Settings: a CI check keeps schema/settings.json and the code that reads settings one to one, and two settings the code read without listing them (agents:defaultruntime, editor:lsp.enabled) are now in the schema and the generated settings.json
+- Settings shows who owns the start-at-login entry, and offers Repair for an entry whose file is gone or Use this build for another build's
+- macOS: the in-app .dmg upgrade now shows an "Updating to <version>" window while the app is swapped, instead of nothing on screen for several seconds
+- Global Memory fleet sync keeps a separate record for each machine, so every machine on the network gets synced and not one per ten minutes
+- Upgrade: an agent that asked another machine for an upgrade is told once, in a note, how it ended: denied, stopped by the person, not confirmed, or restarted into the release (#48133)
+- Settings: 31 more settings in schema/settings.json and the generated settings.json now carry a description or a stated default, and the one-to-one check treats a typed setting nothing uses as unread (it lists 16 such settings for the owner to wire up or remove)
+- A nightly test of the signed update source no longer depends on the runner's CPU, so it passes on Apple Silicon
+- Status bar: the UI busy figure counts slow frames, so a stuttering page reads as busy even when no single piece of work is long
+- A file sent to a container agent is never listed under a host path when its pane can't be found: the sender is told it was not delivered
+- build: the frontend typechecks with TypeScript 7 (tsc 7.0.2); the tools that read the compiler API (typescript-eslint, knip, organize-imports, the gen scripts) stay on the TypeScript 6 API package, and tsconfig.json drops the options TypeScript 7 removed (baseUrl, downlevelIteration)
+- An agent is told of an upgrade once, even when a restart restores it into a new pane, and the upgrade line is logged only by the start that made it
+- A hosted or headless srv whose carry-forward of the previous version's data fails now stops with a plain message and leaves that data untouched, instead of starting with empty data
+- Screenshot tool: a sysinfo suite for the System Metrics page and the tab-close selector fix
+- fix(windows): start at login can be turned on without elevation, and an uninstall removes the login entry (start-with-OS phase 4, Windows installer half)
+- A login's saved site matches the page's origin with or without a trailing slash, in any case and with a default port, in every place that matches a login to a page
+
 ## 0.60.35 — 2026-11-18
 
 - The magnified pane size is held to 0.5 to 1 of the layout area, so a value like 3 no longer makes the pane larger than the window

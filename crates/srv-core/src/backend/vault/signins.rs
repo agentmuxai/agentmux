@@ -43,6 +43,33 @@ pub fn profile_for_tab(identity: Option<&str>) -> Option<String> {
     }
 }
 
+/// Whether a login's saved `site` names the page origin `origin`: the one comparison every matcher of a login to a page
+/// uses (a form fill, an HTTP prompt, a share, a sign-up), so they cannot disagree. It compares origins, not strings:
+/// scheme, host in any case and port (the scheme's default when absent) must be the same; a trailing slash, a path, a
+/// query or user information in either is ignored, and none of them widens a match to another host, port or scheme.
+pub fn same_site(site: &str, origin: &str) -> bool {
+    agentmux_common::allowed_origins::same_origin(site, origin)
+}
+
+/// The origin in `origins` that `site` names, as the page showed it.
+fn page_origin<'a>(site: &str, origins: &'a [String]) -> Option<&'a String> {
+    origins.iter().find(|o| same_site(site, o))
+}
+
+/// A login's site as it is stored: one written as just an origin (`HTTPS://Example.com:443/`) is kept as `https://example.com`;
+/// a site with a path, query or user information is a login page the person saved, and is kept as it was typed.
+/// Entries saved before this keep matching without a change ([`same_site`]).
+pub(super) fn normalize_site(kind: &str, fields: &mut BTreeMap<String, String>) {
+    if kind != "login" {
+        return;
+    }
+    if let Some(site) = fields.get_mut(SITE) {
+        if let Some(origin) = agentmux_common::allowed_origins::bare_origin(site) {
+            *site = origin;
+        }
+    }
+}
+
 /// A login with a site belongs to Personal unless it names another profile; one
 /// without a site belongs to none.
 pub(super) fn settle_profile(kind: &str, fields: &mut BTreeMap<String, String>) {
@@ -77,7 +104,7 @@ pub(super) fn tags_of(row: &VaultRow) -> Vec<String> {
 fn holds(row: &VaultRow, s: &Space) -> bool {
     let f = fields_of(row);
     let get = |k: &str| f.get(k).map(String::as_str).unwrap_or("");
-    row.kind == "login" && get(PROFILE) == s.profile && get(SITE) == s.origin && get(REALM) == s.realm && f.contains_key(PROXY) == s.proxy
+    row.kind == "login" && get(PROFILE) == s.profile && same_site(get(SITE), &s.origin) && get(REALM) == s.realm && f.contains_key(PROXY) == s.proxy
 }
 
 /// Whether a sign-in may be offered for filling: not one the site refused, nor
@@ -141,20 +168,23 @@ pub fn offered_for(store: &Store, profile: &str, origins: &[String]) -> Result<V
             r.kind == "login"
                 && r.vault_id == vault
                 && f.get(PROFILE).map(String::as_str) == Some(profile)
-                && f.get(SITE).is_some_and(|s| origins.contains(s))
+                && f.get(SITE).is_some_and(|s| page_origin(s, origins).is_some())
                 && !f.contains_key(REALM)
                 && !f.contains_key(PROXY)
                 && offered(r)
         })
         .collect();
     rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(rows
-        .into_iter()
-        .map(|r| {
-            let f = fields_of(&r);
-            (r.id, f.get(SITE).cloned().unwrap_or_default(), f.get(USERNAME).cloned().unwrap_or_default())
-        })
-        .collect())
+    Ok(rows.into_iter().map(|r| offered_row(r, origins)).collect())
+}
+
+/// `(entry id, the page's origin the login's site names, user name)`: the origin is the one the page showed, so what
+/// is typed and logged names the page, not the way the site happened to be written.
+fn offered_row(r: VaultRow, origins: &[String]) -> (String, String, String) {
+    let f = fields_of(&r);
+    let site = f.get(SITE).cloned().unwrap_or_default();
+    let origin = page_origin(&site, origins).cloned().unwrap_or(site);
+    (r.id, origin, f.get(USERNAME).cloned().unwrap_or_default())
 }
 
 /// The logins shared with the agent whose permanent uid is `uid`, saved for exactly these frame origins, whatever
@@ -166,11 +196,11 @@ fn shared_with(store: &Store, origins: &[String], uid: &str) -> Result<Vec<(Stri
         .into_iter()
         .filter(|r| {
             let f = fields_of(r);
-            r.kind == "login" && super::shares::names(&f, uid) && f.get(SITE).is_some_and(|s| origins.contains(s)) && !f.contains_key(REALM) && !f.contains_key(PROXY) && offered(r)
+            r.kind == "login" && super::shares::names(&f, uid) && f.get(SITE).is_some_and(|s| page_origin(s, origins).is_some()) && !f.contains_key(REALM) && !f.contains_key(PROXY) && offered(r)
         })
         .collect();
     rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(rows.into_iter().map(|r| (r.id.clone(), fields_of(&r).get(SITE).cloned().unwrap_or_default(), fields_of(&r).get(USERNAME).cloned().unwrap_or_default())).collect())
+    Ok(rows.into_iter().map(|r| offered_row(r, origins)).collect())
 }
 
 /// [`offered_for`], limited to the sign-ins in Vaults `agent` may use: what an agent's own
@@ -201,7 +231,7 @@ pub fn offered_for_agent(store: &Store, profile: &str, origins: &[String], agent
 pub fn unshared_for(store: &Store, id: &str, origins: &[String], agent: &str, uid: &str) -> bool {
     let Ok(Some(row)) = store.vault_get(id) else { return false };
     let f = fields_of(&row);
-    row.kind == "login" && f.get(SITE).is_some_and(|s| origins.contains(s)) && !super::shares::names(&f, uid) && super::vaults::entry_usable(store, id, Some(agent)).unwrap_or(false)
+    row.kind == "login" && f.get(SITE).is_some_and(|s| page_origin(s, origins).is_some()) && !super::shares::names(&f, uid) && super::vaults::entry_usable(store, id, Some(agent)).unwrap_or(false)
 }
 
 /// What a fill of entry `id` types: `(origin, user name, password, label)`, if it
@@ -275,7 +305,7 @@ pub fn find_shared(store: &Store, s: &Space, owner: &ProfileOwner) -> Result<Opt
             r.kind == "login"
                 && super::shares::answers_prompt(&f)
                 && super::shares::names(&f, &owner.uid)
-                && get(SITE) == s.origin
+                && same_site(get(SITE), &s.origin)
                 && get(REALM) == s.realm
                 && f.contains_key(PROXY) == s.proxy
                 && offered(r)

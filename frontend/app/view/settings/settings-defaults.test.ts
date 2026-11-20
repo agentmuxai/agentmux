@@ -54,6 +54,7 @@ const SRV_ZERO_IS_UNSET: Record<string, string> = {
     "telemetry:interval": "the sysinfo pane and srv apply 1 second (sysinfo-model.ts, sysinfo.rs)",
     "telemetry:enabled": "nothing reads it; the template says on",
     "window:savelastwindow": "nothing reads it; the template says on",
+    "conn:helper": "an empty value means ask (helper_consent.rs applies it)",
 };
 const srvZeroSkipped = new Set<string>();
 
