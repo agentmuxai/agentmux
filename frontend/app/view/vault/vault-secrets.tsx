@@ -172,7 +172,7 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                 when={(rows() ?? []).length > 0}
                 fallback={<NoUses loading={rows() === null} readFull={readFull()} lines={lines()} canReadMore={moreToRead()} onMore={showMore} />}
             >
-                <table class="warden-manager-table" aria-label="Agents' use of secrets">
+                <table class="warden-manager-table vault-uses" aria-label="Agents' use of secrets">
                     <thead>
                         <tr>
                             <th>When</th>
@@ -187,12 +187,16 @@ export function VaultSecrets(props: { visible?: boolean }): JSX.Element {
                         <For each={rows()}>
                             {(a) => (
                                 <tr data-outcome={a.outcome}>
-                                    <td class="warden-manager-dim">{formatWhen(a.at)}</td>
-                                    <td class="warden-manager-mono">{a.actor}</td>
-                                    <td>{a.action}</td>
-                                    <td>{a.entry_label}</td>
-                                    <td class="warden-manager-dim">{a.target}</td>
-                                    <td>{a.outcome}</td>
+                                    <td class="warden-manager-dim vault-uses__when">{formatWhen(a.at)}</td>
+                                    <td class="warden-manager-mono vault-uses__agent">{a.actor}</td>
+                                    <td class="vault-uses__what">{a.action}</td>
+                                    <td class="vault-uses__entry">{a.entry_label}</td>
+                                    <td class="warden-manager-dim vault-uses__where" data-label={t("vault.activity.where")}>
+                                        {a.target}
+                                    </td>
+                                    <td class="vault-uses__outcome" data-label={t("vault.secrets.outcome")}>
+                                        {a.outcome}
+                                    </td>
                                 </tr>
                             )}
                         </For>

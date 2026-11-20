@@ -173,6 +173,52 @@
     margin-top: var(--space-4);
 }
 
+// The Secrets list's six columns (when, agent, what, entry, where, outcome) need about 700px, and below that the table
+// grew a sideways scrollbar. A row stacks instead, with what a reader wants first on top: when, which agent and what it
+// did, then the entry it used on a line of its own, then where and the outcome (labelled, as the headings are hidden).
+// Nothing is dropped; the wide table is unchanged.
+@container audit (max-width: 720px) {
+    .vault-uses {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: var(--space-1) var(--space-2);
+            padding: var(--space-2) var(--space-1);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        // `tbody td` outranks the shared table's cell rule (padding and a line under every cell) whichever stylesheet loads
+        // first. A long unbroken word (a path, an entry's name) wraps rather than widening the row.
+        tbody td {
+            padding: 0;
+            border-bottom: 0;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        td.vault-uses__entry {
+            flex: 1 1 100%;
+            font-weight: 500;
+        }
+
+        td[data-label]::before {
+            content: attr(data-label) ": ";
+            color: var(--secondary-text-color);
+        }
+    }
+}
+
 // Does not scroll itself (the feed's body does): a container that scrolls would resize with its own scrollbar.
 .audit-container {
     width: 100%;
