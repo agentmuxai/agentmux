@@ -115,7 +115,7 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
             <div class="attention-list-header">
                 <span class="attention-list-title">{SUMMARY_TEXT.title}</span>
                 {/* The total includes the Vault's requests: while one waits it is the operator's, as the Vault part is. */}
-                <span class="attention-list-count" data-operator-only={vaultCount() > 0 ? "" : undefined}>
+                <span class="attention-list-count" data-operator-only={vaultCount() > 0 ? "" : undefined} data-operator-item={vaultCount() > 0 ? "" : undefined}>
                     {props.summary().waiting}
                 </span>
             </div>
@@ -127,6 +127,7 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
                                 class="attention-list-section"
                                 aria-label={SUMMARY_TEXT.section[part.id]}
                                 data-operator-only={part.id === "vault" ? "" : undefined}
+                                data-operator-item={part.id === "vault" ? "" : undefined}
                             >
                                 <h3 class="attention-list-section-title">{SUMMARY_TEXT.section[part.id]}</h3>
                                 <ul class="attention-list-rows">

@@ -658,17 +658,33 @@
 
 .files-op {
     display: flex;
+    // In a narrow pane (or with a long name) the text takes a line of its own and the bar and Cancel go below it,
+    // instead of the bar and Cancel keeping their width and squeezing the text to an ellipsis.
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
     padding: 3px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
     white-space: nowrap;
 }
 
+// The name is cut with an ellipsis when there is no room; the " · 3 of 10 · 45%" after it never is.
 .files-op-text {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.files-op-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.files-op-tail {
+    flex: none;
+    white-space: pre;
 }
 
 .files-op-bar {

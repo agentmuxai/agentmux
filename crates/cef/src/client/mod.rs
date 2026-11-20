@@ -61,6 +61,7 @@ mod stopped_page;
 mod pane_frontend_guard;
 mod ipc_credentials;
 pub(crate) mod downloads;
+mod save_answer;
 pub(crate) mod agent_notice;
 pub(crate) mod agent_downloads;
 pub(crate) mod download_place;

@@ -108,9 +108,15 @@ on:
 # have via the PR number — a second push can never land on the same SHA, so
 # this loses no real cancellation behavior, only the spurious cross-merge
 # kind.
+#
+# Pushes to main are the one exception. They share a single group and a run in progress is NOT
+# cancelled: GitHub keeps one run going and one waiting, and a newer push replaces the waiting one,
+# so a burst of merges is tested at its head, not once per merge. A waiting run that is replaced
+# starts no job, so `main status` (a job of the run) never reports for it. It only acts for the run
+# whose commit is main's head, and that run always executes.
 concurrency:
-  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('ci-pr-{0}-main-push', github.workflow) || format('ci-pr-{0}-{1}', github.workflow, github.event.pull_request.number || github.sha) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Read-only by default; a job that needs more says so itself (job-level permissions replace this
 # block). A job added later gets nothing it did not ask for.
@@ -571,9 +577,12 @@ jobs:
   # gate merges; then `macos-latest` moves into the `rust` matrix instead.
   rust-macos:
     name: cargo check --tests (macos-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -603,9 +612,12 @@ jobs:
   # partitions are disjoint and together are the whole suite.
   rust-windows-build:
     name: nextest build (windows-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     # `continue-on-error` makes this job's `result` read `success` to `needs` even
@@ -711,9 +723,12 @@ jobs:
   # signal for the other crates, which the shards above also run.
   rust-windows-host:
     name: nextest (windows-latest, host)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -1195,7 +1210,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: generator and classifier tests
-        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs
+        run: npx vitest run scripts/gen-docs-index.test.mjs scripts/ci-classify-changes.test.mjs scripts/cli-probe/fake-anthropic.test.mjs scripts/cli-probe/probe-safety.test.mjs scripts/release-manifest.test.mjs scripts/release-gate.test.mjs scripts/release-publish-needs.test.mjs scripts/check-rust-pin.test.mjs scripts/check-shared-paths.test.mjs scripts/check-test-support-off.test.mjs scripts/ci-main-stalled.test.mjs scripts/ci-main-range.test.mjs
       - name: Specs index is current (changed specs only)
         run: node scripts/gen-docs-index.mjs --check
       - name: bash wrapper reaches the same generator
@@ -1435,6 +1450,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci-main-stalled.mjs
+            scripts/ci-main-range.mjs
           sparse-checkout-cone-mode: false
       - name: Report a stalled or cancelled job to the ci-stalled issue
         id: stall
@@ -1476,6 +1492,9 @@ jobs:
           open=$(printf '%s\n' "$open" | head -1)
           failing=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[] | select(.conclusion == "failure") | "- " + .name' | grep -v -- '- CI required$' || true)
           note="CI failed on main at $at: $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"
+          # Pushes to main share a group and a waiting run is replaced, so this run can stand for several merges.
+          range=$(node scripts/ci-main-range.mjs || true)
+          if [ -n "$range" ]; then note="$note"$'\n\n'"$range"; fi
           if [ -n "$open" ]; then
             gh issue comment "$open" --repo "$REPO" --body "$note"
           else

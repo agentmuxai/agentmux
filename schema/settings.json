@@ -1525,6 +1525,12 @@
           "description": "Let paired devices see this computer's processes in their Tower.",
           "x-section": "Cloud and sharing"
         },
+        "audit:sharewithpaired": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let paired computers on your network read this computer's Audit in theirs: which agents did what, never message text.",
+          "x-section": "Cloud and sharing"
+        },
         "messaging:discord:enabled": {
           "type": "boolean",
           "default": false,

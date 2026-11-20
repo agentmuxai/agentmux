@@ -387,6 +387,9 @@ jobs:
       - name: Build and assemble the unsigned app (RELEASE_CHANNEL=stable)
         env:
           AGENTMUX_GOOGLE_CLIENT_SECRET: ${{ steps.google.outputs.value }}
+          # What this build must produce, as a literal: scripts/verify-app-identity-darwin.sh fails on any other id,
+          # even if the channel variable above were lost.
+          AGENTMUX_EXPECT_BUNDLE_ID: ai.agentmux.stable
         run: |
           mkdir -p "$OUT"
           # The srv release build ends in a link of many minutes that prints nothing. A line every
@@ -621,6 +624,8 @@ jobs:
       # Inside-out, hardened runtime, secure timestamp; then verified, srv's identity included.
       - name: Sign the app
         shell: bash
+        env:
+          AGENTMUX_EXPECT_BUNDLE_ID: ai.agentmux.stable
         run: |
           set -euo pipefail
           /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"

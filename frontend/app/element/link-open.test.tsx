@@ -123,6 +123,17 @@ describe("Markdown links into AgentMux", () => {
         expect(openLink).not.toHaveBeenCalled();
     });
 
+    it("hand a link of a container agent's message to srv with the pane that wrote it, and a native agent's as before", async () => {
+        const inMessage = (media: { baseDir: string; blockId?: string; confined?: boolean }) =>
+            render(() => <Markdown text="[the thing](/workspace/notes.md)" scrollable={false} media={media} />).container.querySelector("a")!;
+        fire(inMessage({ baseDir: "/ws", blockId: "pane-1", confined: true }), "click", 0);
+        await settle();
+        expect(openPathLink).toHaveBeenLastCalledWith("/workspace/notes.md", { floating: false, owner: { blockId: "pane-1", confined: true } });
+        fire(inMessage({ baseDir: "/ws", blockId: "pane-2", confined: false }), "click", 0);
+        await settle();
+        expect(openPathLink).toHaveBeenLastCalledWith("/workspace/notes.md", { floating: false, owner: { blockId: "pane-2", confined: false } });
+    });
+
     it("open a task on the Kanban", async () => {
         const a = link("agentmux://task/14995")!;
         expect(fire(a, "click", 0)).toBe(true);
