@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/** The Claude sign-in's page: its frame (a dialog, or the section it is in), then signed in, an error with Retry, or the login panel. */
+/** The Claude sign-in's page: its frame (a dialog, or the section it is in), then an error with Retry, or the login panel. It closes itself once signed in. */
 
 import { Show, type JSX } from "solid-js";
 
@@ -30,23 +30,11 @@ function LoginShell(p: {
             closeOnBackdropClick={!p.busy}
             size="md"
             ariaLabel={`Connect ${p.brand}`}
-            panelClass="accounts-chooser"
+            // Over an agent pane, the dialog follows the pane's zoom, not the chrome's (accounts-gallery.scss).
+            panelClass={p.scope === "pane" ? "accounts-chooser accounts-chooser--pane" : "accounts-chooser"}
         >
             {p.children}
         </Modal>
-    );
-}
-
-function SignedIn(props: { s: LoginState }): JSX.Element {
-    return (
-        <div class="accounts-chooser-modes">
-            <div class="oauth-byo-note">{`✓ Signed in to ${brandOf(props.s.props)}.`}</div>
-            <div class="identity-key-actions">
-                <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => props.s.props.onClose()}>
-                    Done
-                </Button>
-            </div>
-        </div>
     );
 }
 
@@ -70,18 +58,16 @@ export function LoginView(props: { s: LoginState; session: LoginSession }): JSX.
     const { s, session } = props;
     return (
         <LoginShell inline={s.props.inline} scope={s.props.scope} busy={s.inFlight()} brand={brandOf(s.props)} onClose={s.props.onClose}>
-            <Show when={!s.done()} fallback={<SignedIn s={s} />}>
-                <Show when={!s.error()} fallback={<LoginError s={s} session={session} />}>
-                    <InAppLoginPanel
-                        providerId={loginProviderOf(s.props).id}
-                        // The account's brand ("Anthropic", "ChatGPT"), not the CLI tool's name: this panel is Connectors-facing.
-                        providerLabel={brandOf(s.props)}
-                        authUrl={s.authUrl()}
-                        phase={s.phase()}
-                        onCancel={session.onCancel}
-                        onUseTerminal={session.useTerminal}
-                    />
-                </Show>
+            <Show when={!s.error()} fallback={<LoginError s={s} session={session} />}>
+                <InAppLoginPanel
+                    providerId={loginProviderOf(s.props).id}
+                    // The account's brand ("Anthropic", "ChatGPT"), not the CLI tool's name: this panel is Connectors-facing.
+                    providerLabel={brandOf(s.props)}
+                    authUrl={s.authUrl()}
+                    phase={s.phase()}
+                    onCancel={session.onCancel}
+                    onUseTerminal={session.useTerminal}
+                />
             </Show>
         </LoginShell>
     );

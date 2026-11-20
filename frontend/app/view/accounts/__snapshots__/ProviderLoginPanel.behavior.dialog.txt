@@ -5,7 +5,7 @@
     <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-label="Connect Anthropic">
       <div class="modal-backdrop">
       <span class="modal-focus-sentinel" aria-hidden="true">
-      <div class="modal-panel accounts-chooser" data-size="md">
+      <div class="modal-panel accounts-chooser accounts-chooser--pane" data-size="md">
         <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="starting" data-auth-url="">
           <button>
             "inapp-cancel"
@@ -23,7 +23,7 @@
     <div class="modal-root" role="dialog" aria-modal="true" data-scope="window" data-scope-fallback="pane" data-placement="center" aria-label="Connect Anthropic">
       <div class="modal-backdrop">
       <span class="modal-focus-sentinel" aria-hidden="true">
-      <div class="modal-panel accounts-chooser" data-size="md">
+      <div class="modal-panel accounts-chooser accounts-chooser--pane" data-size="md">
         <div class="accounts-chooser-modes">
           <div class="oauth-byo-note">
             "The login link timed out. Complete it in your browser, then try again."
