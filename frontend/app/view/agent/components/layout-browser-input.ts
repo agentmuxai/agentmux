@@ -26,6 +26,8 @@ export interface InputPage {
      * A wheel notch that is sent again, after a short wait, until `moved()` says it took effect or `tries` notches have
      * been sent; resolves with how many were sent. A notch sent before the browser has built its scroll tree is dropped
      * (a cold start on a busy machine, seen on the nightly's runner), and a dropped notch leaves nothing to add up.
+     * A notch the page did receive (it counts its wheel events) is waited for about 3 s and not sent again, so a slow
+     * runner never adds a second notch to the first.
      */
     wheelUntil(x: number, y: number, deltaY: number, moved: () => Promise<boolean>, tries?: number): Promise<number>;
     /** Move the pointer to (x, y). */
@@ -124,13 +126,28 @@ function inputPage(send: Send): InputPage {
             await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY });
         },
         async wheelUntil(x, y, deltaY, moved, tries = 8) {
+            // The page counts the wheel events it receives, so a notch that is only slow (a loaded runner) is told
+            // from one that was dropped: the slow one is waited for, never sent again, because a second notch on
+            // top of it adds up to a scroll of twice the amount.
+            await page.evaluate<boolean>(
+                `(() => { if (window.__wheelSeen === undefined) { window.__wheelSeen = 0;
+                  addEventListener('wheel', () => { window.__wheelSeen++; }, { capture: true, passive: true }); } return true; })()`
+            );
+            const seen = () => page.evaluate<number>("window.__wheelSeen");
+            const waitFor = async (polls: number) => {
+                for (let i = 0; i < polls; i++) {
+                    await sleep(50);
+                    if (await moved()) return true;
+                }
+                return false;
+            };
             for (let sent = 1; ; sent++) {
+                const before = await seen();
                 await page.wheel(x, y, deltaY);
                 // Give a notch that was taken time to show; one that was dropped never does.
-                for (let i = 0; i < 8; i++) {
-                    await sleep(50);
-                    if (await moved()) return sent;
-                }
+                if (await waitFor(8)) return sent;
+                // The page got it but has not scrolled yet: wait longer (about 3 s) before sending another.
+                if ((await seen()) > before && (await waitFor(60))) return sent;
                 if (sent >= tries) return sent;
             }
         },
