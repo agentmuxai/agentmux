@@ -10,9 +10,10 @@ getAutostartStatus
       <div class="ui-field-description" id="ui-field-desc-cl-N">
         "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
     <div class="ui-field-control">
-      <div data-stand="ToggleControl" data-checked="true">
-        <span data-cb="onChange">
-          "toggle"
+      <div class="setting-control-pair">
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
 getAutostartStatus
 -- an entry whose file is gone
 <div class="setting-row" id="setting-notifications.autostart">
@@ -25,11 +26,12 @@ getAutostartStatus
       <div class="ui-field-description" id="ui-field-desc-cl-N">
         "Start at login is on, but the file it runs is gone, so nothing starts at login. Repair points it at this build."
     <div class="ui-field-control">
-      <span data-stand="Button" data-cb="onClick">
-        "Repair"
-      <div data-stand="ToggleControl" data-checked="true">
-        <span data-cb="onChange">
-          "toggle"
+      <div class="setting-control-pair">
+        <span data-stand="Button" data-cb="onClick">
+          "Repair"
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
 == Repair
 set app:startatlogin false
 -- 399 ms later: only the off write so far
@@ -47,11 +49,12 @@ getAutostartStatus
       <div class="ui-field-description" id="ui-field-desc-cl-N">
         "Start at login is on for local-x. This build can take it over."
     <div class="ui-field-control">
-      <span data-stand="Button" data-cb="onClick">
-        "Use this build"
-      <div data-stand="ToggleControl" data-checked="true">
-        <span data-cb="onChange">
-          "toggle"
+      <div class="setting-control-pair">
+        <span data-stand="Button" data-cb="onClick">
+          "Use this build"
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
 getAutostartStatus
 -- an entry from before owners were recorded
 <div class="setting-row" id="setting-notifications.autostart">
@@ -64,8 +67,9 @@ getAutostartStatus
       <div class="ui-field-description" id="ui-field-desc-cl-N">
         "Start at login is on for another build. This build can take it over."
     <div class="ui-field-control">
-      <span data-stand="Button" data-cb="onClick">
-        "Use this build"
-      <div data-stand="ToggleControl" data-checked="true">
-        <span data-cb="onChange">
-          "toggle"
+      <div class="setting-control-pair">
+        <span data-stand="Button" data-cb="onClick">
+          "Use this build"
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
