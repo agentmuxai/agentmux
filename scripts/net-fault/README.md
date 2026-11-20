@@ -264,3 +264,33 @@ reaches anything off the machine.
 | Check | Expect | When |
 |---|---|---|
 | G7 | same-host `Message` send, the Terminal, Stop, panes and layout work as before | Now |
+
+## Recorded runs
+
+### Boot-time faults, no sign-in (2026-11-20, main at `8a5026eb89`)
+
+An isolated dev instance (Linux, private X11 display, empty AgentMux home, not
+signed in to anything) was started behind the proxy in each mode below, watched
+for about 2 minutes, and the proxy switched to `pass` after about 70 s. The
+status bar's Offline indicator was read from the page. No agent turn was run, so
+this covers only what needs none.
+
+| Mode at start | Indicator within 15 s | After `pass` |
+|---|---|---|
+| `refuse` (every host) | **Offline** at 6 s, "Can't reach the Anthropic API"; at 11 s "No internet connection" with the API and MuxBus named | cleared at about 2 min (the last probe backs off up to 60 s) |
+| `refuse --host api.anthropic.com` | **Offline** at 6 s, names the Anthropic API only | cleared at about 2 min |
+| `refuse --host muxbus.agentmux.ai` | **Offline** at 12 s, names MuxBus only | cleared at 82 s |
+| `blackhole` | **Offline** at 5 s for the API; "No internet connection" at 20 s | MuxBus line first, cleared at 100 s |
+| `dns` (name lookups fail) | same as `refuse` | cleared at about 2 min |
+
+What this settles from the checklist: the status-bar half of G2 (Offline within
+10 s for the model API, in every mode), the "only the API is Offline" row of
+scenario 4 and its reverse, and the clearing after `pass`. The indicator needs
+something to call a service: with the instance already running, switching the
+proxy to `refuse` shows nothing until a request is made, so start the instance
+behind a refusing proxy, or send a message.
+
+Not run, because each needs a signed-in account: G5 and scenario 5 (MuxBus
+staying signed in while offline), G1, G3, G4, G6 (held input, retry row, Stop,
+notes not starting turns, resend after `pass`), and the retry assumption for
+`api_retry` events. Scenarios 3 (`flap`), 6 and 7 were not run either.

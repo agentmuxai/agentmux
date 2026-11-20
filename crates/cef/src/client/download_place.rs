@@ -93,12 +93,31 @@ pub(crate) fn is_quiet(pane: &str, id: u32) -> bool {
 pub(crate) fn ended(pane: &str, id: u32) {
     QUIET.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
     FALLBACK.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
+    ASKED.with(|m| m.borrow_mut().remove(&(pane.to_string(), id)));
 }
 
 /// The pane closed: none of its downloads is still running here.
 pub(crate) fn forget_pane(pane: &str) {
     QUIET.with(|m| m.borrow_mut().retain(|(p, _), _| p != pane));
     FALLBACK.with(|m| m.borrow_mut().retain(|(p, _)| p != pane));
+    ASKED.with(|m| m.borrow_mut().retain(|(p, _), _| p != pane));
+}
+
+thread_local! {
+    /// The file names of the downloads that ask where to save, by (pane, id). A download the person turns away in
+    /// the Save As window ends "cancelled" with no path, so its strip row would have no name; this is the name it
+    /// had when it was offered.
+    static ASKED: RefCell<HashMap<(String, u32), String>> = RefCell::new(HashMap::new());
+}
+
+/// This download asks where to save, under this file name (the page's own, made safe).
+pub(crate) fn remember_asked_name(pane: &str, id: u32, name: &str) {
+    ASKED.with(|m| m.borrow_mut().insert((pane.to_string(), id), name.to_string()));
+}
+
+/// The name this download was offered under; read before `ended`, which forgets it.
+pub(crate) fn asked_name(pane: &str, id: u32) -> Option<String> {
+    ASKED.with(|m| m.borrow().get(&(pane.to_string(), id)).cloned())
 }
 
 thread_local! {
@@ -204,6 +223,20 @@ mod tests {
         assert_eq!(fallback_note("p1", 6), None);
         assert!(fallback_note("p2", 6).is_some());
         ended("p2", 6);
+    }
+
+    #[test]
+    fn a_turned_away_download_keeps_the_name_it_was_offered_under_until_it_ends() {
+        assert_eq!(asked_name("p1", 9), None);
+        remember_asked_name("p1", 9, "notes-2.csv");
+        assert_eq!(asked_name("p1", 9).as_deref(), Some("notes-2.csv"));
+        // Another pane's id 9 is another download.
+        assert_eq!(asked_name("p2", 9), None);
+        ended("p1", 9);
+        assert_eq!(asked_name("p1", 9), None, "an id that comes round again has no old name");
+        remember_asked_name("p1", 10, "a.zip");
+        forget_pane("p1");
+        assert_eq!(asked_name("p1", 10), None);
     }
 
     #[test]
