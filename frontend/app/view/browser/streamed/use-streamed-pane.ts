@@ -6,6 +6,7 @@
 // Sizes are sent as the stage changes, at most every RESIZE_MS. docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md §6, §7.
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
+import { releaseLease } from "./lease-step";
 import { openStreamedPane, type StreamedHandle } from "./streamed-client";
 import type { ServerMsg } from "./streamed-protocol";
 
@@ -14,7 +15,7 @@ const MIN_SIDE = 100;
 const MAX_SIDE = 4096;
 const RESIZE_MS = 100;
 
-export type PaneStatus = "waiting" | "connecting" | "live" | "failed" | "ended" | "paused";
+export type PaneStatus = "waiting" | "connecting" | "starting" | "live" | "failed" | "ended" | "paused";
 export type NavState = Extract<ServerMsg, { t: "nav" }>;
 
 export function clampSide(n: number): number {
@@ -87,9 +88,13 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
                     } else if (m.t === "error") setError(m.message);
                     else if (m.t === "closed") setStatus("ended");
                 },
-                onEnd: (how) => {
+                // The server's browser is being made for this pane: its own status, until the socket opens.
+                onStarting: () => setStatus("starting"),
+                onEnd: (how, reason) => {
                     handle = null;
                     setStatus(how === "failed" ? "failed" : "ended");
+                    // A server that would not hand out a browser says why; it stays readable next to Reconnect.
+                    if (reason) setError(reason);
                 },
             }
         );
@@ -98,6 +103,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     onCleanup(() => {
         clearTimeout(timer);
         close();
+        // The pane is gone (not just hidden): a server that handed out a browser for it is told to take it back.
+        releaseLease();
     });
 
     return {
