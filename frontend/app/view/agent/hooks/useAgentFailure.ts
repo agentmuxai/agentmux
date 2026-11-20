@@ -262,6 +262,8 @@ interface FailureHookState {
     lastFailureAt: number;
     // The usage limit's one automatic resend: its timer, and the reset it was last made for (one per reset).
     resendTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The reset the pending resend waits for: a later reset replaces it. */
+    resendFor: number | undefined;
     resentReset: number | undefined;
 }
 
@@ -297,6 +299,7 @@ function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState 
         completionTimer: undefined,
         lastFailureAt: 0,
         resendTimer: undefined,
+        resendFor: undefined,
         resentReset: undefined,
     };
 }
@@ -304,6 +307,7 @@ function createFailureHookState(opts: UseAgentFailureOptions): FailureHookState 
 function cancelResend(s: FailureHookState) {
     clearTimeout(s.resendTimer);
     s.resendTimer = undefined;
+    s.resendFor = undefined;
 }
 
 function cancelCountdown(s: FailureHookState) {
@@ -660,11 +664,16 @@ function watchUsageResend(s: FailureHookState) {
     createEffect(() => {
         const pf = s.opts.failure();
         const reset = pf?.data.code === "usage_limit" ? pf.data.resetsAtMs : undefined;
-        if (!pf || reset == null || pf.turnAttempted === false || s.resentReset === reset || s.resendTimer) return;
+        if (!pf || reset == null || pf.turnAttempted === false || s.resentReset === reset) return;
+        // The same reset keeps its timer; a replacement limit with a later reset moves the send to that reset.
+        if (s.resendTimer && s.resendFor === reset) return;
+        cancelResend(s);
         const wait = reset + RESEND_AFTER_RESET_MS + Math.random() * RESEND_JITTER_MS - Date.now();
         if (wait > 2 ** 31 - 1) return;
+        s.resendFor = reset;
         s.resendTimer = setTimeout(() => {
             s.resendTimer = undefined;
+            s.resendFor = undefined;
             const done = s.completedTurnAt();
             if (done != null && done > pf.at) return;
             s.resentReset = reset;
