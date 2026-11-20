@@ -25,11 +25,69 @@ fn spawn_on(runtime: Option<tokio::runtime::Handle>, job: impl FnOnce() + Send +
     }
 }
 
+/// A "cancel" that comes back sooner than a person could have looked at a window and closed it is no answer: the
+/// dialog never opened (the portal refused and nothing else could ask). Only a last resort: [`can_ask`] is the
+/// check made before asking, but a backend that is there and still fails shows only as this.
+pub(crate) const QUICK_CANCEL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Whether anything can show a file dialog now. Always so on macOS and Windows. On Linux `rfd` asks the desktop
+/// portal first and runs `zenity` when the portal refuses, and the portal refuses a process that is not
+/// dumpable (it cannot open `/proc/<pid>/root`), which the host is on purpose (`process_hardening`; a dev build
+/// and `AGENTMUX_ALLOW_PTRACE=1` are exempt). So today on Linux every dialog is `zenity`'s; with neither a
+/// dumpable host nor `zenity` on the PATH `rfd` answers "nothing chosen" at once, which looks like a cancel.
+pub(crate) fn can_ask() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        backend_available(program_on_path("zenity", std::env::var_os("PATH").as_deref()), dumpable())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn backend_available(zenity_on_path: bool, dumpable: bool) -> bool {
+    zenity_on_path || dumpable
+}
+
+/// Whether an executable file `name` is in a folder of `path_var` (a PATH value).
+#[cfg(any(target_os = "linux", test))]
+fn program_on_path(name: &str, path_var: Option<&std::ffi::OsStr>) -> bool {
+    let Some(path_var) = path_var else { return false };
+    std::env::split_paths(path_var).any(|dir| dir.join(name).is_file())
+}
+
+/// Whether this process is dumpable, the state the portal needs of a process that asks it for a dialog.
+#[cfg(target_os = "linux")]
+fn dumpable() -> bool {
+    // SAFETY: PR_GET_DUMPABLE takes no pointer and only reads the process's flag.
+    unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) == 1 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn a_dialog_needs_the_portal_or_zenity() {
+        assert!(backend_available(true, false), "zenity answers for the portal's refusal");
+        assert!(backend_available(false, true), "a dumpable host is accepted by the portal");
+        assert!(!backend_available(false, false), "neither: rfd would answer nothing at once");
+    }
+
+    #[test]
+    fn a_program_is_found_only_on_the_path_given() {
+        let with = tempfile::tempdir().unwrap();
+        let without = tempfile::tempdir().unwrap();
+        std::fs::write(with.path().join("zenity"), b"").unwrap();
+        let path = std::env::join_paths([without.path(), with.path()]).unwrap();
+        assert!(program_on_path("zenity", Some(&path)));
+        assert!(!program_on_path("zenity", Some(without.path().as_os_str())));
+        assert!(!program_on_path("zenity", None));
+    }
 
     #[test]
     fn a_job_runs_inside_the_runtime_when_there_is_one() {

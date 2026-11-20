@@ -323,26 +323,7 @@ thread_local! {
         std::cell::RefCell::new(HashMap::new());
 }
 
-/// What the Save As dialog came to.
-#[derive(Clone, Debug, PartialEq)]
-enum SaveAnswer {
-    /// The person picked this file.
-    Chosen(PathBuf),
-    /// The person closed the dialog.
-    Cancelled,
-    /// The dialog could not open or died (a panic in its thread, a missing portal): nobody answered.
-    Failed,
-}
-
-/// Run the blocking dialog `ask` so that a panic inside it is an answer too. Without this a dead dialog thread
-/// never posted anything back: the download waited for an answer for good, and so did every download behind it.
-fn ask_guarded(ask: impl FnOnce() -> Option<PathBuf>) -> SaveAnswer {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(ask)) {
-        Ok(Some(path)) => SaveAnswer::Chosen(path),
-        Ok(None) => SaveAnswer::Cancelled,
-        Err(_) => SaveAnswer::Failed,
-    }
-}
+use super::save_answer::{ask_guarded, SaveAnswer};
 
 wrap_task! {
     struct SaveAnswerTask {
@@ -384,7 +365,7 @@ fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallb
     let block_id = block_id.to_string();
     let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     crate::commands::file_dialog::spawn(move || {
-        let answer = ask_guarded(|| {
+        let answer = ask_guarded(crate::commands::file_dialog::can_ask(), || {
             let mut dialog = rfd::FileDialog::new().set_title("Save as");
             if let Some(name) = path.file_name() {
                 dialog = dialog.set_file_name(name.to_string_lossy());
@@ -1293,16 +1274,6 @@ mod tests {
         assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
         assert!(w.release("p1", 1));
         assert!(w.has_room("p1"));
-    }
-
-    #[test]
-    fn a_dialog_that_panics_is_an_answer_not_a_wait_for_ever() {
-        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/a.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/a.txt")));
-        assert_eq!(ask_guarded(|| None), SaveAnswer::Cancelled);
-        // The Linux portal panic of 2026-11-20: "there is no reactor running".
-        assert_eq!(ask_guarded(|| panic!("there is no reactor running")), SaveAnswer::Failed);
-        // And a dialog thread that has failed once does not stop the next one.
-        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/b.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/b.txt")));
     }
 
     #[test]
