@@ -470,6 +470,8 @@ mod spawn_site_coverage {
          "test: Unix only; runs the container download and uv install scripts against a fake curl in a temp dir, to prove the hash check, the size cap and the marker-last order"),
         ("src/backend/container/cli_release_tests.rs", "\"tar\"", 2,
          "test: Unix only; builds throwaway tarballs in a temp dir (one with a `..` member) as the download script tests' fixtures"),
+        ("src/backend/container_task_probe.rs", "\"sh\"", 1,
+         "test: Linux only; runs the probe's script against this test's own pid and a pid no process has, to prove what it prints"),
         ("src/backend/lsp/supervisor.rs", "&resolved", 1,
          "sanitized: language server, sanitize_process_command"),
         ("src/backend/mcp_probe.rs", "command", 1,
