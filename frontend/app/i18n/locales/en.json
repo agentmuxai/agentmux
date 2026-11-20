@@ -221,6 +221,7 @@
     "settings.kanban.stages": "Stages",
     "settings.kanban.stageName": "Stage name",
     "settings.kanban.colour": "Colour",
+    "settings.kanban.colourIs": "Colour: {{name}}",
     "settings.kanban.shows": "Shows",
     "settings.kanban.cantRemove": "Can't be removed",
     "settings.kanban.needsNote": "Shows what needs you, so it always stays a stage of its own.",

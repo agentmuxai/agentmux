@@ -111,6 +111,13 @@
     background: var(--kanban-stage, var(--border-color));
 }
 
+// The colour button: its swatch, its name and a chevron, one line, so the name never wraps beside the stage's name.
+.kanban-stages__colour {
+    flex: none;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
 .kanban-stages__count {
     min-width: 2ch;
     text-align: end;
