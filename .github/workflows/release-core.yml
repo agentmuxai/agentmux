@@ -566,7 +566,7 @@ jobs:
             echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
           fi
           # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
-          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -exec sha256sum {} + 2> /dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -print0 2> /dev/null | xargs -0 -r node -e 'for (const f of process.argv.slice(1)) console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(f)).digest("hex"))' | sort | tr '\n' ' ')"
           if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
             echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi
@@ -722,7 +722,7 @@ jobs:
             echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
           fi
           # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
-          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -exec sha256sum {} + 2> /dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -print0 2> /dev/null | xargs -0 -r node -e 'for (const f of process.argv.slice(1)) console.log(require("crypto").createHash("sha256").update(require("fs").readFileSync(f)).digest("hex"))' | sort | tr '\n' ' ')"
           if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
             echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi

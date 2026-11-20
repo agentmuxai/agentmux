@@ -311,3 +311,33 @@ describe("the signing job calls its tools by absolute path", () => {
         expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen)\s+[-\w"$]/m);
     });
 });
+
+// `needs.<job>.outputs` holds only the direct needs of a job: a job that reads build-macos's digest without listing the
+// job in its own `needs` gets an empty value, and every release that has a DMG stops at the flatten step.
+describe("release-core.yml jobs that read the macOS build's output name it in their needs", () => {
+    const releaseCore = readFileSync(join(ROOT, ".github/workflows/release-core.yml"), "utf8").replace(/\r\n/g, "\n");
+    const jobs = {};
+    let current = null;
+    let inJobs = false;
+    for (const line of releaseCore.split("\n")) {
+        if (/^jobs:\s*$/.test(line)) {
+            inJobs = true;
+            continue;
+        }
+        if (!inJobs) continue;
+        const head = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+        if (head) current = jobs[head[1]] = [];
+        if (current) current.push(line);
+    }
+    const readers = Object.entries(jobs).filter(([, text]) => text.join("\n").includes("needs.build-macos.outputs."));
+
+    it("has the two jobs that read it", () => {
+        expect(readers.map(([name]) => name).sort()).toEqual(["publish", "sign-release"]);
+    });
+
+    it.each(readers)("%s lists build-macos in its needs", (name, text) => {
+        const needs = text.find((l) => /^ {4}needs:/.test(l)) ?? "";
+        const ids = needs.replace(/^ {4}needs:\s*/, "").replace(/[\[\]]/g, "").split(",").map((x) => x.trim());
+        expect(ids).toContain("build-macos");
+    });
+});

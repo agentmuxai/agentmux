@@ -91,13 +91,24 @@ with zipfile.ZipFile(zip_path, "w") as z:
     elif kind == "through-link-first":
         entry(z, "AgentMux.app/Contents/l/x")
         entry(z, "AgentMux.app/Contents/l", outside.encode(), 0o120777)
+    elif kind == "through-link-dot":
+        entry(z, "AgentMux.app/Contents/l", outside.encode(), 0o120777)
+        entry(z, "AgentMux.app/Contents/./l/x")
+    elif kind == "through-link-case":
+        entry(z, "AgentMux.app/Contents/l", outside.encode(), 0o120777)
+        entry(z, "AgentMux.app/Contents/L/x")
+    elif kind == "through-link-unicode":
+        entry(z, "AgentMux.app/Contents/\u00e9", outside.encode(), 0o120777)
+        entry(z, "AgentMux.app/Contents/e\u0301/x")
+    elif kind == "duplicate-case":
+        entry(z, "AgentMux.app/Contents/a"); entry(z, "AgentMux.app/Contents/A", b"y")
     elif kind == "duplicate":
         entry(z, "AgentMux.app/Contents/a"); entry(z, "AgentMux.app/Contents/a", b"y")
     elif kind == "fifo":
         entry(z, "AgentMux.app/Contents/pipe", b"", 0o010644)
 PY
     }
-    for kind in through-link through-link-first duplicate fifo; do
+    for kind in through-link through-link-first through-link-dot through-link-case through-link-unicode duplicate duplicate-case fifo; do
         mkdir -p "$TMP/outside-target"
         mkrec "$TMP/rec-$kind.zip" "$kind"
         refuses "refuses a zip with a $kind record" "$TMP/rec-$kind.zip"

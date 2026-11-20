@@ -36,7 +36,7 @@ while IFS= read -r name; do
     esac
     case "$name" in
         *\\*) echo "❌ unpack: an entry has a backslash: '$name'" >&2; exit 1 ;;
-        */../*|*/..|../*|..|*//*|/*) echo "❌ unpack: an entry leaves its folder: '$name'" >&2; exit 1 ;;
+        */../*|*/..|../*|..|*//*|/*|*/./*|*/.|./*|.) echo "❌ unpack: an entry leaves its folder or spells it another way: '$name'" >&2; exit 1 ;;
     esac
 done <<< "$entries"
 
@@ -46,26 +46,35 @@ done <<< "$entries"
 # records: a duplicate name, an entry beneath a symlink entry (whatever the order), and any type other than a regular
 # file, a folder or a symlink.
 python3 -I - "$ZIP" <<'PY' || { echo "❌ unpack: the zip has an entry that is not allowed (see above)" >&2; exit 1; }
-import stat, sys, zipfile
+import stat, sys, unicodedata, zipfile
 bad = []
+
+def key(name):
+    # The filesystem takes one folder for several spellings: letters in either case, and a letter written composed or
+    # decomposed. Names are compared the way it would, a component at a time.
+    return "/".join(unicodedata.normalize("NFD", part).casefold() for part in name.split("/"))
+
 with zipfile.ZipFile(sys.argv[1]) as z:
-    seen, links, names = set(), set(), []
+    seen, links, entries = {}, set(), []
     for info in z.infolist():
         name = info.filename.rstrip("/")
+        k = key(name)
         mode = info.external_attr >> 16
         kind = stat.S_IFMT(mode)
-        if name in seen:
-            bad.append("duplicate entry: " + info.filename)
-        seen.add(name)
+        if "." in name.split("/"):
+            bad.append("a '.' component: " + info.filename)
+        if k in seen:
+            bad.append("two entries for one name (%r and %r)" % (seen[k], info.filename))
+        seen[k] = info.filename
         if kind == stat.S_IFLNK:
-            links.add(name)
+            links.add(k)
         elif kind not in (0, stat.S_IFREG, stat.S_IFDIR):
             bad.append("an entry that is not a file, folder or symlink: " + info.filename)
         elif info.filename.endswith("/") and kind not in (0, stat.S_IFDIR):
             bad.append("a folder entry with a file type: " + info.filename)
-        names.append(name)
-    for name in names:
-        parts = name.split("/")
+        entries.append((info.filename, k))
+    for name, k in entries:
+        parts = k.split("/")
         for i in range(1, len(parts)):
             if "/".join(parts[:i]) in links:
                 bad.append("an entry beneath a symlink entry: " + name)
