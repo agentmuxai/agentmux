@@ -21,6 +21,13 @@ describe("openMessageFile", () => {
         expect(notices.push).not.toHaveBeenCalled();
     });
 
+    it("with no pane to name opens nothing, asks srv nothing and says so", async () => {
+        openMessageFile("/workspace/pic.png", undefined);
+        expect(rpc.PaneOpenCommand).not.toHaveBeenCalled();
+        expect(notices.push).toHaveBeenCalledTimes(1);
+        expect((notices.push.mock.calls[0][0] as { title: string }).title).toBe("Couldn't open the file");
+    });
+
     it("tells the person why when srv refuses it", async () => {
         rpc.PaneOpenCommand.mockRejectedValueOnce(new Error("This file isn't in a folder the agent shares with its container"));
         openMessageFile("C:/Users/me/photo.png", "pane-1");

@@ -252,6 +252,22 @@ mod tests {
     }
 
     #[test]
+    fn only_the_workspace_and_the_volumes_the_person_declared_can_be_shown_never_the_folders_the_app_binds_itself() {
+        let f = fixture();
+        let shared = f.private.to_string_lossy().replace('\\', "/");
+        let volumes = format!("[\"{shared}:/data\",\"{shared}:/docs:ro\",\"cache:/cache\"]");
+        let mut meta = f.meta.clone();
+        meta.insert("agent:container_volumes".to_string(), serde_json::json!(volumes));
+        let targets: Vec<String> = writable_binds(&meta, None).into_iter().map(|b| b.target).collect();
+        assert_eq!(targets, ["/workspace", "/data"], "a read-only volume and a named volume are not folders of the host to show");
+        // The agent's Personal Memory, its credentials, its Git hooks and its AWS folder are bound by the app under the
+        // container's home, outside these folders.
+        for app_owned in ["/root/.claude/projects/-workspace/memory/m.md", "/root/.claude/.credentials.json", "/root/.aws/credentials", "/docs/photo.png", "/cache/x"] {
+            assert_eq!(resolve(&meta, app_owned).unwrap_err(), OUTSIDE, "{app_owned}");
+        }
+    }
+
+    #[test]
     fn a_file_that_is_not_there_says_so() {
         let f = fixture();
         assert_eq!(resolve(&f.meta, "/workspace/img/missing.png").unwrap_err(), "That file doesn't exist.");

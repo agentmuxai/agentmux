@@ -45,7 +45,8 @@ export function AgentMediaProvider(props: {
     return (
         <AgentMediaContext.Provider value={media}>
             {props.children}
-            <Show when={gallery()}>
+            {/* Fail closed: a pane called confined with no pane id to name reads nothing, in a preview either. */}
+            <Show when={!(props.confined?.() && !props.blockId?.()) && gallery()}>
                 {(g) => (
                     <MessageImageLightbox
                         blockId={props.blockId?.()}

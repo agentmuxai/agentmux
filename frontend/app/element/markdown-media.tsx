@@ -113,7 +113,7 @@ const MuxBlock = (props: MuxBlockProps) => {
 export function openMediaInEditor(path: string, owner?: MediaOwner): void {
     // A file of a container agent's message is opened by srv, from the agent's own folders and as a read-only copy:
     // never as the path the message wrote, which this computer would read as the person.
-    if (owner?.confined && owner.blockId) {
+    if (owner?.confined) {
         openMessageFile(path, owner.blockId);
         return;
     }
@@ -570,6 +570,9 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const shown = /^file:/i.test(src) ? path : src;
     if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     const kind = inlineMediaKind(path);
+    // Fail closed: a message of an agent not known to run on this computer, with no pane to name, reads nothing. srv
+    // decides by the pane's runtime; this flag only picks the route, and without a pane there is no route.
+    if (p.media.confined && !p.media.blockId) return <span class="am-muted">[image: {shown} — not shown here]</span>;
     const owner: MediaOwner = { blockId: p.media.blockId, confined: p.media.confined };
     if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} owner={owner} />;
     if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} owner={owner} />;

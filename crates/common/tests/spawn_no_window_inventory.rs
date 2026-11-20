@@ -110,6 +110,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: the Windows-only junction test makes a junction in a temp folder with mklink /J"),
     ("crates/srv/src/server/agent_folder_open.rs", "\"cmd\"", 1,
      "test: the Windows side of a test's link swap makes a junction in a temp folder with mklink /J"),
+    ("crates/srv/src/server/agent_media_files.rs", "\"cmd\"", 1,
+     "test: the Windows side of a test's link swap makes a junction in a temp folder with mklink /J"),
     ("crates/bashwrap/src/git_hooks.rs", "\"git\"", 4,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/git_hooks.rs", "\"sh\"", 2,

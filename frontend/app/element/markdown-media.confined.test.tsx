@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
     reads: [] as { what: string; path: string; blockId?: string }[],
-    opened: [] as [string, string][],
+    opened: [] as [string, string | undefined][],
     editor: [] as string[],
     created: [] as unknown[],
 }));
@@ -33,7 +33,7 @@ vi.mock("@/app/element/local-media", async () => {
         },
     };
 });
-vi.mock("@/app/element/open-message-file", () => ({ openMessageFile: (path: string, blockId: string) => h.opened.push([path, blockId]) }));
+vi.mock("@/app/element/open-message-file", () => ({ openMessageFile: (path: string, blockId: string | undefined) => h.opened.push([path, blockId]) }));
 vi.mock("@/app/util/editor-open", () => ({ openInEditorPaneOnScreen: async (path: string) => (h.editor.push(path), true) }));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: async (req: unknown) => (h.created.push(req), "new-block") }));
 vi.mock("@/app/store/global", () => ({ openLink: () => {} }));
@@ -46,7 +46,7 @@ vi.mock("@/element/ui", () => ({
     ),
 }));
 
-import { MarkdownImg } from "./markdown-media";
+import { MarkdownImg, openMediaInEditor } from "./markdown-media";
 
 const imgProps = (src: string) => ({ src, alt: "a picture" }) as JSX.ImgHTMLAttributes<HTMLImageElement>;
 const card = (container: HTMLElement) => container.querySelector(".am-media-card") as HTMLElement;
@@ -91,6 +91,31 @@ describe("a container agent's message", () => {
         fireEvent.click(card(container));
         expect(h.editor).toEqual([]);
         expect(h.opened).toHaveLength(1);
+    });
+});
+
+describe("a confined message with no pane to name", () => {
+    const media = { baseDir: "/ws", confined: true };
+
+    it("reads no picture and shows none", () => {
+        const { container } = render(() => <MarkdownImg props={imgProps("/workspace/big.png")} media={media} />);
+        expect(h.reads).toEqual([]);
+        expect(container.querySelector(".am-media-card")).toBeNull();
+        expect(container.textContent).toContain("not shown here");
+    });
+
+    it("probes and reads no video", () => {
+        const { container } = render(() => <MarkdownImg props={imgProps("/workspace/clip.mp4")} media={media} />);
+        expect(h.reads).toEqual([]);
+        expect(container.textContent).toContain("not shown here");
+    });
+
+    it("opens nothing on a click anywhere (card, preview, tool-result picture all go through the same open)", () => {
+        openMediaInEditor("/workspace/big.png", { confined: true });
+        expect(h.editor).toEqual([]);
+        expect(h.created).toEqual([]);
+        // The helper that opens a message's file is told there is no pane, and refuses itself.
+        expect(h.opened).toEqual([["/workspace/big.png", undefined]]);
     });
 });
 
