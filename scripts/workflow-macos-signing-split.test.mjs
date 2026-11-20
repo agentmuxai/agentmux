@@ -260,3 +260,54 @@ describe("release-core.yml takes the macOS DMG from the macos-dmg artifact only"
         expect(releaseCore.split('find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/').length).toBe(3);
     });
 });
+
+// What `sign` and `publish` receive from another job is input: found by name in the run, where another job of the run
+// (a caller's own, a sibling build job) could put a file of its own under the name. Each hand-off is bound by a digest
+// that comes through a job output, which no other job can set, and is checked before anything reads the file.
+describe("the hand-offs are bound by digest", () => {
+    it("`build` reports the unsigned app's digest and `sign` checks it before it unpacks, and unpacks before it holds anything", () => {
+        expect(jobText("build")).toMatch(/^ {6}app_sha256: \$\{\{ steps\.zip\.outputs\.sha256 \}\}\s*$/m);
+        const names = stepsOf("sign").map((s) => (/- name: (.*)/.exec(s) ?? [])[1] ?? "");
+        const at = (re) => names.findIndex((n) => re.test(n));
+        const digest = at(/^The zip is the one the build job made/);
+        const unpack = at(/^Unpack the unsigned app/);
+        expect(digest).toBeGreaterThan(-1);
+        expect(unpack).toBeGreaterThan(digest);
+        const steps = stepsOf("sign");
+        const awsRole = steps.findIndex((s) => /configure-aws-credentials/.test(s));
+        const secret = at(/^Fetch the Apple signing secrets/);
+        const keychain = at(/^Import Developer ID certificate/);
+        for (const later of [awsRole, secret, keychain]) expect(later).toBeGreaterThan(unpack);
+        expect(steps[digest]).toMatch(/WANT: \$\{\{ needs\.build\.outputs\.app_sha256 \}\}/);
+        expect(steps[digest]).toMatch(/\[ "\$GOT" = "\$WANT" \]/);
+    });
+
+    it("`sign` reports the DMG's digest of the final bytes and `publish` checks it first", () => {
+        expect(jobText("sign")).toMatch(/^ {6}dmg_sha256: \$\{\{ steps\.final\.outputs\.sha256 \}\}\s*$/m);
+        const final = stepsOf("sign").find((s) => /id: final/.test(s));
+        // after the DMG is signed, notarized and stapled, before it is renamed for upload
+        expect(final.indexOf("notarize-macos.sh dmg")).toBeLessThan(final.indexOf("shasum -a 256"));
+        expect(final.indexOf("shasum -a 256")).toBeLessThan(final.indexOf(".pending"));
+        const check = stepsOf("publish").find((s) => /name: Check the DMG as a Mac would/.test(s));
+        expect(check).toMatch(/WANT_SHA256: \$\{\{ needs\.sign\.outputs\.dmg_sha256 \}\}/);
+        expect(check.indexOf("WANT_SHA256\" = ") === -1 ? check.indexOf('"$(shasum') : check.indexOf("WANT_SHA256\" =")).toBeLessThan(
+            check.indexOf("stapler validate"),
+        );
+    });
+
+    it("hands the published DMG's digest to the caller, and release-core checks the file against it in both flatten steps", () => {
+        expect(source).toMatch(/outputs:\n {6}dmg-sha256:[\s\S]*?value: \$\{\{ jobs\.publish\.outputs\.dmg_sha256 \}\}/);
+        const releaseCore = readFileSync(join(ROOT, ".github/workflows/release-core.yml"), "utf8").replace(/\r\n/g, "\n");
+        expect(releaseCore.split("MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}")).toHaveLength(3);
+        expect(releaseCore.split("the macOS DMG is not the one build-macos.yml published")).toHaveLength(3);
+    });
+});
+
+// The signing job holds the keychain and can ask for the identity token: the commands it runs by one bare word are
+// called by absolute path, so nothing earlier on a search path can answer for them.
+describe("the signing job calls its tools by absolute path", () => {
+    it("has no bare security, codesign, xcrun, rm, mv or uuidgen", () => {
+        const text = code(jobText("sign"));
+        expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen)\s+[-\w"$]/m);
+    });
+});

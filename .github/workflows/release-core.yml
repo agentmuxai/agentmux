@@ -554,6 +554,8 @@ jobs:
       # The same selection `publish` makes (its "Flatten artifact tree"); the
       # "Check the files that are published" step there fails if they differ.
       - name: Flatten artifact tree
+        env:
+          MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
@@ -562,6 +564,11 @@ jobs:
           # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
           if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
             echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -exec sha256sum {} + 2> /dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+          if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
+            echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi
           if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
@@ -703,6 +710,8 @@ jobs:
         # docs/specs/SPEC_LINUX_PACKAGES_XZ_2026_10_14.md); *.rpm added for Phase 2 (.pacman lands here
         # too once Phase 3 ships). *.7z is the Windows portable, which replaced
         # the only *.zip (docs/specs/SPEC_WINDOWS_PORTABLE_7Z_2026_10_11.md).
+        env:
+          MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
           find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
@@ -711,6 +720,11 @@ jobs:
           # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
           if [ -n "$(find release-artifacts -type f -name '*.dmg' ! -path 'release-artifacts/macos-dmg/*' -print -quit)" ]; then
             echo "::error::a .dmg came in an artifact other than macos-dmg"; exit 1
+          fi
+          # ...and it is the file the publish job reported the digest of (none reported when the macOS build did not run).
+          have="$(find release-artifacts/macos-dmg -type f -name '*.dmg' -exec sha256sum {} + 2> /dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+          if [ "$have" != "${MACOS_DMG_SHA256:+$MACOS_DMG_SHA256 }" ]; then
+            echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi
           if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
           # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)

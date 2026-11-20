@@ -9,24 +9,25 @@ name: build-macos
 #   gate     checks the commit to build is main's (or the gated release commit of a tag), and names
 #            the exact commit; no secrets, no identity token.
 #   build    compiles and assembles the UNSIGNED .app from that commit. It runs the commit's scripts
-#            and its dependencies' scripts (npm, cargo), so it has no certificate, no keychain, no
-#            Apple secret and cannot get any: the identity token it holds (the actions broker needs it
-#            for the CEF framework and the Google client secret) names no environment, and the Apple
-#            role accepts only the `apple-signing` environment.
-#   sign     the only job in the `apple-signing` environment, so the only one that can assume the
-#            Apple role. It takes the signing scripts from the revision of THIS file that holds its
-#            identity (the token's job_workflow_sha), never from the commit that was built, and only
-#            reads and signs the app: signs it inside-out, notarizes and staples the app, makes the
-#            DMG from the stapled app, signs it, notarizes and staples that.
-#   publish  checks the DMG as a user's Mac would (stapled, signed, accepted by Gatekeeper), then
-#            uploads it. It holds contents:write and nothing else, and runs no repository code.
+#            and its dependencies' scripts (npm, cargo), so it has no certificate, no keychain and no
+#            Apple secret. It holds an identity token only for the actions broker (the CEF framework
+#            and the Google client secret); it is not in the `apple-signing` environment.
+#   sign     the only job in the `apple-signing` environment. It takes the signing scripts from the
+#            revision of THIS file that holds its identity (the token's job_workflow_sha), never from
+#            the commit that was built. What it receives from `build` is input, not trusted: it checks
+#            the zip against the digest `build` reported, checks and unpacks it, and only then asks for
+#            the Apple secrets. It signs the app inside-out, notarizes and staples the app, makes the
+#            DMG from the stapled app, signs it, notarizes and staples that, and reports the DMG's digest.
+#   publish  checks the DMG against the digest `sign` reported, then as a user's Mac would (stapled,
+#            signed by our team, accepted by Gatekeeper), then uploads it and reports its digest, which
+#            release-core.yml checks. It holds contents:write and nothing else, and runs no repository code.
 #
 # The Apple signing secrets (Developer ID certificate and its password, the Apple ID
 # and app-specific password for notarytool, the team id) are not repository secrets.
-# They are one AWS secret that a role hands out only to the `sign` job of THIS file at
-# refs/heads/main, in the `apple-signing` environment (which only main and release tags
-# may deploy to), for a run on main or for a gated release tag. A workflow on any
-# other branch, or a tag's own copy of a workflow, cannot get them.
+# They are one AWS secret that a role hands out only to a job of THIS file at refs/heads/main
+# (the `sign` job, in the `apple-signing` environment, which only main and release tags may
+# deploy to), for a run on main or for a gated release tag. A workflow on any other branch,
+# or a tag's own copy of a workflow, cannot get them.
 # (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 #
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
@@ -74,6 +75,10 @@ on:
         required: false
         type: string
         default: ""
+    outputs:
+      dmg-sha256:
+        description: "sha256 of the DMG the publish job checked and uploaded as the macos-dmg artifact (the caller checks the file it takes against it)"
+        value: ${{ jobs.publish.outputs.dmg_sha256 }}
 
 # Each job names what it needs; none inherits a grant.
 permissions: {}
@@ -201,10 +206,11 @@ jobs:
     # build alone is 85 to 103 min (most of it the final LTO link, which prints nothing). The limit
     # leaves room for that to grow, and still fails long before GitHub's 6-hour limit.
     timeout-minutes: 240
+    outputs:
+      app_sha256: ${{ steps.zip.outputs.sha256 }}
     permissions:
       contents: read
-      # Only for the actions broker below (the CEF framework token and the Google client secret). The Apple
-      # role accepts the `apple-signing` environment and no other, so this token cannot get the Apple secrets.
+      # Only for the actions broker below (the CEF framework token and the Google client secret).
       id-token: write
     env:
       OUT: ${{ github.workspace }}/artifacts
@@ -393,6 +399,15 @@ jobs:
           # The zip is named so that release-core's "*.dmg" sweep of the run's artifacts cannot pick it up.
           ditto -c -k --keepParent --sequesterRsrc build/AgentMux.app "$OUT/AgentMux-unsigned-app.zip"
 
+      # Artifacts are found by name in the run, and any job of the run (a caller's own, a sibling) could put another file under
+      # that name between this job and `sign`. The digest goes by job output: `sign` checks the zip it downloaded against it.
+      - name: Name the digest of the unsigned app
+        id: zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha256=$(shasum -a 256 "$OUT/AgentMux-unsigned-app.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Upload the unsigned app for the signing job
         uses: actions/upload-artifact@v4
         with:
@@ -412,6 +427,8 @@ jobs:
     # The only job that can assume the Apple role: the role's trust names this environment in the token's `sub`.
     # The environment has no secrets of its own and deploys only from main and v* tags.
     environment: apple-signing
+    outputs:
+      dmg_sha256: ${{ steps.final.outputs.sha256 }}
     permissions:
       contents: read
       id-token: write   # the identity token the role for the Apple secrets accepts; this is the only job that can use it
@@ -473,6 +490,36 @@ jobs:
             build/entitlements.mac.plist
           sparse-checkout-cone-mode: false
 
+      # The zip is the one the build job made: its digest came by job output, which no other job of the run can set. Nothing
+      # reads the zip before this.
+      - name: The zip is the one the build job made
+        shell: bash
+        env:
+          WANT: ${{ needs.build.outputs.app_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the build job reported no digest for the unsigned app"; exit 1; }
+          GOT="$(/usr/bin/shasum -a 256 "$WORK/in/AgentMux-unsigned-app.zip" | /usr/bin/cut -d' ' -f1)"
+          [ "$GOT" = "$WANT" ] || { echo "::error::the unsigned app in the artifact is not the one the build job made"; exit 1; }
+
+      # The zip is input from code that ran in another job: unpack-macos-app.sh refuses an entry outside AgentMux.app (an
+      # absolute path, `..`), anything at the top besides AgentMux.app, a file that is not a regular file, folder or symlink,
+      # and a symlink that leaves the app. It starts nothing from the archive.
+      - name: Unpack the unsigned app
+        id: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          /bin/rm -rf "$WORK/app"
+          bash signing-scripts/scripts/unpack-macos-app.sh "$WORK/in/AgentMux-unsigned-app.zip" "$WORK/app"
+          APP="$WORK/app/AgentMux.app"
+          # The version comes out of the app, and names the DMG: shape-checked, as it came from the build job.
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$ ]] || { echo "::error::the app's version is not a version"; exit 1; }
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "DMG=$WORK/dmg/AgentMux_${VERSION}_arm64.dmg" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ vars.APPLE_SIGNING_ROLE }}
@@ -525,27 +572,27 @@ jobs:
           # modern macOS (the file lands at ~/Library/Keychains/<name>-db but
           # notarytool --keychain looks for the literal name).
           KEYCHAIN_PATH="$RUNNER_TEMP/build-${{ github.run_id }}.keychain"
-          KEYCHAIN_PASS="$(uuidgen)"
+          KEYCHAIN_PASS="$(/usr/bin/uuidgen)"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           echo "KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
 
-          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security default-keychain -s "$KEYCHAIN_PATH"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           # Auto-lock after 6 hours, the longest a job can run: it is unlocked again before every
           # step that signs, so a locked keychain never makes codesign wait for a password.
-          security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
+          /usr/bin/security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
 
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" \
+          /usr/bin/security import "$RUNNER_TEMP/cert.p12" \
             -k "$KEYCHAIN_PATH" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
             -T /usr/bin/codesign \
             -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
+          /bin/rm -f "$RUNNER_TEMP/cert.p12"
 
           # Allow codesign to access the key without interactive prompts
-          security set-key-partition-list \
+          /usr/bin/security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
 
@@ -561,39 +608,21 @@ jobs:
           # --no-validate skips the live Apple credential check so a pending
           # Developer Program agreement doesn't block credential storage; a
           # submission Apple does not accept then fails the notarize step below.
-          xcrun notarytool store-credentials "notarytool" \
+          /usr/bin/xcrun notarytool store-credentials "notarytool" \
             --apple-id   "$APPLE_ID" \
             --password   "$APPLE_PASSWORD" \
             --team-id    "$APPLE_TEAM_ID" \
             --keychain   "$KEYCHAIN_PATH" \
             --no-validate
           # Everything that needed the secret has read it: the file goes now, not at the end.
-          rm -f "$APPLE_SIGNING_FILE"
-
-      # The zip is input from code that ran in another job: unpack-macos-app.sh refuses an entry outside AgentMux.app (an
-      # absolute path, `..`), anything at the top besides AgentMux.app, a file that is not a regular file, folder or symlink,
-      # and a symlink that leaves the app. It starts nothing from the archive.
-      - name: Unpack the unsigned app
-        id: app
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf "$WORK/app"
-          bash signing-scripts/scripts/unpack-macos-app.sh "$WORK/in/AgentMux-unsigned-app.zip" "$WORK/app"
-          APP="$WORK/app/AgentMux.app"
-          # The version comes out of the app, and names the DMG: shape-checked, as it came from the build job.
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.+-]+)?$ ]] || { echo "::error::the app's version is not a version"; exit 1; }
-          echo "APP=$APP" >> "$GITHUB_ENV"
-          echo "DMG=$WORK/dmg/AgentMux_${VERSION}_arm64.dmg" >> "$GITHUB_ENV"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          /bin/rm -f "$APPLE_SIGNING_FILE"
 
       # Inside-out, hardened runtime, secure timestamp; then verified, srv's identity included.
       - name: Sign the app
         shell: bash
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           bash signing-scripts/scripts/sign-macos-app.sh "$APP" signing-scripts/build/entitlements.mac.plist
 
       # The app first, so that the DMG is made from an app that carries its own ticket and a Mac that is
@@ -603,7 +632,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           bash signing-scripts/scripts/notarize-macos.sh app "$APP"
 
       - name: Make the DMG from the stapled app
@@ -613,17 +642,20 @@ jobs:
           bash signing-scripts/scripts/make-macos-dmg.sh "$APP" "$DMG"
 
       - name: Sign, notarize and staple the DMG
+        id: final
         shell: bash
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          CERT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
           [ -n "$CERT" ] || { echo "::error::no 'Developer ID Application' identity in the keychain"; exit 1; }
-          codesign --force --timestamp --sign "$CERT" --keychain "$KEYCHAIN_PATH" "$DMG"
+          /usr/bin/codesign --force --timestamp --sign "$CERT" --keychain "$KEYCHAIN_PATH" "$DMG"
           bash signing-scripts/scripts/notarize-macos.sh dmg "$DMG"
+          # The final bytes (signed, stapled) have a digest; `publish` checks the file it downloads against it.
+          echo "sha256=$(/usr/bin/shasum -a 256 "$DMG" | /usr/bin/cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           # A suffix that is not .dmg: release-core.yml gathers every "*.dmg" in the run's artifacts into the
           # signed manifest, and only the publish job's checked copy may be one of them.
-          mv "$DMG" "$DMG.pending"
+          /bin/mv "$DMG" "$DMG.pending"
 
       - name: Upload the signed DMG for the publish job
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -638,14 +670,16 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP/apple-signing.json" "$RUNNER_TEMP/cert.p12"
-          if [ -n "${KEYCHAIN_PATH:-}" ]; then security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
+          /bin/rm -f "$RUNNER_TEMP/apple-signing.json" "$RUNNER_TEMP/cert.p12"
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then /usr/bin/security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true; fi
 
   publish:
     name: macOS arm64 — check the DMG and publish it
     needs: [gate, sign]
     runs-on: macos-latest
     timeout-minutes: 30
+    outputs:
+      dmg_sha256: ${{ steps.dmg.outputs.sha256 }}
     permissions:
       contents: write   # needed to upload release assets via GITHUB_TOKEN
     env:
@@ -662,11 +696,17 @@ jobs:
       - name: Check the DMG as a Mac would
         id: dmg
         shell: bash
+        env:
+          WANT_SHA256: ${{ needs.sign.outputs.dmg_sha256 }}
         run: |
           set -euo pipefail
           shopt -s nullglob
           pending=(signed/*.dmg.pending)
           [ "${#pending[@]}" = 1 ] || { echo "::error::expected one signed DMG, found ${#pending[@]}"; exit 1; }
+          # First: the file is the one the signing job made (its digest came by job output), not another of ours that was put
+          # under the artifact's name.
+          [[ "$WANT_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the signing job reported no digest for the DMG"; exit 1; }
+          [ "$(shasum -a 256 "${pending[0]}" | cut -d' ' -f1)" = "$WANT_SHA256" ] || { echo "::error::the DMG in the artifact is not the one the signing job made"; exit 1; }
           DMG="${pending[0]%.pending}"
           mv "${pending[0]}" "$DMG"
           # Whose signature it is, not only that Apple accepts it: "Notarized Developer ID" is true of any developer's app.
@@ -691,6 +731,7 @@ jobs:
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
           [ "$(basename "$DMG")" = "AgentMux_${VERSION}_arm64.dmg" ] || { echo "::error::the DMG's name does not match the app's version"; exit 1; }
           echo "path=$DMG" >> "$GITHUB_OUTPUT"
+          echo "sha256=$WANT_SHA256" >> "$GITHUB_OUTPUT"
 
       # ── Upload to GitHub Actions artifacts (always) ────────────────────────
       - name: Upload DMG as workflow artifact

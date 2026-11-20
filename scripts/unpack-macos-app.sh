@@ -7,7 +7,9 @@
 # The zip is input from code that ran in another job (the built commit's scripts and its dependencies' scripts), so
 # it is checked before it is trusted:
 #   before unpacking  every entry is AgentMux.app/... (or the resource-fork folder ditto writes, __MACOSX/...), with
-#                     no absolute path, no `..` component, no backslash and no empty component;
+#                     no absolute path, no `..` component, no backslash and no empty component; no duplicate name, no
+#                     entry beneath a symlink entry, no type but file, folder and symlink (so nothing can be written
+#                     through a link before the unpacked tree is looked at);
 #   after unpacking   the only thing at the top is AgentMux.app, it has an Info.plist, it holds nothing but regular
 #                     files, folders and symlinks, and every symlink's target, followed all the way, stays inside
 #                     AgentMux.app (an absolute target is refused: the app uses relative links only).
@@ -37,6 +39,41 @@ while IFS= read -r name; do
         */../*|*/..|../*|..|*//*|/*) echo "❌ unpack: an entry leaves its folder: '$name'" >&2; exit 1 ;;
     esac
 done <<< "$entries"
+
+# 1b. The entries' types and their order, before anything is written. ditto writes entries in order and follows a
+# symlink it has made: a symlink entry followed by an entry beneath it, both with clean names, would put a file where
+# the link points, outside the folder, before any check of the unpacked tree could run. So refuse, from the zip's own
+# records: a duplicate name, an entry beneath a symlink entry (whatever the order), and any type other than a regular
+# file, a folder or a symlink.
+python3 -I - "$ZIP" <<'PY' || { echo "❌ unpack: the zip has an entry that is not allowed (see above)" >&2; exit 1; }
+import stat, sys, zipfile
+bad = []
+with zipfile.ZipFile(sys.argv[1]) as z:
+    seen, links, names = set(), set(), []
+    for info in z.infolist():
+        name = info.filename.rstrip("/")
+        mode = info.external_attr >> 16
+        kind = stat.S_IFMT(mode)
+        if name in seen:
+            bad.append("duplicate entry: " + info.filename)
+        seen.add(name)
+        if kind == stat.S_IFLNK:
+            links.add(name)
+        elif kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+            bad.append("an entry that is not a file, folder or symlink: " + info.filename)
+        elif info.filename.endswith("/") and kind not in (0, stat.S_IFDIR):
+            bad.append("a folder entry with a file type: " + info.filename)
+        names.append(name)
+    for name in names:
+        parts = name.split("/")
+        for i in range(1, len(parts)):
+            if "/".join(parts[:i]) in links:
+                bad.append("an entry beneath a symlink entry: " + name)
+                break
+for b in bad:
+    print("  " + b, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
 
 # 2. Unpack, then look at what is there.
 mkdir -p "$DEST"

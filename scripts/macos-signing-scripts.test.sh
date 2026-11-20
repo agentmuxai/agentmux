@@ -75,6 +75,36 @@ PY
     mkzip "$TMP/noplist.zip" "AgentMux.app/Contents/MacOS/x"
     refuses "refuses an app with no Info.plist" "$TMP/noplist.zip"
 
+    # Entries whose names are clean but whose records are not: a file written through a symlink the same zip made, a
+    # duplicate, a special file. The check is on the zip's own records, so nothing may be written outside the destination.
+    mkrec() { # <zip> <kind>
+        python3 -I - "$1" "$2" "$TMP/outside-target" <<'PY'
+import sys, zipfile
+zip_path, kind, outside = sys.argv[1:4]
+def entry(z, name, data=b"x", mode=0o100644):
+    zi = zipfile.ZipInfo(name); zi.external_attr = mode << 16; z.writestr(zi, data)
+with zipfile.ZipFile(zip_path, "w") as z:
+    entry(z, "AgentMux.app/Contents/Info.plist")
+    if kind == "through-link":
+        entry(z, "AgentMux.app/Contents/l", outside.encode(), 0o120777)
+        entry(z, "AgentMux.app/Contents/l/x")
+    elif kind == "through-link-first":
+        entry(z, "AgentMux.app/Contents/l/x")
+        entry(z, "AgentMux.app/Contents/l", outside.encode(), 0o120777)
+    elif kind == "duplicate":
+        entry(z, "AgentMux.app/Contents/a"); entry(z, "AgentMux.app/Contents/a", b"y")
+    elif kind == "fifo":
+        entry(z, "AgentMux.app/Contents/pipe", b"", 0o010644)
+PY
+    }
+    for kind in through-link through-link-first duplicate fifo; do
+        mkdir -p "$TMP/outside-target"
+        mkrec "$TMP/rec-$kind.zip" "$kind"
+        refuses "refuses a zip with a $kind record" "$TMP/rec-$kind.zip"
+        if [ -z "$(ls -A "$TMP/outside-target")" ]; then ok "nothing was written outside the destination ($kind)"
+        else bad "nothing was written outside the destination ($kind)" "$(ls -A "$TMP/outside-target")"; fi
+    done
+
     # Symlinks that leave: absolute, relative past the top, and a chain whose first hop stays inside.
     for kind in absolute relative chain; do
         bd="$TMP/link-$kind/AgentMux.app"
