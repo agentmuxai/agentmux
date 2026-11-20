@@ -1,0 +1,36 @@
+getAutostartStatus
+-- registered, waiting for approval
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start at login is on, but macOS is waiting for you to allow AgentMux in System Settings > General > Login Items & Extensions."
+    <div class="ui-field-control">
+      <div class="setting-control-pair">
+        <span data-stand="Button" data-cb="onClick">
+          "Open Login Items"
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"
+== Open Login Items
+openLoginItems
+== the person allows it and comes back to the window
+-- allowed: no button
+<div class="setting-row" id="setting-notifications.autostart">
+  <div class="ui-field ui-field--inline">
+    <div class="ui-field-text">
+      <div class="ui-field-label-row">
+        <label class="ui-field-label" id="ui-field-label-cl-N">
+          "Start at login"
+        <span class="setting-saved" role="status" aria-live="polite">
+      <div class="ui-field-description" id="ui-field-desc-cl-N">
+        "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
+    <div class="ui-field-control">
+      <div class="setting-control-pair">
+        <div data-stand="ToggleControl" data-checked="true">
+          <span data-cb="onChange">
+            "toggle"

@@ -16,7 +16,6 @@ export function createLoginState(props: ProviderLoginProps) {
     const [phase, setPhase] = createSignal<InAppLoginPhase>("starting");
     const [authUrl, setAuthUrl] = createSignal<string | undefined>(undefined);
     const [error, setError] = createSignal<string | null>(null);
-    const [done, setDone] = createSignal(false);
     // Signal (not a plain `let`) so `Modal`'s `closeOnBackdropClick` can
     // reactively track it — preserves the original hand-rolled overlay's
     // "don't dismiss on backdrop click mid-login" behavior.
@@ -29,8 +28,6 @@ export function createLoginState(props: ProviderLoginProps) {
         setAuthUrl,
         error,
         setError,
-        done,
-        setDone,
         inFlight,
         setInFlight,
         cancelled: false,
@@ -53,8 +50,8 @@ export function createLoginState(props: ProviderLoginProps) {
     // from starting (#2414).
     //
     // Guarded on `inFlight`: this panel can also unmount AFTER reaching its
-    // success/error screen, while still counted as "mounted" for a moment
-    // (e.g. the user lingers on "✓ Signed in" before closing). cancelCliLogin()
+    // error screen, or right after a sign-in succeeds (it closes itself, with the
+    // login no longer in flight). cancelCliLogin()
     // hits the host's SINGLE global login slot — if a different window/surface
     // has since started its own login, an unconditional call here would kill
     // that unrelated, newer attempt instead of a no-op cleanup of our own

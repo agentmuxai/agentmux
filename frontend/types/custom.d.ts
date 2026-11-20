@@ -465,6 +465,8 @@ declare global {
         getHostCaps(): HostCaps;
         /** Start at login: can the host manage a login entry, and is one registered? */
         getAutostartStatus(): Promise<AutostartStatus>;
+        /** macOS: open System Settings at Login Items, where the person allows AgentMux to start at login. */
+        openLoginItems(): Promise<void>;
         /** Create the settings file if it is missing (or bring it up to the latest template) and return its path. */
         ensureSettingsFile(): Promise<string>;
         /** Create the settings file if it is missing, and open it in the operating system's default editor. The
@@ -1408,7 +1410,7 @@ declare global {
             onFailure: (code: number, message: string) => void;
         }) => number;
         /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
-        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number; host?: { waited_ms?: number; handled_ms: number } }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;

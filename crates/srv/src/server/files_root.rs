@@ -75,21 +75,31 @@ pub(crate) fn refuse_change(state: &AppState, block_id: Option<&str>) -> Result<
     }
 }
 
+/// The meta of a Files pane confined to `folder` (resolved), which the pane's title calls `of`.
+pub(crate) fn confined_meta(folder: &Path, of: &str) -> crate::backend::obj::MetaMapType {
+    let host = folder.to_string_lossy().into_owned();
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".into(), "files".into());
+    meta.insert("files:path".into(), host.clone().into());
+    meta.insert(FILES_ROOT_META_KEY.into(), host.into());
+    meta.insert("frame:title".into(), format!("{of} (read-only, from the agent's workspace)").into());
+    meta
+}
+
 /// `pane.open` from a confined pane: only a file inside its folder, opened in an Editor. Its path is
-/// replaced by the resolved one.
-pub(crate) async fn bind_pane_open(state: &AppState, cmd: &mut CommandPaneOpenData) -> Result<(), String> {
+/// replaced by the resolved one, and the answer is the pane's folder (none: the open is from no such pane).
+pub(crate) async fn bind_pane_open(state: &AppState, cmd: &mut CommandPaneOpenData) -> Result<Option<PathBuf>, String> {
     let from = [cmd.split_reference_block_id.as_deref(), cmd.stack_onto_block_id.as_deref()]
         .into_iter()
         .flatten()
-        .find(|b| root_of(state, b).is_some())
-        .map(str::to_string);
-    let Some(from) = from else { return Ok(()) };
+        .find_map(|b| root_of(state, b).map(|root| (b.to_string(), root)));
+    let Some((from, root)) = from else { return Ok(None) };
     let remote = cmd.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local");
     let Some(file) = cmd.file.clone().filter(|_| cmd.view == "editor" && cmd.meta.is_none() && !remote) else {
         return Err("From this folder, shown read-only from an agent's workspace, only a file inside it can be opened, in an Editor.".to_string());
     };
     cmd.file = Some(bound_path(state, Some(&from), &file).await?);
-    Ok(())
+    Ok(Some(root))
 }
 
 /// A listing that failed because the folder lies outside the pane's root.

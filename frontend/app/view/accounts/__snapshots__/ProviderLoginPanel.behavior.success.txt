@@ -101,7 +101,7 @@
           <button>
             "inapp-terminal"
       <span class="modal-focus-sentinel" aria-hidden="true">
-== signed in
+== signed in: closed by itself
 <body>
   <div>
   <div>
@@ -109,12 +109,11 @@
       <div class="modal-backdrop">
       <span class="modal-focus-sentinel" aria-hidden="true">
       <div class="modal-panel accounts-chooser" data-size="md">
-        <div class="accounts-chooser-modes">
-          <div class="oauth-byo-note">
-            "✓ Signed in to Anthropic."
-          <div class="identity-key-actions">
-            <button type="button" class="ui-button ui-tone-accent identity-btn identity-btn-primary">
-              "Done"
+        <div data-testid="inapp" data-provider-id="claude" data-provider-label="Anthropic" data-phase="waiting-authorize" data-auth-url="">
+          <button>
+            "inapp-cancel"
+          <button>
+            "inapp-terminal"
       <span class="modal-focus-sentinel" aria-hidden="true">
   call refreshAccountCache []
   call onClose []

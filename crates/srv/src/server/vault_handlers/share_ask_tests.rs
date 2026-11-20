@@ -317,3 +317,67 @@ async fn generate_makes_a_login_for_the_agents_own_profile_and_leaves_where_it_i
     let row = state.identity_store.vault_get(key["id"].as_str().unwrap()).unwrap().unwrap();
     assert!(!vault::signins::fields_of(&row).contains_key("profile"));
 }
+
+/// A call the browser's own process makes to srv about a prompt met in `space` (`credential.Lookup`, `credential.Fill`),
+/// with the secret only the paired host holds when `secret` is given.
+async fn broker(state: &crate::server::AppState, method: &str, space: &Space, secret: Option<&str>) -> crate::backend::service::WebReturnType {
+    let args = json!({ "identity_id": space.profile, "origin": space.origin, "realm": space.realm, "is_proxy": space.proxy });
+    let call = crate::backend::service::WebCallType { service: "credential".into(), method: method.into(), uicontext: None, args: vec![args, json!(secret.unwrap_or(""))] };
+    crate::server::service::run_service_call(state, &call).await
+}
+
+const HOST_SECRET: &str = "test-host-reg-secret";
+
+#[tokio::test]
+async fn a11_the_browsers_credential_calls_answer_a_prompt_from_a_share_the_agent_asked_for() {
+    // The whole chain through the real routes: the agent's `Vault share` request, the person's Always on its card, then
+    // what the browser's process asks srv when the site's prompt appears in the agent's own profile.
+    let (app, state) = setup().await;
+    let token = agent(&state, "vid-pr-d");
+    let _other = agent(&state, "vid-pr-e");
+    let id = prompt_login(&app).await;
+    let space = prompt_space("vid-pr-d");
+
+    // Before any share: nothing answers, and Fill gives nothing.
+    let before = broker(&state, "Lookup", &space, Some(HOST_SECRET)).await;
+    assert_eq!((before.success, before.data.as_ref().and_then(|d| d["found"].as_bool())), (true, Some(false)), "{before:?}");
+    assert!(!broker(&state, "Fill", &space, Some(HOST_SECRET)).await.success);
+
+    // The agent asks, the person answers Always.
+    let asked = ask(&app, &token, "vid-pr-d", json!({ "id": id, "reason": REASON }));
+    let card = card_of(&id, "vid-pr-d").await;
+    uses::uses().answer(&card.id, UseAnswer::of(Decision::Always));
+    let (s, out) = asked.await.unwrap();
+    assert_eq!((s, out["always"].as_bool()), (StatusCode::OK, Some(true)), "{out}");
+
+    // Lookup: found, shared with that agent, already approved, the user name masked and no password.
+    let looked = broker(&state, "Lookup", &space, Some(HOST_SECRET)).await;
+    let data = looked.data.clone().unwrap_or_default();
+    assert!(looked.success, "{looked:?}");
+    assert_eq!((data["found"].as_bool(), data["shared"].as_bool(), data["approval"].as_str(), data["username"].as_str()), (Some(true), Some(true), Some("granted"), Some("al***")), "{data}");
+    assert!(!data.to_string().contains("pw-two-of-a-kind") && !data.to_string().contains("alice"), "{data}");
+
+    // Fill is the one call that returns the password, and an Always is not used up by it.
+    for _ in 0..2 {
+        let filled = broker(&state, "Fill", &space, Some(HOST_SECRET)).await;
+        let data = filled.data.clone().unwrap_or_default();
+        assert!(filled.success, "{filled:?}");
+        assert_eq!((data["username"].as_str(), data["password"].as_str()), (Some("alice"), Some("pw-two-of-a-kind")));
+    }
+    let used = lines_of(&state, &id).into_iter().filter(|l| l.action == vault::signins::SIGNED_IN).count();
+    assert_eq!(used, 2, "each use is in the history, as the agent's");
+
+    // A caller without the host's secret (an agent riding the shared key) is given nothing; nor is another agent's
+    // profile, nor Personal.
+    for secret in [None, Some("not-the-secret")] {
+        let refused = broker(&state, "Fill", &space, secret).await;
+        assert!(!refused.success && refused.data.is_none(), "{refused:?}");
+    }
+    let other = prompt_space("vid-pr-e");
+    assert_eq!(broker(&state, "Lookup", &other, Some(HOST_SECRET)).await.data.unwrap()["found"].as_bool(), Some(false), "another agent's profile");
+    assert!(!broker(&state, "Fill", &other, Some(HOST_SECRET)).await.success, "another agent's profile");
+    // Personal's own tab is offered its own saved login, as before, and it is no share's: nothing says it was shared.
+    let personal = Space { profile: "personal".into(), ..space.clone() };
+    let own = broker(&state, "Lookup", &personal, Some(HOST_SECRET)).await.data.unwrap();
+    assert_eq!((own["found"].as_bool(), own.get("shared")), (Some(true), None), "{own}");
+}
