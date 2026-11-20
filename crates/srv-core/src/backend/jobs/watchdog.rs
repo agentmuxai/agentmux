@@ -244,8 +244,8 @@ const LOCAL_GRACE_MS: i64 = JITTER_MAX_MS + 3 * 60 * 1000;
 const SUSPEND_GAP_MS: i64 = 2 * PASS_MS as i64 + SETTLE_MS as i64;
 
 /// What the watchdog remembers between passes about the local jobs it watches. Only what happened while it ran
-/// counts: a slot from before it started belongs to the start-up catch-up (`app_not_running`), and one from before a
-/// job was edited or turned on again belongs to the old schedule.
+/// counts: a slot from before its first pass belongs to the start-up catch-up (`app_not_running`), and one from
+/// before a job was edited or turned on again belongs to the old schedule.
 pub struct LocalWatch {
     started_ms: i64,
     last_pass_ms: Option<i64>,
@@ -290,7 +290,8 @@ impl RunLedger {
                     seen.1
                 }
                 None => {
-                    // At start-up a job's slots count from the start; a job that appears later, or comes back, from now.
+                    // On the first pass a job's slots count from where the watchdog begins; a job that appears later, or
+                    // comes back, from now.
                     let from = if first_pass { watch.started_ms } else { now_ms };
                     watch.seen.insert(job.id.clone(), (sig, from));
                     from
@@ -353,8 +354,10 @@ impl RunLedger {
 pub fn start_local(ledger: Arc<RunLedger>, shared: Arc<Store>) {
     let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
     rt.spawn(async move {
-        let mut watch = LocalWatch::new(now_ms());
         tokio::time::sleep(std::time::Duration::from_millis(SETTLE_MS)).await;
+        // Counted from the first pass, not from start-up: the scheduler's catch-up for the slots missed while AgentMux
+        // was off writes one collapsed row for all of them, so a slot in that stretch has no row of its own.
+        let mut watch = LocalWatch::new(now_ms());
         loop {
             let (ledger, shared) = (ledger.clone(), shared.clone());
             let moved = tokio::task::spawn_blocking(move || {

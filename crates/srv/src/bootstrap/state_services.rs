@@ -130,10 +130,9 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
-        backend::jobs::paused::spawn(jobs_store.clone(), run_ledger.clone());
-        // A local slot that passed with no row of any kind is given up on (jobs spec §4.4).
-        backend::jobs::watchdog::start_local(run_ledger.clone(), jobs_store);
+        backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
+    let local_ledger = run_ledger.clone();
     state.cron_scheduler.install_runs(run_ledger);
     // An `app_event` job's runs start when the broker reports the event it names; a `file_watch` job's, when its folder changes; a `poll` job's, when its query finds something new.
     if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
@@ -145,6 +144,11 @@ pub async fn start_job_ledger_and_cron(state: &AppState) {
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
     state.cron_scheduler.start().await;
+    // A local slot that passed with no row of any kind is given up on (jobs spec §4.4). After the scheduler's start-up
+    // catch-up, whose collapsed rows cover the slots missed while AgentMux was off.
+    if let Some(jobs_store) = crate::server::cron::jobs_store(state) {
+        backend::jobs::watchdog::start_local(local_ledger, jobs_store);
+    }
 }
 
 /// Compensates the sagas an earlier run left unresolved; non-fatal when it fails.

@@ -100,13 +100,17 @@ fn a_row_the_scheduler_writes_late_wins_the_slot() {
 }
 
 #[test]
-fn slots_from_before_the_watchdog_started_are_not_its_to_judge() {
+fn slots_from_before_the_first_pass_are_not_judged() {
     let rig = rig();
     let job = every_minute("j");
-    // Started at 20 minutes: the first pass at 30 judges the slots from 21 to 25 minutes only.
+    // The start-up catch-up writes one collapsed row for all the slots missed while AgentMux was off, so the slots
+    // behind its first have no row of their own: a watchdog that began at 20 minutes judges from there only.
+    handled(&rig, "j", 10 * MIN, "skipped");
     let mut watch = LocalWatch::new(20 * MIN);
     assert_eq!(rig.ledger.watch_local(&mut watch, std::slice::from_ref(&job), 30 * MIN), 5);
-    assert_eq!(rows(&rig, "j")[0].scheduled_for_ms, Some(21 * MIN));
+    let all = rows(&rig, "j");
+    assert_eq!(all.len(), 6);
+    assert_eq!((all[0].scheduled_for_ms, all[1].scheduled_for_ms), (Some(10 * MIN), Some(21 * MIN)));
 }
 
 #[test]

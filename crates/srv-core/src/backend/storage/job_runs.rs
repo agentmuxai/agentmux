@@ -437,7 +437,6 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// The job's newest run, if any.
     /// Whether the ledger has a row for the job's `slot_ms`, whatever its state: a run, a skip or a miss. Every
     /// way a scheduled slot is handled writes one (the slot's unique index, §3.1), so a slot without a row was
     /// never handled.
@@ -451,6 +450,7 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// The job's newest run, if any.
     pub fn job_run_last(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
         Ok(self.job_runs_for_job(job_id, 1, None)?.pop())
     }
