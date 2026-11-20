@@ -91,7 +91,7 @@ fi
 # never set STRIP_MAPS=1 at all, unlike Windows's package:release and every
 # package:release:linux* variant).
 TASKFILE="$HERE/../Taskfile.yml"
-if grep -q "STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh" "$TASKFILE"; then
+if grep -q "STRIP_MAPS=1 RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh" "$TASKFILE"; then
     ok "package:release:macos sets STRIP_MAPS=1"
 else
     bad "package:release:macos sets STRIP_MAPS=1" "release DMGs would ship with source maps"

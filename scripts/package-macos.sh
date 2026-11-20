@@ -47,7 +47,7 @@
 # before this change.
 #
 # Release / CI path:
-#   RELEASE_CHANNEL=stable bash scripts/package-macos.sh [output-dir]
+#   RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh [output-dir]
 #   (task package:release:macos sets this automatically)
 #
 # Bundle layout. The host resolves everything RELATIVE TO ITS OWN BINARY
