@@ -9,6 +9,7 @@ import {
     inlineMediaKind,
     isNetworkPath,
     MediaTooLargeError,
+    refusalReason,
     resolveMediaPath,
     type MediaOwner,
 } from "@/app/element/local-media";
@@ -123,6 +124,11 @@ export function openMediaInEditor(path: string, owner?: MediaOwner): void {
     });
 }
 
+/** srv's reason for refusing a file, after the placeholder's text, when it gave one. */
+function reasonOf(state: { kind: string; reason?: string }): string {
+    return state.kind === "missing" && state.reason ? " " + state.reason : "";
+}
+
 type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"]; owner?: MediaOwner };
 
 /** A click on an image of an agent's message opens the preview over the tab; with no pane to show it, the Editor. */
@@ -187,7 +193,7 @@ type LocalImageState =
     | { kind: "waiting" }
     | { kind: "ready"; url: string }
     | { kind: "too-large"; size: number }
-    | { kind: "missing" };
+    | { kind: "missing"; reason?: string };
 
 /**
  * A local image file (§4.2): a 16:9 placeholder until it nears the viewport,
@@ -228,7 +234,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
             else swap();
         } catch (e) {
             if (disposed) return;
-            setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing" });
+            setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing", reason: refusalReason(e) });
         }
     };
 
@@ -287,7 +293,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
             }
         >
             <Match when={state().kind === "missing"}>
-                <span class="am-muted">[image not found: {props.src}]</span>
+                <span class="am-muted">[image not found: {props.src}]{reasonOf(state())}</span>
             </Match>
             <Match when={state().kind === "too-large"}>
                 <MediaCard path={props.path} owner={props.owner} size={tooLargeSize()} icon="fa-image" />
@@ -480,7 +486,7 @@ function LocalAV(props: {
         <Switch fallback={<AvFigure s={s} path={props.path} kind={props.kind} openGallery={props.openGallery} />}>
             <Match when={s.state().kind === "missing"}>
                 <span class="am-muted">
-                    [{props.kind} not found: {props.src}]
+                    [{props.kind} not found: {props.src}]{reasonOf(s.state())}
                 </span>
             </Match>
             <Match when={s.state().kind === "error"}>

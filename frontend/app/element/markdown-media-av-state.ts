@@ -12,6 +12,7 @@ import {
     fetchMediaRange,
     INLINE_AV_MAX_BYTES,
     MediaTooLargeError,
+    refusalReason,
     type MediaOwner,
 } from "@/app/element/local-media";
 import { createSignal, onCleanup, onMount } from "solid-js";
@@ -49,7 +50,7 @@ type AvState =
     | { kind: "loading"; total: number }
     | { kind: "playing"; url: string }
     | { kind: "too-large"; size: number }
-    | { kind: "missing" }
+    | { kind: "missing"; reason?: string }
     | { kind: "error"; message: string };
 
 export type LocalAvState = ReturnType<typeof createLocalAv>;
@@ -70,7 +71,7 @@ export function createLocalAv(props: { path: string; src: string; kind: "video" 
     };
     const fail = (e: unknown) => {
         if (disposed) return;
-        setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing" });
+        setState(e instanceof MediaTooLargeError ? { kind: "too-large", size: e.size } : { kind: "missing", reason: refusalReason(e) });
     };
 
     const probe = async () => {

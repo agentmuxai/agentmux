@@ -129,11 +129,33 @@ export class MediaTooLargeError extends Error {
     }
 }
 
-/** srv answered with an error status (404 for a missing file). */
-class MediaFetchError extends Error {
-    constructor(readonly status: number, statusText: string) {
+/** srv answered with an error status (404 for a missing file). A refusal (403) carries srv's reason. */
+export class MediaFetchError extends Error {
+    constructor(
+        readonly status: number,
+        statusText: string,
+        readonly reason?: string,
+    ) {
         super(`${status} ${statusText}`);
     }
+}
+
+async function fetchFailed(resp: Response): Promise<MediaFetchError> {
+    let reason: string | undefined;
+    if (resp.status === 403) {
+        try {
+            const body = (await resp.json()) as { error?: unknown };
+            reason = typeof body.error === "string" ? body.error : undefined;
+        } catch {
+            // No reason given: the status stands.
+        }
+    }
+    return new MediaFetchError(resp.status, resp.statusText, reason);
+}
+
+/** Why srv refused to show the file, in its words, when it said. */
+export function refusalReason(e: unknown): string | undefined {
+    return e instanceof MediaFetchError ? e.reason : undefined;
 }
 
 /**
@@ -166,9 +188,7 @@ export interface FetchMediaOpts {
 export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): Promise<Blob> {
     const headers = authHeaders();
     const resp = await fetch(streamUrl(path, opts.blockId), { headers, signal: opts.signal });
-    if (!resp.ok) {
-        throw new MediaFetchError(resp.status, resp.statusText);
-    }
+    if (!resp.ok) throw await fetchFailed(resp);
     if (opts.maxBytes != null) {
         const declared = Number(resp.headers.get("Content-Length"));
         if (declared > opts.maxBytes) {
@@ -201,7 +221,7 @@ export async function fetchMediaRange(
 ): Promise<MediaRange> {
     const headers = authHeaders({ Range: `bytes=${start}-${end}` });
     const resp = await fetch(streamUrl(path, opts.blockId), { headers, signal: opts.signal });
-    if (!resp.ok) throw new MediaFetchError(resp.status, resp.statusText);
+    if (!resp.ok) throw await fetchFailed(resp);
     if (resp.status !== 206) {
         void resp.body?.cancel().catch(() => {});
         return { blob: null, total: Number(resp.headers.get("Content-Length")) || 0 };
