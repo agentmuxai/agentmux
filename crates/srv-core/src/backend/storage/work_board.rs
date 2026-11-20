@@ -64,7 +64,9 @@ pub(crate) const SCHEMA: &str = "
         to_state    TEXT NOT NULL DEFAULT '',
         body        TEXT NOT NULL DEFAULT ''
     );
-    CREATE INDEX IF NOT EXISTS idx_ids_work_events_work ON db_work_events(work_id, at);";
+    CREATE INDEX IF NOT EXISTS idx_ids_work_events_work ON db_work_events(work_id, at);
+    CREATE INDEX IF NOT EXISTS idx_ids_work_events_actor ON db_work_events(actor COLLATE NOCASE, kind, at);
+    CREATE INDEX IF NOT EXISTS idx_ids_work_events_kind ON db_work_events(kind, at);";
 
 /// How long a finished task's history is kept after it last changed.
 pub const EVENTS_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -472,6 +474,37 @@ impl Store {
             params![ev.work_id, ev.at, ev.actor, ev.actor_kind, ev.kind, ev.from_state, ev.to_state, ev.body],
         )?;
         Ok(())
+    }
+
+    /// The id of the task `agent` held at `at_ms`: the latest one it took by then that nothing had ended (completed,
+    /// submitted, released, expired, cancelled, given to another agent or taken back) before `at_ms`. An agent took a
+    /// task when it claimed it (the agent is the line's actor), or when the board started it on the agent or began
+    /// tracking its work (the operator is the actor, and the line's text names the agent). What the Audit links a row
+    /// to. The history is kept 30 days after a task finishes, so an older row has none.
+    pub fn work_held_at(&self, agent: &str, at_ms: i64) -> Result<Option<String>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                "WITH took AS (
+                   SELECT id, work_id, at FROM db_work_events
+                    WHERE kind = 'claimed' AND actor = ?1 COLLATE NOCASE AND at <= ?2
+                   UNION ALL
+                   SELECT id, work_id, at FROM db_work_events
+                    WHERE kind = 'started' AND body = ('on ' || ?1) COLLATE NOCASE AND at <= ?2
+                   UNION ALL
+                   SELECT id, work_id, at FROM db_work_events
+                    WHERE kind = 'tracked' AND body = (?1 || '''s work') COLLATE NOCASE AND at <= ?2
+                 )
+                 SELECT t.work_id FROM took t
+                  WHERE NOT EXISTS (SELECT 1 FROM db_work_events x
+                                     WHERE x.work_id = t.work_id AND x.at > t.at AND x.at <= ?2
+                                       AND x.kind IN ('completed', 'submitted', 'released', 'expired', 'cancelled',
+                                                      'assigned', 'reassigned', 'taken_back'))
+                  ORDER BY t.at DESC, t.id DESC LIMIT 1",
+                params![agent, at_ms],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// A task's history, oldest first (the newest `limit`).

@@ -59,7 +59,7 @@ pub(crate) async fn handle_host_app_update(
     }
     let result = match body.action.as_str() {
         "download" => crate::backend::update::download::start(),
-        "restart" => crate::backend::update::restart::start(body.now),
+        "restart" => crate::backend::update::restart::start(body.now, Vec::new()),
         "cancel" => crate::backend::update::restart::cancel(),
         other => Err(format!("unknown action {other:?}")),
     };

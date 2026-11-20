@@ -170,10 +170,19 @@ export function totalsLabel(totals: AuditTotals): string {
     return `${totals.entries} ${noun} · ${approx}${formatTokens(tokens)} tokens${usd}`;
 }
 
-/** One button on a row: opens an agent's history at the entry, or reveals its live pane. */
+/** One button on a row: opens an agent's history at the entry, reveals its live pane, or opens the Kanban task it was
+ *  working on or that task's PR (`href`, which the app's link opener takes). */
 export type AuditLinkItem =
     | { key: string; label: string; kind: "history"; link: AuditHistoryLink }
-    | { key: string; label: string; kind: "pane"; blockId: string };
+    | { key: string; label: string; kind: "pane"; blockId: string }
+    | { key: string; label: string; kind: "task"; href: string }
+    | { key: string; label: string; kind: "pr"; href: string };
+
+/** "#9" for a PR's URL (`.../pull/9`), "" when it doesn't end in a number. */
+export function prNumber(url: string): string {
+    const n = /\/pull\/(\d+)\/?(?:[?#].*)?$/.exec(url)?.[1];
+    return n ? `#${n}` : "";
+}
 
 function linksOf(end: Pick<AuditEnd, "links">, key: string, who: string): AuditLinkItem[] {
     const items: AuditLinkItem[] = [];
@@ -182,6 +191,15 @@ function linksOf(end: Pick<AuditEnd, "links">, key: string, who: string): AuditL
     }
     if (end.links.pane) {
         items.push({ key: `${key}-pane`, label: who ? `${who}'s pane` : "In its pane", kind: "pane", blockId: end.links.pane.block_id });
+    }
+    const task = end.links.task;
+    // The task link opens the Kanban's default board by number; a task on another board has no such link.
+    if (task && task.task_ref.startsWith("#")) {
+        const owner = who ? `${who}'s ` : "";
+        items.push({ key: `${key}-task`, label: `${owner}task ${task.task_ref}`, kind: "task", href: `agentmux://task/${task.num}` });
+        if (task.pr_url) {
+            items.push({ key: `${key}-pr`, label: `${owner}PR ${prNumber(task.pr_url)}`.trim(), kind: "pr", href: task.pr_url });
+        }
     }
     return items;
 }

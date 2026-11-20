@@ -25,7 +25,18 @@ fn update_summary() -> Value {
         "checked_ms": u.checked_ms,
     });
     if let (Some(d), Value::Object(map)) = (u.download, &mut out) {
-        map.insert("download".into(), json!({ "version": d.version, "state": d.state }));
+        map.insert("download".into(), download_summary(&d));
+    }
+    out
+}
+
+/// A download as it leaves this machine: the release and its state, and, after a restart that was asked for and
+/// not confirmed, when and why (a time and a word, no text).
+pub(crate) fn download_summary(d: &crate::backend::update::check::DownloadStatus) -> Value {
+    let mut out = json!({ "version": d.version, "state": d.state });
+    if let (Some(at), Some(why), Value::Object(map)) = (d.not_confirmed_at, d.not_confirmed.as_deref(), &mut out) {
+        map.insert("not_confirmed_at".into(), json!(at));
+        map.insert("not_confirmed".into(), json!(why));
     }
     out
 }

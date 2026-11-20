@@ -1142,6 +1142,13 @@
           "description": "The context size, in tokens, from which the agent:compacthints note suggests compacting. Keep it below agent:compactat, so the agent can compact at the end of a turn before Claude Code compacts on its own mid-task.",
           "x-section": "Agents"
         },
+        "agent:compactbackstopat": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 600000,
+          "description": "The context size, in tokens, over which AgentMux compacts a container agent itself, between turns, when the agent has not acted on the agent:compacthints note: at the head of the container's queue, ahead of the messages waiting. Two tries; if the context is still over after them, the agent's pane shows a warning and its leader is told. 0 turns it off. A route agent has its own limit, from its model's budget.",
+          "x-section": "Agents"
+        },
         "agent:overlapnotes": {
           "type": "boolean",
           "default": true,

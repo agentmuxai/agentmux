@@ -209,6 +209,8 @@ mod tests {
             waiting_for: 0,
             waiting_on: Vec::new(),
             stopping: Vec::new(),
+            not_confirmed_at: None,
+            not_confirmed: None,
         }
     }
 

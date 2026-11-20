@@ -16,6 +16,7 @@ pub mod message_stats;
 pub mod ordered;
 pub mod provenance;
 pub mod segments;
+pub mod tasks;
 pub mod totals;
 
 use std::collections::HashSet;
@@ -262,6 +263,7 @@ fn end_of(name: &str, ts_ms: u64, block_id: Option<&str>, ctx: &Ctx) -> AuditEnd
             // The reader opens an agent by UID: a name the registry does not know has no history to open.
             history: uid.map(|uid| AuditHistoryLink { definition_id: Some(uid), agent_id: slug, zone: None, at_ms: ts_ms, at_byte: None }),
             pane: pane.map(|block_id| AuditPaneLink { block_id }),
+            task: None,
         },
     }
 }

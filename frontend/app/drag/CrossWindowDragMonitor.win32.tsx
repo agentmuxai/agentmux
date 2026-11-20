@@ -36,6 +36,7 @@ import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endDrag, endReleasedSession, session } from "./drag-session";
 import { endedByEscape } from "./native-cancel";
+import { dragWasStalled } from "./drag-stall";
 import { paneDragCandidate, pressIsOnTab, prewarmTearOffSnapshot, takeTearOffSnapshot, takeWindowTabSnapshot } from "./tearoff-snapshot";
 
 // Shared drag state set by TileLayout / TabBar drag handlers
@@ -193,7 +194,7 @@ function CrossWindowDragMonitor(): JSX.Element {
                 endLiveFollow(getApi());
                 return;
             }
-            if (await abandonedByEscape(dragSession, e.dataTransfer?.dropEffect)) return;
+            if ((await abandonedByEscape(dragSession, e.dataTransfer?.dropEffect)) || abandonedByStall()) return;
 
             // Release WebView2 mouse capture immediately — IDropSource may leave it active
             // after an out-of-window HTML5 drag, breaking subsequent mousedown delivery.
@@ -227,6 +228,18 @@ async function abandonedByEscape(dragSession: ReturnType<typeof endReleasedSessi
     endLiveFollow(getApi());
     getApi().releaseDragCapture().catch(() => {});
     Logger.info("dnd:cross", "cross-window drag aborted via Escape");
+    return true;
+}
+
+/**
+ * The page was frozen for seconds during this drag (drag-stall.ts): it drew no guides and the person had nothing to aim
+ * at, so where they let go is not a choice. Nothing is torn off; the pane stays where it was.
+ */
+function abandonedByStall(): boolean {
+    if (!dragWasStalled()) return false;
+    endLiveFollow(getApi());
+    getApi().releaseDragCapture().catch(() => {});
+    Logger.info("dnd:cross", "cross-window drag cancelled: the page was frozen during it");
     return true;
 }
 

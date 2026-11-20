@@ -192,13 +192,7 @@ fn require_super(state: &AppState, uid: &str) -> Result<(), String> {
 
 /// Tell an agent something, from AgentMux. Not delivered (the agent isn't running) is not an error.
 fn tell(uid: &str, note: &str) -> bool {
-    match crate::backend::reactive::get_global_handler().deliver_system_note(uid, note) {
-        Ok(()) => true,
-        Err(e) => {
-            tracing::info!(error = %e, "sensitive request: note not delivered");
-            false
-        }
-    }
+    window::tell_one(uid, note)
 }
 
 /// Send the super agent the request, and say to the requester what came of it.

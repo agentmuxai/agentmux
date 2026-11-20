@@ -20,7 +20,7 @@ use super::{AppState, RemoteCaller, RemoteRefusal, RemoteResult};
 
 /// The request owner for a remote caller: not an agent here, so no local uid stands in for it.
 fn owner(caller: &RemoteCaller) -> String {
-    format!("remote:{}", caller.actor())
+    format!("{}{}", crate::backend::sensitive_requests::REMOTE_OWNER_PREFIX, caller.actor())
 }
 
 pub(super) async fn disk_cleanup(state: &AppState, caller: &RemoteCaller, params: Value) -> RemoteResult {

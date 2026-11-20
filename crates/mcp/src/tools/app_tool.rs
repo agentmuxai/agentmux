@@ -484,6 +484,22 @@ pub(super) fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
 
+/// What a download says about the last restart into it that was asked for and not confirmed, as a sentence to add
+/// after "ready to restart into": when and why (`not_confirmed_at`, `not_confirmed`); empty when there was none.
+fn not_confirmed_words(d: &Value) -> String {
+    let Some(at) = d["not_confirmed_at"].as_u64() else { return String::new() };
+    let secs = at / 1000;
+    let when = format!("{:02}:{:02} UTC", secs / 3600 % 24, secs / 60 % 60);
+    let why = match s(d, "not_confirmed") {
+        "no" => "the user answered No",
+        "timed_out" => "nobody answered the prompt before it closed itself",
+        "too_late" => "an answer came after the prompt had lapsed",
+        "unanswered" => "the launcher didn't restart AgentMux in time",
+        _ => "the restart was declined",
+    };
+    format!(" The last restart into it did not go ahead at {when}: {why}. Ask again if it is still wanted.")
+}
+
 /// `version`'s answer, from srv's `AppUpdateStatus`.
 fn describe_status(st: &Value) -> String {
     let current = s(st, "current");
@@ -501,9 +517,12 @@ fn describe_status(st: &Value) -> String {
         if s(d, "version") == latest {
             match s(d, "state") {
                 "downloading" | "unpacking" => out.push_str(" It is downloading now."),
-                "ready" => out.push_str(" It is downloaded and ready to restart into."),
+                "ready" => {
+                    out.push_str(" It is downloaded and ready to restart into.");
+                    out.push_str(&not_confirmed_words(d));
+                }
                 "waiting" => out.push_str(" A restart into it is waiting for agents to finish their turn."),
-                "restarting" => out.push_str(" AgentMux is asking the user to confirm the restart."),
+                "restarting" => out.push_str(" AgentMux is restarting into it now."),
                 // A remote answer carries no error text (srv allow-lists what leaves a machine).
                 "failed" if s(d, "error").is_empty() => out.push_str(" Its download failed."),
                 "failed" => out.push_str(&format!(" Its download failed: {}.", s(d, "error"))),
@@ -533,8 +552,8 @@ fn describe_outcome(o: &Value) -> String {
     match s(o, "status") {
         "started" => {
             let mut text = format!(
-                "Upgrade to {version} started: AgentMux downloads it if needed, asks the user to confirm in its own \
-                 dialog, then restarts once every agent has finished its turn. End your turn so you don't hold it up. \
+                "Upgrade to {version} started: AgentMux downloads it if needed, then restarts once every agent has finished \
+                 its turn and the in-app countdown has ended, with no second dialog. End your turn so you don't hold it up. \
                  Your session resumes after the restart."
             );
             let stopping: Vec<&str> = o["stopping"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).collect();
@@ -606,6 +625,16 @@ mod tests {
         assert!(text.starts_with("AgentMux 0.59.26 (windows-portable). A newer release is out: 0.59.27."), "{text}");
         assert!(text.contains("downloaded and ready"), "{text}");
         assert!(text.contains("action \"upgrade\""), "{text}");
+        assert!(!text.contains("not confirmed"), "nothing unconfirmed to say: {text}");
+
+        // A restart that was asked for and not confirmed says when and why, from a word and a time (a remote answer's).
+        for (why, words) in [("timed_out", "nobody answered"), ("no", "answered No"), ("too_late", "had lapsed"), ("unanswered", "didn't restart AgentMux in time"), ("declined", "was declined")] {
+            let mut unconfirmed = st.clone();
+            unconfirmed["download"]["not_confirmed_at"] = json!(1_795_106_021_000u64);
+            unconfirmed["download"]["not_confirmed"] = json!(why);
+            let text = describe_status(&unconfirmed);
+            assert!(text.contains("ready to restart into. The last restart into it did not go ahead at 16:33 UTC") && text.contains(words), "{why}: {text}");
+        }
 
         let setup = json!({ "state": "available", "current": "0.59.26", "latest": "0.59.27", "install": "windows-setup",
             "can_download": false, "url": "https://example/r", "checked_ms": 1 });

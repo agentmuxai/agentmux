@@ -403,6 +403,7 @@ const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
     "telemetry:interval": ["crates/srv-core/src/backend/sysinfo.rs", /const DEFAULT_INTERVAL_SECS: f64 = ([\d.]+);/],
     "voice:whisperModel": ["crates/srv/src/server/voice.rs", /const DEFAULT_WHISPER_MODEL: &str = ("[^"]*");/],
     "agent:compacthintat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
+    "agent:compactbackstopat": ["crates/srv-core/src/backend/context_reading.rs", /const DEFAULT_BACKSTOP_AT: u64 = (\d+);/],
     "supervisor:enabled": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_ENABLED: bool = (true|false);/],
     "supervisor:steady:continuations": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_CONTINUATIONS: \w+ = (\d+);/],
     "supervisor:steady:minutes": ["crates/srv-core/src/backend/supervisor/settings.rs", /const DEFAULT_STEADY_MINUTES: \w+ = (\d+);/],
