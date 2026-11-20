@@ -164,6 +164,25 @@ describe("a prompt for the person", () => {
         expect(await api().run("pane:close", "asking")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
     });
 
+    it("holds nothing back for the status bar's Vault badge: marked operator-only so agents cannot click it, but it is the person's control, not a prompt over the panes", async () => {
+        installShortcutApi();
+        h.inWindow.add("here");
+        pane("here");
+        const badge = document.createElement("button"); // outside every pane, as the status bar is
+        badge.setAttribute("data-operator-only", "");
+        badge.setAttribute("data-operator-item", "");
+        document.body.appendChild(badge);
+        expect(operatorPromptOpen()).toBe(false);
+        expect(operatorPromptOpen("here")).toBe(false);
+        expect(await api().run("split:right", "here")).not.toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api().plan("Enter", "here")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        // A real prompt beside it still holds back.
+        const p = prompt();
+        expect(operatorPromptOpen("here")).toBe(true);
+        p.remove();
+        badge.remove();
+    });
+
     it("sees no prompt in a confirm that is the person's own action (nothing is marked)", async () => {
         installShortcutApi();
         pane("replace");
