@@ -164,8 +164,9 @@ Channels are separate installs that share one login, so one entry, with the owne
   "Start at login is on for *<channel>*", with a button to switch it to this build.
 - Turning the setting **off** removes only an entry this channel owns; another build's entry is left
   alone (built: `autostart::plan`).
-- Not built yet: showing the owning channel in Settings, and asking before a non-owning build turns it
-  off.
+- Built: Settings shows the owning channel when another build owns the entry, with **Use this build**
+  (§3.8).
+- Not built yet: asking before a non-owning build turns it off.
 
 This keeps the existing single artifact name, so `disable()` still finds it, while fixing G5.
 
@@ -194,9 +195,14 @@ window, is unchanged.
 
 `--autostart-status` gains `--json` and returns
 `{ state: "off" | "on" | "broken" | "needs_approval", target, owner_channel, this_channel, movable }`,
-where `broken` means the entry exists but its target does not. Settings will render that status next
-to the switch, with **Repair** (re-apply the setting). Until then, Settings reads the plain
-`--autostart-status` after each change, and says so when the setting is on but nothing is registered.
+where `broken` means the entry exists but its target does not, and `movable` means another channel (or
+none) owns the entry and this build can take it over. `needs_approval` is for the macOS Login Items
+approval (phase 4) and is not produced yet. Settings renders that status next to the switch: a broken
+entry shows **Repair**, another build's entry shows its channel and **Use this build**. Both write
+`app:startatlogin` off and then on again (400 ms apart), which the launcher reconciles like any change
+(`autostart::plan` writes for a missing target and for another channel's entry), so there is no second
+path to the login entry. An older launcher without `--json` still answers the plain verb, and Settings
+falls back to saying so when the setting is on but nothing is registered.
 
 ### 3.9 One property, two switches, one login entry (built)
 
@@ -277,7 +283,7 @@ broadcasts it like every other setting.
 | 1 | Linux stable target via `AGENTMUX_STABLE_EXE` from AppRun and the wrappers; `TryExec` and the delay key; self-heal (§3.2) | **Built** (PR #3788) | G1, G4, G6 (Linux) |
 | 1b | `--background` second instance exits quietly (§3.6) | **Built** (Phase 2 PR) | G8 |
 | 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add (already in `tray-icon`) | **Built** (Phase 2 PR) | G2, G3 |
-| 3 | Status JSON; Settings status with owner and Repair (§3.8) | Not started | G9 |
+| 3 | Status JSON; Settings status with owner and Repair (§3.8) | **Built** (this PR: `--autostart-status --json`; Settings shows the owner and offers Repair or Use this build) | G9 |
 | 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | Not started | G6 (Windows), G7 |
 
 Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. With Phase 2

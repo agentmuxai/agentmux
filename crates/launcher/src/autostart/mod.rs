@@ -580,7 +580,8 @@ pub fn disable() -> Result<(), String> {
 /// disturb a running instance):
 /// - `--enable-autostart`  — register, using this executable's own path
 /// - `--disable-autostart` — remove; idempotent, safe to run unconditionally
-/// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way
+/// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way;
+///   with `--json`, print the [`Status`] object instead
 /// The channel this launcher belongs to, which owns any entry it writes
 /// (`SPEC_START_WITH_OS_2026_09_25.md` §3.5). Resolved the same way as the
 /// data dir; `"unknown"` only if that resolution fails.
@@ -799,6 +800,48 @@ pub fn missing_target(entry: &Entry) -> Option<&str> {
     entry.target.as_deref().filter(|t| !t.is_empty() && !Path::new(t).exists())
 }
 
+/// How the login entry stands (`SPEC_START_WITH_OS_2026_09_25.md` §3.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    /// No login entry.
+    Off,
+    /// An entry that runs a file that is there.
+    On,
+    /// An entry whose file is gone: the session skips it without a word.
+    Broken,
+    /// Registered, but the system waits for the user's approval (macOS Login Items, phase 4). Not produced yet.
+    NeedsApproval,
+}
+
+/// `--autostart-status --json`: what Settings shows next to the switch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Status {
+    pub state: State,
+    /// What the entry runs, when readable.
+    pub target: Option<String>,
+    /// The channel that wrote the entry; `None` for no entry or one from before ownership was recorded.
+    pub owner_channel: Option<String>,
+    pub this_channel: String,
+    /// The entry belongs to another channel (or to none) and this build can take it over.
+    pub movable: bool,
+}
+
+/// Pure: the status from what is on the machine. `registered` is [`is_enabled`], which can say yes when
+/// `entry` could not be read (an entry this build cannot parse still starts something at login).
+/// `can_write` is whether this build has a target to point an entry at.
+pub fn status(entry: Option<&Entry>, registered: bool, this_channel: &str, can_write: bool) -> Status {
+    let state = match entry {
+        Some(e) if missing_target(e).is_some() => State::Broken,
+        Some(_) => State::On,
+        None if registered => State::On,
+        None => State::Off,
+    };
+    let owner_channel = entry.and_then(|e| e.channel.clone());
+    let movable = entry.is_some() && owner_channel.as_deref() != Some(this_channel) && can_write;
+    Status { state, target: entry.and_then(|e| e.target.clone()), owner_channel, this_channel: this_channel.to_string(), movable }
+}
+
 /// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
 /// `target` is `stable_target()`, `None` when it could not be resolved: only
 /// writing needs it, so removing or adopting never waits on it (ReAgent P1 on
@@ -828,7 +871,12 @@ pub fn handle_cli(args: &[String]) -> bool {
     let has = |v: &str| args.iter().any(|a| a == v);
 
     if has("--autostart-status") {
-        println!("{}", if is_enabled() { "enabled" } else { "disabled" });
+        if has("--json") {
+            let s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+            println!("{}", serde_json::to_string(&s).unwrap_or_else(|_| "{}".to_string()));
+        } else {
+            println!("{}", if is_enabled() { "enabled" } else { "disabled" });
+        }
         return true;
     }
     if has("--enable-autostart") {
@@ -1150,6 +1198,46 @@ mod autostart_tests {
         assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", Some(new), None), Plan::Nothing);
         // No target to point it at: no repoint.
         assert_eq!(super::plan(Some(false), Some(&entry(old, Some("local-x"))), "stable", None, Some(old)), Plan::Nothing);
+    }
+
+    #[test]
+    fn status_says_off_on_or_broken_and_who_owns_the_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let there = dir.path().join("AgentMux.AppImage");
+        std::fs::write(&there, b"x").unwrap();
+        let there = there.display().to_string();
+        let gone = dir.path().join("Gone.AppImage").display().to_string();
+
+        let none = status(None, false, "stable", true);
+        assert_eq!((none.state, none.movable, none.owner_channel.as_deref(), none.target.as_deref()), (State::Off, false, None, None));
+
+        let ours = status(Some(&entry(&there, Some("stable"))), true, "stable", true);
+        assert_eq!((ours.state, ours.movable, ours.owner_channel.as_deref()), (State::On, false, Some("stable")));
+        assert_eq!(ours.target.as_deref(), Some(there.as_str()));
+
+        let broken = status(Some(&entry(&gone, Some("stable"))), true, "stable", true);
+        assert_eq!((broken.state, broken.movable), (State::Broken, false), "ours but its file is gone: Repair, not a move");
+
+        let theirs = status(Some(&entry(&there, Some("local-x"))), true, "stable", true);
+        assert_eq!((theirs.state, theirs.movable, theirs.owner_channel.as_deref()), (State::On, true, Some("local-x")));
+        assert!(!status(Some(&entry(&there, Some("local-x"))), true, "stable", false).movable, "no target to point it at: not movable");
+
+        let unowned = status(Some(&entry(&there, None)), true, "stable", true);
+        assert_eq!((unowned.state, unowned.movable, unowned.owner_channel), (State::On, true, None), "from before ownership was recorded");
+
+        let unreadable = status(None, true, "stable", true);
+        assert_eq!((unreadable.state, unreadable.movable), (State::On, false), "registered but unparsed still starts something at login");
+    }
+
+    #[test]
+    fn status_json_has_the_keys_settings_reads() {
+        let s = status(Some(&entry("/x/AgentMux.AppImage", Some("local-x"))), true, "stable", true);
+        let v: serde_json::Value = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "state": "broken", "target": "/x/AgentMux.AppImage", "owner_channel": "local-x", "this_channel": "stable", "movable": true })
+        );
+        assert_eq!(serde_json::to_value(State::NeedsApproval).unwrap(), "needs_approval");
     }
 
     #[test]

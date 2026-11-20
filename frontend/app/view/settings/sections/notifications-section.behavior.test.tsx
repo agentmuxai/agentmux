@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
     log: [] as string[],
     arg: undefined as unknown,
     caps: {} as Record<string, boolean>,
-    autostart: { available: true, enabled: false } as { available: boolean; enabled: boolean },
+    autostart: { available: true, enabled: false } as AutostartStatus,
     autostartFails: false,
     notifyFails: false,
 }));
@@ -124,6 +124,11 @@ const look = (label: string) => {
     log(`-- ${label}`);
     // The kit numbers its fields as they are made, so the count depends on the tests that ran before.
     log(dump(host).join("\n").replace(/-cl-\d+/g, "-cl-N"));
+};
+/** Just one row, for a case that is about it. */
+const lookRow = (label: string, id = "autostart") => {
+    log(`-- ${label}`);
+    log(dump(row(id)!).join("\n").replace(/-cl-\d+/g, "-cl-N"));
 };
 const flush = async () => {
     for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
@@ -235,6 +240,38 @@ describe("NotificationsSection, pinned", () => {
         await flush();
         look("the verb is missing");
         await snapshot("autostart");
+    });
+
+    it("offers Repair for a login entry whose file is gone and Use this build for another build's, and a click writes the setting off and on again", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("an entry of this build that works: no button");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "broken", target: "/gone/AgentMux", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("an entry whose file is gone");
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        log("== Repair");
+        fireEvent.click(row("autostart")!.querySelector("[data-stand=Button] [data-cb], [data-stand=Button][data-cb]")!);
+        await vi.advanceTimersByTimeAsync(399);
+        log("-- 399 ms later: only the off write so far");
+        await vi.advanceTimersByTimeAsync(1);
+        log("-- 400 ms later: switched on again");
+        vi.useRealTimers();
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", target: "/x/AgentMux", ownerChannel: "local-x", thisChannel: "stable", movable: true };
+        mount();
+        await flush();
+        lookRow("another build's entry");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: null, movable: true };
+        mount();
+        await flush();
+        lookRow("an entry from before owners were recorded");
+        await snapshot("autostart-fix");
     });
 
     it("reads the registration again two seconds after a change to start at login, and not for another setting", async () => {

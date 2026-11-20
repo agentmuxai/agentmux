@@ -285,9 +285,10 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="true">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="true">
+              <span data-cb="onChange">
+                "toggle"
 getAutostartStatus
 -- 2000 ms later, registered
 <div>
@@ -573,6 +574,7 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="true">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="true">
+              <span data-cb="onChange">
+                "toggle"

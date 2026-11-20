@@ -5,22 +5,53 @@
 {
     // -- Terminal --
 
+    // Terminal font size in pixels (8 to 32).
     // "term:fontsize": 15,
+
+    // Terminal fonts as a comma-separated list, tried in order.
     // "term:fontfamily": "Hack",
+
+    // Color theme of terminals, by theme name. Blank uses the default.
     // "term:theme": "default-dark",
+
+    // Draw the terminal on a canvas instead of with WebGL. Takes effect after a restart.
     // "term:disablewebgl": false,
+
+    // The shell new local terminals open with. Agents' shells and SSH or WSL terminals keep
+    // their own.
     // "term:localshellpath": "/bin/bash",  // example; unset uses your shell
+
+    // Extra arguments for the shell a new local terminal starts, as a list of strings. A
+    // terminal's own value, even an empty list, wins.
     // "term:localshellopts": [],
+
+    // Lines a terminal keeps in its scrollback (1000 to 100000).
     // "term:scrollback": 2000,
+
+    // Copy selected text to the clipboard as you select it.
     // "term:copyonselect": false,
+
+    // Terminal background transparency: 0 is opaque, 1 is fully transparent.
     // "term:transparency": 0.5,
+
     // Scroll wheel speed multiplier for terminal panes (xterm.js scrollSensitivity). Default 1
     // (unchanged from xterm.js's own default). Independent of the OS-level scroll-speed setting
     // — AgentMux does not read or mirror it.
     // "term:scrollsensitivity": 1,
 
+    // Let programs tell pasted text from typed text (bracketed paste).
     // "term:allowbracketedpaste": true,
+
+    // In a terminal, Shift+Enter sends a newline instead of running the line.
     // "term:shiftenternewline": false,
+
+    // Show typed characters locally at once while waiting on a slow or remote shell.
+    // "term:predictiveecho": true,
+
+    // Round-trip latency, in milliseconds, above which predictive echo starts. 0 predicts all
+    // the time.
+    // "term:predictiveecho:thresholdms": 0,
+
     // Show the live CPU%/memory usage badge in the top-right corner of terminal panes.
     // "term:showstatsbadge": true,
 
@@ -63,7 +94,14 @@
 
     // -- Window --
 
+    // Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in
+    // the host menu. Default true (absent means shown); set false to hide both. LAN discovery
+    // is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.
+    // "statusbar:showmuxbuscloud": true,
+
+    // Enable background transparency and blur.
     // "window:transparent": false,
+
     // Reload a window that has been idle for 10 minutes when its page uses much more memory
     // than it did after loading (over 600 MB and twice its size after load), to give that
     // memory back. Drafts, scroll positions and layout are kept, and it waits while anything
@@ -71,10 +109,19 @@
     // Memory)).
     // "window:autorecycle": true,
 
+    // Blur the content behind the window.
     // "window:blur": false,
+
+    // Default window opacity (35 to 100 percent) for windows without one of their own; the menu
+    // sets one window's.
     // "window:opacity": 0.8,
+
+    // Window background color override, as a hex color. Blank uses the theme's.
     // "window:bgcolor": "",
+
+    // Pixels between tiled panes (0 to 20).
     // "window:tilegapsize": 3,
+
     // "window:showmenubar": false,
     // Show the status bar along the bottom of the window. Default true; set false to hide it.
     // It comes back by itself while the backend is down. The "Toggle Status Bar" palette
@@ -84,15 +131,22 @@
     // "window:nativetitlebar": false,
     // "window:disablehardwareacceleration": false,
     // "window:maxtabcachesize": 10,
+    // Background opacity of a pane while it is magnified (0 to 1).
     // "window:magnifiedblockopacity": 1,
+
+    // Size of a magnified pane as a fraction of its tab, held to the allowed range.
     // "window:magnifiedblocksize": 0.9,
+
     // "window:confirmclose": false,
     // Ask before closing a window while an agent in it is mid-turn. Closing stops its agents;
     // the window stays in the workspace, to reopen from the version panel.
     // "window:confirmcloseworking": true,
 
     // "window:savelastwindow": true,
+    // Keep the tabs you are not looking at laid out, so switching back is fast. Off when false,
+    // which hides them with content-visibility: hidden instead.
     // "window:keepinactivetabslaidout": true,
+
     // Draw the agent transcripts of window tabs you have not opened yet while the window is
     // idle, one pane at a time, so the first visit shows the whole tab at once. Uses more
     // memory; pauses under memory pressure.
@@ -100,6 +154,12 @@
 
     // "window:dimensions": "",
     // "window:zoom": 1,
+    // UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast
+    // (black + cyan), monokai (warm dark + green), nord (arctic blue-grey), dracula (purple
+    // dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple), gruvbox (retro warm +
+    // yellow), light (white + blue), catppuccin-latte (pastel light + blue), solarized-light
+    // (cream + cyan/blue), gruvbox-light (retro warm cream + orange)
+    // "window:theme": "default",
 
     // -- Panes and tabs --
 
@@ -109,7 +169,9 @@
     // Color pick and an agent's color still win. Remove a key to return to the built-in color.
     // "pane:colors": {},
 
+    // Show each pane's internal block ID in its header (a debugging aid).
     // "blockheader:showblockids": false,
+
     // "preview:showhiddenfiles": false,
     // "tab:preset": "",
     // Ask before closing a tab. Off by default: a tab closes at once.
@@ -119,15 +181,33 @@
     // across tabs. Off leaves them to the page.
     // "mouse:sidebuttons": true,
 
+    // Show icons without text labels on the widget bar.
     // "widget:icononly": false,
+
+    // Widget-bar entries hidden from the bar, More and the pane + picker, as full keys
+    // ("defwidget@drone"). Set in Settings > Widgets. See
+    // docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md.
+    // "widget:hidden": [],
+
+    // -- Keyboard --
+
+    // Your own keyboard shortcuts, applied over the defaults. Each entry: {"key":
+    // "ctrl+shift+e", "command": "split:right"}. A command starting with - unbinds it:
+    // {"command": "-tab:new"} removes every key, or add "key" to remove one. Optional "when"
+    // (e.g. "!terminalFocus") and "platform" ("mac" or "other"). Command ids are listed in the
+    // keyboard shortcuts help.
+    // "keybindings": [],
 
     // -- Shell environment --
 
+    // Environment variables injected into every shell.
     // "cmd:env": {},
 
     // -- App --
 
+    // Show numbered overlays on panes for the quick pane-jump shortcuts.
     // "app:showoverlayblocknums": true,
+
     // Check for a newer AgentMux release in the background (a minute after start, then every
     // few hours). Set false and AgentMux asks GitHub only when you or an agent does (Check for
     // update).
@@ -176,10 +256,16 @@
     // -- Telemetry --
 
     // "telemetry:enabled": true,
+    // Seconds between samples of the system-info widget.
     // "telemetry:interval": 1,
+
+    // How many system-info widget samples are kept (30 to 1024).
     // "telemetry:numpoints": 120,
 
     // -- Connections --
+
+    // Installing AgentMux's helper on an SSH host: ask first (the default), always, or never.
+    // "conn:helper": "ask",
 
     // "conn:askbeforewshinstall": true,
     // "conn:wshenabled": true,
@@ -218,9 +304,17 @@
     // looking at that pane. Default true.
     // "notify:sound:agent.waiting.for.input": true,
 
+    // Include browser hand-offs and approvals in the waiting tone, tab flash and notification.
+    // Default true.
+    // "notify:waiting:browser": true,
+
     // Show a toast that names the agent waiting on you, with a link to it. Independent of the
     // waiting tone. Default true.
     // "notify:waiting:toast": true,
+
+    // Play the falling shutdown chime when something other than you asked to shut an agent down
+    // and you have 15 seconds to keep it running. Default true.
+    // "notify:sound:agent.shutdown.pending": true,
 
     // Independent gain for the waiting-for-input sound, 0.0 (silent) to 1.0. Layered below the
     // shared master gain. Default 0.25.
@@ -425,6 +519,18 @@
     // applies to open panes.
     // "agent:previewskidnotches": 2,
 
+    // The memory limit, in MB, of every container agent that has none of its own: a number, 0
+    // for no limit, or "auto" (half of what Docker has, at least 2 GB, never more than Docker
+    // has). A change reaches running containers the next time their agent starts a turn,
+    // without restarting them.
+    // "agent:container_memory": "auto",
+
+    // The CPU limit, in CPUs, of every container agent that has none of its own: a number
+    // (fractions allowed), 0 for no limit, or "auto" (all but a quarter of the CPUs Docker has,
+    // at least one). A change reaches running containers the next time their agent starts a
+    // turn, without restarting them.
+    // "agent:container_cpus": "auto",
+
     // What agent panes show (docs/specs/SPEC_AGENT_PANE_VERBOSITY_MODES_2026_10_29.md): a
     // preset name (full, standard or replies) or an object with the five switches. A view only
     // changes what the pane lists; the rows, the history, search, copy and the agent's context
@@ -606,6 +712,10 @@
     // longest with no pane is stopped to make room. 0 turns the check off.
     // "agents:commit_limit_pct": 85,
 
+    // Where a new agent runs when nothing else says: container, or native (host also means
+    // native). Applies to agents created after the change.
+    // "agents:defaultruntime": "container",
+
     // The most agents one sender (an agent, a job) may start in a minute; a start over it is
     // refused. 0 turns the limit off.
     // "agents:start_per_minute": 5,
@@ -759,12 +869,23 @@
     // be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md.
     // "files:icons": "system",
 
+    // -- Editor --
+
+    // Language-server features in the Editor (diagnostics, hover, completion). false turns them
+    // off.
+    // "editor:lsp.enabled": true,
+
     // -- Network --
 
     // Enable mDNS-based discovery of other AgentMux instances on the same host and LAN.
     // Defaults to false to avoid the Windows Firewall prompt; toggle from the HostPopover
     // panel. See docs/specs/lan-discovery-toggle.md.
     // "network:lan_discovery": false,
+
+    // Carry out typed requests from agents on other proven machines (account moves, version and
+    // health reads, and the operations that follow). Default true (absent means on); set false
+    // to refuse every one. See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md.
+    // "network:remote_ops": true,
 
     // -- Cloud and sharing --
 
@@ -862,52 +983,33 @@
     // -- Without a default --
     // These settings have no value to show: unset means the app decides.
 
-    // term:durable: (no description yet)
-    // term:predictiveecho: (no description yet)
-    // term:predictiveecho:thresholdms: (no description yet)
+    // term:durable: Keep an SSH terminal's shell running on the host, in AgentMux's small
+    // helper there, so a dropped link, sleep or a restart reconnects instead of ending it.
+    // Unset (auto) lets AgentMux decide. On a host without the helper the first terminal asks
+    // before installing it, and is a plain terminal if it is not installed. Connectors >
+    // Remotes can set it per host.
     // window:reducedmotion: Deprecated, ignored: motion follows the system
     // (SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15).
-    // statusbar:showmuxbuscloud: Show MuxBus Cloud in the status bar: the dot after the host
-    // name and the sign-in block in the host menu. Default true (absent means shown); set false
-    // to hide both. LAN discovery is unaffected. See
-    // docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.
-    // window:magnifiedblockblurprimarypx: (no description yet)
-    // window:magnifiedblockblursecondarypx: (no description yet)
-    // window:theme: UI color theme. Options: default (dark grey + blue), midnight (deep navy),
-    // high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey),
-    // dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple),
-    // gruvbox (retro warm + yellow), light (white + blue), catppuccin-latte (pastel light +
-    // blue), solarized-light (cream + cyan/blue), gruvbox-light (retro warm cream + orange)
+    // window:magnifiedblockblurprimarypx: Backdrop blur, in pixels, applied to the magnified
+    // pane itself.
+    // window:magnifiedblockblursecondarypx: Backdrop blur, in pixels, applied to the other
+    // panes behind a magnified one.
     // tab:skipcloseconfirm: No longer read; closing a tab asks only when tab:confirmclose is
     // true.
     // widget:pinned: The widget bar's pinned icons, in order: a built-in's short name ("agent"
     // for defwidget@agent) or an installed package widget's full key ("ext@acme.board/main").
     // Absent means the fresh-install default.
-    // widget:hidden: Widget-bar entries hidden from the bar, More and the pane + picker, as
-    // full keys ("defwidget@drone"). Set in Settings > Widgets. See
-    // docs/specs/SPEC_WIDGET_BAR_VISIBILITY_SETTINGS_2026_10_12.md.
     // launcher:recent: The widget keys opened last, newest first (at most 12): the Shortcuts
     // pane shows these tiles first. Kept by the app; see
     // docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.
-    // keybindings: Your own keyboard shortcuts, applied over the defaults. Each entry: {"key":
-    // "ctrl+shift+e", "command": "split:right"}. A command starting with - unbinds it:
-    // {"command": "-tab:new"} removes every key, or add "key" to remove one. Optional "when"
-    // (e.g. "!terminalFocus") and "platform" ("mac" or "other"). Command ids are listed in the
-    // keyboard shortcuts help.
     // app:dismissarchitecturewarning: (no description yet)
-    // app:defaultnewblock: (no description yet)
+    // app:defaultnewblock: View type opened by default for new tabs and panes (for example
+    // term, agent, shortcuts). Blank or unset opens a terminal.
     // app:devmode: Show the developer-only parts of the UI: DevTools in the menu, Inspect
     // Element and View Page Source in right-click menus, the DevTools port in the host popover
     // and the block ID option. Off by default in the installed app; when unset, a task dev or
     // debug build has it on. Takes effect at once in every window (the macOS menu bar item at
     // the next start).
-    // conn:helper: Installing AgentMux's helper on an SSH host: ask first (the default),
-    // always, or never.
-    // notify:waiting:browser: Include browser hand-offs and approvals in the waiting tone, tab
-    // flash and notification. Default true.
-    // notify:sound:agent.shutdown.pending: Play the falling shutdown chime when something other
-    // than you asked to shut an agent down and you have 15 seconds to keep it running. Default
-    // true.
     // voice:groqApiKeyMoved: Set when AgentMux moved a Groq key that sat in settings.json as
     // plain text into the Vault, so Settings > Recording can say so once. Dismissing the notice
     // removes it.
@@ -917,18 +1019,6 @@
     // agent:livefeedturns: Optional cap on how many finished turns an agent pane keeps before
     // older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit;
     // the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened.
-    // agent:container_memory: The memory limit, in MB, of every container agent that has none
-    // of its own: a number, 0 for no limit, or "auto" (half of what Docker has, at least 2 GB,
-    // never more than Docker has). A change reaches running containers the next time their
-    // agent starts a turn, without restarting them.
-    // agent:container_cpus: The CPU limit, in CPUs, of every container agent that has none of
-    // its own: a number (fractions allowed), 0 for no limit, or "auto" (all but a quarter of
-    // the CPUs Docker has, at least one). A change reaches running containers the next time
-    // their agent starts a turn, without restarting them.
-    // network:remote_ops: Carry out typed requests from agents on other proven machines
-    // (account moves, version and health reads, and the operations that follow). Default true
-    // (absent means on); set false to refuse every one. See
-    // docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md.
     // messaging:discord:target: Agent ID that receives Discord messages. Unset: they are
     // logged, not forwarded.
     // messaging:discord:guild: Guild ID for guild-scoped slash commands.

@@ -15,11 +15,13 @@
         },
         "app:defaultnewblock": {
           "type": "string",
+          "description": "View type opened by default for new tabs and panes (for example term, agent, shortcuts). Blank or unset opens a terminal.",
           "x-section": "App",
           "x-nodefault": "blank and unset both open a terminal"
         },
         "app:showoverlayblocknums": {
           "type": "boolean",
+          "description": "Show numbered overlays on panes for the quick pane-jump shortcuts.",
           "x-section": "App",
           "default": true
         },
@@ -41,26 +43,31 @@
         },
         "term:fontsize": {
           "type": "number",
+          "description": "Terminal font size in pixels (8 to 32).",
           "x-section": "Terminal",
           "default": 15
         },
         "term:fontfamily": {
           "type": "string",
+          "description": "Terminal fonts as a comma-separated list, tried in order.",
           "x-section": "Terminal",
           "default": "Hack"
         },
         "term:theme": {
           "type": "string",
+          "description": "Color theme of terminals, by theme name. Blank uses the default.",
           "x-section": "Terminal",
           "default": "default-dark"
         },
         "term:disablewebgl": {
           "type": "boolean",
+          "description": "Draw the terminal on a canvas instead of with WebGL. Takes effect after a restart.",
           "x-section": "Terminal",
           "default": false
         },
         "term:localshellpath": {
           "type": "string",
+          "description": "The shell new local terminals open with. Agents' shells and SSH or WSL terminals keep their own.",
           "x-section": "Terminal",
           "x-example": "/bin/bash",
           "x-nodefault": "unset uses your shell"
@@ -70,25 +77,31 @@
             "type": "string"
           },
           "type": "array",
+          "description": "Extra arguments for the shell a new local terminal starts, as a list of strings. A terminal's own value, even an empty list, wins.",
           "x-section": "Terminal",
           "default": []
         },
         "term:scrollback": {
           "type": "integer",
+          "description": "Lines a terminal keeps in its scrollback (1000 to 100000).",
           "x-section": "Terminal",
           "default": 2000
         },
         "term:durable": {
           "type": "boolean",
-          "x-section": "Terminal"
+          "description": "Keep an SSH terminal's shell running on the host, in AgentMux's small helper there, so a dropped link, sleep or a restart reconnects instead of ending it. Unset (auto) lets AgentMux decide. On a host without the helper the first terminal asks before installing it, and is a plain terminal if it is not installed. Connectors > Remotes can set it per host.",
+          "x-section": "Terminal",
+          "x-nodefault": "unset (auto): AgentMux decides"
         },
         "term:copyonselect": {
           "type": "boolean",
+          "description": "Copy selected text to the clipboard as you select it.",
           "x-section": "Terminal",
           "default": false
         },
         "term:transparency": {
           "type": "number",
+          "description": "Terminal background transparency: 0 is opaque, 1 is fully transparent.",
           "x-section": "Terminal",
           "default": 0.5
         },
@@ -102,11 +115,13 @@
         },
         "term:allowbracketedpaste": {
           "type": "boolean",
+          "description": "Let programs tell pasted text from typed text (bracketed paste).",
           "x-section": "Terminal",
           "default": true
         },
         "term:shiftenternewline": {
           "type": "boolean",
+          "description": "In a terminal, Shift+Enter sends a newline instead of running the line.",
           "x-section": "Terminal",
           "default": false
         },
@@ -174,6 +189,7 @@
         },
         "keybindings": {
           "type": "array",
+          "default": [],
           "description": "Your own keyboard shortcuts, applied over the defaults. Each entry: {\"key\": \"ctrl+shift+e\", \"command\": \"split:right\"}. A command starting with - unbinds it: {\"command\": \"-tab:new\"} removes every key, or add \"key\" to remove one. Optional \"when\" (e.g. \"!terminalFocus\") and \"platform\" (\"mac\" or \"other\"). Command ids are listed in the keyboard shortcuts help.",
           "items": {
             "type": "object",
@@ -203,10 +219,14 @@
         },
         "term:predictiveecho": {
           "type": "boolean",
+          "default": true,
+          "description": "Show typed characters locally at once while waiting on a slow or remote shell.",
           "x-section": "Terminal"
         },
         "term:predictiveecho:thresholdms": {
           "type": "number",
+          "default": 0,
+          "description": "Round-trip latency, in milliseconds, above which predictive echo starts. 0 predicts all the time.",
           "x-section": "Terminal"
         },
         "term:showstatsbadge": {
@@ -234,6 +254,7 @@
             "type": "string"
           },
           "type": "object",
+          "description": "Environment variables injected into every shell.",
           "x-section": "Shell environment",
           "default": {}
         },
@@ -258,6 +279,7 @@
         },
         "blockheader:showblockids": {
           "type": "boolean",
+          "description": "Show each pane's internal block ID in its header (a debugging aid).",
           "x-section": "Panes and tabs",
           "default": false
         },
@@ -295,6 +317,7 @@
         },
         "widget:icononly": {
           "type": "boolean",
+          "description": "Show icons without text labels on the widget bar.",
           "x-section": "Panes and tabs",
           "default": false
         },
@@ -304,10 +327,12 @@
             "type": "string"
           },
           "description": "The widget bar's pinned icons, in order: a built-in's short name (\"agent\" for defwidget@agent) or an installed package widget's full key (\"ext@acme.board/main\"). Absent means the fresh-install default.",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "x-nodefault": "absent means the fresh-install default"
         },
         "widget:hidden": {
           "type": "array",
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -320,10 +345,12 @@
             "type": "string"
           },
           "description": "The widget keys opened last, newest first (at most 12): the Shortcuts pane shows these tiles first. Kept by the app; see docs/specs/SPEC_SHORTCUTS_PANE_FOR_SPLITS_2026_10_28.md.",
-          "x-section": "Panes and tabs"
+          "x-section": "Panes and tabs",
+          "x-nodefault": "kept by the app; unset until a widget is opened"
         },
         "statusbar:showmuxbuscloud": {
           "type": "boolean",
+          "default": true,
           "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.",
           "x-section": "Window"
         },
@@ -351,6 +378,7 @@
         },
         "window:transparent": {
           "type": "boolean",
+          "description": "Enable background transparency and blur.",
           "x-section": "Window",
           "default": false
         },
@@ -362,16 +390,19 @@
         },
         "window:blur": {
           "type": "boolean",
+          "description": "Blur the content behind the window.",
           "x-section": "Window",
           "default": false
         },
         "window:opacity": {
           "type": "number",
+          "description": "Default window opacity (35 to 100 percent) for windows without one of their own; the menu sets one window's.",
           "x-section": "Window",
           "default": 0.8
         },
         "window:bgcolor": {
           "type": "string",
+          "description": "Window background color override, as a hex color. Blank uses the theme's.",
           "x-section": "Window",
           "default": ""
         },
@@ -420,6 +451,7 @@
         },
         "window:tilegapsize": {
           "type": "integer",
+          "description": "Pixels between tiled panes (0 to 20).",
           "x-section": "Window",
           "default": 3
         },
@@ -451,21 +483,27 @@
         },
         "window:magnifiedblockopacity": {
           "type": "number",
+          "description": "Background opacity of a pane while it is magnified (0 to 1).",
           "x-section": "Window",
           "default": 1
         },
         "window:magnifiedblocksize": {
           "type": "number",
+          "description": "Size of a magnified pane as a fraction of its tab, held to the allowed range.",
           "x-section": "Window",
           "default": 0.9
         },
         "window:magnifiedblockblurprimarypx": {
           "type": "integer",
-          "x-section": "Window"
+          "description": "Backdrop blur, in pixels, applied to the magnified pane itself.",
+          "x-section": "Window",
+          "x-nodefault": "unset applies no blur"
         },
         "window:magnifiedblockblursecondarypx": {
           "type": "integer",
-          "x-section": "Window"
+          "description": "Backdrop blur, in pixels, applied to the other panes behind a magnified one.",
+          "x-section": "Window",
+          "x-nodefault": "unset applies no blur"
         },
         "window:confirmclose": {
           "type": "boolean",
@@ -485,6 +523,7 @@
         },
         "window:keepinactivetabslaidout": {
           "type": "boolean",
+          "description": "Keep the tabs you are not looking at laid out, so switching back is fast. Off when false, which hides them with content-visibility: hidden instead.",
           "x-section": "Window",
           "default": true
         },
@@ -506,6 +545,7 @@
         },
         "window:theme": {
           "type": "string",
+          "default": "default",
           "enum": [
             "default",
             "midnight",
@@ -535,11 +575,13 @@
         },
         "telemetry:interval": {
           "type": "number",
+          "description": "Seconds between samples of the system-info widget.",
           "x-section": "Telemetry",
           "default": 1
         },
         "telemetry:numpoints": {
           "type": "integer",
+          "description": "How many system-info widget samples are kept (30 to 1024).",
           "minimum": 30,
           "maximum": 1024,
           "default": 120,
@@ -547,6 +589,7 @@
         },
         "conn:helper": {
           "type": "string",
+          "default": "ask",
           "enum": [
             "ask",
             "always",
@@ -577,6 +620,7 @@
         },
         "network:remote_ops": {
           "type": "boolean",
+          "default": true,
           "description": "Carry out typed requests from agents on other proven machines (account moves, version and health reads, and the operations that follow). Default true (absent means on); set false to refuse every one. See docs/specs/SPEC_AGENTS_OPERATE_OTHER_MACHINES_2026_10_30.md.",
           "x-section": "Network"
         },
@@ -634,7 +678,8 @@
         "voice:inputDeviceId": {
           "type": "string",
           "description": "Preferred microphone input device (from navigator.mediaDevices.enumerateDevices). Absent or 'default' means the OS default input. See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §5.",
-          "x-section": "Voice input"
+          "x-section": "Voice input",
+          "x-nodefault": "absent means the OS default input"
         },
         "notify:*": {
           "type": "boolean",
@@ -698,6 +743,7 @@
         },
         "notify:waiting:browser": {
           "type": "boolean",
+          "default": true,
           "description": "Include browser hand-offs and approvals in the waiting tone, tab flash and notification. Default true.",
           "x-section": "Notifications"
         },
@@ -709,6 +755,7 @@
         },
         "notify:sound:agent.shutdown.pending": {
           "type": "boolean",
+          "default": true,
           "description": "Play the falling shutdown chime when something other than you asked to shut an agent down and you have 15 seconds to keep it running. Default true.",
           "x-section": "Notifications"
         },
@@ -969,7 +1016,8 @@
         "app:devmode": {
           "type": "boolean",
           "description": "Show the developer-only parts of the UI: DevTools in the menu, Inspect Element and View Page Source in right-click menus, the DevTools port in the host popover and the block ID option. Off by default in the installed app; when unset, a task dev or debug build has it on. Takes effect at once in every window (the macOS menu bar item at the next start).",
-          "x-section": "App"
+          "x-section": "App",
+          "x-nodefault": "unset: on in a task dev or debug build, off in an installed app"
         },
         "app:locale": {
           "type": "string",
@@ -999,7 +1047,8 @@
           "type": "integer",
           "minimum": 1,
           "description": "Optional cap on how many finished turns an agent pane keeps before older ones roll off into the History tab (with agent:livefeed on). Unset: no turn limit; the pane keeps about 1 MB of finished turns. Takes effect when a pane is next opened.",
-          "x-section": "Agents"
+          "x-section": "Agents",
+          "x-nodefault": "unset: no turn limit"
         },
         "agent:previewskidnotches": {
           "type": "integer",
@@ -1014,6 +1063,7 @@
             "string",
             "integer"
           ],
+          "default": "auto",
           "description": "The memory limit, in MB, of every container agent that has none of its own: a number, 0 for no limit, or \"auto\" (half of what Docker has, at least 2 GB, never more than Docker has). A change reaches running containers the next time their agent starts a turn, without restarting them.",
           "x-section": "Agents"
         },
@@ -1022,6 +1072,7 @@
             "string",
             "number"
           ],
+          "default": "auto",
           "description": "The CPU limit, in CPUs, of every container agent that has none of its own: a number (fractions allowed), 0 for no limit, or \"auto\" (all but a quarter of the CPUs Docker has, at least one). A change reaches running containers the next time their agent starts a turn, without restarting them.",
           "x-section": "Agents"
         },
@@ -1432,6 +1483,18 @@
           "x-platform": [
             "windows"
           ]
+        },
+        "agents:defaultruntime": {
+          "type": "string",
+          "default": "container",
+          "description": "Where a new agent runs when nothing else says: container, or native (host also means native). Applies to agents created after the change.",
+          "x-section": "Agents"
+        },
+        "editor:lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Language-server features in the Editor (diagnostics, hover, completion). false turns them off.",
+          "x-section": "Editor"
         },
         "agents:start_per_minute": {
           "type": "integer",

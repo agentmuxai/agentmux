@@ -117,7 +117,7 @@
 182 crates/launcher/src/splash.rs::run_splash
 163 crates/launcher/src/splash_linux/x11.rs::run
 105 crates/launcher/src/splash_mac.rs::Splash::run_until_dismissed
-233 crates/launcher/src/splash_mac.rs::build_window
+189 crates/launcher/src/splash_mac.rs::build_window_with
 109 crates/launcher/src/splash_mac.rs::flatten_rows
 238 crates/launcher/src/srv_spawner.rs::spawn_srv_once
 858 crates/launcher/src/supervisor/unix.rs::run_unix
@@ -175,7 +175,7 @@
 141 crates/srv-core/src/backend/layout/mod.rs::validate_layout_invariants
 200 crates/srv-core/src/backend/layout_file.rs::PlanBuilder::view_meta
 134 crates/srv-core/src/backend/layout_file.rs::view_from_block
-120 crates/srv-core/src/backend/lsp/supervisor.rs::LspSupervisor::start
+113 crates/srv-core/src/backend/lsp/supervisor.rs::LspSupervisor::start
 114 crates/srv-core/src/backend/memory/adopt.rs::adopt_under_lease
 159 crates/srv-core/src/backend/memory/reconcile.rs::reconcile_file
 126 crates/srv-core/src/backend/name_resolution.rs::resolve_name_to_uid
