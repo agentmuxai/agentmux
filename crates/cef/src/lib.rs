@@ -220,7 +220,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     if std::env::args().any(|a| a == app::gl_probe::INTERNAL_PROBE_GL_FLAG) {
         app::gl_probe::run_internal_gl_probe_and_exit();
     }
-
+    commands::file_dialog_helper::run_and_exit_if_asked(); // the Linux file-dialog helper: shows one dialog, exits
     // Phase 0 (service supervision & recovery): suppress the Windows crash
     // modal so a fault terminates the process immediately instead of freezing
     // it behind an "Application Error" dialog. Must be the first statement —

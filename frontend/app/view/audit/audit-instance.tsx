@@ -14,8 +14,8 @@ import "./audit-manager.scss";
 export function create(ctx: PaneTabHostContext): PaneTabInstance {
     return {
         component: () => (
-            // audit-container carries the container the feed's width queries answer; a container
-            // element cannot respond to its own container query.
+            // audit-pane carries both the pane's zoom and the container the feed's width queries answer, so a query
+            // measures the width the content is laid out in (audit-manager.scss).
             <div class="audit-container">
                 <div class="audit-pane" style={{ zoom: readZoom(ctx.meta()) }}>
                     <AuditManager

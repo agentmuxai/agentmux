@@ -91,9 +91,7 @@ const FILES_NAVIGATE = new Set(["files:back", "files:forward", "files:up", "file
  *  tried on the replace-pane confirmation (it never confirms: no Enter is
  *  sent, and the next Escape closes it anyway). */
 const SETUP = {
-    // The replace-pane confirmation is a prompt only the person can answer, which the API refuses to press
-    // keys past; the palette is a dialog Escape closes.
-    "app:escape": "view:command-palette",
+    "app:escape": "pane:replaceWithLauncher",
     // The first and last tab are the same one until the active tab moves off it.
     "tab:goto:last": "tab:goto:1",
     "tab:goto:1": "tab:goto:last",

@@ -117,6 +117,9 @@ pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
 pub const EVENT_AGENT_RESUME_RETRY: &str = "agent-resume-retry";
 /// srv's own panics, counted (`panic_watch`): warn above 20 in a minute, critical above 200. Persisted (1), so a window that opens mid-storm gets it.
 pub const EVENT_SRV_PANICS: &str = "srv-panics";
+/// What the rules that read the record have flagged and still say (`record_notice`): stalls in an hour, a size that
+/// keeps growing. Persisted (1), so a window that opens later gets it; an empty list clears it.
+pub const EVENT_RECORD_FLAGS: &str = "record-flags";
 /// A Claude CLI request is being retried, or no longer is
 /// (`backend::agent_api_retry`). Payload: `{ "retry": {…} | null }`. Not
 /// persisted: it carries time remaining as of sending.

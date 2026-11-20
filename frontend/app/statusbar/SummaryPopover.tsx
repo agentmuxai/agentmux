@@ -106,6 +106,7 @@ export const SummaryPopover = (props: SummaryPopoverProps): JSX.Element => {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            fitHeight
             onDismiss={props.onClose}
             class="attention-list"
             role="dialog"

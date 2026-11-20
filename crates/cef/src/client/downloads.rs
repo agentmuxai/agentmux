@@ -324,6 +324,7 @@ thread_local! {
 }
 
 use super::save_answer::{ask_guarded, SaveAnswer};
+use crate::commands::file_dialog::{DialogSpec, Kind, Outcome};
 
 wrap_task! {
     struct SaveAnswerTask {
@@ -363,17 +364,22 @@ wrap_task! {
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
+    let path = super::save_answer::offered_path(path);
     let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     crate::commands::file_dialog::spawn(move || {
         let answer = ask_guarded(crate::commands::file_dialog::can_ask(), || {
-            let mut dialog = rfd::FileDialog::new().set_title("Save as");
+            let mut spec = DialogSpec::new(Kind::Save, "Save as");
             if let Some(name) = path.file_name() {
-                dialog = dialog.set_file_name(name.to_string_lossy());
+                spec = spec.file_name(name.to_string_lossy());
             }
             if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
-                dialog = dialog.set_directory(dir);
+                spec = spec.dir(dir);
             }
-            dialog.save_file()
+            let outcome = crate::commands::file_dialog::show(&spec);
+            if let Outcome::Failed(why) = &outcome {
+                tracing::warn!(target: "pane-download", %block_id, id, %why, "the Save As dialog failed");
+            }
+            outcome
         });
         if answer == SaveAnswer::Failed {
             tracing::warn!(target: "pane-download", %block_id, id, "the Save As dialog could not open");

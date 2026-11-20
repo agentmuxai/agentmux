@@ -173,16 +173,73 @@
     margin-top: var(--space-4);
 }
 
-// Does not scroll itself (the feed's body does): a container that scrolls would resize with its own scrollbar.
+// In the wide table too, a long unbroken value (a path, an entry's name) wraps in its cell: the table shrinks to the
+// pane instead of growing a sideways scrollbar just above the stacking width. Only the two cells that hold such values:
+// on every cell the table would shrink the short columns to nothing and break ordinary words ("comman / d").
+.vault-uses td.vault-uses__entry,
+.vault-uses td.vault-uses__where {
+    overflow-wrap: anywhere;
+}
+
+// The Secrets list's six columns (when, agent, what, entry, where, outcome) need about 700px, and below that the table
+// grew a sideways scrollbar. A row stacks instead, with what a reader wants first on top: when, which agent and what it
+// did, then the entry it used on a line of its own, then where and the outcome (labelled, as the headings are hidden).
+// Nothing is dropped; the wide table is unchanged.
+@container audit (max-width: 720px) {
+    .vault-uses {
+        display: block;
+
+        thead {
+            display: none;
+        }
+
+        tbody {
+            display: block;
+        }
+
+        tr {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: var(--space-1) var(--space-2);
+            padding: var(--space-2) var(--space-1);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        // `tbody td` outranks the shared table's cell rule (padding and a line under every cell) whichever stylesheet loads
+        // first. A long unbroken word (a path, an entry's name) wraps rather than widening the row.
+        tbody td {
+            padding: 0;
+            border-bottom: 0;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        td.vault-uses__entry {
+            flex: 1 1 100%;
+            font-weight: 500;
+        }
+
+        td[data-label]::before {
+            content: attr(data-label) ": ";
+            color: var(--secondary-text-color);
+        }
+    }
+}
+
 .audit-container {
     width: 100%;
     height: 100%;
-    container-type: inline-size;
-    container-name: audit;
 }
 
+// Carries the zoom (audit-instance.tsx) and the container the width queries answer, both on this one element, so a
+// query measures the width the content is laid out in: at a pane zoom of 200% in a pane 1126px wide that is 563px, and
+// the narrow layouts apply. (On the unzoomed element around it, the queries saw 1126px and the wide table overflowed.)
+// Does not scroll itself (the feed's body does): a container that scrolls would resize with its own scrollbar.
 .audit-pane {
     width: 100%;
     height: 100%;
     overflow: hidden;
+    container-type: inline-size;
+    container-name: audit;
 }

@@ -188,7 +188,7 @@ function BlockErrorFallback(props: {
     };
 
     return (
-        <div class="block-error-fallback" role="alert" data-testid="block-error-fallback" onMouseUp={handleMouseUp}>
+        <div class="block-error-fallback" role="alert" data-testid="block-error-fallback" data-blockid={props.blockId} onMouseUp={handleMouseUp}>
             <div class="block-error-fallback-header">
                 <i class="fa-solid fa-triangle-exclamation block-error-fallback-icon" aria-hidden="true" />
                 <div class="block-error-fallback-title">This pane crashed</div>

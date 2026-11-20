@@ -152,6 +152,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/app/gl_probe.rs", "exe", 1,
      "gui-program: re-runs agentmux-cef itself (GUI subsystem, no console) to probe GL"),
+    ("crates/cef/src/commands/file_dialog_helper.rs", "exe", 1,
+     "not-windows: Linux-only, re-runs agentmux-cef itself to show a file dialog the portal accepts"),
     ("crates/common/src/xauthority.rs", "\"systemctl\"", 1,
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/cef/src/commands/autostart.rs", "exe", 1,
