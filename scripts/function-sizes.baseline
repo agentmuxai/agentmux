@@ -421,7 +421,7 @@
 112 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
-472 frontend/app/workspace/workspace.tsx::WorkspaceElem
+467 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 158 frontend/layout/lib/layoutNodeModels.ts::getNodeModel
