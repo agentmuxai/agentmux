@@ -523,6 +523,38 @@ async fn an_interrupt_that_is_not_a_stop_still_runs_the_message_queued_behind_th
     assert!(ctrl.inner.lock().unwrap().held_after_stop.is_empty());
 }
 
+/// The case an operator hit: the CLI answered (its result is out) but a command the model sent to the background
+/// keeps the exec alive, and messages sent since wait behind it. The person's "Stop it and send now" interrupts the
+/// process; every waiting message must then run, in the order sent, each exactly once.
+#[tokio::test]
+async fn an_exec_that_outlives_its_result_hands_the_container_to_each_waiting_message_in_order_once() {
+    let fake = FakeDocker::start().await;
+    let broker = Arc::new(Broker::new());
+    let seen = watch(&broker);
+    fake.script(vec![
+        Turn { hold_open: true, ..Turn::says(&[INIT, RESULT_OK], 0) },
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+    ]);
+    let ctrl = controller(&unique("blk"), Some(broker));
+    let (cm, name) = (fake.manager(), unique("c"));
+    let with_id = |text: &str, id: &str| SubprocessSpawnConfig { message_id: Some(id.to_string()), ..config(text) };
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("start the build", "m-0")).unwrap();
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), with_id("first waiting", "m-1")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), with_id("second waiting", "m-2")).unwrap();
+    assert!(ctrl.turn_in_flight(), "the exec is still alive, so the container is busy");
+    assert_eq!(queued_events(&seen), [("m-1".to_string(), 0), ("m-2".to_string(), 1)], "the pane is told both wait, and how many are ahead");
+
+    // The pane's stop sends SIGINT, which the controller turns into this interrupt.
+    ctrl.stop_subprocess(true).unwrap();
+    wait_for("both waiting messages to run", || fake.execs(Kind::Turn).len() == 3 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["start the build", "first waiting", "second waiting"], "in the order sent, each delivered once");
+    let inner = ctrl.inner.lock().unwrap();
+    assert!(inner.pending_messages.is_empty() && inner.held_after_stop.is_empty(), "nothing is left to run twice");
+}
+
 #[tokio::test]
 async fn a_turn_in_flight_is_reported_while_it_runs_and_not_after_it_ends() {
     let fake = FakeDocker::start().await;

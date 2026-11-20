@@ -24,8 +24,8 @@ pub(super) async fn upgrade(state: &AppState, caller: &RemoteCaller, params: Val
     let uid = owner(caller);
     if let Some(id) = params.get("status").and_then(Value::as_str) {
         let mut shown = crate::server::sensitive_handlers::status_for(&uid, id).map_err(RemoteRefusal::failed)?;
-        // A requester on another machine is told nothing by a note (srv can't speak as one of that machine's
-        // agents), so how the restart stands is here: its state, and when and why it was not confirmed.
+        // How the restart stands is here too: its state, and when and why it was not confirmed. The requester's
+        // own machine reads this to tell it how the request ends (`upgrade_watch`).
         if let (Some(d), Value::Object(map)) = (crate::backend::update::check::current_status().download, &mut shown) {
             map.insert("restart".into(), super::app_ops::download_summary(&d));
         }

@@ -75,6 +75,12 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{a
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Start at login registers a Scheduled Task that runs {app}\agentmux.exe. Without this an uninstall leaves it behind,
+; pointing at nothing (SPEC_START_WITH_OS_2026_09_25.md G6, G7). The verb removes the entry only when it runs a file from
+; this install's folder, so a dev build's or another install's entry stays; no entry is a success.
+Filename: "{app}\{#AppExe}"; Parameters: "--remove-autostart-for-this-install"; Flags: runhidden skipifdoesntexist; RunOnceId: "RemoveLoginEntry"
+
 [Code]
 #include "prune-old-versions.iss"
 

@@ -187,3 +187,70 @@ fn a_keychain_copy_never_replaces_what_the_vault_holds_for_that_user() {
     assert!(versions::list(&s, &id).unwrap().is_empty());
     assert!(s.browser_signins_saved().unwrap().is_empty());
 }
+
+fn found(s: &Store, saved_site: &str, page: &str) -> bool {
+    let id = create(s, login(Some(saved_site), None)).unwrap();
+    // Written as the entry was before sites were stored in one form: no migration is needed for it to match.
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let mut f = fields_of(&row);
+    f.insert("site".into(), saved_site.into());
+    s.vault_set_fields_if(&row.id, row.created_at, &row.sealed, &row.fields, &serde_json::to_string(&f).unwrap(), 1).unwrap();
+    let origins = [page.to_string()];
+    let offered = offered_for(s, PERSONAL, &origins).unwrap();
+    let matched = find(s, &Space { profile: PERSONAL.into(), origin: page.into(), realm: String::new(), proxy: false }).unwrap().is_some();
+    assert_eq!(offered.len() == 1, matched, "the form fill and the prompt fill agree for {saved_site} on {page}");
+    if let Some((_, origin, _)) = offered.first() {
+        assert_eq!(origin, page, "what is typed and logged names the page's origin");
+    }
+    matched
+}
+
+#[test]
+fn a_login_matches_its_page_by_origin_whether_or_not_the_site_was_written_with_a_slash() {
+    // With and without the slash, both ways round.
+    assert!(found(&store(), "http://host.example:8080", "http://host.example:8080/"));
+    assert!(found(&store(), "http://host.example:8080/", "http://host.example:8080"));
+    // Upper-case scheme and host.
+    assert!(found(&store(), "HTTPS://Intranet.Example.com", "https://intranet.example.com"));
+    // A default port is no port; an explicit other port is another origin.
+    assert!(found(&store(), "https://intranet.example.com:443", "https://intranet.example.com"));
+    assert!(!found(&store(), "https://intranet.example.com:8443", "https://intranet.example.com"));
+    // Another scheme is another origin.
+    assert!(!found(&store(), "http://intranet.example.com", "https://intranet.example.com"));
+    // A look-alike host is never matched.
+    assert!(!found(&store(), "https://intranet.example.com.evil.test", "https://intranet.example.com"));
+    assert!(!found(&store(), "https://intranet.example.com@evil.test", "https://intranet.example.com"));
+    // A site with a path names its origin: matched, and no other host or port is.
+    assert!(found(&store(), "https://intranet.example.com/login", "https://intranet.example.com"));
+    assert!(!found(&store(), "https://intranet.example.com/login", "https://intranet.example.com:8443"));
+}
+
+#[test]
+fn a_site_is_saved_in_one_form_when_it_is_only_an_origin_and_a_login_page_is_kept_as_typed() {
+    let s = store();
+    for (typed, kept) in [
+        ("HTTPS://Intranet.Example.com:443/", "https://intranet.example.com"),
+        ("http://host.example:8080/", "http://host.example:8080"),
+        ("https://intranet.example.com", "https://intranet.example.com"),
+        ("https://intranet.example.com/login", "https://intranet.example.com/login"),
+    ] {
+        let id = create(&s, login(Some(typed), None)).unwrap();
+        assert_eq!(fields(&s, &id)["site"], kept, "{typed}");
+    }
+    // An edit goes through the same step.
+    let id = create(&s, login(Some("https://intranet.example.com"), None)).unwrap();
+    let row = s.vault_get(&id).unwrap().unwrap();
+    let mut f = fields_of(&row);
+    f.insert("site".into(), "https://Other.Example.com/".into());
+    super::super::update(&s, super::super::EntryChange { id: id.clone(), label: row.label.clone(), fields: f, tags: vec![], parts: Parts::default(), clear: vec![] }).unwrap();
+    assert_eq!(fields(&s, &id)["site"], "https://other.example.com");
+}
+
+#[test]
+fn a_page_origin_with_a_slash_finds_a_site_saved_without_one() {
+    let s = store();
+    let id = create(&s, login(Some("https://intranet.example.com/"), None)).unwrap();
+    // The site was saved without the slash (normalised) and the page shows it with one.
+    assert!(offered_for(&s, PERSONAL, &["https://intranet.example.com/".to_string()]).unwrap().iter().any(|f| f.0 == id));
+    assert!(same_site("https://intranet.example.com", "https://INTRANET.example.com/"));
+}
