@@ -320,3 +320,36 @@ async fn a_peer_that_cannot_be_listed_shows_the_reason_in_the_status() {
     sync_peers_with(mine, &[peer("old-build")], &mut seen, &call, Instant::now(), &report).await;
     assert_eq!(report.snapshot()["peers"]["old-build"]["error"], "list: peer_cannot_do_remote_ops");
 }
+
+#[test]
+fn peers_are_told_apart_by_their_install_and_channel_whatever_their_discovery_instance_id_says() {
+    // Four machines on one stable build all announce the version as their instance id; the key must not use it.
+    let keys: Vec<String> = ["install-a", "install-b", "install-c", "install-d"].iter().map(|i| peer_key(i, "host", "stable", "addr-1", 29700)).collect();
+    let mut unique = keys.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 4, "{keys:?}");
+    // The same install on another channel is another peer, and the key survives the machine's address changing.
+    assert_ne!(peer_key("install-a", "h", "stable", "addr-1", 29700), peer_key("install-a", "h", "dev", "addr-1", 29700));
+    assert_eq!(peer_key("install-a", "h", "stable", "addr-1", 29700), peer_key("install-a", "h", "stable", "addr-9", 29701));
+    // An install that announces no id is told apart by name, channel and address.
+    assert_ne!(peer_key("", "one", "stable", "addr-1", 29700), peer_key("", "two", "stable", "addr-1", 29700));
+    assert_ne!(peer_key("", "one", "stable", "addr-1", 29700), peer_key("", "one", "stable", "addr-2", 29700));
+}
+
+#[tokio::test]
+async fn every_peer_is_synced_in_one_pass_not_one_per_resync() {
+    let (mine, a, b) = (machine(), machine(), machine());
+    write(&mine, "x", "one", 1_000);
+    let (fake_a, fake_b) = (Fake::new(a.clone()), Fake::new(b.clone()));
+    let (call_a, call_b) = (fake_a.call(), fake_b.call());
+    // One call that routes by host, as the real send does.
+    let call = move |host: String, op: &'static str, params: Value| -> BoxFuture<'static, RemoteOpResult> {
+        if host == "alpha" { call_a(host, op, params) } else { call_b(host, op, params) }
+    };
+    let mut seen = HashMap::new();
+    let peers = [Peer { key: peer_key("install-alpha", "alpha", "stable", "addr-3", 29700), host: "alpha".into() }, Peer { key: peer_key("install-beta", "beta", "stable", "addr-4", 29700), host: "beta".into() }];
+    sync_peers(mine.clone(), &peers, &mut seen, &call, Instant::now()).await;
+    assert_eq!(ids(&a), ids(&mine), "the first peer");
+    assert_eq!(ids(&b), ids(&mine), "the second peer, in the same pass");
+}

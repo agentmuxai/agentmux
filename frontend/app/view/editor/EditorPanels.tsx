@@ -8,9 +8,11 @@ import { Show } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { Button, CloseButton, SegmentedControl } from "@/app/element/ui";
 import { redactSecrets } from "@/app/errors/redact";
+import { t } from "@/app/i18n/i18n";
 import { keyLabel } from "@/app/keybindings";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { previewMedia } from "./editor-preview-media";
+import { lspBannerKey } from "./editor-lsp-status";
 import { installHintFor } from "./lsp/install-hints";
 import type { LspState } from "./lsp/lsp-client";
 
@@ -56,7 +58,8 @@ export function EditorErrorPanel(props: { model: EditorViewModel }): JSX.Element
     );
 }
 
-/** The language server's binary isn't on PATH: how to install it. Dismissable per session. */
+/** The language server's binary isn't on PATH: how to install it. Or the folder is a container agent's:
+ *  that no server runs on the host for it. Dismissable per session. */
 export function EditorLspBanner(props: {
     state: Accessor<LspState | null>;
     onDismiss: (language: string) => void;
@@ -66,6 +69,18 @@ export function EditorLspBanner(props: {
         <>
             {(() => {
                 const state = props.state();
+                if (state?.kind === "notOnHost") {
+                    const key = lspBannerKey(state)!;
+                    return (
+                        <div class="editor-lsp-banner" role="status">
+                            <div class="editor-lsp-banner-row">
+                                <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
+                                <span class="editor-lsp-banner-text">{t("editor.lsp.notOnHost")}</span>
+                                <CloseButton size="sm" label={t("editor.lsp.dismissBanner")} onClick={() => props.onDismiss(key)} />
+                            </div>
+                        </div>
+                    );
+                }
                 if (!state || state.kind !== "missing") return null;
                 const hint = installHintFor(state.language);
                 return (
@@ -77,7 +92,7 @@ export function EditorLspBanner(props: {
                             </span>
                             <CloseButton
                                 size="sm"
-                                label="Dismiss banner for this session"
+                                label={t("editor.lsp.dismissBanner")}
                                 onClick={() => props.onDismiss(state.language)}
                             />
                         </div>
