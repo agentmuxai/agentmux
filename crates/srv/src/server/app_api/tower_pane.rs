@@ -140,13 +140,15 @@ fn spawn_record_timer(state: &AppState) {
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    let dir = || agentmux_common::data_paths::DataPaths::from_env().map(|p| p.data_dir.join("record"));
-    let Some(record) = crate::backend::record::Record::global(dir, env!("CARGO_PKG_VERSION")) else {
+    let Some(record) = crate::backend::record::Record::global(agentmux_common::record_events::record_dir, env!("CARGO_PKG_VERSION")) else {
         return;
     };
     let state = state.clone();
     STARTED.call_once(|| {
         runtime.spawn(async move {
+            // What older builds kept in their data folders joins the record before its first line (file work:
+            // off the async workers).
+            let _ = tokio::task::spawn_blocking(crate::backend::record_carry::bring_over_here).await;
             let mut tick = tokio::time::interval(std::time::Duration::from_millis(crate::backend::record::EVERY_MS));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             // The first tick is now, before anything has run long enough to be worth a line: skip it.
