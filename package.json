@@ -49,6 +49,7 @@
         "@types/throttle-debounce": "^5",
         "@types/unist": "^3.0.3",
         "@types/ws": "^8",
+        "@typescript/native": "npm:typescript@^7.0.2",
         "@vitest/coverage-istanbul": "^5.0.0",
         "csstype": "^3.2.3",
         "eslint": "^8.57.0",
@@ -65,7 +66,7 @@
         "stylelint-config-standard-scss": "^17.0.0",
         "tailwindcss": "^4.1.18",
         "tsx": "^4.21.0",
-        "typescript": "^5.9.3",
+        "typescript": "npm:@typescript/typescript6@^6.0.2",
         "typescript-eslint": "^8.52.0",
         "vfile": "^6.0.3",
         "vite": "^8.3.7",
@@ -136,6 +137,9 @@
         "docs"
     ],
     "overrides": {
-        "brace-expansion@5.x": "^5.0.8"
+        "brace-expansion@5.x": "^5.0.8",
+        "tsconfck": {
+            "typescript": "$typescript"
+        }
     }
 }

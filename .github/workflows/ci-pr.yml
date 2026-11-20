@@ -1096,6 +1096,11 @@ jobs:
       - name: macOS srv signing identity check self-test
         run: bash scripts/verify-srv-identity-darwin.test.sh
 
+      # The release's signing job runs these scripts, with the Apple credentials, on an app that came out of another job:
+      # the zip's unpack checks, and that none of them starts anything that is in the app. Stand-in tools; runs on Linux.
+      - name: macOS signing scripts self-test
+        run: bash scripts/macos-signing-scripts.test.sh
+
       # The root helper behind a .deb/.rpm's in-app upgrade runs as root on a file a
       # user process names: these are the ways it could install the wrong one.
       # Fake dpkg/rpm/apt and a fake GitHub listing; needs no root.
