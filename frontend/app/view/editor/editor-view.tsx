@@ -197,7 +197,7 @@ function EditorTreeColumn(props: {
                 }}
             >
                 {/* The tree's part of the pane: its own zoom (`editor:tree_zoom`), never the chrome's. */}
-                <div class="editor-tree-zoom" tabindex="-1" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom() }}>
+                <div class="editor-tree-zoom" tabindex="-1" {...zoomPartAttrs(TREE_PART)} data-zoom-scope="pane" style={{ zoom: props.treeZoom(), "--editor-tree-zoom": props.treeZoom() } as JSX.CSSProperties}>
                 <FileTree
                     model={model.treeModel}
                     activeFilePath={model.filePathAtom()}
@@ -268,7 +268,7 @@ function EditorMainColumn(props: {
                     class="editor-main-zoom"
                     {...zoomPartAttrs(MAIN_PART)}
                     data-zoom-scope={props.contentZoomed() ? "chrome" : undefined}
-                    style={{ zoom: props.mainZoom() }}
+                    style={{ zoom: props.mainZoom(), "--editor-main-zoom": props.mainZoom() } as JSX.CSSProperties}
                 >
                 <EditorTabBar model={model} docTabs={docTabs} names={props.names} showTreeButton={props.showTreeButton} />
 
@@ -354,6 +354,7 @@ function EditorTabBar(props: {
             <DocTabStrip
                 ctl={docTabs}
                 docType="editor"
+                zoomScope="chrome"
                 blockId={model.blockId}
                 show={() => props.showTreeButton() || docTabs.tabs().length > 0}
                 leading={

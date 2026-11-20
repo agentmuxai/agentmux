@@ -679,6 +679,11 @@ describe("live reconfiguration", () => {
         h.log.push(`root zoom: ${JSON.stringify(root.style.zoom)} scope=${root.dataset.zoomScope}`);
         h.log.push(`document zoom: ${JSON.stringify(main.style.zoom)} part=${main.dataset.zoomPart} scope=${main.dataset.zoomScope}`);
         h.log.push(`tree zoom: ${JSON.stringify(tree.style.zoom)} part=${tree.dataset.zoomPart} scope=${tree.dataset.zoomScope}`);
+        // The control bars are the chrome's, not the pane's: each says so to a Ctrl+wheel, and the two parts publish their
+        // levels so a bar inside divides it out (editor-view.scss).
+        const scopeOf = (sel: string) => v.container.querySelector<HTMLElement>(sel)?.dataset.zoomScope;
+        h.log.push(`published levels: document=${main.style.getPropertyValue("--editor-main-zoom")} tree=${tree.style.getPropertyValue("--editor-tree-zoom")}`);
+        h.log.push(`bars: tree toolbar=${scopeOf(".file-tree-toolbar")} tab strip=${scopeOf(".doc-tab-strip")}`);
         await expect(out()).toMatchFileSnapshot(snap("live-zoom"));
     });
 });

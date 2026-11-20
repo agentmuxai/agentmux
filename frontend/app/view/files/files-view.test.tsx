@@ -279,26 +279,36 @@ describe("the Files pane: zoom", () => {
     const places = (v: ReturnType<typeof mount>) => v.container.querySelector<HTMLElement>('.files-zoom[data-zoom-part="places"]');
     const levels = (v: ReturnType<typeof mount>) => mains(v).map((m) => m.style.zoom);
 
-    it("zooms the toolbar, the list and the footer with the pane's term:zoom, and is 1 when unset; the root is never zoomed", async () => {
+    // The control bar at the top is the chrome's (the title bar's, the menus'), not the pane's.
+    const CHROME = "var(--zoomfactor)";
+
+    it("zooms the list and the footer with the pane's term:zoom, and is 1 when unset; the toolbar follows the chrome's; the root is never zoomed", async () => {
         const v = mount();
         const root = v.container.querySelector(".files-view") as HTMLElement;
         expect(mains(v)).toHaveLength(3);
-        expect(levels(v)).toEqual(["1", "1", "1"]);
+        expect(levels(v)).toEqual([CHROME, "1", "1"]);
         expect(root.style.zoom).toBe("");
         await v.ctx.setMeta({ "term:zoom": 1.5 });
-        expect(levels(v)).toEqual(["1.5", "1.5", "1.5"]);
+        expect(levels(v)).toEqual([CHROME, "1.5", "1.5"]);
         await v.ctx.setMeta({ "term:zoom": null });
-        expect(levels(v)).toEqual(["1", "1", "1"]);
+        expect(levels(v)).toEqual([CHROME, "1", "1"]);
         expect(root.style.zoom).toBe("");
+    });
+
+    it("marks the toolbar as drawn at the chrome's zoom (a Ctrl+wheel over it steps the chrome), and the rest as the pane's", () => {
+        const v = mount();
+        const scopes = [...v.container.querySelectorAll<HTMLElement>(".files-zoom")].map((el) => el.getAttribute("data-zoom-scope"));
+        expect(scopes[0]).toBe("chrome");
+        expect(scopes.slice(1).every((s) => s === "pane")).toBe(true);
     });
 
     it("zooms Places on its own level, and never moves the rest with it", async () => {
         const v = mount({ "term:zoom": 1.5, "files:places_zoom": 1.2 });
         expect(places(v)!.style.zoom).toBe("1.2");
-        expect(levels(v)).toEqual(["1.5", "1.5", "1.5"]);
+        expect(levels(v)).toEqual([CHROME, "1.5", "1.5"]);
         await v.ctx.setMeta({ "files:places_zoom": 2 });
         expect(places(v)!.style.zoom).toBe("2");
-        expect(levels(v)).toEqual(["1.5", "1.5", "1.5"]);
+        expect(levels(v)).toEqual([CHROME, "1.5", "1.5"]);
         await v.ctx.setMeta({ "term:zoom": 1 });
         expect(places(v)!.style.zoom).toBe("2");
     });

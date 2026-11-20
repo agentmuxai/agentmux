@@ -90,8 +90,13 @@
     color: var(--file-tree-text-color);
 }
 
+// The tree's control strip follows the chrome's zoom; its rows (below) follow the tree's own level, which the tree's
+// wrapper publishes as `--editor-tree-zoom` (editor-view.tsx).
 .file-tree-toolbar {
+    @include mixins.chrome-zoom-inside(--editor-tree-zoom);
     display: flex;
+    // A narrow tree at a large chrome zoom has less room than its buttons: they wrap to a second row, none is cut off.
+    flex-wrap: wrap;
     gap: 2px;
     padding: var(--space-1);
     border-bottom: 1px solid var(--border-color);
@@ -502,9 +507,18 @@
 // ── Markdown mode toolbar ─────────────────────────────────────────────
 // Segmented Preview | Source | Split toggle, shown only for .md tabs.
 
+// This row, the viewers' bar (the same class) and the document tab bar follow the chrome's zoom; the document under
+// them follows the pane's, which its wrapper publishes as `--editor-main-zoom` (editor-view.tsx).
+.editor-mode-toolbar,
+.editor-main-zoom .doc-tab-strip {
+    @include mixins.chrome-zoom-inside(--editor-main-zoom);
+}
+
 .editor-mode-toolbar {
     flex: 0 0 auto;
     display: flex;
+    // The same at a narrow pane: what does not fit wraps.
+    flex-wrap: wrap;
     align-items: center;
     gap: 1px;
     padding: 3px 8px;

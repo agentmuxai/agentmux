@@ -85,7 +85,10 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={keys.onPaneKeyDown}
         >
-            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: mainZoom() }}>
+            {/* The control bar at the top follows the chrome's zoom (a sibling of the zoomed parts, so it is not
+                scaled twice); the list, Places, the preview and the footer keep the pane's. The zoom keys still
+                step the pane's level from it (`zoomPartAttrs`). */}
+            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="chrome" style={{ zoom: "var(--zoomfactor)" }}>
                 <FilesToolbar
                     model={model}
                     grid={win.grid}

@@ -79,7 +79,7 @@ interface FileTreeToolbarProps {
 
 function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
     return (
-        <div class="file-tree-toolbar">
+        <div class="file-tree-toolbar" data-zoom-scope="chrome">
             {/* The tree's own hide button; the editor's document bar has the
                 one that shows it again. */}
             <Show when={props.onHideTree}>
