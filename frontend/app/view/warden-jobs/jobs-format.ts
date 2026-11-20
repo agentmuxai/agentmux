@@ -105,6 +105,7 @@ const REASON_TEXT: Record<string, string> = {
     run_cap: "run cap reached",
     timeout: "timed out",
     no_report: "never reported",
+    not_started: "never started",
 };
 
 export function reasonText(reason: string): string {
