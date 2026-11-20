@@ -62,6 +62,11 @@ pub struct Inside {
 }
 
 impl Inside {
+    /// The bound folder on the host that holds the asked path, in the spelling it was found under.
+    pub fn bound(&self) -> &str {
+        &self.host
+    }
+
     /// The host path of `inside`, an absolute path inside the container; `None` when it is not in the bound
     /// folder this was found under.
     pub fn host_path(&self, inside: &str) -> Option<String> {
@@ -189,6 +194,13 @@ fn inside_of(asked: &[String], folders: &[Folder]) -> Option<Inside> {
         }
     }
     best
+}
+
+/// Where `asked` is inside `container`, were `folder` bound into it at `target`: `None` when it is not in
+/// that folder, as written or as it resolves. Reads the disk for the spellings and nothing else.
+pub fn inside_one(asked: &Path, folder: &Path, container: &str, target: &str) -> Option<Inside> {
+    let bound = Folder { hosts: spellings(folder), container: container.to_string(), target: target.to_string() };
+    inside_of(&spellings(asked), &[bound])
 }
 
 /// Where git for `dir` runs.
