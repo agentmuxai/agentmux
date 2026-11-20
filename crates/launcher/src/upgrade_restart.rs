@@ -749,7 +749,15 @@ fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::
             crate::log(&format!("upgrade: no updating window ({e}); the upgrade goes on without it"));
         }
     }
-    #[cfg(not(windows))]
+    // A macOS `.dmg` install: the same gap, from this launcher's exit to the swap script opening the new app, with
+    // a window from a clone of this app (the app itself is about to be replaced).
+    #[cfg(target_os = "macos")]
+    if let Staged::MacDmg(up) = staged {
+        if let Err(e) = crate::updating_window::start(&up.version, child.id(), &up.app, &crate::updating_window::dir()) {
+            crate::log(&format!("upgrade: no updating window ({e}); the upgrade goes on without it"));
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = child;
     Ok(())
 }
