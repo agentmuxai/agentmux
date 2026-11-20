@@ -90,7 +90,7 @@ describe("build-server-package.yml: the signing job", () => {
 
     it("calls its tools by absolute path", () => {
         const text = code(jobText("sign-macos"));
-        expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen|ditto|shasum)\s+[-\w"$]/m);
+        expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen|ditto|shasum|jq|curl|awk|base64|chmod|grep|mkdir|cut|find|wc|tr)\s+[-+\w"'$]/m);
     });
 
     it("pins every third-party action by commit", () => {
@@ -135,6 +135,20 @@ describe("build-server-package.yml: the hand-offs are bound by digest", () => {
         for (const line of source.split("\n")) {
             if (/shasum -a 256 /.test(line) && !/^\s*#/.test(line)) expect(line, line).toMatch(/shasum -a 256 (< |\|)|shasum -a 256$/);
         }
+    });
+});
+
+describe("build-server-package.yml: what a signing run builds", () => {
+    it("the plan names the commit of the run for a run that signs, and the checkouts take it from the plan", () => {
+        const plan = stepsOf("plan").find((s) => /id: sign/.test(s));
+        expect(plan).toMatch(/if \[ "\$sign" = true \]; then build_ref="\$RUN_SHA"; else build_ref="\$\{BUILD_REF:-\$RUN_SHA\}"; fi/);
+        expect(plan).toMatch(/echo "build_ref=\$build_ref" >> "\$GITHUB_OUTPUT"/);
+        expect(jobText("plan")).toMatch(/build_ref: \$\{\{ steps\.sign\.outputs\.build_ref \}\}/);
+        for (const job of ["package", "pack-macos"]) {
+            const checkout = stepsOf(job).find((s) => /actions\/checkout/.test(s));
+            expect(checkout, job).toMatch(/ref: \$\{\{ needs\.plan\.outputs\.build_ref \}\}/);
+        }
+        expect(code(source)).not.toMatch(/ref: \$\{\{ inputs\.ref/);
     });
 });
 

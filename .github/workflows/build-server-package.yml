@@ -83,6 +83,7 @@ jobs:
       legs: ${{ steps.legs.outputs.legs }}
       macos_legs: ${{ steps.legs.outputs.macos_legs }}
       sign: ${{ steps.sign.outputs.sign }}
+      build_ref: ${{ steps.sign.outputs.build_ref }}
     steps:
       - id: legs
         env:
@@ -124,8 +125,12 @@ jobs:
               esac
             fi
           fi
+          # What is built: a run that signs builds the commit the run is on (the one the identity token's workflow is at), never
+          # a name that can move on while the run waits; any other run builds the ref it was asked for.
+          if [ "$sign" = true ]; then build_ref="$RUN_SHA"; else build_ref="${BUILD_REF:-$RUN_SHA}"; fi
           echo "sign=$sign" >> "$GITHUB_OUTPUT"
-          echo "sign=$sign"
+          echo "build_ref=$build_ref" >> "$GITHUB_OUTPUT"
+          echo "sign=$sign build_ref=$build_ref"
 
   package:
     name: Server package (${{ matrix.os }}-${{ matrix.arch }})
@@ -145,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ needs.plan.outputs.build_ref }}
 
       - uses: actions/setup-node@v4
         with:
@@ -567,14 +572,14 @@ jobs:
       - name: The identity token names build-server-package.yml on main
         shell: bash
         run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          TOKEN=$(/usr/bin/curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | /usr/bin/jq -r .value)
           echo "::add-mask::$TOKEN"
-          CLAIMS=$(echo "$TOKEN" | jq -R 'split(".")[1] | @base64d | fromjson')
-          echo "$CLAIMS" | jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name, environment}'
+          CLAIMS=$(echo "$TOKEN" | /usr/bin/jq -R 'split(".")[1] | @base64d | fromjson')
+          echo "$CLAIMS" | /usr/bin/jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name, environment}'
           WANT="${GITHUB_REPOSITORY}/.github/workflows/build-server-package.yml@refs/heads/main"
-          GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
-          SUB=$(echo "$CLAIMS" | jq -r .sub)
-          REF=$(echo "$CLAIMS" | jq -r .ref)
+          GOT=$(echo "$CLAIMS" | /usr/bin/jq -r .job_workflow_ref)
+          SUB=$(echo "$CLAIMS" | /usr/bin/jq -r .sub)
+          REF=$(echo "$CLAIMS" | /usr/bin/jq -r .ref)
           if [ "$GOT" != "$WANT" ]; then
             echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'"
             exit 1
@@ -589,7 +594,7 @@ jobs:
           esac
           # A dispatch signs only on main (the plan refuses anything else too; the role's trust and the environment's policy are the
           # other two checks).
-          if [ "$(echo "$CLAIMS" | jq -r .event_name)" = workflow_dispatch ] && [ "$REF" != refs/heads/main ]; then
+          if [ "$(echo "$CLAIMS" | /usr/bin/jq -r .event_name)" = workflow_dispatch ] && [ "$REF" != refs/heads/main ]; then
             echo "::error::a dispatch signs only a run on main (this one is on '$REF')"; exit 1
           fi
 
@@ -601,7 +606,9 @@ jobs:
           role-session-name: apple-signing-server-${{ github.run_id }}
           role-duration-seconds: 900
 
-      # The secret goes to a file that the next step reads and deletes.
+      # The secret goes to a file that the next step reads and deletes. Every tool of this job is called by absolute path (the
+      # system's own, /usr/bin and /bin of the runner image) except `aws`: the AWS CLI is not at one path on the runner images
+      # (Intel and Apple silicon differ), and it is the CLI the image ships, run with a session that lives for this one call.
       - name: Fetch the Apple signing secrets
         shell: bash
         env:
@@ -613,14 +620,14 @@ jobs:
           umask 077
           if [ -n "$SECRET_FIELD" ]; then
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text \
-              | jq -ce "$SECRET_FIELD" > "$FILE" \
+              | /usr/bin/jq -ce "$SECRET_FIELD" > "$FILE" \
               || { echo "::error::the Apple signing secret has no value at the configured field"; exit 1; }
           else
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
           fi
-          jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
+          /usr/bin/jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
             || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }
-          jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
+          /usr/bin/jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
           echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
           for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do echo "$v=" >> "$GITHUB_ENV"; done
 
@@ -636,14 +643,14 @@ jobs:
           /usr/bin/security default-keychain -s "$KEYCHAIN_PATH"
           /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           /usr/bin/security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
-          jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          /usr/bin/security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$(jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")" -T /usr/bin/codesign -T /usr/bin/security
+          /usr/bin/jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE" | /usr/bin/base64 --decode > "$RUNNER_TEMP/cert.p12"
+          /usr/bin/security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN_PATH" -P "$(/usr/bin/jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")" -T /usr/bin/codesign -T /usr/bin/security
           /bin/rm -f "$RUNNER_TEMP/cert.p12"
           /usr/bin/security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           /usr/bin/xcrun notarytool store-credentials "notarytool" \
-            --apple-id "$(jq -er .APPLE_ID "$APPLE_SIGNING_FILE")" \
-            --password "$(jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")" \
-            --team-id "$(jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")" \
+            --apple-id "$(/usr/bin/jq -er .APPLE_ID "$APPLE_SIGNING_FILE")" \
+            --password "$(/usr/bin/jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")" \
+            --team-id "$(/usr/bin/jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")" \
             --keychain "$KEYCHAIN_PATH" \
             --no-validate
           /bin/rm -f "$APPLE_SIGNING_FILE"
@@ -657,9 +664,9 @@ jobs:
         run: |
           set -euo pipefail
           /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | /usr/bin/awk -F'"' '/Developer ID Application/ {print $2; exit}')"
           [ -n "$CERT" ] || { echo "::error::no 'Developer ID Application' identity in the keychain"; exit 1; }
-          chmod +x programs/*
+          /bin/chmod +x programs/*
           SIGN=(/usr/bin/codesign --force --timestamp --options runtime --sign "$CERT" --keychain "$KEYCHAIN_PATH")
           "${SIGN[@]}" --identifier ai.agentmux.srv programs/agentmux-srv
           for prog in agentmux agentmux-mcp agentmux-bashwrap; do "${SIGN[@]}" "programs/$prog"; done
@@ -674,12 +681,12 @@ jobs:
           set -euo pipefail
           /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
           zip_dir="$RUNNER_TEMP/notarize"
-          /bin/rm -rf "$zip_dir" && mkdir -p "$zip_dir"
+          /bin/rm -rf "$zip_dir" && /bin/mkdir -p "$zip_dir"
           /usr/bin/ditto -c -k --keepParent programs "$zip_dir/programs.zip"
           # The whole output first, then look at it: grep -q on a pipe would end notarytool early.
           out="$(/usr/bin/xcrun notarytool submit "$zip_dir/programs.zip" --keychain-profile notarytool --keychain "$KEYCHAIN_PATH" --wait 2>&1 || true)"
           printf '%s\n' "$out"
-          if ! printf '%s\n' "$out" | grep -q "status: Accepted"; then
+          if ! printf '%s\n' "$out" | /usr/bin/grep -q "status: Accepted"; then
             echo "::error::Apple did not accept the notarization of the server programs (the log above says why)"
             exit 1
           fi
@@ -730,7 +737,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ needs.plan.outputs.build_ref }}
 
       - uses: actions/download-artifact@v4
         with:
