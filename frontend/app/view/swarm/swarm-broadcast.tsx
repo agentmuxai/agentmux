@@ -10,6 +10,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Acce
 import { Button, TextArea } from "@/app/element/ui";
 import { keyLabel } from "@/app/keybindings";
 import { t } from "@/app/i18n/i18n";
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { SwarmAgents } from "./swarm-agent-list";
 import { gapSummary, localFleetTargets, partitionTargets, remoteFleetTargets } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
@@ -34,6 +36,39 @@ export const MAX_AUTO_HEIGHT = 160;
 export function fittedHeight(scrollHeight: number, borders: number): number | null {
     if (scrollHeight <= 0) return null;
     return Math.min(scrollHeight + borders, MAX_AUTO_HEIGHT);
+}
+
+/** How far a broadcast whose deliveries srv paces has got. */
+export interface BroadcastProgress {
+    sent: number;
+    total: number;
+}
+
+/** No progress is shown for this long: a small broadcast is over by then, and a figure that flashes says nothing. */
+export const PROGRESS_AFTER_MS = 300;
+
+/**
+ * Follows the deliveries of the broadcast sent with `id`: srv reports each one that ends
+ * (crates/srv/src/server/app_api/fleet_pacing.rs). `set` gets the latest count once the send has
+ * lasted `PROGRESS_AFTER_MS`, and null when the returned stop is called.
+ */
+export function followBroadcastProgress(id: string, set: (p: BroadcastProgress | null) => void): () => void {
+    let latest: BroadcastProgress | null = null;
+    let showing = false;
+    const unsub = onMuxEvent(WpsEvent.FleetBroadcastProgress, (e) => {
+        if (e.id !== id) return;
+        latest = { sent: e.sent, total: e.total };
+        if (showing) set(latest);
+    });
+    const timer = setTimeout(() => {
+        showing = true;
+        if (latest) set(latest);
+    }, PROGRESS_AFTER_MS);
+    return () => {
+        clearTimeout(timer);
+        unsub();
+        set(null);
+    };
 }
 
 /** `list` with `record` newest first, capped at the last ten. */
@@ -158,6 +193,7 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
     const canSend = () => state.draft().trim().length > 0 && recipients() > 0 && !model.fleetActionInFlightAtom();
     const now = useNow(30_000);
     const watch = useAutoGrow(state.draft);
+    const [progress, setProgress] = createSignal<BroadcastProgress | null>(null);
 
     const send = async (): Promise<void> => {
         if (!canSend()) return;
@@ -167,12 +203,17 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
         const unreachable = split().unreachable.length;
         state.setDraft("");
         let result;
+        // A broadcast to many agents is paced by srv and takes a few seconds: the count shows it is going out.
+        const progressId = crypto.randomUUID();
+        const stopProgress = followBroadcastProgress(progressId, setProgress);
         try {
-            result = await model.broadcastToSelection(text);
+            result = await model.broadcastToSelection(text, progressId);
         } catch {
             // The call itself failed: nothing was sent, so the message is not lost.
             if (state.draft() === "") state.setDraft(text);
             return;
+        } finally {
+            stopProgress();
         }
         state.setRecent((list) =>
             withRecent(list, {
@@ -208,7 +249,13 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
                     <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
                 </Button>
-                <span class="swarm-broadcast-hint">{t("swarm.broadcast.hint", { newlineKey: keyLabel("shift+Enter") })}</span>
+                <Show when={progress()} fallback={<span class="swarm-broadcast-hint">{t("swarm.broadcast.hint", { newlineKey: keyLabel("shift+Enter") })}</span>}>
+                    {(p) => (
+                        <span class="swarm-broadcast-hint" role="status">
+                            {t("swarm.broadcast.progress", { sent: p().sent, total: p().total })}
+                        </span>
+                    )}
+                </Show>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
                 <Show when={hidden() > 0}>
                     <span class="swarm-fleet-broadcast-gap">{hidden()} hidden by the filter, not included</span>

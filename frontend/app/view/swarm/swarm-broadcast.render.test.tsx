@@ -9,7 +9,22 @@
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BroadcastDock, fittedHeight, MAX_AUTO_HEIGHT, MAX_RECENT_BROADCASTS, withRecent, type BroadcastRecord } from "./swarm-broadcast";
+import type { FleetBroadcastProgressEvent } from "@/types/rpc/FleetBroadcastProgressEvent";
+
+// srv's events, by hand: a test reports a broadcast's progress with `progressEvents.emit`.
+const progressEvents = vi.hoisted(() => {
+    const handlers = new Set<(e: FleetBroadcastProgressEvent) => void>();
+    return { handlers, emit: (e: FleetBroadcastProgressEvent) => handlers.forEach((h) => h(e)) };
+});
+vi.mock("@/app/store/mps", async (original) => ({
+    ...(await original<typeof import("@/app/store/mps")>()),
+    onMuxEvent: (_type: string, handler: (e: FleetBroadcastProgressEvent) => void) => {
+        progressEvents.handlers.add(handler);
+        return () => progressEvents.handlers.delete(handler);
+    },
+}));
+
+import { BroadcastDock, fittedHeight, followBroadcastProgress, MAX_AUTO_HEIGHT, MAX_RECENT_BROADCASTS, PROGRESS_AFTER_MS, withRecent, type BroadcastProgress, type BroadcastRecord } from "./swarm-broadcast";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 
 afterEach(() => cleanup());
@@ -49,7 +64,7 @@ describe("BroadcastDock", () => {
         fireEvent.click(sendButton(container));
         await Promise.resolve();
         await Promise.resolve();
-        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it");
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("ship it", expect.any(String));
         expect(box(container).value).toBe("");
         const row = container.querySelector(".swarm-broadcast-recent-row")!;
         expect(row.textContent).toContain("ship it");
@@ -66,10 +81,10 @@ describe("BroadcastDock", () => {
         const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
         fireEvent.input(box(container), { target: { value: "hi" } });
         fireEvent.keyDown(box(container), { key: "Enter" });
-        expect(model.broadcastToSelection).toHaveBeenCalledWith("hi");
+        expect(model.broadcastToSelection).toHaveBeenCalledWith("hi", expect.any(String));
         fireEvent.input(box(container), { target: { value: "again" } });
         fireEvent.keyDown(box(container), { key: "Enter", ctrlKey: true });
-        expect(model.broadcastToSelection).toHaveBeenLastCalledWith("again");
+        expect(model.broadcastToSelection).toHaveBeenLastCalledWith("again", expect.any(String));
     });
 
     it("adds a line on Shift+Enter and sends nothing", () => {
@@ -140,6 +155,59 @@ describe("BroadcastDock", () => {
         const { container } = render(() => <BroadcastDock model={modelStub(["a", "ghost"])} agents={agents} />);
         expect(container.querySelector(".swarm-fleet-broadcast-gap")!.textContent).toBe("1 of 2 can't be messaged: no longer listed");
         expect(sendButton(container).textContent).toContain("Send to 1");
+    });
+});
+
+describe("a paced broadcast's progress", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => {
+        vi.useRealTimers();
+        progressEvents.handlers.clear();
+    });
+
+    it("shows nothing for a broadcast that is over quickly, and stops listening", () => {
+        const seen: (BroadcastProgress | null)[] = [];
+        const stop = followBroadcastProgress("b1", (p) => seen.push(p));
+        progressEvents.emit({ id: "b1", sent: 1, total: 2 });
+        progressEvents.emit({ id: "b1", sent: 2, total: 2 });
+        stop();
+        vi.advanceTimersByTime(PROGRESS_AFTER_MS * 2);
+        expect(seen).toEqual([null]);
+        expect(progressEvents.handlers.size).toBe(0);
+    });
+
+    it("reports the latest count once the send has lasted, then each one, and only its own broadcast's", () => {
+        const seen: (BroadcastProgress | null)[] = [];
+        const stop = followBroadcastProgress("b1", (p) => seen.push(p));
+        progressEvents.emit({ id: "b1", sent: 1, total: 30 });
+        progressEvents.emit({ id: "b1", sent: 2, total: 30 });
+        progressEvents.emit({ id: "someone-else", sent: 9, total: 9 });
+        vi.advanceTimersByTime(PROGRESS_AFTER_MS);
+        progressEvents.emit({ id: "b1", sent: 3, total: 30 });
+        progressEvents.emit({ id: "someone-else", sent: 1, total: 4 });
+        stop();
+        expect(seen).toEqual([{ sent: 2, total: 30 }, { sent: 3, total: 30 }, null]);
+    });
+
+    it("says how many have been sent in place of the hint while a paced broadcast goes out, then the hint again", async () => {
+        let finish!: (r: unknown) => void;
+        const model = modelStub(["a", "b", "c"]);
+        (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+        const { container } = render(() => <BroadcastDock model={model} agents={agents} />);
+        fireEvent.input(box(container), { target: { value: "go" } });
+        fireEvent.click(sendButton(container));
+        const id = (model.broadcastToSelection as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+        const hint = () => container.querySelector(".swarm-broadcast-hint")!;
+        expect(hint().textContent).toContain("Enter sends");
+        progressEvents.emit({ id, sent: 2, total: 3 });
+        expect(hint().textContent).toContain("Enter sends");
+        vi.advanceTimersByTime(PROGRESS_AFTER_MS);
+        expect(hint().textContent).toBe("Sent 2 of 3…");
+        expect(hint().getAttribute("role")).toBe("status");
+        finish({ succeeded: ["a", "b", "c"], failed: [], aborted_early: false });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(hint().textContent).toContain("Enter sends");
+        expect(container.querySelector(".swarm-broadcast-recent-meta")!.textContent).toContain("3 sent · 3 delivered");
     });
 });
 
