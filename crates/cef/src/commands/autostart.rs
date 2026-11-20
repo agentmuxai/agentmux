@@ -68,6 +68,7 @@ pub fn parse_status_json(stdout: &str) -> Option<serde_json::Value> {
         "ownerChannel": text("owner_channel"),
         "thisChannel": text("this_channel"),
         "movable": v.get("movable").and_then(|x| x.as_bool()).unwrap_or(false),
+        "package": text("package"),
     }))
 }
 
@@ -105,8 +106,11 @@ mod tests {
         let on = parse_status_json(r#"{"state":"on","target":"/a/AgentMux","owner_channel":"local-x","this_channel":"stable","movable":true}"#).unwrap();
         assert_eq!(
             on,
-            serde_json::json!({ "available": true, "enabled": true, "state": "on", "target": "/a/AgentMux", "ownerChannel": "local-x", "thisChannel": "stable", "movable": true })
+            serde_json::json!({ "available": true, "enabled": true, "state": "on", "target": "/a/AgentMux", "ownerChannel": "local-x", "thisChannel": "stable", "movable": true, "package": null })
         );
+        // The Store package's startup task, as Windows says it: the person turned it off there.
+        let pkg = parse_status_json(r#"{"state":"needs_approval","target":null,"owner_channel":null,"this_channel":"stable","movable":false,"package":"disabled_by_user","activation":"launch"}"#).unwrap();
+        assert_eq!((pkg["state"].clone(), pkg["package"].clone()), ("needs_approval".into(), "disabled_by_user".into()));
         let off = parse_status_json(r#"{"state":"off","target":null,"owner_channel":null,"this_channel":"stable","movable":false}"#).unwrap();
         assert_eq!((off["enabled"].clone(), off["state"].clone(), off["ownerChannel"].clone()), (false.into(), "off".into(), serde_json::Value::Null));
         assert_eq!(parse_status_json(r#"{"state":"broken","this_channel":"s"}"#).unwrap()["enabled"], true, "broken still has an entry");

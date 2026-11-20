@@ -274,6 +274,25 @@ describe("NotificationsSection, pinned", () => {
         await snapshot("autostart-fix");
     });
 
+    it("says where to turn start at login back on when Windows has it off for the Store package, by the person or by policy", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: true, state: "needs_approval", thisChannel: "stable", movable: false, package: "disabled_by_user" };
+        mount();
+        await flush();
+        lookRow("the person turned it off in Windows");
+        cleanup();
+        h.autostart = { available: true, enabled: false, state: "off", thisChannel: "stable", movable: false, package: "disabled_by_policy" };
+        mount();
+        await flush();
+        lookRow("off by the organisation's policy");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", thisChannel: "stable", movable: false, package: "enabled" };
+        mount();
+        await flush();
+        lookRow("on, as Windows says");
+        await snapshot("autostart-package");
+    });
+
     it("reads the registration again two seconds after a change to start at login, and not for another setting", async () => {
         mount();
         await flush();

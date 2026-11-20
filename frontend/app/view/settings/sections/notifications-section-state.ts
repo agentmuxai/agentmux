@@ -82,6 +82,12 @@ export function createAutostart() {
                 ? t("settings.notifications.autostart.owner", { channel: st.ownerChannel })
                 : t("settings.notifications.autostart.ownerUnknown");
         }
+        // The Store package's login entry is Windows' own: the person can turn it off in Windows, and AgentMux
+        // cannot turn it back on, so the switch here says where.
+        if (startAtLogin() && st && !autostart.loading) {
+            if (st.package === "disabled_by_user") return t("settings.notifications.autostart.packageOffByUser");
+            if (st.package === "disabled_by_policy") return t("settings.notifications.autostart.packageOffByPolicy");
+        }
         if (startAtLogin() && st && !autostart.loading && !st.enabled) {
             return "On, but not registered with the system yet. If this persists, see the launcher log.";
         }

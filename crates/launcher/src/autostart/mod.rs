@@ -59,6 +59,9 @@
 use agentmux_common::win32::NoWindow;
 use std::path::Path;
 
+#[cfg(target_os = "windows")]
+pub mod packaged;
+
 /// The flag every generated artifact passes to the launcher.
 ///
 /// This is the ONLY thing that makes an auto-started instance behave like a
@@ -74,7 +77,20 @@ pub const BACKGROUND_FLAG: &str = "--background";
 /// host actually reads (`AGENTMUX_BACKGROUND_SERVICE`, plus `AGENTMUX_TRAY` —
 /// see `background_env_for`).
 pub fn background_requested(args: &[String]) -> bool {
-    args.iter().any(|a| a == BACKGROUND_FLAG)
+    args.iter().any(|a| a == BACKGROUND_FLAG) || started_by_login_task()
+}
+
+/// The Store package's startup task starts the exe with no arguments, so a login start there is known from how
+/// Windows activated the process, not from `--background`. Nowhere else is it ever true.
+fn started_by_login_task() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        packaged::started_by_startup_task()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// Was this process started by a login entry? Every artifact passes
@@ -472,17 +488,26 @@ fn schtasks_command() -> std::process::Command {
 /// whatever wrote it. So this inspects the real system state (the Task
 /// Scheduler store, or the artifact file) rather than any bookkeeping of our
 /// own.
+/// Is the Scheduled Task (every install but the Store package's login entry) registered? `/Query` fails if not.
+#[cfg(target_os = "windows")]
+fn scheduled_task_exists() -> bool {
+    schtasks_command()
+        .args(["/Query", "/TN", AUTOSTART_ID])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 pub fn is_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
-        // `schtasks /Query` exits non-zero when the task does not exist.
-        schtasks_command()
-            .args(["/Query", "/TN", AUTOSTART_ID])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        // The Store package's login entry is its startup task, which Windows owns.
+        if packaged::is_packaged() {
+            return packaged::state().map(packaged::TaskState::is_on).unwrap_or(false);
+        }
+        scheduled_task_exists()
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -496,6 +521,29 @@ pub fn is_enabled() -> bool {
 pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        if packaged::is_packaged() {
+            // The package's task runs no file AgentMux picks: `exe` and `channel` are written nowhere. A person's
+            // "off" in Windows stays off, and the error says so.
+            let _ = (exe, channel);
+            // A copy installed with the setup program has its own login entry, the Scheduled Task. Single
+            // instance is per version, so with both on, two versions start at login and show two tray icons.
+            // The other direction cannot be seen from outside the package, so only this one is checked.
+            if scheduled_task_exists() {
+                return Err(
+                    "start at login is already on for the AgentMux installed with the setup program: turn it off there first, so AgentMux does not start twice".to_string(),
+                );
+            }
+            return match packaged::request_enable()? {
+                s if s.is_on() => Ok(()),
+                packaged::TaskState::DisabledByUser => Err(
+                    "Windows has start at login turned off for AgentMux: turn it on in Settings > Apps > Startup".to_string(),
+                ),
+                packaged::TaskState::DisabledByPolicy => {
+                    Err("start at login is turned off for AgentMux by your organisation's policy".to_string())
+                }
+                _ => Err("Windows did not turn start at login on".to_string()),
+            };
+        }
         // Register from XML — the only way to set LogonType/battery settings;
         // the flag-based `schtasks /Create /SC ONLOGON` form cannot express
         // them. The XML must be UTF-16 per the Task Scheduler schema
@@ -558,6 +606,9 @@ pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
 pub fn disable() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        if packaged::is_packaged() {
+            return packaged::disable();
+        }
         if !is_enabled() {
             return Ok(());
         }
@@ -678,6 +729,14 @@ pub struct Entry {
 pub fn read_entry() -> Option<Entry> {
     #[cfg(target_os = "windows")]
     {
+        // The package's task runs this package's launcher and belongs to this channel by construction.
+        if packaged::is_packaged() {
+            return packaged::state().ok().filter(|s| s.is_on()).map(|_| Entry {
+                target: std::env::current_exe().ok().map(|e| e.display().to_string()),
+                channel: Some(current_channel()),
+                current: true,
+            });
+        }
         let out = schtasks_command()
             .args(["/Query", "/TN", AUTOSTART_ID, "/XML"])
             .stderr(std::process::Stdio::null())
@@ -800,6 +859,12 @@ pub(crate) fn moved_from() -> Option<String> {
 pub fn startup() {
     take_stable_exe_env();
     note_appimage_start();
+    // How Windows started a packaged copy, so a bug report about a login start that opened a window or showed
+    // no tray says whether the package's startup task was recognised (`startup_task`) or not.
+    #[cfg(target_os = "windows")]
+    if packaged::is_packaged() {
+        crate::log(&format!("packaged start: activation {}", packaged::activation_name()));
+    }
 }
 
 /// At start, for an AppImage: put its channel record back beside it if a move or a rename left that behind, and
@@ -848,6 +913,13 @@ pub struct Status {
     pub this_channel: String,
     /// The entry belongs to another channel (or to none) and this build can take it over.
     pub movable: bool,
+    /// The Store package's startup task, as Windows says it now (`enabled`, `disabled`, `disabled_by_user`,
+    /// `disabled_by_policy`, `enabled_by_policy`); `None` anywhere that is not a packaged install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
+    /// How Windows activated this process (`launch`, `startup_task`, `unknown`), packaged installs only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation: Option<String>,
 }
 
 /// Pure: the status from what is on the machine. `registered` is [`is_enabled`], which can say yes when
@@ -862,7 +934,7 @@ pub fn status(entry: Option<&Entry>, registered: bool, this_channel: &str, can_w
     };
     let owner_channel = entry.and_then(|e| e.channel.clone());
     let movable = entry.is_some() && owner_channel.as_deref() != Some(this_channel) && can_write;
-    Status { state, target: entry.and_then(|e| e.target.clone()), owner_channel, this_channel: this_channel.to_string(), movable }
+    Status { state, target: entry.and_then(|e| e.target.clone()), owner_channel, this_channel: this_channel.to_string(), movable, package: None, activation: None }
 }
 
 /// Pure decision. `setting` is `app:startatlogin`, `None` when never set.
@@ -910,7 +982,19 @@ pub fn handle_cli(args: &[String]) -> bool {
 
     if has("--autostart-status") {
         if has("--json") {
-            let s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+            let mut s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+            #[cfg(target_os = "windows")]
+            if packaged::is_packaged() {
+                if let Ok(task) = packaged::state() {
+                    s.package = Some(task.as_str().to_string());
+                    // The person turned it off in Windows: only they can turn it back on.
+                    if task == packaged::TaskState::DisabledByUser {
+                        s.state = State::NeedsApproval;
+                    }
+                }
+                s.activation = Some(packaged::activation_name());
+                s.movable = false;
+            }
             println!("{}", serde_json::to_string(&s).unwrap_or_else(|_| "{}".to_string()));
         } else {
             println!("{}", if is_enabled() { "enabled" } else { "disabled" });
