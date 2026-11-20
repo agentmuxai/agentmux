@@ -456,6 +456,12 @@ export function AvFigure(props: {
         <figure
             class={`am-media am-media-${props.kind}`}
             ref={props.s.setBox}
+            // Anywhere on it, before play (the poster and the play button) and after: the same items as the media
+            // viewer. The element is read when Copy frame is pressed: the poster first, the player once it plays.
+            onContextMenu={(e) => {
+                const figure = e.currentTarget;
+                showMediaCopyMenu(e, { kind: props.kind, mime: "", path: props.path, element: () => figure.querySelector("video") });
+            }}
             // A video of an agent's message is one of the preview's items; audio is not.
             {...(props.kind === "video" ? { "data-am-media-path": props.path, "data-am-media-kind": "video" } : {})}
         >
