@@ -1,11 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
-import { busyPercent, createUiBusyMeter, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetBlockedTracking, startBlockedTracking } from "@/app/diag/main-thread-blocked";
+import { resetSlowFrameTracking, startSlowFrameTracking } from "@/app/diag/slow-frames";
+import { busyPercent, createUiBusyMeter, pageBusyBetween, UI_BUSY_WARN_PCT, uiBusyColor } from "./ui-busy";
 
 describe("the UI busy share", () => {
-    it("is the long-task time over the window, whole and within 0 to 100", () => {
+    it("is the slow-frame time over the window, whole and within 0 to 100", () => {
         expect(busyPercent(120, 1000)).toBe(12);
         expect(busyPercent(1500, 1000)).toBe(100);
         expect(busyPercent(-5, 1000)).toBe(0);
@@ -19,10 +21,10 @@ describe("the UI busy share", () => {
     });
 });
 
-/** A clock and a page that can be hidden, with the long-task time the page has had in each window. */
-function world(blocked: (start: number, end: number) => number | null = () => 0) {
+/** A clock and a page that can be hidden, with the slow-frame time the page has had in each window. */
+function world(busy: (start: number, end: number) => number | null = () => 0) {
     const w = { t: 0, visible: true };
-    const meter = createUiBusyMeter({ now: () => w.t, visible: () => w.visible, blockedBetween: blocked });
+    const meter = createUiBusyMeter({ now: () => w.t, visible: () => w.visible, busyBetween: busy });
     return { w, meter };
 }
 
@@ -32,7 +34,7 @@ describe("the UI busy meter", () => {
         expect(meter.tick()).toBeNull();
     });
 
-    it("reads each second's long tasks as a share of that second", () => {
+    it("reads each second's slow frames as a share of that second", () => {
         const { w, meter } = world((start, end) => (end - start) * 0.25);
         meter.tick();
         w.t = 1000;
@@ -65,10 +67,98 @@ describe("the UI busy meter", () => {
         expect(meter.tick()).toBe(90);
     });
 
-    it("shows nothing where the engine has no Long Tasks API", () => {
+    it("shows nothing where the engine can say neither slow frames nor long tasks", () => {
         const { w, meter } = world(() => null);
         meter.tick();
         w.t = 1000;
         expect(meter.tick()).toBeNull();
+    });
+});
+
+type Entry = { startTime: number; duration: number };
+
+/** A page whose engine reports the given entry types, with the frames and long tasks it has had. */
+function page(types: string[], frames: Entry[], tasks: Entry[]) {
+    class FakeObserver {
+        static supportedEntryTypes = types;
+        private type = "";
+        observe(options: { type: string }) {
+            this.type = options.type;
+        }
+        disconnect() {}
+        takeRecords() {
+            const out = this.type === "long-animation-frame" ? frames : tasks;
+            if (this.type === "long-animation-frame") frames = [];
+            else tasks = [];
+            return out;
+        }
+    }
+    vi.stubGlobal("PerformanceObserver", FakeObserver);
+    startSlowFrameTracking();
+    startBlockedTracking();
+    const w = { t: 0 };
+    const meter = createUiBusyMeter({ now: () => w.t, visible: () => true, busyBetween: pageBusyBetween });
+    meter.tick();
+    return { w, meter };
+}
+
+/** Frames one after another from `at`, `gap` ms apart, of the given lengths. */
+function backToBack(durations: number[], at = 0, gap = 20): Entry[] {
+    let t = at;
+    return durations.map((duration) => {
+        const entry = { startTime: t, duration };
+        t += duration + gap;
+        return entry;
+    });
+}
+
+describe("the UI busy meter on recorded frames", () => {
+    afterEach(() => {
+        resetSlowFrameTracking();
+        resetBlockedTracking();
+        vi.unstubAllGlobals();
+    });
+
+    // The frames one window's page logged while 16 agents started a turn within four seconds (the report's burst):
+    // 248, 245, 165 and 188 ms, one after another. The only tasks of 50 ms or more in them were 143 and 150 ms, so the
+    // figure read under half while the page drew about four frames a second.
+    const BURST_FRAMES = backToBack([248, 245, 165, 188]);
+    const BURST_LONG_TASKS: Entry[] = [
+        { startTime: 40, duration: 143 },
+        { startTime: 300, duration: 150 },
+    ];
+
+    it("reads a page drawing four frames a second as busy, where long tasks alone read under a third", () => {
+        const withFrames = page(["longtask", "long-animation-frame"], [...BURST_FRAMES], [...BURST_LONG_TASKS]);
+        withFrames.w.t = 1000;
+        expect(withFrames.meter.tick()).toBe(85);
+        resetSlowFrameTracking();
+        resetBlockedTracking();
+        const tasksOnly = page(["longtask"], [...BURST_FRAMES], [...BURST_LONG_TASKS]);
+        tasksOnly.w.t = 1000;
+        expect(tasksOnly.meter.tick()).toBe(29);
+    });
+
+    it("reads a second of frames under 50 ms as not busy, however many tasks ran", () => {
+        // Forty tasks of 20 ms fill most of a second, in frames of about 25 ms each: 40 frames a second, no slow frame.
+        const { w, meter } = page(["longtask", "long-animation-frame"], [], []);
+        w.t = 1000;
+        expect(meter.tick()).toBe(0);
+    });
+
+    it("counts a frame that was slow to draw with little script in it", () => {
+        // 898 ms from first task to paint with 40 ms of script: the person waited the 898 ms.
+        const { w, meter } = page(["longtask", "long-animation-frame"], [{ startTime: 50, duration: 898 }], []);
+        w.t = 1000;
+        expect(meter.tick()).toBe(90);
+    });
+
+    it("counts a frame that ran over the tick in the second it ended, and never over 100%", () => {
+        const frames = [...backToBack([300, 300, 300], 0, 0), { startTime: 900, duration: 400 }];
+        const { w, meter } = page(["longtask", "long-animation-frame"], frames, []);
+        w.t = 1000;
+        expect(meter.tick()).toBe(90);
+        w.t = 1350;
+        expect(meter.tick()).toBe(100);
     });
 });

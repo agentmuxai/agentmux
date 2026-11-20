@@ -144,8 +144,28 @@ pub const MACOS_LABEL: &str = "com.agentmux.launcher";
 /// exact "is it actually running?" unreliability WS4 warns about.
 #[cfg(any(target_os = "windows", test))]
 pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
+    scheduled_task_xml_for(exe, channel, current_user_id().as_deref())
+}
+
+/// The signed-in user as `DOMAIN\user`, the form Task Scheduler takes in `<UserId>`.
+#[cfg(any(target_os = "windows", test))]
+fn current_user_id() -> Option<String> {
+    let user = std::env::var("USERNAME").ok().filter(|u| !u.is_empty())?;
+    Some(match std::env::var("USERDOMAIN").ok().filter(|d| !d.is_empty()) {
+        Some(domain) => format!("{domain}\\{user}"),
+        None => user,
+    })
+}
+
+/// [`scheduled_task_xml`] for a named user. A logon trigger with no `<UserId>` means "any user who signs in":
+/// Windows lets only an elevated token create that (`schtasks /Create` fails with "Access is denied" from a
+/// normal one), and it would start AgentMux for every other account on the machine too. With the user named, the
+/// trigger is this user's alone and needs no elevation. `None` keeps the any-user form.
+#[cfg(any(target_os = "windows", test))]
+pub fn scheduled_task_xml_for(exe: &Path, channel: &str, user: Option<&str>) -> String {
     let exe = xml_escape(&exe.display().to_string());
     let channel = xml_escape(channel);
+    let user_id = user.map(|u| format!("\n      <UserId>{}</UserId>", xml_escape(u))).unwrap_or_default();
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -155,12 +175,12 @@ pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
-      <Enabled>true</Enabled>
+      <Enabled>true</Enabled>{user_id}
       <Delay>PT30S</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>
-    <Principal id="Author">
+    <Principal id="Author">{user_id}
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
@@ -196,6 +216,7 @@ pub fn scheduled_task_xml(exe: &Path, channel: &str) -> String {
         exe = exe,
         marker = TASK_CHANNEL_MARKER,
         channel = channel,
+        user_id = user_id,
     )
 }
 
@@ -598,6 +619,8 @@ fn remove_launch_agent_plist() -> Result<(), String> {
 /// disturb a running instance):
 /// - `--enable-autostart`  — register, using this executable's own path
 /// - `--disable-autostart` — remove; idempotent, safe to run unconditionally
+/// - `--remove-autostart-for-this-install` — remove only an entry that runs a file from this
+///   executable's own folder (what an uninstaller calls)
 /// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way;
 ///   with `--json`, print the [`Status`] object instead
 /// The channel this launcher belongs to, which owns any entry it writes
@@ -910,6 +933,21 @@ pub fn current_status() -> Status {
     s
 }
 
+/// Does the login entry run a file inside `dir`? An uninstaller asks this with its own install folder, so it
+/// removes the entry that would be left pointing at nothing (`SPEC_START_WITH_OS_2026_09_25.md` G6, G7) and
+/// leaves an entry that another install or channel owns alone. Windows paths compare without case.
+pub fn entry_runs_from(entry: &Entry, dir: &Path) -> bool {
+    fn norm(p: &str) -> String {
+        let p = p.trim_end_matches(|c| c == '\\' || c == '/');
+        if cfg!(target_os = "windows") { p.replace('/', "\\").to_lowercase() } else { p.to_string() }
+    }
+    let Some(target) = entry.target.as_deref().filter(|t| !t.is_empty()) else { return false };
+    let dir = norm(&dir.to_string_lossy());
+    let target = norm(target);
+    let sep = if cfg!(target_os = "windows") { '\\' } else { '/' };
+    !dir.is_empty() && target.len() > dir.len() && target.starts_with(&dir) && target[dir.len()..].starts_with(sep)
+}
+
 pub fn handle_cli(args: &[String]) -> bool {
     let has = |v: &str| args.iter().any(|a| a == v);
 
@@ -962,6 +1000,22 @@ pub fn handle_cli(args: &[String]) -> bool {
         }
         return true;
     }
+    if has("--remove-autostart-for-this-install") {
+        // What an uninstaller runs (Inno's `[UninstallRun]`): remove the login entry only when it runs a file
+        // from this install's folder. Another build's entry stays; no entry is a success.
+        let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+        match (read_entry(), dir) {
+            (Some(entry), Some(dir)) if entry_runs_from(&entry, &dir) => match disable() {
+                Ok(()) => println!("auto-start entry for this install removed"),
+                Err(e) => {
+                    eprintln!("failed to remove the auto-start entry: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            _ => println!("no auto-start entry runs from this install; left alone"),
+        }
+        return true;
+    }
     false
 }
 
@@ -991,6 +1045,20 @@ mod autostart_tests {
             xml.contains("<RunLevel>LeastPrivilege</RunLevel>"),
             "auto-start must never require elevation"
         );
+    }
+
+    /// A logon trigger with no user is the any-user form, which only an elevated token may create. Naming the
+    /// user in the trigger and the principal makes it this user's alone.
+    #[test]
+    fn scheduled_task_names_the_user_so_a_normal_token_can_create_it() {
+        let xml = scheduled_task_xml_for(&exe(), "test", Some(r"PC\Ann & Bo"));
+        assert_eq!(xml.matches(r"<UserId>PC\Ann &amp; Bo</UserId>").count(), 2, "{xml}");
+        let trigger = xml.split("<LogonTrigger>").nth(1).unwrap().split("</LogonTrigger>").next().unwrap();
+        assert!(trigger.contains("<UserId>"));
+        let principal = xml.split("<Principal id=\"Author\">").nth(1).unwrap().split("</Principal>").next().unwrap();
+        assert!(principal.contains("<UserId>"));
+        // Without a user it stays the form it was.
+        assert!(!scheduled_task_xml_for(&exe(), "test", None).contains("<UserId>"));
     }
 
     #[test]
@@ -1167,6 +1235,36 @@ mod autostart_tests {
 
     fn entry(target: &str, channel: Option<&str>) -> Entry {
         Entry { target: Some(target.to_string()), channel: channel.map(str::to_string), current: true }
+    }
+
+    /// An uninstaller removes the entry that runs from its own folder, and nothing else.
+    #[test]
+    fn an_uninstall_removes_only_an_entry_that_runs_from_its_own_folder() {
+        let (dir, ours, other) = if cfg!(target_os = "windows") {
+            (
+                r"C:\Users\a\AppData\Local\Programs\AgentMux",
+                r"C:\Users\a\AppData\Local\Programs\AgentMux\agentmux.exe",
+                r"C:\dev\agentmux\agentmux.exe",
+            )
+        } else {
+            ("/opt/agentmux", "/opt/agentmux/agentmux", "/home/a/dev/agentmux/agentmux")
+        };
+        assert!(entry_runs_from(&entry(ours, Some("stable")), Path::new(dir)));
+        // Another build's entry stays, whoever owns it.
+        assert!(!entry_runs_from(&entry(other, Some("stable")), Path::new(dir)));
+        // A folder whose name only starts the same is not inside it.
+        let sibling = format!("{}-dev{}agentmux.exe", dir, std::path::MAIN_SEPARATOR);
+        assert!(!entry_runs_from(&entry(&sibling, None), Path::new(dir)));
+        // No target, or no folder: nothing to remove.
+        assert!(!entry_runs_from(&Entry { target: None, channel: None, current: true }, Path::new(dir)));
+        assert!(!entry_runs_from(&entry(ours, None), Path::new("")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_paths_compare_without_case_or_slash_direction() {
+        let e = entry(r"c:\users\a\appdata\local\programs\agentmux\AGENTMUX.EXE", None);
+        assert!(entry_runs_from(&e, Path::new("C:/Users/A/AppData/Local/Programs/AgentMux/")));
     }
 
     #[test]

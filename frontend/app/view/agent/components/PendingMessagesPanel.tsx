@@ -26,6 +26,8 @@
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { tip } from "@/app/element/tip";
+import { Button } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
 import { t } from "@/app/i18n/i18n";
 import { formatElapsedCompact } from "@/util/format-time";
@@ -34,6 +36,8 @@ import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
+    /** Stops the agent's turn. Offered while a message waits behind the agent's own running command, which only a stop ends. */
+    onStop?: () => void;
 }
 
 // One clock for the whole queue, however many messages stack: how long the oldest one has waited. It starts
@@ -71,10 +75,13 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     // agent any moment" is not true then. The first such message is the one that goes next.
     const waiting = createMemo(() => queuedMessages().find((m) => m.flushing && m.waiting)?.waiting);
     const oldest = createMemo(() => Math.min(...queuedMessages().map((m) => m.createdAt)));
+    // Offered only while every message waits behind the process: one still queued in the pane goes with Esc.
+    const stop = createMemo(() => (waiting() && stillQueuedCount() === 0 ? props.onStop : undefined));
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
-                <div class="agent-pending-header">
+                {/* With the button, the sentence says what the button stops: it wraps instead of being cut. */}
+                <div class="agent-pending-header" classList={{ "agent-pending-header-wraps": !!stop() }}>
                     <span class="agent-spinner-dot" />
                     <span class="agent-pending-header-text">
                         <Show
@@ -107,6 +114,13 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                             {stillQueuedCount() === 1 ? " message" : " messages"})
                         </Show>
                     </span>
+                    <Show when={stop()}>
+                        {(onStop) => (
+                            <Button variant="link" class="agent-pending-stop" onClick={onStop()} {...tip(t("pendingPanel.stopAndSendTip"))}>
+                                {t("pendingPanel.stopAndSend")}
+                            </Button>
+                        )}
+                    </Show>
                     <PendingTimer since={oldest} />
                 </div>
                 <For each={queuedMessages()}>

@@ -102,6 +102,33 @@ describe("PendingMessagesPanel — flushing copy split", () => {
         expect(screen.getByText(/Waiting \(2 messages, 1 ahead\) — /)).toBeTruthy();
     });
 
+    // A command in the background keeps the agent's process alive for as long as it runs, and only a stop ends it:
+    // while a message waits behind it, the person can stop the command and let the message go.
+    it("offers to stop the running command and send, only while a message waits behind it", () => {
+        let stops = 0;
+        const onStop = () => void stops++;
+        const [pending, setPending] = createSignal<PendingMessage[]>([msg({ flushing: true, waiting: { ahead: 0 } })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} onStop={onStop} />);
+        const button = screen.getByText("Stop it and send now");
+        button.click();
+        expect(stops).toBe(1);
+        // The sentence says what the button stops, so with the button the header wraps instead of being cut.
+        expect(document.querySelector(".agent-pending-header-wraps")).not.toBeNull();
+        // Not waiting behind the process (srv has not said so): nothing to stop.
+        setPending([msg({ flushing: true })]);
+        expect(screen.queryByText("Stop it and send now")).toBeNull();
+        expect(document.querySelector(".agent-pending-header-wraps")).toBeNull();
+        // Still queued in the pane (the turn has not ended): the Esc gesture is the way, not a stop.
+        setPending([msg({ id: "a", flushing: true, waiting: { ahead: 0 } }), msg({ id: "b", flushing: false })]);
+        expect(screen.queryByText("Stop it and send now")).toBeNull();
+    });
+
+    it("has no stop button when the pane gives no stop", () => {
+        const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true, waiting: { ahead: 0 } })]);
+        render(() => <PendingMessagesPanel pendingMessages={pending} />);
+        expect(screen.queryByText("Stop it and send now")).toBeNull();
+    });
+
     it("keeps 'any moment' for a flushing message srv did not report as waiting", () => {
         const [pending] = createSignal<PendingMessage[]>([msg({ flushing: true })]);
         render(() => <PendingMessagesPanel pendingMessages={pending} />);
