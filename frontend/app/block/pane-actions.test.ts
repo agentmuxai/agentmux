@@ -213,3 +213,33 @@ describe("buildPaneContextMenu — Paste", () => {
         expect(calls).toEqual(["paste", "focus"]);
     });
 });
+
+describe("buildPaneContextMenu — a view's own Copy", () => {
+    const viewWith = (items: ContextMenuItem[]) => ({ getCopyMenuItems: vi.fn(() => items) }) as unknown as ViewModel;
+    const media = [{ label: "Copy", click: () => {} }, { label: "Copy path", click: () => {} }] as ContextMenuItem[];
+
+    it("stands in for the plain Copy, which only a text selection enables", () => {
+        const menu = buildPaneContextMenu(agentBlock, opts(), viewWith(media));
+        expect(shape(menu).slice(0, 2)).toEqual(["Copy", "Copy path"]);
+        expect(menu.filter((i) => i.label === "Copy")).toHaveLength(1);
+        expect(menu.find((i) => i.label === "Copy")!.enabled).not.toBe(false);
+    });
+
+    it("is asked with the pane's selection", () => {
+        const view = viewWith(media);
+        buildPaneContextMenu(agentBlock, opts(), view);
+        expect(view.getCopyMenuItems).toHaveBeenCalledWith("");
+    });
+
+    it("an empty answer, or no hook, leaves the plain Copy, disabled with nothing selected", () => {
+        for (const view of [viewWith([]), undefined, {} as ViewModel]) {
+            const copy = buildPaneContextMenu(agentBlock, opts(), view).find((i) => i.label === "Copy")!;
+            expect(copy.enabled).toBe(false);
+        }
+    });
+
+    it("is left out with the rest of Copy when the menu omits it", () => {
+        const menu = buildPaneContextMenu(agentBlock, opts({ omit: new Set<PaneMenuSection>(["copy"]) }), viewWith(media));
+        expect(shape(menu)).not.toContain("Copy path");
+    });
+});
