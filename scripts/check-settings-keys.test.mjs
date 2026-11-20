@@ -8,7 +8,8 @@ import { check, compare, parseBaseline, readKeys, withoutTestModules } from "./c
 
 const entry = (extra = {}) => ({ type: "boolean", default: true, description: "d", "x-section": "App", ...extra });
 const schema = (props) => ({ $defs: { SettingsType: { properties: props } } });
-const STRUCT = (...keys) => `pub struct SettingsType {\n${keys.map((k) => `    #[serde(rename = "${k}")]\n    pub f: bool,\n`).join("")}\n}\n`;
+const STRUCT = (...keys) => `pub struct SettingsType {\n${keys.map((k, i) => `    #[serde(rename = "${k}")]\n    pub f${i}: bool,\n`).join("")}\n}\n`;
+const USES = (n) => Array.from({ length: n }, (_, i) => `s.f${i}`).join(" ");
 const ts = (path, text) => ({ path, text });
 // The two floors (80 frontend, 100 srv) are met by padding, so a test is about one finding.
 const pad = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}:k${i}`);
@@ -21,6 +22,7 @@ const padded = (extraSources = [], extraProps = {}) => {
         sources: [
             ts("frontend/a.ts", fe.map((k) => `getSettingsKeyAtom("${k}")`).join("\n")),
             ts("crates/srv-core/src/backend/wconfig/types.rs", STRUCT(...rs)),
+            ts("crates/srv-core/src/backend/uses.rs", `fn f(s: &S) { ${USES(rs.length)} }`),
             ...extraSources,
         ],
     };
@@ -46,6 +48,13 @@ describe("check-settings-keys", () => {
     it("does not count a connection's own settings as a settings read", () => {
         const { schema: s, sources } = padded([ts("frontend/c.tsx", 'const n = r().settings?.["display:name"];')]);
         expect(check(s, sources)).toEqual([]);
+    });
+
+    it("counts a typed key as read when its field is used outside the struct, and not when it is only declared", () => {
+        const { schema: s, sources } = padded([ts("crates/srv/src/uses2.rs", "fn g(s: &S) { s.t_used }")], { "x:used": entry(), "x:declared": entry() });
+        const more = '    #[serde(rename = "x:used")]\n    pub t_used: bool,\n    #[serde(rename = "x:declared")]\n    pub t_declared: bool,\n}\n';
+        const swapped = sources.map((src) => (src.path.endsWith("types.rs") ? ts(src.path, src.text.replace(/\n}\n$/, `\n${more}`)) : src));
+        expect(kinds(check(s, swapped))).toEqual(["schema-not-read x:declared"]);
     });
 
     it("does not count a field of another struct, or a key only a test module reads", () => {
@@ -89,6 +98,11 @@ describe("withoutTestModules and readKeys", () => {
     it("removes a nested test module whole", () => {
         const text = 'fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { if x { y } }\n}\nfn b() {}\n';
         expect(withoutTestModules(text)).toBe("fn a() {}\n\nfn b() {}\n");
+    });
+
+    it("is not thrown by a brace inside a string, a raw string, a char or a comment", () => {
+        const text = 'fn a(){}\n#[cfg(test)]\nmod tests {\n  const A: &str = "{ open";\n  const B: &str = r#"}} "q" {"#;\n  fn c(){ let x = \'{\'; } // }\n}\nfn b(){}\n';
+        expect(withoutTestModules(text)).toBe("fn a(){}\n\nfn b(){}\n");
     });
 
     it("reads each kind of key from its own source", () => {
