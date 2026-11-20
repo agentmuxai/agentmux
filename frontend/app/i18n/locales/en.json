@@ -489,6 +489,11 @@
     "settings.notifications.runInBackground.description": "When all windows are closed, AgentMux keeps running in the system tray instead of quitting. Quit it from the tray icon's menu. Applies at the next launch.",
     "settings.notifications.autostart.label": "Start at login",
     "settings.notifications.autostart.description": "Start AgentMux in the tray when you log in, without opening a window. The tray icon's menu has the same switch.",
+    "settings.notifications.autostart.broken": "Start at login is on, but the file it runs is gone, so nothing starts at login. Repair points it at this build.",
+    "settings.notifications.autostart.owner": "Start at login is on for {{channel}}. This build can take it over.",
+    "settings.notifications.autostart.ownerUnknown": "Start at login is on for another build. This build can take it over.",
+    "settings.notifications.autostart.repair": "Repair",
+    "settings.notifications.autostart.useThisBuild": "Use this build",
     "settings.notifications.osEnabled.label": "Desktop notifications",
     "settings.notifications.osEnabled.description": "Show a system notification when an agent needs you or finishes while you're not looking at it.",
     "settings.notifications.group.notifications": "Notifications",
@@ -1128,5 +1133,7 @@
     "templateApproval.usesCredential": "Uses a credential",
     "templateApproval.usesCredentialYes": "yes, because of auth.vault:",
     "templateApproval.usesCredentialNo": "no",
-    "templateApproval.secretsNoneDeclared": "none declared (see Uses a credential)"
+    "templateApproval.secretsNoneDeclared": "none declared (see Uses a credential)",
+    "editor.lsp.dismissBanner": "Dismiss banner for this session",
+    "editor.lsp.notOnHost": "A container agent can write in this folder, so no language server runs on the host for it."
 }

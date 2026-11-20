@@ -10,7 +10,7 @@
 # which is what keeps a new version from asking for the keychain again. That
 # fix was lost once before, and a release whose srv comes out with another
 # identifier, or with another team, makes every user's every keychain item ask
-# again on first launch. package-macos.sh runs this after signing, before the
+# again on first launch. sign-macos-app.sh runs this after signing, before the
 # DMG and notarization, so such a build never reaches either.
 #
 # Checked: `Contents/Helpers/AgentMux Server.app` (required) and every
@@ -81,6 +81,6 @@ for t in "${TARGETS[@]}"; do
 done
 if [ "$status" -ne 0 ]; then
     echo "   A different srv identity makes every macOS keychain item ask again after the upgrade." >&2
-    echo "   srv is signed with --identifier $IDENTIFIER in scripts/package-macos.sh; check that step." >&2
+    echo "   srv is signed with --identifier $IDENTIFIER in scripts/sign-macos-app.sh; check that step." >&2
 fi
 exit "$status"
