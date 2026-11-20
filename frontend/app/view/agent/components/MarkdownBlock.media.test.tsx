@@ -46,8 +46,9 @@ describe("MarkdownBlock inline media", () => {
     });
 
     it.each([
-        [{ meta: { "cmd:cwd": "D:/launched" } }, { working_directory: "D:/defined" }, "D:/launched/shots/after.png"],
-        [{ meta: {} }, { working_directory: "D:/defined" }, "D:/defined/shots/after.png"],
+        // A real pane has its block id and a definition that says where the agent runs (a pane that can't say is confined).
+        [{ oid: "b1", meta: { "cmd:cwd": "D:/launched" } }, { agent_type: "claude", working_directory: "D:/defined" }, "D:/launched/shots/after.png"],
+        [{ oid: "b1", meta: {} }, { agent_type: "claude", working_directory: "D:/defined" }, "D:/defined/shots/after.png"],
     ])("the pane's providers prefer the launch cwd over the definition's directory", async (block, agent, want) => {
         const { container } = render(() => (
             <AgentPaneProviders dormant={() => false} block={() => block} agent={() => agent}>

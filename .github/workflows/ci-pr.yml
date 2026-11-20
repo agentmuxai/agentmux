@@ -1096,6 +1096,11 @@ jobs:
       - name: macOS srv signing identity check self-test
         run: bash scripts/verify-srv-identity-darwin.test.sh
 
+      # The stable app's bundle id carries no version (that is what keeps macOS's privacy grants across upgrades), and
+      # its signed requirement names the same id. The packaging and signing steps run this check; fake bundles here.
+      - name: macOS app identity check self-test
+        run: bash scripts/verify-app-identity-darwin.test.sh
+
       # The release's signing job runs these scripts, with the Apple credentials, on an app that came out of another job:
       # the zip's unpack checks, and that none of them starts anything that is in the app. Stand-in tools; runs on Linux.
       - name: macOS signing scripts self-test

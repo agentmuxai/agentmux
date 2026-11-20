@@ -10,8 +10,10 @@ import {
     isNetworkPath,
     MediaTooLargeError,
     resolveMediaPath,
+    type MediaOwner,
 } from "@/app/element/local-media";
 import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
+import { openMessageFile } from "@/app/element/open-message-file";
 import { t } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
@@ -34,6 +36,10 @@ import { createLocalAv, whenNearViewport, type LocalAvState } from "./markdown-m
 export type MarkdownMediaOpts = {
     /** Relative paths resolve against this: the agent's working directory. */
     baseDir: string;
+    /** The agent pane showing the message: srv reads a container agent's paths from its own folders (see `MediaOwner`). */
+    blockId?: string;
+    /** A click on a file of the message is opened by srv from the agent's own folders, not as a path of this computer. */
+    confined?: boolean;
     /**
      * Set by the agent pane: a click on a local image of a message, or on a video's enlarge button, opens a
      * preview over the whole tab that steps through the message's images and videos. Without it a click on an
@@ -104,20 +110,26 @@ const MuxBlock = (props: MuxBlockProps) => {
 /** Open an image or video in the Editor: a tab of the Editor pane on screen,
  *  else a new Editor pane, following newer files in its folder as the Media
  *  pane did (SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md §4.12.1). */
-export function openMediaInEditor(path: string): void {
+export function openMediaInEditor(path: string, owner?: MediaOwner): void {
+    // A file of a container agent's message is opened by srv, from the agent's own folders and as a read-only copy:
+    // never as the path the message wrote, which this computer would read as the person.
+    if (owner?.confined) {
+        openMessageFile(path, owner.blockId);
+        return;
+    }
     fireAndForget(async () => {
         if (await openInEditorPaneOnScreen(path, { followFolder: true })) return;
         await createBlock({ meta: { view: "editor", file: path, "editor:follow_folder": true } });
     });
 }
 
-type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"] };
+type LocalImageProps = { path: string; src: string; alt: string; openGallery?: MarkdownMediaOpts["openGallery"]; owner?: MediaOwner };
 
 /** A click on an image of an agent's message opens the preview over the tab; with no pane to show it, the Editor. */
 function openImage(props: LocalImageProps, figure: HTMLElement | undefined): void {
     const gallery = props.openGallery && figure ? messageGallery(figure) : undefined;
     if (gallery && gallery.index >= 0) props.openGallery!(gallery);
-    else openMediaInEditor(props.path);
+    else openMediaInEditor(props.path, props.owner);
 }
 
 /** An image of an agent's message is a button for the keyboard too, named with its place among the message's images once focused. */
@@ -198,6 +210,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                 maxBytes: INLINE_IMAGE_MAX_BYTES,
                 type: extOf(props.path) === "svg" ? "image/svg+xml" : undefined,
                 signal: abort.signal,
+                blockId: props.owner?.blockId,
             });
             if (disposed) return;
             const objectUrl = URL.createObjectURL(blob);
@@ -277,16 +290,16 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                 <span class="am-muted">[image not found: {props.src}]</span>
             </Match>
             <Match when={state().kind === "too-large"}>
-                <MediaCard path={props.path} size={tooLargeSize()} icon="fa-image" />
+                <MediaCard path={props.path} owner={props.owner} size={tooLargeSize()} icon="fa-image" />
             </Match>
         </Switch>
     );
 }
 
 /** Over the inline cap: the file's name and size, opening it in the Editor. */
-function MediaCard(props: { path: string; size: number; icon: string }): JSX.Element {
+function MediaCard(props: { path: string; size: number; icon: string; owner?: MediaOwner }): JSX.Element {
     return (
-        <Button class="am-media-card" onClick={() => openMediaInEditor(props.path)}>
+        <Button class="am-media-card" onClick={() => openMediaInEditor(props.path, props.owner)}>
             <i class={`fa ${props.icon}`} aria-hidden="true" />
             <span class="am-media-card-name">{basenameOf(props.path)}</span>
             <span class="am-muted">{formatBytes(props.size)}</span>
@@ -460,6 +473,7 @@ function LocalAV(props: {
     src: string;
     kind: "video" | "audio";
     openGallery?: MarkdownMediaOpts["openGallery"];
+    owner?: MediaOwner;
 }): JSX.Element {
     const s = createLocalAv(props);
     return (
@@ -475,7 +489,7 @@ function LocalAV(props: {
                 </span>
             </Match>
             <Match when={s.state().kind === "too-large"}>
-                <MediaCard path={props.path} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
+                <MediaCard path={props.path} owner={props.owner} size={s.tooLargeSize()} icon={props.kind === "video" ? "fa-film" : "fa-music"} />
             </Match>
         </Switch>
     );
@@ -556,8 +570,12 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const shown = /^file:/i.test(src) ? path : src;
     if (isNetworkPath(path)) return <span class="am-muted">[image: {shown} — network paths aren't loaded]</span>;
     const kind = inlineMediaKind(path);
-    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} />;
-    if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} />;
+    // Fail closed: a message of an agent not known to run on this computer, with no pane to name, reads nothing. srv
+    // decides by the pane's runtime; this flag only picks the route, and without a pane there is no route.
+    if (p.media.confined && !p.media.blockId) return <span class="am-muted">{t("mediaPreview.notShownHere", { name: shown })}</span>;
+    const owner: MediaOwner = { blockId: p.media.blockId, confined: p.media.confined };
+    if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} owner={owner} />;
+    if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} owner={owner} />;
     return <span class="am-muted">[image: {shown} — unsupported type]</span>;
 };
 

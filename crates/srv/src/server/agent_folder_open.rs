@@ -29,6 +29,22 @@ type Turned = (CommandPaneOpenData, Option<Snapshot>);
 /// `pane.open` where it leads into a container agent's folder: `cmd` is turned to open the read-only copy (or
 /// the confined Files pane). The copy taken is returned, for the caller to note to the pane that opens.
 pub(crate) async fn bind(state: &AppState, cmd: &mut CommandPaneOpenData) -> Result<Option<Snapshot>, String> {
+    // A file clicked in a container agent's message: found in the agent's own folders, whatever else the open names.
+    // For a pane that is not a container agent's the open goes on as asked.
+    if let Some(pane) = cmd.message_of.take() {
+        if let Some(meta) = crate::server::agent_media_files::pane_meta(state, &pane) {
+            let asked = cmd.clone();
+            let turned = tokio::task::spawn_blocking(move || {
+                let snapshots = container_pane_snapshot::root();
+                from_message(asked, &meta, snapshots.as_deref())
+            })
+            .await
+            .map_err(|e| format!("filesystem task failed: {e}"))?;
+            let (turned, snapshot) = turned?;
+            *cmd = turned;
+            return Ok(Some(snapshot));
+        }
+    }
     let from_pane = crate::server::files_root::bind_pane_open(state, cmd).await?;
     if from_pane.is_none() && cmd.from_link != Some(true) {
         return Ok(None);
@@ -64,6 +80,24 @@ fn called(within: &Path, file: &Path, place: &dyn Fn(&str) -> Place) -> String {
     }
     let rest = file.strip_prefix(within).unwrap_or(file);
     rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+/// A file clicked in a message of the container agent whose pane is `meta`: the file the agent's own folders hold
+/// under that path, as a read-only copy named as the container names it. A path anywhere else, and one that leads out
+/// of the folder through a link, is refused with the reason; so is an open on another computer.
+fn from_message(mut cmd: CommandPaneOpenData, meta: &crate::backend::obj::MetaMapType, snapshots: Option<&Path>) -> Result<(CommandPaneOpenData, Snapshot), String> {
+    if cmd.connection.as_deref().map(str::trim).is_some_and(|c| !c.is_empty() && c != "local") {
+        return Err("A file of an agent's message is on this computer; it isn't opened from another one.".to_string());
+    }
+    let asked = cmd.file.clone().unwrap_or_default();
+    let found = crate::server::agent_media_files::resolve(meta, &asked)?;
+    cmd.view = "editor".into();
+    // The copy does not change when the file does, so there is no folder to follow; and the open is no link.
+    cmd.follow_folder = None;
+    cmd.from_link = None;
+    cmd.meta = None;
+    let snapshot = container_pane_snapshot::for_person(&mut cmd, snapshots, &found.root, &found.file, found.of)?;
+    Ok((cmd, snapshot))
 }
 
 /// A link in a message. A path no container agent can write opens as asked, and so does anything that is not
@@ -224,6 +258,84 @@ mod tests {
         let mut remote = link("editor", &ws.join("src").join("a.txt"));
         remote.connection = Some("user@host".into());
         assert!(turn(remote, None, Some(&snaps), &place).unwrap().1.is_none());
+    }
+
+    /// The pane of a container agent whose workspace is `ws`.
+    fn agent_pane(ws: &Path) -> crate::backend::obj::MetaMapType {
+        let mut meta = crate::backend::obj::MetaMapType::default();
+        meta.insert("agentMode".into(), "container".into());
+        meta.insert(crate::backend::blockcontroller::META_KEY_CMD_CWD.into(), ws.to_string_lossy().into_owned().into());
+        meta
+    }
+
+    fn clicked(path: &str) -> CommandPaneOpenData {
+        CommandPaneOpenData { view: "editor".into(), file: Some(path.into()), follow_folder: Some(true), message_of: Some("pane".into()), ..Default::default() }
+    }
+
+    #[test]
+    fn a_picture_clicked_in_a_container_agents_message_opens_as_a_read_only_copy_named_as_the_container_names_it() {
+        let (_tmp, ws, _private, snaps) = folders();
+        std::fs::write(ws.join("pic.png"), "the agent's picture").unwrap();
+        for asked in ["/workspace/pic.png".to_string(), format!("{}/pic.png", ws.to_string_lossy())] {
+            let (open, snapshot) = from_message(clicked(&asked), &agent_pane(&ws), Some(&snaps)).unwrap();
+            let copy = PathBuf::from(open.file.clone().unwrap());
+            assert!(copy.starts_with(&snaps), "{asked}: the pane is given the copy, never the folder's path");
+            assert_eq!(std::fs::read_to_string(&copy).unwrap(), "the agent's picture");
+            assert!(std::fs::metadata(&copy).unwrap().permissions().readonly());
+            assert!(open.title.clone().unwrap().starts_with("/workspace/pic.png (read-only snapshot, "));
+            assert_eq!((open.view.as_str(), open.follow_folder, open.from_link, open.meta.is_none()), ("editor", None, None, true));
+            assert_eq!(snapshot.of, "/workspace/pic.png");
+        }
+    }
+
+    #[test]
+    fn a_file_clicked_in_a_message_that_is_not_in_the_agents_folders_is_refused_and_leaves_no_copy() {
+        let (_tmp, ws, private, snaps) = folders();
+        let pane = agent_pane(&ws);
+        for asked in [
+            private.join("a.txt").to_string_lossy().into_owned(),
+            "/workspace/../private/a.txt".into(),
+            "~/a.txt".into(),
+            "//host/share/a.png".into(),
+            "C:/Users/me/a.png".into(),
+            "/etc/hostname".into(),
+        ] {
+            let err = from_message(clicked(&asked), &pane, Some(&snaps)).unwrap_err();
+            assert_eq!(err, crate::server::agent_media_files::OUTSIDE, "{asked}");
+        }
+        let mut elsewhere = clicked("/workspace/src/a.txt");
+        elsewhere.connection = Some("user@host".into());
+        assert!(from_message(elsewhere, &pane, Some(&snaps)).is_err(), "a file of another computer is not opened from a message");
+        assert_eq!(std::fs::read_dir(&snaps).map(|d| d.count()).unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn a_link_that_leads_out_of_the_agents_folder_is_refused_when_clicked_in_a_message() {
+        let (_tmp, ws, private, snaps) = folders();
+        if swap_for_a_link(&ws.join("src"), &private) {
+            let err = from_message(clicked("/workspace/src/a.txt"), &agent_pane(&ws), Some(&snaps)).unwrap_err();
+            assert_eq!(err, crate::server::agent_media_files::LEADS_OUT);
+            assert_eq!(std::fs::read_dir(&snaps).map(|d| d.count()).unwrap_or(0), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_click_in_a_pane_that_is_not_a_container_agents_opens_as_asked_and_the_field_is_not_kept() {
+        let (_tmp, ws, private, _snaps) = folders();
+        let state = crate::server::tests::test_state();
+        let mut meta = agent_pane(&ws);
+        meta.insert("agentMode".into(), "host".into());
+        let mut block = crate::backend::obj::Block { oid: "pane".into(), meta, ..Default::default() };
+        state.mstore.insert(&mut block).unwrap();
+        let asked = private.join("a.txt").to_string_lossy().into_owned();
+        let mut cmd = clicked(&asked);
+        assert!(bind(&state, &mut cmd).await.unwrap().is_none());
+        assert_eq!((cmd.file.as_deref(), cmd.message_of), (Some(asked.as_str()), None));
+        // A pane that is not there is not a container agent's either.
+        let mut gone = clicked(&asked);
+        gone.message_of = Some("no-such-pane".into());
+        assert!(bind(&state, &mut gone).await.unwrap().is_none());
+        assert_eq!(gone.file.as_deref(), Some(asked.as_str()));
     }
 
     #[tokio::test]
