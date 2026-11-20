@@ -414,11 +414,11 @@ fn report_progress(op: &StoreOp, emit: &Emit) {
     let mut throttle = store_progress::Throttle::default();
     let handler = AsyncOperationProgressHandler::<StorePackageUpdateResult, StorePackageUpdateStatus>::new(move |_, status| {
         if let Ok(s) = status.ok() {
-            let p = store_progress::from_status(update_state(s.PackageUpdateState), s.PackageBytesDownloaded, s.PackageDownloadSizeInBytes, s.TotalDownloadProgress);
+            let p = store_progress::from_status(update_state(s.PackageUpdateState), s.TotalDownloadProgress);
             if throttle.admits(&p) {
                 // The Store's raw numbers at each change of what the page shows: a package's own bytes and the whole update's fraction.
                 tracing::debug!(
-                    state = ?s.PackageUpdateState,
+                    phase = p.phase,
                     package_bytes = s.PackageBytesDownloaded,
                     package_size = s.PackageDownloadSizeInBytes,
                     package_fraction = s.PackageDownloadProgress,
