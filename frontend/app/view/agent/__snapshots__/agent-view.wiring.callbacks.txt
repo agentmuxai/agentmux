@@ -15,7 +15,7 @@ log("agent", "Retry — no prior message to re-send; relaunching the agent")
 launch.startLaunchFlow()
 > recovered, a message to resend
 clearFailure(<paneModel>, {"reason":"recovered","system":true})
-commands.sendWithState("again", [{"n":1}], false)
+commands.sendWithState("again", [{"n":1}], false, true)
 > recovered while another flow runs
 computeTermSizeFromEl(.agent-view)
 reconcileTurnActive(true)
@@ -103,7 +103,7 @@ send: same
 log: same
 log("agent", "Retry — no prior message to re-send; relaunching the agent")
 launch.startLaunchFlow()
-commands.sendWithState("again", [], true)
+commands.sendWithState("again", [], true, true)
 hasHeldMessages: same
 flushHeldMessages: same
 commands.flushPendingControllerRefresh()

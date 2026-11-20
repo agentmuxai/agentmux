@@ -95,6 +95,10 @@ fn persist_user_line_as(
     shown_by_pane: bool,
     record: Option<&RecordOrigin>,
 ) {
+    // A message sent again (a retry, a usage limit's resend) is already in the transcript from its first send: one copy.
+    if record.is_some_and(|r| r.resend) {
+        return;
+    }
     let global = global_output_zone.and_then(|zone| {
         crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
     });

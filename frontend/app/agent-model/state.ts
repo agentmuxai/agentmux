@@ -61,6 +61,8 @@ export interface PendingMessage {
     createdAt: number;
     /** Sent by the pane on AgentMux's behalf (the start-up document), not typed by the person. */
     system?: boolean;
+    /** The same message again (a Retry): the conversation already holds it, so acceptance adds no second node. */
+    resend?: boolean;
     /**
      * True when this message was queued while a turn was already in-flight
      * (Submitting | Streaming | Interrupting). False for messages that

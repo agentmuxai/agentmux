@@ -500,6 +500,26 @@ mod tests {
         assert!(read[1]["amx"].get("sig").is_none());
     }
 
+    /// A retry and a usage limit's resend send the same message again: the transcript keeps the first record only, so
+    /// the conversation reads back with one copy however many attempts were made.
+    #[test]
+    fn a_message_sent_again_is_recorded_once() {
+        use crate::backend::message_origin::{MessageOrigin, RecordOrigin};
+        let (fs, ms) = stores();
+        let block = "blk-sig-resend";
+        let first = RecordOrigin::new(MessageOrigin::user());
+        let again = RecordOrigin { resend: true, ..first.clone() };
+        crate::backend::transcript::append::persist_user_line(None, block, &user_line("do the thing"), Some(&fs), None, Some(&first));
+        for _ in 0..13 {
+            crate::backend::transcript::append::persist_user_line(None, block, &user_line("do the thing"), Some(&fs), None, Some(&again));
+            crate::backend::transcript::append::persist_injected_user_line(None, block, &user_line("do the thing"), Some(&fs), None, Some(&again));
+        }
+        let read = tail(&fs, &ms, block);
+        assert_eq!(read.len(), 1, "13 resends add no copy");
+        assert_eq!(read[0]["message"]["content"], "do the thing");
+        assert_eq!(read[0]["amx"]["verified"], true);
+    }
+
     #[test]
     fn a_line_appended_by_anyone_else_is_read_back_untyped() {
         let (fs, ms) = stores();
