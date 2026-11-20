@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import { decodeFileUri, workspaceCovers } from "./editor-lsp-paths";
-import { lspBannerKey, lspBannerShows, lspStatusChipText, NOT_ON_HOST_TEXT } from "./editor-lsp-status";
+import english from "@/app/i18n/locales/en.json";
+import { lspBannerKey, lspBannerShows, lspStatusChipText } from "./editor-lsp-status";
 
 describe("workspaceCovers", () => {
     it("is false with no root", () => {
@@ -78,6 +79,6 @@ describe("the language server's status", () => {
         expect(lspBannerShows(notOnHost, new Set([key]))).toBe(false);
         expect(lspBannerKey({ kind: "missing", language: "python" })).toBe("python");
         expect(lspBannerKey({ kind: "ready", capabilities: {} as never })).toBeNull();
-        expect(NOT_ON_HOST_TEXT).toContain("no language server runs on the host");
+        expect(english["editor.lsp.notOnHost"]).toContain("no language server runs on the host");
     });
 });

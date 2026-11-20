@@ -220,6 +220,27 @@ pub(crate) fn add_for_test(folder: &Path, container: &str, target: &str) {
     state().lock().for_tests.push(Folder { hosts: spellings(folder), container: container.to_string(), target: target.to_string() });
 }
 
+/// Whether one of `folders` is `asked` (the spellings of one folder) or lies beneath it.
+fn holds_one_of(asked: &[String], folders: &[Folder]) -> bool {
+    folders.iter().flat_map(|folder| &folder.hosts).any(|host| asked.iter().any(|dir| relative_to(host, dir).is_some()))
+}
+
+/// Whether a folder a container agent can write is `dir` or lies beneath it. Yes while that can't be told.
+/// Reads the disk and the store, as [`place`] does.
+pub fn holds_a_container_agents_folder(dir: &str) -> bool {
+    // `place` reads the panes when its last read is old: the list it leaves is the one looked through here.
+    if matches!(place(dir), Place::Unknown) {
+        return true;
+    }
+    let asked = spellings(Path::new(dir));
+    let s = state().lock();
+    #[cfg(test)]
+    if holds_one_of(&asked, &s.for_tests) {
+        return true;
+    }
+    s.folders.as_deref().is_some_and(|folders| holds_one_of(&asked, folders))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +262,20 @@ mod tests {
         assert_eq!(inside_of(&asked("/data/shared/x"), &folders).unwrap().dir, "/data/x");
         assert_eq!(inside_of(&asked("/w/aria2"), &folders), None, "a sibling with a longer name is outside");
         assert_eq!(inside_of(&asked("/w"), &folders), None, "the folder above is outside");
+    }
+
+    #[test]
+    fn a_folder_holds_a_bound_one_that_is_it_or_lies_beneath_it() {
+        let folders = [folder("/p/proj/crates/foo", "agentmux-a", "/workspace"), folder("/w/aria", "agentmux-b", "/workspace")];
+        assert!(holds_one_of(&asked("/p/proj"), &folders), "a bound folder beneath it");
+        assert!(holds_one_of(&asked("/p/proj/crates/foo"), &folders), "the bound folder itself");
+        assert!(holds_one_of(&asked("/p"), &folders), "a bound folder deeper beneath it");
+        assert!(!holds_one_of(&asked("/p/proj/crates/foo/src"), &folders), "a folder inside a bound one holds none");
+        assert!(!holds_one_of(&asked("/p/proj/crates/fo"), &folders), "a sibling with a shorter name");
+        assert!(!holds_one_of(&asked("/p/other"), &folders), "a folder beside it");
+        // Either spelling of the folder asked about finds it.
+        assert!(holds_one_of(&["/links/proj".to_string(), "/p/proj".to_string()], &folders));
+        assert!(!holds_one_of(&asked("/p/proj"), &[]));
     }
 
     #[test]

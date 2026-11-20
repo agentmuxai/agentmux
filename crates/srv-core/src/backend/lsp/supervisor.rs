@@ -53,8 +53,9 @@ pub enum LspError {
     #[error("unsupported language: {0}")]
     UnsupportedLanguage(String),
 
-    /// The file, or its project folder, is one a container agent can write: no server runs on the host
-    /// for it, whatever the language. The frontend shows this as a state of its own.
+    /// The file, or its project folder, is one a container agent can write, or the project folder holds
+    /// one: no server runs on the host for it, whatever the language. The frontend shows this as a state
+    /// of its own.
     #[error("no_host_server_for_container_agent_folder")]
     ContainerAgentFolder,
 
@@ -85,14 +86,12 @@ pub struct LspSupervisor {
     event_bus: Arc<EventBus>,
 }
 
-/// Refuses a server for a file or a project folder that a container agent can write. The check reads the
-/// disk and the store, so it runs off the async workers.
+/// Refuses a server for a file or a project folder that a container agent can write, and for a project
+/// folder that holds one. The check reads the disk and the store, so it runs off the async workers.
 async fn on_host_only(args: &StartArgs) -> Result<(), LspError> {
     let (file, root) = (args.file_path.clone(), args.workspace_root.clone());
-    let on_host = tokio::task::spawn_blocking(move || {
-        super::workspace::runs_on_host(&file, &root, &crate::backend::fs_ops::container_folders::place)
-    })
-    .await
+    let on_host = tokio::task::spawn_blocking(move || super::workspace::served_on_host(&file, &root))
+        .await
     .map_err(|e| LspError::SpawnFailed(format!("the folder check did not finish: {e}")))?;
     if on_host {
         Ok(())

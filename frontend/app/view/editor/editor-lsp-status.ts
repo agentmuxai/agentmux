@@ -24,9 +24,6 @@ export function lspStatusChipText(state: LspState | null, language: string): str
     }
 }
 
-/** What the banner says for a file in a folder a container agent can write. */
-export const NOT_ON_HOST_TEXT = "This folder belongs to a container agent, so no language server runs on the host for it.";
-
 /** The name the banner of a state is dismissed under for the session: a missing server's language, one
  *  name for every container agent's folder; `null` for a state with no banner. */
 export function lspBannerKey(state: LspState | null): string | null {

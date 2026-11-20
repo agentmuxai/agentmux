@@ -8,10 +8,11 @@ import { Show } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { Button, CloseButton, SegmentedControl } from "@/app/element/ui";
 import { redactSecrets } from "@/app/errors/redact";
+import { t } from "@/app/i18n/i18n";
 import { keyLabel } from "@/app/keybindings";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { previewMedia } from "./editor-preview-media";
-import { lspBannerKey, NOT_ON_HOST_TEXT } from "./editor-lsp-status";
+import { lspBannerKey } from "./editor-lsp-status";
 import { installHintFor } from "./lsp/install-hints";
 import type { LspState } from "./lsp/lsp-client";
 
@@ -74,8 +75,8 @@ export function EditorLspBanner(props: {
                         <div class="editor-lsp-banner" role="status">
                             <div class="editor-lsp-banner-row">
                                 <span class="editor-lsp-banner-icon" aria-hidden="true">ⓘ</span>
-                                <span class="editor-lsp-banner-text">{NOT_ON_HOST_TEXT}</span>
-                                <CloseButton size="sm" label="Dismiss banner for this session" onClick={() => props.onDismiss(key)} />
+                                <span class="editor-lsp-banner-text">{t("editor.lsp.notOnHost")}</span>
+                                <CloseButton size="sm" label={t("editor.lsp.dismissBanner")} onClick={() => props.onDismiss(key)} />
                             </div>
                         </div>
                     );
@@ -91,7 +92,7 @@ export function EditorLspBanner(props: {
                             </span>
                             <CloseButton
                                 size="sm"
-                                label="Dismiss banner for this session"
+                                label={t("editor.lsp.dismissBanner")}
                                 onClick={() => props.onDismiss(state.language)}
                             />
                         </div>
