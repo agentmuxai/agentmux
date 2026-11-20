@@ -6,7 +6,7 @@
 // and checked by the real `ssh-keygen -Y verify` wherever it is installed (the release job's runner has it; CI sets CI).
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createPrivateKey, createPublicKey, sign as cryptoSign } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -138,6 +138,64 @@ describe("the signed bytes and the file", () => {
         const wrongMagic = Buffer.from(raw);
         wrongMagic.write("SSHSIX", 0);
         expect(() => parseSshsig(wrap(wrongMagic))).toThrow(/magic/);
+    });
+});
+
+describe("a signature whose inner length fields run past the end is refused cleanly", () => {
+    const u32 = (n) => {
+        const b = Buffer.alloc(4);
+        b.writeUInt32BE(n);
+        return b;
+    };
+    const str = (b) => Buffer.concat([u32(b.length), b]);
+    const goodKey = () => Buffer.concat([str(Buffer.from("ssh-ed25519")), str(Buffer.alloc(32, 1))]);
+    const goodSig = () => Buffer.concat([str(Buffer.from("ssh-ed25519")), str(Buffer.alloc(64, 2))]);
+    // The outer strings are well formed (so the file parses to its key blob and signature blob); only the blobs' own fields are wrong.
+    const file = (keyBlob, sigBlob) => {
+        const blob = Buffer.concat([Buffer.from("SSHSIG"), u32(1), str(keyBlob), str(Buffer.from(SSHSIG_NAMESPACE)), str(Buffer.alloc(0)), str(Buffer.from("sha512")), str(sigBlob)]);
+        return `-----BEGIN SSH SIGNATURE-----\n${blob.toString("base64")}\n-----END SSH SIGNATURE-----\n`;
+    };
+
+    it("the well-formed blobs parse (so the cases below are refused for their lengths and nothing else)", () => {
+        const p = parseSshsig(file(goodKey(), goodSig()));
+        expect(p.publicKey.length).toBe(32);
+        expect(p.signature.length).toBe(64);
+    });
+
+    it("a key blob whose key-type length, or key length, runs past its end is refused as cut short", () => {
+        const typeTooLong = Buffer.concat([u32(0xffffffff), Buffer.from("ssh-ed25519"), str(Buffer.alloc(32, 1))]);
+        const keyTooLong = Buffer.concat([str(Buffer.from("ssh-ed25519")), u32(33), Buffer.alloc(32, 1)]);
+        const keyHuge = Buffer.concat([str(Buffer.from("ssh-ed25519")), u32(0xffffffff), Buffer.alloc(32, 1)]);
+        const noRoomForLength = Buffer.concat([str(Buffer.from("ssh-ed25519")), Buffer.from([0, 0])]);
+        for (const bad of [typeTooLong, keyTooLong, keyHuge, noRoomForLength]) {
+            expect(() => parseSshsig(file(bad, goodSig()))).toThrow(/cut short/);
+        }
+    });
+
+    it("a signature blob whose type length, or signature length, runs past its end is refused as cut short", () => {
+        const typeTooLong = Buffer.concat([u32(0x7fffffff), Buffer.from("ssh-ed25519"), str(Buffer.alloc(64, 2))]);
+        const sigTooLong = Buffer.concat([str(Buffer.from("ssh-ed25519")), u32(65), Buffer.alloc(64, 2)]);
+        const sigHuge = Buffer.concat([str(Buffer.from("ssh-ed25519")), u32(0xffffffff), Buffer.alloc(64, 2)]);
+        const noRoomForLength = Buffer.concat([str(Buffer.from("ssh-ed25519")), Buffer.from([0])]);
+        for (const bad of [typeTooLong, sigTooLong, sigHuge, noRoomForLength]) {
+            expect(() => parseSshsig(file(goodKey(), bad))).toThrow(/cut short/);
+        }
+    });
+
+    it("lengths that fit but leave bytes over, or are the wrong size for Ed25519, are still refused", () => {
+        expect(() => parseSshsig(file(Buffer.concat([goodKey(), Buffer.from([0])]), goodSig()))).toThrow(/Ed25519 key/);
+        expect(() => parseSshsig(file(goodKey(), Buffer.concat([goodSig(), Buffer.from([0])])))).toThrow(/Ed25519 signature/);
+        expect(() => parseSshsig(file(Buffer.concat([str(Buffer.from("ssh-ed25519")), str(Buffer.alloc(31, 1))]), goodSig()))).toThrow(/Ed25519 key/);
+    });
+});
+
+describe("no workflow runs the tests-only switch that skips ssh-keygen", () => {
+    it("--no-ssh-keygen does not appear anywhere under .github/workflows", () => {
+        const dirOf = join(HERE, "..", ".github", "workflows");
+        const names = readdirSync(dirOf).filter((n) => /\.ya?ml$/.test(n));
+        expect(names.length).toBeGreaterThan(0);
+        const offenders = names.filter((n) => readFileSync(join(dirOf, n), "utf8").includes("no-ssh-keygen"));
+        expect(offenders).toEqual([]);
     });
 });
 

@@ -206,6 +206,13 @@ if [ -n "$ALREADY" ] && [ "$FORCE" = 0 ]; then
 fi
 
 # ---- the release, and checking what is downloaded ----
+# 1 when the version was not asked for (it is "the latest") and the network's latest is below the SSH-signature floor this script
+# ships with. A "latest" can never be older than a release the script itself knows exists, so nothing the network says on its own
+# moves an install to a release that could only be checked by its hashes: it is installed only if its Ed25519 signature is checked.
+STALE_LATEST=0
+stale_latest_message() {
+    printf '%s' "the latest release the network gives ($VERSION) is older than ${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}, which this script ships with, and its signature cannot be checked here (this system's openssl cannot check Ed25519, and releases that old carry no SSH signature): not installing. Give the version with --version to install an older release on purpose, or install OpenSSL 3 and run this again"
+}
 resolve_version() {
     if [ -n "$VERSION" ]; then return; fi
     have curl || die "curl is needed to find the latest release (or pass --version)"
@@ -214,6 +221,10 @@ resolve_version() {
     [ "$rc" = 0 ] || net_die "could not look up the latest release" "$rc" curl
     VERSION="${url##*/v}"
     printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$' || die "the latest release's address ($url) is not a version"
+    if ! version_at_least "$VERSION" "${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}"; then
+        STALE_LATEST=1
+        can_check_signature || die "$(stale_latest_message)"
+    fi
 }
 
 # The openssl that checks signatures. The Ed25519 check needs OpenSSL 3 (pkeyutl -rawin). A stock Mac's /usr/bin/openssl is
@@ -336,6 +347,7 @@ download_verified() {
                 floor) dv_why="this release ($VERSION) is older than ${AGENTMUX_INSTALL_SSHSIG_FLOOR:-$SSHSIG_FLOOR}, the first with an SSH signature" ;;
                 *) dv_why="there is no ssh-keygen of OpenSSH 8.0 or newer to check the SSH signature that releases from $SSHSIG_FLOOR on carry" ;;
             esac
+            [ "$STALE_LATEST" = 0 ] || die "$(stale_latest_message)"
             [ "$REQUIRE_SIGNATURE" = 0 ] || die "the release's signature cannot be checked here ($dv_ossl cannot, and $dv_why) and --require-signature was given"
             say "signature NOT checked: this system's openssl ($dv_ossl) cannot check Ed25519 signatures (it needs OpenSSL 3; on a Mac, Homebrew's openssl@3 does, if you have it), and $dv_why"
             say "what is checked instead: the file's size and SHA-256 against the manifest. That catches a damaged download, not a release that was replaced upstream"
