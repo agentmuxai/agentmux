@@ -249,13 +249,19 @@ export function BroadcastDock(props: { model: SwarmViewModel; agents: Pick<Swarm
                 <Button tone="accent" class="swarm-fleet-btn swarm-fleet-btn--primary" disabled={!canSend()} onClick={() => void send()}>
                     <i class="fa-solid fa-tower-broadcast" /> Send to {recipients()}
                 </Button>
-                <Show when={progress()} fallback={<span class="swarm-broadcast-hint">{t("swarm.broadcast.hint", { newlineKey: keyLabel("shift+Enter") })}</span>}>
-                    {(p) => (
-                        <span class="swarm-broadcast-hint" role="status">
-                            {t("swarm.broadcast.progress", { sent: p().sent, total: p().total })}
-                        </span>
-                    )}
-                </Show>
+                {/* The hint keeps its box under the count: in a narrow pane the hint is two lines and the count one, and swapping them moved everything below the row. */}
+                <span class="swarm-broadcast-hint">
+                    <span class="swarm-broadcast-hint-text" classList={{ "is-covered": progress() !== null }} aria-hidden={progress() !== null ? "true" : undefined}>
+                        {t("swarm.broadcast.hint", { newlineKey: keyLabel("shift+Enter") })}
+                    </span>
+                    <Show when={progress()}>
+                        {(p) => (
+                            <span class="swarm-broadcast-progress" role="status">
+                                {t("swarm.broadcast.progress", { sent: p().sent, total: p().total })}
+                            </span>
+                        )}
+                    </Show>
+                </span>
                 <Show when={gap()}>{(text) => <span class="swarm-fleet-broadcast-gap">{text()}</span>}</Show>
                 <Show when={hidden() > 0}>
                     <span class="swarm-fleet-broadcast-gap">{hidden()} hidden by the filter, not included</span>
