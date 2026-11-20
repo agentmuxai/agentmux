@@ -328,6 +328,13 @@ declare global {
         opts?: WebSelectorOpts;
     };
 
+    // wconfig.UnrecognizedSetting
+    type UnrecognizedSetting = {
+        key: string;
+        suggestion?: string;
+        line?: number;
+    };
+
     // wconfig.ConfigError
     type ConfigError = {
         file: string;
@@ -513,6 +520,7 @@ declare global {
         connections: {[key: string]: ConnKeywords};
         bookmarks: {[key: string]: WebBookmark};
         configerrors: ConfigError[];
+        unrecognized?: UnrecognizedSetting[];
         browserstartpage?: string;
     };
 

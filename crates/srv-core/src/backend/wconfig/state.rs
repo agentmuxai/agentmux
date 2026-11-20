@@ -87,6 +87,18 @@ impl ConfigState {
         self.replace_config_errors(|e| !is_widgets_error(e), errors)
     }
 
+    /// Say which keys of `settings.json` are not settings. Returns whether anything changed.
+    pub fn set_unrecognized(&self, unrecognized: Vec<super::unrecognized::UnrecognizedSetting>) -> bool {
+        let mut current = self.config.write().unwrap();
+        if current.unrecognized == unrecognized {
+            return false;
+        }
+        let mut new_config = (**current).clone();
+        new_config.unrecognized = unrecognized;
+        *current = Arc::new(new_config);
+        true
+    }
+
     /// The same for `widgets.json`: its errors replace its own, and the settings' stay.
     pub fn set_widgets_config_errors(&self, errors: Vec<ConfigError>) -> bool {
         self.replace_config_errors(is_widgets_error, errors)
@@ -149,6 +161,21 @@ mod tests {
         assert_eq!(state.get_full_config().config_errors, bad);
         assert!(state.set_config_errors(Vec::new()));
         assert!(state.get_full_config().config_errors.is_empty());
+    }
+
+    #[test]
+    fn unrecognized_keys_are_set_cleared_kept_across_a_settings_update_and_only_a_change_is_reported() {
+        use super::super::unrecognized::UnrecognizedSetting;
+        let state = ConfigState::new();
+        let typo = vec![UnrecognizedSetting { key: "term:fontsise".into(), suggestion: Some("term:fontsize".into()), line: Some(2) }];
+        assert!(state.set_unrecognized(typo.clone()));
+        assert!(!state.set_unrecognized(typo.clone()), "the same list again is not a change");
+        state.update_settings(SettingsType::default());
+        assert_eq!(state.get_full_config().unrecognized, typo);
+        assert!(state.set_unrecognized(Vec::new()));
+        assert!(state.get_full_config().unrecognized.is_empty());
+        // An empty list is not sent at all.
+        assert!(serde_json::to_value(&*state.get_full_config()).unwrap().get("unrecognized").is_none());
     }
 
     /// `settings.json` → `connections.<name>` reaches `FullConfigType::connections`,

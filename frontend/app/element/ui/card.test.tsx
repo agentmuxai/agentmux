@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -149,6 +149,111 @@ describe("CardGrid", () => {
         expect(order()).toEqual(["a", "b", "c", "d", "e", "D"]);
         setSel(null);
         expect(order()).toEqual(["a", "b", "c", "d", "e"]);
+        spy.mockRestore();
+    });
+
+    it("stops at maxColumns however wide it is, and sets each track to at most maxCardWidth", () => {
+        const spy = widthOf(2400);
+        const { container } = render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                minCardWidth={270}
+                maxColumns={4}
+                maxCardWidth={380}
+                renderCard={(i) => <Card title={i} aria-label={i} />}
+            />
+        ));
+        const grid = container.querySelector(".ui-card-grid") as HTMLElement;
+        expect(grid.classList.contains("ui-card-grid--capped")).toBe(true);
+        expect(grid.style.gridTemplateColumns).toBe("repeat(4, minmax(0, 380px))");
+        spy.mockRestore();
+    });
+
+    it("drops columns as the grid narrows, by the card's minimum, at the widths the Connectors spec lists", () => {
+        // 270 px minimum, 6 px gap, 10 px padding each side: 2 columns from 566, 3 from 842, 4 from 1118 (SPEC_CONNECTORS_ONE_LIST §4.7).
+        const columns = (w: number) => Math.min(columnsFor(w - 20, 270, 6), 4);
+        expect([280, 339, 340, 565, 566, 841, 842, 1117, 1118, 2400].map(columns)).toEqual([1, 1, 1, 1, 2, 2, 3, 3, 4, 4]);
+    });
+
+    it("keeps the order of the cards when the column count changes, moving only the details", () => {
+        const [w, setW] = createSignal(1118);
+        const spy = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+            return this.classList.contains("ui-card-grid") ? w() : 0;
+        });
+        let notify: () => void = () => {};
+        const original = globalThis.ResizeObserver;
+        globalThis.ResizeObserver = class {
+            constructor(cb: () => void) {
+                notify = cb;
+            }
+            observe() {}
+            disconnect() {}
+            unobserve() {}
+        } as unknown as typeof ResizeObserver;
+        const { container } = render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey="b"
+                minCardWidth={270}
+                maxColumns={4}
+                renderCard={(i) => <Card title={i} aria-label={i} />}
+                renderDetail={(i) => <div>details of {i}</div>}
+            />
+        ));
+        const order = () =>
+            [...container.querySelector(".ui-card-grid")!.children].map((el) =>
+                el.classList.contains("ui-card-detail") ? "D" : el.getAttribute("data-card-key"),
+            );
+        // 1118 px: four columns, so b's row is a b c d.
+        expect(order()).toEqual(["a", "b", "c", "d", "D", "e"]);
+        setW(566);
+        notify();
+        expect(order()).toEqual(["a", "b", "D", "c", "d", "e"]);
+        setW(300);
+        notify();
+        expect(order()).toEqual(["a", "b", "D", "c", "d", "e"]);
+        expect(container.querySelectorAll(".ui-card-cell").length).toBe(5);
+        globalThis.ResizeObserver = original;
+        spy.mockRestore();
+    });
+
+    it("names the details as a region, labelled by the open card, and moves focus into them when asked", async () => {
+        const spy = widthOf(406);
+        const [sel, setSel] = createSignal<string | null>(null);
+        render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey={sel()}
+                detailId="the-details"
+                detailLabel={(i) => `${i} details`}
+                focusDetails
+                renderCard={(i) => <Card title={i} aria-label={i} aria-controls="the-details" />}
+                renderDetail={(i) => <div>details of {i}</div>}
+            />
+        ));
+        setSel("b");
+        const region = await screen.findByRole("region", { name: "b details" });
+        expect(region.id).toBe("the-details");
+        await waitFor(() => expect(document.activeElement).toBe(region));
+        expect(screen.getByRole("button", { name: "b" }).getAttribute("aria-controls")).toBe("the-details");
+        spy.mockRestore();
+    });
+
+    it("gives the details no role when no label is asked for", () => {
+        const spy = widthOf(406);
+        const { container } = render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey="a"
+                renderCard={(i) => <Card title={i} aria-label={i} />}
+                renderDetail={() => <div>details</div>}
+            />
+        ));
+        expect(container.querySelector(".ui-card-detail")!.getAttribute("role")).toBeNull();
         spy.mockRestore();
     });
 
