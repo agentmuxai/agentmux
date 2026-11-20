@@ -61,9 +61,13 @@ const r = (el) => el.getBoundingClientRect();
 const panel = r(document.querySelector(".modal-panel"));
 const list = document.querySelector(".command-palette-list");
 list.scrollTop = 500;
+// What a key move does to the selected row: a script's scroll must reach the list, never the panel around it.
+const all = document.querySelectorAll(".command-palette-item");
+all[all.length - 1].scrollIntoView({ block: "nearest" });
 const input = r(document.querySelector(".command-palette-input-row"));
 const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
 const caps = [...document.querySelectorAll(".command-palette-item-shortcut")].map((el) => r(el));
+const labels = [...document.querySelectorAll(".command-palette-item-label")].map((el) => r(el).width);
 const groups = [...document.querySelectorAll(".command-palette-item-group")].map((el) => r(el));
 const backdrop = getComputedStyle(document.querySelector(".modal-backdrop"));
 const out = {
@@ -72,6 +76,8 @@ const out = {
   capsWidths: caps.map((c) => c.width), capsRights: caps.map((c) => c.right), panelRight: panel.right,
   groupRights: groups.map((g) => g.right), groupWidths: groups.map((g) => g.width),
   backdropBg: backdrop.backgroundColor, backdropFilter: backdrop.backdropFilter,
+  panelScroll: document.querySelector(".modal-panel").scrollTop, labelWidths: labels, listScrollW: list.scrollWidth, listClientW: list.clientWidth,
+  groupShown: [...document.querySelectorAll(".command-palette-item-group")].some((g) => getComputedStyle(g).display !== "none"),
 };
 const pre = document.createElement("pre"); pre.id = "result"; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 `;
@@ -117,6 +123,33 @@ describe.skipIf(!BROWSER)("command palette place and size", () => {
     it("never grows past the window's height less 48px", async () => {
         const m = await measureInBrowser<Measured>(BROWSER!, page(1, many), { width: 900, height: 300 });
         expect(m.height).toBeLessThanOrEqual(300 - 48 + 1);
+        expect(m.inputTop).toBeLessThanOrEqual(1);
+    }, 60_000);
+
+    it("keeps every label some room, and scrolls nothing sideways, in a narrow panel with four-key shortcuts", async () => {
+        const rows = [
+            row("Split Down", ["Ctrl", "Alt", "Shift", "D"], "split"),
+            row("Open Agent", ["Ctrl", "Shift", "A"], "open"),
+            row("New Pane", ["Ctrl", "Shift", "N"], "window"),
+        ].join("");
+        const m = await measureInBrowser<Measured>(BROWSER!, page(1.5, rows), { width: 400, height: 700 });
+        expect(Math.min(...m.labelWidths)).toBeGreaterThanOrEqual(40);
+        expect(m.listScrollW).toBeLessThanOrEqual(m.listClientW);
+        // The panel is narrower than 440 css px here: the group's name is left out.
+        expect(m.groupShown).toBe(false);
+    }, 60_000);
+
+    it("keeps the group's name where the panel is wide enough for it", async () => {
+        const m = await measureInBrowser<Measured>(BROWSER!, page(1, row("Open Agent", ["Ctrl", "Shift", "A"], "open")), {
+            width: 900,
+            height: 700,
+        });
+        expect(m.groupShown).toBe(true);
+    }, 60_000);
+
+    it("never scrolls the panel itself, in a window shorter than the panel", async () => {
+        const m = await measureInBrowser<Measured>(BROWSER!, page(1, many), { width: 900, height: 300 });
+        expect(m.panelScroll).toBe(0);
         expect(m.inputTop).toBeLessThanOrEqual(1);
     }, 60_000);
 

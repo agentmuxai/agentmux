@@ -20,9 +20,19 @@
     max-width: min(100%, calc((100vw - 16px) / var(--zoomfactor)));
     max-height: calc((100vh - 48px) / var(--zoomfactor));
     padding: 0;
-    // Panel content manages its own scrolling in the list area, so
-    // let overflow fall through.
-    overflow: hidden;
+    // Panel content manages its own scrolling in the list area. `clip`, not `hidden`: a hidden box can still be
+    // scrolled by a script (a row's scrollIntoView in a window shorter than the panel moved the search row up).
+    overflow: clip;
+    // What the rows are laid out against (below): the panel's own width, whatever the window's.
+    container: command-palette / inline-size;
+}
+
+// In a narrow panel the caps and the label need the room the group's name takes: the name is left out, and the
+// groups keep their hairlines and their names to a screen reader (R12, R14).
+@container command-palette (max-width: 440px) {
+    .command-palette-item-group {
+        display: none;
+    }
 }
 
 .command-palette-container {
@@ -71,6 +81,7 @@
     overflow-y: auto;
     flex: 1;
     padding: var(--space-1) 0;
+    overflow-x: hidden;
     // Twelve rows, then it scrolls and the search row stays (R2).
     max-height: calc(12 * var(--palette-row-h) + 2 * var(--space-1));
 
@@ -119,7 +130,8 @@
 // The label, then what is said about it (an agent's seat and state), on one line that gives way to the category.
 .command-palette-item-text {
     flex: 1;
-    min-width: 0;
+    // The label keeps some room however long the shortcut is; the row cuts the rest of it.
+    min-width: 6ch;
     display: flex;
     align-items: baseline;
     gap: var(--space-2);
