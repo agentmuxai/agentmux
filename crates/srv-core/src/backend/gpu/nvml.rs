@@ -200,6 +200,7 @@ impl Nvml {
     }
 
     /// How many devices NVML lists.
+    #[cfg(test)]
     pub fn devices(&self) -> usize {
         self.slots.len()
     }
