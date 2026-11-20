@@ -41,6 +41,7 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
+import { catchPaneErrors } from "@/app/util/pane-error-scope";
 import { BlockSuspenseSpinner } from "./BlockSuspenseSpinner";
 import { PaneViewBoundary } from "./PaneViewBoundary";
 import { agentNameOf, logBlockCover } from "./pane-cover-log";
@@ -97,12 +98,22 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     let disposeRoot!: () => void;
     const vm = createRoot((dispose) => {
         disposeRoot = dispose;
-        // An unregistered view (a widget that failed to load, a view from a
-        // newer build) gets the default ViewModel.
-        if (manifest == null) return makeDefaultViewModel(blockId, effectiveView);
-        // The instance gets a host context, never the raw nodeModel.
-        const ctx = makePaneTabHostContext(blockId, nodeModel);
-        return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
+        // The root has no owner, so a memo or effect the constructor made had no handler above it: a throw there
+        // aborted the window's flush and named no pane. This one logs the pane and carries on (a throw while the
+        // constructor runs still reaches its caller, as before).
+        return catchPaneErrors(
+            blockId,
+            `${effectiveView} view model`,
+            () => {
+                // An unregistered view (a widget that failed to load, a view from a
+                // newer build) gets the default ViewModel.
+                if (manifest == null) return makeDefaultViewModel(blockId, effectiveView);
+                // The instance gets a host context, never the raw nodeModel.
+                const ctx = makePaneTabHostContext(blockId, nodeModel);
+                return adaptPaneTabInstance(manifest, ctx, createPaneTabInstance(manifest, ctx));
+            },
+            "contain"
+        );
     });
     viewModelRoots.set(vm, disposeRoot);
     viewModelManifests.set(vm, manifest ?? null);
@@ -397,7 +408,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
                             assembly), but suppressed while the cover is up over this box:
                             "two brains at once". SPEC_PANE_LOADING_CONSOLIDATION §5.3. */}
                         <PaneViewBoundary fallback={<Show when={!covered?.()}><BlockSuspenseSpinner blockId={nodeModel.blockId} agent={() => agentNameOf(blockData())} /></Show>}>
-                            <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />
+                            {catchPaneErrors(nodeModel.blockId, "body", () => <PaneView blockId={nodeModel.blockId} blockRef={blockRef} contentRef={contentRef} viewType={blockViewType()} viewModel={viewModel} />)}
                         </PaneViewBoundary>
                     </ErrorBoundary>
                 </div>
