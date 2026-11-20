@@ -303,7 +303,7 @@
 163 frontend/app-init.ts::initHostNewWindow
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
-138 frontend/app/block/block.tsx::BlockFull
+135 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
 108 frontend/app/block/lazy-pane-tab.tsx::createStandIn

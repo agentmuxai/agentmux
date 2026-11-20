@@ -47,15 +47,19 @@
     min-width: 0;
 }
 
+// The three button rows wrap, rather than run off the side of a narrow pane.
 .in-app-login-url-actions {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--space-2);
 }
 
+// The code box takes the row's width and the two buttons wrap beneath it when they do not fit beside it.
 .in-app-login-callback-row {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
 }
@@ -65,6 +69,7 @@
 .in-app-login-actions {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
 }
@@ -95,7 +100,7 @@
 }
 
 .in-app-login-url-input {
-    flex: 1 1 auto;
+    flex: 1 1 8em;
     min-width: 0;
     padding: var(--space-2) var(--space-3);
     background-color: var(--tint-2);
