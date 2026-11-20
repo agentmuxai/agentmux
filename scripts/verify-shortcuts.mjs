@@ -105,8 +105,9 @@ const SETUP = {
 };
 
 /** Keys that are not shortcuts in a terminal: a row without `skipShell` in the key table hands the key to the
- *  shell there (ctrl+f is the shell's forward-char; ctrl+shift+f is the terminal's find). */
-const KEY_TO_SHELL_IN_TERM = { "pane:find": ["ctrl+f"], "view:command-palette": ["ctrl+p"] };
+ *  shell there (ctrl+f is the shell's forward-char; ctrl+shift+f is the terminal's find). Only rows that are given the terminal
+ *  pane as their target are listed: a global row's keys go wherever focus is, and the global rows start in a new tab. */
+const KEY_TO_SHELL_IN_TERM = { "pane:find": ["ctrl+f"] };
 
 /** Rows a dialog handles itself, so its key never reaches the dispatcher:
  *  the key passes when it closes the dialog. */
@@ -299,7 +300,7 @@ async function checkRow(cdp, s, row, tree) {
     }
     const target = paneFor(s) ?? s.gridPane;
     if (needsPane(s) && !target) {
-        row.note = `skipped: needs a ${s.pane ?? (PANE_KIND_FLAG[s.command] ? "pane of one kind" : "term")} pane (${PANE_KIND_FLAG[s.command] ?? `--${s.pane === "doctabs" ? "editor or --media" : (s.pane ?? "term")}`})`;
+        row.note = `skipped: needs ${s.pane ? `a ${s.pane} pane` : "a pane of the kind it acts on"} (${PANE_KIND_FLAG[s.command] ?? `--${s.pane === "doctabs" ? "editor or --media" : (s.pane ?? "term")}`})`;
         return;
     }
     if (target && !(await cdp.evaluate(`${S}.focus(${js(target)})`))) {
@@ -380,10 +381,11 @@ async function checkRow(cdp, s, row, tree) {
     }
 }
 
-/** A prompt addressed to the person (an approval or a grant) takes no command or key until they answer it. When
+/** A prompt addressed to the person (an approval or a grant: a modal dialog with `data-operator-only`; the status
+ *  bar's vault button carries the attribute too, and is not a prompt) takes no command or key until they answer it. When
  *  a row leaves one open, say which prompt, so the rows after it are not read as failures of their own. */
 async function noteOperatorPrompt(cdp, row) {
-    const text = await cdp.evaluate(`(() => { const m = document.querySelector("[data-operator-only]"); return m ? (m.textContent ?? "").trim().replace(/\\s+/g, " ").slice(0, 160) : null; })()`);
+    const text = await cdp.evaluate(`(() => { const m = document.querySelector("[role=dialog][data-operator-only]"); return m ? (m.textContent ?? "").trim().replace(/\\s+/g, " ").slice(0, 160) : null; })()`);
     if (text && !row.note) row.note = `FAIL: left a prompt for the user open: "${text}"`;
 }
 
