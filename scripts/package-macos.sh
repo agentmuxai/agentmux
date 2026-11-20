@@ -206,10 +206,13 @@ ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # See docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
 CHANNEL_ID="$(printf '%s' "$CHANNEL" | tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]')"
 BUNDLE_ID="ai.agentmux.${CHANNEL_ID}.${VERSION}"
-# A stable bundle id (no version) is what lets start at login be a real Login Items entry (SMAppService) that
-# survives upgrades, and keeps the notification permission across them. Off until the identity decision is made
-# (docs/specs/SPEC_START_WITH_OS_2026_09_25.md section 7 question 4 and the notification spec's section 2): set
-# AGENTMUX_STABLE_BUNDLE_ID=1 for the release channel. Every other build keeps the per-version id above.
+# A fixed bundle id (no version) is what keeps macOS's privacy grants (Screen Recording, Accessibility, folders,
+# notifications) and the Login Items registration across upgrades: they are keyed to the signed requirement, which
+# names the id, so with a versioned id every release is a new app and asks again. Decided for the release channel
+# (docs/specs/SPEC_START_WITH_OS_2026_09_25.md section 3.7): the release's build job sets AGENTMUX_STABLE_BUNDLE_ID=1
+# and the app is `ai.agentmux.stable`, for every release. scripts/verify-app-identity-darwin.sh fails the build when a
+# stable app comes out with a version in its id. Every other build keeps the per-version id above (a local build
+# next to the installed app is a different app, so double-clicking it does not hand over to the installed one).
 AGENTMUX_STABLE_BUNDLE_ID="${AGENTMUX_STABLE_BUNDLE_ID:-0}"
 if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ]; then
     BUNDLE_ID="ai.agentmux.${CHANNEL_ID}"
@@ -588,6 +591,13 @@ for lp in "$LOCDIR"/*.lproj; do
     esac
 done
 echo "  framework now: $(du -sh "$FW" 2>/dev/null | awk '{print $1}')  (locales trimmed to en*)"
+
+# The stable channel's id carries no version, and its Login Items agent is in the bundle: a stable app that comes out
+# otherwise would send every person back to granting again at the next upgrade. The signing step checks the signed
+# requirement as well (scripts/sign-macos-app.sh).
+echo "==> Checking the app's bundle id"
+bash "$REPO_ROOT/scripts/verify-app-identity-darwin.sh" "$APP" \
+    || { echo "❌ the stable app's bundle id is not the fixed one; not packaging. Set AGENTMUX_STABLE_BUNDLE_ID=1." >&2; exit 1; }
 
 if [ "$UNSIGNED_APP" = "1" ]; then
     # The release workflow stops here: the assembled, stripped, UNSIGNED app is handed to the job that holds the

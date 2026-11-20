@@ -219,6 +219,29 @@ pub(crate) unsafe fn disable_macos_drag_slideback() {
     );
 }
 
+/// Whether an `NSDictionary` (the main bundle's info dictionary) has a value for `key` (a NUL-terminated name).
+/// A packaged app's Info.plist already carries its `CFBundleIdentifier`, and that id is what the signature and macOS's
+/// privacy grants name: the stable channel's has no version, so computing one at run time (channel plus the crate's
+/// version) would make this process disagree with its own bundle. Only a bundle with no id is given one.
+unsafe fn info_has_key(info: *mut std::ffi::c_void, key: &[u8]) -> bool {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> *mut c_void;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+    let cls_str = objc_getClass(b"NSString\0".as_ptr() as _);
+    if info.is_null() || cls_str.is_null() {
+        return false;
+    }
+    let make: extern "C" fn(Id, Sel, *const c_char) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let get: extern "C" fn(Id, Sel, Id) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let name = make(cls_str, sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _), key.as_ptr() as _);
+    !name.is_null() && !get(info, sel_registerName(b"objectForKey:\0".as_ptr() as _), name).is_null()
+}
+
 /// Set the macOS app display name (Dock tile + app-menu title).
 ///
 /// A bundle-less binary (`task dev` direct-invoke, the launcher's flat
@@ -337,7 +360,7 @@ unsafe fn set_macos_app_display_name_impl(set_bundle_id: bool) {
                 // dev builds is needed in the future, find a way to set the ID
                 // that does NOT trigger the MacAppCodeSignClone spawn (e.g.
                 // a CEF source patch to disable the spawn for unbundled builds).
-                if set_bundle_id && !agentmux_common::is_dev_self() {
+                if set_bundle_id && !agentmux_common::is_dev_self() && !info_has_key(info, b"CFBundleIdentifier\0") {
                     let channel = std::env::var("AGENTMUX_CHANNEL")
                         .unwrap_or_else(|_| "dev".to_string());
                     let channel_sanitized: String = channel
@@ -358,7 +381,7 @@ unsafe fn set_macos_app_display_name_impl(set_bundle_id: bool) {
                         "macOS: set CFBundleName/CFBundleDisplayName/CFBundleIdentifier on main bundle"
                     );
                 } else if set_bundle_id {
-                    tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle (dev build: CFBundleIdentifier skipped to prevent MacAppCodeSignClone SIGTRAP)");
+                    tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle (CFBundleIdentifier left as it is: the bundle's own, or a dev build, where setting it triggers a MacAppCodeSignClone SIGTRAP)");
                 } else {
                     tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle (pre-init pass)");
                 }
