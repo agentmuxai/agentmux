@@ -235,9 +235,7 @@ async fn route_command(
         // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
         // _2026_09_24 §4.1). Kept separate from background mode on purpose —
         // tray spec §7.4.
-        "autostart_status" => commands::autostart::autostart_status().await,
-        // macOS: open System Settings at Login Items, where a start-at-login entry waits for the person's approval.
-        "autostart_open_login_items" => commands::autostart::open_login_items().await,
+        "autostart_status" | "autostart_open_login_items" => commands::autostart::route(cmd).await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
