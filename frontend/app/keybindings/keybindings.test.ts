@@ -11,9 +11,9 @@ function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEve
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
 }
 
-const NONE: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "term", docTabsHost: false };
-const TERM: KeyContext = { textInputFocus: false, terminalFocus: true, viewType: "term", docTabsHost: false };
-const TYPING: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "agent", docTabsHost: false };
+const NONE: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "term", docTabsHost: false };
+const TERM: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: true, viewType: "term", docTabsHost: false };
+const TYPING: KeyContext = { textInputFocus: true, textInputFilled: true, terminalFocus: false, viewType: "agent", docTabsHost: false };
 
 describe("key syntax", () => {
     it("formats per platform", () => {
@@ -135,9 +135,29 @@ describe("resolveKey", () => {
     });
 });
 
+describe("pane keys in a text field", () => {
+    const FOCUS_LEFT = ev("ArrowLeft", "ArrowLeft", { ctrlKey: true, shiftKey: true });
+    const RESIZE_UP = ev("ArrowUp", "ArrowUp", { altKey: true, shiftKey: true });
+    const EMPTY_FIELD: KeyContext = { ...TYPING, textInputFilled: false };
+
+    it("move focus and resize from a field with nothing in it (a Shortcuts pane's filter holds the caret when it opens)", () => {
+        expect(resolveKey(FOCUS_LEFT, EMPTY_FIELD, "other")?.row.command).toBe("pane:focus:left");
+        expect(resolveKey(RESIZE_UP, EMPTY_FIELD, "other")?.row.command).toBe("pane:resize:up");
+    });
+
+    it("stay with the field once it holds text: they select a word or a line there", () => {
+        expect(resolveKey(FOCUS_LEFT, TYPING, "other")).toBeNull();
+        expect(resolveKey(RESIZE_UP, TYPING, "other")).toBeNull();
+    });
+
+    it("leave a plain-letter shortcut blocked in an empty field", () => {
+        expect(resolveKey(ev("F2", "F2"), EMPTY_FIELD, "other")).toBeNull();
+    });
+});
+
 describe("pane rows", () => {
-    const FILES: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "files", docTabsHost: false };
-    const EDITOR: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "editor", docTabsHost: true };
+    const FILES: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "files", docTabsHost: false };
+    const EDITOR: KeyContext = { textInputFocus: true, textInputFilled: true, terminalFocus: false, viewType: "editor", docTabsHost: true };
 
     it("a pane matches only its own rows", () => {
         expect(matchPaneKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), "files", "other")).toBe("files:newFolder");

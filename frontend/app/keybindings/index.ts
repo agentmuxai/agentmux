@@ -12,7 +12,7 @@ import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
 import { formatCommand, keybindingsVersion, keysFor, matchPaneKey, resolveKey, type KeyContext } from "./registry";
 
-let keyContext: () => KeyContext = () => ({ textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false });
+let keyContext: () => KeyContext = () => ({ textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "", docTabsHost: false });
 
 /** Where focus is, for `isGlobalKey`: the dispatcher supplies it at load
  *  (keymodel-dispatch's currentKeyContext), which avoids an import cycle. */

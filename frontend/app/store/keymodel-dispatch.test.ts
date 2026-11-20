@@ -90,10 +90,18 @@ describe("appHandleKeyDown", () => {
         expect(handlers["tab:new"]).not.toHaveBeenCalled();
     });
 
-    it("leaves word selection to a focused text field", () => {
-        focus(document.createElement("textarea"));
+    it("leaves word selection to a focused text field that holds text", () => {
+        const field = document.createElement("textarea");
+        field.value = "two words";
+        focus(field);
         expect(press(CTRL_SHIFT_LEFT)).toBe(false);
         expect(handlers["pane:focus:left"]).not.toHaveBeenCalled();
+    });
+
+    it("moves focus from a text field with nothing in it (a Shortcuts pane's filter has the caret when it opens)", () => {
+        focus(document.createElement("input"));
+        expect(press(CTRL_SHIFT_LEFT)).toBe(true);
+        expect(handlers["pane:focus:left"]).toHaveBeenCalledTimes(1);
     });
 
     it("still runs other shortcuts while typing", () => {

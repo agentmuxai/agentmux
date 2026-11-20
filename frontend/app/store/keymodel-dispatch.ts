@@ -122,6 +122,12 @@ export function isTypingFocus(el: Element | null = document.activeElement): bool
     return isEditableTarget(el);
 }
 
+/** The focused field holds text (an empty one has nothing for a word-or-line key to move or select). */
+function fieldHasText(el: Element | null): boolean {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value.length > 0;
+    return (el?.textContent ?? "").length > 0;
+}
+
 /** Focus is in a terminal (its hidden textarea, or anywhere inside xterm). */
 function isTerminalFocus(el: Element | null = document.activeElement): boolean {
     return el instanceof HTMLElement && (el.classList.contains("xterm-helper-textarea") || el.closest(".xterm") != null);
@@ -140,6 +146,7 @@ function currentKeyContext(): KeyContext {
     const viewType = focusedViewType();
     return {
         textInputFocus: isTypingFocus(el),
+        textInputFilled: isTypingFocus(el) && fieldHasText(el),
         terminalFocus: isTerminalFocus(el),
         viewType,
         docTabsHost: DOC_TAB_HOSTS.includes(viewType),
