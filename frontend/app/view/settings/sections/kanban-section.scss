@@ -60,6 +60,11 @@
     padding-left: var(--space-4);
 }
 
+// A line that wraps (a narrow pane) takes two or three rows: a gap between lines keeps each change a unit.
+.kanban-stages__history-list > li + li {
+    margin-top: var(--space-1);
+}
+
 .kanban-stages__row[data-dragging] {
     opacity: 0.5;
 }
