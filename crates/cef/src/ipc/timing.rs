@@ -8,8 +8,9 @@
 // page's own lines are the first to be dropped when the page is the slow part.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
+use agentmux_common::time::now_ms_u64;
 use parking_lot::Mutex;
 
 /// A wait or a handling time from here on is logged.
@@ -53,14 +54,14 @@ impl CallClock {
     /// `sent_ms` is the page's `Date.now()` when it sent the call.
     pub fn begin(sent_ms: Option<f64>) -> Self {
         let others = IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
-        Self { began: Instant::now(), waited_ms: waited_ms(sent_ms, wall_ms()), others }
+        Self { began: Instant::now(), waited_ms: waited_ms(sent_ms, now_ms_u64()), others }
     }
 
     /// The call's timing; a slow one is logged, by command name only.
     pub fn finish(&self, cmd: &str) -> IpcTiming {
         let timing = IpcTiming { waited_ms: self.waited_ms, handled_ms: self.began.elapsed().as_millis() as u64 };
         if is_slow(cmd, timing) {
-            if let Some(left_out) = LOG_GATE.lock().admit(wall_ms()) {
+            if let Some(left_out) = LOG_GATE.lock().admit(now_ms_u64()) {
                 tracing::info!("{}", slow_line(cmd, timing, self.others, left_out));
             }
         }
@@ -72,10 +73,6 @@ impl Drop for CallClock {
     fn drop(&mut self) {
         IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
     }
-}
-
-fn wall_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 /// The wait between the page's send and now. None for no send time, one that is
