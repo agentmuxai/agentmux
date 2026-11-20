@@ -11,6 +11,8 @@ import { atoms, pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { openInEditorPaneOnScreen } from "@/app/util/editor-open";
+import type { MediaOwner } from "./local-media";
+import { openMessageFile } from "./open-message-file";
 import { openKanbanTask } from "@/app/util/open-kanban-task";
 
 /** Whether `path` is a folder: it says so (a trailing slash), or listing one entry of it works. A listing
@@ -42,7 +44,14 @@ async function inAgentFolder(path: string): Promise<boolean> {
  *  `floating` (a Ctrl+click), in a window of its own rather than a tab of the Editor on screen. A path in a
  *  container agent's folder is never given to the Editor on screen, which would read the path itself: srv
  *  opens it (`from_link`), and when it refuses, the person is told why. */
-export async function openPathLink(path: string, opts: { floating?: boolean } = {}): Promise<void> {
+export async function openPathLink(path: string, opts: { floating?: boolean; owner?: MediaOwner } = {}): Promise<void> {
+    // A link in a container agent's message names a path of the agent's own folders: srv finds it there and opens it
+    // (a file as a read-only copy, a folder confined to it), and refuses any other path with the reason. Nothing here
+    // reads the path, and a message with no pane to name opens nothing.
+    if (opts.owner?.confined) {
+        openMessageFile(path, opts.owner.blockId, { floating: opts.floating });
+        return;
+    }
     const tab_id = atoms.activeTabId();
     const open = { file: path, from_link: true, ...(opts.floating ? { floating: true } : {}) };
     const agents = await inAgentFolder(path);

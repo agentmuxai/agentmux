@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A click on a file named in a container agent's message (an inline picture or video, or a card for one too big to
- * show inline): srv opens it, from the agent's own folders and as a read-only copy, and refuses a path anywhere
+ * A click on a file or folder named in a container agent's message (an inline picture or video, a card for
+ * one too big to show inline, or a link to a path): srv opens it, from the agent's own folders and as a read-only copy, and refuses a path anywhere
  * else with the reason. The path is never handed to the Editor here: this computer would read it as the person.
  * `message_of` names the agent's pane, which tells srv whose folders the path may lead into. srv decides by that
  * pane's runtime; the caller's "confined" flag only picks this route. With no pane to name there is no route: nothing is
@@ -18,14 +18,14 @@ import { fireAndForget } from "@/util/util";
 
 const NOTICE_MS = 10_000;
 
-export function openMessageFile(path: string, blockId: string | undefined): void {
+export function openMessageFile(path: string, blockId: string | undefined, opts: { floating?: boolean } = {}): void {
     if (!blockId) {
         notify("This message isn't tied to its agent's pane, so its file can't be opened from here.");
         return;
     }
     fireAndForget(async () => {
         try {
-            await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", file: path, message_of: blockId, tab_id: atoms.activeTabId() }, {});
+            await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", file: path, message_of: blockId, tab_id: atoms.activeTabId(), ...(opts.floating ? { floating: true } : {}) }, {});
         } catch (err) {
             notify(err instanceof Error ? err.message : String(err));
         }
