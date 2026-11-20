@@ -363,6 +363,8 @@ export const Modal: Component<ModalProps> = (props) => {
     // in the stack, or shadowed by a higher overlapping modal, stay open.
     const handleKeyDown = (ev: KeyboardEvent): void => {
         if (ev.key !== "Escape") return;
+        // Escape while text is being composed (an IME) cancels the composition: it is not for the dialog.
+        if (ev.isComposing) return;
         if (props.closeOnEscape === false) return;
         if (!stackEntry || !isReachable(stackEntry)) return;
         ev.preventDefault();

@@ -42,7 +42,11 @@ vi.mock("@/app/store/command-registry", () => ({
 }));
 vi.mock("./palette-agents", () => ({ usePaletteAgents: () => () => h.agents }));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
-vi.mock("@/app/keybindings", () => ({ shortcutFor: (id: string) => h.keys[id] ?? "" }));
+vi.mock("@/app/keybindings", () => ({
+    shortcutFor: (id: string) => h.keys[id] ?? "",
+    // The palette's own key, for the test: Ctrl+P.
+    isKeyFor: (e: KeyboardEvent, command: string) => command === "view:command-palette" && e.ctrlKey && e.key === "p",
+}));
 vi.mock("@/app/platform/pane-overlay", () => ({
     useHiddenTabMarker: () => () => undefined,
     usePaneOverlay: (getEl: () => HTMLElement | null | undefined) => {
@@ -351,5 +355,137 @@ describe("CommandPaletteModal rows", () => {
         open();
         fireEvent.input(screen.getByPlaceholderText("Search commands and agents..."), { target: { value: "zzzzqqq" } });
         expect(document.querySelector(".command-palette-empty")?.textContent).toBe('Nothing matches "zzzzqqq"');
+    });
+});
+
+describe("CommandPaletteModal keys", () => {
+    const open = (close: () => void = () => {}) => {
+        render(() => <CommandPaletteModal close={close} />);
+        return screen.getByPlaceholderText("Search commands and agents...");
+    };
+    const selected = () => document.querySelector(".command-palette-item.selected .command-palette-item-label")?.textContent;
+
+    it("wraps Up from the first row to the last, and Down from the last to the first", () => {
+        const input = open();
+        fireEvent.keyDown(input, { key: "ArrowUp" });
+        expect(selected()).toBe("Close Pane");
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        expect(selected()).toBe("Split Right");
+    });
+
+    it("does nothing on Up or Down when no row matches", () => {
+        const input = open();
+        fireEvent.input(input, { target: { value: "zzzzqqq" } });
+        fireEvent.keyDown(input, { key: "ArrowUp" });
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        expect(document.querySelector(".command-palette-item")).toBeNull();
+    });
+
+    it("leaves Enter, the arrows and Escape to the composition while text is being composed", async () => {
+        vi.useFakeTimers();
+        try {
+            const close = vi.fn();
+            const input = open(close);
+            const before = selected();
+            fireEvent.keyDown(input, { key: "ArrowDown", isComposing: true });
+            fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+            fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+            await vi.runAllTimersAsync();
+            expect(selected()).toBe(before);
+            expect(close).not.toHaveBeenCalled();
+            expect(h.ran).toEqual([]);
+            fireEvent.keyDown(input, { key: "Escape", isComposing: true });
+            expect(close).not.toHaveBeenCalled();
+            fireEvent.keyDown(input, { key: "Escape" });
+            expect(close).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("closes on the key that opens it", () => {
+        const close = vi.fn();
+        const input = open(close);
+        fireEvent.keyDown(input, { key: "p", ctrlKey: true });
+        expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs the selected row with Shift+Enter as a new one", async () => {
+        vi.useFakeTimers();
+        try {
+            let forced: boolean | undefined;
+            h.commands[0].execute = ((o?: { forceNew?: boolean }) => {
+                forced = o?.forceNew;
+            }) as never;
+            const input = open();
+            fireEvent.input(input, { target: { value: "New Tab" } });
+            fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+            await vi.runAllTimersAsync();
+            expect(forced).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe("CommandPaletteModal roles", () => {
+    const open = () => {
+        render(() => <CommandPaletteModal close={() => {}} />);
+        return screen.getByPlaceholderText("Search commands and agents...");
+    };
+
+    it("is a combobox over a listbox of options, and names the selected option", () => {
+        const input = open();
+        expect(input.getAttribute("role")).toBe("combobox");
+        const list = document.querySelector('[role="listbox"]') as HTMLElement;
+        expect(input.getAttribute("aria-controls")).toBe(list.id);
+        const options = Array.from(list.querySelectorAll('[role="option"]'));
+        expect(options.length).toBe(5);
+        expect(options.map((o) => o.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false", "false"]);
+        expect(input.getAttribute("aria-activedescendant")).toBe(options[0].id);
+        fireEvent.keyDown(input, { key: "ArrowDown" });
+        expect(input.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    });
+
+    it("gives every option its own id", () => {
+        open();
+        const ids = Array.from(document.querySelectorAll('[role="option"]')).map((o) => o.id);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it("names each group by its category while browsing, and none while typing", () => {
+        const input = open();
+        const groups = Array.from(document.querySelectorAll('[role="group"]')).map((g) => g.getAttribute("aria-label"));
+        expect(groups).toEqual(["split", "window", "tab", "pane"]);
+        fireEvent.input(input, { target: { value: "close" } });
+        expect(document.querySelector('[role="group"]')).toBeNull();
+    });
+
+    it("names an option by its label, its detail and its shortcut in words", () => {
+        h.keys["tab:new"] = "Ctrl+Shift+T";
+        h.agents = [{ id: "agent:a1", label: "Korp", category: "Agent", detail: "Specialist · idle", execute: () => {} }];
+        open();
+        const names = Array.from(document.querySelectorAll('[role="option"]')).map((o) => o.getAttribute("aria-label"));
+        expect(names).toContain("New Tab, Ctrl Shift T");
+        expect(names).toContain("Korp, Specialist · idle");
+        expect(names).toContain("Close Tab");
+    });
+
+    it("says that nothing matches as a status, outside the list", () => {
+        const input = open();
+        fireEvent.input(input, { target: { value: "zzzzqqq" } });
+        const status = document.querySelector('[role="status"]') as HTMLElement;
+        expect(status.textContent).toBe('Nothing matches "zzzzqqq"');
+        expect(status.closest('[role="listbox"]')).toBeNull();
+        expect(input.hasAttribute("aria-activedescendant")).toBe(false);
+    });
+
+    it("leaves hover out of aria-selected", () => {
+        open();
+        const rows = document.querySelectorAll('[role="option"]');
+        fireEvent.mouseMove(rows[3], { clientX: 10, clientY: 10 });
+        fireEvent.mouseEnter(rows[3]);
+        expect(rows[3].getAttribute("aria-selected")).toBe("false");
+        expect(rows[0].getAttribute("aria-selected")).toBe("true");
     });
 });

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { formatKey } from "./keys";
-import { keyCaps } from "./caps";
+import { keyCaps, keyCapsWords } from "./caps";
 
 describe("keyCaps", () => {
     it("gives one cap per key", () => {
@@ -41,5 +41,21 @@ describe("keyCaps", () => {
                 expect(joined).toBe(label);
             }
         }
+    });
+});
+
+describe("keyCapsWords", () => {
+    it("says the keys in words, a chord's steps joined by then", () => {
+        expect(keyCapsWords("Ctrl+Shift+P")).toBe("Ctrl Shift P");
+        expect(keyCapsWords("Ctrl+Shift+S then Right")).toBe("Ctrl Shift S then Right");
+    });
+
+    it("names the macOS symbols", () => {
+        expect(keyCapsWords("⇧⌘P")).toBe("Shift Command P");
+        expect(keyCapsWords("⌃⌥T")).toBe("Control Option T");
+    });
+
+    it("gives nothing for no shortcut", () => {
+        expect(keyCapsWords("")).toBe("");
     });
 });

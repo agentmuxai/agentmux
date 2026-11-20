@@ -11,7 +11,11 @@
 // `panelClass="command-palette-panel"` prop passed to Modal.
 
 @use "../mixins.scss";
+@use "../element/menu-frame";
 .modal-panel.command-palette-panel {
+    // With no backdrop behind it the panel is the one thing that sets it off from the window: the menu family's
+    // surface, opaque at any window opacity, with an edge, a ring and a shadow (R5).
+    @include menu-frame.menu-surface;
     // A row's least height. The list shows at most twelve of them (R2).
     --palette-row-h: 30px;
     width: 600px;
@@ -96,6 +100,9 @@
     font-family: var(--font-sans);
     line-height: 1.5;
     padding: 10px 0;
+    // A narrow panel cuts the placeholder with an ellipsis, not mid-word.
+    min-width: 0;
+    text-overflow: ellipsis;
 
     &::placeholder {
         color: var(--secondary-text-color);
@@ -136,6 +143,19 @@
 
     &.selected {
         background: var(--highlight-bg-color);
+    }
+
+    // The muted text (the detail, the group's name) does not reach 4.5:1 on the selected row on every theme: it
+    // takes the main text colour there (R27).
+    &.selected .command-palette-item-detail,
+    &.selected .command-palette-item-group {
+        color: var(--main-text-color);
+    }
+
+    // In High Contrast the selected row is marked by more than a colour (R27).
+    [data-theme="high-contrast"] &.selected {
+        outline: 2px solid var(--accent-color);
+        outline-offset: -2px;
     }
 
     // The first row of a group below the first: a hairline above it (R12).
