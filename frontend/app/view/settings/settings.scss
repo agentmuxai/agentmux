@@ -96,6 +96,20 @@
     }
 }
 
+// A button beside a row's switch (start at login: Repair, Use this build). A field's control column stacks its
+// children, so the pair is one child; it wraps under the narrowest width and the button keeps its own size.
+.setting-control-pair {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-2);
+
+    .ui-button {
+        white-space: nowrap;
+    }
+}
+
 // "Saved", on a row's label line for the moment after its setting was written (settings-saved.ts). The live region
 // (`.setting-saved`) is always there and empty at rest; the flag fades over the linger the app gives a confirmation, and
 // its timer removes it. Under reduced motion it holds, then goes.

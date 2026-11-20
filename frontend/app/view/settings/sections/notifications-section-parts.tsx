@@ -198,7 +198,19 @@ export function StartAtLoginRow({ a }: { a: AutostartState }): JSX.Element {
                             when={a.autostart()?.available !== false}
                             fallback={<ToggleControl checked={false} onChange={() => {}} />}
                         >
-                            <ToggleControl checked={a.startAtLogin()} onChange={(v) => set("app:startatlogin", v)} />
+                            {/* The button beside the switch, not above it: a field's control column stacks its children. */}
+                            <div class="setting-control-pair">
+                                <Show when={a.fix()}>
+                                    {(kind) => (
+                                        <Button onClick={a.applyFix}>
+                                            {kind() === "repair"
+                                                ? t("settings.notifications.autostart.repair")
+                                                : t("settings.notifications.autostart.useThisBuild")}
+                                        </Button>
+                                    )}
+                                </Show>
+                                <ToggleControl checked={a.startAtLogin()} onChange={(v) => set("app:startatlogin", v)} />
+                            </div>
                         </Show>
                     }
                 />

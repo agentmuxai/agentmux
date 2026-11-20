@@ -571,9 +571,10 @@ getAutostartStatus
           <div class="ui-field-description" id="ui-field-desc-cl-N">
             "On, but not registered with the system yet. If this persists, see the launcher log."
         <div class="ui-field-control">
-          <div data-stand="ToggleControl" data-checked="true">
-            <span data-cb="onChange">
-              "toggle"
+          <div class="setting-control-pair">
+            <div data-stand="ToggleControl" data-checked="true">
+              <span data-cb="onChange">
+                "toggle"
 getAutostartStatus
 -- the verb is missing
 <div>
