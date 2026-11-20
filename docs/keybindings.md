@@ -14,6 +14,15 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Settings | ⌘, | Ctrl+, |
 | Keyboard shortcuts | ⌘/, F1 | Ctrl+/, F1 |
 | Voice input | ⌃⇧V | Ctrl+Shift+V |
+| Open Terminal | ⇧⌘O then T | Ctrl+Shift+O then T |
+| Open Files | ⇧⌘O then F | Ctrl+Shift+O then F |
+| Open Swarm | ⇧⌘O then S | Ctrl+Shift+O then S |
+| Open Kanban | ⇧⌘O then K | Ctrl+Shift+O then K |
+| Open Vault | ⇧⌘O then V | Ctrl+Shift+O then V |
+| Open History | ⇧⌘O then H | Ctrl+Shift+O then H |
+| Open System Info | ⇧⌘O then I | Ctrl+Shift+O then I |
+| Connectors | ⇧⌘O then C | Ctrl+Shift+O then C |
+| Memory | ⇧⌘O then M | Ctrl+Shift+O then M |
 | Close dialog or find bar | Esc | Esc |
 
 ## Tabs & windows
@@ -53,6 +62,8 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | Focus the message box | ⌘L | Ctrl+L |
 | Replace pane with Shortcuts | ⌃⇧K | Ctrl+Shift+K |
 | Change connection | ⇧⌘G | Ctrl+Shift+G |
+| Back to Previous Pane | ⌃- | Ctrl+Alt+- |
+| Forward to Next Pane | ⌃⇧- | Ctrl+Shift+- |
 
 ## Find & zoom
 
