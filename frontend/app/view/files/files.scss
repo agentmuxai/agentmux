@@ -669,11 +669,22 @@
     white-space: nowrap;
 }
 
+// The name is cut with an ellipsis when there is no room; the " · 3 of 10 · 45%" after it never is.
 .files-op-text {
+    display: flex;
     min-width: 0;
     max-width: 100%;
+}
+
+.files-op-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.files-op-tail {
+    flex: none;
+    white-space: pre;
 }
 
 .files-op-bar {

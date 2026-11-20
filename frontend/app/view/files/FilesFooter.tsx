@@ -10,7 +10,7 @@ import { tip } from "@/app/element/tip";
 import { formatBytes } from "@/util/format-bytes";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import type { FilesModel } from "./files-model";
-import { opProgressText } from "./files-ops";
+import { opProgressParts } from "./files-ops";
 import { gitSummary } from "./files-view-text";
 
 export function FilesFooter(props: { model: FilesModel; summary: () => string }): JSX.Element {
@@ -21,7 +21,10 @@ export function FilesFooter(props: { model: FilesModel; summary: () => string })
             <For each={model.ops.ops().filter((o) => o.state === "running" || o.state === "conflict")}>
                 {(op) => (
                     <div class="files-op" role="status">
-                        <span class="files-op-text">{opProgressText(op)}</span>
+                        <span class="files-op-text">
+                            <span class="files-op-name">{opProgressParts(op).head}</span>
+                            <span class="files-op-tail">{opProgressParts(op).tail}</span>
+                        </span>
                         <span class="files-op-bar" aria-hidden="true">
                             <span
                                 class="files-op-fill"
