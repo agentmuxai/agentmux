@@ -598,7 +598,7 @@ fn startup_files(launch: &LaunchDirs) -> Vec<crate::backend::startup_files::Star
         return crate::backend::startup_files::workspace_startup_files(&launch.cwd);
     }
     let home = dirs::home_dir();
-    crate::backend::startup_files::claude_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
+    crate::backend::startup_files::host_startup_files(&launch.cwd, launch.config_dir.as_deref(), home.as_deref())
 }
 
 /// Which current Global sections the CLI already got from a startup file: one AgentMux wrote that holds

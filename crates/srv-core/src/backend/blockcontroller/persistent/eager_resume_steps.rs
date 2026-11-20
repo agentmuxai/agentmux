@@ -26,6 +26,11 @@ pub(super) struct LaunchParts {
 /// What the pane's meta says to start, or why this attempt declines. A pane stored without `cmd:args` is not
 /// guessed at.
 pub(super) fn launch_parts(block_meta: &crate::backend::obj::MetaMapType) -> Result<LaunchParts, EagerResumeOutcome> {
+    // As a turn asks first: a harness other than Claude Code is not started on the host in a folder a
+    // container agent can write (`mcp_folder_rule`). The next message's turn says why in the pane.
+    if crate::backend::mcp_folder_rule::turn_refusal(block_meta).is_some() {
+        return Err(EagerResumeOutcome::DeclinedTo("the agent's harness is not started on the host in its folder"));
+    }
     // `cli_command`/`cli_args`/`working_dir` — same meta keys a live
     // message's spawn config reads. Deliberately NOT
     // `agent_handlers::input`'s own print-mode fallback default for a
@@ -313,5 +318,34 @@ impl PersistentSubprocessController {
             self.drain_queue_after_successful_spawn(retry_config, true);
         }
         EagerResumeOutcome::Spawned
+    }
+}
+
+#[cfg(test)]
+mod folder_rule_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn pane(provider: &str, cwd: &std::path::Path) -> crate::backend::obj::MetaMapType {
+        [("agentMode", json!("host")), ("agentProvider", json!(provider)), ("cmd:args", json!(["-p"])), ("cmd:cwd", json!(cwd.to_string_lossy()))]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+    }
+
+    /// The process a turn-based agent starts ahead of a turn asks as the turn does, in a folder a container
+    /// agent can write: Claude Code starts with the flags that keep it to AgentMux's config, another harness
+    /// does not start.
+    #[test]
+    fn a_process_started_ahead_of_a_turn_asks_as_the_turn_does() {
+        let (data, bound, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        crate::backend::fs_ops::container_folders::add_for_test(bound.path(), "agentmux-eager-rule", "/workspace");
+        crate::backend::mcp_config_file::with_data_home(data.path(), || {
+            let claude = launch_parts(&pane("claude", bound.path())).ok().expect("Claude Code starts");
+            assert!(claude.cli_args.iter().any(|a| a == "--strict-mcp-config"), "{:?}", claude.cli_args);
+            assert!(matches!(launch_parts(&pane("codex", bound.path())), Err(EagerResumeOutcome::DeclinedTo(why)) if why.contains("folder")));
+            let elsewhere = launch_parts(&pane("codex", own.path())).ok().expect("in a folder of its own it starts");
+            assert!(!elsewhere.cli_args.iter().any(|a| a == "--strict-mcp-config"));
+        });
     }
 }

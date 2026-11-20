@@ -161,6 +161,15 @@ pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Optio
     Some(dir.join("work-store.db"))
 }
 
+/// The GLOBAL `<home>/shared/container-agent-folders/` directory: one small file per folder a container
+/// agent has run in (`backend::mcp_folder_rule`). Every version and channel of an install reads the same
+/// marks, and an upgrade, the removal of an old version and the deletion of an agent leave them. A mark is
+/// plain text, written once and never changed, the same whichever srv writes it: so it is read and written
+/// by a srv that has given the shared stores up to a srv of another version too.
+pub fn resolve_shared_container_agent_folders_dir() -> Option<PathBuf> {
+    shared_root_ignoring_deferral().map(|h| h.join("container-agent-folders"))
+}
+
 /// The global, channel-independent `<home>/shared` root. Deliberately
 /// UNAFFECTED by `isolated_auth_enabled()` — callers that need the true
 /// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
@@ -247,6 +256,26 @@ mod tests {
         std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
         assert_eq!(resolve_isolated_work_store_path(&PathBuf::from("/x")), None);
         clear();
+    }
+
+    /// The marks of folders a container agent ran in are in the shared folder, wherever this version's data is.
+    #[test]
+    fn the_container_agent_folder_marks_are_in_the_shared_folder_not_in_a_versions_data() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        let saved = std::env::var_os("AGENTMUX_DATA_HOME");
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/tmp/test-home/shared");
+        std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/test-home/channels/stable/versions/1.0.0/data");
+        let one = resolve_shared_container_agent_folders_dir().unwrap();
+        std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/test-home/channels/beta/versions/2.0.0/data");
+        let other = resolve_shared_container_agent_folders_dir().unwrap();
+        match saved {
+            Some(v) => std::env::set_var("AGENTMUX_DATA_HOME", v),
+            None => std::env::remove_var("AGENTMUX_DATA_HOME"),
+        }
+        clear();
+        assert_eq!(one, PathBuf::from("/tmp/test-home/shared/container-agent-folders"));
+        assert_eq!(one, other, "one folder for every version and channel");
     }
 
     #[test]
