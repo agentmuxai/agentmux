@@ -107,6 +107,9 @@ windows-sys = { version = "0.59", features = [
 windows = { version = "0.61", features = [
     "UI_Notifications",
     "Data_Xml_Dom",
+    # The Store package's startup task and how Windows activated the process (src/autostart/packaged.rs).
+    "ApplicationModel",
+    "ApplicationModel_Activation",
     "Foundation",
     # NotificationData's value map (a shutdown toast's live countdown).
     "Foundation_Collections",

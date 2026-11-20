@@ -450,6 +450,8 @@ declare global {
         thisChannel?: string;
         /** The entry is another channel's (or nobody's) and this build can take it over. */
         movable?: boolean;
+        /** The Store package's startup task as Windows says it now; absent anywhere that is not a packaged install. */
+        package?: "enabled" | "disabled" | "disabled_by_user" | "disabled_by_policy" | "enabled_by_policy";
     };
 
     /** A window opened at a user's click, to be pointed at a URL later (`AppApi.reserveExternalWindow`). */
