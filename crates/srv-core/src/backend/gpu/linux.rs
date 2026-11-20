@@ -31,6 +31,9 @@ use std::time::{Duration, Instant};
 const SCAN_BUDGET: Duration = Duration::from_millis(300);
 /// NVML is looked for again this often when it was not there (a driver installed since).
 const NVML_RETRY: Duration = Duration::from_secs(300);
+/// How old the processes' last read may be and still be the baseline for the next: a few times the panel's longest
+/// interval (`PANEL_MAX`, 10 s), so a panel that stays open keeps it however slow its reads get.
+const BASELINE_STALE: Duration = Duration::from_secs(30);
 
 /// Where the files are, so a test can point them at a directory of its own.
 #[derive(Debug, Clone)]
@@ -126,6 +129,12 @@ impl Gpu {
         }
 
         let now = Instant::now();
+        // A baseline from long ago (the panel was closed, so nothing refreshed it) is no baseline: this read starts over.
+        // The status bar's reads leave it alone: they come on their own clock while the panel is open.
+        if full && self.prev_at.is_some_and(|at| now.duration_since(at) > BASELINE_STALE) {
+            self.prev.clear();
+            self.prev_at = None;
+        }
         let elapsed = self.prev_at.map(|at| now.duration_since(at));
         let warming = full && self.prev_at.is_none() && scanned.iter().any(|s| !s.client.engines.is_empty());
         let mut processes: Vec<ProcessFigures> = Vec::new();
@@ -139,11 +148,6 @@ impl Gpu {
                     merge(&mut processes, ProcessFigures { pid: p.pid, use_pct: p.use_pct, dedicated: p.memory, shared: None });
                 }
             }
-        } else {
-            // The processes are not read while the panel is closed, so what was kept is going stale: the first read
-            // after it is opened again is a first read, not a use over however long it was closed.
-            self.prev.clear();
-            self.prev_at = None;
         }
         if warming {
             return Ok(Read::Warming);
@@ -441,17 +445,34 @@ mod tests {
         r.client(4242, 9, &info(1_000_000_000));
         let mut gpu = Gpu::open_with(r.fs()).unwrap();
         assert!(matches!(gpu.read(true).unwrap(), Read::Warming));
-        // The panel is closed: only the status bar's reads come, and they leave the processes alone.
+        // The panel was closed for a long time: the baseline is from then.
+        gpu.prev_at = Instant::now().checked_sub(BASELINE_STALE + Duration::from_secs(60));
         r.client(4242, 9, &info(900_000_000_000));
-        let bar = reading(gpu.read(false).unwrap());
-        assert!(!bar.per_process_memory && bar.processes.is_empty());
-        // Opened again: the baseline from before is not compared against, so this is a first read again.
+        // Opened again: this is a first read again, not a use over the whole time.
         assert!(matches!(gpu.read(true).unwrap(), Read::Warming));
         std::thread::sleep(Duration::from_millis(300));
         r.client(4242, 9, &info(900_300_000_000));
         let reading = reading(gpu.read(true).unwrap());
         let use_pct = reading.processes[0].use_pct.expect("two reads give a use");
         assert!(use_pct > 0.0 && use_pct <= 100.0, "{use_pct}");
+    }
+
+    #[test]
+    fn a_status_bar_read_between_two_panel_reads_leaves_their_baseline_alone() {
+        let r = amd_root();
+        let info = |busy: u64| {
+            format!("drm-driver:\tamdgpu\ndrm-pdev:\t0000:03:00.0\ndrm-client-id:\t7\ndrm-engine-gfx:\t{busy} ns\ndrm-memory-vram:\t1024 KiB\ndrm-memory-gtt:\t0 KiB\n")
+        };
+        r.client(4242, 9, &info(1_000_000_000));
+        let mut gpu = Gpu::open_with(r.fs()).unwrap();
+        assert!(matches!(gpu.read(true).unwrap(), Read::Warming));
+        // The status bar reads on its own clock while the panel is open; it does not take the baseline away.
+        let bar = reading(gpu.read(false).unwrap());
+        assert!(!bar.per_process_memory && bar.processes.is_empty());
+        std::thread::sleep(Duration::from_millis(300));
+        r.client(4242, 9, &info(1_300_000_000));
+        let reading = reading(gpu.read(true).unwrap());
+        assert!(reading.processes[0].use_pct.is_some(), "the next panel read has a use, not a restart");
     }
 
     #[test]
