@@ -17,8 +17,8 @@
 //! - the pane says which servers of the folder's file were left out ([`left_out`], `cli_notice`).
 //!
 //! "Can write" is asked of [`container_folders`](crate::backend::fs_ops::container_folders), as the Editor's
-//! language servers ask it; where that can't be told, the rule holds. "Has run in it" is a mark kept under the
-//! data root ([`mark`]), so the rule still holds when the agent is switched to the host, or another host agent
+//! language servers ask it; where that can't be told, the rule holds. "Has run in it" is a mark kept in the
+//! shared folder ([`mark`]), so the rule still holds when the agent is switched to the host, or another host agent
 //! is given the folder, a folder in it or a folder that holds it. A folder no container agent has to do with
 //! is not touched by any of this.
 
@@ -30,11 +30,27 @@ use serde_json::Value;
 use crate::backend::fs_ops::container_folders::{holds_a_container_agents_folder, place, Place};
 use crate::backend::obj::{meta_get_string, MetaMapType};
 
-/// The mark's file. It is kept in the folder under the data root that holds what AgentMux keeps for host agents
-/// alone (`mcp_config_path::HOST_ONLY_DIR`: shared by every version and channel of an install, bound into no
-/// container, and not removed with a version, a cache or an agent), under the key of each spelling of the
-/// marked folder. It holds those spellings, one a line.
-const MARK: &str = "container-agent-folder";
+/// A test's own folder for the marks, set with its data home (`mcp_config_file::with_data_home`). A test
+/// build never reads or writes the real shared folder: with none set there are no marks.
+#[cfg(any(test, feature = "test-support"))]
+static MARKS_DIR_FOR_TEST: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Sets the folder a test's marks are kept in, and returns the one set before.
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_marks_dir_for_test(dir: Option<PathBuf>) -> Option<PathBuf> {
+    std::mem::replace(&mut *MARKS_DIR_FOR_TEST.lock().unwrap_or_else(|e| e.into_inner()), dir)
+}
+
+/// The folder the marks are kept in: in the shared folder (`resolve_shared_container_agent_folders_dir`), so
+/// every version and channel of an install reads the same ones, an upgrade and the removal of an old version
+/// leave them, and so does the deletion of an agent. It is bound into no container. One file per spelling of
+/// a marked folder, named by that spelling's key; it holds the folder's spellings, one a line.
+fn marks_dir() -> Option<PathBuf> {
+    #[cfg(any(test, feature = "test-support"))]
+    return MARKS_DIR_FOR_TEST.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    #[cfg(not(any(test, feature = "test-support")))]
+    return crate::registry::paths::resolve_shared_container_agent_folders_dir();
+}
 /// The most servers a pane row names, and the most characters of one name: they are read from the folder's
 /// own file.
 const MOST_NAMES: usize = 20;
@@ -52,7 +68,7 @@ fn spellings(expanded: &str) -> Vec<String> {
 }
 
 fn mark_file(spelling: &str) -> Option<PathBuf> {
-    Some(shared::host_only_root()?.join(shared::spelling_key(spelling)).join(MARK))
+    Some(marks_dir()?.join(shared::spelling_key(spelling)))
 }
 
 /// Record that a container agent runs with `work_dir` as its folder. The mark stays: from now on a host agent
@@ -68,8 +84,15 @@ pub fn mark(work_dir: &str) {
         if path.is_file() {
             continue;
         }
-        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, &text));
+        // Whole or not at all: a reader in another AgentMux never sees half a mark.
+        let half = path.with_extension(format!("{}.tmp", std::process::id()));
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&half, &text))
+            .and_then(|()| std::fs::rename(&half, &path));
         if let Err(e) = written {
+            let _ = std::fs::remove_file(&half);
             tracing::warn!(work_dir, error = %e, "the folder could not be marked as a container agent's");
         }
     }
@@ -86,12 +109,13 @@ pub fn mark_when_moved_to_the_host(old: &crate::backend::storage::AgentDefinitio
 
 /// Every spelling a mark records.
 fn marked_folders() -> Vec<String> {
-    let Some(entries) = shared::host_only_root().and_then(|root| std::fs::read_dir(root).ok()) else {
+    let Some(entries) = marks_dir().and_then(|dir| std::fs::read_dir(dir).ok()) else {
         return Vec::new();
     };
     entries
         .flatten()
-        .filter_map(|entry| std::fs::read_to_string(entry.path().join(MARK)).ok())
+        .filter(|entry| entry.path().extension().is_none())
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
         .flat_map(|text| text.lines().map(str::to_string).collect::<Vec<_>>())
         .filter(|line| !line.is_empty())
         .collect()
@@ -312,14 +336,38 @@ mod tests {
             mark(&dir);
             mark(&dir);
             assert!(holds_in(&dir), "no container has it now, and the rule still holds");
-            assert!(!was.path().join(MARK).exists(), "the mark is kept outside the folder");
-            // Kept with what is for host agents alone: not in the folder of a relocated config, which a
-            // container is given (read-only), and not under anything that goes with a version or an agent.
+            // Kept in the marks' own folder: not in the marked folder, and not in the folder of a relocated
+            // config, which a container is given (read-only).
             let kept = mark_file(&spellings(&dir)[0]).unwrap();
-            assert!(kept.is_file() && kept.starts_with(data.path().join(shared::HOST_ONLY_DIR)), "{kept:?}");
+            assert!(kept.is_file() && !kept.starts_with(was.path()), "{kept:?}");
             let given_to_a_container = crate::backend::mcp_config_file::relocated_dir(&dir).expect("a project's config folder");
-            assert!(!given_to_a_container.join(MARK).exists() && !kept.starts_with(&given_to_a_container), "{given_to_a_container:?}");
+            assert!(!kept.starts_with(&given_to_a_container), "{given_to_a_container:?}");
             assert!(!crate::backend::mcp_config_file::host_config_path(&dir).starts_with(&given_to_a_container), "nor is the host agent's config");
+        });
+    }
+
+    /// The mark is not one version's: made while one version's data root is in use, it holds under another's,
+    /// and neither data root has it.
+    #[test]
+    fn a_mark_made_by_one_version_holds_for_another() {
+        let (shared_dir, one, other, was) =
+            (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = was.path().to_string_lossy().into_owned();
+        fn files_under(root: &Path) -> usize {
+            std::fs::read_dir(root).map_or(0, |entries| {
+                entries.flatten().map(|e| if e.path().is_dir() { files_under(&e.path()) } else { 1 }).sum()
+            })
+        }
+        with_data_home(one.path(), || {
+            let before = set_marks_dir_for_test(Some(shared_dir.path().join("container-agent-folders")));
+            mark(&dir);
+            // Another version of the same install: its own data root, the same shared folder.
+            std::env::set_var("AGENTMUX_DATA_HOME", other.path());
+            let holds = holds_in(&dir);
+            set_marks_dir_for_test(before);
+            assert!(holds, "the mark is read from the shared folder");
+            assert_eq!(files_under(one.path()) + files_under(other.path()), 0, "no version's data root holds a mark");
+            assert_eq!(files_under(shared_dir.path()), spellings(&dir).len());
         });
     }
 

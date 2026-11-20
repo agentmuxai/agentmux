@@ -254,6 +254,19 @@
       ]
     },
     {
+      "name": "container agent folder marks",
+      "paths": [
+        "container-agent-folders/"
+      ],
+      "why": "A folder a container agent has run in stays marked for every install, channel and version on the machine: a host agent started there by any of them gets only the MCP servers set in AgentMux. Kept in a version's own data, the mark would be gone after an upgrade.",
+      "gate": "n/a: a mark is a plain-text file of folder spellings, one a line, with one format; a reader takes each non-empty line.",
+      "lock": "Created once (a temporary file, then a rename) and never changed or removed; two writers write the same text.",
+      "users": [
+        "crates/srv-core/src/backend/mcp_folder_rule.rs",
+        "crates/srv-core/src/registry/paths.rs"
+      ]
+    },
+    {
       "name": "where the shared folder is",
       "paths": [
         "shared/"

@@ -195,7 +195,10 @@ pub fn with_data_home<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     let _held = data_home_lock();
     let saved = std::env::var_os("AGENTMUX_DATA_HOME");
     std::env::set_var("AGENTMUX_DATA_HOME", root);
+    // The marks of folders a container agent ran in are in the shared folder: a test gets its own.
+    let marks = crate::backend::mcp_folder_rule::set_marks_dir_for_test(Some(root.join("shared-for-test").join("container-agent-folders")));
     let out = f();
+    crate::backend::mcp_folder_rule::set_marks_dir_for_test(marks);
     match saved {
         Some(v) => std::env::set_var("AGENTMUX_DATA_HOME", v),
         None => std::env::remove_var("AGENTMUX_DATA_HOME"),

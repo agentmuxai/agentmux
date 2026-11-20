@@ -189,7 +189,8 @@ pub fn relocated_dir_for(expanded: &Path) -> Option<PathBuf> {
 
 /// The folder, under the data root, of what AgentMux keeps for host agents alone. Nothing in it is bound into
 /// a container: a relocated config's folder under `mcp` is (read-only, `container::mounts`), this one never.
-/// The data root is the one every version and channel of an install shares; an isolated instance has its own.
+/// The data root is one version's of one install: what is kept here is written again by a launch, so nothing
+/// that must outlive an upgrade belongs in it.
 pub const HOST_ONLY_DIR: &str = "mcp-host";
 
 /// [`HOST_ONLY_DIR`] under the data root. `None` when the data root can't be named.
