@@ -75,6 +75,11 @@ class ModalsModel {
         return { close: () => this.closeModal(id) };
     };
 
+    /** Closes every open modal rendered by `Component`. Idempotent. */
+    closeModalsOf = (Component: (props: any) => JSX.Element): void => {
+        this._setModals(this._modals().filter((m) => m.Component !== Component));
+    };
+
     /** Closes the topmost open modal, if any. Used by the global Escape key. */
     closeTopModal = (): void => {
         const modals = this._modals();

@@ -303,6 +303,11 @@ export function matchPaneKey(e: KeyEventLike, pane: KeyPane, platform: KeyPlatfo
     return null;
 }
 
+/** Whether `e` is a single key bound to the global command `command` in the effective table (a pane's own rows are not). */
+export function keyRunsCommand(e: KeyEventLike, command: string, platform: KeyPlatform): boolean {
+    return rowsFor(platform).some((c) => !c.row.pane && c.row.command === command && c.steps.length === 1 && matchKey(e, c.steps[0]));
+}
+
 /** The first step of the chord a resolved binding starts. */
 export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | null {
     for (const c of rowsFor(platform)) {

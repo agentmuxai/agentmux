@@ -53,6 +53,7 @@ import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
 import { hostHas } from "@/util/host-caps";
 import { CrossWindowDropOverlay } from "./drag/CrossWindowDropOverlay";
 import "./drag/drop-indicators.scss";
+import { installMediaMenuGuard } from "./element/media-menu-guard";
 import { CenteredDiv } from "./element/quickelems";
 import { ZoomIndicator } from "./element/zoomindicator";
 import { isOverChrome } from "@/app/store/chrome-zoom-target";
@@ -217,6 +218,12 @@ const AppKeyHandlers = () => {
             document.removeEventListener("mousedown", keyboardMouseDownHandler);
         });
     });
+    return null;
+};
+
+// The engine's own menu never opens over a video or audio element (element/media-menu-guard.ts).
+const AppMediaMenuGuard = () => {
+    onMount(() => onCleanup(installMediaMenuGuard()));
     return null;
 };
 
@@ -452,6 +459,7 @@ const AppInner = () => {
             >
                 <AppBackground />
                 <AppKeyHandlers />
+                <AppMediaMenuGuard />
                 <AppZoomHandler />
                 <AppAllPanesZoomHandler />
                 <AppFocusHandler />

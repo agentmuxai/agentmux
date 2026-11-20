@@ -117,7 +117,7 @@ export function askInPane<P extends object>(
             blockId,
             Component as (props: Record<string, unknown> & PaneRequestProps) => JSX.Element,
             { ...props, ...answer },
-            { source: "memory-confirm", onGone: () => resolve("declined"), ...about }
+            { source: "memory-confirm", operatorOnly: true, onGone: () => resolve("declined"), ...about }
         );
     });
 }

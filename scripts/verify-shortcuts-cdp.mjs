@@ -25,11 +25,15 @@ export async function attach(target) {
     const ws = new WebSocket(target.webSocketDebuggerUrl);
     let seq = 0;
     const pending = new Map();
+    /** Handlers for the page's events (a message with a `method` and no `id`), by method name. */
+    const listeners = new Map();
     ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.id && pending.has(m.id)) {
             pending.get(m.id)(m);
             pending.delete(m.id);
+        } else if (m.method) {
+            for (const fn of listeners.get(m.method) ?? []) fn(m.params);
         }
     };
     await new Promise((r, j) => {
@@ -58,7 +62,12 @@ export async function attach(target) {
         if (m.result?.exceptionDetails) throw new Error(m.result.exceptionDetails.exception?.description ?? m.result.exceptionDetails.text);
         return m.result?.result?.value;
     };
-    return { ws, send, fire, evaluate };
+    /** Calls `fn(params)` for each event of this method; returns the function that stops it. */
+    const on = (method, fn) => {
+        listeners.set(method, [...(listeners.get(method) ?? []), fn]);
+        return () => listeners.set(method, (listeners.get(method) ?? []).filter((f) => f !== fn));
+    };
+    return { ws, send, fire, evaluate, on };
 }
 
 export const CALL_TIMEOUT_MS = 15_000;
