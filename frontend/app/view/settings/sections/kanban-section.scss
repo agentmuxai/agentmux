@@ -194,3 +194,14 @@
     color: var(--secondary-text-color);
     font-variant-numeric: tabular-nums;
 }
+
+// The copy of a row that follows the pointer while it is dragged (kanban-stages-reorder.ts): a solid surface, so the
+// picture reads in a dark theme as it does in a light one. It sits off screen; the browser takes its picture at once.
+.kanban-stages__ghost {
+    position: fixed;
+    top: -1000px;
+    left: 0;
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    pointer-events: none;
+}
