@@ -307,6 +307,34 @@ fn run_with_dry_run_reports_and_removes_nothing_and_only_limits_a_removal_to_wha
     assert!(l.versions_root.join("0.60.2").is_dir(), "not in the list that was shown");
 }
 
+#[test]
+fn a_hosted_workspace_removes_by_default_and_a_setting_of_false_still_wins() {
+    let none = HashMap::new();
+    assert!(!Policy::from_extra(&none).clean, "a desktop only reports until asked");
+    assert!(!Policy::from_extra_for(&none, false).clean);
+    assert!(Policy::from_extra_for(&none, true).clean, "a hosted volume is the person's: every pin move adds a folder");
+    let off = HashMap::from([(KEY_CLEAN.to_string(), serde_json::json!(false))]);
+    assert!(!Policy::from_extra_for(&off, true).clean);
+    let keep_two = HashMap::from([(KEY_KEEP_PREVIOUS.to_string(), serde_json::json!(2))]);
+    let hosted = Policy::from_extra_for(&keep_two, true);
+    assert_eq!((hosted.keep_previous, hosted.idle, hosted.portables), (2, Duration::from_secs(24 * 3600), false), "only `clean` differs");
+}
+
+#[test]
+fn a_hosted_pass_leaves_the_running_version_and_the_one_it_carried_from_whatever_else_goes() {
+    let root = tempfile::tempdir().unwrap();
+    let l = layout(root.path(), "0.60.35");
+    for v in ["0.60.26", "0.60.33", "0.60.34", "0.60.35"] {
+        version(&l, v);
+    }
+    let hosted = Policy { clean: true, ..eager() };
+    let run = run(&l, &hosted, false, None, SystemTime::now());
+    assert_eq!(run.report.unwrap().removed.len(), 2);
+    assert!(l.versions_root.join("0.60.35").is_dir(), "the running version");
+    assert!(l.versions_root.join("0.60.34").is_dir(), "the way back, the version it carried from");
+    assert!(!l.versions_root.join("0.60.33").exists() && !l.versions_root.join("0.60.26").exists());
+}
+
 /// An unpacked portable of `v`, as the updater leaves it, recording `channel` when there is one.
 fn portable(l: &Layout, v: &str, channel: Option<&str>) -> PathBuf {
     let dir = l.portable_parents[0].join(if cfg!(windows) { format!("agentmux-{v}-x64-portable") } else { format!("AgentMux-{v}") });
