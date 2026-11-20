@@ -71,9 +71,17 @@ export async function ensureLease(o: LeaseOptions): Promise<LeaseOutcome> {
             resp = await fetchImpl(ROUTE, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}", signal: o.signal });
         } catch {
             // Aborted, or a server that cannot be reached: the socket is the next thing to try (and says so if it cannot be opened).
-            return o.signal.aborted ? aborted() : { ok: true };
+            // An ask that was cut off may still have been answered by a server that began a browser for it: that one is given back too.
+            if (o.signal.aborted) {
+                leased = true;
+                return aborted();
+            }
+            return { ok: true };
         }
-        if (o.signal.aborted) return aborted();
+        if (o.signal.aborted) {
+            leased = true;
+            return aborted();
+        }
         const body = await bodyOf(resp);
         // No such route here: a server that does not hand out browsers (a page's own fallback answers 200 with something that is not
         // JSON). A 404 that says "not-found" is the route answering, about a workspace.
@@ -88,11 +96,29 @@ export async function ensureLease(o: LeaseOptions): Promise<LeaseOutcome> {
     }
 }
 
-/** Gives the pane's browser back (the pane was closed or the page is going): best effort, and only if a server handed one out. */
+/** Gives the page's browser back: best effort, and only if a server handed one out (or may have, to an ask that was cut off). */
 export function releaseLease(fetchImpl: Fetch = (input, init) => fetch(input, init)): void {
     if (!leased) return;
     leased = false;
     void fetchImpl(ROUTE, { method: "DELETE", credentials: "same-origin", keepalive: true }).catch(() => {});
+}
+
+/** The panes of this page that may be using the browser. The server's browser is the person's, one for the page's panes. */
+let panes = 0;
+
+/**
+ * A pane takes its place among the page's panes; the function it returns gives the place up when the pane goes (not when it is only
+ * hidden). The browser is given back when the LAST pane goes: a pane closing must not take the browser from one that is still open.
+ */
+export function joinLease(fetchImpl?: Fetch): () => void {
+    panes += 1;
+    let left = false;
+    return () => {
+        if (left) return;
+        left = true;
+        panes = Math.max(0, panes - 1);
+        if (panes === 0) releaseLease(fetchImpl);
+    };
 }
 
 let pageHideWired = false;
@@ -106,5 +132,6 @@ export function releaseOnPageHide(target: Pick<Window, "addEventListener"> = win
 /** For tests: forget what a server has answered. */
 export function resetLeaseState(): void {
     leased = false;
+    panes = 0;
     pageHideWired = false;
 }

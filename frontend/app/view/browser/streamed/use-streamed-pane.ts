@@ -6,7 +6,7 @@
 // Sizes are sent as the stage changes, at most every RESIZE_MS. docs/specs/SPEC_STREAMED_BROWSER_PANE_DEMO_2026_11_15.md §6, §7.
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
-import { releaseLease } from "./lease-step";
+import { joinLease } from "./lease-step";
 import { openStreamedPane, type StreamedHandle } from "./streamed-client";
 import type { ServerMsg } from "./streamed-protocol";
 
@@ -49,6 +49,7 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     const [nav, setNav] = createSignal<NavState | null>(null);
     const [error, setError] = createSignal("");
     let handle: StreamedHandle | null = null;
+    const leave = joinLease();
     let size = { w: 0, h: 0 };
     let visible = false;
     /** An address asked for while the socket was still opening: kept, and sent as soon as it opens. */
@@ -103,8 +104,8 @@ export function useStreamedPane(draw: (jpeg: Uint8Array) => void, startUrl: () =
     onCleanup(() => {
         clearTimeout(timer);
         close();
-        // The pane is gone (not just hidden): a server that handed out a browser for it is told to take it back.
-        releaseLease();
+        // The pane is gone (not just hidden): when it is the page's last, a server that handed out a browser takes it back.
+        leave();
     });
 
     return {

@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/app/i18n/i18n";
-import { ensureLease, releaseLease, releaseOnPageHide, resetLeaseState } from "./lease-step";
+import { ensureLease, joinLease, releaseLease, releaseOnPageHide, resetLeaseState } from "./lease-step";
 
 type Answer = { status: number; body: unknown };
 const answer = (status: number, body: unknown): Answer => ({ status, body });
@@ -143,6 +143,68 @@ describe("leaving", () => {
         expect(del.calls).toHaveLength(1);
         expect(del.calls[0].input).toBe("/me/browser");
         expect(del.calls[0].init).toMatchObject({ method: "DELETE", credentials: "same-origin", keepalive: true });
+    });
+
+    it("gives the browser back only when the page's last pane goes: one closing must not take it from another that is open", async () => {
+        const del = fake([answer(200, {})]);
+        const a = joinLease(del.fetchImpl);
+        const b = joinLease(del.fetchImpl);
+        await run([answer(200, { ready: true })]).promise;
+        a();
+        a(); // a second call for the same pane counts for nothing
+        expect(del.calls).toHaveLength(0);
+        b();
+        expect(del.calls).toHaveLength(1);
+        expect(del.calls[0].init).toMatchObject({ method: "DELETE", keepalive: true });
+    });
+
+    it("gives it back after a pane has come and gone and another has taken its place", async () => {
+        const del = fake([answer(200, {})]);
+        await run([answer(200, { ready: true })]).promise;
+        joinLease(del.fetchImpl)();
+        expect(del.calls).toHaveLength(1);
+        await run([answer(200, { ready: true })]).promise;
+        const next = joinLease(del.fetchImpl);
+        next();
+        expect(del.calls).toHaveLength(2);
+    });
+
+    it("gives back a browser an ask may have started even when the pane went before the answer came", async () => {
+        const del = fake([answer(200, {})]);
+        const leave = joinLease(del.fetchImpl);
+        const ctl = new AbortController();
+        const p = ensureLease({ signal: ctl.signal, onStarting: () => {}, fetchImpl: () => new Promise((_r, rej) => ctl.signal.addEventListener("abort", () => rej(new Error("aborted")))), sleep: instantly });
+        ctl.abort();
+        expect(await p).toMatchObject({ ok: false, aborted: true });
+        leave();
+        expect(del.calls).toHaveLength(1);
+    });
+
+    it("gives back a browser when the pane went just after the answer came, before it was read", async () => {
+        const del = fake([answer(200, {})]);
+        const leave = joinLease(del.fetchImpl);
+        const ctl = new AbortController();
+        const f = fake([answer(200, { ready: false })]);
+        const p = ensureLease({
+            signal: ctl.signal,
+            onStarting: () => {},
+            fetchImpl: async (input, init) => {
+                const r = await f.fetchImpl(input, init);
+                ctl.abort();
+                return r;
+            },
+            sleep: instantly,
+        });
+        expect(await p).toMatchObject({ ok: false, aborted: true });
+        leave();
+        expect(del.calls).toHaveLength(1);
+    });
+
+    it("gives back nothing for a server that has no such route, however many panes come and go", async () => {
+        const del = fake([answer(200, {})]);
+        await run([answer(404, undefined)]).promise;
+        joinLease(del.fetchImpl)();
+        expect(del.calls).toHaveLength(0);
     });
 
     it("does not mind a release that fails", async () => {
