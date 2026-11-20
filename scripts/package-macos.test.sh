@@ -21,6 +21,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/package-macos.sh"
+SIGN_SCRIPT="$HERE/sign-macos-app.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -101,9 +102,10 @@ fi
 # requirement, which includes the identifier: with the version in it, "Always Allow" never
 # carried over and every new version asked for the login keychain on first launch
 # (retro-keychain-prompt-recurs-per-build-identity-2026-08-21.md). srv lives in its own helper
-# app now (`$SRV_APP_BIN/agentmux-srv`). Run the script's real srv signing line, ad hoc, on two
-# copies built under different versions: both must come out the same.
-SIGN_LINE="$(grep -E '^"\$\{SIGN\[@\]\}" --identifier ai\.agentmux\.srv .*"\$SRV_APP_BIN/agentmux-srv"$' "$SCRIPT")"
+# app now (`$SRV_APP_BIN/agentmux-srv`). Run the signing script's real srv signing line, ad hoc, on two
+# copies built under different versions: both must come out the same. (The signing moved out of
+# package-macos.sh into sign-macos-app.sh, which the release workflow's signing job runs.)
+SIGN_LINE="$(grep -E '^"\$\{SIGN\[@\]\}" --identifier ai\.agentmux\.srv .*"\$SRV_APP_BIN/agentmux-srv"$' "$SIGN_SCRIPT")"
 if [ -z "$SIGN_LINE" ]; then
     bad "extract srv's signing line" "not found — did the signing step change shape?"
 elif ! command -v codesign > /dev/null 2>&1; then
@@ -131,6 +133,29 @@ else
         bad "srv signs as ai.agentmux.srv whatever its version" \
             "got '$id_a' and '$id_b' — each version is a new app to the Keychain"
     fi
+fi
+
+# The release's order: the unsigned app is the build job's whole output, and the signing steps
+# run in the order that puts a ticket on the app before the DMG is made from it. These read the
+# scripts' text, so a reordering that would ship an app without its own ticket fails here.
+if grep -q -- '--unsigned-app' "$SCRIPT" && grep -qE '^if \[ "\$UNSIGNED_APP" = "1" \]; then$' "$SCRIPT"; then
+    ok "package-macos.sh has an --unsigned-app stage that stops before any signing"
+else
+    bad "package-macos.sh has an --unsigned-app stage" "the release build job relies on it"
+fi
+unsigned_at="$(grep -n 'exit 0' "$SCRIPT" | head -1 | cut -d: -f1)"
+sign_at="$(grep -n 'sign-macos-app.sh' "$SCRIPT" | grep -v '^[0-9]*:#' | head -1 | cut -d: -f1)"
+if [ -n "$unsigned_at" ] && [ -n "$sign_at" ] && [ "$unsigned_at" -lt "$sign_at" ]; then
+    ok "the unsigned stage ends before the signing call"
+else
+    bad "the unsigned stage ends before the signing call" "exit at line '${unsigned_at:-none}', sign at '${sign_at:-none}'"
+fi
+app_at="$(grep -n 'notarize-macos.sh" app' "$SCRIPT" | head -1 | cut -d: -f1)"
+dmg_at="$(grep -n 'make-macos-dmg.sh' "$SCRIPT" | grep -v '^[0-9]*:#' | head -1 | cut -d: -f1)"
+if [ -n "$app_at" ] && [ -n "$dmg_at" ] && [ "$app_at" -lt "$dmg_at" ]; then
+    ok "the app is notarized and stapled before the DMG is made"
+else
+    bad "the app is notarized and stapled before the DMG is made" "app at '${app_at:-none}', DMG at '${dmg_at:-none}'"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
