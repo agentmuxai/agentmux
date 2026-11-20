@@ -308,9 +308,11 @@ async fn itest_container_lifecycle_exec_env_and_io() {
     let _ = cm.remove(name, true).await; // clean slate; ignore if absent
 
     // create path: pull + create + start
-    cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (create)");
+    let created = cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (create)");
+    assert!(created, "a container made now started now: what ran in an earlier one is gone");
     // reuse path: already running → must no-op, not error or re-create
-    cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (reuse)");
+    let reused = cm.ensure_running_observed(name, image, &[], &[], &ContainerMountSpec::default(), &|_| {}).await.expect("ensure_running (reuse)");
+    assert!(!reused, "a container already running was not started, so its processes are still there");
 
     // env reaches the in-container process via the Docker socket, not argv.
     // Drop the (unused) stdin half first: bollard's exec output stream does

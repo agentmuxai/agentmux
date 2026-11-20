@@ -81,6 +81,12 @@ describe("a stale registry row", () => {
         expect(a.canStop).toBe(false);
     });
 
+    it("turned unknown when the ceiling passed, which is where its time in the dock runs from", () => {
+        const a = backgroundTaskToActivity(stale(), NOW);
+        expect(a.unknownSince).toBe(NOW - 1);
+        expect(backgroundTaskToActivity(stale({ last_seen_ms: NOW - 60_000 }), NOW).unknownSince).toBeUndefined();
+    });
+
     it("leaves a recently seen row without a pid running", () => {
         const a = backgroundTaskToActivity(stale({ last_seen_ms: NOW - 60_000 }), NOW);
         expect(a.status).toBe("running");
