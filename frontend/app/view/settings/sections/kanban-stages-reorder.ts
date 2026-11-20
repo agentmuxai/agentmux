@@ -20,12 +20,39 @@ export interface StageReorder {
     onDragEnd: () => void;
 }
 
+/**
+ * The picture that follows the pointer. The browser snapshots the row as drawn, and the row has no background of its own,
+ * so in a dark theme its light text lands on a light picture. A copy on a solid surface, kept off screen for a moment, is
+ * what the browser takes instead.
+ */
+function dragGhost(row: HTMLElement): HTMLElement {
+    dropGhosts();
+    const ghost = row.cloneNode(true) as HTMLElement;
+    // A copy keeps a field's first value, not what was typed since.
+    const typed = row.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
+    ghost.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select").forEach((el, i) => {
+        el.value = typed[i].value;
+    });
+    ghost.classList.add("kanban-stages__ghost");
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.style.width = `${row.offsetWidth}px`;
+    document.body.appendChild(ghost);
+    setTimeout(() => ghost.remove(), 0);
+    return ghost;
+}
+
+/** A copy is dropped as soon as the browser has its picture, and any left over goes with the drag's end or the next drag. */
+function dropGhosts() {
+    document.querySelectorAll(".kanban-stages__ghost").forEach((g) => g.remove());
+}
+
 export function createStageReorder(moveNear: (id: string, target: string, after: boolean) => void) {
     const [held, setHeld] = createSignal<string | null>(null);
     const [over, setOver] = createSignal<{ id: string; after: boolean } | null>(null);
     const clear = () => {
         setHeld(null);
         setOver(null);
+        dropGhosts();
     };
 
     return (id: string): StageReorder => ({
@@ -41,7 +68,7 @@ export function createStageReorder(moveNear: (id: string, target: string, after:
             if (e.dataTransfer) {
                 e.dataTransfer.setData(STAGE_MIME, id);
                 e.dataTransfer.effectAllowed = "move";
-                if (row) e.dataTransfer.setDragImage(row, 12, 12);
+                if (row) e.dataTransfer.setDragImage(dragGhost(row), 12, 12);
             }
             setHeld(id);
         },
