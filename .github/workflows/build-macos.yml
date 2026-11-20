@@ -406,7 +406,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "sha256=$(shasum -a 256 "$OUT/AgentMux-unsigned-app.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 < "$OUT/AgentMux-unsigned-app.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Upload the unsigned app for the signing job
         uses: actions/upload-artifact@v4
@@ -499,7 +499,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$WANT" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the build job reported no digest for the unsigned app"; exit 1; }
-          GOT="$(/usr/bin/shasum -a 256 "$WORK/in/AgentMux-unsigned-app.zip" | /usr/bin/cut -d' ' -f1)"
+          GOT="$(/usr/bin/shasum -a 256 < "$WORK/in/AgentMux-unsigned-app.zip" | /usr/bin/cut -d' ' -f1)"
           [ "$GOT" = "$WANT" ] || { echo "::error::the unsigned app in the artifact is not the one the build job made"; exit 1; }
 
       # The zip is input from code that ran in another job: unpack-macos-app.sh refuses an entry outside AgentMux.app (an
@@ -652,7 +652,7 @@ jobs:
           /usr/bin/codesign --force --timestamp --sign "$CERT" --keychain "$KEYCHAIN_PATH" "$DMG"
           bash signing-scripts/scripts/notarize-macos.sh dmg "$DMG"
           # The final bytes (signed, stapled) have a digest; `publish` checks the file it downloads against it.
-          echo "sha256=$(/usr/bin/shasum -a 256 "$DMG" | /usr/bin/cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(/usr/bin/shasum -a 256 < "$DMG" | /usr/bin/cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           # A suffix that is not .dmg: release-core.yml gathers every "*.dmg" in the run's artifacts into the
           # signed manifest, and only the publish job's checked copy may be one of them.
           /bin/mv "$DMG" "$DMG.pending"
@@ -706,7 +706,7 @@ jobs:
           # First: the file is the one the signing job made (its digest came by job output), not another of ours that was put
           # under the artifact's name.
           [[ "$WANT_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::the signing job reported no digest for the DMG"; exit 1; }
-          [ "$(shasum -a 256 "${pending[0]}" | cut -d' ' -f1)" = "$WANT_SHA256" ] || { echo "::error::the DMG in the artifact is not the one the signing job made"; exit 1; }
+          [ "$(shasum -a 256 < "${pending[0]}" | cut -d' ' -f1)" = "$WANT_SHA256" ] || { echo "::error::the DMG in the artifact is not the one the signing job made"; exit 1; }
           DMG="${pending[0]%.pending}"
           mv "${pending[0]}" "$DMG"
           # Whose signature it is, not only that Apple accepts it: "Notarized Developer ID" is true of any developer's app.
