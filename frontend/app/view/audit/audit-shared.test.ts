@@ -182,7 +182,7 @@ describe("a page with the other channels' rows", () => {
 });
 
 describe("sections", () => {
-    const from =(id: string, channel?: string, extra = {}) => entry({ id, provenance: channel === undefined ? undefined : { channel, ...extra } });
+    const from = (id: string, channel?: string, extra = {}) => entry({ id, provenance: channel === undefined ? undefined : { channel, ...extra } });
 
     it("cut the list into one section per channel, in the order each first appears, keeping the list's order within one", () => {
         const sections = sectionsOf([from("a", "stable"), from("b", "dev"), from("c", "stable"), from("d", "dev")], "dev");
