@@ -24,10 +24,13 @@ pub fn request_for_peer(req: &AuditQueryReq) -> AuditQueryReq {
     AuditQueryReq { cursor: None, totals: None, scope: Some("machine".to_string()), limit: Some(req.limit.unwrap_or(50).min(PEER_LIMIT)), ..req.clone() }
 }
 
-/// Take from `entries` the links that only work on the computer that wrote them: a pane, an agent's history and a task
-/// of its Kanban would open nothing, or the wrong thing, anywhere else.
+/// Take from `entries` what belongs to the computer that wrote them. The links: a pane, an agent's history and a task
+/// of its Kanban would open nothing, or the wrong thing, anywhere else. The text of a dialog and the answer given to it
+/// (`prompt`, `answer` of a sensitive-operation row): the Audit shares what agents did, never what was typed.
 pub fn without_local_links(entries: &mut [AuditEntry]) {
     for e in entries {
+        e.prompt = None;
+        e.answer = None;
         e.links = AuditLinks::default();
         for end in [e.from.as_mut(), e.to.as_mut()].into_iter().flatten() {
             end.links = AuditLinks::default();

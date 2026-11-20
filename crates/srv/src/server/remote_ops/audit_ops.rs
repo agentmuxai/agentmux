@@ -95,13 +95,14 @@ pub(crate) async fn ask_peers(state: &AppState, req: &AuditQueryReq) -> Vec<Audi
     }
     let Some(slug) = super::fleet_sync::signer(state) else { return Vec::new() };
     let params = serde_json::to_value(peers::request_for_peer(req)).unwrap_or(Value::Null);
-    let key = params.to_string();
+    let hosts = lan_hosts(&state.lan_discovery.get_instances());
+    // What was asked, of whom and by whom: a newly paired computer, or another signer, is not answered from the last one.
+    let key = format!("{params}|{slug}|{}", hosts.iter().map(|(_, host)| host.as_str()).collect::<Vec<_>>().join(","));
     if let Some((asked, at, rows)) = LAST_ASKED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         if *asked == key && at.elapsed() < REUSE_FOR {
             return rows.clone();
         }
     }
-    let hosts = lan_hosts(&state.lan_discovery.get_instances());
     let rows = futures_util::future::join_all(hosts.into_iter().map(|(name, host)| {
         let (slug, params) = (slug.clone(), params.clone());
         async move {

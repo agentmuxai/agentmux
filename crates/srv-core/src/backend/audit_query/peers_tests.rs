@@ -60,6 +60,28 @@ fn its_rows_are_one_list_by_time_with_the_computers_own_name_and_no_local_link()
 }
 
 #[test]
+fn a_dialogs_text_and_the_answer_given_stay_on_the_computer_that_wrote_them() {
+    let mut sensitive = row("j2", 20);
+    sensitive.kind = "action".into();
+    sensitive.prompt = Some("Allow the agent to read a file?".into());
+    sensitive.answer = Some("yes, this one".into());
+    sensitive.level = Some("high".into());
+    let other = vec![AuditChannelRows { channel: "dev".into(), entries: vec![sensitive.clone()], more: false }];
+    let rows = rows_of("beta", answer(vec![sensitive], other, None));
+    assert_eq!(rows.entries.len(), 2);
+    for e in &rows.entries {
+        assert_eq!((e.prompt.as_deref(), e.answer.as_deref()), (None, None));
+        assert_eq!(e.level.as_deref(), Some("high"), "how risky it was is not text a person typed");
+    }
+    // The answering computer removes it too, so it never leaves.
+    let mut sent = [row("j3", 30)];
+    sent[0].prompt = Some("text".into());
+    sent[0].answer = Some("value".into());
+    without_local_links(&mut sent);
+    assert_eq!((sent[0].prompt.as_deref(), sent[0].answer.as_deref()), (None, None));
+}
+
+#[test]
 fn a_row_that_names_no_channel_gets_the_one_that_answered() {
     let mut bare = row("j1", 10);
     bare.provenance = None;
