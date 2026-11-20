@@ -2,7 +2,7 @@
   <div.agent-view.agent-view--presentation tabindex="-1" style="--agent-pane-zoom: 1;">
     <PaneLoadingCover {"phase":"<fn>"}>
     <ShutdownOverlay {"agentName":"\"Korp\"","blockId":"\"blk-12345678\""}>
-    <AgentTopBand {"blockId":"\"blk-12345678\"","zoom":"<fn>"}>
+    <AgentTopBand {"blockId":"\"blk-12345678\""}>
     <div.agent-view-row>
       <div.agent-view-zoomed style="zoom: 1;">
         <AgentProgressBar {"active":"false","mount":"<fn>","stopping":"false"}>

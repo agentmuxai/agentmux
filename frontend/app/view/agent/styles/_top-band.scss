@@ -5,6 +5,9 @@
 // Messages panel. Three slots, each drawn in a box of its own, so nothing is drawn over another.
 .agent-view {
     .agent-top-band {
+        // The band sits in `.agent-view`, which carries no zoom of its own, so the chrome's level applies as it is
+        // (the conversation under it keeps the pane's). It says so to a Ctrl+wheel with `data-zoom-scope`.
+        zoom: var(--zoomfactor);
         flex: 0 0 auto;
         position: relative;
         padding: var(--space-1) var(--space-2);
