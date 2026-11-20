@@ -175,7 +175,8 @@ pub(super) fn write_config_file(
             crate::backend::mcp_config_file::relocated_path(expanded_dir)
         };
         if let Some(path) = outside {
-            crate::backend::mcp_config_file::write_relocated(&path, &file.content)
+            let content = if on_host { crate::backend::mcp_config_file::host_content(expanded_dir, file.content.clone()) } else { file.content.clone() };
+            crate::backend::mcp_config_file::write_relocated(&path, &content)
                 .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
             return Ok(());
         }
@@ -304,10 +305,13 @@ mod tests {
             write_config_file(&wd, &home, &home_str, &file, true).unwrap();
             crate::backend::mcp_config_file::host_config_path(&home_str)
         });
-        assert!(outside.starts_with(data.path().join("mcp")) && !outside.starts_with(&home), "{outside:?}");
-        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&outside).unwrap()).unwrap();
-        assert_eq!(written["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
-        assert_eq!(written["mcpServers"].as_object().unwrap().len(), 1, "none of the folder's servers: {written}");
+        assert!(outside.starts_with(data.path().join(agentmux_common::mcp_config_path::HOST_ONLY_DIR)) && !outside.starts_with(&home), "{outside:?}");
+        let text = std::fs::read_to_string(&outside).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // The command by its path (where an `agentmux-mcp` ships on this computer), never the bare name.
+        assert!(crate::backend::mcp_folder_rule::names_the_command_by_path(&text), "{text}");
+        assert_ne!(written["mcpServers"]["agentmux"]["command"], "agentmux-mcp");
+        assert!(written["mcpServers"].as_object().unwrap().keys().all(|name| name == "agentmux"), "none of the folder's servers: {written}");
         assert_eq!(std::fs::read_to_string(home.join(".mcp.json")).unwrap(), theirs, "the folder's file is left as it is");
         for file in files_under(&home) {
             assert!(!std::fs::read_to_string(&file).unwrap_or_default().contains("PRIVATE-JEKT"), "no signing key in the folder: {file:?}");

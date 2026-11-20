@@ -60,15 +60,26 @@ pub fn config_path(work_dir: &str) -> PathBuf {
 }
 
 /// The config of a host agent in `work_dir` when it is kept outside the folder: [`relocated_path`] for a
-/// user's project, and the same place for any folder the rule of [`crate::backend::mcp_folder_rule`] holds for
-/// (a container agent can write it), AgentMux's own included. `None` when the file belongs in the folder.
-/// Reads the disk and the store.
+/// user's project. For any folder the rule of [`crate::backend::mcp_folder_rule`] holds for (a container agent
+/// can write it), AgentMux's own included, it is in the folder kept for host agents alone
+/// (`mcp_config_path::HOST_ONLY_DIR`), which no container has in its mounts. `None` when the file belongs in
+/// the folder. Reads the disk and the store.
 pub fn host_relocated_path(work_dir: &str) -> Option<PathBuf> {
     if crate::backend::mcp_folder_rule::holds_in(work_dir) {
         let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
-        return shared::outside_dir_for(Path::new(&expanded)).map(|dir| dir.join(shared::RELOCATED_MCP_JSON));
+        return shared::host_only_dir_for(Path::new(&expanded)).map(|dir| dir.join(shared::RELOCATED_MCP_JSON));
     }
     relocated_path(work_dir)
+}
+
+/// `content` as a host agent's config is written for `work_dir`: as it is, except in a folder the rule holds
+/// for, where the `agentmux` command is named by its path (`mcp_folder_rule::with_the_command_by_path`). Every
+/// writer of a host agent's config outside its folder passes the text through here.
+pub fn host_content(work_dir: &str, content: String) -> String {
+    if crate::backend::mcp_folder_rule::holds_in(work_dir) {
+        return crate::backend::mcp_folder_rule::with_the_command_by_path(&content, work_dir);
+    }
+    content
 }
 
 /// Where a host agent's MCP config is: [`config_path`], except that it is outside a folder a container agent
@@ -312,6 +323,8 @@ mod tests {
             let project_dir = project.path().to_string_lossy().into_owned();
             // As today while no container agent has to do with them.
             assert_eq!(host_relocated_path(&owned_dir), None);
+            let untouched = r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#;
+            assert_eq!(host_content(&project_dir, untouched.to_string()), untouched, "a folder of the agent's own keeps the command as the launch writes it");
             // A config path is resolved, so compare the folder resolved the same way (a temp dir can be a link).
             let in_the_folder = |config: PathBuf| config.file_name() == Some(std::ffi::OsStr::new(MCP_JSON)) && std::fs::canonicalize(config.parent().unwrap()).unwrap() == std::fs::canonicalize(&owned).unwrap();
             assert!(in_the_folder(host_config_path(&owned_dir)));
@@ -321,9 +334,14 @@ mod tests {
             for (folder, dir) in [(owned.as_path(), &owned_dir), (project.path(), &project_dir)] {
                 crate::backend::mcp_folder_rule::mark(dir);
                 let outside = host_relocated_path(dir).expect("kept outside the folder");
-                assert!(outside.starts_with(data.path().join("mcp")) && !outside.starts_with(folder), "{outside:?}");
+                assert!(outside.starts_with(data.path().join(shared::HOST_ONLY_DIR)) && !outside.starts_with(folder), "{outside:?}");
+                // Not the folder a container agent of a project is given (its relocated config's, read-only).
+                assert!(relocated_dir(dir).is_none_or(|given| !outside.starts_with(given)), "{outside:?}");
                 assert_eq!(host_config_path(dir), outside);
                 assert_eq!(read_for_turn(dir), None, "no config of AgentMux's yet: the folder's is not read in its place");
+                // As a writer writes it: the `agentmux` command by its path, or no such entry.
+                let content = host_content(dir, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"},"git":{"command":"git-mcp"}}}"#.to_string());
+                assert!(crate::backend::mcp_folder_rule::names_the_command_by_path(&content), "{content}");
                 write_relocated(&outside, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#).unwrap();
                 let read: serde_json::Value = serde_json::from_str(&read_for_turn(dir).unwrap()).unwrap();
                 assert_eq!(read["mcpServers"]["agentmux"]["command"], "agentmux-mcp");

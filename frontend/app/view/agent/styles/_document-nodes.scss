@@ -2142,20 +2142,27 @@ $tool-name-colors: (
         }
     }
 
+    // A long label (a list of names) wraps inside the row; it is never cut at the pane's edge. The radius is
+    // half a one-line label's height: a pill on one line, rounded corners once it wraps.
     .agent-cli-notice-label {
-        flex-shrink: 0;
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        text-align: center;
+        overflow-wrap: anywhere;
         font-size: var(--text-xs);
         font-weight: 600;
         color: var(--cli-notice-tone);
         padding: 2px 10px;
         border: 1px solid var(--border-color);
-        border-radius: var(--radius-full);
+        border-radius: 11px;
         background: var(--panel-bg-color);
     }
 
+    // The theme's own secondary text, as the session divider's detail: readable in a light theme too.
     .agent-cli-notice-detail {
         font-size: var(--text-xs);
-        color: rgba(255, 255, 255, 0.3);
+        color: var(--secondary-text-color);
         text-align: center;
     }
 

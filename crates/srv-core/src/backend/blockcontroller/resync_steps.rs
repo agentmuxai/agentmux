@@ -141,14 +141,12 @@ impl ResyncCtx<'_> {
     }
 
     /// Create a controller of `controller_type`, register it and start it.
+    ///
+    /// Not in a folder a container agent can write, for a controller that starts the agent's CLI itself
+    /// ([`start_refusal`]).
     pub(super) fn create_and_start(self, controller_type: &str) -> Result<(), String> {
-        // An agent whose CLI starts with its controller (a terminal agent, a session agent) is not started on
-        // the host in a folder a container agent can write (`mcp_folder_rule`). A turn-based agent's CLI
-        // starts with each turn, which asks the same there.
-        if !matches!(controller_type, BLOCK_CONTROLLER_SUBPROCESS | BLOCK_CONTROLLER_PERSISTENT) {
-            if let Some(why) = crate::backend::mcp_folder_rule::refusal(&self.block.meta) {
-                return Err(why);
-            }
+        if let Some(why) = start_refusal(controller_type, &self.block.meta) {
+            return Err(why);
         }
         refresh_agent_skill_files(&self.block.meta, &self.mstore, &self.identity_store);
         match controller_type {
@@ -351,4 +349,16 @@ impl ResyncCtx<'_> {
         register_controller(&self.block.oid, ctrl.clone());
         ctrl.start(self.block.meta.clone(), self.rt_opts, self.force)
     }
+}
+
+/// Why a controller of `controller_type` is not created for the agent on a pane with `meta`: its CLI starts
+/// with the controller (a terminal agent, a session agent, an app-server agent), and in a folder a container
+/// agent can write nothing on that path keeps a CLI to the MCP servers set in AgentMux, Claude Code included
+/// (`mcp_folder_rule::refusal`). A turn-based agent's controller (subprocess, persistent) starts no CLI: each
+/// turn starts it, and asks `mcp_folder_rule::turn_refusal` there.
+pub(super) fn start_refusal(controller_type: &str, meta: &crate::backend::obj::MetaMapType) -> Option<String> {
+    if matches!(controller_type, BLOCK_CONTROLLER_SUBPROCESS | BLOCK_CONTROLLER_PERSISTENT) {
+        return None;
+    }
+    crate::backend::mcp_folder_rule::refusal(meta)
 }

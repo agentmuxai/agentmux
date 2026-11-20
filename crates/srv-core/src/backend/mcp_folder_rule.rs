@@ -9,24 +9,31 @@
 //!
 //! - its config is kept outside the folder (`mcp_config_file::host_config_path`), and the folder's own
 //!   `.mcp.json` is neither merged into it nor handed to a harness (`mcp_config_file::read_for_turn`);
-//! - Claude Code is told to use that config alone (`agent_runtime`);
-//! - any other harness is not started there ([`refusal`]): what it reads from its folder is its own, and
+//! - a Claude Code turn is told to use that config alone (`agent_mcp_flag`), and the config names the
+//!   `agentmux` command by its path ([`with_the_command_by_path`]);
+//! - any other harness, and any agent whose CLI is started by a terminal, session or app-server controller,
+//!   is not started there ([`refusal`], [`turn_refusal`]): what it reads from its folder is its own, and
 //!   AgentMux has no switch for it;
 //! - the pane says which servers of the folder's file were left out ([`left_out`], `cli_notice`).
 //!
 //! "Can write" is asked of [`container_folders`](crate::backend::fs_ops::container_folders), as the Editor's
 //! language servers ask it; where that can't be told, the rule holds. "Has run in it" is a mark kept under the
 //! data root ([`mark`]), so the rule still holds when the agent is switched to the host, or another host agent
-//! is given the folder. A folder no container agent has to do with is not touched by any of this.
+//! is given the folder, a folder in it or a folder that holds it. A folder no container agent has to do with
+//! is not touched by any of this.
 
 use std::path::{Path, PathBuf};
 
+use agentmux_common::mcp_config_path as shared;
 use serde_json::Value;
 
 use crate::backend::fs_ops::container_folders::{holds_a_container_agents_folder, place, Place};
 use crate::backend::obj::{meta_get_string, MetaMapType};
 
-/// The mark's file, in the folder under the data root that is keyed by the working folder.
+/// The mark's file. It is kept in the folder under the data root that holds what AgentMux keeps for host agents
+/// alone (`mcp_config_path::HOST_ONLY_DIR`: shared by every version and channel of an install, bound into no
+/// container, and not removed with a version, a cache or an agent), under the key of each spelling of the
+/// marked folder. It holds those spellings, one a line.
 const MARK: &str = "container-agent-folder";
 /// The most servers a pane row names, and the most characters of one name: they are read from the folder's
 /// own file.
@@ -37,23 +44,34 @@ fn expanded(work_dir: &str) -> String {
     crate::backend::blockcontroller::core::expand_home_dir(work_dir)
 }
 
-fn mark_path(expanded: &str) -> Option<PathBuf> {
-    agentmux_common::mcp_config_path::outside_dir_for(Path::new(expanded)).map(|dir| dir.join(MARK))
+/// The spellings `expanded` is compared under: as written and as the filesystem names it, so one folder
+/// written another way (letter case and a trailing separator on Windows, a link or junction to it) is the
+/// same folder here.
+fn spellings(expanded: &str) -> Vec<String> {
+    shared::spellings(Path::new(expanded))
+}
+
+fn mark_file(spelling: &str) -> Option<PathBuf> {
+    Some(shared::host_only_root()?.join(shared::spelling_key(spelling)).join(MARK))
 }
 
 /// Record that a container agent runs with `work_dir` as its folder. The mark stays: from now on a host agent
-/// in that folder gets only the servers AgentMux writes. Best-effort; a failure is logged.
+/// in that folder, in one beneath it or in one that holds it gets only the servers AgentMux writes.
+/// Best-effort; a failure is logged.
 pub fn mark(work_dir: &str) {
     if work_dir.trim().is_empty() {
         return;
     }
-    let Some(path) = mark_path(&expanded(work_dir)) else { return };
-    if path.is_file() {
-        return;
-    }
-    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, b""));
-    if let Err(e) = written {
-        tracing::warn!(work_dir, error = %e, "the folder could not be marked as a container agent's");
+    let all = spellings(&expanded(work_dir));
+    let text = all.join("\n");
+    for path in all.iter().filter_map(|spelling| mark_file(spelling)) {
+        if path.is_file() {
+            continue;
+        }
+        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, &text));
+        if let Err(e) = written {
+            tracing::warn!(work_dir, error = %e, "the folder could not be marked as a container agent's");
+        }
     }
 }
 
@@ -66,8 +84,27 @@ pub fn mark_when_moved_to_the_host(old: &crate::backend::storage::AgentDefinitio
     }
 }
 
+/// Every spelling a mark records.
+fn marked_folders() -> Vec<String> {
+    let Some(entries) = shared::host_only_root().and_then(|root| std::fs::read_dir(root).ok()) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path().join(MARK)).ok())
+        .flat_map(|text| text.lines().map(str::to_string).collect::<Vec<_>>())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// Whether `expanded` carries the mark, lies in a folder that does, or holds one that does.
 fn marked(expanded: &str) -> bool {
-    mark_path(expanded).is_some_and(|path| path.is_file())
+    let asked = spellings(expanded);
+    if asked.iter().any(|spelling| mark_file(spelling).is_some_and(|path| path.is_file())) {
+        return true;
+    }
+    let recorded = marked_folders();
+    asked.iter().any(|a| recorded.iter().any(|r| shared::spelled_within(a, r) || shared::spelled_within(r, a)))
 }
 
 /// Whether a host agent in `work_dir` gets only the servers AgentMux writes: a container agent can write the
@@ -95,12 +132,18 @@ pub fn folder_of(meta: &MetaMapType) -> Option<String> {
     holds_in(&work_dir).then(|| expanded(&work_dir))
 }
 
-/// Why the agent on a pane with `meta` is not started on this computer, when it is not: its harness is not
-/// Claude Code and the rule holds for its folder. `None` for a container agent, for Claude Code, for a pane
-/// that is no agent's, and for every other folder.
+/// The pane's harness as its meta names it: empty for a pane that is no agent's. A name no harness answers
+/// to is still an agent's, so it is refused like the rest.
+fn provider_of(meta: &MetaMapType) -> String {
+    meta_get_string(meta, "agentProvider", "").trim().to_string()
+}
+
+/// Why the agent on a pane with `meta` is not started on this computer by a controller that starts its CLI
+/// itself (a terminal agent, a session agent, an app-server agent): the rule holds for its folder, and nothing
+/// on that path keeps a CLI to AgentMux's config, whatever the harness. `None` for a container agent, for a
+/// pane that is no agent's, and for every other folder.
 pub fn refusal(meta: &MetaMapType) -> Option<String> {
-    let provider = crate::backend::providers::resolve_provider_alias(&meta_get_string(meta, "agentProvider", ""));
-    if provider.is_empty() || provider == "claude" {
+    if provider_of(meta).is_empty() {
         return None;
     }
     folder_of(meta)?;
@@ -113,8 +156,71 @@ pub fn not_refused(meta: &MetaMapType) -> Result<(), String> {
     refusal(meta).map_or(Ok(()), Err)
 }
 
+/// Why a turn of the agent on a pane with `meta` is not started on this computer: as [`refusal`], except for
+/// Claude Code, whose turn goes on because the flags it is started with keep it to AgentMux's config
+/// (`agent_mcp_flag`). Asked only where those flags are added (`agent_runtime::with_runtime_flags`): the turn
+/// of a turn-based agent, and the start of its process ahead of a turn.
+pub fn turn_refusal(meta: &MetaMapType) -> Option<String> {
+    if crate::backend::providers::resolve_provider_alias(&provider_of(meta)) == "claude" {
+        return None;
+    }
+    refusal(meta).map(|_| TURN_REFUSAL.to_string())
+}
+
 /// What a pane is told when [`refusal`] stops its agent.
-pub const REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: only Claude Code can be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
+pub const REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: an agent that runs as a terminal or as a session can't be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
+
+/// What a pane is told when [`turn_refusal`] stops its agent's turn.
+pub const TURN_REFUSAL: &str = "A container agent can write in this agent's folder, or has run in it, so this agent is not started on this computer there: only Claude Code can be kept to the MCP servers set in AgentMux. Run this agent in a container, or give it a folder no container agent can write.";
+
+/// Whether `exe` may be named as a command in the config of a host agent in the folder spelled `folder`: an
+/// absolute path that is not in that folder and that no container agent can write.
+fn outside(exe: &Path, folder: &[String]) -> bool {
+    let Some(parent) = exe.parent() else { return false };
+    exe.is_absolute()
+        && !shared::spellings(exe).iter().any(|e| folder.iter().any(|f| shared::spelled_within(e, f)))
+        && matches!(place(&parent.to_string_lossy()), Place::Host)
+}
+
+/// `config` (the text of an MCP config) with its `agentmux` entry's command made `exe`; with no `exe`, the
+/// entry is taken out. A config that is not a JSON object with servers is returned as it is.
+fn by_path(config: &str, exe: Option<&Path>) -> String {
+    let Ok(mut doc) = serde_json::from_str::<Value>(config) else { return config.to_string() };
+    let Some(servers) = doc.get_mut("mcpServers").and_then(Value::as_object_mut) else { return config.to_string() };
+    match (servers.get_mut("agentmux").and_then(Value::as_object_mut), exe) {
+        (None, _) => return config.to_string(),
+        (Some(entry), Some(exe)) => {
+            entry.insert("command".to_string(), Value::String(exe.to_string_lossy().into_owned()));
+        }
+        (Some(_), None) => {
+            servers.remove("agentmux");
+        }
+    }
+    serde_json::to_string_pretty(&doc).unwrap_or_else(|_| config.to_string())
+}
+
+/// `config` (the text of a host agent's MCP config) as it is written for `work_dir`, a folder the rule holds
+/// for: the `agentmux` entry's command is the absolute path of the `agentmux-mcp` that ships with this
+/// install, never a name. Where no such file ships outside the folder, the entry is taken out: no server
+/// rather than one found by name.
+pub fn with_the_command_by_path(config: &str, work_dir: &str) -> String {
+    let folder = spellings(&expanded(work_dir));
+    let exe = crate::backend::mcp_rewrite::shipped_exe().filter(|exe| outside(exe, &folder));
+    if exe.is_none() {
+        tracing::warn!(work_dir, "no agentmux-mcp ships outside this folder: the agent's config is written without the agentmux server");
+    }
+    by_path(config, exe.as_deref())
+}
+
+/// Whether `config` (the text of an MCP config) names its `agentmux` command by an absolute path, or has no
+/// such entry: what a host turn in a folder the rule holds for is given, and nothing else.
+pub fn names_the_command_by_path(config: &str) -> bool {
+    let Ok(doc) = serde_json::from_str::<Value>(config) else { return false };
+    match doc.pointer("/mcpServers/agentmux") {
+        None => true,
+        Some(entry) => entry.get("command").and_then(Value::as_str).is_some_and(|command| Path::new(command).is_absolute()),
+    }
+}
 
 /// The text of `folder`'s own `.mcp.json` for a host agent that is defined from the folder (an import), which
 /// keeps the folder's servers as its own. `None` where the rule holds: the agent takes no server from the file.
@@ -207,21 +313,35 @@ mod tests {
             mark(&dir);
             assert!(holds_in(&dir), "no container has it now, and the rule still holds");
             assert!(!was.path().join(MARK).exists(), "the mark is kept outside the folder");
+            // Kept with what is for host agents alone: not in the folder of a relocated config, which a
+            // container is given (read-only), and not under anything that goes with a version or an agent.
+            let kept = mark_file(&spellings(&dir)[0]).unwrap();
+            assert!(kept.is_file() && kept.starts_with(data.path().join(shared::HOST_ONLY_DIR)), "{kept:?}");
+            let given_to_a_container = crate::backend::mcp_config_file::relocated_dir(&dir).expect("a project's config folder");
+            assert!(!given_to_a_container.join(MARK).exists() && !kept.starts_with(&given_to_a_container), "{given_to_a_container:?}");
+            assert!(!crate::backend::mcp_config_file::host_config_path(&dir).starts_with(&given_to_a_container), "nor is the host agent's config");
         });
     }
 
     #[test]
-    fn only_a_host_agent_that_is_not_claude_code_is_refused_and_only_there() {
+    fn only_a_host_agent_is_refused_and_only_there_and_a_turn_lets_claude_code_alone_through() {
         let (data, bound, own) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         add_for_test(bound.path(), "agentmux-rule-c", "/workspace");
         with_data_home(data.path(), || {
             for provider in ["codex", "gemini", "kimi", "muxcode", "opencode"] {
+                assert_eq!(turn_refusal(&pane("host", provider, bound.path())).as_deref(), Some(TURN_REFUSAL), "{provider}");
+                assert_eq!(turn_refusal(&pane("host", provider, own.path())), None, "{provider} in a folder of its own");
+                assert_eq!(turn_refusal(&pane("container", provider, bound.path())), None, "{provider} in the container");
+            }
+            assert_eq!(turn_refusal(&pane("host", "claude", bound.path())), None, "a Claude Code turn is kept to AgentMux's config instead");
+            // Where the CLI starts with its controller there are no such flags: every harness is refused.
+            for provider in ["claude", "codex", "gemini"] {
                 assert_eq!(refusal(&pane("host", provider, bound.path())).as_deref(), Some(REFUSAL), "{provider}");
-                assert_eq!(refusal(&pane("host", provider, own.path())), None, "{provider} in a folder of its own");
+                assert_eq!(not_refused(&pane("host", provider, own.path())), Ok(()), "{provider} in a folder of its own");
                 assert_eq!(refusal(&pane("container", provider, bound.path())), None, "{provider} in the container");
             }
-            assert_eq!(refusal(&pane("host", "claude", bound.path())), None, "Claude Code is kept to AgentMux's config instead");
             assert_eq!(refusal(&pane("host", "", bound.path())), None, "a pane that is no agent's");
+            assert_eq!(turn_refusal(&pane("host", "", bound.path())), None);
             assert_eq!(folder_of(&pane("host", "claude", bound.path())).map(PathBuf::from), Some(PathBuf::from(expanded(&bound.path().to_string_lossy()))));
             assert_eq!(folder_of(&pane("container", "claude", bound.path())), None);
         });
@@ -278,6 +398,139 @@ mod tests {
             assert_eq!(config_to_import(own.path()).as_deref(), Some(config), "as before");
             assert_eq!(config_to_import(bound.path()), None, "a container agent can write it");
             assert_eq!(config_to_import(ran.path()), None, "a container agent ran in it");
+        });
+    }
+
+    #[cfg(unix)]
+    fn link_dir(link: &Path, target: &Path) {
+        std::os::unix::fs::symlink(target, link).unwrap();
+    }
+
+    /// One mark, and the folder is found however it is written, and so are the folders in it and around it.
+    #[test]
+    fn the_mark_is_found_however_the_folder_is_written_and_for_folders_in_it_and_around_it() {
+        let (data, tmp) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let was = tmp.path().join("Work").join("Agent");
+        let beside = tmp.path().join("Work").join("Other");
+        std::fs::create_dir_all(was.join("src")).unwrap();
+        std::fs::create_dir_all(&beside).unwrap();
+        let held = |folder: &Path| holds_in(&folder.to_string_lossy());
+        with_data_home(data.path(), || {
+            assert!(!held(&was) && !held(&was.join("src")) && !held(&tmp.path().join("Work")));
+            mark(&was.to_string_lossy());
+            assert!(held(&was));
+            assert!(held(&PathBuf::from(format!("{}{}", was.display(), std::path::MAIN_SEPARATOR))), "a trailing separator");
+            assert!(held(&was.join("src").join("..")), "a way round");
+            assert!(held(&was.join("src")), "a folder in it");
+            assert!(held(&was.join("not").join("there").join("yet")), "one in it that does not exist yet");
+            assert!(held(&tmp.path().join("Work")), "a folder that holds it");
+            assert!(!held(&beside), "a folder beside it");
+            #[cfg(windows)]
+            assert!(held(Path::new(&was.to_string_lossy().to_uppercase())), "another letter case");
+            #[cfg(unix)]
+            {
+                let link = tmp.path().join("link");
+                link_dir(&link, &was);
+                assert!(held(&link) && held(&link.join("src")), "a link to it");
+            }
+        });
+    }
+
+    /// The mark made through a link is the folder's own.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_marked_through_a_link_is_marked_itself() {
+        let (data, tmp) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = tmp.path().join("link");
+        link_dir(&link, &real);
+        with_data_home(data.path(), || {
+            mark(&link.to_string_lossy());
+            assert!(holds_in(&real.to_string_lossy()) && holds_in(&link.to_string_lossy()));
+        });
+    }
+
+    /// The `agentmux` command of a host agent's config there is a path outside the folder, never a name,
+    /// with a file of that name in the folder and beneath it.
+    #[test]
+    fn the_agentmux_command_is_named_by_a_path_outside_the_folder_or_not_at_all() {
+        let (folder, tools, bound) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let name = if cfg!(windows) { "agentmux-mcp.exe" } else { "agentmux-mcp" };
+        let (planted, shipped, writable) = (folder.path().join(name), tools.path().join(name), bound.path().join(name));
+        for file in [&planted, &shipped, &writable] {
+            std::fs::write(file, b"x").unwrap();
+        }
+        add_for_test(bound.path(), "agentmux-rule-e", "/tools");
+        let config = r#"{"mcpServers":{"agentmux":{"type":"stdio","command":"agentmux-mcp","args":[],"env":{"AGENTMUX_AGENT_ID":"aria"}},"git":{"command":"git-mcp"}}}"#;
+        let the_folder = spellings(&folder.path().to_string_lossy());
+
+        assert!(outside(&shipped, &the_folder), "the one that ships with the install");
+        assert!(!outside(&planted, &the_folder), "a file of that name in the folder");
+        assert!(!outside(&folder.path().join("bin").join(name), &the_folder), "or beneath it");
+        assert!(!outside(&writable, &the_folder), "one a container agent can write");
+        assert!(!outside(Path::new(name), &the_folder), "a bare name");
+
+        let written: Value = serde_json::from_str(&by_path(config, Some(&shipped))).unwrap();
+        assert_eq!(written["mcpServers"]["agentmux"]["command"], json!(shipped.to_string_lossy()));
+        assert_eq!(written["mcpServers"]["agentmux"]["env"]["AGENTMUX_AGENT_ID"], "aria", "the rest of the entry stays");
+        assert_eq!(written["mcpServers"]["git"]["command"], "git-mcp", "another server is left as it is");
+        assert!(names_the_command_by_path(&by_path(config, Some(&shipped))));
+
+        let without: Value = serde_json::from_str(&by_path(config, None)).unwrap();
+        assert!(without["mcpServers"].get("agentmux").is_none(), "with none that ships outside the folder: no entry, not a name");
+        assert!(names_the_command_by_path(&by_path(config, None)));
+
+        assert!(!names_the_command_by_path(config), "a bare name is not handed to a turn there");
+        assert!(!names_the_command_by_path("not json"));
+        assert_eq!(by_path("not json", Some(&shipped)), "not json");
+
+        // As a writer calls it: whatever ships on this computer, the result never names the command barely,
+        // and never by a path in the folder.
+        let data = tempfile::tempdir().unwrap();
+        with_data_home(data.path(), || {
+            let dir = folder.path().to_string_lossy().into_owned();
+            mark(&dir);
+            let text = with_the_command_by_path(config, &dir);
+            assert!(names_the_command_by_path(&text), "{text}");
+            let doc: Value = serde_json::from_str(&text).unwrap();
+            if let Some(command) = doc.pointer("/mcpServers/agentmux/command").and_then(Value::as_str) {
+                assert!(outside(Path::new(command), &the_folder), "{command}");
+            }
+        });
+    }
+
+    /// A container agent in its own folder, which is marked from its first turn: every place that finds a
+    /// host agent's config outside the folder leaves the container agent's alone or never runs for it.
+    #[test]
+    fn a_container_agent_in_its_own_marked_folder_keeps_the_file_in_its_folder() {
+        let (data, folder) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = folder.path().to_string_lossy().into_owned();
+        add_for_test(folder.path(), "agentmux-rule-f", "/workspace");
+        let in_folder = folder.path().join(".mcp.json");
+        let own = r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp","env":{"AGENTMUX_AGENT_ID":"loap-loap-2"}}}}"#;
+        std::fs::write(&in_folder, own).unwrap();
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        with_data_home(data.path(), || {
+            mark(&dir);
+            let container = pane("container", "claude", folder.path());
+            assert_eq!(folder_of(&container), None, "the rule is a host agent's");
+            assert_eq!(refusal(&container), None);
+            assert_eq!(turn_refusal(&container), None);
+
+            // The spawn environment names no host config for it.
+            let mut env = std::collections::HashMap::from([("AGENTMUX_MCP_CONFIG".to_string(), "stale".to_string())]);
+            crate::backend::spawn_env::block_identity::carry_agent_workdir_env(&mut env, &container);
+            assert!(!env.contains_key("AGENTMUX_MCP_CONFIG"), "{env:?}");
+            // The spawn's realign leaves its file as it is and writes none outside.
+            crate::backend::mcp_json_identity::realign_workspace_mcp_json(&store, &dir, "container", "loap-2");
+            assert_eq!(std::fs::read_to_string(&in_folder).unwrap(), own);
+            // Its turn gets no flag that points away from its folder.
+            let flags = crate::backend::agent_runtime::with_runtime_flags(&container, vec!["-p".to_string()]);
+            assert!(!flags.iter().any(|flag| flag.contains("mcp-config")), "{flags:?}");
+            // Its own config path is the file in its folder, and nothing was written for a host agent.
+            assert_eq!(crate::backend::mcp_config_file::relocated_path(&dir).is_none(), agentmux_common::mcp_config_path::is_agent_owned_workdir(folder.path()));
+            assert!(!crate::backend::mcp_config_file::host_config_path(&dir).exists(), "no host config was made by any of this");
         });
     }
 }

@@ -151,7 +151,8 @@ fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canoni
             crate::backend::mcp_config_file::relocated_path(&expanded)
         };
         if let Some(path) = outside {
-            crate::backend::mcp_config_file::write_relocated(&path, &file.content)
+            let content = if on_host { crate::backend::mcp_config_file::host_content(&expanded, file.content.clone()) } else { file.content.clone() };
+            crate::backend::mcp_config_file::write_relocated(&path, &content)
                 .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
             tracing::debug!(path = %path.display(), "wrote config file (relocated, owner-only)");
             return Ok(());

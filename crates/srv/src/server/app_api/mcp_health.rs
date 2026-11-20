@@ -24,21 +24,26 @@ use crate::server::state::AppState;
 pub(crate) struct SelfRequest {
     /// The caller's slug (`AGENTMUX_AGENT_SLUG`), which its token must name.
     agent: String,
-    /// The folder `doctor` runs for, when it asks whether it may start a command from that folder's own
-    /// `.mcp.json` (`folder_rule` in the answer). Absent: the pane's own folder.
+    /// The folder `doctor` asks about, the one its config file is in: whether it may start a command read
+    /// from a file there (`folder_rule` in the answer). Absent: the pane's own folder.
     #[serde(default)]
     folder: Option<String>,
 }
 
 /// Whether a host agent in `folder` (else the folder of the pane `block_id`) gets only the MCP servers
 /// AgentMux writes: a container agent can write it, or has run in it (`backend::mcp_folder_rule`). Yes when
-/// that can't be told.
+/// that can't be told, and when there is no folder to ask about.
 async fn folder_rule(state: &AppState, block_id: &str, folder: Option<String>) -> bool {
     let folder = folder.filter(|f| !f.trim().is_empty()).or_else(|| {
         let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
         Some(crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "")).filter(|cwd| !cwd.trim().is_empty())
     });
-    let Some(folder) = folder else { return false };
+    rule_for(folder).await
+}
+
+/// [`folder_rule`] for the folder that was found, if one was.
+async fn rule_for(folder: Option<String>) -> bool {
+    let Some(folder) = folder else { return true };
     tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::holds_in(&folder)).await.unwrap_or(true)
 }
 
@@ -126,4 +131,15 @@ pub(crate) async fn handle_mcp_beat(
         }
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `doctor` starts a command from a file only on a plain no, so no folder to ask about is a yes.
+    #[tokio::test]
+    async fn the_rule_holds_when_there_is_no_folder_to_ask_about() {
+        assert!(rule_for(None).await);
+    }
 }

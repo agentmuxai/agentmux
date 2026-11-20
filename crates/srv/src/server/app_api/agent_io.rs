@@ -391,9 +391,9 @@ fn refuse_spawn_gate(
 /// the disk).
 async fn folder_gate(state: &AppState, block: &Block) -> Result<(), String> {
     let meta = block.meta.clone();
-    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::refusal(&meta))
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::turn_refusal(&meta))
         .await
-        .unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::REFUSAL.to_string()));
+        .unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::TURN_REFUSAL.to_string()));
     if let Some(why) = refusal {
         show_refused_spawn(state, &block.oid, &why);
         return Err(why);

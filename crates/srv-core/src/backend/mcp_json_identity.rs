@@ -145,6 +145,7 @@ pub(crate) fn realign_workspace_mcp_json(
             tracing::warn!(work_dir, agent_id = slug, "spawn: signing keys unavailable; the agent's MCP config left as it was");
             return;
         };
+        let body = crate::backend::mcp_config_file::host_content(&expanded, body);
         if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
             return;
         }

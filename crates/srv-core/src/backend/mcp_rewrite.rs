@@ -38,7 +38,7 @@ pub(crate) fn workdir_of(block_id: &str) -> Option<String> {
 
 /// The `agentmux-mcp` that ships with this install: the bundled copy, else the user tools dir's
 /// (where `task dev` puts it), the order `tool_store::bashwrap_path` uses.
-fn shipped_exe() -> Option<PathBuf> {
+pub(crate) fn shipped_exe() -> Option<PathBuf> {
     let name = if cfg!(windows) { "agentmux-mcp.exe" } else { COMMAND };
     [crate::backend::tool_store::bundled_tools_dir(), crate::backend::tool_store::user_tools_dir()]
         .into_iter()
@@ -109,6 +109,8 @@ fn rewrite_file(
         } else {
             body
         };
+        // In a folder a container agent can write the command stays named by its path, whatever the rung.
+        let body = crate::backend::mcp_config_file::host_content(&expanded, body);
         if serde_json::from_str::<Value>(&body).ok() == serde_json::from_str::<Value>(&content).ok() {
             return Ok(false);
         }
@@ -142,6 +144,15 @@ fn rewrite_file(
     Ok(true)
 }
 
+/// A repair rewrites a host agent's config. Not a container agent's, wherever its folder is: it starts its
+/// server inside the image, from the file in its own folder.
+fn host_agents_only(def: &crate::backend::storage::AgentDefinition) -> Result<(), String> {
+    if def.runtime().is_container() {
+        return Err("a container agent starts its server inside the image".to_string());
+    }
+    Ok(())
+}
+
 /// Rung 3 or 4 for the agent on `block_id`, whose pane runs in `work_dir`. A container agent starts its
 /// server inside the image, from a copy of the file the host does not own.
 pub fn run(mstore: &crate::backend::storage::store::Store, block_id: &str, work_dir: &str, shape: Shape) -> Result<bool, String> {
@@ -153,9 +164,7 @@ pub fn run(mstore: &crate::backend::storage::store::Store, block_id: &str, work_
         .agent_def_get(&instance.definition_id)
         .map_err(|e| e.to_string())?
         .ok_or("the agent's definition is gone")?;
-    if def.runtime().is_container() {
-        return Err("a container agent starts its server inside the image".to_string());
-    }
+    host_agents_only(&def)?;
     if def.slug.trim().is_empty() {
         return Err("the agent has no id".to_string());
     }
@@ -260,5 +269,12 @@ mod tests {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         assert!(rewrite_file(&store, "", "manoz", Shape::Canonical, None, true).unwrap_err().contains("no working directory"));
         assert!(run(&store, "no-such-block", "/tmp", Shape::Canonical).unwrap_err().contains("no agent runs"));
+    }
+
+    #[test]
+    fn a_repair_is_never_run_for_a_container_agent() {
+        use crate::backend::storage::agents::test_agent_def;
+        assert!(host_agents_only(&test_agent_def("a-1", "Aria", "claude", "container", 1, "")).unwrap_err().contains("inside the image"));
+        assert_eq!(host_agents_only(&test_agent_def("a-2", "Bryn", "claude", "host", 1, "")), Ok(()));
     }
 }

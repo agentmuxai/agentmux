@@ -76,7 +76,7 @@ pub(super) async fn gated_spawn_env(
     // First, before anything is written for the spawn: a harness other than Claude Code is not started on
     // the host in a folder a container agent can write. Asked off the async workers (it reads the disk).
     let meta = block.meta.clone();
-    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::refusal(&meta)).await.unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::REFUSAL.to_string()));
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::turn_refusal(&meta)).await.unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::TURN_REFUSAL.to_string()));
     if let Some(why) = refusal {
         return Err(TurnGate::Folder(why));
     }

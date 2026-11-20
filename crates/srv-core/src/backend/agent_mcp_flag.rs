@@ -51,7 +51,8 @@ pub(crate) fn with_mcp_config_flag(meta: &MetaMapType, mut args: Vec<String>) ->
 /// servers of `config`, AgentMux's own file outside the folder, and no other. `--strict-mcp-config` leaves
 /// out what Claude would read on its own (the folder's `.mcp.json`, the account's servers, a plugin's), and
 /// a `--mcp-config` the argv already had goes too, so nothing names a file in the folder. A config that is
-/// not there yet leaves the turn with no servers until the next launch or repair writes it. Idempotent.
+/// not there yet, or that names the `agentmux` command by a bare name, leaves the turn with no servers until
+/// the next launch or repair writes it. Idempotent.
 fn with_only_agentmux_servers(args: Vec<String>, config: &std::path::Path) -> Vec<String> {
     const STRICT: &str = "--strict-mcp-config";
     const CONFIG: &str = "--mcp-config";
@@ -73,7 +74,8 @@ fn with_only_agentmux_servers(args: Vec<String>, config: &std::path::Path) -> Ve
         out.push(arg);
     }
     out.push(STRICT.to_string());
-    if config.is_file() {
+    // Only a config that names the `agentmux` command by its path is handed over.
+    if std::fs::read_to_string(config).is_ok_and(|text| crate::backend::mcp_folder_rule::names_the_command_by_path(&text)) {
         out.push(CONFIG.to_string());
         out.push(config.to_string_lossy().into_owned());
     }
@@ -113,7 +115,13 @@ mod tests {
             let bare = with_runtime_flags(&meta, s(&["-p"]));
             assert!(bare.iter().any(|a| a == "--strict-mcp-config") && !bare.iter().any(|a| a == "--mcp-config"), "{bare:?}");
 
-            crate::backend::mcp_config_file::write_relocated(&config, r#"{"mcpServers":{"agentmux":{}}}"#).unwrap();
+            // A config that names the `agentmux` command by a bare name is not handed over either.
+            crate::backend::mcp_config_file::write_relocated(&config, r#"{"mcpServers":{"agentmux":{"command":"agentmux-mcp"}}}"#).unwrap();
+            let by_name = with_runtime_flags(&meta, s(&["-p"]));
+            assert!(by_name.iter().any(|a| a == "--strict-mcp-config") && !by_name.iter().any(|a| a == "--mcp-config"), "{by_name:?}");
+
+            let by_path = serde_json::json!({ "mcpServers": { "agentmux": { "command": data.path().join("tools").join("agentmux-mcp").to_string_lossy() } } });
+            crate::backend::mcp_config_file::write_relocated(&config, &by_path.to_string()).unwrap();
             let own_flags = s(&["-p", "--mcp-config", ".mcp.json", "extra.json", "--model", "sonnet", "--mcp-config=other.json"]);
             let out = with_runtime_flags(&meta, own_flags);
             assert_eq!(out.iter().filter(|a| *a == "--strict-mcp-config").count(), 1, "{out:?}");

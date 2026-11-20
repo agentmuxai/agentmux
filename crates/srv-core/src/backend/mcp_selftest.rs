@@ -233,4 +233,15 @@ rl.on("line", (l) => { let m; try { m = JSON.parse(l); } catch { return; }
         assert!(run(&dir.join(".mcp.json"), &prefix, &HashMap::new()).await.is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// The launch self-test reads a host agent's config. For a container agent it does not run at all, in a
+    /// marked folder as in any other.
+    #[test]
+    fn a_container_agents_launch_is_not_tested_on_the_host() {
+        let meta: crate::backend::obj::MetaMapType = [("agentMode", json!("container")), ("cmd:cwd", json!("/work/a"))].into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        let prefix = crate::backend::tool_store::bashwrap_path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "/t/agentmux-bashwrap".to_string());
+        let env = HashMap::from([(PREFIX_ENV.to_string(), prefix), ("AGENTMUX_AGENT_ID".to_string(), "selftest-container-agent".to_string())]);
+        launch(&env, "block-selftest-container", &meta);
+        assert!(!tested().lock().unwrap().iter().any(|key| key.starts_with("selftest-container-agent@")), "it returned before anything was read");
+    }
 }
