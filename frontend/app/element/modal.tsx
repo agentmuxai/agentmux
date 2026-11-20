@@ -250,6 +250,8 @@ export const Modal: Component<ModalProps> = (props) => {
 
     let panelRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
+    // The airspace clip: the whole root, or only the panel when there is no backdrop to clip around.
+    const clipEl = () => (props.backdrop === "none" ? panelRef : rootRef);
     // Taking the caret on open and giving it back on close (modal-caret.ts).
     const caret = createModalCaret(
         () => panelRef,
@@ -275,17 +277,9 @@ export const Modal: Component<ModalProps> = (props) => {
     // whole window is easy to find in the DOM, and reported loudly in dev.
     const [fellBackFrom, setFellBackFrom] = createSignal<ModalScope | null>(null);
 
-    /**
-     * Resolve the scope this modal renders into. Returns the Portal
-     * mount node + the lock region (the element whose children get
-     * inerted and which the backdrop is sized to).
-     *
-     * - `window`: mount = window body; lock region = window body.
-     * - `tab`/`pane`: mount = lock region = the context-supplied node.
-     *   When no provider is present (or it has no node yet) we fall
-     *   back to window scope with a console.warn — an un-hosted scoped
-     *   modal is a wiring bug, not a crash.
-     */
+    // The scope this modal renders into: the Portal mount node and the lock region (inerted; the backdrop is sized to
+    // it). `window`: the window body for both. `tab`/`pane`: the context-supplied node for both; with no provider, or
+    // none yet, it falls back to window with a console.warn (an un-hosted scoped modal is a wiring bug, not a crash).
     const resolveScope = (): { scope: ModalScope; mount: HTMLElement; region: HTMLElement; fellBackFrom?: ModalScope } => {
         const requested = props.scope ?? "window";
         const fallback = (missing: string): string =>
@@ -424,7 +418,8 @@ export const Modal: Component<ModalProps> = (props) => {
                             class="modal-root"
                             data-scope={resolvedScope()}
                             data-scope-fallback={fellBackFrom() ?? undefined}
-                            data-placement={props.placement ?? "center"} data-backdrop={props.backdrop === "none" ? "none" : undefined}
+                            data-placement={props.placement ?? "center"}
+                            data-backdrop={props.backdrop === "none" ? "none" : undefined}
                             data-operator-only={props.operatorOnly || forcedOperatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
@@ -434,7 +429,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             tabIndex={-1}
                             onKeyDown={handleKeyDown}
                         >
-                            <ModalRootBindings getEl={() => rootRef} getClipEl={() => (props.backdrop === "none" ? panelRef : rootRef)} mount={mount()} />
+                            <ModalRootBindings getEl={() => rootRef} getClipEl={clipEl} mount={mount()} />
                             <div class="modal-backdrop" onPointerDown={backdrop.press} onClick={backdrop.click} />
                             <span
                                 class="modal-focus-sentinel"
