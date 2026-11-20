@@ -265,7 +265,11 @@ mod keywin_objc {
         // The window's own hit test did not reach a page view: with a pane window open it stops at the content
         // view and never descends (#48237, measured on the release build), so every press was left to AppKit,
         // which drops it while the pane holds the key. Ask each page view of the window directly instead.
-        rwhvc_containing(win, x, y)
+        let page = rwhvc_containing(win, x, y);
+        if page.is_null() {
+            tracing::debug!("[press] {}", describe_miss(win, x, y));
+        }
+        page
     }
     /// The shown page view of `win` that the window point `(x, y)` is over, asking each page view's own hit test
     /// (which takes the point in its superview's coordinates), or null. Hidden views, and points outside every
@@ -910,9 +914,6 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                             "[press] left press: {}",
                             if under.is_null() { "no page view under the pointer, left to AppKit" } else { "sent to the page view under the pointer" }
                         );
-                        if under.is_null() {
-                            tracing::info!("[press] {}", keywin_objc::describe_miss(win, loc.x, loc.y));
-                        }
                     }
                     let (to_appkit, via_appkit) =
                         press_route(ev_type, !under.is_null(), PRESS_VIA_APPKIT.load(std::sync::atomic::Ordering::Relaxed));
