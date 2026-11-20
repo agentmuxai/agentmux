@@ -1,7 +1,7 @@
 -- home open, src and docs open
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -103,7 +103,7 @@ ListEditorDirCommand /home/a/broken
 -- a folder still loading and one that failed
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -208,7 +208,7 @@ ListEditorDirCommand /home/a/broken
 -- hidden files shown
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye" data-label="Hide hidden files" data-density="compact" data-pressed="true">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">
@@ -332,7 +332,7 @@ model.collapseAll
 -- collapsed to the roots
 <div>
   <div class="file-tree">
-    <div class="file-tree-toolbar">
+    <div class="file-tree-toolbar" data-zoom-scope="chrome">
       <span data-stand="IconButton" data-icon="angles-left" data-label="Hide file tree" data-density="compact" data-pressed="undefined">
       <span data-stand="IconButton" data-icon="eye-slash" data-label="Show hidden files" data-density="compact" data-pressed="false">
       <span data-stand="IconButton" data-icon="square-minus" data-label="Collapse all folders" data-density="compact" data-pressed="undefined">

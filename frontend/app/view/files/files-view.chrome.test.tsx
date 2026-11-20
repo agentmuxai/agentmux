@@ -146,7 +146,7 @@ describe("the Files pane's chrome", () => {
         await settled(v);
         await expect(markup(v.view().querySelector(".files-toolbar"), v.view().querySelector(".files-places"), v.view().querySelector(".files-header"))).toMatchFileSnapshot(snap("local"));
         expect(footer(v)).toMatchInlineSnapshot(`
-          "<div class="files-zoom files-zoom-bar" data-zoom-part="main" data-zoom-scope="pane" style="zoom: 1;">
+          "<div class="files-zoom files-zoom-bar" data-zoom-part="main" data-zoom-scope="chrome" style="zoom: var(--zoomfactor);">
           <div class="files-status" role="status">
           <span>3 items</span>
           </div>

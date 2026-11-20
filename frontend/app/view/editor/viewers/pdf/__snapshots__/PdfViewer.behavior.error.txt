@@ -8,7 +8,7 @@ fetchMediaBlob /docs/a.pdf signal=true
 getDocument #1 data=Uint8Array(8) safe=true
 --- an Error
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -55,7 +55,7 @@ fetchMediaBlob /docs/a.pdf signal=true
 getDocument #2 data=Uint8Array(8) safe=true
 --- reloading
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -97,7 +97,7 @@ getDocument #2 data=Uint8Array(8) safe=true
       "Loading…"
 --- a string
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
