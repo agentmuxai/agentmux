@@ -30,6 +30,7 @@ import {
     applyDownloadUpdate,
     DONE_ROW_MS,
     dismissDownload,
+    IGNORED_KEY,
     type DownloadRow,
     justFinished,
     type DownloadUpdate,
@@ -754,8 +755,15 @@ export class BrowserViewModel {
                 return next;
             });
             this._history.record(ended.row);
-            if ((payload.state === "done" || payload.state === "cancelled") && payload.download_id != null) {
-                const key = String(payload.download_id);
+            // The skipped line folds away like a finished row; the next skip starts a new count.
+            const foldKey =
+                payload.state === "ignored"
+                    ? IGNORED_KEY
+                    : (payload.state === "done" || payload.state === "cancelled") && payload.download_id != null
+                      ? String(payload.download_id)
+                      : null;
+            if (foldKey != null) {
+                const key = foldKey;
                 clearTimeout(this._downloadTimers.get(key));
                 this._downloadTimers.set(
                     key,

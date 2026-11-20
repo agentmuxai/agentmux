@@ -79,6 +79,15 @@ export function failureVerdict(f: JudgedFailure, live: FailureLive, now: number)
     }
 }
 
+/** "in 24 min", "in 2 h", "in 3 d": how long until `at`, for a usage limit's reset. */
+export function inLabel(at: number, now: number): string {
+    const minutes = Math.max(1, Math.ceil((at - now) / 60_000));
+    if (minutes < 60) return `in ${minutes} min`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `in ${hours} h`;
+    return `in ${Math.round(hours / 24)} d`;
+}
+
 /** "3 min", "2 h", "1 d": how long ago, for the lapsed note. */
 export function agoLabel(at: number, now: number): string {
     const minutes = Math.max(0, Math.round((now - at) / 60_000));

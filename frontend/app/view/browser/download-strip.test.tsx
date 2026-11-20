@@ -83,8 +83,9 @@ describe("DownloadStrip", () => {
         expect(screen.getByText("cancelled")).toBeTruthy();
     });
 
-    it("shows the flood line", () => {
-        setup([upd({ download_id: null, state: "ignored", reason: "This page tried to start more downloads. Ignored." })]);
-        expect(screen.getByText("This page tried to start more downloads. Ignored.")).toBeTruthy();
+    it("shows the flood line, with how many downloads were skipped", () => {
+        const flood = upd({ download_id: null, state: "ignored", reason: "This page tried to start more downloads. Ignored." });
+        setup([flood, flood, flood]);
+        expect(screen.getByText("3 downloads skipped: this page started too many at once.")).toBeTruthy();
     });
 });

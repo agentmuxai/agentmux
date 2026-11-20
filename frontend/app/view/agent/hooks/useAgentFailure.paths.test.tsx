@@ -90,6 +90,7 @@ vi.mock("@/app/store/recycle-blockers", async (importOriginal) => {
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import type { AccountState } from "../failure/failure-verdict";
 import {
+    COMPLETION_GRACE_MS,
     jitteredBackoffSeconds,
     SEED_WAIT_MS,
     TAKEOVER_CONFIRM_MS,
@@ -806,13 +807,16 @@ describe("Retry, Dismiss and what each writes", () => {
             const { ui, cleared } = mk();
             await flush();
             fire(fail("killed"));
-            vi.advanceTimersByTime(5);
+            vi.advanceTimersByTime(5000); // a later turn, not the failed one's own end
             fireEvent(BLOCK_ID, {
                 type: "turn-ended",
                 outcome: "completed",
                 statsMerged: false,
                 stoppingCleared: false,
             });
+            // It counts once the grace has passed with no failure beside it.
+            expect(ui.row()).not.toBeNull();
+            vi.advanceTimersByTime(COMPLETION_GRACE_MS);
             expect(ui.row()).toBeNull();
             expect(cleared()).toEqual(["episode-ended"]);
         });
@@ -1385,10 +1389,12 @@ describe("the verdict", () => {
             });
             return count;
         };
+        // A usage limit with a timable reset has the look, the quota line's minute tick, and (when it is near enough
+        // to be timed from now) the one resend.
         expect(await timers(undefined)).toBe(0);
-        expect(await timers(2 ** 31 - 1)).toBe(1);
+        expect(await timers(2 ** 31 - 1)).toBe(2);
         expect(await timers(2 ** 31)).toBe(0);
-        expect(await timers(2 ** 30 + 10)).toBe(1);
+        expect(await timers(2 ** 30 + 10)).toBe(3);
     });
 
     it("drops the look at the old reset when the failure is replaced", async () => {
@@ -1397,7 +1403,8 @@ describe("the verdict", () => {
             await flush();
             external(usageLimit(T0 + 100_000));
             external(usageLimit(T0 + 200_000));
-            expect(vi.getTimerCount()).toBe(1);
+            // The look, the minute tick, and the one resend: each for the new reset only (the resend keeps its first).
+            expect(vi.getTimerCount()).toBe(3);
         });
     });
 
