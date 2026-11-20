@@ -375,17 +375,19 @@ fn succeeds_within(mut cmd: Command, limit: std::time::Duration) -> bool {
 /// The Linux half of [`reveal`], with its two steps passed in so each can be tested alone: `dbus` runs the
 /// `ShowItems` call and says whether it worked; when it didn't (no `dbus-send`, no session bus, the call
 /// failed or timed out), `fallback` gets the `xdg-open` of the containing folder, which is what Linux did
-/// before the file could be selected.
+/// before the file could be selected. A folder is opened itself (its menu rows read "Open in File Manager"), by
+/// `xdg-open` and without the D-Bus call, which would show its parent with the folder selected.
 pub fn reveal_linux(
     path: &Path,
     dbus: impl FnOnce(Command) -> bool,
     fallback: impl FnOnce(Command) -> io::Result<()>,
 ) -> io::Result<()> {
-    if dbus(dbus_show_items_command(path)) {
+    let folder = path.is_dir();
+    if !folder && dbus(dbus_show_items_command(path)) {
         return Ok(());
     }
     let mut cmd = Command::new("xdg-open");
-    cmd.arg(path.parent().unwrap_or(path));
+    cmd.arg(if folder { path } else { path.parent().unwrap_or(path) });
     fallback(cmd)
 }
 
@@ -570,6 +572,22 @@ mod tests {
     fn linux_reports_a_failed_fallback() {
         let r = reveal_linux(Path::new("/home/me/a.txt"), |_| false, |_| Err(io::Error::new(io::ErrorKind::NotFound, "no xdg-open")));
         assert_eq!(r.unwrap_err().kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn linux_opens_a_folder_itself_and_never_asks_dbus_to_select_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let opened = std::cell::RefCell::new(Vec::new());
+        let r = reveal_linux(
+            dir.path(),
+            |_| panic!("ShowItems would show the folder's parent"),
+            |cmd| {
+                opened.borrow_mut().push(cmd.get_args().map(|a| a.to_os_string()).collect::<Vec<_>>());
+                Ok(())
+            },
+        );
+        assert!(r.is_ok());
+        assert_eq!(*opened.borrow(), [vec![dir.path().as_os_str().to_os_string()]]);
     }
 
     #[test]
