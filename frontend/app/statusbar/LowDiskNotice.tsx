@@ -9,6 +9,7 @@
  * it stay current while it is open.
  */
 
+import { t } from "@/app/i18n/i18n";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { Button } from "@/app/element/ui";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
@@ -38,7 +39,7 @@ export const LowDiskNotice = (props: LowDiskNoticeProps): JSX.Element => {
             onDismiss={() => props.onDismiss()}
             class="low-disk-notice"
             role="alert"
-            aria-label="Low disk space"
+            aria-label={t("lowDiskNotice.aria")}
             style={{ width: "340px" }}
         >
             <div class={`low-disk-notice-card low-disk-notice-card--${props.notice.level}`} data-level={props.notice.level}>
@@ -59,10 +60,10 @@ export const LowDiskNotice = (props: LowDiskNoticeProps): JSX.Element => {
                             void openOrFocusPaneByView("history");
                         }}
                     >
-                        Open History
+                        {t("lowDiskNotice.openHistory")}
                     </Button>
                     <Button density="compact" onClick={() => props.onDismiss()}>
-                        Dismiss
+                        {t("lowDiskNotice.dismiss")}
                     </Button>
                 </div>
             </div>
