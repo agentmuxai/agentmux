@@ -8,7 +8,8 @@
 // What it fails on:
 //   read-not-in-schema  a key the code reads (srv's typed settings and `extra` reads, the frontend's settings atom
 //                       and bracket reads) that the schema does not list
-//   schema-not-read     a schema key that no production source mentions (mark one that is read another way `x-unread`)
+//   schema-not-read     a schema key that no production source reads: by its name, or through its typed field in srv
+//                       (declaring the field does not count). Mark one that is read another way `x-unread`.
 //   no-description / no-default / no-section / secret-default / bad-platform
 //                       a schema entry that is missing what the generated settings.json shows for it
 //   floor               an extractor that finds too few keys: its pattern stopped matching, so it would check nothing
@@ -44,7 +45,47 @@ const SRV_READS = [
     new RegExp(String.raw`\bsetting_\w+\(\s*[^,()]*,\s*${KEY}`, "g"),
 ];
 const SETTINGS_STRUCT = "pub struct SettingsType {";
-const TYPED_FIELD = new RegExp(String.raw`#\[serde\([^\]]*rename\s*=\s*${KEY}`, "g");
+const TYPED_FIELD = new RegExp(String.raw`#\[serde\([^\]]*rename\s*=\s*${KEY}[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*pub\s+(\w+)\s*:`, "g");
+
+/**
+ * The index just past a Rust string, raw string, char literal or comment that starts at `i`, or `i` when none does, so
+ * a brace inside one is not counted when a block's end is looked for.
+ */
+function skipLiteral(s, i) {
+    const raw = /^r(#*)"/.exec(s.slice(i, i + 40));
+    if (raw && !/\w/.test(s[i - 1] ?? " ")) {
+        const close = s.indexOf(`"${raw[1]}`, i + raw[0].length);
+        return close < 0 ? s.length : close + 1 + raw[1].length;
+    }
+    if (s[i] === '"') {
+        for (let j = i + 1; j < s.length; j++) {
+            if (s[j] === "\\") j++;
+            else if (s[j] === '"') return j + 1;
+        }
+        return s.length;
+    }
+    if (s[i] === "'" && (s[i + 1] === "\\" ? s[i + 3] === "'" || s[i + 4] === "'" : s[i + 2] === "'")) return s.indexOf("'", i + 2) + 1;
+    if (s.startsWith("//", i)) return s.indexOf("\n", i) < 0 ? s.length : s.indexOf("\n", i);
+    if (s.startsWith("/*", i)) return s.indexOf("*/", i + 2) < 0 ? s.length : s.indexOf("*/", i + 2) + 2;
+    return i;
+}
+
+/** The index just past the block whose opening brace is already consumed, ending at `from`. */
+function blockEnd(s, from) {
+    let depth = 1;
+    let i = from;
+    while (i < s.length && depth > 0) {
+        const j = skipLiteral(s, i);
+        if (j !== i) {
+            i = j;
+            continue;
+        }
+        if (s[i] === "{") depth++;
+        else if (s[i] === "}") depth--;
+        i++;
+    }
+    return i;
+}
 
 /** `text` without `#[cfg(test)] mod x { ... }` blocks, whose fixtures name keys no real code reads. */
 export function withoutTestModules(text) {
@@ -52,14 +93,7 @@ export function withoutTestModules(text) {
     for (;;) {
         const m = /#\[cfg\(test\)\]\s*mod\s+\w+\s*\{/.exec(out);
         if (!m) return out;
-        let depth = 1;
-        let i = m.index + m[0].length;
-        while (i < out.length && depth > 0) {
-            if (out[i] === "{") depth++;
-            else if (out[i] === "}") depth--;
-            i++;
-        }
-        out = out.slice(0, m.index) + out.slice(i);
+        out = out.slice(0, m.index) + out.slice(blockEnd(out, m.index + m[0].length));
     }
 }
 
@@ -69,12 +103,27 @@ function matches(text, patterns) {
     return keys;
 }
 
-/** The keys the typed settings struct names: its `rename`d fields, and nothing from the structs around it. */
-function typedKeys(text) {
+/** The bounds of the typed settings struct in `text`: `[start, end)`, or null when it is not there. */
+function settingsStruct(text) {
     const start = text.indexOf(SETTINGS_STRUCT);
-    if (start < 0) return new Set();
+    if (start < 0) return null;
     const end = text.indexOf("\n}", start);
-    return matches(text.slice(start, end < 0 ? text.length : end), [TYPED_FIELD]);
+    return [start, end < 0 ? text.length : end];
+}
+
+/** The keys the typed settings struct names, as `Map<key, field>`: its `rename`d fields, and nothing from the structs around it. */
+function typedKeys(text) {
+    const bounds = settingsStruct(text);
+    const out = new Map();
+    if (!bounds) return out;
+    for (const m of text.slice(bounds[0], bounds[1]).matchAll(TYPED_FIELD)) out.set(m[1], m[2]);
+    return out;
+}
+
+/** `text` without the typed settings struct, which declares keys and does not read them. */
+function withoutSettingsStruct(text) {
+    const bounds = settingsStruct(text);
+    return bounds ? text.slice(0, bounds[0]) + text.slice(bounds[1]) : text;
 }
 
 /**
@@ -84,16 +133,20 @@ function typedKeys(text) {
 export function readKeys(sources) {
     const frontend = new Set();
     const srv = new Set();
+    const typed = new Map();
     for (const { path, text } of sources) {
         if (path.endsWith(".rs")) {
             const prod = withoutTestModules(text);
             for (const k of matches(prod, SRV_READS)) srv.add(k);
-            for (const k of typedKeys(prod)) srv.add(k);
+            for (const [k, field] of typedKeys(prod)) {
+                srv.add(k);
+                typed.set(k, field);
+            }
         } else {
             for (const k of matches(text, FRONTEND_READS)) frontend.add(k);
         }
     }
-    return { frontend, srv };
+    return { frontend, srv, typed };
 }
 
 /** The schema's entries: `{ key: entry }` for a real setting, and the `ns:` prefixes of its `ns:*` families. */
@@ -111,16 +164,18 @@ export function schemaEntries(schema) {
 /** Every finding as `{ kind, key, detail }`, sorted. */
 export function check(schema, sources) {
     const { keys, families } = schemaEntries(schema);
-    const { frontend, srv } = readKeys(sources);
+    const { frontend, srv, typed } = readKeys(sources);
     const out = [];
     const add = (kind, key, detail = "") => out.push({ kind, key, detail });
     if (frontend.size < FLOORS.frontend) add("floor", "frontend", `${frontend.size} keys found, at least ${FLOORS.frontend} expected`);
     if (srv.size < FLOORS.srv) add("floor", "srv", `${srv.size} keys found, at least ${FLOORS.srv} expected`);
     const inSchema = (k) => k in keys || families.some((f) => k.startsWith(f));
     for (const k of new Set([...frontend, ...srv])) if (!inSchema(k)) add("read-not-in-schema", k);
-    const text = sources.map((s) => (s.path.endsWith(".rs") ? withoutTestModules(s.text) : s.text)).join("\n");
+    // A key is read when production code names it, or uses its typed field; the struct that declares the fields does not count.
+    const text = sources.map((s) => (s.path.endsWith(".rs") ? withoutSettingsStruct(withoutTestModules(s.text)) : s.text)).join("\n");
+    const isRead = (k) => text.includes(`"${k}"`) || (typed.has(k) && new RegExp(String.raw`\.${typed.get(k)}\b`).test(text));
     for (const [k, v] of Object.entries(keys)) {
-        if (!v["x-unread"] && !text.includes(`"${k}"`)) add("schema-not-read", k);
+        if (!v["x-unread"] && !isRead(k)) add("schema-not-read", k);
         if (!v.description) add("no-description", k);
         if (!v["x-section"]) add("no-section", k);
         if (!("default" in v) && !("x-nodefault" in v)) add("no-default", k);
