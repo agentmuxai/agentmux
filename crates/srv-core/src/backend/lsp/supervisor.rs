@@ -85,12 +85,38 @@ pub struct LspSupervisor {
     event_bus: Arc<EventBus>,
 }
 
+/// Refuses a server for a file or a project folder that a container agent can write. The check reads the
+/// disk and the store, so it runs off the async workers.
+async fn on_host_only(args: &StartArgs) -> Result<(), LspError> {
+    let (file, root) = (args.file_path.clone(), args.workspace_root.clone());
+    let on_host = tokio::task::spawn_blocking(move || {
+        super::workspace::runs_on_host(&file, &root, &crate::backend::fs_ops::container_folders::place)
+    })
+    .await
+    .map_err(|e| LspError::SpawnFailed(format!("the folder check did not finish: {e}")))?;
+    if on_host {
+        Ok(())
+    } else {
+        Err(LspError::ContainerAgentFolder)
+    }
+}
+
 impl LspSupervisor {
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
             servers: Mutex::new(HashMap::new()),
             event_bus,
         }
+    }
+
+    /// Counts one more user of the server running for `key`; false when there is none.
+    async fn attach(&self, key: &(String, String)) -> bool {
+        let servers = self.servers.lock().await;
+        let running = servers.get(key);
+        if let Some(handle) = running {
+            handle.refcount.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        running.is_some()
     }
 
     /// Start (or attach to existing) server for `(workspace_root, language)`.
@@ -100,30 +126,11 @@ impl LspSupervisor {
         let key = (root_str.clone(), lang.clone());
         let server_id = make_server_id(&root_str, &lang);
 
-        // First, before a running server is attached to and before the language is looked at: the answer
-        // is about the folder. The check reads the disk and the store, so it runs off the async workers.
-        let (file, root) = (args.file_path.clone(), args.workspace_root.clone());
-        let on_host = tokio::task::spawn_blocking(move || {
-            super::workspace::runs_on_host(&file, &root, &crate::backend::fs_ops::container_folders::place)
-        })
-        .await
-        .map_err(|e| LspError::SpawnFailed(format!("the folder check did not finish: {e}")))?;
-        if !on_host {
-            return Err(LspError::ContainerAgentFolder);
-        }
-
-        // Fast-path: existing server, bump refcount.
-        {
-            let servers = self.servers.lock().await;
-            if let Some(handle) = servers.get(&key) {
-                handle
-                    .refcount
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                return Ok(StartResult {
-                    server_id,
-                    workspace_root: root_str,
-                });
-            }
+        // The answer is about the folder, so it comes first: before a running server is attached to and
+        // before the language is looked at.
+        on_host_only(&args).await?;
+        if self.attach(&key).await {
+            return Ok(StartResult { server_id, workspace_root: root_str });
         }
 
         // Resolve binary on PATH. Phase 1 is opinionated about supported
