@@ -169,3 +169,49 @@ describe("the image viewer's click zoom", () => {
         expect(scaleOf(img)).toBeCloseTo(STEPS[5]);
     });
 });
+
+describe("Ctrl+C / Cmd+C copies the image", () => {
+    beforeAll(() => {
+        Element.prototype.setPointerCapture ??= () => {};
+    });
+    beforeEach(() => setPlatform("win32"));
+    afterEach(() => cleanup());
+
+    function mountWithCopy(onCopy: () => void) {
+        const { container } = render(() => (
+            <ImageViewer
+                path="C:/pics/a.png"
+                mime="image/png"
+                revision={0}
+                onCopy={onCopy}
+                bar={{ viewer: "image", options: ["image"], onReopenWith: () => {} }}
+            />
+        ));
+        return container.querySelector<HTMLElement>(".image-viewer-content")!;
+    }
+
+    it.each([
+        ["Ctrl+C", { key: "c", ctrlKey: true }],
+        ["Cmd+C", { key: "c", metaKey: true }],
+        ["Ctrl+C with caps lock", { key: "C", ctrlKey: true }],
+    ])("%s copies, and the key is taken", (_n, init) => {
+        const onCopy = vi.fn();
+        const content = mountWithCopy(onCopy);
+        const down = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+        content.dispatchEvent(down);
+        expect(onCopy).toHaveBeenCalledTimes(1);
+        expect(down.defaultPrevented).toBe(true);
+    });
+
+    it("does nothing with text selected (the page's own copy), or with Shift or Alt held, or without a handler", () => {
+        const onCopy = vi.fn();
+        const content = mountWithCopy(onCopy);
+        for (const init of [{ key: "c", ctrlKey: true, shiftKey: true }, { key: "c", ctrlKey: true, altKey: true }, { key: "c" }]) {
+            content.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+        }
+        vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "text" } as Selection);
+        content.dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true }));
+        expect(onCopy).not.toHaveBeenCalled();
+        vi.restoreAllMocks();
+    });
+});

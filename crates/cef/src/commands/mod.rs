@@ -26,6 +26,7 @@ pub mod replace_page;
 pub mod pane_pool;
 pub mod startup_pools;
 pub mod clipboard;
+pub mod clipboard_image;
 pub mod vault;
 pub mod store_progress;
 pub mod store_reopen;

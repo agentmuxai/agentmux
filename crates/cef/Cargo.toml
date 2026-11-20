@@ -92,7 +92,7 @@ agentmux-procstats = { path = "../procstats" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # The picture that follows a torn-off tab's cursor (commands/live_follow.rs): decoded and scaled here.
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",

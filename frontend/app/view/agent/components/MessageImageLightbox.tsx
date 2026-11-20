@@ -9,6 +9,7 @@
  * (SPEC_AGENT_PANE_IMAGE_ARROWS_2026_11_06.md).
  */
 
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { Modal } from "@/app/element/modal";
 import { t } from "@/app/i18n/i18n";
 import { tip } from "@/app/element/tip";
@@ -45,6 +46,7 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                             classList={{ "is-actual": s.actual() }}
                             {...tip(s.actual() ? "Fit to the window (1)" : "Actual size (1)")}
                             onClick={s.toggleActual}
+                            onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(src(), { path: s.item()?.path }))}
                             onLoad={(e) => s.setSize(s.item()!.path, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
                         />
                     }
@@ -55,6 +57,11 @@ function Picture(props: { s: MessageLightboxState }): JSX.Element {
                         controls
                         playsinline
                         aria-label={s.item()?.alt || s.item()?.name}
+                        onContextMenu={(e) => {
+                            // Read now: by the time a menu item is picked the event is over and has no currentTarget.
+                            const video = e.currentTarget;
+                            showMediaCopyMenu(e, sourceFromUrl(src(), { kind: "video", path: s.item()?.path, element: () => video }));
+                        }}
                         onLoadedMetadata={(e) =>
                             s.setSize(s.item()!.path, e.currentTarget.videoWidth, e.currentTarget.videoHeight)
                         }

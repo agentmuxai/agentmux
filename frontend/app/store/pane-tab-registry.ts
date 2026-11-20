@@ -131,6 +131,8 @@ export interface PaneTabInstance {
     headerText?: Accessor<string | HeaderElem[]>;
     headerActions?: Accessor<(IconButtonDecl | ToggleIconButtonDecl)[]>;
     contextMenu?(ctx?: unknown): ContextMenuItem[];
+    /** The pane menu's Copy for a view of media (an image), which has no text selection to enable the plain one; `selection` is the pane's. */
+    copyMenu?(selection: string): ContextMenuItem[];
     /** Items for the header's settings menu. */
     settingsMenu?(): ContextMenuItem[];
     /** The header's background, when it follows this tab's own state (the

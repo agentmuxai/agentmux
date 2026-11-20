@@ -469,6 +469,7 @@ async fn route_command(
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
+        "write_clipboard_image" => commands::clipboard_image::write_clipboard_image(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
 
         // ---- Tier 3: Provider/CLI management ----

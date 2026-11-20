@@ -63,6 +63,8 @@ export interface ImageViewerProps {
     bar: Omit<ViewerBarProps, "start" | "facts">;
     /** `[` / `]`: the previous or next image in the folder. */
     onStep?: (delta: -1 | 1) => void;
+    /** Ctrl+C / Cmd+C with the image focused and no text selected: copy the image. */
+    onCopy?: () => void;
 }
 
 /** The two elements the zoom is measured against, and the points on screen as the view sees them. */
@@ -176,6 +178,12 @@ const centre = { x: 0, y: 0 };
 function createKeys(props: ImageViewerProps, z: Zooming, cycleBackground: () => void) {
     const { zoom, setZoom, geo, showsImage } = z;
     return (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "c" && props.onCopy && !window.getSelection()?.toString()) {
+            e.preventDefault();
+            e.stopPropagation();
+            props.onCopy();
+            return;
+        }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         if ((e.key === "[" || e.key === "]") && props.onStep) {
             e.preventDefault();
