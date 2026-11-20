@@ -28,8 +28,8 @@ use crate::backend::obj::{meta_get_string, MetaMapType};
 
 /// The mark's file, in the folder under the data root that is keyed by the working folder.
 const MARK: &str = "container-agent-folder";
-/// The most servers a pane row names, and the most characters of one name: they are read from a file a
-/// container agent wrote.
+/// The most servers a pane row names, and the most characters of one name: they are read from the folder's
+/// own file.
 const MOST_NAMES: usize = 20;
 const LONGEST_NAME: usize = 64;
 

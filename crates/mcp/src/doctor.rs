@@ -154,9 +154,9 @@ fn is_inside(file: &Path, folder: &Path) -> bool {
 }
 
 /// Whether doctor may start the command that the `agentmux` entry of `config` names. A config outside the
-/// working folder is AgentMux's own file. One inside it is the folder's, and a container agent that can write
-/// the folder could have written the entry: `rule` is srv's answer to that (`None` when it gave none), and the
-/// command is started on this computer only on a plain no. Inside a container nothing here runs on the host.
+/// working folder is AgentMux's own file. One inside it is the folder's: `rule` is srv's answer to whether a
+/// host agent there gets only the servers AgentMux writes (`None` when it gave none), and the command is
+/// started on this computer only on a plain no. Inside a container nothing here runs on the host.
 fn may_start_entry(config: &Path, workdir: &Path, in_container: bool, rule: Option<bool>) -> Result<(), String> {
     if in_container || !is_inside(config, workdir) {
         return Ok(());
