@@ -44,7 +44,13 @@ afterEach(() => {
 
 describe("the words and the bar", () => {
     it("names the provider's windows, clamps the bar and turns it amber then red at 75 and 90", () => {
-        expect([windowName("five_hour"), windowName("seven_day"), windowName("seven_day_opus")]).toEqual(["5-hour", "7-day", "seven day opus"]);
+        expect([windowName("five_hour"), windowName("seven_day"), windowName("seven_day_opus"), windowName("seven_day_sonnet"), windowName("monthly_extra")]).toEqual([
+            "5-hour",
+            "7-day",
+            "7-day Opus",
+            "7-day Sonnet",
+            "monthly extra",
+        ]);
         expect([barPercent({ used_percent: -3 }), barPercent({ used_percent: 41.6 }), barPercent({ used_percent: 130 })]).toEqual([0, 42, 100]);
         expect([74.9, 75, 89.9, 90].map((p) => usageTone({ used_percent: p }))).toEqual(["ok", "warn", "warn", "high"]);
         expect(windowText(window_({ used_percent: 60.4 }))).toMatch(/^60% used · resets /);
@@ -52,8 +58,8 @@ describe("the words and the bar", () => {
 
     it("shows a reading's age only once no frame has refreshed it for a while", () => {
         expect(ageNote({ age_ms: 5 * 60_000 })).toBe("");
-        expect(ageNote({ age_ms: 30 * 60_000 })).toBe("as of 30 min ago");
-        expect(ageNote({ age_ms: 3 * 3_600_000 })).toBe("as of 3 h ago");
+        expect(ageNote({ age_ms: 30 * 60_000 })).toBe(" · as of 30 min ago");
+        expect(ageNote({ age_ms: 3 * 3_600_000 })).toBe(" · as of 3 h ago");
     });
 });
 

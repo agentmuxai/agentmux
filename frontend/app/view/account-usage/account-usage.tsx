@@ -7,6 +7,7 @@
 
 import { For, Show, type JSX } from "solid-js";
 
+import { t } from "@/app/i18n/i18n";
 import {
     accountsWithReading,
     ageNote,
@@ -29,15 +30,17 @@ export function AccountUsageRows(props: { usage: AccountUsage }): JSX.Element {
             when={windowsOf(props.usage).length > 0}
             fallback={<span class="account-usage__none">{noReadingText(props.usage)}</span>}
         >
-            <ul class="account-usage" aria-label="Usage of this account">
+            <ul class="account-usage" aria-label={t("accountUsage.rows.aria")}>
                 <For each={windowsOf(props.usage)}>
                     {([key, w]) => (
                         <li class="account-usage__row" data-tone={usageTone(w)}>
-                            <span class="account-usage__name">{windowName(key)}</span>
+                            <span class="account-usage__name" title={windowName(key)}>
+                                {windowName(key)}
+                            </span>
                             <span
                                 class="account-usage__bar"
                                 role="progressbar"
-                                aria-label={`${windowName(key)} window`}
+                                aria-label={t("accountUsage.window.aria", { name: windowName(key) })}
                                 aria-valuemin={0}
                                 aria-valuemax={100}
                                 aria-valuenow={barPercent(w)}
@@ -46,7 +49,7 @@ export function AccountUsageRows(props: { usage: AccountUsage }): JSX.Element {
                             </span>
                             <span class="account-usage__text">
                                 {windowText(w)}
-                                <Show when={ageNote(w)}>{(n) => <span class="account-usage__age"> · {n()}</span>}</Show>
+                                <Show when={ageNote(w)}>{(n) => <span class="account-usage__age">{n()}</span>}</Show>
                             </span>
                         </li>
                     )}
@@ -63,7 +66,7 @@ export function AccountUsageField(props: { accountId: string }): JSX.Element {
         <Show when={accounts().find((a) => a.account_id === props.accountId)}>
             {(a) => (
                 <div class="identity-detail-field account-usage__field">
-                    <span class="identity-detail-label">Usage</span>
+                    <span class="identity-detail-label">{t("accountUsage.field")}</span>
                     <AccountUsageRows usage={a().usage} />
                 </div>
             )}
@@ -77,7 +80,7 @@ export function AccountUsageStrip(): JSX.Element {
     const shown = () => accountsWithReading(accounts());
     return (
         <Show when={shown().length > 0}>
-            <div class="account-usage-strip" role="group" aria-label="Account usage">
+            <div class="account-usage-strip" role="group" aria-label={t("accountUsage.strip.aria")}>
                 <For each={shown().map((a) => a.account_id)}>
                     {(id) => (
                         <Show when={shown().find((a) => a.account_id === id)}>

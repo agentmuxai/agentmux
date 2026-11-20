@@ -49,11 +49,14 @@ export function useAccountUsage(): Accessor<AccountView[]> {
     return accounts;
 }
 
-/** "5-hour", "7-day", or the provider's own name with its underscores undone. */
+/** "5-hour", "7-day", "7-day Opus" (`seven_day_opus`), or the provider's own name with its underscores undone. */
 export function windowName(key: string): string {
-    if (key === "five_hour") return "5-hour";
-    if (key === "seven_day") return "7-day";
-    return key.replace(/_/g, " ");
+    const m = /^(five_hour|seven_day)(?:_(.+))?$/.exec(key);
+    if (!m) return key.replace(/_/g, " ");
+    const base = m[1] === "five_hour" ? "5-hour" : "7-day";
+    if (!m[2]) return base;
+    const rest = m[2].replace(/_/g, " ");
+    return `${base} ${rest.charAt(0).toUpperCase()}${rest.slice(1)}`;
 }
 
 /** The windows of a reading, the one that resets first first (`five_hour` before `seven_day`). */
@@ -76,11 +79,11 @@ export function windowText(w: UsageWindow): string {
     return `${Math.round(w.used_percent)}% used · resets ${resetLabel(w.resets_at_ms)}`;
 }
 
-/** "as of 20 min ago" for a reading no frame has refreshed in a while, else nothing. */
+/** " · as of 20 min ago" (with its separator) for a reading no frame has refreshed in a while, else nothing. */
 export function ageNote(w: Pick<UsageWindow, "age_ms">): string {
     if (w.age_ms < STALE_MS) return "";
     const min = Math.round(w.age_ms / 60_000);
-    return min < 120 ? `as of ${min} min ago` : `as of ${Math.round(min / 60)} h ago`;
+    return min < 120 ? ` · as of ${min} min ago` : ` · as of ${Math.round(min / 60)} h ago`;
 }
 
 /** What to say when an account has no window to show. */

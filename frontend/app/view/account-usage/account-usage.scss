@@ -22,9 +22,14 @@
     font-size: var(--text-xs);
 }
 
+// One line, a fixed width so the bars line up; a longer name ("7-day Sonnet") is cut with an ellipsis and
+// whole in its tooltip.
 .account-usage__name {
-    flex: 0 0 4.5em;
+    flex: 0 0 7.5em;
     color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .account-usage__bar {
