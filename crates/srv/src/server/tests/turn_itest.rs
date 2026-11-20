@@ -80,6 +80,7 @@ async fn itest_container_turn_answers_and_calls_a_muxapi_tool() {
         Box::pin(async move {
             cm.ensure_running_observed("agentmux-itest-turn", "nginx:alpine", &[], &[], &ContainerMountSpec::default(), &|_| {})
                 .await
+                .map(|_started| ())
                 .map_err(|e| e.to_string())
         })
     }));

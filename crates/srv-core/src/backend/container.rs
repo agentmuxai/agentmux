@@ -479,7 +479,7 @@ impl ContainerManager {
     ///
     /// `observe` is told about the steps that take long enough for a person to
     /// wonder: downloading the image (with how far it has got) and creating the
-    /// container. Nothing is reported when the container is already up.
+    /// container. Nothing is reported when it is already up. `true`: this call started it, so what ran in it is gone.
     pub async fn ensure_running_observed(
         &self,
         container_name: &str,
@@ -488,7 +488,7 @@ impl ContainerManager {
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
         observe: StartObserver<'_>,
-    ) -> Result<(), ContainerError> {
+    ) -> Result<bool, ContainerError> {
         // Acquire the per-container serialization lock before touching Docker.
         // Concurrent callers for the same container_name queue here; once the
         // first caller completes, the second finds the container already running
@@ -533,7 +533,7 @@ impl ContainerManager {
         env_vars: &[(String, String)],
         spec: &ContainerMountSpec,
         observe: StartObserver<'_>,
-    ) -> Result<(), ContainerError> {
+    ) -> Result<bool, ContainerError> {
         // Before the container is reused or made: an existing one is refused as well.
         if let Some(path) = runtime_socket::refused_mount(volumes, spec.workspace_host_dir.as_deref()) {
             return Err(ContainerError::VolumeRefused { path });
@@ -564,6 +564,7 @@ impl ContainerManager {
             None => None,
         };
 
+        let started = existing.as_deref() != Some("running");
         match existing {
             Some(status) => {
                 if status != "running" {
@@ -598,7 +599,7 @@ impl ContainerManager {
         // on its next turn. See `ensure_agent_network`'s own doc comment.
         self.ensure_agent_network(container_name).await;
 
-        Ok(())
+        Ok(started)
     }
 
     /// Launch an exec session inside a running container.
