@@ -68,3 +68,23 @@ describe("containBindingErrors", () => {
         expect(report).not.toHaveBeenCalled();
     });
 });
+
+describe("containBindingErrors, counting", () => {
+    it("counts each error it reports toward the window's burst of errors", async () => {
+        const { BURST_COUNT, onWindowErrorBurst } = await import("./window-error-burst");
+        const heard = vi.fn();
+        const stop = onWindowErrorBurst(heard);
+        const [n, setN] = createSignal(0);
+        render(() =>
+            containBindingErrors(() => {
+                createEffect(() => {
+                    if (n() > 0) throw new Error(`throw ${n()}`);
+                });
+                return <div>app</div>;
+            }, () => {})
+        );
+        for (let i = 1; i <= BURST_COUNT; i++) setN(i);
+        stop();
+        expect(heard).toHaveBeenCalledTimes(1);
+    });
+});

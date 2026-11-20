@@ -93,6 +93,16 @@ describe("BlockErrorBoundary — single-pane fallback", () => {
         expect(fallback.textContent).toContain("browser");
     });
 
+    it("carries the pane's block id, so the window can tell this pane is showing (its crash fallback) and not missing", async () => {
+        const BlockErrorBoundary = await loadBoundary();
+        render(() => (
+            <BlockErrorBoundary blockId="abcdef1234567890" viewType="browser">
+                <Boom />
+            </BlockErrorBoundary>
+        ));
+        expect(screen.getByTestId("block-error-fallback").getAttribute("data-blockid")).toBe("abcdef1234567890");
+    });
+
     it("renders the Close pane button only when onClose is provided", async () => {
         const BlockErrorBoundary = await loadBoundary();
         const onClose = vi.fn();
