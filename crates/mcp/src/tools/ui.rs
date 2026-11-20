@@ -43,10 +43,61 @@ async fn run_ui_screenshot(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+    screenshot_text(&result, crate::self_keys::in_container(), &container_media_dir())
+}
+
+/// What `UIScreenshot` tells the agent. srv wrote the PNG on its own machine, so a container agent, which cannot read
+/// that path, gets its own copy in the container (from the bytes srv sent along) and is told that path instead: the
+/// one its file tools read and `files` on Tasks and Message can pass on.
+fn screenshot_text(result: &UiScreenshotResponse, in_container: bool, dir: &std::path::Path) -> Result<String> {
+    if !in_container {
+        return Ok(format!(
+            "Screenshot saved to {} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
+            result.path
+        ));
+    }
+    let local = save_local_copy(dir, &result.png_base64, "png")?;
     Ok(format!(
-        "Screenshot saved to {} — use Read on that path to view it yourself, or Pane (action \"open\", view \"media\") to show it to the user.",
-        result.path
+        "Screenshot saved to {local} (inside your container) — use Read on that path to view it yourself, or pass it in `files` of Tasks update or submit, or of Message send."
     ))
+}
+
+/// Where a container agent's copies of screenshots and recordings go: its own temp folder.
+fn container_media_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("agentmux-media")
+}
+
+/// Write `base64` (a file srv sent inline) to a new `<dir>/<id>.<ext>` and return its path. Files older than an hour
+/// that were written here go too, so the folder does not only grow.
+fn save_local_copy(dir: &std::path::Path, base64: &str, ext: &str) -> Result<String> {
+    use base64::Engine as _;
+    if base64.is_empty() {
+        anyhow::bail!("srv sent no image with the {ext}, so there is nothing to save in your container: the file is on the host and cannot be read from here");
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .map_err(|e| anyhow::anyhow!("the {ext} srv sent could not be decoded: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| anyhow::anyhow!("cannot make {}: {e}", dir.display()))?;
+    prune_old_media(dir);
+    let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    std::fs::write(&path, bytes).map_err(|e| anyhow::anyhow!("cannot save {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Delete the PNGs and GIFs in `dir` that are older than the capture retention. Best effort.
+fn prune_old_media(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !matches!(path.extension().and_then(|e| e.to_str()), Some("png" | "gif")) {
+            continue;
+        }
+        let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > crate::window_capture::CAPTURE_RETENTION);
+        if old {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 async fn run_ui_record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -62,7 +113,14 @@ async fn run_ui_record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let resp = client
         .post(&url)
         .header(AUTH_KEY_HEADER, auth_key)
-        .json(&UiRecordRequest { auth, op, pane: pane_arg(arguments), fps: number("fps"), seconds: number("seconds") })
+        .json(&UiRecordRequest {
+            auth,
+            op,
+            pane: pane_arg(arguments),
+            fps: number("fps"),
+            seconds: number("seconds"),
+            inline: crate::self_keys::in_container(),
+        })
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -75,7 +133,17 @@ async fn run_ui_record(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-    Ok(result.message)
+    record_text(&result, crate::self_keys::in_container(), &container_media_dir())
+}
+
+/// What `UIRecord` tells the agent. A finished recording is on srv's machine; a container agent gets its own copy
+/// (srv sends the bytes when asked) and the message names that path instead of the host's.
+fn record_text(result: &UiRecordResponse, in_container: bool, dir: &std::path::Path) -> Result<String> {
+    let (true, Some(host_path)) = (in_container, result.path.as_deref()) else {
+        return Ok(result.message.clone());
+    };
+    let local = save_local_copy(dir, result.gif_base64.as_deref().unwrap_or_default(), "gif")?;
+    Ok(result.message.replace(host_path, &format!("{local} (inside your container)")))
 }
 
 async fn run_capture_window(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

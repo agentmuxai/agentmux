@@ -30,6 +30,8 @@ export type MessageImageLightboxProps = {
     onClose: (back?: VideoHandback) => void;
     /** Close, then open this file in the Editor (zoom and pan live there). */
     onOpenEditor: (path: string) => void;
+    /** The agent pane the message is in: srv reads a container agent's paths from its own folders only. */
+    blockId?: string;
 };
 
 const isVideo = (item: MediaGalleryItem | undefined): boolean => item?.kind === "video";
@@ -50,7 +52,7 @@ export function ringDistance(a: number, b: number, n: number): number {
 }
 
 /** The files loaded so far, by path: each one's blob URL or why there is none. */
-function createImageStore(abort: AbortController, videoPaths: () => Set<string>) {
+function createImageStore(abort: AbortController, videoPaths: () => Set<string>, blockId?: () => string | undefined) {
     const [entries, setEntries] = createSignal<Record<string, ImageEntry>>({});
     const revoke = (e: ImageEntry | undefined) => {
         if (e?.kind === "ready") URL.revokeObjectURL(e.url);
@@ -70,6 +72,7 @@ function createImageStore(abort: AbortController, videoPaths: () => Set<string>)
                 maxBytes: videoPaths().has(path) ? INLINE_AV_MAX_BYTES : INLINE_IMAGE_MAX_BYTES,
                 type: extOf(path) === "svg" ? "image/svg+xml" : undefined,
                 signal: abort.signal,
+                blockId: blockId?.(),
             });
             // Let go of a result nobody is waiting for: the entry was dropped while it loaded.
             if (abort.signal.aborted || entries()[path]?.kind !== "loading") return;
@@ -185,7 +188,7 @@ export function createMessageLightbox(props: MessageImageLightboxProps) {
     const [sizes, setSizes] = createSignal<Record<string, string>>({});
     const [actual, setActual] = createSignal(false);
     const abort = new AbortController();
-    const store = createImageStore(abort, () => new Set(props.items.filter(isVideo).map((it) => it.path)));
+    const store = createImageStore(abort, () => new Set(props.items.filter(isVideo).map((it) => it.path)), () => props.blockId);
     let dialogRef: HTMLDivElement | undefined;
 
     const n = () => props.items.length;

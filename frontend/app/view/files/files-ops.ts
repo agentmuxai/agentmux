@@ -184,13 +184,13 @@ export class FilesOps {
 
 const isFinal = (state: FsOpEvent["state"]): boolean => state === "done" || state === "failed" || state === "canceled";
 
-/** "Copying report.pdf · 3 of 10 · 45%" for the status line. */
-export function opProgressText(op: OpView): string {
+/** The progress line, "Copying report.pdf · 3 of 10 · 45%", in two parts: "Copying report.pdf", which may be cut short in a narrow pane, and " · 3 of 10 · 45%", which must stay readable. */
+export function opProgressParts(op: OpView): { head: string; tail: string } {
     const verb = op.kind === "move" ? "Moving" : "Copying";
-    const parts = [`${verb} ${op.label}`];
+    const parts: string[] = [];
     if (op.total_items > 1) parts.push(`${Math.min(op.done_items + 1, op.total_items)} of ${op.total_items}`);
     if (op.total_bytes > 0) parts.push(`${Math.floor((op.done_bytes / op.total_bytes) * 100)}%`);
-    return parts.join(" · ");
+    return { head: `${verb} ${op.label}`, tail: parts.map((p) => ` · ${p}`).join("") };
 }
 
 /** What the status line says when an op ends. */

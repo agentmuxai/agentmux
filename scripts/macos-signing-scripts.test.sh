@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # macos-signing-scripts.test.sh — tests for the scripts the release's signing job runs on an app that came out of
-# another job: unpack-macos-app.sh, sign-macos-app.sh, verify-srv-identity-darwin.sh, notarize-macos.sh and
+# another job: unpack-macos-app.sh, sign-macos-app.sh, verify-srv-identity-darwin.sh, verify-app-identity-darwin.sh, notarize-macos.sh and
 # make-macos-dmg.sh.
 #
 # Two rules, both because the app (and the zip it came in) is input from code that ran with no credentials, while
@@ -25,7 +25,7 @@ bad()  { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "${2:-}"; }
 # A section that cannot run is a failure under CI: a skipped test must not look like a passed one.
 skip() { if [ -n "${CI:-}" ]; then bad "$1" "skipped in CI"; else printf '  SKIP  %s\n' "$1"; fi; }
 
-SCRIPTS=(unpack-macos-app.sh sign-macos-app.sh verify-srv-identity-darwin.sh notarize-macos.sh make-macos-dmg.sh)
+SCRIPTS=(unpack-macos-app.sh sign-macos-app.sh verify-srv-identity-darwin.sh verify-app-identity-darwin.sh notarize-macos.sh make-macos-dmg.sh)
 
 # ── 1. The unpack step ────────────────────────────────────────────────────────
 # ditto is macOS's. Where it is missing (the Linux CI runner) a stand-in writes and reads zips with python's zipfile,
@@ -224,7 +224,8 @@ for h in "AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Renderer)";
 done
 plant "$app/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries/libvk_swiftshader.dylib"
 plant "$app/Contents/Frameworks/Chromium Embedded Framework.framework/Versions/A/Chromium Embedded Framework"
-echo '<plist/>' > "$app/Contents/Info.plist"
+# A per-version id of a local channel: the app identity check leaves it alone (the stable id has its own tests).
+printf '<plist><dict><key>CFBundleIdentifier</key><string>ai.agentmux.local-test.0.0.1</string></dict></plist>\n' > "$app/Contents/Info.plist"
 ENT="$TMP/entitlements.plist"; echo '<plist/>' > "$ENT"
 
 run_with_stubs() { PATH="$STUBS:$PATH" RECORD="$RECORD" EXPECTED_TEAM_ID=ABCDE12345 "$@" > "$TMP/run.out" 2>&1; }

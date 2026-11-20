@@ -12,8 +12,12 @@
 //!
 //! A `pid` or `call` op carries a process id from the container's own pid namespace. The pane
 //! files a `pid` against the background task, and `tool_calls` labels a host process with a
-//! `call`'s description, so on this srv's host that pid would name some other process. Both are
-//! accepted and dropped.
+//! `call`'s description, so on this srv's host that pid would name some other process. Neither
+//! goes where a host pid goes: not to the broker, not to the registry's host `pid` column, not to
+//! `tool_calls`. They are filed apart, with the container's name
+//! (`storage::background_container_calls`): the liveness sweep checks the pid inside that
+//! container (`background_task_container_sweep`), and the description is the registry row's
+//! label, so a backgrounded call's dock row knows whether it is alive and is not just "Bash".
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::State;
@@ -68,8 +72,49 @@ pub(crate) async fn handle_container_tool_chunk(
     };
     if matches!(chunk, ToolChunk::Chunk { .. } | ToolChunk::Terminal { .. }) {
         state.broker.publish_event::<crate::backend::mps_events::ToolChunk>(&chunk, req.scopes, PERSIST);
+    } else {
+        file_report(&state, &grant.block_id, &chunk).await;
     }
     Json(json!({ "ok": true })).into_response()
+}
+
+/// A call's id as the container may name it (`toolu_…`): short, and plain characters only.
+fn is_call_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// File a `pid` or `call` report of the container agent on `block_id` (see the module doc). Anything else, a
+/// pane that is not a container's, an id that is not a call's, or a failed write, is dropped: the report is
+/// only ever help for the dock, and the CLI's own task feed still describes the row.
+async fn file_report(state: &AppState, block_id: &str, chunk: &ToolChunk) {
+    let (tool_id, pid, description) = match chunk {
+        ToolChunk::Pid { tool_id, pid, .. } => (tool_id.clone(), *pid, None),
+        ToolChunk::Call { tool_id, pid, description, .. } => (tool_id.clone(), *pid, crate::backend::storage::background_container_calls::clean_description(description)),
+        _ => return,
+    };
+    if !is_call_id(&tool_id) {
+        return;
+    }
+    let (store, broker, block_id) = (state.mstore.clone(), state.broker.clone(), block_id.to_string());
+    let _ = tokio::task::spawn_blocking(move || {
+        let Some(container) = store.get::<crate::backend::obj::Block>(&block_id).ok().flatten().and_then(|b| crate::backend::container::container_of_meta(&b.meta)) else {
+            return;
+        };
+        let now_ms = agentmux_common::time::now_ms();
+        // Zero is no process.
+        let pid = (pid > 0).then_some(i64::from(pid));
+        if let Err(e) = store.background_container_call_file(&block_id, &tool_id, &container, pid, description.as_deref(), now_ms) {
+            tracing::warn!(target: "background_tasks", block_id = %block_id, node_id = %tool_id, error = %e, "could not file a container agent's call report");
+            return;
+        }
+        // The row may exist already, with the renderer's generic label.
+        if let Some(label) = description {
+            if store.background_task_describe_if_generic(&block_id, &tool_id, &label).unwrap_or(false) {
+                crate::backend::background_task_feed::publish_background_task_updated(&broker, &block_id);
+            }
+        }
+    })
+    .await;
 }
 
 #[cfg(test)]
@@ -154,6 +199,71 @@ mod tests {
             let chunk = check("b", &req).unwrap_or_else(|_| panic!("valid"));
             assert!(!matches!(chunk, ToolChunk::Chunk { .. } | ToolChunk::Terminal { .. }));
         }
+    }
+
+    async fn send(app: &axum::Router, token: &str, block: &str, data: serde_json::Value) {
+        let scope = format!("block:{block}");
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/agent/tool-chunk")
+            .header("X-AuthKey", token)
+            .header("Content-Type", "application/json")
+            .body(Body::from(body("tool_chunk", &[scope.as_str()], data).to_string()))
+            .unwrap();
+        assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+    }
+
+    fn pane(state: &crate::server::AppState, block_id: &str, meta: serde_json::Value) {
+        let mut block = crate::backend::obj::Block { oid: block_id.to_string(), ..Default::default() };
+        for (k, v) in meta.as_object().unwrap() {
+            block.meta.insert(k.clone(), v.clone());
+        }
+        state.mstore.insert(&mut block).unwrap();
+    }
+
+    /// A container's pid and description are filed with the container's name, apart from the host's `pid`
+    /// column and the host's process labels, and the description labels the row.
+    #[tokio::test]
+    async fn a_container_pid_and_description_are_filed_apart_and_the_description_labels_the_row() {
+        let state = crate::server::tests::test_state();
+        pane(&state, "tc-file-a", json!({ "agentMode": "container", "agentId": "ag-file" }));
+        let token = crate::backend::container::credential::token_for_block("tc-file-a", None);
+        let app = crate::server::build_router(state.clone());
+        let host_pid = 4_242_417u32;
+        // The row exists first (the renderer made it), then the report; and a row the CLI made after the report.
+        state.mstore.background_task_observe("toolu_a", "tc-file-a", "Bash", 100, 100).unwrap();
+        send(&app, &token, "tc-file-a", json!({ "op": "pid", "tool_id": "toolu_a", "pid": host_pid, "timestamp": 1 })).await;
+        send(&app, &token, "tc-file-a", json!({ "op": "call", "tool_id": "toolu_a", "pid": host_pid, "description": "Run the build\n", "timestamp": 2 })).await;
+        send(&app, &token, "tc-file-a", json!({ "op": "call", "tool_id": "toolu_b", "pid": 9, "description": "Watch the tests", "timestamp": 3 })).await;
+        state.mstore.background_task_observe("toolu_b", "tc-file-a", "Bash", 100, 100).unwrap();
+
+        let row = state.mstore.background_task_get("toolu_a").unwrap().unwrap();
+        assert_eq!((row.pid, row.label.as_str()), (None, "Run the build"), "no host pid; the call's description is the label");
+        assert_eq!(state.mstore.background_task_get("toolu_b").unwrap().unwrap().label, "Watch the tests", "filed before the row, found by it");
+        let filed = state.mstore.background_container_running().unwrap();
+        let mine = filed.iter().find(|t| t.id == "toolu_a").unwrap();
+        assert_eq!((mine.container.as_str(), mine.pid), ("agentmux-ag-file", i64::from(host_pid)));
+        assert!(crate::backend::tool_calls::lookup(host_pid, None).is_none(), "a container pid never labels a host process");
+    }
+
+    /// Only a container pane files a report, only under a call's id, and only for its own pane.
+    #[tokio::test]
+    async fn a_report_from_a_pane_that_is_not_a_container_or_with_an_odd_id_is_dropped() {
+        let state = crate::server::tests::test_state();
+        pane(&state, "tc-file-host", json!({ "agentId": "plain" }));
+        pane(&state, "tc-file-b", json!({ "agentMode": "container", "agentId": "ag-b" }));
+        pane(&state, "tc-file-c", json!({ "agentMode": "container", "agentId": "ag-c" }));
+        let app = crate::server::build_router(state.clone());
+        state.mstore.background_task_observe("toolu_x", "tc-file-c", "Bash", 100, 100).unwrap();
+        let host = crate::backend::container::credential::token_for_block("tc-file-host", None);
+        let b = crate::backend::container::credential::token_for_block("tc-file-b", None);
+        send(&app, &host, "tc-file-host", json!({ "op": "pid", "tool_id": "toolu_h", "pid": 5, "timestamp": 1 })).await;
+        send(&app, &b, "tc-file-b", json!({ "op": "pid", "tool_id": "../odd id", "pid": 5, "timestamp": 1 })).await;
+        // Pane b reports a call that pane c's row has: it files under b, not c.
+        send(&app, &b, "tc-file-b", json!({ "op": "call", "tool_id": "toolu_x", "pid": 6, "description": "Not yours", "timestamp": 1 })).await;
+        assert!(state.mstore.background_container_running().unwrap().is_empty());
+        assert_eq!(state.mstore.background_task_get("toolu_x").unwrap().unwrap().label, "Bash", "another pane's row is not relabelled");
+        assert_eq!(state.mstore.background_container_call_description("tc-file-host", "toolu_h").unwrap(), None);
     }
 
     #[tokio::test]

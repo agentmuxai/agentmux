@@ -119,3 +119,9 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 echo "==> Verifying srv's signing identity"
 bash "$SCRIPT_DIR/verify-srv-identity-darwin.sh" "$APP" "$CERT" \
     || { echo "❌ srv is not signed as ai.agentmux.srv by the signing team; not packaging." >&2; exit 1; }
+
+# The stable app's signed requirement must name the fixed id, with no version: that is what lets macOS keep its
+# privacy grants across upgrades (the same check ran on the unsigned app; this one reads the signature).
+echo "==> Verifying the app's bundle id and requirement"
+bash "$SCRIPT_DIR/verify-app-identity-darwin.sh" "$APP" --signed \
+    || { echo "❌ the app's bundle id or signed requirement is not the fixed one; not packaging." >&2; exit 1; }

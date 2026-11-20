@@ -336,9 +336,20 @@ async fn run(
 }
 
 fn response(status: &str, message: String, finished: Option<&Finished>) -> Response {
+    response_with(status, message, finished, false)
+}
+
+/// As [`response`]; with `inline` the file's bytes go in the answer too, for a caller that cannot read this machine's
+/// folders (a container agent). A file that cannot be read back is left out, and the answer still names it.
+fn response_with(status: &str, message: String, finished: Option<&Finished>, inline: bool) -> Response {
+    use base64::Engine as _;
     let body = UiRecordResponse {
         status: status.to_string(),
         message,
+        gif_base64: finished
+            .filter(|_| inline)
+            .and_then(|f| std::fs::read(&f.path).ok())
+            .map(|b| base64::engine::general_purpose::STANDARD.encode(b)),
         path: finished.map(|f| f.path.to_string_lossy().to_string()),
         frames: finished.map_or(0, |f| f.frames),
         skipped: finished.map_or(0, |f| f.skipped),
@@ -434,7 +445,7 @@ pub(crate) async fn handle_ui_record(
                         f.seconds,
                         f.ended
                     );
-                    response("saved", msg, Some(&f))
+                    response_with("saved", msg, Some(&f), req.inline)
                 }
                 Ok(Err(e)) => err_response(StatusCode::BAD_GATEWAY, format!("the recording failed: {e}")),
                 Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("the recording stopped unexpectedly: {e}")),

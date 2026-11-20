@@ -394,7 +394,7 @@ jobs:
           ( while sleep 300; do echo "still running, $((SECONDS / 60)) min into this step; busiest process: $(ps -Ao pcpu=,etime=,comm= -r | head -1)"; done ) &
           HEARTBEAT=$!
           trap 'kill "$HEARTBEAT" 2>/dev/null || true' EXIT
-          REQUIRE_REMOTE_HELPERS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh --unsigned-app "$OUT"
+          REQUIRE_REMOTE_HELPERS=1 RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh --unsigned-app "$OUT"
           # ditto keeps the symlinks, modes and resource forks of the bundle, which the signing job needs as they are.
           # The zip is named so that release-core's "*.dmg" sweep of the run's artifacts cannot pick it up.
           ditto -c -k --keepParent --sequesterRsrc build/AgentMux.app "$OUT/AgentMux-unsigned-app.zip"
@@ -487,6 +487,7 @@ jobs:
             scripts/notarize-macos.sh
             scripts/make-macos-dmg.sh
             scripts/verify-srv-identity-darwin.sh
+            scripts/verify-app-identity-darwin.sh
             build/entitlements.mac.plist
           sparse-checkout-cone-mode: false
 
