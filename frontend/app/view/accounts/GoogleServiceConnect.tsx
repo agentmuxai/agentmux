@@ -4,6 +4,7 @@
 // A Google service's Connect (docs/specs/SPEC_CONNECTORS_ONE_LIST_2026_11_19.md §4.10): a sign-in that asks for just that
 // service's scopes, so it makes a Google account with the service on. A service AgentMux's own Google client isn't approved
 // for yet says so instead of offering a sign-in that srv would refuse, as a Google account's "Turn on" does.
+// reactive-coverage: one-shot the client's offer is fixed for a running srv, and the section is opened afresh each time
 
 import { createResource, Show, type JSX } from "solid-js";
 
