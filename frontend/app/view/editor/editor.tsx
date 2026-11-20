@@ -23,6 +23,6 @@ export const editorPaneTab = lazyPaneTab({
     // A split opens an empty editor with this one's settings, not a copy of
     // its documents (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
     capabilities: { lifecycle: "keepAlive", paneZoom: EDITOR_ZOOM, noPadding: true, splitBlockDef: editorSplitBlockDef },
-    members: ["liveTitle", "headerText", "contextMenu", "focus"],
+    members: ["liveTitle", "headerText", "contextMenu", "copyMenu", "focus"],
     load: () => import("./editor-instance"),
 });

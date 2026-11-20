@@ -5,6 +5,7 @@
 
 import { Match, Show, Switch, type JSX } from "solid-js";
 import { Button, CloseButton, IconButton } from "@/app/element/ui";
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { tip } from "@/app/element/tip";
 import { formatBytes } from "@/util/format-bytes";
 import type { AttachmentInfo } from "@/types/rpc/AttachmentInfo";
@@ -62,6 +63,7 @@ function PictureView(props: { s: LightboxState }): JSX.Element {
                 alt={s.item()?.name ?? ""}
                 {...tip(s.actual() ? "Fit to the window (1)" : "Actual size (1)")}
                 onClick={s.toggleActual}
+                onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(s.url()!, { mime: s.item()?.info?.mime }))}
             />
         </Show>
     );
