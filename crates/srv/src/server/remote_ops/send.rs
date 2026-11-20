@@ -144,6 +144,7 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
     };
     let nonce = envelope.nonce.clone();
     let target = envelope.params.get("target_agent").and_then(Value::as_str).unwrap_or_default().to_string();
+    let envelope_params = if op == "app.upgrade" { envelope.params.clone() } else { Value::Null };
     let Some(signed) = envelope.sign_with(&key, super::max_params_of(op)) else {
         return RemoteOpResult::failed("the request could not be signed (too long, or a malformed field)");
     };
@@ -151,6 +152,9 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
     explain_not_found(&mut result, &peer);
     if op == "tasks.enqueue" {
         crate::server::task_flow_notes::note_remote_filed(slug, &peer.hostname, &target, &result.result);
+    }
+    if op == "app.upgrade" {
+        super::upgrade_watch::note_asked(state, slug, uid, peer.hostname.trim(), &envelope_params, &result);
     }
     let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));

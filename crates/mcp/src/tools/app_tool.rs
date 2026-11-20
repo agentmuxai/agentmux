@@ -225,8 +225,9 @@ async fn remote_upgrade(arguments: &Value, cx: &ToolCtx<'_>, host: &str) -> Resu
     if s(r, "status") == "requested" {
         return Ok(format!(
             "Asked {host} to upgrade to {} as a sensitive operation ({}). If its super agent approves, the person at {host} \
-             sees a banner with a countdown and can veto it, and the upgrade starts when it ends. Nothing is sent to you when \
-             it moves on: read it with App upgrade, host {host}, request_id {}.",
+             sees a banner with a countdown and can veto it, and the upgrade starts when it ends. AgentMux tells you once, in a \
+             note, how it ends (denied, stopped by the person, not confirmed, or restarted into the release); you can also \
+             read it with App upgrade, host {host}, request_id {}.",
             s(r, "version"),
             s(r, "review"),
             s(r, "id")
