@@ -182,6 +182,16 @@ describe("openConfigFileInEditor", () => {
         expect(reveal.show).toHaveBeenCalledTimes(2);
     });
 
+    it("opens at a line srv found a problem on, and leaves `line` out when there is none or it is not a line", async () => {
+        await openConfigFileInEditor("settings.json", { line: 8 });
+        expect(sent()[1]).toMatchObject({ view: "editor", file: WIN_SETTINGS, line: 8 });
+        for (const line of [undefined, 0, -3, 2.5, Number.NaN]) {
+            rpc.PaneOpenCommand.mockClear();
+            await openConfigFileInEditor("settings.json", { line });
+            expect(sent()[1], String(line)).not.toHaveProperty("line");
+        }
+    });
+
     it("a config folder outside the home folder opens settings.json in the system editor, which can save it", async () => {
         api.ensureSettingsFile.mockResolvedValueOnce("D:\\cfg\\settings.json");
         await openConfigFileInEditor("settings.json");
