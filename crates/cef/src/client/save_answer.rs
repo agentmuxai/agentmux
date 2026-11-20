@@ -46,9 +46,31 @@ fn answer_from(done: std::thread::Result<Outcome>, took: Duration) -> SaveAnswer
     }
 }
 
+/// The path the dialog is offered: `path` itself, or `name (1)`, `name (2)`… beside it when that file already
+/// exists. A download never replaces a file, so Return in the dialog must not land on one: on macOS that
+/// opens the system's "replace it?" sheet, which came up as a stray unnamed popup (#48238). The person can
+/// still type an existing name.
+pub(super) fn offered_path(path: PathBuf) -> PathBuf {
+    let (Some(dir), Some(name)) = (path.parent().filter(|d| d.is_dir()), path.file_name()) else { return path };
+    super::agent_downloads::free_path(dir, &name.to_string_lossy(), &[]).unwrap_or(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_that_exists_is_offered_with_a_free_one_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let taken = dir.path().join("report.txt");
+        assert_eq!(offered_path(taken.clone()), taken, "a free name is offered as it is");
+        std::fs::write(&taken, b"x").unwrap();
+        assert_eq!(offered_path(taken.clone()), dir.path().join("report (1).txt"));
+        std::fs::write(dir.path().join("report (1).txt"), b"x").unwrap();
+        assert_eq!(offered_path(taken), dir.path().join("report (2).txt"));
+        // No folder to look in: the name goes through as it is.
+        assert_eq!(offered_path(PathBuf::from("report.txt")), PathBuf::from("report.txt"));
+    }
 
     fn chosen(p: &str) -> Outcome {
         Outcome::Chosen(PathBuf::from(p))
