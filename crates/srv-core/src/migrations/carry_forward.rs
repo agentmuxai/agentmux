@@ -43,10 +43,10 @@ pub(crate) const CARRIED_FROM_FILE: &str = "carried-from";
 
 /// What [`CARRIED_FROM_FILE`] says for a copy of the channel's pre-versioning
 /// `data/db/`.
-const PRE_VERSIONING: &str = "pre-versioning data";
+pub(crate) const PRE_VERSIONING: &str = "pre-versioning data";
 
 /// `major.minor.patch` of a version or version directory name.
-fn version_core(v: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn version_core(v: &str) -> Option<(u64, u64, u64)> {
     let core = v.trim().trim_start_matches('v').split(['+', '-']).next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
     let version = (parts.next()??, parts.next()??, parts.next()??);
