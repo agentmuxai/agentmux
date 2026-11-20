@@ -16,12 +16,14 @@
 //!   and the word stopped. The dock reads such a row as unknown after two hours; this ends it after a day.
 //!
 //! Both end as `stopped` and only while still `running` (`background_task_end_if_running`), so a real outcome that
-//! arrives during the pass stands. Pids are the host's: a container pane's pid is never filed (`container_tool_chunk`).
+//! arrives during the pass stands. Pids here are the host's: a container pane's pid, from its own pid namespace, is
+//! filed apart (`container_tool_chunk`) and checked inside its container (`background_task_container_sweep`).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::background_task_container_sweep::{sweep as container_sweep, ContainerProbe};
 use super::background_task_feed::publish_background_task_updated;
 use super::mps::Broker;
 use super::reactive::registry::pid_alive_since;
@@ -74,21 +76,39 @@ fn sweep(store: &Store, now_ms: i64, alive: &impl Fn(u32, u64) -> bool) -> BTree
     changed
 }
 
-/// Starts the sweep: a first pass soon after srv starts, then every [`EVERY`].
-pub fn start(store: Arc<Store>, broker: Arc<Broker>) {
+/// How long a container's report of a call's process id and description is kept: far longer than a task that
+/// is still worth checking, short enough that the table does not grow with every Bash call.
+const CONTAINER_REPORT_KEPT_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// Starts the sweep: a first pass soon after srv starts, then every [`EVERY`]. `containers` checks a container
+/// pane's rows inside its container (`background_task_container_sweep`); with none, they are left to the
+/// restart path and the day's wait.
+pub fn start(store: Arc<Store>, broker: Arc<Broker>, containers: Option<Arc<dyn ContainerProbe>>) {
     tokio::spawn(async move {
         tokio::time::sleep(FIRST_AFTER).await;
         let mut tick = tokio::time::interval(EVERY);
         loop {
             tick.tick().await;
-            let store = Arc::clone(&store);
+            let host = Arc::clone(&store);
             // The store and the process table are blocking reads.
-            let changed = tokio::task::spawn_blocking(move || sweep(&store, agentmux_common::time::now_ms(), &pid_alive_since)).await;
-            for block_id in changed.unwrap_or_default() {
+            let mut changed = tokio::task::spawn_blocking(move || sweep(&host, agentmux_common::time::now_ms(), &pid_alive_since)).await.unwrap_or_default();
+            if let Some(probe) = &containers {
+                changed.extend(sweep_containers(&store, probe.as_ref()).await);
+            }
+            for block_id in changed {
                 publish_background_task_updated(&broker, &block_id);
             }
         }
     });
+}
+
+/// One container pass, then forget what containers reported long ago.
+async fn sweep_containers(store: &Arc<Store>, probe: &dyn ContainerProbe) -> BTreeSet<String> {
+    let now_ms = agentmux_common::time::now_ms();
+    let changed = container_sweep(store, now_ms, probe).await;
+    let store = Arc::clone(store);
+    let _ = tokio::task::spawn_blocking(move || store.background_container_calls_prune(now_ms - CONTAINER_REPORT_KEPT_MS)).await;
+    changed
 }
 
 #[cfg(test)]

@@ -108,9 +108,15 @@ on:
 # have via the PR number — a second push can never land on the same SHA, so
 # this loses no real cancellation behavior, only the spurious cross-merge
 # kind.
+#
+# Pushes to main are the one exception. They share a single group and a run in progress is NOT
+# cancelled: GitHub keeps one run going and one waiting, and a newer push replaces the waiting one,
+# so a burst of merges is tested at its head, not once per merge. A waiting run that is replaced
+# starts no job, so `main status` (a job of the run) never reports for it. It only acts for the run
+# whose commit is main's head, and that run always executes.
 concurrency:
-  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('ci-pr-{0}-main-push', github.workflow) || format('ci-pr-{0}-{1}', github.workflow, github.event.pull_request.number || github.sha) }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Read-only by default; a job that needs more says so itself (job-level permissions replace this
 # block). A job added later gets nothing it did not ask for.

@@ -197,7 +197,9 @@ fn spawn_spend_services(state: &AppState) {
 fn spawn_background_task_sweep(state: &AppState) {
     backend::background_task_exit::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
     backend::background_task_pid::install(Arc::clone(&state.broker), Arc::clone(&state.mstore));
-    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker));
+    // A container pane's rows are checked inside its container, through whichever runtime srv is connected to.
+    let containers = backend::container_task_probe::DockerProbe { runtime: Arc::clone(&state.container_manager) };
+    backend::background_task_sweep::start(Arc::clone(&state.mstore), Arc::clone(&state.broker), Some(Arc::new(containers)));
 }
 
 /// Starts the services that run beside the server and need the app state.

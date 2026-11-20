@@ -719,6 +719,21 @@ pub(super) const OBJECT_TABLES_SQL: &str = "CREATE TABLE IF NOT EXISTS db_agent_
         CREATE INDEX IF NOT EXISTS idx_background_tasks_status
             ON db_background_tasks(status);
 
+        -- What a container agent's `agentmux-bashwrap` reports about a Bash call: the process id in the
+        -- container's own pid namespace and the call's description. Kept apart from db_background_tasks
+        -- so the host's `pid` column only ever holds a host process; `container` says where `pid` is
+        -- meaningful. Keyed by the pane too, so a container cannot file anything for another pane's call.
+        -- Additive (no schema bump: an older build ignores the table).
+        CREATE TABLE IF NOT EXISTS db_background_container_calls (
+            block_id    TEXT NOT NULL,
+            id          TEXT NOT NULL,
+            container   TEXT NOT NULL,
+            pid         INTEGER,
+            description TEXT,
+            at_ms       INTEGER NOT NULL,
+            PRIMARY KEY (block_id, id)
+        );
+
         -- v25: saved fleet-control target groups — see OBJECT_SCHEMA_VERSION's
         -- v25 doc comment above. member_ids is a JSON array of block ids
         -- (Swarm's native per-agent selection unit); resolved to concrete
