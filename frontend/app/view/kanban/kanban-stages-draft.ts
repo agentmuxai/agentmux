@@ -66,7 +66,7 @@ export function toggleSource(stages: readonly KanbanStage[], id: string, source:
 
 /** The first palette colour no stage uses, else grey. */
 function freeColour(stages: readonly KanbanStage[]): StageColour {
-    return STAGE_PALETTE.find((p) => !stages.some((s) => s.colour === p.id))?.id ?? "grey";
+    return STAGE_PALETTE.find((p) => !stages.some((s) => s.colour === p.id))?.id ?? "muted";
 }
 
 /** Whether another stage can be added. */
