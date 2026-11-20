@@ -70,32 +70,8 @@ pub(super) async fn bundle_import_for_agent_impl(
     let import_lock = bundle_import_for_agent_lock(&agent.id);
     let _import_guard = import_lock.lock().await;
 
-    // reagent P0, PR #2527: the "zero existing memory" guard below only
-    // consults db_agent_native_memory (the mirror) — a live file that was
-    // written autonomously but never viewed through the Stash Bundle tab
-    // is NOT in the mirror yet, so the check would pass and the write
-    // loop further down would silently overwrite it via fs::rename. Same
-    // class of bug bundle.export_for_agent already had to guard against
-    // (see refresh_memory_mirror_from_live_fs's own doc comment) — the
-    // fix is the same: refresh from the live FS before trusting the
-    // mirror's row count. A missing/unresolvable working directory is not
-    // an error here (nothing to refresh from); the emptiness check below
-    // still runs against whatever the mirror already has.
-    // Only a verified directory is refreshed from: an unverified guess can be
-    // another agent's folder, and refreshing from it would write that
-    // agent's files into this one's mirror (SPEC_MEMORY_FOLLOWS_THE_AGENT
-    // §2.1.2).
-    let resolved = crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, &agent);
-    let verified = resolved.as_ref().is_some_and(|r| {
-        r.provenance != crate::server::native_memory_handlers::MemoryDirProvenance::Unverified
-    });
-    let memory_dir = resolved.map(|r| r.path);
     let mut warnings: Vec<String> = Vec::new();
-    if let Some(dir) = memory_dir.as_ref().filter(|_| verified) {
-        if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(&agent.id, dir, id_store) {
-            warnings.push(format!("native memory refresh failed (checking mirror as-is): {e}"));
-        }
-    }
+    let memory_dir = refresh_memory_mirror_before_check(mstore, id_store, &agent, &mut warnings);
 
     // Reject BEFORE any parsing/decoding work — a target with existing
     // memory is a hard stop, not something worth spending
@@ -126,6 +102,84 @@ pub(super) async fn bundle_import_for_agent_impl(
     // import from falsely claiming its memory was ignored.
     warnings.extend(parsed.warnings.iter().filter(|w| w.as_str() != bi::MEMORY_COMPONENT_IGNORED_WARNING).cloned());
 
+    let manifest_memory_paths = resolved_memory_paths(&resolved.files);
+    let memory_dir = memory_dir_for_import(mstore, &agent, memory_dir, &manifest_memory_paths)?;
+
+    // Normal bundle components, exactly as bundle.import creates them —
+    // a memory-bearing import still creates a reusable bundle row
+    // alongside the agent-scoped memory write below.
+    let bundle_id = uuid::Uuid::new_v4().to_string();
+    let now = now_ms();
+    let imported_skill_ids = import_global_skills(mstore, identity_store, &parsed.skills, now, &mut warnings)?;
+    create_bundle_row(mstore, id_store, identity_store, &parsed, &bundle_id, &imported_skill_ids, now)?;
+
+    // The bundle row now exists, so its skills can be bound. Ref tables are
+    // authoritative — without this the imported bundle would export empty.
+    warnings.extend(bind_imported_components(
+        mstore,
+        id_store,
+        identity_store,
+        &bundle_id,
+        &imported_skill_ids,
+    ));
+    warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
+
+    let memory_files_written =
+        write_memory_files(id_store, &agent.id, memory_dir, manifest_memory_paths, &resolved.files, &mut warnings);
+
+    Ok(BundleImportForAgentResponse {
+        bundle_id,
+        memory_files_written,
+        skipped_skills: parsed.skipped_skills,
+        warnings,
+    })
+}
+
+/// The agent's memory directory (None when it has no resolvable working directory), after
+/// refreshing the mirror from it when it is a verified one.
+///
+/// The "zero existing memory" guard only (#2527)
+/// consults db_agent_native_memory (the mirror) — a live file that was
+/// written autonomously but never viewed through the Stash Bundle tab
+/// is NOT in the mirror yet, so the check would pass and the write
+/// loop further down would silently overwrite it via fs::rename. Same
+/// class of bug bundle.export_for_agent already had to guard against
+/// (see refresh_memory_mirror_from_live_fs's own doc comment) — the
+/// fix is the same: refresh from the live FS before trusting the
+/// mirror's row count. A missing/unresolvable working directory is not
+/// an error here (nothing to refresh from); the emptiness check below
+/// still runs against whatever the mirror already has.
+/// Only a verified directory is refreshed from: an unverified guess can be
+/// another agent's folder, and refreshing from it would write that
+/// agent's files into this one's mirror (SPEC_MEMORY_FOLLOWS_THE_AGENT
+/// §2.1.2).
+fn refresh_memory_mirror_before_check(
+    mstore: &crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+    warnings: &mut Vec<String>,
+) -> Option<std::path::PathBuf> {
+    let resolved = crate::server::native_memory_handlers::resolve_memory_dir_by_id(mstore, agent);
+    let verified = resolved.as_ref().is_some_and(|r| {
+        r.provenance != crate::server::native_memory_handlers::MemoryDirProvenance::Unverified
+    });
+    let memory_dir = resolved.map(|r| r.path);
+    if let Some(dir) = memory_dir.as_ref().filter(|_| verified) {
+        if let Err(e) = crate::server::native_memory_handlers::refresh_memory_mirror_from_live_fs(&agent.id, dir, id_store) {
+            warnings.push(format!("native memory refresh failed (checking mirror as-is): {e}"));
+        }
+    }
+    memory_dir
+}
+
+/// The directory the import writes memory into: the one resolved before, unless the manifest has
+/// memory files, in which case it must be a verified one.
+fn memory_dir_for_import(
+    mstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+    memory_dir: Option<std::path::PathBuf>,
+    manifest_memory_paths: &[String],
+) -> Result<Option<std::path::PathBuf>, String> {
     // reagent P2, PR #2527: this RPC exists specifically to transfer
     // memory — if the manifest actually has a memory component but this
     // agent has no resolvable working directory (and therefore no memory
@@ -135,44 +189,64 @@ pub(super) async fn bundle_import_for_agent_impl(
     // for. A bundle with NO memory component is unaffected — that's a
     // normal bundle.import_for_agent call that just happens not to need
     // a memory dir.
-    let manifest_memory_paths = resolved_memory_paths(&resolved.files);
     if !manifest_memory_paths.is_empty() && memory_dir.is_none() {
         return Err(format!(
             "bundle.import_for_agent: agent {} has no working directory configured; cannot import its memory",
-            req.agent_id
+            agent.id
         ));
     }
     // Importing memory writes files, so the directory must be verified, not
     // a blank-working-dir guess (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2).
-    let memory_dir = if manifest_memory_paths.is_empty() {
-        memory_dir
+    if manifest_memory_paths.is_empty() {
+        Ok(memory_dir)
     } else {
-        Some(
-            crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, &agent)
-                .map_err(|e| format!("bundle.import_for_agent: {e}"))?,
-        )
-    };
+        crate::server::native_memory_handlers::memory_dir_for_write_by_id(mstore, agent)
+            .map(Some)
+            .map_err(|e| format!("bundle.import_for_agent: {e}"))
+    }
+}
 
-    // Normal bundle components, exactly as bundle.import creates them —
-    // a memory-bearing import still creates a reusable bundle row
-    // alongside the agent-scoped memory write below.
-    let bundle_id = uuid::Uuid::new_v4().to_string();
-    // Mirrors bundle.import's own skill-creation block exactly (global,
-    // not bound to any agent; skill_upsert_unique_global is the real API
-    // — a genuine name conflict is a per-skill warning, any other error
-    // aborts the whole RPC).
-    let now = now_ms();
+/// Delete the global skills an import created, after a later step failed; the errors of any that
+/// could not be deleted.
+///
+/// reagent P2, PR #2527: mirrors bundle.import's own rollback_skills
+/// closure — without it, a later failure (the bundle upsert below)
+/// leaves already-created global skill rows orphaned with no way for
+/// the caller to know cleanup may be needed.
+fn rollback_skills(
+    mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    ids: &[String],
+) -> Vec<String> {
+    ids.iter()
+        .filter_map(|id| mstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
+        .collect()
+}
+
+/// `msg`, plus a note naming the skills a rollback could not delete.
+fn with_rollback_note(mut msg: String, rollback_errors: Vec<String>) -> String {
+    if !rollback_errors.is_empty() {
+        msg.push_str(&format!(
+            "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
+            rollback_errors.len(),
+            rollback_errors.join("; ")
+        ));
+    }
+    msg
+}
+
+/// Create the bundle's skills as global skills, exactly as bundle.import does (global, not bound to
+/// any agent; skill_upsert_unique_global is the real API — a genuine name conflict is a per-skill
+/// warning, any other error aborts the whole RPC). Returns the ids of the skills created.
+fn import_global_skills(
+    mstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    skills: &[crate::backend::bundle_import::ParsedSkill],
+    now: i64,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<String>, String> {
     let mut imported_skill_ids: Vec<String> = Vec::new();
-    // reagent P2, PR #2527: mirrors bundle.import's own rollback_skills
-    // closure — without it, a later failure (the bundle upsert below)
-    // leaves already-created global skill rows orphaned with no way for
-    // the caller to know cleanup may be needed.
-    let rollback_skills = |ids: &[String]| -> Vec<String> {
-        ids.iter()
-            .filter_map(|id| mstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
-            .collect()
-    };
-    for skill in &parsed.skills {
+    for skill in skills {
         let row = crate::backend::storage::Skill {
             id: uuid::Uuid::new_v4().to_string(),
             name: skill.slug.clone(),
@@ -190,28 +264,34 @@ pub(super) async fn bundle_import_for_agent_impl(
                 warnings.push(format!("skill \"{}\" already exists; skipped", skill.slug));
             }
             Err(e) => {
-                let rollback_errors = rollback_skills(&imported_skill_ids);
-                let mut msg = format!("bundle.import_for_agent: failed to create skill \"{}\": {e}", skill.slug);
-                if !rollback_errors.is_empty() {
-                    msg.push_str(&format!(
-                        "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
-                        rollback_errors.len(),
-                        rollback_errors.join("; ")
-                    ));
-                }
-                return Err(msg);
+                let rollback_errors = rollback_skills(mstore, identity_store, &imported_skill_ids);
+                let msg = format!("bundle.import_for_agent: failed to create skill \"{}\": {e}", skill.slug);
+                return Err(with_rollback_note(msg, rollback_errors));
             }
         }
     }
+    Ok(imported_skill_ids)
+}
+
+/// Insert the reusable bundle row for an import; on failure the skills it created are rolled back.
+fn create_bundle_row(
+    mstore: &crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
+    parsed: &crate::backend::bundle_import::ParsedBundleImport,
+    bundle_id: &str,
+    imported_skill_ids: &[String],
+    now: i64,
+) -> Result<(), String> {
     let memory = crate::backend::storage::store::Bundle {
-        id: bundle_id.clone(),
-        name: parsed.name,
-        description: parsed.description,
+        id: bundle_id.to_string(),
+        name: parsed.name.clone(),
+        description: parsed.description.clone(),
         is_blank: false,
         is_global: false,
-        provider: parsed.provider,
-        model: parsed.model,
-        instructions: parsed.instructions,
+        provider: parsed.provider.clone(),
+        model: parsed.model.clone(),
+        instructions: parsed.instructions.clone(),
         instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
             .unwrap_or_else(|_| "{}".to_string()),
         context_files: serde_json::to_string(
@@ -219,116 +299,117 @@ pub(super) async fn bundle_import_for_agent_impl(
         ).unwrap_or_else(|_| "[]".to_string()),
         // A bundle carries no MCP servers (see the warning below).
         mcp_servers: "[]".to_string(),
-        skills: serde_json::to_string(&imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
+        skills: serde_json::to_string(imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
         sort_order: 0,
         created_at: now,
         updated_at: now,
         is_system: false,
     };
     if let Err(e) = id_store.bundle_upsert(&memory) {
-        let rollback_errors = rollback_skills(&imported_skill_ids);
-        let mut msg = format!("bundle.import_for_agent: {e}");
-        if !rollback_errors.is_empty() {
-            msg.push_str(&format!(
-                "; additionally, rollback of {} previously-created skill(s) failed and may have left orphaned global skill row(s): {}",
-                rollback_errors.len(),
-                rollback_errors.join("; ")
-            ));
-        }
-        return Err(msg);
+        let rollback_errors = rollback_skills(mstore, identity_store, imported_skill_ids);
+        return Err(with_rollback_note(format!("bundle.import_for_agent: {e}"), rollback_errors));
     }
+    Ok(())
+}
 
-    // The bundle row now exists, so its skills can be bound. Ref tables are
-    // authoritative — without this the imported bundle would export empty.
-    warnings.extend(bind_imported_components(
-        mstore,
-        id_store,
-        identity_store,
-        &bundle_id,
-        &imported_skill_ids,
-    ));
-    warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
-
-    // Bundle files: write through the SAME dual-write path
-    // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
-    // the mirror) — writing only to db_agent_native_memory would leave
-    // this content visible in Stash while invisible to the actual
-    // running agent (see the spec's revision note).
+/// Bundle files: write through the SAME dual-write path
+/// agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
+/// the mirror) — writing only to db_agent_native_memory would leave
+/// this content visible in Stash while invisible to the actual
+/// running agent (see the spec's revision note). Returns how many files were written.
+fn write_memory_files(
+    id_store: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    memory_dir: Option<std::path::PathBuf>,
+    manifest_memory_paths: Vec<String>,
+    files: &[crate::backend::bundle_import::BundleImportFile],
+    warnings: &mut Vec<String>,
+) -> usize {
     let mut memory_files_written = 0usize;
     if let Some(memory_dir) = &memory_dir {
         if let Err(e) = std::fs::create_dir_all(memory_dir) {
             warnings.push(format!("native memory: mkdir failed: {e}"));
         }
     }
-    if let Some(memory_dir) = memory_dir {
-        for path in manifest_memory_paths {
-            // reagent P1, PR #2527 (third round): every skip in this loop
-            // must warn — this RPC's whole reason to exist is transferring
-            // memory, and a silent drop here (bundle_id/skills already
-            // created, memory_files_written silently undercounting)
-            // directly contradicts that. Matches the sibling
-            // invalid-filename branch just below, which already warned.
-            let Some(filename) = path.strip_prefix("memory/") else {
-                warnings.push(format!("{path}: components.memory path is not under memory/; skipped"));
-                continue;
-            };
-            if crate::server::native_memory_handlers::validate_memory_filename(filename).is_err() {
-                warnings.push(format!("memory/{filename}: not a valid memory filename; skipped"));
-                continue;
-            }
-            let Some(content) = resolved.files.iter().find(|f| f.path == path).map(|f| f.content.clone()) else {
-                warnings.push(format!("{path}: referenced in components.memory but not found among the bundle's files; skipped"));
-                continue;
-            };
-            // Into the agent's memory record first, as every AgentMux write
-            // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
-            crate::backend::memory::reconcile::record_agentmux_write(
-                &agent.id,
-                &memory_dir,
-                filename,
-                content.as_bytes(),
-                "bundle-import",
-                "",
-            );
-            let dest = memory_dir.join(filename);
-            let tmp = memory_dir.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
-            let write_result = std::fs::write(&tmp, &content)
-                .and_then(|_| std::fs::rename(&tmp, &dest));
-            if let Err(e) = write_result {
-                let _ = std::fs::remove_file(&tmp);
-                warnings.push(format!("memory/{filename}: write failed: {e}"));
-                continue;
-            }
-            let dest_meta = std::fs::metadata(&dest).ok();
-            let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(content.len() as i64);
-            let mtime_ms = dest_meta
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-            let metadata_type = crate::server::native_memory_handlers::parse_memory_frontmatter_type(&content);
-            if let Err(e) = id_store.agent_native_memory_upsert(
-                &agent.id,
-                filename,
-                &content,
-                metadata_type.as_deref(),
-                &dest.to_string_lossy(),
-                size_bytes,
-                mtime_ms,
-            ) {
-                warnings.push(format!("memory/{filename}: mirror upsert failed: {e}"));
-            } else {
-                memory_files_written += 1;
-            }
+    let Some(memory_dir) = memory_dir else {
+        return memory_files_written;
+    };
+    for path in manifest_memory_paths {
+        // reagent P1, PR #2527 (third round): every skip in this loop
+        // must warn — this RPC's whole reason to exist is transferring
+        // memory, and a silent drop here (bundle_id/skills already
+        // created, memory_files_written silently undercounting)
+        // directly contradicts that. Matches the sibling
+        // invalid-filename branch just below, which already warned.
+        let Some(filename) = path.strip_prefix("memory/") else {
+            warnings.push(format!("{path}: components.memory path is not under memory/; skipped"));
+            continue;
+        };
+        if crate::server::native_memory_handlers::validate_memory_filename(filename).is_err() {
+            warnings.push(format!("memory/{filename}: not a valid memory filename; skipped"));
+            continue;
+        }
+        let Some(content) = files.iter().find(|f| f.path == path).map(|f| f.content.clone()) else {
+            warnings.push(format!("{path}: referenced in components.memory but not found among the bundle's files; skipped"));
+            continue;
+        };
+        if write_memory_file(id_store, agent_id, &memory_dir, filename, &content, warnings) {
+            memory_files_written += 1;
         }
     }
+    memory_files_written
+}
 
-    Ok(BundleImportForAgentResponse {
-        bundle_id,
-        memory_files_written,
-        skipped_skills: parsed.skipped_skills,
-        warnings,
-    })
+/// Write one memory file to the live directory and the mirror; false when either write failed
+/// (the failure is a warning).
+fn write_memory_file(
+    id_store: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    memory_dir: &std::path::Path,
+    filename: &str,
+    content: &str,
+    warnings: &mut Vec<String>,
+) -> bool {
+    // Into the agent's memory record first, as every AgentMux write
+    // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.1).
+    crate::backend::memory::reconcile::record_agentmux_write(
+        agent_id,
+        memory_dir,
+        filename,
+        content.as_bytes(),
+        "bundle-import",
+        "",
+    );
+    let dest = memory_dir.join(filename);
+    let tmp = memory_dir.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
+    let write_result = std::fs::write(&tmp, content)
+        .and_then(|_| std::fs::rename(&tmp, &dest));
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        warnings.push(format!("memory/{filename}: write failed: {e}"));
+        return false;
+    }
+    let dest_meta = std::fs::metadata(&dest).ok();
+    let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(content.len() as i64);
+    let mtime_ms = dest_meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let metadata_type = crate::server::native_memory_handlers::parse_memory_frontmatter_type(content);
+    if let Err(e) = id_store.agent_native_memory_upsert(
+        agent_id,
+        filename,
+        content,
+        metadata_type.as_deref(),
+        &dest.to_string_lossy(),
+        size_bytes,
+        mtime_ms,
+    ) {
+        warnings.push(format!("memory/{filename}: mirror upsert failed: {e}"));
+        return false;
+    }
+    true
 }
 
 pub(super) fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
