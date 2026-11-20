@@ -81,6 +81,7 @@ import type { ProcessAddedEvent } from "@/types/rpc/ProcessAddedEvent";
 import type { ProcessExitedEvent } from "@/types/rpc/ProcessExitedEvent";
 import type { ProcessStatus } from "@/types/rpc/ProcessStatus";
 import type { ProtocolFrame } from "@/types/rpc/ProtocolFrame";
+import type { RecordFlagsEvent } from "@/types/rpc/RecordFlagsEvent";
 import type { ResumeRetryEvent } from "@/types/rpc/ResumeRetryEvent";
 import type { ReviewFlowEvent } from "@/types/rpc/ReviewFlowEvent";
 import type { RunEvent } from "@/types/rpc/RunEvent";
@@ -214,6 +215,7 @@ export type MuxEventPayloads = {
   "pins:changed": null;
   "processbroker:status-changed": ProcessStatus;
   "processbroker:tracked-blocks-changed": null;
+  "record-flags": RecordFlagsEvent;
   remoteschange: null;
   "review-flow": ReviewFlowEvent;
   "sensitive:cleared": SensitiveClearedEvent;
@@ -355,6 +357,7 @@ export const TYPED_MUX_EVENTS = [
   "pins:changed",
   "processbroker:status-changed",
   "processbroker:tracked-blocks-changed",
+  "record-flags",
   "remoteschange",
   "review-flow",
   "sensitive:cleared",
