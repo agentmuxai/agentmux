@@ -16,8 +16,8 @@
 //!   launchd stops its process (checked on macOS 26.5, 2026-11-20). With the shim, the running app is a LaunchServices
 //!   child, not the job, so Settings can switch the entry off from inside the app that login started.
 //! - A process started by `launchd` rather than LaunchServices is refused by `UNUserNotificationCenter` ("notifications
-//!   are not allowed", with no prompt; `SPEC_MACOS_NOTIFICATION_TOAST_BACKEND_2026_10_24.md` §13). Going through
-//!   `open` keeps the login-started app able to notify.
+//!   are not allowed", with no prompt; checked on macOS 26.5). Going through `open` keeps the login-started app able
+//!   to notify.
 //! - `BundleProgram` must be a signed Mach-O inside the bundle: a shell script fails launchd's launch constraints.
 //!
 //! The plist ships only in a bundle whose identifier is stable across versions (`scripts/package-macos.sh`); a bundle
