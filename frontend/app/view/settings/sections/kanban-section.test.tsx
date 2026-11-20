@@ -216,6 +216,16 @@ describe("Settings → Kanban", () => {
         expect(h.acts[0].stages).toBeUndefined();
     });
 
+    it("shows only the sentence of a stale refusal, not the stage set srv adds for an agent's retry", async () => {
+        await shown();
+        h.actFails =
+            'the stages changed since you read them (now revision 2). The stages are now {"version":1,"stages":[]}. Apply your change to that and send it with stages_rev 2.';
+        fireEvent.input(screen.getAllByLabelText("Stage name")[0], { target: { value: "Waiting" } });
+        fireEvent.click(apply());
+        await screen.findByText("The stages changed since you read them (now revision 2).");
+        expect(document.body.textContent).not.toContain('"version":1');
+    });
+
     it("shows why Apply was refused and keeps the draft", async () => {
         await shown();
         h.actFails = "the stages changed since you read them (now revision 2)";

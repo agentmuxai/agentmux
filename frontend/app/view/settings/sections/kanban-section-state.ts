@@ -109,6 +109,13 @@ function stageEdits(edit: (f: (s: readonly KanbanStage[]) => KanbanStage[]) => v
 }
 
 /** `requested`: the board the pane was asked to show (the cog on a Kanban pane names it), by slug. */
+/** srv's refusal of a stale revision goes on to give the set as it is now, for an agent's retry; the person reads the
+ *  sentence before it, and sees the new set in the editor itself. */
+function forPerson(why: string | null): string | null {
+    const at = why?.indexOf(" The stages are now ") ?? -1;
+    return why && at >= 0 ? why.slice(0, at) : why;
+}
+
 export function createKanbanStagesState(requested: () => string | null, asked: () => number = () => 0) {
     const b = useStagedBoard(requested, asked);
     const { model } = b;
@@ -141,7 +148,7 @@ export function createKanbanStagesState(requested: () => string | null, asked: (
         if (ok) return d.setDraft(null);
         // A refusal (a stale revision, a rule srv checks, a network failure) is shown until dismissed; read the board
         // again now, so a change made meanwhile shows as "Load theirs" or "Apply mine" at once.
-        setRefused(why);
+        setRefused(forPerson(why));
         await model.refresh();
     };
 
