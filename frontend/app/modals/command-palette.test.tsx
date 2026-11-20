@@ -66,7 +66,7 @@ afterEach(() => {
 
 function typeQuery(q: string): string[] {
     render(() => <CommandPaletteModal close={() => {}} />);
-    fireEvent.input(screen.getByPlaceholderText("Search commands and agents..."), { target: { value: q } });
+    fireEvent.input(screen.getByPlaceholderText("Search commands and agents"), { target: { value: q } });
     return Array.from(document.querySelectorAll(".command-palette-item-label")).map((el) => el.textContent ?? "");
 }
 
@@ -129,7 +129,7 @@ describe("CommandPaletteModal agents", () => {
             h.agents = [agent("a1", "Korp", "idle")];
             const close = vi.fn();
             render(() => <CommandPaletteModal close={close} />);
-            const input = screen.getByPlaceholderText("Search commands and agents...");
+            const input = screen.getByPlaceholderText("Search commands and agents");
             fireEvent.input(input, { target: { value: "korp" } });
             fireEvent.keyDown(input, { key: "Enter" });
             expect(close).toHaveBeenCalled();
@@ -156,7 +156,7 @@ describe("CommandPaletteModal keyboard scroll", () => {
 
     function open() {
         render(() => <CommandPaletteModal close={() => {}} />);
-        return screen.getByPlaceholderText("Search commands and agents...");
+        return screen.getByPlaceholderText("Search commands and agents");
     }
 
     it("keeps the selected row in view when Down or Up moves it", () => {
@@ -305,7 +305,7 @@ describe("CommandPaletteModal rows", () => {
 
     it("names no group while something is typed", () => {
         open();
-        fireEvent.input(screen.getByPlaceholderText("Search commands and agents..."), { target: { value: "close" } });
+        fireEvent.input(screen.getByPlaceholderText("Search commands and agents"), { target: { value: "close" } });
         expect(document.querySelector(".command-palette-item-group")).toBeNull();
         expect(document.querySelector(".command-palette-item.group-start")).toBeNull();
     });
@@ -353,7 +353,7 @@ describe("CommandPaletteModal rows", () => {
 
     it("says plainly that nothing matches", () => {
         open();
-        fireEvent.input(screen.getByPlaceholderText("Search commands and agents..."), { target: { value: "zzzzqqq" } });
+        fireEvent.input(screen.getByPlaceholderText("Search commands and agents"), { target: { value: "zzzzqqq" } });
         expect(document.querySelector(".command-palette-empty")?.textContent).toBe('Nothing matches "zzzzqqq"');
     });
 });
@@ -361,7 +361,7 @@ describe("CommandPaletteModal rows", () => {
 describe("CommandPaletteModal keys", () => {
     const open = (close: () => void = () => {}) => {
         render(() => <CommandPaletteModal close={close} />);
-        return screen.getByPlaceholderText("Search commands and agents...");
+        return screen.getByPlaceholderText("Search commands and agents");
     };
     const selected = () => document.querySelector(".command-palette-item.selected .command-palette-item-label")?.textContent;
 
@@ -431,7 +431,7 @@ describe("CommandPaletteModal keys", () => {
 describe("CommandPaletteModal roles", () => {
     const open = () => {
         render(() => <CommandPaletteModal close={() => {}} />);
-        return screen.getByPlaceholderText("Search commands and agents...");
+        return screen.getByPlaceholderText("Search commands and agents");
     };
 
     it("is a combobox over a listbox of options, and names the selected option", () => {

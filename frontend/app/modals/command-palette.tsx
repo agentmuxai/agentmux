@@ -196,7 +196,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                         aria-controls={listId}
                         aria-autocomplete="list"
                         aria-activedescendant={filtered().length > 0 ? optionId(clampedIdx()) : undefined}
-                        placeholder="Search commands and agents..."
+                        placeholder="Search commands and agents"
                         value={query()}
                         onInput={handleInput}
                         autocomplete="off"

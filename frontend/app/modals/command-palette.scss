@@ -100,9 +100,9 @@
     font-family: var(--font-sans);
     line-height: 1.5;
     padding: 10px 0;
-    // A narrow panel cuts the placeholder with an ellipsis, not mid-word.
+    // The input may shrink with a narrow panel. (An input's text-overflow does not reach its placeholder in Chromium,
+    // so the placeholder is short enough to fit a 280px window whole instead.)
     min-width: 0;
-    text-overflow: ellipsis;
 
     &::placeholder {
         color: var(--secondary-text-color);
