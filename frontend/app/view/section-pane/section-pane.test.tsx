@@ -12,8 +12,8 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "@/util/platformutil";
 
-vi.mock("@/app/view/accounts/accounts-manager", () => ({
-    AccountsManager: () => <div data-testid="accounts-manager" />,
+vi.mock("@/app/view/connectors/connectors-list", () => ({
+    ConnectorsList: () => <div data-testid="accounts-manager" />,
 }));
 vi.mock("@/app/view/global-bundle/global-bundle-manager", () => ({
     GlobalBundleManager: () => <div data-testid="global-bundle-manager" />,

@@ -53,6 +53,7 @@ function CliSignInDetails(props: { account: Account; brand: string; provider: st
                     provider={PROVIDERS[props.provider]}
                     brand={props.brand}
                     existingAccountId={a().id}
+                    onSignedIn={() => setReconnecting(false)}
                     onClose={() => setReconnecting(false)}
                 />
             </Show>
