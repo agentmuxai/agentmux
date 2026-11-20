@@ -264,6 +264,41 @@ mod keywin_objc {
         }
         std::ptr::null_mut()
     }
+    /// For a press that found no page view (#48237): what the hit test did find, as words for the log. The class
+    /// names from the view under the pointer up to the frame view, each with whether it is hidden, and whether
+    /// `win` holds a page view at all, and whether that one is hidden. Names and flags only: no geometry, which
+    /// would need struct returns from `objc_msgSend`.
+    pub(super) unsafe fn describe_miss(win: *mut c_void, x: f64, y: f64) -> String {
+        extern "C" {
+            fn object_getClass(obj: *mut c_void) -> *mut c_void;
+            fn object_getClassName(cls: *mut c_void) -> *const i8;
+        }
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct NSPoint { x: f64, y: f64 }
+        let name_of = |view: *mut c_void| -> String {
+            let name = object_getClassName(object_getClass(view));
+            if name.is_null() { "?".into() } else { std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned() }
+        };
+        let content = get(win, b"contentView\0");
+        let frame = get(content, b"superview\0");
+        let root = if frame.is_null() { content } else { frame };
+        let hit: extern "C" fn(*mut c_void, *const c_void, NSPoint) -> *mut c_void =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let mut view = if root.is_null() { std::ptr::null_mut() } else { hit(root, sel_registerName(b"hitTest:\0".as_ptr() as _), NSPoint { x, y }) };
+        let mut chain = Vec::new();
+        while !view.is_null() && chain.len() < 8 {
+            chain.push(format!("{}{}", name_of(view), if get_bool(view, b"isHidden\0") { "(hidden)" } else { "" }));
+            view = get(view, b"superview\0");
+        }
+        let page = find_rwhvc(win);
+        let page_state = if page.is_null() {
+            "none in this window".to_string()
+        } else {
+            format!("one, {}", if get_bool(page, b"isHidden\0") { "hidden" } else { "shown" })
+        };
+        format!("hit chain [{}]; page view: {page_state}", chain.join(" < "))
+    }
     pub(super) unsafe fn send_bool(obj: *mut c_void, sel: &[u8], arg: bool) {
         if obj.is_null() { return; }
         let f: extern "C" fn(*mut c_void, *const c_void, i8) =
@@ -834,6 +869,9 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                             "[press] left press: {}",
                             if under.is_null() { "no page view under the pointer, left to AppKit" } else { "sent to the page view under the pointer" }
                         );
+                        if under.is_null() {
+                            tracing::info!("[press] {}", keywin_objc::describe_miss(win, loc.x, loc.y));
+                        }
                     }
                     let (to_appkit, via_appkit) =
                         press_route(ev_type, !under.is_null(), PRESS_VIA_APPKIT.load(std::sync::atomic::Ordering::Relaxed));
