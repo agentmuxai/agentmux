@@ -571,9 +571,12 @@ jobs:
   # gate merges; then `macos-latest` moves into the `rust` matrix instead.
   rust-macos:
     name: cargo check --tests (macos-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -603,9 +606,12 @@ jobs:
   # partitions are disjoint and together are the whole suite.
   rust-windows-build:
     name: nextest build (windows-latest)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     # `continue-on-error` makes this job's `result` read `success` to `needs` even
@@ -711,9 +717,12 @@ jobs:
   # signal for the other crates, which the shards above also run.
   rust-windows-host:
     name: nextest (windows-latest, host)
-    needs: changes
-    # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
+    needs: [changes, docs, frontend]
+    # Same condition as `rust`, for the same reasons (see its comment), and the fast gates first: this job
+    # blocks nothing, so it starts once `docs` and `frontend` (about 5 minutes) have not failed, and a push
+    # that replaces this commit before then cancels the run without a Windows or macOS minute spent. A gate
+    # that was skipped (a PR with no frontend change skips `frontend`) does not stop it: only a failed one does.
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' && needs.docs.result != 'failure' && needs.frontend.result != 'failure' }}
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 35
