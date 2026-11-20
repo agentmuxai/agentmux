@@ -29,9 +29,12 @@ const HELPER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// How often the host looks at whether the helper has ended.
 const POLL: Duration = Duration::from_millis(100);
 
-/// The environment a dialog needs to find the desktop session and its portal, and nothing else: no secret, no
-/// token, no agent variable reaches the helper.
+/// The environment a dialog needs to find the desktop session and its portal, and to start at all, and nothing
+/// else: no secret, no token, no agent variable reaches the helper. `LD_LIBRARY_PATH` is the host's own: the
+/// packaged `agentmux-cef` finds `libcef.so` only through it (no runpath), so without it the helper dies in the
+/// dynamic loader (exit 127) before it shows anything (charlie, 2026-11-20). `LD_PRELOAD` is never passed on.
 const ENV_KEPT: &[&str] = &[
+    "LD_LIBRARY_PATH",
     "PATH",
     "HOME",
     "USER",
@@ -157,7 +160,7 @@ mod tests {
 
     #[test]
     fn the_helper_gets_what_a_dialog_needs_and_no_secret() {
-        for name in ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "HOME", "LC_ALL", "LC_TIME"] {
+        for name in ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "HOME", "LC_ALL", "LC_TIME", "LD_LIBRARY_PATH"] {
             assert!(keeps_env(name), "{name} is kept");
         }
         for name in ["AGENTMUX_AUTH_KEY", "AGENTMUX_IPC_TOKEN", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "AGENTMUX_AGENT_ID", "RUST_LOG", "LD_PRELOAD"] {
