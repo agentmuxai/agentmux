@@ -43,15 +43,16 @@ async function inAgentFolder(path: string): Promise<boolean> {
  *  container agent's folder is never given to the Editor on screen, which would read the path itself: srv
  *  opens it (`from_link`), and when it refuses, the person is told why. */
 export async function openPathLink(path: string, opts: { floating?: boolean } = {}): Promise<void> {
-    const open = { file: path, tab_id: atoms.activeTabId(), from_link: true, ...(opts.floating ? { floating: true } : {}) };
+    const tab_id = atoms.activeTabId();
+    const open = { file: path, from_link: true, ...(opts.floating ? { floating: true } : {}) };
     const agents = await inAgentFolder(path);
     try {
         if (await isFolder(path)) {
-            await RpcApi.PaneOpenCommand(TabRpcClient, { view: "files", ...open }, {});
+            await RpcApi.PaneOpenCommand(TabRpcClient, { view: "files", tab_id, ...open }, {});
             return;
         }
         if (!agents && !opts.floating && (await openInEditorPaneOnScreen(path))) return;
-        await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", ...open }, {});
+        await RpcApi.PaneOpenCommand(TabRpcClient, { view: "editor", tab_id, ...open }, {});
     } catch (err) {
         if (agents) {
             pushNotification({
