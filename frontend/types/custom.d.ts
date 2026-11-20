@@ -1400,7 +1400,7 @@ declare global {
             onFailure: (code: number, message: string) => void;
         }) => number;
         /** A lab's probe: every host command roundtrip, when a script has put an array here (perf/index.ts). */
-        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number }>;
+        __agentmuxIpcProbe?: Array<{ command: string; durationMs: number; at: number; host?: { waited_ms?: number; handled_ms: number } }>;
         __WAVE_SERVER_WS_ENDPOINT__?: string;
         __WAVE_SERVER_WEB_ENDPOINT__?: string;
         __startupPerfStart?: number;
