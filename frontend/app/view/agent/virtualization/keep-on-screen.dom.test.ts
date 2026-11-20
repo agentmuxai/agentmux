@@ -66,6 +66,36 @@ describe("keep-on-screen for rows outside the layout slice (SPEC_AGENT_PANE_VERB
         expect(scroller.scrollTop).toBe(524); // the run starts at the pane's top; 90 is kept to its 24 px
     });
 
+    describe("a pane with nothing on screen to hold (it follows the bottom)", () => {
+        /** A scroller that counts reads of `scrollTop`: each is a layout of the rows just written when they are dirty. */
+        function countedScroller(): { scroller: HTMLElement; reads: () => number } {
+            const scroller = pane({});
+            let reads = 0;
+            Object.defineProperty(scroller, "scrollTop", { get: () => (reads++, 500), set: () => {}, configurable: true });
+            return { scroller, reads: () => reads };
+        }
+
+        it("reads nothing from the scroller and asks for no frame, for any number of changes", () => {
+            const frames: Array<() => void> = [];
+            vi.stubGlobal("requestAnimationFrame", (fn: () => void) => frames.push(fn));
+            vi.stubGlobal("cancelAnimationFrame", () => undefined);
+            const { scroller, reads } = countedScroller();
+            for (let change = 0; change < 40; change++) {
+                restoreOnScreen({ blockId: "p", rows: [], dom: null, latest: () => null, scroller });
+            }
+            expect(reads()).toBe(0);
+            expect(frames).toHaveLength(0);
+        });
+
+        it("still reads it when there are rows to hold, so the count above is the saving", () => {
+            vi.stubGlobal("requestAnimationFrame", () => 0);
+            vi.stubGlobal("cancelAnimationFrame", () => undefined);
+            const { scroller, reads } = countedScroller();
+            restoreOnScreen({ blockId: "p", rows: [{ nodeId: "a", offsetPx: 10 }], dom: null, latest: () => null, scroller });
+            expect(reads()).toBeGreaterThan(0);
+        });
+    });
+
     it("reads a drawn row a frame later, and stops when the pane follows the bottom", () => {
         const frames: Array<() => void> = [];
         vi.stubGlobal("requestAnimationFrame", (fn: () => void) => frames.push(fn));

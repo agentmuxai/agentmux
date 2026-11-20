@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ISSUE_AUTHOR, ISSUE_MARKER, ISSUE_TITLE, evaluate, listedAt, publishedReleases, renderBody, trackingIssue } from "./check-store-listing.mjs";
+import { CATALOG_URL, ISSUE_AUTHOR, ISSUE_MARKER, ISSUE_TITLE, STORE_PRODUCT_ID, catalogVersion, evaluate, listedAt, parseVersion, publishedReleases, renderBody, trackingIssue } from "./check-store-listing.mjs";
 
 const at = (s) => new Date(s);
 const rel = (tag, published_at, extra = {}) => ({ tag_name: tag, published_at, draft: false, prerelease: false, ...extra });
@@ -82,6 +82,78 @@ describe("evaluate", () => {
     });
 });
 
+const catalogOf = (...names) => ({ Product: { DisplaySkuAvailabilities: [{ Sku: { Properties: { Packages: names.map((PackageFullName) => ({ PackageFullName })) } } }] } });
+
+describe("catalogVersion: the package version the Store serves", () => {
+    it("reads it from the package's full name", () => {
+        expect(catalogVersion(catalogOf("AgentMux.AgentMux_0.60.35.0_x64__vqr1k32tkfk4y"))).toEqual([0, 60, 35]);
+    });
+    it("takes the newest when several packages or availabilities are named, and ignores packages of other apps", () => {
+        const two = { Product: { DisplaySkuAvailabilities: [catalogOf("AgentMux.AgentMux_0.60.9.0_x64__v").Product.DisplaySkuAvailabilities[0], catalogOf("AgentMux.AgentMux_0.60.10.0_arm64__v", "Other.App_9.9.9.0_x64__v").Product.DisplaySkuAvailabilities[0]] } };
+        expect(catalogVersion(two)).toEqual([0, 60, 10]);
+    });
+    it("throws when it names no package of the app, or the data is not what it expects", () => {
+        expect(() => catalogVersion({})).toThrow(/no package/);
+        expect(() => catalogVersion(catalogOf("Other.App_1.0.0.0_x64__v"))).toThrow(/no package/);
+        expect(() => catalogVersion(catalogOf(undefined, 5, "AgentMux.AgentMux_latest_x64__v"))).toThrow(/no package/);
+        expect(() => catalogVersion({ Product: { DisplaySkuAvailabilities: [{ Sku: { Properties: {} } }, null] } })).toThrow(/no package/);
+    });
+    it("reads the public catalog of the app's own product", () => {
+        expect(CATALOG_URL).toContain(`displaycatalog.mp.microsoft.com/v7.0/products/${STORE_PRODUCT_ID}`);
+    });
+});
+
+describe("parseVersion", () => {
+    it("reads a plain version or a tag, and nothing else", () => {
+        expect(parseVersion("v0.60.35")).toEqual([0, 60, 35]);
+        expect(parseVersion("1.2.3")).toEqual([1, 2, 3]);
+        for (const bad of ["v1", "v1.2", "v1.2.3-rc1", "nightly", "", undefined]) expect(parseVersion(bad), String(bad)).toBeUndefined();
+    });
+});
+
+describe("evaluate, by the package version the Store serves", () => {
+    const releases = publishedReleases([
+        rel("v0.60.36", "2026-11-20T08:00:00Z"),
+        rel("v0.60.35", "2026-11-19T08:48:08Z"),
+        rel("v0.60.34", "2026-11-18T19:00:30Z"),
+        rel("v0.60.9", "2026-11-10T00:00:00Z"),
+    ]);
+
+    it("names the releases above the Store's version, and the version compares as numbers (0.60.9 is below 0.60.35)", () => {
+        const r = evaluate({ storeVersion: [0, 60, 34], releases, now: NOW });
+        expect(r.by).toBe("version");
+        expect(r.uncovered.map((x) => x.tag)).toEqual(["v0.60.36", "v0.60.35"]);
+        expect(r.oldest.tag).toBe("v0.60.35");
+    });
+
+    it("the Store at the latest release is current, and a Store above every release is not behind", () => {
+        expect(evaluate({ storeVersion: [0, 60, 36], releases, now: NOW }).uncovered).toEqual([]);
+        expect(evaluate({ storeVersion: [0, 61, 0], releases, now: NOW }).behind).toBe(false);
+    });
+
+    it("the package version decides, not the listing's time: a listing edit after the release does not hide a missing one", () => {
+        const r = evaluate({ storeVersion: [0, 60, 34], listed: at("2026-11-20T12:00:00Z"), releases, now: at("2026-11-22T12:00:00Z") });
+        expect(r.uncovered.map((x) => x.tag)).toEqual(["v0.60.36", "v0.60.35"]);
+        expect(r.behind).toBe(true);
+    });
+
+    it("a release whose tag is not a plain version cannot be compared and is left out", () => {
+        const odd = publishedReleases([rel("nightly-1", "2026-11-20T09:00:00Z"), rel("v0.60.36", "2026-11-20T08:00:00Z")]);
+        expect(evaluate({ storeVersion: [0, 60, 35], releases: odd, now: NOW }).uncovered.map((x) => x.tag)).toEqual(["v0.60.36"]);
+    });
+
+    it("the same limits apply: one fresh release missing is not behind, one older than two days is", () => {
+        expect(evaluate({ storeVersion: [0, 60, 35], releases, now: NOW }).behind).toBe(false);
+        expect(evaluate({ storeVersion: [0, 60, 35], releases, now: at("2026-11-23T00:00:00Z") }).behind).toBe(true);
+    });
+
+    it("without a package version it falls back to the listing's time, and says so", () => {
+        const r = evaluate({ listed: at("2026-11-19T07:00:00Z"), releases, now: NOW });
+        expect(r.by).toBe("date");
+        expect(r.uncovered.map((x) => x.tag)).toEqual(["v0.60.36", "v0.60.35"]);
+    });
+});
+
 describe("renderBody", () => {
     const releases = publishedReleases([rel("v2", "2026-11-18T00:00:00Z"), rel("v1", "2026-11-17T00:00:00Z")]);
     const listed = at("2026-11-16T16:14:27Z");
@@ -106,6 +178,41 @@ describe("renderBody", () => {
         const text = renderBody({ listed: at("2026-10-01T00:00:00Z"), result: r, maxReleases: 1, maxDays: 2 });
         expect(text.match(/^- v\d+, published/gm)).toHaveLength(8);
         expect(text).toContain("- and 4 older");
+    });
+});
+
+describe("renderBody, by the package version", () => {
+    const releases = publishedReleases([rel("v0.60.36", "2026-11-20T08:00:00Z"), rel("v0.60.35", "2026-11-19T08:48:08Z")]);
+    const storeVersion = [0, 60, 34];
+    const listed = at("2026-11-19T22:36:00Z");
+    const result = evaluate({ storeVersion, listed, releases, now: at("2026-11-22T12:00:00Z") });
+    const body = renderBody({ storeVersion, listed, result, maxReleases: 1, maxDays: 2 });
+
+    it("says exactly which version the Store serves and which releases are newer", () => {
+        expect(body.startsWith(ISSUE_MARKER)).toBe(true);
+        expect(body).toContain("The Microsoft Store serves version 0.60.34");
+        expect(body).toContain("2 newer releases are on GitHub");
+        expect(body).toContain("- v0.60.36, published 2026-11-20 08:00 UTC");
+        expect(body).toContain("- v0.60.35, published 2026-11-19 08:48 UTC");
+        expect(body).toContain("The oldest of them, v0.60.35, is 3.1 days old");
+    });
+
+    it("says it read the catalog's package version, and names nothing of the account or the plumbing", () => {
+        expect(body).toMatch(/package version the Store's public display catalog names/);
+        expect(body).not.toMatch(/MSSTORE|Partner Center|tenant|secret|environment|variable/i);
+    });
+
+    it("the fallback says the version could not be read and that dates were compared", () => {
+        const byDate = evaluate({ listed: at("2026-11-16T16:14:27Z"), releases, now: at("2026-11-22T12:00:00Z") });
+        const text = renderBody({ listed: at("2026-11-16T16:14:27Z"), result: byDate, maxReleases: 1, maxDays: 2 });
+        expect(text).toContain("package version could not be read, so this compares dates instead");
+        expect(text).toContain("last updated 2026-11-16 16:14 UTC");
+        expect(text).not.toContain("serves version");
+    });
+
+    it("a single missing release reads in the singular", () => {
+        const one = evaluate({ storeVersion: [0, 60, 35], releases, now: at("2026-11-23T00:00:00Z") });
+        expect(renderBody({ storeVersion: [0, 60, 35], result: one, maxReleases: 1, maxDays: 2 })).toContain("1 newer release is on GitHub, so a Store install cannot move to it yet");
     });
 });
 
@@ -183,6 +290,70 @@ describe("release-core.yml: the Store line of the run summary", () => {
         for (const word of ["submitted:", "submitted as a draft:", "skipped:", "failed:", "cancelled:"]) expect(note).toContain(word);
         expect(note).toContain("::warning title=Microsoft Store::");
         expect(note).toContain("$GITHUB_STEP_SUMMARY");
+    });
+});
+
+describe("release-core.yml: the WinGet line of the run summary", () => {
+    const core = text("release-core.yml");
+    const winget = jobBlock(core, "winget");
+    const note = jobBlock(core, "winget-note");
+
+    it("submission itself is as it was: off unless the switch is on, after publish, and a WinGet problem never fails the release", () => {
+        expect(winget).toMatch(/if: \$\{\{ vars\.WINGET_SUBMIT_ENABLED == 'true' && !cancelled\(\) && needs\.publish\.result == 'success' \}\}/);
+        expect(winget).toMatch(/needs: \[gate, publish\]/);
+        expect(winget).toMatch(/continue-on-error: true/);
+        expect(winget).toContain("./wingetcreate.exe update AgentMux.AI");
+        expect(winget).toContain("--submit");
+    });
+
+    it("the WinGet job says by itself that a pull request was opened, only after wingetcreate succeeded, and names the step that failed", () => {
+        expect(winget).toMatch(/outputs:\n {6}failed_step: \$\{\{ steps\.failed\.outputs\.step \}\}\n {6}submitted: \$\{\{ steps\.submit\.outputs\.sent \}\}/);
+        for (const id of ["tag", "install", "submit"]) expect(winget, id).toMatch(new RegExp(`\\n {8}id: ${id}\\n`));
+        const submit = winget.slice(winget.indexOf("- name: Submit the WinGet manifest pull request"), winget.indexOf("- name: Say which step failed"));
+        expect(submit).toMatch(/--token "\$WINGET_TOKEN"\n\s+#[^\n]*\n\s+echo "sent=true" >> "\$GITHUB_OUTPUT"/);
+        const last = winget.slice(winget.indexOf("- name: Say which step failed"));
+        expect(last).toMatch(/if: \$\{\{ failure\(\) \}\}/);
+        expect(last).not.toMatch(/secrets\./);
+    });
+
+    it("the token is still given to the one step that submits", () => {
+        expect(winget.match(/secrets\.WINGET_TOKEN/g)).toHaveLength(1);
+        expect(winget.slice(winget.indexOf("- name: Submit the WinGet manifest pull request"))).toContain("WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}");
+    });
+
+    it("the note runs after a published release whatever the WinGet job did, with read-only repository access and no token", () => {
+        expect(note).toMatch(/needs: \[gate, publish, winget\]/);
+        expect(note).toMatch(/if: \$\{\{ always\(\) && needs\.publish\.result == 'success' \}\}/);
+        expect(note).toMatch(/permissions:\n {6}contents: read\n {4}env:/);
+        expect(note).not.toMatch(/id-token|actions: read|secrets\./);
+        expect(note).toMatch(/SUBMITTED: \$\{\{ needs\.winget\.outputs\.submitted \}\}/);
+    });
+
+    it("a job that read as success is 'submitted' only when the submit step said so", () => {
+        const notSent = note.indexOf('[ "$RESULT" = success ] && [ "$SUBMITTED" != true ]');
+        expect(notSent).toBeGreaterThan(-1);
+        expect(notSent).toBeLessThan(note.indexOf("submitted:"));
+        expect(note.slice(notSent, note.indexOf("elif", notSent + 10))).toContain("warn=1");
+    });
+
+    it("it says submitted, skipped, failed and cancelled in the Store line's style, and warns on everything but a submitted pull request", () => {
+        for (const word of ["submitted:", "skipped: WinGet submission is switched off", "failed:", "cancelled:"]) expect(note).toContain(word);
+        expect(note).toContain("::warning title=WinGet::");
+        expect(note).toContain("$GITHUB_STEP_SUMMARY");
+        expect(note).toContain("### WinGet");
+        const submitted = note.slice(note.indexOf('line="submitted:'));
+        expect(submitted.slice(0, submitted.indexOf("fi\n"))).toContain("warn=0");
+        for (const word of ["failed:", "skipped:", "cancelled:"]) {
+            const at = note.indexOf(`line="${word}`);
+            expect(note.slice(at, note.indexOf("elif", at) === -1 ? undefined : note.indexOf("elif", at))).toContain("warn=1");
+        }
+    });
+
+    it("the note's job is a need of nothing: the release does not wait for it", () => {
+        for (const other of ["publish", "sign-release", "ms-store", "ms-store-note"]) {
+            const block = jobBlock(core, other);
+            expect(block.match(/^ {4}needs:.*$/m)?.[0] ?? "", other).not.toContain("winget-note");
+        }
     });
 });
 

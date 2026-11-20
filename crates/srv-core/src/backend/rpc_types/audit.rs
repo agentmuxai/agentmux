@@ -279,6 +279,27 @@ pub struct AuditQueryResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub other_channels: Option<Vec<AuditChannelRows>>,
+    /// What each paired computer answered, asked over the LAN: the first page of a `lan` scope only, and only
+    /// from a computer whose owner shares its Audit (`audit:sharewithpaired`). One entry per computer asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub peers: Option<Vec<AuditPeerRows>>,
+}
+
+/// The newest rows of one paired computer (`audit.query`, `peers`): its own channel and its other channels, in one list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AuditPeerRows {
+    /// The computer's name, as `Agents list` shows it.
+    pub host: String,
+    /// Newest first. Each `id` is prefixed with the computer, and no link into its windows, history or Kanban is kept.
+    pub entries: Vec<AuditEntry>,
+    /// The computer holds older rows than these. They are not paged.
+    pub more: bool,
+    /// Why there are no rows, when it did not answer with any: sharing is off, the computer needs approval, or it could not be reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note: Option<String>,
 }
 
 /// The newest rows another channel on this computer keeps in its own file (`audit.query`, `other_channels`).

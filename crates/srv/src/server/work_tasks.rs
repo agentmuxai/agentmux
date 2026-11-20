@@ -361,7 +361,10 @@ pub(super) fn expiring(state: &AppState, now: i64) -> Vec<WorkItem> {
 #[derive(Debug, Deserialize)]
 pub(super) struct UpdateRequest {
     pub agent_id: String,
-    pub attempt: i64,
+    /// The attempt from the caller's claim. `update` without it is any agent leaving a note on a task nobody
+    /// holds (`annotate`); `ask` and `submit` are only ever the holder's and need it (`attempt_of`).
+    #[serde(default)]
+    pub attempt: Option<i64>,
     #[serde(default)]
     pub note: Option<String>,
     #[serde(default)]
@@ -385,6 +388,11 @@ pub(super) struct UpdateRequest {
     /// Why it is handed in without media.
     #[serde(default)]
     pub no_media_reason: Option<String>,
+}
+
+/// The attempt of a call only a holder can make (`ask`, `submit`).
+fn attempt_of(req: &UpdateRequest) -> Result<i64, (StatusCode, Json<Value>)> {
+    req.attempt.ok_or_else(|| (StatusCode::BAD_REQUEST, Json(json!({ "error": "attempt is required: the one from the claim" }))))
 }
 
 impl UpdateRequest {
@@ -469,8 +477,9 @@ pub(super) async fn handle_work_update(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let id = resolve_id(&state, &id);
+    let Some(attempt) = req.attempt else { return annotate(&state, caller, &id, &req) };
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else { return conflict() };
-    if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
+    if !holds(&item, &req.agent_id, holder_uid(caller), attempt) {
         return conflict();
     }
     if let Some(why) = doc_problem(&req) {
@@ -516,6 +525,66 @@ pub(super) async fn handle_work_update(
     (StatusCode::OK, Json(answer))
 }
 
+/// `update` without an attempt: any agent leaves a note, and links, on a task nobody holds (waiting, or on
+/// hold), as any agent can already hold, move or edit one. It is not a claim: no attempt is used and no lease
+/// is touched. The note is written as "<agent>: <note>" so the card says who wrote it, and the history line
+/// carries the same agent. A claimed task's note, checklist and files stay its holder's.
+fn annotate(state: &AppState, caller: Option<&Caller>, id: &str, req: &UpdateRequest) -> (StatusCode, Json<Value>) {
+    let who = req.agent_id.trim();
+    if who.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "agent_id is required" })));
+    }
+    let Ok(Some(item)) = state.work_store.work_queue_get(id) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    };
+    if !sees_task(state, caller, id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    }
+    let name = name_of(state, id);
+    match item.state.as_str() {
+        work_state::OPEN | work_state::HELD => {}
+        work_state::CLAIMED | work_state::BLOCKED => {
+            let holder = if item.claimed_by.is_empty() { "its holder".to_string() } else { item.claimed_by.clone() };
+            return refused(format!(
+                "{name} is being worked on by {holder}: its note, checklist and files are the holder's to write (with the attempt from its claim). To tell them something, message {holder}"
+            ));
+        }
+        other => {
+            return refused(format!("{name} is {other}: a note can be left on a task that is waiting or on hold, not on one that is finished or in review"));
+        }
+    }
+    if req.checklist.is_some() || !req.media.is_empty() || req.ui_change.is_some() || req.no_media_reason.is_some() {
+        return refused(format!(
+            "{name} is not claimed by you: you can leave a note and links on it, but its checklist and files are its holder's"
+        ));
+    }
+    if let Some(why) = doc_problem(req) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
+    let mut u = card_update(req);
+    if u.note.is_none() && u.branch.is_none() && u.pr_url.is_none() && u.doc.is_none() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "nothing to write: give a note or links (pr, branch, doc)" })));
+    }
+    u.note = u.note.map(|n| format!("{who}: {n}"));
+    if let Some(why) = u.note.as_deref().and_then(|n| text_too_long("note", n)) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
+    let now = now_ms();
+    let _ = state.work_store.work_card_ensure(id, now);
+    if let Err(e) = state.work_store.work_card_update(id, &u, now) {
+        return failed(e);
+    }
+    if let Some(note) = &u.note {
+        record(state, id, who, "agent", "updated", &item.state, &item.state, note);
+    }
+    if u.pr_url.is_some() || u.branch.is_some() || u.doc.is_some() {
+        let link = [u.pr_url.as_deref(), u.branch.as_deref(), u.doc.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        record(state, id, who, "agent", "linked", &item.state, &item.state, &link);
+    }
+    super::work_queue::publish_changed(state);
+    (StatusCode::OK, Json(json!({ "ok": true, "claimed": false })))
+}
+
 /// `POST /agentmux/work/:id/ask`: the holder needs the operator. The task
 /// goes to Needs you; the holder keeps it, its lease paused.
 pub(super) async fn handle_work_ask(
@@ -532,9 +601,13 @@ pub(super) async fn handle_work_ask(
     if question.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "the question is required" })));
     }
+    let attempt = match attempt_of(&req) {
+        Ok(a) => a,
+        Err(refused) => return refused,
+    };
     let id = resolve_id(&state, &id);
     let now = now_ms();
-    match state.work_store.work_ask(&id, &req.agent_id, holder_uid(caller), req.attempt, now) {
+    match state.work_store.work_ask(&id, &req.agent_id, holder_uid(caller), attempt, now) {
         Ok(Some(_)) => {
             let _ = state.work_store.work_card_ensure(&id, now);
             let _ = state.work_store.work_card_set_question(&id, &question, now);
@@ -567,9 +640,13 @@ pub(super) async fn handle_work_submit(
     if let Some(why) = doc_problem(&req) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
+    let attempt = match attempt_of(&req) {
+        Ok(a) => a,
+        Err(refused) => return refused,
+    };
     let id = resolve_id(&state, &id);
     let Ok(Some(item)) = state.work_store.work_queue_get(&id) else { return conflict() };
-    if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
+    if !holds(&item, &req.agent_id, holder_uid(caller), attempt) {
         return conflict();
     }
     // The files first, so the check below sees them; a bad file fails the call before anything changes.
@@ -581,7 +658,7 @@ pub(super) async fn handle_work_submit(
         let names = attached.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ");
         record(&state, &id, &req.agent_id, "agent", "media", &item.state, &item.state, &format!("attached {names}"));
     }
-    let (status, Json(mut body)) = finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await;
+    let (status, Json(mut body)) = finish(&state, caller, &id, &req.agent_id, attempt, &result, Some(card_update(&req))).await;
     if !attached.is_empty() {
         body["attached"] = super::work_media::attached_json(&attached);
     }

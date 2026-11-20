@@ -158,6 +158,11 @@ async fn call_as(state: &AppState, slug: &str, uid: &str, host: &str, op: &str, 
     }
     let ok = matches!(result.status, crate::server::remote_ops::op::OpStatus::Done | crate::server::remote_ops::op::OpStatus::Queued | crate::server::remote_ops::op::OpStatus::PendingVeto);
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(Value::as_str).map(str::to_string));
+    // A read of the Audit is no row in it, whatever the answer: the Audit asks again every few seconds while it is
+    // shown, and a row (a refusal from a computer that does not share, say) would make it ask again at once.
+    if op == crate::backend::audit_query::peers::QUERY_OP {
+        return result;
+    }
     state.reactive_handler.log_fleet_action_audit(
         Some(&format!("{slug}@{}", state.hostname)),
         peer.hostname.trim(),

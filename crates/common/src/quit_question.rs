@@ -111,9 +111,10 @@ pub fn goes_ahead(question: Option<&Question>, confirm: impl FnOnce(&str) -> Opt
     }
 }
 
-/// What `osascript` said. The Quit button exits 0 and prints its name. "Keep running" is the
-/// dialog's cancel button, so it (and Escape) exits non-zero with AppleScript's "User canceled"
-/// error, -128. Any other failure is a dialog that was never answered: `None`.
+/// What `osascript` said. The alert ([`MACOS_ALERT`]) exits 0 and prints `button returned:` and the
+/// title of the button clicked: Quit, or Keep running. The "User canceled" error, -128, is what a
+/// `display dialog` with a cancel button gives for Keep running; it is read as Keep running too.
+/// Any other failure is an alert that was never answered: `None`, and the quit goes ahead.
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub fn macos_answer(success: bool, stdout: &str, stderr: &str) -> Option<bool> {
     if success && stdout.contains(&format!("button returned:{QUIT}")) {

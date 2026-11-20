@@ -30,6 +30,7 @@ import "./editor-view.scss";
 import { keyLabel } from "@/app/keybindings";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { EditorEmptyState } from "./EditorEmptyState";
+import { EditorDiskConflictPanel } from "./editor-disk-conflict-panel";
 import { EditorErrorPanel, EditorLspBanner, EditorLspStatusChip, EditorMarkdownPreview, EditorModeToolbar } from "./EditorPanels";
 import { lspStatusChipText } from "./editor-lsp-status";
 import type { EditorViewModel } from "./editor-model";
@@ -296,6 +297,10 @@ function EditorMainColumn(props: {
                     isn't on PATH. Dismissable per session via the X button. */}
                 <Show when={banner.lspBannerVisible()}>
                     <EditorLspBanner state={lspState} onDismiss={banner.dismissBanner} onCopy={copyToClipboard} />
+                </Show>
+
+                <Show when={model.diskConflicts.has(model.activeIdAtom() ?? undefined)}>
+                    <EditorDiskConflictPanel model={model} />
                 </Show>
 
                 <EditorBody
