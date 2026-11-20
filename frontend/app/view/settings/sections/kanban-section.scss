@@ -40,6 +40,56 @@
     border-radius: var(--radius-sm);
 }
 
+.kanban-stages__history {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
+.kanban-stages__history-title {
+    margin: 0;
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.kanban-stages__history-list {
+    margin: 0;
+    padding-left: var(--space-4);
+}
+
+.kanban-stages__row[data-dragging] {
+    opacity: 0.5;
+}
+
+// Where the held row would land: a line on the edge of the row it is over.
+.kanban-stages__row[data-drop="before"] {
+    box-shadow: 0 -2px 0 0 var(--accent-color);
+}
+
+.kanban-stages__row[data-drop="after"] {
+    box-shadow: 0 2px 0 0 var(--accent-color);
+}
+
+.kanban-stages__grip {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-1);
+    color: var(--secondary-text-color);
+    cursor: var(--cursor-grab);
+
+    &:active {
+        cursor: var(--cursor-grabbing);
+    }
+
+    &[draggable="false"] {
+        opacity: 0.4;
+        cursor: default;
+    }
+}
+
 // Wraps, so a narrow pane (or a large zoom) moves the controls under the name rather than squeezing it to nothing.
 .kanban-stages__line {
     display: flex;

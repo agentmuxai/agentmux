@@ -7,9 +7,11 @@ PlaceWindowSlots ["w1"]
 console.debug [wave-panel] windowId=own label=main idx=0 displayName=Mine workspaceName=Main Space → name="Mine"
 PlaceWindowSlots ["w1"]
 names: Mine | Window 2
-removed the other one without an id
-requestRemoveWindow {"windowId":"own","label":"main"}
-removed this one
 rename of the other opens: false
 console.debug [wave-panel] windowId=own label=main idx=0 displayName=Mine workspaceName=Main Space → name="Mine"
 rename of this one opens: true
+requestRemoveWindow {"windowId":null,"label":"window-2"}
+console.debug [wave-panel] windowId=own label=main idx=0 displayName=Mine workspaceName=Main Space → name="Mine"
+ListClosedWindows
+removed the other one without an id
+removed this one

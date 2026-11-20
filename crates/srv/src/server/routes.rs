@@ -724,6 +724,7 @@ fn memory_and_identity_routes() -> Router<AppState> {
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/v1/agent/identity/switch", post(handle_agent_identity_switch))
+        .route("/api/v1/agent/identity/check-limits", post(handle_agent_identity_check_limits))
         .route("/api/v1/agent/identity/signin/notice", post(signin_notice::handle_agent_signin_notice))
         .route("/api/v1/agent/skill", post(handle_agent_skill))
 }
@@ -869,6 +870,9 @@ fn agent_self_and_fleet_routes() -> Router<AppState> {
         // A container agent's `gh pr merge`, run by the host's gh-agent: the container's own token cannot write contents.
         .route("/api/v1/github/pr-merge", post(app_api::pr_merge::handle_pr_merge))
         .route("/api/v1/aws/credentials", post(app_api::aws_credentials::handle_aws_credentials))
+        // The grants a host shares with its container agents: which are in force, and the answer to a new or wider one.
+        .route("/api/v1/aws/grants", get(app_api::aws_grants::handle_aws_grants))
+        .route("/api/v1/aws/grants/decide", post(app_api::aws_grants::handle_aws_grant_decide))
         // An agent sets or clears seats, several at once; recorded under its name.
         .merge(agent_definition_routes())
         // An agent asks for the shared pane-history store's free space to be given back at the next

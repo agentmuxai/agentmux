@@ -264,7 +264,8 @@ async fn session_start_ack(state: AppState, req: AckRequest) -> Json<serde_json:
         }
     };
     if complete {
-        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), parked = parked_at.is_some(), "memory delivery: complete, notice sent");
+        let tokens = agentmux_srv_core::backend::context_reading::tokens_now(&req.block_id);
+        tracing::info!(block_id = %req.block_id, reason = reason.as_str(), tokens, parked = parked_at.is_some(), "memory delivery: complete, notice sent");
     }
     if let Some(line) = write_now {
         append_notice(&state, &req.block_id, &line);

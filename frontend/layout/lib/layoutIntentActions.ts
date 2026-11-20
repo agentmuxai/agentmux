@@ -18,6 +18,7 @@ import {
     magnifyNodeToggle,
     minimizeNode,
     moveNode,
+    moveToEdge,
     replaceNode,
     resizeNode,
     restoreNode,
@@ -36,6 +37,7 @@ import {
     LayoutTreeMagnifyNodeToggleAction,
     LayoutTreeMinimizeNodeAction,
     LayoutTreeMoveNodeAction,
+    LayoutTreeMoveToEdgeAction,
     LayoutTreeReplaceNodeAction,
     LayoutTreeResizeNodeAction,
     LayoutTreeSplitHorizontalAction,
@@ -47,6 +49,7 @@ import {
 /** The actions srv applies as intents. */
 const INTENT_ACTIONS = new Set<LayoutTreeActionType>([
     LayoutTreeActionType.Move,
+    LayoutTreeActionType.MoveToEdge,
     LayoutTreeActionType.Swap,
     LayoutTreeActionType.ResizeNode,
     LayoutTreeActionType.InsertNode,
@@ -78,6 +81,10 @@ export function intentForAction(action: LayoutTreeAction): LayoutIntent | null {
         case LayoutTreeActionType.Move: {
             const a = action as LayoutTreeMoveNodeAction;
             return { type: "move", nodeId: a.node.id, parentId: a.parentId, index: a.index, insertAtRoot: !!a.insertAtRoot };
+        }
+        case LayoutTreeActionType.MoveToEdge: {
+            const a = action as LayoutTreeMoveToEdgeAction;
+            return { type: "movetoedge", nodeId: a.nodeId, edge: a.edge };
         }
         case LayoutTreeActionType.Swap: {
             const a = action as LayoutTreeSwapNodeAction;
@@ -139,6 +146,9 @@ export function applyLayoutAction(state: LayoutTreeState, action: LayoutTreeActi
     switch (action.type) {
         case LayoutTreeActionType.Move:
             moveNode(state, action as LayoutTreeMoveNodeAction);
+            break;
+        case LayoutTreeActionType.MoveToEdge:
+            moveToEdge(state, action as LayoutTreeMoveToEdgeAction);
             break;
         case LayoutTreeActionType.InsertNode:
             insertNode(state, action as LayoutTreeInsertNodeAction);

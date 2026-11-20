@@ -78,6 +78,65 @@ describe("NotificationBubbles placement", () => {
     });
 });
 
+describe("NotificationBubbles placement and blocks that are not shown", () => {
+    /** A marked block under where the stack sits, inside `tab`: a window tab's container. */
+    const blockIn = (tab: HTMLElement) => {
+        const block = document.createElement("div");
+        block.setAttribute("data-toast-avoid", "");
+        block.getBoundingClientRect = () => box(700) as DOMRect;
+        tab.appendChild(block);
+        return block;
+    };
+
+    /** After a `style` change: the mutation observer's turn (a microtask), then the wait before the next measure. */
+    const settle = async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        vi.advanceTimersByTime(250);
+    };
+
+    it("stays where toasts belong when the marked block is in a tab that is kept laid out and hidden", async () => {
+        // A window tab that is not the displayed one: laid out, with `visibility: hidden` (window-tab-visibility.ts).
+        const hiddenTab = document.createElement("div");
+        hiddenTab.style.visibility = "hidden";
+        document.body.appendChild(hiddenTab);
+        const block = blockIn(hiddenTab);
+
+        setNotifications([{ id: "t", icon: "bell", title: "t", message: "", timestamp: "" }]);
+        render(() => <NotificationBubbles />);
+        vi.advanceTimersByTime(50);
+        expect(stackBottom()).toBe("34px");
+        // Not shown, so not watched for resizing either.
+        expect(observed).not.toContain(block);
+
+        // The tab comes to the front: its block is in the way now, and the stack clears it.
+        hiddenTab.style.visibility = "";
+        await settle();
+        expect(stackBottom()).toBe("76px");
+        expect(observed).toContain(block);
+
+        // And goes back when the tab is hidden again.
+        hiddenTab.style.visibility = "hidden";
+        await settle();
+        expect(stackBottom()).toBe("34px");
+    });
+
+    it("asks the browser whether the block is shown, which also covers a subtree the tab skips rendering", () => {
+        const tab = document.createElement("div");
+        document.body.appendChild(tab);
+        const block = blockIn(tab);
+        // `content-visibility: hidden` on a tab that is leaving: the browser reports the block as not shown.
+        const checkVisibility = vi.fn(() => false);
+        (block as unknown as { checkVisibility: typeof checkVisibility }).checkVisibility = checkVisibility;
+
+        setNotifications([{ id: "t", icon: "bell", title: "t", message: "", timestamp: "" }]);
+        render(() => <NotificationBubbles />);
+        vi.advanceTimersByTime(50);
+        expect(checkVisibility).toHaveBeenCalledWith({ checkVisibilityCSS: true });
+        expect(stackBottom()).toBe("34px");
+    });
+});
+
 describe("NotificationBubbles over a native browser pane", () => {
     it("registers its stack as an overlay while a toast shows, and not when none does", () => {
         render(() => <NotificationBubbles />);

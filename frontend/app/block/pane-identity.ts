@@ -11,7 +11,8 @@
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { currentWindowTheme } from "@/app/store/window-appearance";
-import { paneRoleColor, type PaneColorRole } from "./pane-color-scheme";
+import { identitySlot, paneRoleColor, type PaneColorRole } from "./pane-color-scheme";
+import type { PaletteSlot } from "@/app/theme/palette";
 import { getPaneTab, type PaneTabManifest } from "@/app/store/pane-tab-registry";
 
 /** `pick`: the pane's own "Pane Color". `agent`: the agent's identity color.
@@ -110,6 +111,12 @@ export function blockRoleColor(
 ): string | undefined {
     const id = resolvePaneIdentity(meta, opts);
     return id ? paneRoleColor(id.hslHue, id.hex, isLightTheme, role) : undefined;
+}
+
+/** The palette slot a block's color is, or undefined when it has none: what `theme/paint.ts` is asked to paint. */
+export function blockIdentitySlot(meta: Block["meta"] | undefined, opts?: PaneIdentityOptions): PaletteSlot | undefined {
+    const id = resolvePaneIdentity(meta, opts);
+    return id ? identitySlot(id.hslHue, id.hex) : undefined;
 }
 
 /** A widget type's own color for `role` in the current theme (the top bar,

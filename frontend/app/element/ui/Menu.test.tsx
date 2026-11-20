@@ -143,6 +143,23 @@ describe("Menu", () => {
         expect(row.querySelector(".menu-item-sublabel")?.textContent).toBe("the default");
     });
 
+    it("draws a swatch's bar across its top when the row has one, and a plain swatch without it", async () => {
+        mount({
+            items: [
+                { label: "Barred", swatchColor: "#007493", swatchBar: "#5ed5ff", testId: "barred" },
+                { label: "Plain", swatchColor: "#007493", testId: "plain" },
+            ],
+        });
+        await placed();
+        const barred = screen.getByTestId("barred").querySelector(".menu-item-swatch") as HTMLElement;
+        expect(barred.classList.contains("menu-item-swatch--bar")).toBe(true);
+        expect(barred.style.getPropertyValue("--swatch-bar")).toBe("#5ed5ff");
+        expect(barred.style.backgroundColor).toBe("rgb(0, 116, 147)");
+        const plain = screen.getByTestId("plain").querySelector(".menu-item-swatch") as HTMLElement;
+        expect(plain.classList.contains("menu-item-swatch--bar")).toBe(false);
+        expect(plain.style.getPropertyValue("--swatch-bar")).toBe("");
+    });
+
     it("draws a swatch beside a check, for a colour that is the current choice, and a swatch alone when it is not a choice", async () => {
         mount({
             items: [

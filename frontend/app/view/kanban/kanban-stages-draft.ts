@@ -38,6 +38,15 @@ export function moveStage(stages: readonly KanbanStage[], id: string, delta: num
     return next;
 }
 
+/** Move a stage next to another: just before it, or just after it when `after`. A drop onto itself changes nothing. */
+export function moveStageNear(stages: readonly KanbanStage[], id: string, target: string, after: boolean): KanbanStage[] {
+    if (id === target || !stages.some((s) => s.id === id) || !stages.some((s) => s.id === target)) return [...stages];
+    const moved = stages.find((s) => s.id === id) as KanbanStage;
+    const rest = stages.filter((s) => s.id !== id);
+    const at = rest.findIndex((s) => s.id === target) + (after ? 1 : 0);
+    return [...rest.slice(0, at), moved, ...rest.slice(at)];
+}
+
 /** Whether a stage may show `source` in the editor: what needs the operator is a stage of its own, so no other
  *  stage offers it, and its stage offers nothing else. */
 export function canShow(stage: KanbanStage, source: ColumnId): boolean {

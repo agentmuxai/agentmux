@@ -400,7 +400,7 @@ Built into P1–P3 so the later phases add, not change:
 | Approve a template, pin a reporter or catalog key | Yes | No |
 | Read jobs and history | Yes | Yes (`Schedule` `list`, `history`) |
 
-Container agents get `list` and `history` only, as they can't spawn either (`agent_spawn.rs:266`).
+Container agents do all of this for their own `message` and `task` jobs, the same as a native agent (create, edit, pause, resume, delete, Run now, `list`, `history`). They can't have a `spawn` or `drone` job, nor Run one now, as its runs start things on the host (`agent_spawn.rs:266`); the refusal says so and says what to do instead: schedule a message or task job, or ask the leader to create it.
 
 **Signed templates.** Templates and cloud manifests are data: approving one runs nothing. Their signatures are checked against pinned publisher keys, catalogs against keys the operator pinned, and a job keeps the version it was created from until the operator accepts an update.
 

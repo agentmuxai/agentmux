@@ -236,6 +236,11 @@ fn check_login_import(target: &Target, source: &Source, share: bool) -> Result<(
     }
     if share {
         super::shares::check_shareable("login", fields)?;
+        // An import's share is the form login's (B3): a sign-in the browser answers a prompt with is asked for on its
+        // own card, which says what that share does (A11).
+        if super::shares::answers_prompt(fields) {
+            return Err("a sign-in for a site's HTTP prompt or a proxy can't be shared with its import: ask for it afterwards with Vault share".into());
+        }
         let site = fields.get(super::signins::SITE).map_or("", String::as_str);
         if !agentmux_common::allowed_origins::target_origin(site).is_some_and(|o| o == site && o.starts_with("https://")) {
             return Err("a login to share names its site as an exact https origin, such as https://example.com".into());
@@ -292,6 +297,9 @@ pub fn check_grant(policy: &Result<Option<Arc<Policy>>, String>, profile: Option
     };
     if grant.disabled {
         return Err(format!("The grant '{profile}' is switched off on this machine."));
+    }
+    if grant.hold.is_some() {
+        return Err(format!("The grant '{profile}' was added or widened in the grants file and has not been allowed yet. A native agent can allow it (Identity aws_grants)."));
     }
     if !grant.open_to(slug) {
         return Err(format!("The grant '{profile}' isn't open to you. Ask the person to add you to it."));
@@ -390,7 +398,7 @@ async fn run_cli<R: Runner>(runner: &R, args: Vec<String>, source: &Source, via:
     let spec = RunSpec { program, args, env, timeout: RECIPE_TIMEOUT };
     let out = match runner.run(spec).await {
         Ok(out) => out,
-        Err(RunError::TimedOut) => return Err("AWS took too long to answer (25 s). Try again in a minute.".into()),
+        Err(RunError::TimedOut) => return Err(format!("AWS took too long to answer ({} s). Try again in a minute.", RECIPE_TIMEOUT.as_secs())),
         Err(RunError::Spawn(_)) => return Err("couldn't run the AWS CLI on this computer".into()),
     };
     let stdout = Zeroizing::new(out.stdout);

@@ -20,6 +20,8 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { slotOf } from "@/app/theme/palette";
+import { deltaE, tabPaint } from "@/app/theme/paint";
 
 const headerCalls: any[] = [];
 // When set, the header throws for the props it returns true for (a ViewModel that breaks the render).
@@ -75,11 +77,6 @@ vi.mock("@/app/block/blockframe", () => ({
     // one tab-wide value).
     computeBlockActiveBorderColor: (meta: any) =>
         meta?.["frame:hue"] != null ? `underline-${meta["frame:hue"]}` : undefined,
-    computeBlockIdentityColor: (meta?: Record<string, unknown>) =>
-        meta?.["frame:hue"] != null ? `underline-${String(meta["frame:hue"])}` : undefined,
-    computeBlockTabPillBg: (meta: any) => (meta?.["frame:hue"] != null ? `bg-${meta["frame:hue"]}` : undefined),
-    computeBlockTabPillActiveBg: (meta?: Record<string, unknown>) =>
-        meta?.["frame:hue"] != null ? `bg-active-${String(meta["frame:hue"])}` : undefined,
     // Meta-driven, NOT a fixed stub: the real one returns two different
     // dark-theme colors depending on meta.view, and a fixed stub is exactly
     // what hid reagent's P1 (the tail's neutral was keyed on the ACTIVE
@@ -525,10 +522,27 @@ describe("renderPaneChromeShell — per-tab pane color", () => {
         mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
         render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
 
+        // What a pill paints is theme/paint.ts's call for the block's own slot, the one a window tab uses.
+        const painted = (hue: number) => {
+            const p = tabPaint(slotOf(hue)!, false, undefined);
+            return { underline: p.bar, background: p.unselected, activeBackground: p.selected, hoverBackground: p.unselectedHover, neutralBackground: "neutral-none" };
+        };
         const h = headerCalls.at(-1);
-        expect(h.getColor("b1")).toEqual({ underline: "underline-10", background: "bg-10", activeBackground: "bg-active-10", neutralBackground: "neutral-none" });
-        expect(h.getColor("b2")).toEqual({ underline: "underline-20", background: "bg-20", activeBackground: "bg-active-20", neutralBackground: "neutral-none" });
-        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, activeBackground: undefined, neutralBackground: "neutral-none" });
+        expect(h.getColor("b1")).toEqual(painted(10));
+        expect(h.getColor("b2")).toEqual(painted(20));
+        expect(h.getColor("b1")?.underline).not.toBe(h.getColor("b2")?.underline);
+        expect(h.getColor("b3")).toEqual({ underline: undefined, background: undefined, activeBackground: undefined, hoverBackground: undefined, neutralBackground: "neutral-none" });
+    });
+
+    it("a pill's hover is a tone of its own, one step from its resting fill, never the resting fill", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        const c = headerCalls.at(-1).getColor("b1")!;
+        expect(c.hoverBackground).toMatch(/^#[0-9a-f]{6}$/);
+        expect(c.hoverBackground).not.toBe(c.background);
+        expect(deltaE(c.background!, c.hoverBackground!)).toBeLessThan(6);
     });
 
     it("an uncolored tab still gets an opaque neutral background, so the header's active-tab tint never shows through it", () => {

@@ -12,6 +12,7 @@
 pub mod container;
 pub mod mint;
 pub mod policy;
+pub mod record;
 pub mod request;
 pub mod sessions;
 pub mod tools;

@@ -591,32 +591,13 @@ pub fn build_settings_with_hooks(
     }
     settings_obj.insert("hooks".to_string(), Value::Object(hooks_obj));
 
-    // Claude Code requires the bashwrap exec command (produced by the hook rewrite)
-    // to be in permissions.allow — otherwise it raises a permissions error and the
-    // agent cannot run any bash commands. Merge with any user-supplied allow list
-    // rather than overwriting it.
-    {
-        // Space before * enforces a command-name boundary: matches
-        // "agentmux-bashwrap <args>" only, not other executables that
-        // happen to share the prefix (e.g. agentmux-bashwrapXYZ).
-        let bashwrap_allow = Value::String("Bash(agentmux-bashwrap *)".to_string());
-        let mut allow_arr = match settings_obj.get("permissions") {
-            Some(Value::Object(perms)) => match perms.get("allow") {
-                Some(Value::Array(arr)) => arr.clone(),
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        if !allow_arr.iter().any(|v| v == &bashwrap_allow) {
-            allow_arr.push(bashwrap_allow);
-        }
-        let mut perms_obj = match settings_obj.remove("permissions") {
-            Some(Value::Object(obj)) => obj,
-            _ => serde_json::Map::new(),
-        };
-        perms_obj.insert("allow".to_string(), Value::Array(allow_arr));
-        settings_obj.insert("permissions".to_string(), Value::Object(perms_obj));
-    }
+    // No `permissions.allow` entry for the wrapper is written. One for `Bash(agentmux-bashwrap *)` used to be:
+    // checked against the pinned CLI, it changes nothing. In prefix mode the CLI's rules see the model's own
+    // command, which that pattern never matches; in rewrite mode the hook's own `allow` decision already
+    // lets the call run, trusted workspace or not. And a project's allow entries are ignored by the CLI until
+    // the workspace is trusted ("Ignoring 1 permissions.allow entry ... this workspace has not been trusted"),
+    // which AgentMux must not grant: a trusted project lets whatever lands in its `.claude` folder take effect.
+    // A user's own `permissions` in their settings are left as they wrote them.
 
     // No AI attribution in commits or PR descriptions: the repos' checks
     // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By

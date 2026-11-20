@@ -71,9 +71,10 @@ function spot(m: LayoutModel, direction: DropDirection): { x: number; y: number 
     return { x: found.x, y: found.y };
 }
 
+// A point of the pane off every spot of its guide, and off the wide guides at the layout's top and bottom centre.
 const corner = (m: LayoutModel, id: string) => {
     const r = m.getNodeRectById(id);
-    return { x: r.left + 6, y: r.top + 6 };
+    return { x: r.left + 6, y: r.top + 0.4 * r.height };
 };
 
 describe("placementDirection", () => {
@@ -126,6 +127,51 @@ describe("placementDirection", () => {
         placementDirection(m, over(m, "b", corner(m, "b"), {}));
         expect(guideIn(m)!.spots).not.toBe(spots);
         expect(guideIn(m)!.targetId).toBe("b");
+    });
+});
+
+describe("placementDirection at the top and the bottom centre of the layout", () => {
+    const WIDE = [DropDirection.WideTop, DropDirection.WideCenter, DropDirection.WideBottom];
+
+    it("shows the wide guides there beside the hovered pane's own, for a pane of the tree, and none for a tab pill", () => {
+        const m = threeInARow();
+        // `a` over `b`, at the top centre: a band across the top, the middle or the bottom, and the pane's own guide with it.
+        expect(placementDirection(m, over(m, "b", { x: 600, y: 12 }, {}))).toBeUndefined();
+        const directions = guideIn(m)!.spots.map((s) => s.direction);
+        expect(directions.slice(0, 3)).toEqual(WIDE);
+        expect(directions.slice(3)).toEqual(expect.arrayContaining([DropDirection.Top, DropDirection.Right, DropDirection.Bottom]));
+        for (const direction of [...WIDE, DropDirection.Top, DropDirection.Right, DropDirection.Bottom]) {
+            expect(placementDirection(m, over(m, "b", spot(m, direction), {}))).toBe(direction);
+            expect(guideIn(m)!.active).toBe(direction);
+        }
+        // Down at the bottom centre the same set stands there.
+        placementDirection(m, over(m, "b", { x: 600, y: 790 }, {}));
+        expect(guideIn(m)!.spots[0].y).toBeGreaterThan(700);
+        // Out of the zone, the hovered pane's own guide is all there is.
+        placementDirection(m, over(m, "c", { x: 1000, y: 400 }, {}));
+        expect(guideIn(m)!.spots.map((s) => s.direction)).not.toContain(DropDirection.WideTop);
+        // A tab pill lands beside a pane: its guide is the pane's, at the top centre too.
+        const stand = pillStandIn("x");
+        placementDirection(m, over(m, "b", { x: 600, y: 12 }, { draggedId: stand.id, foreignNode: stand, pill: true }));
+        expect(guideIn(m)!.spots.map((s) => s.direction)).not.toContain(DropDirection.WideTop);
+    });
+
+    it("keeps the same spots while the pointer moves inside the zone", () => {
+        const m = threeInARow();
+        placementDirection(m, over(m, "b", { x: 600, y: 12 }, {}));
+        const spots = guideIn(m)!.spots;
+        placementDirection(m, over(m, "b", { x: 620, y: 30 }, {}));
+        expect(guideIn(m)!.spots).toBe(spots);
+    });
+
+    it("shows the band the pointer is on, as the move that makes it", () => {
+        const m = threeInARow();
+        placementDirection(m, over(m, "b", { x: 600, y: 12 }, {}));
+        const treeReducer = vi.spyOn(m, "treeReducer");
+        const { direction, compute } = previewPlacement(m, over(m, "b", spot(m, DropDirection.WideTop), {}));
+        expect(direction).toBe(DropDirection.WideTop);
+        expect(compute.direction).toBe(DropDirection.WideTop);
+        expect(treeReducer).toHaveBeenCalledWith(expect.objectContaining({ type: LayoutTreeActionType.ComputeMove, direction: DropDirection.WideTop }));
     });
 });
 

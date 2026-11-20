@@ -9,6 +9,7 @@
 use super::*;
 
 mod accounts;
+mod aws_grants;
 mod agents_tool;
 mod app_record;
 mod app_workspace;
@@ -247,6 +248,7 @@ const REPLACED: &[(&str, &str)] = &[
     ("IdentityAccounts", "Identity with action \"accounts\""),
     ("IdentityValidate", "Identity with action \"validate\""),
     ("IdentitySwitch", "Identity with action \"switch\""),
+    ("IdentityCheckLimits", "Identity with action \"check_limits\""),
     ("IdentitySignin", "Identity with action \"signin\""),
     ("DiscoverAgents", "Agents with action \"list\""),
     ("FleetList", "Agents with action \"list\""),

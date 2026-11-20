@@ -61,6 +61,34 @@ fn a_fresh_store_has_main_as_the_default_board() {
 }
 
 #[test]
+fn a_board_keeps_its_latest_history_lines_and_loses_them_with_the_board() {
+    let (s, _d) = store();
+    let line = |n: i64| BoardEvent {
+        at: n,
+        actor: "agentx".into(),
+        actor_kind: "agent".into(),
+        kind: "stages".into(),
+        body: format!("line {n}"),
+        detail: String::new(),
+    };
+    for n in 1..=(BOARD_EVENTS_KEPT + 5) {
+        s.work_board_event_add("main", &line(n)).unwrap();
+    }
+    let kept = s.work_board_events("main", 100).unwrap();
+    assert_eq!(kept.len() as i64, BOARD_EVENTS_KEPT);
+    assert_eq!(kept[0].body, format!("line {}", BOARD_EVENTS_KEPT + 5));
+    assert_eq!(s.work_board_events("main", 3).unwrap().len(), 3);
+
+    let team = s.work_board_create(&edit("Team"), "tester", 10).unwrap();
+    s.work_board_event_add(&team.id, &line(1)).unwrap();
+    assert_eq!(s.work_board_events(&team.id, 5).unwrap().len(), 1);
+    s.work_board_archive(&team.id, true, 11).unwrap();
+    s.work_board_delete(&team.id, 12).unwrap();
+    assert!(s.work_board_events(&team.id, 5).unwrap().is_empty());
+    assert_eq!(s.work_board_events("main", 100).unwrap().len() as i64, BOARD_EVENTS_KEPT);
+}
+
+#[test]
 fn today_s_cards_keep_their_numbers_when_the_schema_first_runs() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("identity-store.db");

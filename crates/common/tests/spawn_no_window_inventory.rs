@@ -396,7 +396,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole (a container agent's shell)"),
     ("crates/srv-core/src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/srv-core/src/backend/fs_ops/git.rs", "\"git\"", 5,
+    ("crates/srv-core/src/backend/fs_ops/git.rs", "\"git\"", 6,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv-core/src/backend/work_facts/git.rs", "\"git\"", 1,
      "no-window: a test helper, hidden with no_window() like the production spawns; calls it in this file"),

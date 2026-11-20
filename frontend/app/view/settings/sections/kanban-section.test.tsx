@@ -8,7 +8,7 @@
  * the limit, and Reset. The editor edits a draft, so nothing is sent before Apply.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -112,6 +112,71 @@ describe("Settings → Kanban", () => {
         expect(screen.getByText("Shows what needs you, so it always stays a stage of its own.")).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Remove Needs you" })).toBeNull();
         expect(screen.getByRole("button", { name: "Remove Backlog" })).toBeTruthy();
+    });
+
+    it("lists who changed the stages and when, newest first, and names the operator as You", async () => {
+        const lines = [
+            { at: 2000, actor: "", actor_kind: "operator", kind: "stages", body: "reset the stages to the default: 5 → 8" },
+            { at: 1000, actor: "agentx", actor_kind: "agent", kind: "stages", body: "changed the stages: 8 → 5" },
+        ];
+        h.board = boardOf([info("main", { history: lines })]);
+        await shown();
+        const items = screen.getAllByRole("listitem").filter((li) => li.textContent?.includes("the stages"));
+        expect(items).toHaveLength(2);
+        expect(items[0].textContent).toContain("You reset the stages to the default: 5 → 8");
+        expect(items[1].textContent).toContain("agentx changed the stages: 8 → 5");
+    });
+
+    it("shows no history list for a board nobody has changed", async () => {
+        await shown();
+        expect(screen.queryByText("Recent changes")).toBeNull();
+    });
+
+    it("reorders a stage by dragging its grip onto another row, before or after by the pointer", async () => {
+        await shown();
+        const rows = () => Array.from(document.querySelectorAll<HTMLElement>(".kanban-stages__row"));
+        const grip = (i: number) => rows()[i].querySelector<HTMLElement>(".kanban-stages__grip") as HTMLElement;
+        const data: Record<string, string> = {};
+        const dataTransfer = { setData: (k: string, v: string) => (data[k] = v), setDragImage: () => {}, effectAllowed: "", dropEffect: "" };
+        // jsdom has no DragEvent, so the pointer's height is put on the event by hand (the rows have no size here).
+        const over = (el: HTMLElement, clientY: number) => {
+            const ev = createEvent.dragOver(el, { dataTransfer });
+            Object.defineProperty(ev, "clientY", { value: clientY });
+            fireEvent(el, ev);
+        };
+        // Review (index 5) onto Backlog (0), upper half: it lands first.
+        fireEvent.dragStart(grip(5), { dataTransfer });
+        expect(rows()[5].hasAttribute("data-dragging")).toBe(true);
+        over(rows()[0], -1);
+        expect(rows()[0].getAttribute("data-drop")).toBe("before");
+        fireEvent.drop(rows()[0], { dataTransfer });
+        fireEvent.dragEnd(grip(5), { dataTransfer });
+        expect(names().slice(0, 3)).toEqual(["Review", "Backlog", "In Research"]);
+        expect(document.querySelector("[data-dragging]")).toBeNull();
+        expect(document.querySelector("[data-drop]")).toBeNull();
+        // Review (now 0) onto Released (7), lower half: it lands last.
+        fireEvent.dragStart(grip(0), { dataTransfer });
+        over(rows()[7], 10);
+        expect(rows()[7].getAttribute("data-drop")).toBe("after");
+        fireEvent.drop(rows()[7], { dataTransfer });
+        expect(names()[7]).toBe("Review");
+        expect(apply().disabled).toBe(false);
+        fireEvent.click(apply());
+        await waitFor(() => expect(h.acts).toHaveLength(1));
+        expect(h.acts[0].stages.stages.map((s: any) => s.id)).toEqual([
+            "backlog", "research", "specd", "progress", "needs", "merged", "released", "review",
+        ]);
+    });
+
+    it("ignores a drop that did not start from a grip, and a drop on the held row", async () => {
+        await shown();
+        const rows = () => Array.from(document.querySelectorAll<HTMLElement>(".kanban-stages__row"));
+        fireEvent.dragOver(rows()[2], { clientY: 10 });
+        fireEvent.drop(rows()[2]);
+        const grip = rows()[1].querySelector<HTMLElement>(".kanban-stages__grip") as HTMLElement;
+        fireEvent.dragStart(grip, { dataTransfer: { setData: () => {}, setDragImage: () => {} } });
+        fireEvent.drop(rows()[1]);
+        expect(apply().disabled).toBe(true);
     });
 
     it("removes a stage into the one before it, and the stages it sends show its sources there", async () => {

@@ -1,10 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LauncherEvent } from "@/util/launcher-events";
 import { update } from "./reducer";
-import { initialState, type WindowEntry } from "./types";
+import { initialState, RECENT_CLOSE_MS, type WindowEntry } from "./types";
 
 const evt = (e: Partial<LauncherEvent> & { event: string }): LauncherEvent => e as LauncherEvent;
 
@@ -360,6 +360,79 @@ describe("launcher-event reducer", () => {
             expect(r.state.knownEntries.has("window-a")).toBe(true);
             expect(r.state.knownEntries.has("window-pool-promoted")).toBe(true);
             expect(r.state.knownEntries.has("browser-pane-x")).toBe(false);
+        });
+
+        const seededWith = (...entries: ReturnType<typeof win>[]) => update(initialState(), { type: "ApplySeed", entries }).state;
+        const closed = (s: ReturnType<typeof initialState>, label: string) => update(s, { type: "ApplyEvent", event: evt({ event: "window_closed", label }) }).state;
+
+        it("a snapshot that still lists a window the launcher just said closed does not bring it back", () => {
+            const s = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            expect(s.knownEntries.has("window-x")).toBe(false);
+            // the host is still tearing the window down when the snapshot is taken
+            const r = update(s, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-2")] });
+            expect(r.state.knownEntries.has("window-x")).toBe(false);
+            expect(r.state.instances.map((e) => e.label)).toEqual(["main"]);
+        });
+
+        it("a window opened under that label afterwards is listed again", () => {
+            const s = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            const opened = update(s, { type: "ApplyEvent", event: evt({ event: "window_opened", label: "window-x" }) }).state;
+            const r = update(opened, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-3")] });
+            expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-3"));
+        });
+
+        it("a window the stream assigns again after its close (no window_opened) stays through a snapshot, and takes its id", () => {
+            const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            const assigned = update(base, { type: "ApplyEvent", event: evt({ event: "window_instance_assigned", label: "window-x" }) }).state;
+            const afterAssign = update(assigned, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-5")] });
+            expect(afterAssign.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-5"));
+            const registered = update(assigned, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) }).state;
+            expect(registered.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+        });
+
+        it("the id the host registers for a label it has just closed (the window going back to its pool) does not list the window", () => {
+            const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+            const r = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) });
+            expect(r.state).toBe(base);
+            expect(r.state.instances.map((e) => e.label)).toEqual(["main"]);
+        });
+
+        it("an id registered for a label closed more than RECENT_CLOSE_MS ago lists the window", () => {
+            vi.useFakeTimers();
+            try {
+                const base = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+                vi.advanceTimersByTime(RECENT_CLOSE_MS + 1);
+                const r = update(base, { type: "ApplyEvent", event: evt({ event: "backend_window_id_registered", label: "window-x", window_id: "w-6" }) });
+                expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-6"));
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("forgets a close after RECENT_CLOSE_MS, so a stale label can't hide a window for good", () => {
+            vi.useFakeTimers();
+            try {
+                const s = closed(seededWith(win("main", "w-1"), win("window-x", "w-2")), "window-x");
+                vi.advanceTimersByTime(RECENT_CLOSE_MS + 1);
+                const r = update(s, { type: "ReconcileFromSnapshot", entries: [win("main", "w-1"), win("window-x", "w-4")] });
+                expect(r.state.knownEntries.get("window-x")).toEqual(win("window-x", "w-4"));
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a snapshot with no id for a window the stream has given an id keeps that id", () => {
+            const s = seededWith(win("main", "w-1"), win("window-x", "w-2"));
+            const r = update(s, { type: "ReconcileFromSnapshot", entries: [win("main", null), win("window-x", null)] });
+            expect(r.state.knownEntries.get("main")?.windowId).toBe("w-1");
+            expect(r.state.knownEntries.get("window-x")?.windowId).toBe("w-2");
+        });
+
+        it("a snapshot that differs in nothing keeps the same state, so nothing redraws", () => {
+            const s = seededWith(win("main", "w-1"), win("window-x", "w-2"));
+            const r = update(s, { type: "ReconcileFromSnapshot", entries: [win("window-x", "w-2"), win("main", "w-1")] });
+            expect(r.state).toBe(s);
+            expect(r.events[0]).toMatchObject({ type: "reconciled", addedCount: 0, removedCount: 0, totalAfter: 2 });
         });
     });
 

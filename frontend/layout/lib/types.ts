@@ -26,6 +26,10 @@ export enum DropDirection {
     OuterBottom = 6,
     OuterLeft = 7,
     Center = 8,
+    /** A band across the whole layout: at its top, in its middle, at its bottom (the wide guides, dropGuides.ts). */
+    WideTop = 9,
+    WideCenter = 10,
+    WideBottom = 11,
 }
 
 export enum FlexDirection {
@@ -49,6 +53,8 @@ export type MoveOperation = {
 export enum LayoutTreeActionType {
     ComputeMove = "computemove",
     Move = "move",
+    /** A pane becomes a band across the whole layout (`moveToEdge`, layoutTree.ts). */
+    MoveToEdge = "movetoedge",
     Swap = "swap",
     SetPendingAction = "setpending",
     CommitPendingAction = "commitpending",
@@ -83,6 +89,15 @@ export enum LayoutTreeActionType {
 
 export interface LayoutTreeAction {
     type: LayoutTreeActionType;
+}
+
+/** Where a pane moved to the layout's edge goes: across its top, its bottom, or its middle. */
+export type LayoutEdge = "top" | "bottom" | "middle";
+
+export interface LayoutTreeMoveToEdgeAction extends LayoutTreeAction {
+    type: LayoutTreeActionType.MoveToEdge;
+    nodeId: string;
+    edge: LayoutEdge;
 }
 
 export interface LayoutTreeComputeMoveNodeAction extends LayoutTreeAction {

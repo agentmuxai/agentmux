@@ -137,16 +137,15 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     let mut agents: Vec<serde_json::Value> = instances
         .into_iter()
         .map(|i| {
-            let live_block = if i.instance_name.is_empty() {
-                None
-            } else {
-                reachable_block.get(&i.instance_name.to_lowercase()).cloned()
-            };
+            // A row with no name of its own (one made before names were stored on it) is listed under its
+            // definition's, so it isn't a nameless entry that no name reaches.
+            let name = listed_name(&i.instance_name, runtime.get(&i.id).map(|r| r.name.as_str()));
+            let live_block = (!name.is_empty()).then(|| reachable_block.get(&name.to_lowercase()).cloned()).flatten();
             // By the agent's UID, not its name: two agents can share a display name, and a name
             // the registry normalised ("Loap #3") misses the name-keyed map above.
             let availability_block = super::availability_view::block_of_uid(&state.reactive_handler, &i.id);
             json!({
-                "name": i.instance_name,
+                "name": name,
                 "id": i.id,
                 "definition_id": i.definition_id,
                 "working_directory": i.working_directory,
@@ -223,6 +222,11 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     }))
 }
 
+/// The name a host agent is listed under: its row's, else its definition's.
+fn listed_name(instance_name: &str, definition_name: Option<&str>) -> String {
+    if instance_name.is_empty() { definition_name.unwrap_or_default().to_string() } else { instance_name.to_string() }
+}
+
 pub(super) async fn stub_501() -> impl IntoResponse {
     (
         StatusCode::NOT_IMPLEMENTED,
@@ -280,4 +284,16 @@ pub(super) async fn handle_wps_publish(
     };
     state.broker.publish(event);
     (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::listed_name;
+
+    #[test]
+    fn a_row_with_no_name_is_listed_under_its_definitions() {
+        assert_eq!(listed_name("Loap #3", Some("Loap-3")), "Loap #3", "the row's own name wins");
+        assert_eq!(listed_name("", Some("Tansy")), "Tansy");
+        assert_eq!(listed_name("", None), "", "no definition either: still empty, not invented");
+    }
 }

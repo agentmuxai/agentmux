@@ -82,7 +82,7 @@ pub(crate) fn shared_grant_key(uid: &str, profile: &str, origin: &str, saved: &s
 pub(crate) fn choose(found: Vec<(String, String, String)>, entry: Option<&str>) -> Result<(String, String, String), String> {
     if let Some(want) = entry {
         return found.into_iter().find(|(e, _, _)| e == want).ok_or_else(|| {
-            "that sign-in isn't saved for a sign-in form on this page in this tab's profile, so nothing was typed".to_string()
+            "that sign-in isn't saved for a sign-in form on this page in this tab's profile, so nothing was typed (a sign-in for a site's HTTP prompt is never typed into a form: the browser answers that prompt itself when the site asks, from an entry saved for this tab's profile or one the person shared with you, which you can ask for with Vault share, and you are told what became of it)".to_string()
         });
     }
     match found.len() {

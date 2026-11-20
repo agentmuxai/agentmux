@@ -95,7 +95,7 @@ export function promptTitle(u: UseRequest, short = false): string {
         if (!u.link.from) return `${agent} wants to record where the machine copy of ${label} is`;
         return u.link.to ? `${agent} wants to change where the machine copy of ${label} is` : `${agent} wants to remove where the machine copy of ${label} is`;
     }
-    if (u.share) return t("vault.shareCard.title", { agent, site: siteOf(u.origin), label });
+    if (u.share) return t(u.prompt ? "vault.shareCard.titlePrompt" : "vault.shareCard.title", { agent, site: siteOf(u.origin), label });
     if (u.account && u.change) return `${agent} wants to change your password on ${siteOf(u.origin)}`;
     if (u.account) return `${agent} wants to create an account on ${siteOf(u.origin)}`;
     if (u.signin) return `${agent} wants to sign in to ${siteOf(u.origin)} as ${short ? clip(u.field, CLIP.label) : u.field}`;
@@ -112,17 +112,18 @@ function promptNote(u: UseRequest): string {
     if (u.link) return "The place decides what a check of this entry reads. No value is in it, and the agent never sees one.";
     if (u.replaces) return "The agent never sees the new value: the command's output is cleaned of it.";
     if (u.command) return "The agent never sees the value, and the command's output is cleaned of it.";
-    if (u.share) return t("vault.shareCard.note");
+    if (u.share) return t(u.prompt ? "vault.shareCard.notePrompt" : "vault.shareCard.note");
     if (u.account && u.change) return "The Vault makes the new password. The agent never sees it. The old one is kept for 7 days, and you can put it back. Check the site is the one you expect.";
     if (u.account) return "The Vault makes the password and keeps it for you. The agent never sees it. Check the site is the one you expect.";
     if (u.signin) return "The agent never sees the user name or the password. Check the site is the one you expect.";
     return "The agent never sees the value. Check the site is the one you expect.";
 }
 
-/** The "Always" button: for the agent, on the site, or both for a sign-in. */
+/** The "Always" button: for the agent, on the site, or both for a sign-in (a shared one the browser answers a prompt
+ *  with included). */
 function alwaysLabel(u: UseRequest): string {
     const agent = clip(u.agent, CLIP.name);
-    if (u.signin || u.account) return `Always for ${agent} on ${clip(siteOf(u.origin), CLIP.label)}`;
+    if (u.signin || u.account || u.share) return `Always for ${agent} on ${clip(siteOf(u.origin), CLIP.label)}`;
     // A field in another site's frame is granted as that frame on that page.
     if (u.page) return `Always on ${siteOf(u.page)} (${siteOf(u.origin)} fields)`;
     return u.command ? `Always for ${agent}` : `Always on ${siteOf(u.origin)}`;
@@ -132,10 +133,12 @@ function alwaysLabel(u: UseRequest): string {
 function UseTarget(props: { use: UseRequest }): JSX.Element {
     const u = props.use;
     if (u.share) {
-        const params = { field: clip(u.field, CLIP.label), site: siteOf(u.origin), origin: u.origin, agent: clip(u.agent, CLIP.name) };
+        const params = { field: clip(u.field, CLIP.label), site: siteOf(u.origin), origin: u.origin, agent: clip(u.agent, CLIP.name), realm: clip(u.prompt?.realm ?? "", CLIP.label) };
+        // A sign-in the browser answers a prompt with is typed into no form: the card says which prompt.
+        const key = !u.prompt ? "vault.shareCard.target" : u.prompt.proxy ? "vault.shareCard.targetProxy" : "vault.shareCard.targetPrompt";
         return (
             <p>
-                <Rich k="vault.shareCard.target" params={params} />
+                <Rich k={key} params={params} />
             </p>
         );
     }

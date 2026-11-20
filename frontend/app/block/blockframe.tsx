@@ -47,7 +47,8 @@ import { buildPaneContextMenu, type PaneMenuSection } from "./pane-actions";
 import { sectionPinMenuItems } from "@/app/window/section-pins";
 import { applyColorToAllPanes, setPaneColor } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
-import { slotSwatchColor } from "./pane-color-scheme";
+import { tabSample } from "@/app/theme/paint";
+import { currentTabInk } from "@/app/tab/tab-ink";
 import { PALETTE, slotOf, type PaletteSlot } from "@/app/theme/palette";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -73,24 +74,9 @@ export function computeBlockColorBg(
     return blockRoleColor(blockMeta, isLightTheme, "headerTint", opts);
 }
 
-/** Same as computeBlockColorBg, for an inactive pane-tab pill's own
- * background (pane-color-scheme.ts `pill`). Deliberately stronger than the
- * header tint: on a small pill the header's subtle value is nearly
- * indistinguishable from black and from a neighbouring uncoloured pill
- * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
-export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    return blockRoleColor(blockMeta, isLightTheme, "pill");
-}
-
-/** The selected pane-tab pill's background (`pillActive`): this block's own
- * identity a step stronger than its inactive pill. Undefined when the block
- * has no colour of its own. */
-export function computeBlockTabPillActiveBg(
-    blockMeta: Block["meta"] | undefined,
-    isLightTheme: boolean
-): string | undefined {
-    return blockRoleColor(blockMeta, isLightTheme, "pillActive");
-}
+// A pane-tab pill's own colours (resting, selected, hover, bar) are `theme/paint.ts`'s `tabPaint`, the call a window
+// tab uses; the pill is stronger than the header tint on purpose, so a small pill is told from a neighbouring uncoloured one
+// (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md).
 
 /** This block's identity at full strength for the theme: the active-tab
  * underline. Normalised in OKLCH so it clears 3:1 against the pill and header
@@ -177,9 +163,12 @@ export function buildPaneColorSubmenu(blockData: Block, live?: () => Block | und
     const agentId = blockData?.meta?.agentId as string | undefined;
     const isLight = isLightThemeActive();
     // A colour pick leaves the menu open: the person tries one colour after another.
+    // The swatch is the pane's selected tab pill as it will be drawn (fill and bar, theme/paint.ts), so what is picked is what is seen.
+    const ink = currentTabInk();
     const colorItem = (slot: PaletteSlot): ContextMenuItem => ({
         label: slot.name,
-        swatchColor: slotSwatchColor(slot, isLight),
+        swatchColor: tabSample(slot, isLight, ink).fill,
+        swatchBar: tabSample(slot, isLight, ink).bar,
         checked: currentSlot?.id === slot.id,
         live: () => ({ checked: pickOf(now())?.id === slot.id }),
         keepOpen: true,

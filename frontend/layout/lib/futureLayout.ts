@@ -21,6 +21,7 @@ import {
     type LayoutTreeAction,
     type LayoutTreeDeleteNodeAction,
     type LayoutTreeMoveNodeAction,
+    type LayoutTreeMoveToEdgeAction,
     type LayoutTreeSplitHorizontalAction,
     type LayoutTreeSplitVerticalAction,
     type LayoutTreeStayAction,
@@ -59,6 +60,7 @@ const isSplit = (action: LayoutTreeAction): action is LayoutTreeSplitHorizontalA
 /** The node a move, swap, stay or split action carries, by its id, and none for any other action. */
 function movedIdOf(action: LayoutTreeAction): string | undefined {
     if (action.type === LayoutTreeActionType.Move) return (action as LayoutTreeMoveNodeAction).node?.id;
+    if (action.type === LayoutTreeActionType.MoveToEdge) return (action as LayoutTreeMoveToEdgeAction).nodeId;
     if (isSplit(action)) return action.newNode?.id;
     if (action.type === LayoutTreeActionType.Swap) return (action as LayoutTreeSwapNodeAction).node2Id;
     if (action.type === LayoutTreeActionType.Stay) return (action as LayoutTreeStayAction).nodeId;

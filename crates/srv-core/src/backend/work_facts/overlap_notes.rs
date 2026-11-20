@@ -278,6 +278,9 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
         if theirs.len() >= MAX_BRANCH_CLONES {
             break;
         }
+        if !f.clone_is_read_by(&me.channel) {
+            continue;
+        }
         let (Some(their_root), Some(their_branch)) = (f.repo_root.as_deref(), f.branch.as_deref()) else { continue };
         let same_repo = f.repo_key().as_deref() == Some(repo_key.as_str());
         if !same_repo || f.agent.eq_ignore_ascii_case(&me.agent) || their_root == root || their_branch == branch {

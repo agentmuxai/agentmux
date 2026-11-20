@@ -581,6 +581,8 @@ pub const COMMAND_AGENT_MOVE_HERE: &str = "agent.move-here";
 // transport.
 pub const COMMAND_FLEET_BROADCAST: &str = "fleet.broadcast";
 pub const COMMAND_FLEET_BULK_STOP: &str = "fleet.bulk-stop";
+/// Look again, now, at agents marked out of quota (`CommandFleetCheckLimitsData`), returning `FleetActionResult`.
+pub const COMMAND_FLEET_CHECK_LIMITS: &str = "fleet.check-limits";
 pub const COMMAND_FLEET_GROUP_CREATE: &str = "fleet.group.create";
 pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
 pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";

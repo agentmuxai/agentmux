@@ -212,6 +212,8 @@ fn start_container_status(state: &AppState) {
     let hub = backend::container_status::install(Arc::clone(&state.broker), move || {
         mstore.agent_def_list().unwrap_or_default().into_iter().filter(|d| d.is_seeded != 1).map(|d| (d.id, d.name)).collect()
     });
+    // Git facts of a container agent are read inside its container, through this runtime.
+    backend::container::mounts::read_exec::install(&state.container_manager);
     let source = backend::container_status::DockerSource::new(Arc::clone(&state.container_manager));
     tokio::spawn(backend::container_status::run(source, hub, Default::default()));
 }
@@ -295,6 +297,11 @@ pub fn spawn_state_services(state: &AppState) {
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));
+    // A container agent's turn that ended well is when srv's compaction backstop looks at its context.
+    let backstop_state = state.clone();
+    backend::context_reading::observe_container_turn_ends(Box::new(move |block_id| {
+        crate::server::compact_backstop::after_container_turn(&backstop_state, block_id);
+    }));
     backend::container::limits::install_config(Arc::clone(&state.config_watcher));
     // The Claude CLI's own cross-session messaging is off unless `agent:climessaging` is true.
     backend::cli_messaging::install_config(Arc::clone(&state.config_watcher));

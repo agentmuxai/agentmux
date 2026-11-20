@@ -4,7 +4,7 @@
 import { Show, type JSX } from "solid-js";
 import { cpuColor } from "./cpu-color";
 import { CpuCoresPopover } from "./CpuCoresPopover";
-import { diskTooltip, watchVolumeColor } from "./disk-volumes";
+import { diskPillLabel, diskTooltip, watchVolumeColor } from "./disk-volumes";
 import { DiskVolumesPopover } from "./DiskVolumesPopover";
 import { GpuReadout, MemReadouts, RateReadouts, UiBusyReadout } from "./SystemStatsParts";
 import { createSystemStats } from "./SystemStatsState";
@@ -75,7 +75,7 @@ const SystemStats = (): JSX.Element => {
                             aria-haspopup="dialog"
                             aria-expanded={diskPanelOpen()}
                         >
-                            Disk {Math.round(s().watchVolumeFreePct!)}%
+                            {diskPillLabel(s().watchVolumeFreePct!)}
                         </button>
                         <Show when={diskPanelOpen()}>
                             <DiskVolumesPopover

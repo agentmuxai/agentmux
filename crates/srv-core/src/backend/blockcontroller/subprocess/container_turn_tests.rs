@@ -902,3 +902,74 @@ async fn a_container_codex_turn_gets_no_hint_since_it_cannot_compact_there() {
     assert_eq!(next_message(&block), "next");
     crate::backend::context_reading::forget(&block);
 }
+
+/// A `/compact` that AgentMux sends (the agent's own `Agents compact`, or srv's backstop) is a system turn.
+fn compaction(text: &str) -> SubprocessSpawnConfig {
+    let origin = crate::backend::message_origin::MessageOrigin::system();
+    SubprocessSpawnConfig { record: Some(crate::backend::message_origin::RecordOrigin::new(origin)), ..config(text) }
+}
+
+fn queued_messages(ctrl: &SubprocessController) -> Vec<String> {
+    ctrl.inner.lock().unwrap().pending_messages.iter().map(|c| c.message.clone()).collect()
+}
+
+/// A busy agent's queue is never empty, so a compaction put at the back waits for every message ahead of it, and the
+/// context it is meant to shrink grows meanwhile. It runs next instead; nothing is dropped and the others keep the
+/// order they were sent in.
+#[tokio::test]
+async fn a_compaction_runs_next_ahead_of_the_queue_and_the_rest_keep_their_order() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![
+        Turn::says(&[INIT, RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+        Turn::says(&[RESULT_OK], 0),
+    ]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("first behind")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("second behind")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), compaction("/compact keep: the PR")).expect("a compaction is queued like any message");
+
+    assert_eq!(queued_messages(&ctrl), ["/compact keep: the PR", "first behind", "second behind"], "ahead of the waiting messages");
+
+    wait_for("all four turns", || fake.execs(Kind::Turn).len() == 4 && !ctrl.run_lock.load(Ordering::SeqCst)).await;
+    wait_done(&ctrl).await;
+    let texts: Vec<String> = fake.uploads().into_iter().map(|u| u.3).collect();
+    assert_eq!(texts, ["running", "/compact keep: the PR", "first behind", "second behind"], "the compaction is the turn after the running one; none is lost");
+}
+
+#[tokio::test]
+async fn compactions_keep_their_order_among_themselves_and_a_persons_compact_is_an_ordinary_message() {
+    let fake = FakeDocker::start().await;
+    fake.script(vec![Turn { hold_open: true, ..Turn::says(&[INIT, RESULT_OK], 0) }]);
+    let ctrl = controller(&unique("blk"), None);
+    let (cm, name) = (fake.manager(), unique("c"));
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("running")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("a")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), config("/compact")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), compaction("/compact one")).unwrap();
+    ctrl.spawn_container_turn(cm.clone(), name.clone(), cli(), compaction("/compact")).unwrap();
+    ctrl.spawn_container_turn(cm, name, cli(), config("b")).unwrap();
+    assert_eq!(queued_messages(&ctrl), ["/compact one", "/compact", "a", "/compact", "b"], "AgentMux's compactions first, in order; a person's /compact stays where it was sent");
+
+    wait_for("the CLI to be started", || ctrl.session_id().as_deref() == Some("sid-one")).await;
+    assert_eq!(fake.execs(Kind::Turn).len(), 1, "a compaction never interrupts the turn in flight: it waits with the rest");
+
+    Controller::stop(ctrl.as_ref(), true, STATUS_DONE).expect("the stop is accepted");
+    wait_done(&ctrl).await;
+}
+
+#[test]
+fn only_a_claude_compaction_from_agentmux_goes_ahead() {
+    let queue = std::collections::VecDeque::from([config("a")]);
+    let ahead = |c: &SubprocessSpawnConfig| super::super::queue_position(&queue, c);
+    assert_eq!(ahead(&compaction("/compact")), (0, true));
+    assert_eq!(ahead(&compaction("/compact keep: x")), (0, true));
+    assert_eq!(ahead(&compaction("/compaction notes")), (1, false), "only the /compact command");
+    assert_eq!(ahead(&compaction("please /compact")), (1, false));
+    assert_eq!(ahead(&config("/compact")), (1, false), "not from AgentMux");
+    let codex = SubprocessSpawnConfig { resume_strategy: "codex-exec".into(), ..compaction("/compact") };
+    assert_eq!(ahead(&codex), (1, false), "a Codex compaction has its own path");
+}

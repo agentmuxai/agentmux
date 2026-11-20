@@ -214,12 +214,33 @@ fn handle_lookup(state: &AppState, call: &WebCallType) -> WebReturnType {
             "found": true,
             "username": mask_username(&username),
         })),
-        Ok(None) => WebReturnType::success(serde_json::json!({ "found": false })),
+        Ok(None) => lookup_shared(state, &space),
         Err(e) => {
             // The exact failure is for srv's log, not the caller: the host's
             // credential broker treats any error here as "not found" and falls
             // through to the normal prompt.
             tracing::warn!("[credential] Lookup failed: {e}");
+            WebReturnType::error("lookup failed")
+        }
+    }
+}
+
+/// The profile holds no sign-in of its own for `space`: in an agent's own profile, the login the person shared with
+/// that agent answers ([`crate::server::vault_prompt_share`]). The answer then also says `shared`, the `agent`, and
+/// `approval`: `granted` when the person already said yes to this use (the host answers the prompt without asking),
+/// `ask` when the host asks them as it does for the profile's own.
+fn lookup_shared(state: &AppState, space: &Space) -> WebReturnType {
+    match crate::server::vault_prompt_share::lookup(state, space) {
+        Ok(Some(found)) => WebReturnType::success(serde_json::json!({
+            "found": true,
+            "username": found.username,
+            "shared": true,
+            "agent": found.agent,
+            "approval": if found.granted { "granted" } else { "ask" },
+        })),
+        Ok(None) => WebReturnType::success(serde_json::json!({ "found": false })),
+        Err(e) => {
+            tracing::warn!("[credential] Lookup of a shared sign-in failed: {e}");
             WebReturnType::error("lookup failed")
         }
     }
@@ -273,7 +294,12 @@ fn handle_delete(state: &AppState, call: &WebCallType) -> WebReturnType {
         Err(e) => return WebReturnType::error(format!("credential.Delete: {e}")),
     };
     let Some(space) = args.space() else { return WebReturnType::success_empty() };
-    match signins::refused(&state.identity_store, &space) {
+    // The profile's own sign-in is the one that was filled when it has one; otherwise it was a shared one.
+    let refused = match signins::find(&state.identity_store, &space) {
+        Ok(None) => crate::server::vault_prompt_share::refused(state, &space),
+        _ => signins::refused(&state.identity_store, &space),
+    };
+    match refused {
         Ok(()) => {
             crate::server::vault_handlers::publish(state);
             WebReturnType::success_empty()
@@ -465,7 +491,12 @@ fn handle_fill(state: &AppState, call: &WebCallType) -> WebReturnType {
         Err(e) => return WebReturnType::error(format!("credential.Fill: {e}")),
     };
     let Some(space) = args.space() else { return WebReturnType::error("no stored credential for this pane") };
-    match signins::fill(&state.identity_store, &space) {
+    // The profile's own sign-in first; in an agent's own profile that holds none, the one shared with the agent.
+    let filled = match signins::fill(&state.identity_store, &space) {
+        Ok(None) => crate::server::vault_prompt_share::fill(state, &space),
+        own => own,
+    };
+    match filled {
         Ok(Some((username, password))) => {
             crate::server::vault_handlers::publish(state);
             WebReturnType::success(serde_json::json!({

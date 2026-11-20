@@ -830,6 +830,9 @@ impl TurnEnd {
         // Only a process that exited on its own says anything about the API; a stop leaves `clean_exit` unset.
         if exited_on_its_own {
             core::report_provider_turn(&self.block_id, run_failure, &self.mstore);
+            if run_failure.is_none() {
+                crate::backend::limit_evidence::clean_turn(&self.block_id, &self.mstore, &self.event_bus);
+            }
         }
 
         // Surface the classified failure cause to the pane (Phase 2 of

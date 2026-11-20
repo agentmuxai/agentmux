@@ -203,6 +203,17 @@ export interface KanbanBoardInfo {
     stages_default?: boolean;
     /** Why a stored set can't be used, when it can't. */
     stages_error?: string | null;
+    /** The latest changes to the board itself (today its stages), newest first. */
+    history?: KanbanBoardEvent[];
+}
+
+/** One line of a board's history: `actor` is an agent's id, and empty for the operator, whose name is never recorded. */
+export interface KanbanBoardEvent {
+    at: number;
+    actor: string;
+    actor_kind: "agent" | "operator" | string;
+    kind: string;
+    body: string;
 }
 
 export interface KanbanBoard {

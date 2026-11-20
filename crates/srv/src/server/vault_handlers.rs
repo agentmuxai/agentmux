@@ -186,7 +186,10 @@ fn share_list(state: &AppState, id: &str) -> Result<Value, String> {
             let every = who == vault::shares::EVERY_AGENT;
             let mine: Vec<i64> = uses.iter().filter(|(uid, _)| every || uid == who).map(|(_, at)| *at).collect();
             let name = if every { "Every agent".to_string() } else { defs.iter().find(|d| &d.id == who).map_or_else(|| "an agent that is gone".to_string(), |d| d.name.clone()) };
-            json!({ "agent": who, "name": name, "uses": mine.len(), "last_used_ms": mine.iter().copied().max().unwrap_or(0) })
+            // The person's "Always" for a sign-in the browser answers a prompt with, in this agent's own profile (A11).
+            let profile = format!("profile:{}", crate::backend::browser_profiles_store::agent_profile_id(who));
+            let always = !every && vault::shares::prompt_always(store, &row, who, &profile);
+            json!({ "agent": who, "name": name, "uses": mine.len(), "last_used_ms": mine.iter().copied().max().unwrap_or(0), "always": always })
         })
         .collect();
     let agents: Vec<Value> = defs.iter().filter(|d| !listed.contains(&d.id)).map(|d| json!({ "uid": d.id, "name": d.name })).collect();
@@ -225,6 +228,7 @@ fn entry_ops(state: &AppState, op: &str, body: &Value) -> Result<(Value, bool), 
             let changed = vault::shares::remove(store, &s("id"), &s("agent"))?;
             if changed {
                 super::browser_signin::share_removed(state, &s("id"), &s("agent"));
+                super::vault_prompt_share::share_removed(&s("id"), &s("agent"));
             }
             Ok((json!({ "changed": changed }), true))
         }

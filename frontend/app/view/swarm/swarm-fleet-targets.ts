@@ -153,7 +153,7 @@ export interface FleetResultEntry {
     labels: Record<string, string>;
 }
 
-export const EMPTY_FLEET_RESULT: FleetActionResult = { succeeded: [], failed: [], aborted_early: false, pending: [] };
+export const EMPTY_FLEET_RESULT: FleetActionResult = { succeeded: [], failed: [], aborted_early: false, pending: [], held: [] };
 
 /** `result` plus the targets the action could not reach, each with its reason,
  *  so a target is never silently left out. */

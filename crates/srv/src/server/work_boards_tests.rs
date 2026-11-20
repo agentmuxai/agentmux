@@ -316,6 +316,34 @@ async fn a_refused_stage_set_says_why_and_a_stale_editor_is_told() {
 }
 
 #[tokio::test]
+async fn a_change_of_stages_leaves_a_line_in_the_boards_history() {
+    let state = test_state();
+    set_stages(&state, Some(("agentx", "")), "main", merged_set(), Some(0)).unwrap();
+    // A refused change leaves nothing.
+    assert!(set_stages(&state, None, "main", merged_set(), Some(0)).is_err());
+    let reset = BoardsRequest { action: "edit".into(), board: Some("main".into()), stages_reset: Some(true), ..Default::default() };
+    board_act(&state, None, "operator", reset).unwrap();
+
+    let v = boards_view(&state, None, false).unwrap();
+    let lines = v["boards"][0]["history"].as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    // Newest first; the operator's own name is never recorded, an agent's id is.
+    assert_eq!(lines[0]["body"], json!("reset the stages to the default: 5 → 8"));
+    assert_eq!((lines[0]["actor"].clone(), lines[0]["actor_kind"].clone()), (json!(""), json!("operator")));
+    assert_eq!(lines[1]["body"], json!("changed the stages: 8 → 5"));
+    assert_eq!((lines[1]["actor"].clone(), lines[1]["actor_kind"].clone(), lines[1]["kind"].clone()), (json!("agentx"), json!("agent"), json!("stages")));
+    assert!(lines[1].get("detail").is_none() && lines[1]["at"].as_i64().unwrap() > 0);
+    // The Kanban's own list, which Settings reads, carries the same lines.
+    let listed = crate::server::app_api::kanban::list_for_tests(&state, json!({ "board": "all" })).await;
+    let main = listed["boards"].as_array().unwrap().iter().find(|b| b["slug"] == "main").unwrap();
+    assert_eq!(main["history"], v["boards"][0]["history"]);
+    // The sets before and after are kept, for a later Restore.
+    let kept = state.work_store.work_board_events("main", 5).unwrap();
+    let detail: Value = serde_json::from_str(&kept[1].detail).unwrap();
+    assert_eq!((detail["from"]["stages"].as_array().unwrap().len(), detail["to"]["stages"].as_array().unwrap().len()), (8, 5));
+}
+
+#[tokio::test]
 async fn an_agent_sets_stages_only_on_a_board_it_sees() {
     let state = test_state();
     create(&state, "Team", &["agentx"]);

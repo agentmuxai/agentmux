@@ -69,10 +69,17 @@ pub fn profile_under(data: &Path) -> PathBuf {
     data.join("streamed-browser").join("profile")
 }
 
+/// The profile folder a browser host was given: it has no data directory, and its profile is one fresh folder.
+static HOST_PROFILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn use_profile_root(dir: PathBuf) {
+    let _ = HOST_PROFILE.set(profile_under(&dir));
+}
+
 /// The profile folder: under srv's data directory, never a desktop profile.
 fn profile_dir() -> Option<PathBuf> {
     // The directory srv itself keeps its databases in (`--wavedata` first), so two servers never share a profile.
-    crate::headless::data_dir().map(profile_under)
+    HOST_PROFILE.get().cloned().or_else(|| crate::headless::data_dir().map(profile_under))
 }
 
 fn find_binary() -> Result<PathBuf, String> {

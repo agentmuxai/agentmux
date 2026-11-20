@@ -15,9 +15,11 @@
 //!    exactly that version, newer than this one, beside a portable; or that
 //!    version's installer, with the release's digest, in this version's own
 //!    `updates/<v>/`, on a `setup.exe` install;
-//! 2. asks the user with a native dialog ([`confirm`]), which no page or agent
-//!    tool in AgentMux can click: a restart stops every agent, so it takes the
-//!    user's own answer here, whoever asked srv;
+//! 2. goes ahead when srv marks the request confirmed (the restart was decided
+//!    in the app: the user's own click or turn, or an approved request's in-app
+//!    countdown with no veto); a request without the mark, from an older srv, is
+//!    asked with a native dialog ([`confirm`]), which no page or agent tool in
+//!    AgentMux can click;
 //! 3. quits the host the way the tray's Quit does, which closes the windows and
 //!    saves the session;
 //! 4. after srv has stopped (so the new version copies complete data,
@@ -26,7 +28,7 @@
 //!    installer silently and starts AgentMux again ([`relaunch`]), and exits.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -221,7 +223,12 @@ fn check_package(_: &Path, _: &str, _: &str, _: &Path, _: &Path) -> Result<Stage
     Err("this AgentMux doesn't install .deb or .rpm packages".into())
 }
 
-/// Ask the user on a thread of its own, and call `on_yes` only for an
+/// Restart as srv asked, on a thread of its own. When the restart is `confirmed` (srv's line says so: the user's
+/// own click or turn, or an approved request whose in-app countdown ran out with no veto) nothing more is asked:
+/// no native dialog, so a computer nobody sits at restarts. The staged file was checked again before this
+/// ([`staged`]), and on a `.deb` or `.rpm` install the OS's own permission prompt still stands: that one is the
+/// system's, not a question of ours. A request that does not say it is confirmed is asked about, and `on_yes`
+/// is called only for an
 /// explicit Yes that still counts ([`answer_counts`]): one given within
 /// [`ANSWER_WITHIN`], to the latest request. One dialog at a time: a newer
 /// request closes the open one, and a dialog closes itself (as No) once its
@@ -236,54 +243,152 @@ pub fn ask_then(
     stopping: Vec<String>,
     data_dir: PathBuf,
     host_pid: Option<u32>,
+    confirmed: bool,
     on_yes: impl FnOnce(Staged) + Send + 'static,
 ) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
     dismiss(DIALOG_THREAD.load(Ordering::SeqCst));
     std::thread::spawn(move || {
         let opened = Instant::now();
+        if confirmed {
+            let ok = confirmed_go(&staged);
+            let outcome = confirmed_outcome(ok, opened.elapsed());
+            crate::log(&outcome.log_line(opened.elapsed()));
+            if outcome == DialogOutcome::Confirmed {
+                on_yes(staged);
+            } else if let Some(why) = outcome.declined() {
+                write_declined(&data_dir, &version, why);
+            }
+            return;
+        }
         let thread = current_thread();
         DIALOG_THREAD.store(thread, Ordering::SeqCst);
+        // Set by the timer below just before it closes the dialog: a close by time is told from a No by it.
+        let timed_out = std::sync::Arc::new(AtomicBool::new(false));
+        let timer_closed = timed_out.clone();
         std::thread::spawn(move || {
             std::thread::sleep(ANSWER_WITHIN);
             if DIALOG_THREAD.load(Ordering::SeqCst) == thread {
+                timer_closed.store(true, Ordering::SeqCst);
                 dismiss(thread);
             }
         });
         let yes = confirm(&version, &staged, &stopping, host_pid);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
         let latest = LATEST_ASK.load(Ordering::SeqCst);
-        if !yes {
-            // A No, or the dialog closing itself. Not when a newer request closed
-            // this one: that request's own answer is still to come.
-            if ask == latest {
-                write_declined(&data_dir, &version);
+        let waited = opened.elapsed();
+        let outcome = dialog_outcome(yes, timed_out.load(Ordering::SeqCst), ask, latest, waited);
+        crate::log(&outcome.log_line(waited));
+        match outcome {
+            DialogOutcome::Yes => on_yes(staged),
+            // A newer request closed this one: that request's own answer is still to come.
+            DialogOutcome::Superseded | DialogOutcome::Confirmed => {}
+            DialogOutcome::No | DialogOutcome::TimedOut | DialogOutcome::TooLate => {
+                // Not when the question was an older one: only the latest is waited for.
+                if ask == latest {
+                    if let Some(why) = outcome.declined() {
+                        write_declined(&data_dir, &version, why);
+                    }
+                }
+                if outcome == DialogOutcome::TooLate {
+                    crate::show_fatal_dialog(
+                        "AgentMux upgrade",
+                        "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
+                    );
+                }
             }
-            return;
-        }
-        if answer_counts(ask, latest, opened.elapsed()) {
-            on_yes(staged);
-        } else {
-            if ask == latest {
-                write_declined(&data_dir, &version);
-            }
-            crate::log(&format!("upgrade: a Yes {}s after asking, or to an older request, was ignored", opened.elapsed().as_secs()));
-            crate::show_fatal_dialog(
-                "AgentMux upgrade",
-                "This upgrade request expired, so AgentMux didn't restart.\n\nStart it again from the version panel.",
-            );
         }
     });
 }
 
-/// Tell srv the restart it asked for won't happen
+/// How the restart question ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogOutcome {
+    /// An explicit Yes that still counts.
+    Yes,
+    /// The user answered No.
+    No,
+    /// Nobody answered: the dialog closed itself after [`ANSWER_WITHIN`], which counts as a No.
+    TimedOut,
+    /// A Yes that came too late, or to an older request: ignored.
+    TooLate,
+    /// A newer request closed this dialog.
+    Superseded,
+    /// srv said the restart is decided, so nothing was asked (and nothing more was needed).
+    Confirmed,
+}
+
+/// Whether to go on with a restart srv says is decided: always, except on a `.deb` or `.rpm` install, where the OS's
+/// own permission prompt for the install is asked here and may be refused or go unanswered.
+#[cfg(target_os = "linux")]
+fn confirmed_go(staged: &Staged) -> bool {
+    match staged {
+        Staged::Package(up) => crate::upgrade_package::authorize(up, std::process::id(), ANSWER_WITHIN),
+        _ => true,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn confirmed_go(_staged: &Staged) -> bool {
+    true
+}
+
+/// How a decided restart went: on, or (the permission prompt of a package install said no, or was not answered within
+/// [`ANSWER_WITHIN`]) not.
+fn confirmed_outcome(go: bool, waited: Duration) -> DialogOutcome {
+    match (go, waited >= ANSWER_WITHIN) {
+        (true, _) => DialogOutcome::Confirmed,
+        (false, true) => DialogOutcome::TimedOut,
+        (false, false) => DialogOutcome::No,
+    }
+}
+
+/// What became of the question: `yes` is the dialog's answer, `timed_out` that the timer closed it,
+/// `ask` this request's number and `latest` the newest one's, `waited` how long it was open.
+fn dialog_outcome(yes: bool, timed_out: bool, ask: u64, latest: u64, waited: Duration) -> DialogOutcome {
+    match (yes, timed_out) {
+        (true, _) if answer_counts(ask, latest, waited) => DialogOutcome::Yes,
+        (true, _) => DialogOutcome::TooLate,
+        (false, _) if ask != latest => DialogOutcome::Superseded,
+        (false, true) => DialogOutcome::TimedOut,
+        (false, false) => DialogOutcome::No,
+    }
+}
+
+impl DialogOutcome {
+    /// The launcher log's line for it: every outcome says so, with how long the dialog was open.
+    fn log_line(self, waited: Duration) -> String {
+        let s = waited.as_secs();
+        match self {
+            DialogOutcome::Yes => format!("upgrade: the dialog was answered Yes after {s}s"),
+            DialogOutcome::No => format!("upgrade: the dialog was answered No after {s}s"),
+            DialogOutcome::TimedOut => format!("upgrade: nobody answered the dialog within {s}s; it closed itself, which counts as No"),
+            DialogOutcome::TooLate => format!("upgrade: a Yes {s}s after asking, or to an older request, was ignored"),
+            DialogOutcome::Superseded => format!("upgrade: a newer request closed the dialog after {s}s"),
+            DialogOutcome::Confirmed => format!("upgrade: the restart is already confirmed (the user's own click or turn, or an approved request's countdown); no dialog, going on after {s}s"),
+        }
+    }
+
+    /// What srv is told when this ends the question without a restart.
+    fn declined(self) -> Option<agentmux_common::srv_stderr::Declined> {
+        use agentmux_common::srv_stderr::Declined;
+        match self {
+            DialogOutcome::No => Some(Declined::No),
+            DialogOutcome::TimedOut => Some(Declined::TimedOut),
+            DialogOutcome::TooLate => Some(Declined::TooLate),
+            DialogOutcome::Yes | DialogOutcome::Superseded | DialogOutcome::Confirmed => None,
+        }
+    }
+}
+
+/// Tell srv the restart it asked for won't happen, and why
 /// ([`agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE`]): it is waiting on
 /// this launcher and would otherwise say "Restarting" for minutes after a No.
-fn write_declined(data_dir: &Path, version: &str) {
+fn write_declined(data_dir: &Path, version: &str, why: agentmux_common::srv_stderr::Declined) {
     let dir = data_dir.join("updates");
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-    if let Err(e) = std::fs::write(&file, format!("{version}\n")) {
+    if let Err(e) = std::fs::write(&file, agentmux_common::srv_stderr::declined_text(version, why)) {
         crate::log(&format!("upgrade: couldn't leave {} for srv: {e}", file.display()));
     }
 }
@@ -664,7 +769,7 @@ mod tests {
 
     #[cfg(windows)]
     fn req(version: &str, launcher: &Path) -> UpgradeRequest {
-        UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
+        UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()), confirmed: false }
     }
 
     #[test]
@@ -754,7 +859,7 @@ echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn setup_req(version: &str, installer: &Path) -> UpgradeRequest {
         let target = UpgradeTarget::Installer { installer: installer.to_path_buf(), sha256: EMPTY_SHA256.into() };
-        UpgradeRequest { version: version.into(), target }
+        UpgradeRequest { version: version.into(), target, confirmed: false }
     }
 
     // A Windows portable; Linux's targets are `upgrade_linux`'s tests.
@@ -921,11 +1026,61 @@ Naki-2: `node server.js`
     }
 
     #[test]
+    fn a_confirmed_restart_goes_ahead_with_no_dialog_and_leaves_nothing_for_srv_to_read_as_a_no() {
+        let data = tempfile::tempdir().unwrap();
+        let launcher = data.path().join("agentmux-0.60.35").join(if cfg!(windows) { "agentmux.exe" } else { "agentmux.sh" });
+        let (tx, rx) = std::sync::mpsc::channel();
+        ask_then("0.60.35".into(), Staged::Launcher(launcher.clone()), Vec::new(), data.path().to_path_buf(), None, true, move |s| {
+            let _ = tx.send(s);
+        });
+        // The answer is Yes without anyone: it arrives at once (a dialog would wait for a person, and none can be shown here).
+        let staged = rx.recv_timeout(Duration::from_secs(10)).expect("a confirmed restart goes ahead without a dialog");
+        assert_eq!(staged, Staged::Launcher(launcher));
+        assert!(!data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE).exists(), "no decline was left");
+        // Only an install's own permission prompt can still refuse a decided restart (Linux .deb/.rpm), and when it does the
+        // reason is told apart: refused (No) or not answered in time.
+        assert_eq!(confirmed_outcome(true, Duration::ZERO), DialogOutcome::Confirmed);
+        assert_eq!(confirmed_outcome(true, ANSWER_WITHIN), DialogOutcome::Confirmed);
+        assert_eq!(confirmed_outcome(false, Duration::from_secs(3)), DialogOutcome::No);
+        assert_eq!(confirmed_outcome(false, ANSWER_WITHIN), DialogOutcome::TimedOut);
+    }
+
+    #[test]
     fn a_no_is_left_for_srv_under_the_name_it_reads() {
         let data = tempfile::tempdir().unwrap();
         // The updates folder may not exist yet.
-        write_declined(data.path(), "0.59.37");
+        write_declined(data.path(), "0.59.37", agentmux_common::srv_stderr::Declined::TimedOut);
         let file = data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
-        assert_eq!(std::fs::read_to_string(file).unwrap().trim(), "0.59.37");
+        let text = std::fs::read_to_string(file).unwrap();
+        assert_eq!(agentmux_common::srv_stderr::parse_declined(&text), ("0.59.37", Some(agentmux_common::srv_stderr::Declined::TimedOut)));
+    }
+
+    #[test]
+    fn every_way_the_question_can_end_is_told_apart_and_logged() {
+        use agentmux_common::srv_stderr::Declined;
+        let quick = Duration::from_secs(2);
+        // Yes, within the time, to the latest request.
+        assert_eq!(dialog_outcome(true, false, 3, 3, quick), DialogOutcome::Yes);
+        // A Yes at or after the time, or to an older request, is ignored.
+        assert_eq!(dialog_outcome(true, false, 3, 3, ANSWER_WITHIN), DialogOutcome::TooLate);
+        assert_eq!(dialog_outcome(true, false, 2, 3, quick), DialogOutcome::TooLate);
+        // No: an answer; a timeout: the timer closed the dialog; both end as a decline, with different reasons.
+        assert_eq!(dialog_outcome(false, false, 3, 3, quick), DialogOutcome::No);
+        assert_eq!(dialog_outcome(false, true, 3, 3, ANSWER_WITHIN), DialogOutcome::TimedOut);
+        // A newer request closed it: neither, and srv is told nothing.
+        assert_eq!(dialog_outcome(false, false, 2, 3, quick), DialogOutcome::Superseded);
+        assert_eq!(dialog_outcome(false, true, 2, 3, ANSWER_WITHIN), DialogOutcome::Superseded);
+        assert_eq!(DialogOutcome::No.declined(), Some(Declined::No));
+        assert_eq!(DialogOutcome::TimedOut.declined(), Some(Declined::TimedOut));
+        assert_eq!(DialogOutcome::TooLate.declined(), Some(Declined::TooLate));
+        assert_eq!((DialogOutcome::Yes.declined(), DialogOutcome::Superseded.declined(), DialogOutcome::Confirmed.declined()), (None, None, None));
+        // Every outcome has a line, and the line says how long the dialog was open.
+        let lines: Vec<String> =
+            [DialogOutcome::Yes, DialogOutcome::No, DialogOutcome::TimedOut, DialogOutcome::TooLate, DialogOutcome::Superseded, DialogOutcome::Confirmed]
+                .iter()
+                .map(|o| o.log_line(Duration::from_secs(150)))
+                .collect();
+        assert!(lines.iter().all(|l| l.starts_with("upgrade: ") && l.contains("150s")), "{lines:?}");
+        assert_eq!(lines.iter().collect::<std::collections::HashSet<_>>().len(), 6, "each outcome reads differently");
     }
 }

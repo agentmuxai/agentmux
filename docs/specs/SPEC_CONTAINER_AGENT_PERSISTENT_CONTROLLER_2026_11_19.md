@@ -54,6 +54,10 @@ R6. While R1 is not in place for a provider, a person's message never waits sile
 work: the pane says what it waits for and offers "Stop it and send now" (interrupt, then send) and keeps
 "send when it finishes" as the default.
 
+R7. The process's credential stays short-lived and brokered per use, as a per-turn exec's is today. A long-lived
+process does not get a credential that outlives its use by days, and none is written into the container: when
+the credential nears its expiry the route asks the broker again.
+
 ## 4. Design
 
 The `PersistentSubprocessController` is tied to `tokio::process::Child` in about six places: starting the child
@@ -78,13 +82,17 @@ the stream-json input mode does not.
    recorded pid. There is no EOF-based graceful stop.
 6. The prompt-file path (`container_turn_exec`) and the per-turn queue (`pending_messages`, drained per exit)
    remain for the non-persistent fallback (R5).
+7. Credential (R7): the per-turn credential route (`key_route`) is bound to a spawn today. For the long-lived
+   process it is bound to the process and refreshed: the route keeps the same short expiry, and renews the
+   credential from the broker before it expires, and again at the start of each result-bounded turn if it has
+   expired while the process sat idle. The CLI keeps talking to the same local route, so nothing inside the
+   container changes when the credential does. If the broker refuses a refresh, the next request fails as a
+   sign-in failure does today and the pane says so; the process is not given a longer-lived credential instead.
 
 ## 5. Open points to settle in the build
 
 - Session files: the resume gate and relocation read the session file on the host; confirm they can read the
   file a long-lived container process writes, or make them ask the container.
-- Token lifetime: the per-turn credential route (`key_route`) is bound to a spawn; a process that lives for days
-  needs a token that outlives a turn, or a refresh path.
 - Update gate: the container update gate is held for the whole turn today and would block updates forever if a
   turn were the process's life; it has to be held per result-bounded turn.
 - The compact hint, `Agents fresh`, the turn ledger and the queue drain all assume "turn = exec": each moves to
@@ -109,8 +117,11 @@ the stream-json input mode does not.
 - The process ending (container restart, srv restart, CLI exit) starts a new one with `--resume`, losing nothing.
 - A stop interrupts the turn and leaves the process up; a forced stop kills only this block's process.
 - The update gate is free between turns while the process stays up.
+- A process that outlives its credential's expiry gets a refreshed one from the broker and its next turn works;
+  a refused refresh fails that turn with the sign-in message; at no point does a credential with a longer
+  expiry exist, and none is found in the container's files.
 
 ## 8. Effort
 
 Phases 1 and 2 are the bulk: a few days with the fake daemon work. Phase 3 and the open points in section 5
-need the container's session files and the token lifetime settled first.
+need the container's session files settled first; the credential's lifetime is decided (R7, design 7).

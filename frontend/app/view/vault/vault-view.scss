@@ -37,6 +37,29 @@
         flex: 1 1 auto;
         min-height: 0;
     }
+
+    // The smallest width the Vault supports is 160px of this box (inside the pane's zoom: 240px of pane at 150%).
+    // Below it the Vaults row, the list and the dialogs cannot hold a word each, so one line says so instead.
+    container-type: inline-size;
+    container-name: vault-pane;
+}
+
+.vault-too-narrow {
+    display: none;
+    padding: var(--space-3);
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+@container vault-pane (max-width: 159px) {
+    .vault-view > :not(.vault-too-narrow) {
+        display: none;
+    }
+
+    .vault-too-narrow {
+        display: block;
+    }
 }
 
 // The list: the filter stays put, the sections scroll under it.
@@ -226,6 +249,13 @@
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border-color);
+    // Requests taller than the pane (a long card in a narrow, zoomed pane) scroll here: the view itself never
+    // scrolls, so without this a card's buttons fell below the pane, out of the wheel's reach. They take the
+    // room they need before the list does, and never more than the pane.
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    max-height: 100%;
+    overflow-y: auto;
 }
 
 .vault-request {
@@ -635,6 +665,13 @@
     max-width: 100%;
     overflow-wrap: anywhere;
     border: 1px solid var(--border-color);
+}
+
+// A chip's words in one box, so they wrap at spaces together. As loose parts of the chip (a name, then its note) each
+// was a flex item of its own, and a narrow column shrank the name to a letter before the note had wrapped: "Test / er".
+.vault-grant__text {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 // An entry's expiry date, read against today; near or past it, in the warning colour.

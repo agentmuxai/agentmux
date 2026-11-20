@@ -15,7 +15,7 @@ import { SectionHeader } from "../settings-controls";
 import { settingEntry } from "../settings-model";
 import type { SettingsViewModel } from "../settings-model";
 import { createKanbanStagesState } from "./kanban-section-state";
-import { Footer, Notices, Preview, Problems, StageActions, StageList } from "./kanban-section-parts";
+import { Footer, History, Notices, Preview, Problems, StageActions, StageList } from "./kanban-section-parts";
 
 import "./kanban-section.scss";
 
@@ -66,6 +66,7 @@ export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element
             <Preview s={s} />
             <Problems s={s} />
             <Footer s={s} />
+            <History s={s} />
         </div>
     );
 }

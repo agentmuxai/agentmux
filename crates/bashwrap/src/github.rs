@@ -27,9 +27,10 @@ use serde_json::{json, Value};
 
 use crate::mps_client::WpsClient;
 
-/// srv may call AgentMux Cloud twice (a revalidation, then the mint); a stuck call must not hold a
-/// `git push` forever.
-const ASK_TIMEOUT: Duration = Duration::from_secs(30);
+/// srv may call AgentMux Cloud twice (a revalidation, then the mint), or wait on the host's `gh-agent` for a fresh token (up to
+/// 50 s, `identity::gh_agent_token`), and then says why it has none: this waits a little longer than that, so the answer
+/// reaches the command. A stuck call still must not hold a `git push` forever.
+const ASK_TIMEOUT: Duration = Duration::from_secs(65);
 
 /// The repository named by a git credential request's `path`: `owner/repo` or `owner/repo.git`.
 pub fn owner_repo_of_path(path: &str) -> Option<(String, String)> {

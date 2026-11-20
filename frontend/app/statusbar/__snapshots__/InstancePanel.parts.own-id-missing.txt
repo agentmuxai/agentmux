@@ -10,4 +10,6 @@ PlaceWindowSlots ["w2"]
 names: Reviews | Window 1
 console.debug [wave-panel] windowId=<null> label=main idx=0 displayName=<none> workspaceName=<none> → name="Window 1"
 rename opens: false
+requestRemoveWindow {"windowId":null,"label":"main"}
+ListClosedWindows
 removed this one

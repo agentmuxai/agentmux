@@ -17,8 +17,13 @@ use agentmux_common::win32::NoWindow;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
-/// How long `gh-agent token` may take: a cached token is instant, a fresh one is a round trip.
-const TIMEOUT: Duration = Duration::from_secs(25);
+/// How long a caller waits for `gh-agent token`: a cached token is instant, a fresh one is a round trip, and on a
+/// loaded machine that round trip has taken 20 to 26 s. The container's own ask waits longer than this
+/// (`agentmux-bashwrap`'s `ASK_TIMEOUT`), so the answer here reaches it.
+const TIMEOUT: Duration = Duration::from_secs(50);
+/// How long a `gh-agent token` that the caller stopped waiting for is left to finish. gh-agent keeps what it minted, so
+/// the next ask is instant; a mint stopped half-way is kept by nobody, and every retry would start it over.
+const FINISH_TIMEOUT: Duration = Duration::from_secs(150);
 
 /// A token `gh-agent` minted.
 pub struct HostToken {
@@ -78,7 +83,10 @@ pub fn installed() -> Option<PathBuf> {
 
 /// What an agent is told when `gh-agent` is installed but did not answer in [`TIMEOUT`]: not a missing connection.
 pub fn took_too_long() -> String {
-    format!("GitHub token took too long: this machine's gh-agent didn't answer in {} s. Try again in a minute", TIMEOUT.as_secs())
+    format!(
+        "GitHub token took too long: this machine's gh-agent didn't answer in {} s (it keeps going, so the next try is quick). Try again in a minute",
+        TIMEOUT.as_secs()
+    )
 }
 
 /// Whether `error` (a [`token_for`] error) is [`took_too_long`].
@@ -180,6 +188,25 @@ fn token_args(owner: &str, repo: &str, scope: Scope, workflows: bool) -> Vec<Str
     args
 }
 
+/// The command's end: its output, or why it has none. Past [`FINISH_TIMEOUT`] the child is killed.
+async fn finish(child: tokio::process::Child) -> Result<std::process::Output, String> {
+    match tokio::time::timeout(FINISH_TIMEOUT, child.wait_with_output()).await {
+        Ok(Ok(out)) => Ok(out),
+        Ok(Err(e)) => Err(format!("couldn't run gh-agent: {e}")),
+        Err(_) => Err(took_too_long()),
+    }
+}
+
+/// Wait up to `limit` for `run`. Past it the caller is told [`took_too_long`] and `run` goes on by itself (a dropped
+/// join handle detaches the task, it does not cancel it), so what it was minting is kept for the next ask.
+async fn wait_for<T>(run: &mut tokio::task::JoinHandle<Result<T, String>>, limit: Duration) -> Result<T, String> {
+    match tokio::time::timeout(limit, run).await {
+        Ok(Ok(done)) => done,
+        Ok(Err(_)) => Err("couldn't run gh-agent: it stopped unexpectedly".to_string()),
+        Err(_) => Err(took_too_long()),
+    }
+}
+
 /// A narrowed token for `owner/repo`, minted for the agent `slug`: one repository, and `scope`'s permissions only.
 pub async fn token_for(slug: &str, owner: &str, repo: &str, scope: Scope, workflows: bool) -> Result<HostToken, String> {
     if !is_name(owner) || !is_name(repo) {
@@ -194,13 +221,12 @@ pub async fn token_for(slug: &str, owner: &str, repo: &str, scope: Scope, workfl
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
+        // Only a mint that runs past FINISH_TIMEOUT is killed (the future that holds the child is dropped then).
         .kill_on_drop(true);
     cmd.no_window();
-    let out = match tokio::time::timeout(TIMEOUT, cmd.output()).await {
-        Ok(Ok(out)) => out,
-        Ok(Err(e)) => return Err(format!("couldn't run gh-agent: {e}")),
-        Err(_) => return Err(took_too_long()),
-    };
+    let child = cmd.spawn().map_err(|e| format!("couldn't run gh-agent: {e}"))?;
+    let mut run = tokio::spawn(finish(child));
+    let out = wait_for(&mut run, TIMEOUT).await?;
     if !out.status.success() {
         return Err("gh-agent gave no token for that repository".to_string());
     }
@@ -538,6 +564,40 @@ mod tests {
         let refused = token_for("aria", "octo", "hello", Scope::Push, false).await;
         std::env::set_var("PATH", old);
         assert_eq!(refused.err().as_deref(), Some(GH_AGENT_TOO_OLD));
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_stops_waiting_leaves_the_work_running() {
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = done.clone();
+        let mut run = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok::<_, String>(7)
+        });
+        // The caller gives up after 20 ms and is told it took too long...
+        assert_eq!(wait_for(&mut run, Duration::from_millis(20)).await, Err(took_too_long()));
+        assert!(!done.load(std::sync::atomic::Ordering::SeqCst));
+        drop(run);
+        // ...and the work still finishes, which is what lets the next ask be quick.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_waits_long_enough_gets_the_answer_or_the_reason() {
+        let mut ok = tokio::spawn(async { Ok::<_, String>(7) });
+        assert_eq!(wait_for(&mut ok, Duration::from_secs(5)).await, Ok(7));
+        let mut failed = tokio::spawn(async { Err::<u8, _>("couldn't run gh-agent: x".to_string()) });
+        assert_eq!(wait_for(&mut failed, Duration::from_secs(5)).await, Err("couldn't run gh-agent: x".to_string()));
+        let mut crashed = tokio::spawn(async { if true { panic!("boom") } else { Ok::<u8, String>(1) } });
+        assert!(wait_for(&mut crashed, Duration::from_secs(5)).await.unwrap_err().contains("stopped unexpectedly"));
+    }
+
+    #[test]
+    fn a_container_asks_longer_than_srv_waits_and_srv_lets_a_mint_finish() {
+        assert!(TIMEOUT >= Duration::from_secs(40), "a loaded machine's mint has taken 26 s");
+        assert!(FINISH_TIMEOUT > TIMEOUT);
     }
 
     #[test]

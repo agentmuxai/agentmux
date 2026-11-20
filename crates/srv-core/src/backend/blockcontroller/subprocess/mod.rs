@@ -140,6 +140,28 @@ pub struct SubprocessSpawnConfig {
     pub record: Option<crate::backend::message_origin::RecordOrigin>,
 }
 
+/// Whether this turn is AgentMux's own `/compact` of a Claude agent: the one the agent asked for with `Agents compact` or
+/// the srv backstop sent (both are system turns). A person's own `/compact` is an ordinary message.
+pub(super) fn is_agentmux_compaction(config: &SubprocessSpawnConfig) -> bool {
+    let message = config.message.trim();
+    let is_compact = message == "/compact" || message.strip_prefix("/compact").is_some_and(|rest| rest.starts_with(char::is_whitespace));
+    is_compact
+        && config.resume_strategy != "codex-exec"
+        && config.record.as_ref().is_some_and(|r| r.origin.kind == crate::backend::blockcontroller::health::TriggerKind::System)
+}
+
+/// Where a message waiting for the running turn goes in the queue, and whether that is ahead of messages already
+/// waiting. A compaction runs next: the context it shrinks only grows while the messages ahead of it run, so it goes
+/// behind the compactions already waiting (their order is kept) and in front of everything else. Any other message
+/// goes to the back, in the order it was sent.
+fn queue_position(queue: &VecDeque<SubprocessSpawnConfig>, config: &SubprocessSpawnConfig) -> (usize, bool) {
+    if !is_agentmux_compaction(config) {
+        return (queue.len(), false);
+    }
+    let waiting = queue.iter().take_while(|queued| is_agentmux_compaction(queued)).count();
+    (waiting, waiting < queue.len())
+}
+
 /// Inner state protected by mutex.
 struct SubprocessControllerInner {
     /// Current process status.
@@ -382,9 +404,9 @@ impl SubprocessController {
         let message_id = config.message_id.clone();
         let ahead = {
             let mut inner = self.inner.lock().unwrap();
-            let ahead = inner.pending_messages.len();
-            tracing::info!(block_id = %self.block_id, queue_depth = ahead + 1, "{what} — message queued");
-            inner.pending_messages.push_back(config);
+            let (ahead, jumped) = queue_position(&inner.pending_messages, &config);
+            tracing::info!(block_id = %self.block_id, queue_depth = inner.pending_messages.len() + 1, jumped, "{what} — message queued");
+            inner.pending_messages.insert(ahead, config);
             ahead
         };
         self.emit_message_queued(message_id.as_deref(), ahead);

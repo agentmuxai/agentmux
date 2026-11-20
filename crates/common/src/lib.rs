@@ -88,7 +88,7 @@ pub use data_paths::{
 };
 pub use errors::{AgentMuxError, AmxCode};
 pub use settings_path::{settings_dir_for, SETTINGS_FILE};
-pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
+pub use layout_intent::{LayoutEdge, LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,
     StackMovePosition,

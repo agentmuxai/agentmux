@@ -3265,6 +3265,25 @@
     }
   },
   {
+    "command": "fleet.check-limits",
+    "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetCheckLimitsData",
+    "requestName": "CommandFleetCheckLimitsData",
+    "requestTs": {
+      "imports": [
+        "CommandFleetCheckLimitsData"
+      ],
+      "name": "CommandFleetCheckLimitsData"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fleet::FleetActionResult",
+    "responseName": "FleetActionResult",
+    "responseTs": {
+      "imports": [
+        "FleetActionResult"
+      ],
+      "name": "FleetActionResult"
+    }
+  },
+  {
     "command": "fleet.group.create",
     "request": "agentmux_srv_core::backend::rpc_types::fleet::CommandFleetGroupCreateData",
     "requestName": "CommandFleetGroupCreateData",

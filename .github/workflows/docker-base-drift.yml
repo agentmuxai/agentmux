@@ -1,0 +1,54 @@
+# Copyright 2026, AgentMux Corp.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The base images of the shipped Docker images are pinned by digest (docker/Dockerfile.*). A tag moves on purpose, so
+# once a week this asks the registry whether any has, and opens (or updates) one issue naming the new digests. The pin
+# itself is moved in a reviewed pull request (scripts/docker-base-digests.sh --update); nothing here changes a Dockerfile.
+name: Docker base image drift
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Look for newer base images
+        id: look
+        run: |
+          set +e
+          bash scripts/docker-base-digests.sh --check >drift.txt 2>&1
+          echo "code=$?" >>"$GITHUB_OUTPUT"
+          cat drift.txt
+      - name: Open or update the issue
+        if: steps.look.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Docker base images have newer digests"
+          {
+            echo "A base image tag pinned in docker/Dockerfile.* now points at a different image. This is expected when the image's publisher ships an update; check what changed, then move the pins."
+            echo
+            echo '```'
+            cat drift.txt
+            echo '```'
+          } >body.md
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
+          fi
+      - name: Fail when the registry could not be asked
+        if: steps.look.outputs.code != '0' && steps.look.outputs.code != '1'
+        run: exit 1

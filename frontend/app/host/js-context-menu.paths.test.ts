@@ -458,6 +458,14 @@ describe("rows", () => {
         );
     });
 
+    it("draws a swatch row's bar across the top of its swatch, and none on a row without one", () => {
+        show([item("Blue", { swatchColor: "#3366ff", swatchBar: "#99bbff" }), item("Red", { swatchColor: "#ff3333" })]);
+        const barred = rowAt(0).querySelector<HTMLElement>(".menu-item-swatch")!;
+        expect(barred.classList.contains("menu-item-swatch--bar")).toBe(true);
+        expect(barred.style.getPropertyValue("--swatch-bar")).toBe("#99bbff");
+        expect(rowAt(1).querySelector(".menu-item-swatch--bar")).toBeNull();
+    });
+
     it("draws an empty label for an item with none", () => {
         show([{ id: "x" } as NativeContextMenuItem]);
         expect(rowAt(0).querySelector(".label")!.textContent).toBe("");

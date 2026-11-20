@@ -25,6 +25,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The three images come from a mirror that needs no Docker Hub sign-in, with retries (Docker Hub limits
+# anonymous pulls per address and CI runners share addresses); the runs below then find them on this machine.
+bash "$HERE/ci-docker-pull.sh" ubuntu:24.04 fedora:42 opensuse/tumbleweed
+
 echo "== build the repository (Ubuntu 24.04) =="
 docker run --rm -v "$MOUNT:/w" ubuntu:24.04 bash -euc '
 export DEBIAN_FRONTEND=noninteractive

@@ -113,6 +113,119 @@ pub(super) async fn maybe_probe(state: &AppState, req: &InjectionRequest, unavai
     }
 }
 
+/// The least time between two checks a person's message starts on one agent.
+const PERSON_CHECK_EVERY_MS: u64 = 60 * 1000;
+
+/// What [`check_now`] did.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Check {
+    /// A check turn was started.
+    Started,
+    /// One is running, or one started less than a minute ago: its result is the answer.
+    Running,
+    /// None was started, and why (the agent isn't registered, or the note wasn't delivered).
+    NotStarted(String),
+}
+
+/// Starts a check turn on the agent of `block_id` because a person's message waits for it: it does
+/// not wait for the 15-minute slot a message between agents does, but one turn runs at a time and a
+/// new one starts no sooner than a minute after the last. The message itself never rides the turn.
+pub(super) fn check_now(block_id: &str, now_ms: u64) -> Check {
+    let handler = crate::backend::reactive::get_global_handler();
+    let Some(target) = handler
+        .list_agents()
+        .into_iter()
+        .find(|r| r.block_id == block_id)
+        .map(|r| r.uid.filter(|u| !u.is_empty()).unwrap_or(r.agent_id))
+    else {
+        return Check::NotStarted("the agent is not registered".to_string());
+    };
+    if !take_person_check(block_id, now_ms) {
+        return Check::Running;
+    }
+    match handler.deliver_system_note(&target, PROBE_NOTE) {
+        Ok(()) => Check::Started,
+        Err(e) => {
+            PROBING.lock().unwrap_or_else(|e| e.into_inner()).remove(block_id);
+            Check::NotStarted(e)
+        }
+    }
+}
+
+/// Takes the right to start a check on `block_id`, and marks its turn in flight (the hold lasts until it clears
+/// the limit, [`unavailable_while_probing`]). `false` when one runs or ran less than
+/// [`PERSON_CHECK_EVERY_MS`] ago.
+fn take_person_check(block_id: &str, now_ms: u64) -> bool {
+    let mut probing = PROBING.lock().unwrap_or_else(|e| e.into_inner());
+    if probing.get(block_id).is_some_and(|started| now_ms.saturating_sub(*started) < PERSON_CHECK_EVERY_MS) {
+        return false;
+    }
+    probing.insert(block_id.to_string(), now_ms);
+    true
+}
+
+/// The pause between the starts of the check turns of one account.
+const CHECK_STAGGER_MS: u64 = 2_000;
+
+/// How long after the first each check of one account starts: the first at once, the others
+/// [`CHECK_STAGGER_MS`] apart, so the agents of an account do not all start a turn in the same second.
+/// `accounts[i]` is pane `i`'s account (`None`: its own).
+pub(super) fn stagger_delays(accounts: &[Option<&str>]) -> Vec<u64> {
+    let mut seen: HashMap<&str, u64> = HashMap::new();
+    accounts
+        .iter()
+        .map(|account| match account {
+            Some(account) => {
+                let n = seen.entry(account).or_insert(0);
+                *n += 1;
+                (*n - 1) * CHECK_STAGGER_MS
+            }
+            None => 0,
+        })
+        .collect()
+}
+
+/// "Check now" for the panes `block_ids`: each one out of quota gets a check turn (`check_now`),
+/// staggered by account. `Ok` when its check started, runs, or starts in a moment; `Err` says why
+/// not (not out of quota, a route out of credits, not registered). The way to say "the plan changed,
+/// look again", so nobody needs to know that an urgent message is what starts one.
+pub(super) fn check_limited(mstore: &Store, block_ids: &[String]) -> Vec<(String, Result<(), String>)> {
+    let now_ms = agentmux_common::time::now_ms_u64();
+    let found: Vec<Result<Unavailable, String>> = block_ids
+        .iter()
+        .map(|id| match crate::backend::agent_state::unavailable_of_block(mstore, None, id, now_ms) {
+            Some(u) if super::person_hold::is_kept_for_check(&u) => Ok(u),
+            Some(u) => Err(format!("{}: a check cannot change that", u.reason())),
+            None => Err("not out of quota".to_string()),
+        })
+        .collect();
+    let accounts: Vec<Option<&str>> = found.iter().map(|f| f.as_ref().ok().and_then(|u| u.account_id.as_deref())).collect();
+    let delays = stagger_delays(&accounts);
+    block_ids
+        .iter()
+        .zip(found.iter().zip(delays))
+        .map(|(id, (found, delay_ms))| (id.clone(), found.as_ref().map_err(Clone::clone).and_then(|_| start_check(id, delay_ms, now_ms))))
+        .collect()
+}
+
+fn start_check(block_id: &str, delay_ms: u64, now_ms: u64) -> Result<(), String> {
+    if delay_ms == 0 {
+        return match check_now(block_id, now_ms) {
+            Check::NotStarted(why) => Err(why),
+            Check::Started | Check::Running => Ok(()),
+        };
+    }
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return Err("no runtime to start the check on".to_string()) };
+    let block_id = block_id.to_string();
+    runtime.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        if let Check::NotStarted(why) = check_now(&block_id, agentmux_common::time::now_ms_u64()) {
+            tracing::info!(block_id = %block_id, why = %why, "limit check: not started");
+        }
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +251,48 @@ mod tests {
         assert!(!take_slot(key, 1_000_000 + PROBE_EVERY_MS - 1));
         assert!(take_slot(key, 1_000_000 + PROBE_EVERY_MS));
         assert!(take_slot("probe-test-other", 1_000_001), "another agent has its own slot");
+    }
+
+    #[test]
+    fn the_checks_of_one_account_start_two_seconds_apart_and_other_accounts_do_not_wait_for_it() {
+        let delays = stagger_delays(&[Some("a"), Some("b"), Some("a"), None, Some("a"), None]);
+        assert_eq!(delays, vec![0, 0, CHECK_STAGGER_MS, 0, 2 * CHECK_STAGGER_MS, 0]);
+    }
+
+    #[test]
+    fn only_a_pane_out_of_its_plans_quota_is_checked() {
+        let store = Store::open_in_memory().unwrap();
+        let now = agentmux_common::time::now_ms_u64();
+        limited_block(&store, "check-test-limited", now, true);
+        let mut healthy = Block { oid: "check-test-healthy".to_string(), ..Default::default() };
+        store.insert(&mut healthy).unwrap();
+        let answers = check_limited(&store, &["check-test-healthy".to_string(), "check-test-gone".to_string()]);
+        assert_eq!(
+            answers,
+            vec![
+                ("check-test-healthy".to_string(), Err("not out of quota".to_string())),
+                ("check-test-gone".to_string(), Err("not out of quota".to_string())),
+            ]
+        );
+        // A limited pane with a process but no agent registered on it: the check cannot start, and says so.
+        crate::backend::agent_state::test_support::register_stub(
+            "check-test-limited",
+            crate::backend::blockcontroller::BLOCK_CONTROLLER_PERSISTENT,
+            crate::backend::blockcontroller::STATUS_RUNNING,
+            false,
+        );
+        let answers = check_limited(&store, &["check-test-limited".to_string()]);
+        crate::backend::blockcontroller::delete_controller("check-test-limited");
+        assert_eq!(answers, vec![("check-test-limited".to_string(), Err("the agent is not registered".to_string()))]);
+    }
+
+    #[test]
+    fn a_persons_check_starts_at_once_but_one_runs_at_a_time_and_not_again_within_a_minute() {
+        let id = "check-test-pane";
+        assert!(take_person_check(id, 1_000_000), "no wait for the 15-minute slot");
+        assert!(!take_person_check(id, 1_000_000 + PERSON_CHECK_EVERY_MS - 1), "one is in flight");
+        assert!(take_person_check(id, 1_000_000 + PERSON_CHECK_EVERY_MS));
+        assert!(take_person_check("check-test-other-pane", 1_000_001), "another agent has its own");
     }
 
     fn limited_block(store: &Store, oid: &str, now: u64, with_failure: bool) {

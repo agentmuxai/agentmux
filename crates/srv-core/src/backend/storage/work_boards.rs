@@ -50,7 +50,21 @@ pub(crate) const SCHEMA: &str = "
         created_by        TEXT NOT NULL DEFAULT '',
         created_at        INTEGER NOT NULL DEFAULT 0,
         updated_at        INTEGER NOT NULL DEFAULT 0
-    );";
+    );
+    CREATE TABLE IF NOT EXISTS db_board_events (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        board_id    TEXT NOT NULL,
+        at          INTEGER NOT NULL,
+        actor       TEXT NOT NULL DEFAULT '',
+        actor_kind  TEXT NOT NULL DEFAULT '',
+        kind        TEXT NOT NULL,
+        body        TEXT NOT NULL DEFAULT '',
+        detail      TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_ids_board_events_board ON db_board_events(board_id, at);";
+
+/// How many lines of a board's own history are kept; the oldest go as new ones come.
+pub const BOARD_EVENTS_KEPT: i64 = 50;
 
 /// Columns added to a boards table that older builds created: the stages (JSON text, empty for the
 /// default set) and the counter that goes up with each change of them.
@@ -404,6 +418,20 @@ pub struct TaskMoved {
     pub target_cleared: bool,
 }
 
+/// One line of a board's history: a change to the board itself (today its stages). `actor` is the agent's
+/// id for an agent and empty for the operator, whose name is never recorded; `detail` holds the sets
+/// before and after (JSON) and is not sent to readers of the list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BoardEvent {
+    pub at: i64,
+    pub actor: String,
+    pub actor_kind: String,
+    pub kind: String,
+    pub body: String,
+    #[serde(skip_serializing)]
+    pub detail: String,
+}
+
 /// Where a delete stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Deletion {
@@ -658,6 +686,34 @@ impl Store {
         Ok(find(&conn, &board.id, now_ms)?.ok_or(StoreError::NotFound)?)
     }
 
+    /// Add a line to a board's history, keeping the newest [`BOARD_EVENTS_KEPT`].
+    pub fn work_board_event_add(&self, board_id: &str, ev: &BoardEvent) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_board_events (board_id, at, actor, actor_kind, kind, body, detail) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![board_id, ev.at, ev.actor, ev.actor_kind, ev.kind, ev.body, ev.detail],
+        )?;
+        conn.execute(
+            "DELETE FROM db_board_events WHERE board_id = ?1 AND id NOT IN
+                (SELECT id FROM db_board_events WHERE board_id = ?1 ORDER BY at DESC, id DESC LIMIT ?2)",
+            params![board_id, BOARD_EVENTS_KEPT],
+        )?;
+        Ok(())
+    }
+
+    /// A board's history, newest first (at most `limit` lines).
+    pub fn work_board_events(&self, board_id: &str, limit: usize) -> Result<Vec<BoardEvent>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT at, actor, actor_kind, kind, body, detail FROM db_board_events
+              WHERE board_id = ?1 ORDER BY at DESC, id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![board_id, limit as i64], |r| {
+            Ok(BoardEvent { at: r.get(0)?, actor: r.get(1)?, actor_kind: r.get(2)?, kind: r.get(3)?, body: r.get(4)?, detail: r.get(5)? })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Delete an archived board and its tasks. A board with tasks waits [`DELETE_COUNTDOWN_MS`]
     /// first, so the person can veto ([`Self::work_board_cancel_delete`]); one with none goes now.
     pub fn work_board_delete(&self, key: &str, now_ms: i64) -> Result<Deletion, BoardError> {
@@ -671,6 +727,7 @@ impl Store {
         }
         let tasks: i64 = conn.query_row("SELECT COUNT(*) FROM db_work_cards WHERE board_id = ?1", params![board.id], |r| r.get(0))?;
         if tasks == 0 {
+            conn.execute("DELETE FROM db_board_events WHERE board_id = ?1", params![board.id])?;
             conn.execute("DELETE FROM db_boards WHERE id = ?1", params![board.id])?;
             return Ok(Deletion::Deleted);
         }
@@ -704,6 +761,7 @@ impl Store {
             for work_id in &ids {
                 purge_task(&tx, work_id)?;
             }
+            tx.execute("DELETE FROM db_board_events WHERE board_id = ?1", params![id])?;
             tx.execute("DELETE FROM db_boards WHERE id = ?1", params![id])?;
             tx.commit()?;
             gone.push(slug);

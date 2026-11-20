@@ -16,7 +16,10 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "accounts", tool: "IdentityAccounts", rename: &[] },
     Act { action: "validate", tool: "IdentityValidate", rename: &[] },
     Act { action: "switch", tool: "IdentitySwitch", rename: &[] },
+    Act { action: "check_limits", tool: "IdentityCheckLimits", rename: &[] },
     Act { action: "signin", tool: "IdentitySignin", rename: &[] },
+    Act { action: "aws_grants", tool: "IdentityAwsGrants", rename: &[] },
+    Act { action: "aws_grant", tool: "IdentityAwsGrant", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -25,6 +28,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let (act, args) = pick("Identity", ACTS, arguments)?;
             let result = match act.tool {
                 "PresetList" | "PresetGet" => presets::call(act.tool, &args, cx).await,
+                "IdentityAwsGrants" | "IdentityAwsGrant" => aws_grants::call(act.tool, &args, cx).await,
                 _ => accounts::call(act.tool, &args, cx).await,
             };
             relabeled("Identity", ACTS, result)

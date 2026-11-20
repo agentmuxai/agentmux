@@ -39,6 +39,8 @@ export interface MenuEntry {
     sublabel?: string;
     /** An exact-hue square before the label (a palette colour), in place of the icon. */
     swatchColor?: string;
+    /** With `swatchColor`: the bar across the top of the swatch (a tab's or pill's bar). */
+    swatchBar?: string;
     /** More inside the label (a second line under it); the row's `class` styles it. */
     detail?: JSX.Element;
     /** After the label: a mark at the row's end (the tab's own identity). */
@@ -399,7 +401,12 @@ function MenuRowLead(props: { entry: MenuEntry; reserve: boolean }): JSX.Element
                 </Show>
             </Show>
             <Show when={props.entry.swatchColor}>
-                {(color) => <span class="menu-item-swatch" style={{ "background-color": color() }} />}
+                {(color) => (
+                    <span
+                        class={clsx("menu-item-swatch", props.entry.swatchBar && "menu-item-swatch--bar")}
+                        style={{ "background-color": color(), ...(props.entry.swatchBar ? { "--swatch-bar": props.entry.swatchBar } : {}) }}
+                    />
+                )}
             </Show>
         </>
     );

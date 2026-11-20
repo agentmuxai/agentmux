@@ -28,7 +28,9 @@
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
 import { tip } from "@/app/element/tip";
 import { Button } from "@/app/element/ui";
+import { useTick } from "@/app/hook/useTick";
 import { t } from "@/app/i18n/i18n";
+import { formatElapsedCompact } from "@/util/format-time";
 import type { PendingMessage } from "../../../agent-model/state";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 
@@ -37,6 +39,19 @@ interface PendingMessagesPanelProps {
     /** Stops the agent's turn. Offered while a message waits behind the agent's own running command, which only a stop ends. */
     onStop?: () => void;
 }
+
+// One clock for the whole queue, however many messages stack: how long the oldest one has waited. It starts
+// showing at one second, so a message that goes straight through never flashes "0s". It ticks only while the
+// panel is on screen (the panel's own Show owns it).
+const PendingTimer = (props: { since: Accessor<number> }): JSX.Element => {
+    const tick = useTick(1000);
+    const waited = createMemo(() => (tick(), Date.now() - props.since()));
+    return (
+        <Show when={waited() >= 1000}>
+            <span class="agent-pending-timer">{formatElapsedCompact(waited())}</span>
+        </Show>
+    );
+};
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => {
     // Only surface messages that were genuinely queued behind a running turn.
@@ -59,10 +74,14 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     // srv has the message but holds it behind the agent's live process (`agent-message-queued`): "reaching the
     // agent any moment" is not true then. The first such message is the one that goes next.
     const waiting = createMemo(() => queuedMessages().find((m) => m.flushing && m.waiting)?.waiting);
+    const oldest = createMemo(() => Math.min(...queuedMessages().map((m) => m.createdAt)));
+    // Offered only while every message waits behind the process: one still queued in the pane goes with Esc.
+    const stop = createMemo(() => (waiting() && stillQueuedCount() === 0 ? props.onStop : undefined));
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
-                <div class="agent-pending-header">
+                {/* With the button, the sentence says what the button stops: it wraps instead of being cut. */}
+                <div class="agent-pending-header" classList={{ "agent-pending-header-wraps": !!stop() }}>
                     <span class="agent-spinner-dot" />
                     <span class="agent-pending-header-text">
                         <Show
@@ -95,13 +114,14 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                             {stillQueuedCount() === 1 ? " message" : " messages"})
                         </Show>
                     </span>
-                    <Show when={waiting() && stillQueuedCount() === 0 ? props.onStop : undefined}>
-                        {(stop) => (
-                            <Button variant="link" class="agent-pending-stop" onClick={stop()} {...tip(t("pendingPanel.stopAndSendTip"))}>
+                    <Show when={stop()}>
+                        {(onStop) => (
+                            <Button variant="link" class="agent-pending-stop" onClick={onStop()} {...tip(t("pendingPanel.stopAndSendTip"))}>
                                 {t("pendingPanel.stopAndSend")}
                             </Button>
                         )}
                     </Show>
+                    <PendingTimer since={oldest} />
                 </div>
                 <For each={queuedMessages()}>
                     {(msg) => (

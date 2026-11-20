@@ -11,15 +11,15 @@
 import { createEffect, createMemo, createSignal, getOwner, on, onCleanup, onMount, runWithOwner, untrack, type Accessor } from "solid-js";
 import {
     computeBlockColorBg,
-    computeBlockIdentityColor,
-    computeBlockTabPillActiveBg,
-    computeBlockTabPillBg,
     computeBlockTabPillNeutralBg,
     computeMixedPaneHeaderBg,
     showPaneTabMenu,
 } from "@/app/block/blockframe";
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/store/pane-tab-registry";
-import { isLightThemeActive } from "@/app/block/pane-identity";
+import { blockIdentitySlot, isLightThemeActive } from "@/app/block/pane-identity";
+import { tabPaint } from "@/app/theme/paint";
+import { currentTabInk } from "@/app/tab/tab-ink";
+import { appliedWindowTheme } from "@/app/store/window-appearance";
 import { MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { readPaneSummary } from "@/app/store/swarm-line";
@@ -303,20 +303,25 @@ export function createTabInfos(
 /**
  * Each pill's own pane color, from its own block's meta (the same source BlockFrame_Header's header
  * and border use). One call per pill's own block: a color taken from anything tab-wide would
- * collapse every underline to one shared color.
+ * collapse every underline to one shared color. The tones come from `theme/paint.ts`, the call a
+ * window tab and the Pane Color menu's sample use too, made readable under the theme's own label colours.
  */
 export function createTabColors(tabIds: Accessor<string[]>): Accessor<Map<string, PaneTabColors>> {
     return createMemo(() => {
         const isLightTheme = isLightThemeActive();
+        appliedWindowTheme(); // the label colours are the theme's own: read once its attribute is on the document
+        const ink = currentTabInk();
         const colors = new Map<string, PaneTabColors>();
         for (const blockId of tabIds()) {
             const meta = blockMeta(blockId);
+            const slot = blockIdentitySlot(meta);
+            const paint = slot ? tabPaint(slot, isLightTheme, ink) : undefined;
             colors.set(blockId, {
-                // The identity normalised for the theme, so it clears 3:1 against the pill under it;
-                // an uncoloured tab falls back to accent.
-                underline: computeBlockIdentityColor(meta, isLightTheme),
-                background: computeBlockTabPillBg(meta, isLightTheme),
-                activeBackground: computeBlockTabPillActiveBg(meta, isLightTheme),
+                // The bar, moved in lightness until it is seen on the selected pill; an uncoloured tab falls back to accent.
+                underline: paint?.bar,
+                background: paint?.unselected,
+                activeBackground: paint?.selected,
+                hoverBackground: paint?.unselectedHover,
                 // Always set: the header behind the strip is tinted with the ACTIVE block's color,
                 // so a transparent uncolored pill would appear to take on whichever tab is selected.
                 neutralBackground: computeBlockTabPillNeutralBg(meta, isLightTheme),

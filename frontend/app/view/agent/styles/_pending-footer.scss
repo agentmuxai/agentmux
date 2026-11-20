@@ -45,6 +45,33 @@
                 min-width: 0;
                 @include mixins.truncate;
             }
+
+            // How long the oldest queued message has waited: one clock for the queue, at the header's right.
+            .agent-pending-timer {
+                flex: none;
+                font-variant-numeric: tabular-nums;
+                // The header's label style is capitals; a duration reads "3m 5s", as the agent's own timer does.
+                text-transform: none;
+            }
+
+            // With "Stop it and send now" in it (PendingMessagesPanel.tsx), the sentence says what the button
+            // stops, so it wraps instead of being cut. In a pane too narrow for the sentence's first words, the
+            // button and the clock on one line, they go under the sentence, at the right.
+            &.agent-pending-header-wraps {
+                flex-wrap: wrap;
+                align-items: baseline;
+
+                .agent-pending-header-text {
+                    flex: 1 1 30em;
+                    white-space: normal;
+                    overflow: visible;
+                }
+
+                .agent-pending-stop {
+                    flex: none;
+                    margin-left: auto;
+                }
+            }
         }
 
         // A queued message (`.agent-pending-item`) is the human's own words waiting, so it is styled

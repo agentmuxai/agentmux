@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
     modals: [] as { component: unknown; props: any }[],
     pushNotification: vi.fn(),
     discardFails: false,
+    closeFails: false,
     open: [] as unknown[],
     windows: 2,
 }));
@@ -47,6 +48,7 @@ vi.mock("@/store/global", () => ({
     getApi: () => ({
         closeWindow: async (label?: string) => {
             h.calls.push(label ? `close:${label}` : "close");
+            if (h.closeFails) throw new Error("the window would not close");
         },
         openRestoredWindow: async (w: { workspaceid: string }) => {
             h.calls.push(`open:${w.workspaceid}`);
@@ -93,6 +95,7 @@ beforeEach(() => {
     h.settings = {};
     h.modals = [];
     h.discardFails = false;
+    h.closeFails = false;
     h.open = [];
     h.windows = 2;
     h.pushNotification.mockReset();
@@ -203,6 +206,29 @@ describe("removing an open window from the workspace", () => {
         await requestRemoveWindow({ windowId: "win-2", label: "window-2" });
         expect(h.modals).toHaveLength(0);
         expect(h.calls).toEqual(["agents:win-2", "discard:win-2", "close:window-2"]);
+    });
+
+    it("closes a window the host has not named the id of by its label, with nothing asked or deleted", async () => {
+        await requestRemoveWindow({ windowId: null, label: "window-2" });
+        expect(h.modals).toHaveLength(0);
+        expect(h.calls).toEqual(["close:window-2"]);
+    });
+
+    it("tells the caller when the window then does not close, on every path (no agent working, an agent working, no id)", async () => {
+        h.closeFails = true;
+        const failed: string[] = [];
+        h.agents = [agent("Korp", false)];
+        await requestRemoveWindow({ windowId: "win-2", label: "window-2" }, undefined, () => failed.push("direct"));
+        // an agent is working: the answer comes from the confirm panel, after requestRemoveWindow has resolved
+        h.agents = [agent("Korp", true)];
+        h.settings = { "window:confirmcloseworking": false };
+        await requestRemoveWindow({ windowId: "win-2", label: "window-2" }, undefined, () => failed.push("confirmed"));
+        expect(failed).toEqual(["direct"]);
+        await h.modals[0].props.onConfirm();
+        expect(failed).toEqual(["direct", "confirmed"]);
+        await requestRemoveWindow({ windowId: null, label: "window-3" }, undefined, () => failed.push("no id"));
+        expect(failed).toEqual(["direct", "confirmed", "no id"]);
+        expect(h.pushNotification).toHaveBeenCalled();
     });
 
     it("tells the caller once the contents are deleted, just before the window closes", async () => {

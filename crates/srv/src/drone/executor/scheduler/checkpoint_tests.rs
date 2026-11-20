@@ -834,6 +834,69 @@ async fn a_checkpoint_from_before_the_failed_set_was_kept_still_knows_which_bran
     assert_eq!(resumed, kept.result, "a restore from the old checkpoint ends as the uninterrupted run did");
 }
 
+/// A loop whose second pass skips a branch that failed in its first: `pick` sends the first pass (n is xx)
+/// to `flaky`, which fails, and the second to `alt`; `ok` arrives each time. `j` brings the three together
+/// before the guard asks whether the loop is done.
+fn a_loop_that_skips_a_branch_that_failed() -> DroneGraph {
+    let flaky = node("flaky", json!({ "kind": "variables", "entries": [{ "name": "v", "value": "1", "reducer": "bogus" }] }));
+    DroneGraph {
+        nodes: vec![
+            vars("start", "n", "x"),
+            vars("step", "n", "{{var.n}}x"),
+            node("pick", json!({ "kind": "condition", "expr": "{{var.n}} == xx" })),
+            flaky,
+            vars("alt", "a", "1"),
+            vars("ok", "o", "1"),
+            node("j", json!({ "kind": "join", "mode": "any", "on_branch_error": "skip" })),
+            node("guard", json!({ "kind": "condition", "expr": "{{var.n}} == xxx" })),
+            response("done", "{{j.arrived}} arrived, {{j.failed}} failed"),
+        ],
+        edges: vec![
+            edge("e1", "start", "step", None),
+            edge("e2", "step", "pick", None),
+            edge("e3", "step", "ok", None),
+            edge("e4", "pick", "flaky", Some("true")),
+            edge("e5", "pick", "alt", Some("false")),
+            edge("e6", "flaky", "j", None),
+            edge("e7", "alt", "j", None),
+            edge("e8", "ok", "j", None),
+            edge("e9", "j", "guard", None),
+            edge("e10", "guard", "done", Some("true")),
+            edge("e11", "guard", "step", Some("false")),
+        ],
+    }
+}
+
+#[tokio::test]
+async fn a_legacy_checkpoint_does_not_bring_back_a_failure_from_an_earlier_pass() {
+    let graph = a_loop_that_skips_a_branch_that_failed();
+    let kept = run_kept(graph.clone(), Value::Null).await;
+    let said = kept.result.clone().unwrap();
+    assert!(!said.as_str().unwrap().contains("flaky"), "in the last pass flaky was skipped, not failed: {said}");
+
+    // The checkpoint kept after the second pass skipped `flaky` and before `j` ran, as an older build wrote it:
+    // with no failed set, and `flaky` still holding the output of its failure in the first pass.
+    let rows = kept.rows();
+    let n = (1..=rows.len())
+        .rev()
+        .find(|n| {
+            let c: Checkpoint = load(&rows[..*n]).unwrap().unwrap();
+            let done = |id: &str| c.position.finished.iter().any(|f| f == id);
+            c.position.failed.as_ref().is_some_and(Vec::is_empty) && done("flaky") && done("alt") && done("ok") && !done("j")
+        })
+        .expect("a checkpoint after the skip and before the join");
+    let mut c: Checkpoint = load(&rows[..n]).unwrap().unwrap();
+    assert_eq!(c.outputs["flaky"]["failed"], json!(true), "the skipped block keeps its old output");
+    c.position.failed = None;
+
+    let (tx, rx) = mpsc::unbounded_channel();
+    let states = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let ended = resume((&graph, &c, Limits::default()), &tx, &states).await;
+    drop(tx);
+    drop(rx);
+    assert_eq!(ended.ok(), kept.result.clone().ok(), "the join prunes the skipped branch, as the uninterrupted run did");
+}
+
 #[tokio::test]
 async fn what_a_failed_call_spent_is_still_on_its_block_after_a_restart() {
     // `call` is a Drone block that fails (there is no drone to call), and its error edge takes the run on.

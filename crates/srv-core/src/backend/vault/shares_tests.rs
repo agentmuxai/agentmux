@@ -73,7 +73,7 @@ fn a1_only_a_login_saved_for_a_site_can_be_shared_and_only_by_a_real_uid() {
     let key = create_in(&s, NewEntry { kind: "api-key".into(), label: "Key".into(), fields: BTreeMap::new(), tags: vec![], parts: Parts([("value".to_string(), "v".to_string())].into()) }, "personal").unwrap();
     assert!(add(&s, &key, PULP).unwrap_err().contains("only a login"));
     let http = login_in(&s, "personal", &[("realm", "Admin")]);
-    assert!(add(&s, &http, PULP).unwrap_err().contains("HTTP prompt"));
+    assert!(add(&s, &http, PULP).unwrap(), "a sign-in for a site's HTTP prompt is shared too (A11)");
 }
 
 #[test]
@@ -340,11 +340,11 @@ fn a2_restoring_an_earlier_value_leaves_who_it_is_shared_with_as_it_is() {
     assert_eq!(listed(&fields(&s, &id)), [PULP]);
 }
 
-/// Gives entry `id` a realm, as the person's edit of it can: it is then no login a share can be made of.
-fn with_realm(s: &Store, id: &str) {
+/// Takes entry `id`'s site away, as the person's edit of it can: it is then no login a share can be made of.
+fn without_site(s: &Store, id: &str) {
     let row = s.vault_get(id).unwrap().unwrap();
     let mut f = fields_of(&row);
-    f.insert("realm".into(), "Admin".into());
+    f.remove("site");
     let changed = VaultRow { fields: serde_json::to_string(&f).unwrap(), ..row.clone() };
     assert!(s.vault_update_kept(&changed, &row.sealed, &row.fields, None).unwrap());
 }
@@ -357,14 +357,14 @@ fn a7_a_share_can_be_removed_whatever_the_login_has_become() {
     add(&s, &two, PULP).unwrap();
     grant(&s, &one, &always_key(PULP));
     grant(&s, &two, &always_key(PULP));
-    with_realm(&s, &one);
+    without_site(&s, &one);
     assert!(add(&s, &one, OTHER).is_err(), "no new share of it");
     // The share it has is still removed, and its Always goes with it.
     assert!(remove(&s, &one, PULP).unwrap());
     assert!(!s.vault_grant_check(&one, &always_key(PULP)).unwrap());
     // A deleted agent: the entry that can't be shared any more does not stop the others.
     add(&s, &two, OTHER).unwrap();
-    with_realm(&s, &two);
+    without_site(&s, &two);
     let (three, four) = (login_in(&s, "personal", &[("site", "https://third.example.com")]), login_in(&s, "personal", &[("site", "https://fourth.example.com")]));
     add(&s, &three, PULP).unwrap();
     add(&s, &four, PULP).unwrap();

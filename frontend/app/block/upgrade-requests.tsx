@@ -9,7 +9,7 @@
  * RPC) that an agent made without the user's own turn asking for it. The
  * answer goes to srv the one way an approval can, through the host
  * (`approvals.decideUpgrade`). Upgrade now starts the download and the
- * restart (the launcher still asks once more before it restarts); Later
+ * restart (the launcher asks nothing more); Later
  * declines. Either way srv tells the agent.
  */
 

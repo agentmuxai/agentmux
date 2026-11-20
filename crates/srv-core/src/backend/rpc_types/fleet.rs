@@ -25,6 +25,19 @@ pub struct FleetActionResult {
     /// agent): not stopped yet, and not failed.
     #[serde(default)]
     pub pending: Vec<String>,
+    /// A broadcast kept for an agent that is out of quota: its check has started and the words go as
+    /// soon as the agent can work. Not sent yet, and not failed.
+    #[serde(default)]
+    pub held: Vec<FleetActionHeld>,
+}
+
+/// One target of a broadcast whose words are kept until the agent can work.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct FleetActionHeld {
+    pub id: String,
+    /// Why, in words: "Out of quota until Sun 7:00 PM; the check has not cleared it yet. Kept, and sent when it can work".
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -32,6 +45,15 @@ pub struct FleetActionResult {
 pub struct FleetActionFailure {
     pub id: String,
     pub error: String,
+}
+
+/// Input for fleet.check-limits: the panes (block ids) whose agents are marked out of quota, to be
+/// looked at again now: each gets a small turn, and one that works clears the limit. The answer is
+/// a `FleetActionResult`: `succeeded` where a check started or runs, `failed` with why not.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandFleetCheckLimitsData {
+    pub targets: Vec<String>,
 }
 
 /// Input for fleet.broadcast. `targets` are block ids (Swarm's native

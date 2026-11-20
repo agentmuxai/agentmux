@@ -31,6 +31,7 @@ export function menuEntriesFrom(items: ContextMenuItem[]): MenuEntry[] {
                     return item.live ? item.live().checked : item.checked;
                 },
                 swatchColor: item.swatchColor,
+                swatchBar: item.swatchBar,
                 sublabel: item.sublabel,
                 submenu: item.submenu?.length ? menuEntriesFrom(item.submenu) : undefined,
                 get disabled() {

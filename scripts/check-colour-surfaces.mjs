@@ -28,14 +28,7 @@ const FORBIDDEN = /^(filter|backdrop-filter|mix-blend-mode|opacity)$/;
  * Rules that still break the above, with the phase of the spec that removes each. `file` is repo-relative; `selector`
  * is the flattened selector the rule resolves to, and `property` the declaration.
  */
-export const ALLOW = [
-    {
-        file: "frontend/app/element/PaneTabStrip.scss",
-        selector: ".pane-tab--colored:hover:not(.pane-tab--active)",
-        property: "filter",
-        reason: "a hovered coloured pane tab pill is lightened by brightness(1.4); phase 2 replaces it with a hover tone",
-    },
-];
+export const ALLOW = [];
 
 /** `text` with comments removed, newlines kept so a line number still counts. */
 export function stripComments(text) {

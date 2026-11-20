@@ -308,7 +308,38 @@ fn notice_words(notice: &str, shown: &str) -> (String, &'static str) {
             format!("the sign-in prompt for {shown} timed out after 5 minutes without an answer"),
             "The person is asked for a username and password in the app; nothing the agent can do answers it. Load the page again to ask again, or tell the person you need it",
         ),
+        // A sign-in prompt (HTTP Basic or Digest) the site raised. `shown` is the site and the realm's name, never a value.
+        "auth_required" => (
+            format!("{shown} asks for a sign-in and the page waits for it, blank until it is answered"),
+            "No saved sign-in of this pane's profile could be used. If Vault list shows a login for this site and realm, ask for it with Vault share (the entry and a reason) from a tab of your own profile, then load the page again. Otherwise the person can type it into the prompt shown in the pane, or save one in Vault; nothing the agent can do types it. The prompt gives up after 5 minutes. Tell the person which site you need",
+        ),
+        "auth_waiting_approval" => (
+            format!("{shown} asks for a sign-in; this profile has a saved one, and the person is asked to approve using it"),
+            "The browser types it itself and you never see it. The page stays blank until the person answers (it gives up after 5 minutes); you are told what happens next. Tell the person if it is urgent",
+        ),
+        "auth_answered" => (
+            format!("{shown}: the saved sign-in was used"),
+            "The page loads if the site accepts it. If the site refuses it you are told, and nothing else is tried",
+        ),
+        "auth_refused" => (
+            format!("{shown} refused the saved sign-in"),
+            "The saved password is probably out of date. Nothing was changed or deleted and the page shows the site's own 401. Tell the person to update that sign-in in Vault",
+        ),
+        "auth_denied" => (
+            format!("the person did not approve using the saved sign-in for {shown}"),
+            "The page shows the site's own 401. Don't ask again unless the person says to",
+        ),
         _ => (format!("the host refused something: {shown}"), "the host refused it"),
+    }
+}
+
+/// What the log says became of a notice: saved or answered are not refusals, and waiting is not either.
+fn notice_decision(notice: &str) -> &'static str {
+    match notice {
+        "download_saved" => "saved",
+        "auth_answered" => "answered",
+        "auth_waiting_approval" => "waiting",
+        _ => "blocked",
     }
 }
 
@@ -349,7 +380,7 @@ pub(crate) async fn handle_host_browser_dialog(
         // Something the host refused in the pane (a link to a program, an untrusted certificate): the agent is told.
         let (what, reason) = notice_words(notice, &message);
         let saved = notice == "download_saved";
-        record(&agent, &target, notice, &what, if saved { "saved" } else { "blocked" }, reason);
+        record(&agent, &target, notice, &what, notice_decision(notice), reason);
         if notice.starts_with("download_") {
             audit_download(&state, &agent, &banner_at, saved, &message);
             // A download is also an action in the pane's log, with the person's header.
@@ -535,6 +566,23 @@ mod tests {
         assert!(what.contains("expired.example") && why.contains("certificate warning"), "{what} / {why}");
         let (what, why) = notice_words("auth_expired", "intranet.example:8080");
         assert!(what.contains("intranet.example:8080") && what.contains("5 minutes") && why.contains("Load the page again"), "{what} / {why}");
+    }
+
+    #[test]
+    fn a_sign_in_prompt_tells_the_agent_which_site_and_what_happened_to_it() {
+        let site = "intranet.example:8080 (realm \"staff\")";
+        let (what, why) = notice_words("auth_required", site);
+        assert!(what.contains(site) && what.contains("blank") && why.contains("Vault") && why.contains("nothing the agent can do"), "{what} / {why}");
+        let (what, why) = notice_words("auth_waiting_approval", site);
+        assert!(what.contains(site) && what.contains("approve") && why.contains("never see"), "{what} / {why}");
+        assert!(notice_words("auth_answered", site).0.contains("saved sign-in was used"));
+        let (what, why) = notice_words("auth_refused", site);
+        assert!(what.contains("refused") && why.contains("out of date") && why.contains("Nothing was changed"), "{what} / {why}");
+        assert!(notice_words("auth_denied", site).0.contains("did not approve"));
+        assert_eq!(notice_decision("auth_answered"), "answered");
+        assert_eq!(notice_decision("auth_waiting_approval"), "waiting");
+        assert_eq!(notice_decision("auth_refused"), "blocked");
+        assert_eq!(notice_decision("download_saved"), "saved");
     }
 
     #[test]

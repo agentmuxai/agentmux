@@ -73,6 +73,10 @@ pub(crate) mod registry_reconcile;
 pub(crate) mod start_rate;
 pub(crate) mod jekt_cold;
 mod limit_probe;
+/// A person's words to an agent out of quota: kept, checked, sent when it can work (task #2648).
+mod person_hold;
+/// `Identity` action `check_limits`: look again now at the agents out of quota (task #2648).
+mod limit_check_api;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_ack;
 pub(crate) mod muxbus_hooks;
@@ -193,6 +197,7 @@ pub(crate) mod vault_handlers;
 pub(crate) mod vault_import;
 pub(crate) mod vault_import_batch;
 pub(crate) mod vault_inspect;
+pub(crate) mod vault_prompt_share;
 pub(crate) mod vault_rotate;
 pub(crate) mod vault_source;
 pub(crate) mod browser_capture;

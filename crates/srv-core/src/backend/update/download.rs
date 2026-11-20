@@ -109,6 +109,8 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
         waiting_for: 0,
         waiting_on: Vec::new(),
         stopping: Vec::new(),
+        not_confirmed_at: None,
+        not_confirmed: None,
     }))
 }
 

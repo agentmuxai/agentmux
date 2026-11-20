@@ -18,8 +18,10 @@
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
+import { t } from "@/app/i18n/i18n";
 import { Button, CloseButton } from "@/app/element/ui";
 import type { PaneRequestProps } from "@/app/store/pane-requests";
+import { openConnectors } from "@/app/store/section-panes";
 import type { NoticeView } from "@/types/rpc/NoticeView";
 import "./agent-notice-card.scss";
 
@@ -108,15 +110,21 @@ export function AgentNoticeCard(props: { notice: NoticeView; decide: (choice: No
     );
 }
 
+/** Whether a notice is a container agent refused a credential: it stays until the credential works, and says so in full. */
+export function isCredentialNotice(kind: NoticeView["kind"]): boolean {
+    return kind === "github" || kind === "aws";
+}
+
 export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps): JSX.Element {
     const n = props.notice;
+    const credential = isCredentialNotice(n.kind);
     // One line, cut with an ellipsis; the whole of it is in the tooltip.
     const whole = [n.headline, n.body, n.quote && `"${n.quote}"`]
         .filter(Boolean)
         .map((part) => String(part).replace(/[.\s]+$/, ""))
         .join(". ");
     return (
-        <section class="agent-notice-line" aria-label={n.headline}>
+        <section class="agent-notice-line" classList={{ "agent-notice-line--credential": credential }} aria-label={n.headline}>
             <p class="agent-notice-line-text" {...tip(whole)}>
                 <strong>{n.headline}</strong>
                 <Show when={n.quote}>
@@ -124,6 +132,12 @@ export function AgentNoticeLine(props: { notice: NoticeView } & PaneRequestProps
                     {n.quote}
                 </Show>
             </p>
+            {/* GitHub is connected, and its sign-in kept, in Connectors; an AWS login is the person's to renew on the host. */}
+            <Show when={n.kind === "github"}>
+                <Button variant="link" class="agent-notice-line-link" onClick={() => void openConnectors("accounts")}>
+                    {t("agentNotice.openConnectors")}
+                </Button>
+            </Show>
             <CloseButton size="sm" label="Dismiss" tooltip={false} onClick={() => props.close()} />
         </section>
     );
