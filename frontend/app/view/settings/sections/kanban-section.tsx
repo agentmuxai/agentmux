@@ -40,7 +40,6 @@ export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element
         () => props.model?.kanbanAsk?.() ?? 0
     );
     return (
-        <>
         <div class="settings-section-body kanban-stages" id={`setting-${KANBAN_SETTINGS.stages.id}`}>
             <SectionHeader label={t("settings.kanban.group.stages")} />
             <p class="kanban-stages__tier">{t("settings.kanban.stages.description")}</p>
@@ -71,10 +70,7 @@ export function KanbanSection(props: { model?: SettingsViewModel }): JSX.Element
             <Problems s={s} />
             <Footer s={s} />
             <History s={s} />
-        </div>
-        <div class="settings-section-body">
             <KanbanBehaviourRows />
         </div>
-        </>
     );
 }

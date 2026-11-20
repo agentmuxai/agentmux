@@ -62,6 +62,7 @@ export function KanbanBehaviourRows(): JSX.Element {
                         class="setting-number"
                         min={0}
                         step={1}
+                        parse="int"
                         value={reviewLimitOf(settings())}
                         onChange={(v) => set("kanban:reviewlimit", Math.max(0, Math.floor(v)))}
                     />
