@@ -668,7 +668,7 @@
     "uiBusy.aria": "This window's page busy share",
     "uiBusy.value": "UI busy {{pct}}%",
     "uiBusy.hidden": "UI busy: shown while this window is in front",
-    "uiBusy.tip": "UI busy: the share of the last second this window's page spent in tasks longer than 50 ms. It covers this window only, not agents, the server or other windows, and shows nothing while the window is in the background. Above {{warn}}% it turns the warning colour.",
+    "uiBusy.tip": "UI busy: the share of the last second this window's page spent drawing slow frames (a frame that took 50 ms or more, about three missed in a row). A stutter reads high even when no single piece of work is long. It is not CPU. It covers this window only, not agents, the server or other windows, and shows nothing while the window is in the background. Above {{warn}}% it turns the warning colour.",
     "gpuPanel.aria": "GPU use and memory",
     "gpuPanel.title": "Graphics",
     "gpuPanel.reading": "Reading the GPU…",
