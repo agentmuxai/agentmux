@@ -364,6 +364,7 @@ wrap_task! {
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
+    let path = super::save_answer::offered_path(path);
     let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     crate::commands::file_dialog::spawn(move || {
         let answer = ask_guarded(crate::commands::file_dialog::can_ask(), || {
