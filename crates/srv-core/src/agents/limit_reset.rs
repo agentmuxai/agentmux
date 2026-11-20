@@ -14,8 +14,9 @@
 //!    `overageStatus` is often `"rejected"` while `status` is `"allowed"`; it
 //!    is never read.
 //! 2. The error text, `resets Oct 26, 7pm (America/Los_Angeles)` or
-//!    `resets 7pm`, parsed only in this machine's own time zone: srv has no
-//!    time-zone database, so a time in any other zone is left unknown. Codex
+//!    `resets 3:10am (UTC)` or `resets 7pm`, read in the zone it names (any
+//!    IANA name or `UTC`, from the `chrono-tz` data) or, with none, in this
+//!    machine's own; a zone that is not a name is left unknown. Codex
 //!    words it `... or try again at 9:44 PM.` (the machine's own zone, with the
 //!    date and year when it is not today: `Nov 3rd, 2025 9:44 PM`);
 //!    [`codex_failure_text`] picks that text out of Codex's `error` and
@@ -117,9 +118,10 @@ pub fn fill_reset(
 }
 
 /// The reset a limit message names (`resets Oct 26, 7pm (America/Los_Angeles)`,
-/// `resets 7:30pm`), in unix ms, or `None`. A named zone must be `local_zone`,
-/// this machine's own; with none named the time is local (the CLI writes it in
-/// the machine's zone). A time with no date is its next occurrence after `now`;
+/// `resets 7:30pm`, `resets 3:10am (UTC)`), in unix ms, or `None`. A named zone
+/// is read as that zone's clock (`local_zone` is this machine's, read as local);
+/// with none named the time is local (the CLI writes it in the machine's zone).
+/// A time with no date is its next occurrence after `now`;
 /// a date with no year, likewise.
 pub fn reset_from_text(text: &str, now: DateTime<Local>, local_zone: Option<&str>) -> Option<u64> {
     claude_reset(text, now, local_zone).or_else(|| codex_reset(text, now))
@@ -194,11 +196,6 @@ fn claude_reset(text: &str, now: DateTime<Local>, local_zone: Option<&str>) -> O
         }
         None => (line.trim(), None),
     };
-    if let Some(zone) = zone {
-        if Some(zone) != local_zone {
-            return None;
-        }
-    }
     // "Oct 26, 7pm", "Oct 26 at 7pm" or "7pm"
     let words: Vec<&str> = when.split(|c: char| c == ',' || c.is_whitespace()).filter(|w| !w.is_empty() && *w != "at").collect();
     let (date, time_word) = match words.as_slice() {
@@ -207,23 +204,36 @@ fn claude_reset(text: &str, now: DateTime<Local>, local_zone: Option<&str>) -> O
         _ => return None,
     };
     let time = parse_clock(time_word)?;
+    let at_ms = match zone.filter(|z| Some(*z) != local_zone) {
+        // A zone other than this machine's (a UTC reset read on a Pacific host): the clock is that zone's.
+        Some(named) => {
+            let tz: chrono_tz::Tz = named.parse().ok()?;
+            next_occurrence(&now.with_timezone(&tz), date, time)?.timestamp_millis()
+        }
+        None => next_occurrence(&now, date, time)?.timestamp_millis(),
+    };
+    u64::try_from(at_ms).ok()
+}
+
+/// The next time after `now` that the clock in `now`'s zone reads `time` (on `date`, month and day, when named).
+fn next_occurrence<Z: TimeZone>(now: &DateTime<Z>, date: Option<(u32, u32)>, time: NaiveTime) -> Option<DateTime<Z>> {
+    let zone = now.timezone();
     let today = now.date_naive();
-    let candidate = |d: NaiveDate| Local.from_local_datetime(&d.and_time(time)).earliest();
-    let at = match date {
+    let candidate = |d: NaiveDate| zone.from_local_datetime(&d.and_time(time)).earliest();
+    match date {
         None => {
             let t = candidate(today)?;
-            if t > now { t } else { candidate(today.succ_opt()?)? }
+            if t > *now { Some(t) } else { candidate(today.succ_opt()?) }
         }
         Some((month, day)) => {
             let this_year = candidate(NaiveDate::from_ymd_opt(today.year(), month, day)?)?;
-            if this_year > now {
-                this_year
+            if this_year > *now {
+                Some(this_year)
             } else {
-                candidate(NaiveDate::from_ymd_opt(today.year() + 1, month, day)?)?
+                candidate(NaiveDate::from_ymd_opt(today.year() + 1, month, day)?)
             }
         }
-    };
-    u64::try_from(at.timestamp_millis()).ok()
+    }
 }
 
 fn month_number(word: &str) -> Option<u32> {
@@ -374,16 +384,42 @@ mod tests {
         let now = at(2026, 10, 23, 9, 0);
         let allowed = RateLimitInfo { status: "allowed".into(), ..rejected(at(2026, 10, 23, 14, 0), "five_hour") };
         let f = fill_reset(&weekly(), Some(&allowed), now, Some("Europe/Paris"));
-        assert_eq!(f.resets_at_ms, None, "no rejected event, and the text names another zone");
+        assert_eq!(f.resets_at_ms, Some(ms_in(chrono_tz::America::Los_Angeles, (2026, 10, 26), (19, 0))), "no rejected event: the text's own zone");
         assert_eq!(f.limit_window, None);
     }
 
     #[test]
-    fn the_text_is_the_fallback_in_the_local_zone_only() {
+    fn the_text_is_the_fallback_read_in_the_zone_it_names() {
         let now = at(2026, 10, 23, 9, 0);
         assert_eq!(fill_reset(&weekly(), None, now, Some(ZONE)).resets_at_ms, Some(ms(at(2026, 10, 26, 19, 0))));
-        assert_eq!(fill_reset(&weekly(), None, now, Some("Europe/Paris")).resets_at_ms, None);
-        assert_eq!(fill_reset(&weekly(), None, now, None).resets_at_ms, None, "local zone unknown");
+        let pacific = Some(ms_in(chrono_tz::America::Los_Angeles, (2026, 10, 26), (19, 0)));
+        assert_eq!(fill_reset(&weekly(), None, now, Some("Europe/Paris")).resets_at_ms, pacific, "another machine zone");
+        assert_eq!(fill_reset(&weekly(), None, now, None).resets_at_ms, pacific, "local zone unknown");
+        let unknown = classify(Some(1), None, "You've hit your weekly limit · resets Oct 26, 7pm (Mars/Olympus)", None);
+        assert_eq!(fill_reset(&unknown, None, now, Some(ZONE)).resets_at_ms, None, "not a zone name");
+    }
+
+    /// The text of the outage that started #48173: a 429 that names the 5-hour window, reset in UTC.
+    const FIVE_HOUR: &str = "HTTP 429 You've hit your 5-hour limit · resets 3:10am (UTC)";
+
+    #[test]
+    fn a_429_naming_the_five_hour_window_is_a_usage_limit_with_its_utc_reset() {
+        let f = classify(Some(1), None, FIVE_HOUR, None);
+        assert_eq!(f.code, FailureClass::UsageLimit);
+        assert!(!f.retryable);
+        // 02:00 UTC on a day: the next 03:10 UTC is that morning, whatever zone the machine is in.
+        let now = chrono_tz::UTC.with_ymd_and_hms(2026, 11, 20, 2, 0, 0).unwrap().with_timezone(&Local);
+        for local in [Some(ZONE), Some("Europe/Paris"), None] {
+            let reset = fill_reset(&f, None, now, local).resets_at_ms;
+            assert_eq!(reset, Some(ms_in(chrono_tz::UTC, (2026, 11, 20), (3, 10))), "{local:?}");
+        }
+        // Past 03:10 UTC it is the next day's.
+        let later = chrono_tz::UTC.with_ymd_and_hms(2026, 11, 20, 4, 0, 0).unwrap().with_timezone(&Local);
+        assert_eq!(fill_reset(&f, None, later, None).resets_at_ms, Some(ms_in(chrono_tz::UTC, (2026, 11, 21), (3, 10))));
+    }
+
+    fn ms_in(tz: chrono_tz::Tz, (y, mo, d): (i32, u32, u32), (h, mi): (u32, u32)) -> u64 {
+        u64::try_from(tz.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap().timestamp_millis()).unwrap()
     }
 
     #[test]
@@ -401,9 +437,11 @@ mod tests {
     #[test]
     fn a_reset_out_of_range_is_dropped() {
         let now = at(2026, 10, 23, 9, 0);
-        let past = fill_reset(&weekly(), Some(&rejected(at(2026, 10, 22, 9, 0), "seven_day")), now, None);
+        // No reset in the text either, so a dropped event leaves none.
+        let bare = classify(Some(1), None, "You've hit your weekly limit", None);
+        let past = fill_reset(&bare, Some(&rejected(at(2026, 10, 22, 9, 0), "seven_day")), now, None);
         assert_eq!(past.resets_at_ms, None);
-        let far = fill_reset(&weekly(), Some(&rejected(at(2026, 11, 5, 9, 0), "seven_day")), now, None);
+        let far = fill_reset(&bare, Some(&rejected(at(2026, 11, 5, 9, 0), "seven_day")), now, None);
         assert_eq!(far.resets_at_ms, None, "more than 8 days ahead");
         // Exactly 8 days of milliseconds, whatever DST does that week.
         let edge = Local.timestamp_millis_opt((ms(now) + MAX_AHEAD_MS) as i64).unwrap();

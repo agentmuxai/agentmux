@@ -61,6 +61,29 @@ fn a_rejected_login_wins_over_a_context_message_and_a_plan_limit_wins_over_both(
     assert_eq!(class_of("the context is too long and the network dropped"), FailureClass::ContextExceeded);
 }
 
+/// A 429 whose text names the plan's own window is the account quota on every path, not a throttle to retry.
+#[test]
+fn a_429_that_names_a_plan_window_is_a_usage_limit_and_a_plain_429_is_a_rate_limit() {
+    for text in [
+        "HTTP 429 You've hit your 5-hour limit · resets 3:10am (UTC)",
+        "API Error: 429 You've hit your weekly limit · resets Nov 24, 7pm (UTC)",
+        "429 You've hit your Opus limit · resets 3pm",
+        "error: rate_limit · You've hit your limit",
+        "status 429: five-hour limit reached",
+    ] {
+        let f = classify(Some(1), None, text, None);
+        assert_eq!((f.code, f.retryable), (FailureClass::UsageLimit, false), "{text}");
+    }
+    for text in [
+        "HTTP 429 Too Many Requests",
+        "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited",
+        "429 rate limit exceeded, retry after 20 seconds",
+    ] {
+        let f = classify(Some(1), None, text, None);
+        assert_eq!((f.code, f.retryable), (FailureClass::RateLimited, true), "{text}");
+    }
+}
+
 #[test]
 fn a_usage_limit_is_checked_before_the_network_words() {
     assert_eq!(class_of("quota exceeded after a network timeout"), FailureClass::UsageLimit);
