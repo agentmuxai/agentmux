@@ -98,7 +98,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn the_script_reads_a_live_process_and_a_missing_one() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = agentmux_common::time::now_ms() / 1000;
         let mine = run(&[&std::process::id().to_string()]);
         let started: i64 = mine.strip_prefix("alive ").expect(&mine).parse().unwrap();
         assert!(started <= now + 2 && started > now - 7 * 24 * 3600, "{mine}");
