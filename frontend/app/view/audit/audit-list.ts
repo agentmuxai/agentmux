@@ -96,6 +96,19 @@ function createListState() {
     };
 }
 
+/**
+ * Look at the newest entries again when srv says a row was written. The other channels on this computer push
+ * nothing, so while they are listed (the `machine` scope) it also looks every few seconds.
+ */
+function keepFresh(filter: Accessor<AuditFilter>, visible: () => boolean, look: () => void) {
+    useAuditLive(visible, look);
+    createEffect(() => {
+        if (filter().scope !== "machine" || !visible()) return;
+        const timer = setInterval(look, OTHER_CHANNELS_EVERY_MS);
+        onCleanup(() => clearInterval(timer));
+    });
+}
+
 export function createAuditList(filter: Accessor<AuditFilter>, visible: () => boolean) {
     const state = createListState();
     const { entries, setEntries, cursor, setCursor, error, setError, setLoading, loadingMore, setLoadingMore } = state;
@@ -191,14 +204,7 @@ export function createAuditList(filter: Accessor<AuditFilter>, visible: () => bo
         }
         return untrack(following) ? loadFirst(true, true) : peek();
     });
-    useAuditLive(visible, () => void refresh());
-
-    // The other channels on this computer are asked, not pushed: while they are listed, look again every few seconds.
-    createEffect(() => {
-        if (filter().scope !== "machine" || !visible()) return;
-        const timer = setInterval(() => void refresh(), OTHER_CHANNELS_EVERY_MS);
-        onCleanup(() => clearInterval(timer));
-    });
+    keepFresh(filter, visible, () => void refresh());
 
     const { totals, notRecorded, loading, paused, newCount, channel } = state;
     return { channel, entries, cursor, totals, notRecorded, error, loading, loadingMore, paused, setPaused, newCount, loadMore, showNewest, reachBack: reachBackOf(firstLoad, cursor, loadMore) };
