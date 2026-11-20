@@ -26,6 +26,8 @@ export interface DiskConflictTab {
 
 /** What the Editor's model supplies. */
 export interface DiskConflictHost {
+    /** The tab as it is now (a read takes time, and the tab may have been saved, changed or closed meanwhile). */
+    current(tabId: string): (DiskConflictTab & { dirty?: boolean }) | undefined;
     /** The connection and block of a read for this tab (a host's file is read there). */
     on(tabId: string): { connection?: string; block_id?: string };
     /** Discard the tab's edits and show the file's current content. */
@@ -48,7 +50,7 @@ export class DiskConflicts {
         return !!tabId && this.flagged[0]().has(tabId);
     }
 
-    /** A tab closed: nothing more to ask about it. */
+    /** A tab closed, or a save of it went through (the disk holds its own content): nothing more to ask about it. */
     forget(tabId: string): void {
         this.kept.delete(tabId);
         this.saving.delete(tabId);
@@ -57,7 +59,7 @@ export class DiskConflicts {
 
     /** The watcher saw the file of a tab with unsaved edits change: ask if it really differs from what the tab started from. */
     async noteChange(tab: DiskConflictTab): Promise<void> {
-        if (await this.diverged(tab)) this.setFlag(tab.id, true);
+        if ((await this.diverged(tab)) && this.host.current(tab.id)?.dirty) this.setFlag(tab.id, true);
     }
 
     /** Before a save writes: true to go ahead, false when the file changed under the edits (the question is shown). */
@@ -72,10 +74,11 @@ export class DiskConflicts {
 
     /** "Keep mine": the edits stay, the disk version is not asked about again, and a save that was waiting goes ahead. */
     async keep(tab: DiskConflictTab): Promise<void> {
+        this.setFlag(tab.id, false);
+        // A save is waiting: it goes now, with no read first (a read can take long, and the tab in front may change).
+        if (this.saving.delete(tab.id)) return this.host.overwrite(tab);
         const disk = await this.diskHash(tab);
         if (disk !== null) this.kept.set(tab.id, disk);
-        this.setFlag(tab.id, false);
-        if (this.saving.delete(tab.id)) await this.host.overwrite(tab);
     }
 
     /** "Reload": the edits go and the file's current content shows. */
@@ -89,7 +92,9 @@ export class DiskConflicts {
     private async diverged(tab: DiskConflictTab): Promise<boolean> {
         if (tab.isScratch || !tab.contentHash) return false;
         const disk = await this.diskHash(tab);
-        return disk !== null && disk !== tab.contentHash && disk !== this.kept.get(tab.id);
+        // Against the tab as it is after the read: a save that finished meanwhile moved its hash to what is on disk.
+        const now = this.host.current(tab.id);
+        return disk !== null && !!now && disk !== now.contentHash && disk !== this.kept.get(tab.id);
     }
 
     /** The hash of the file as it is now, or null when it cannot be read. */

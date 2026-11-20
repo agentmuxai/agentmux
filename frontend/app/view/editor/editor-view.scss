@@ -627,9 +627,7 @@
 .editor-disk-conflict-text {
     flex: 1 1 16em;
     min-width: 0;
-}
-
-.editor-disk-conflict-name {
+    // A long file name has no spaces to wrap at.
     overflow-wrap: anywhere;
 }
 

@@ -6,6 +6,7 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { t } from "@/app/i18n/i18n";
 import type { EditorViewModel } from "./editor-model";
 
 export function EditorDiskConflictPanel(props: { model: EditorViewModel }): JSX.Element {
@@ -13,18 +14,17 @@ export function EditorDiskConflictPanel(props: { model: EditorViewModel }): JSX.
     const tab = () => model.activeTabAtom();
     return (
         <Show when={tab()}>
-            {(t) => (
+            {(tb) => (
                 <div class="editor-disk-conflict" role="alert" data-zoom-scope="chrome">
                     <span class="editor-disk-conflict-text">
-                        <b class="editor-disk-conflict-name">{t().displayName ?? t().filePath.split(/[\\/]/).pop()}</b> changed on disk. Reload
-                        loses your unsaved edits; Keep mine keeps them.
+                        {t("editor.diskConflict.message", { name: tb().displayName ?? tb().filePath.split(/[\\/]/).pop() })}
                     </span>
                     <span class="editor-disk-conflict-actions">
-                        <Button density="compact" tone="danger" onClick={() => void model.diskConflicts.reload(t())}>
-                            Reload
+                        <Button density="compact" tone="danger" onClick={() => void model.diskConflicts.reload(tb())}>
+                            {t("editor.diskConflict.reload")}
                         </Button>
-                        <Button density="compact" onClick={() => void model.diskConflicts.keep(t())}>
-                            Keep mine
+                        <Button density="compact" onClick={() => void model.diskConflicts.keep(tb())}>
+                            {t("editor.diskConflict.keepMine")}
                         </Button>
                     </span>
                 </div>

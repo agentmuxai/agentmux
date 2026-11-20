@@ -1201,6 +1201,9 @@
     "connectors.google.notOffered": "{{name}} isn't available in this version of AgentMux yet.",
     "connectors.control.howToNamed": "How to connect {{name}}",
     "connectors.control.reconnectNamed": "Reconnect {{name}}",
+    "editor.diskConflict.message": "{{name}} changed on disk. Reload loses your unsaved edits; Keep mine keeps them.",
+    "editor.diskConflict.reload": "Reload",
+    "editor.diskConflict.keepMine": "Keep mine",
     "editor.lsp.dismissBanner": "Dismiss banner for this session",
     "editor.lsp.notOnHost": "A container agent can write in this folder, so no language server runs on the host for it."
 }

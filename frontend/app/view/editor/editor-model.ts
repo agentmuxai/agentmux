@@ -256,8 +256,10 @@ export class EditorViewModel {
     /** A tab with unsaved edits whose file changed on disk: Reload or Keep mine (editor-disk-conflict.ts). */
     readonly diskConflicts = new DiskConflicts({
         on: (id) => this.on(id),
+        current: (id) => snapshot(this.blockId)?.tabs.find((t) => t.id === id),
         reload: async (t) => void ((await this._loadFileIntoTab(t.id, t.filePath)) && dispatch(this.blockId, { type: "ClearDirty", tabId: t.id, source: "system" })),
-        overwrite: () => this.saveFile({ overwrite: true }),
+        // saveFile writes the tab in front: only when it is still this one.
+        overwrite: async (t) => void (this.activeTabAtom()?.id === t.id && (await this.saveFile({ overwrite: true }))),
     });
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`
@@ -1032,6 +1034,7 @@ export class EditorViewModel {
                 tabId: tab.id,
                 source: "system",
             });
+            this.diskConflicts.forget(tab.id); // the disk holds this tab's own content now
             // Recompute content hash since disk now matches buffer.
             const hash = await sha256Hex(content);
             dispatch(this.blockId, {

@@ -18,25 +18,72 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 import { DiskConflicts, type DiskConflictTab } from "./editor-disk-conflict";
 import { sha256Hex } from "./editor-hash";
 
+/** The tabs as the Editor holds them now (what `current` answers), which a test moves on while a read is in flight. */
+const live = new Map<string, DiskConflictTab & { dirty?: boolean }>();
+
 function setup() {
     const calls: string[] = [];
     const conflicts = new DiskConflicts({
         on: () => ({}),
+        current: (id) => live.get(id),
         reload: async (t) => void calls.push(`reload:${t.id}`),
         overwrite: async (t) => void calls.push(`overwrite:${t.id}`),
     });
     return { conflicts, calls };
 }
 
-/** A tab that loaded "one" from disk. */
+/** A tab with unsaved edits that loaded "one" from disk. */
 async function tabOf(over: Partial<DiskConflictTab> = {}): Promise<DiskConflictTab> {
-    return { id: "t1", filePath: "/p/settings.json", contentHash: await sha256Hex("one"), ...over };
+    const tab = { id: "t1", filePath: "/p/settings.json", contentHash: await sha256Hex("one"), ...over };
+    live.set(tab.id, { ...tab, dirty: true });
+    return tab;
 }
 
 describe("DiskConflicts", () => {
     beforeEach(() => {
         disk.content = "one";
         disk.reads = 0;
+        live.clear();
+    });
+
+    it("the echo of the tab's own save that arrives while the write is in flight is not a conflict once the save has finished", async () => {
+        const { conflicts } = setup();
+        const tab = await tabOf(); // the event's snapshot: dirty, the hash from before the save
+        disk.content = "two"; // the save's own write
+        const noting = conflicts.noteChange(tab);
+        live.set("t1", { ...tab, contentHash: await sha256Hex("two"), dirty: false }); // the save finished during the read
+        await noting;
+        expect(conflicts.has("t1")).toBe(false);
+    });
+
+    it("a tab that is clean after the read is not asked about, whatever the disk says", async () => {
+        const { conflicts } = setup();
+        const tab = await tabOf();
+        disk.content = "two";
+        const noting = conflicts.noteChange(tab);
+        live.set("t1", { ...tab, dirty: false });
+        await noting;
+        expect(conflicts.has("t1")).toBe(false);
+    });
+
+    it("a save that goes through clears a question the echo raised while it was in flight", async () => {
+        const { conflicts } = setup();
+        disk.content = "two";
+        await conflicts.noteChange(await tabOf());
+        expect(conflicts.has("t1")).toBe(true);
+        conflicts.forget("t1"); // the Editor's saveFile, once the write returned
+        expect(conflicts.has("t1")).toBe(false);
+    });
+
+    it("Keep mine for a save that is waiting saves at once, with no read of the disk first", async () => {
+        const { conflicts, calls } = setup();
+        const tab = await tabOf();
+        disk.content = "two";
+        await conflicts.guardSave(tab);
+        disk.reads = 0;
+        await conflicts.keep(tab);
+        expect(disk.reads).toBe(0);
+        expect(calls).toEqual(["overwrite:t1"]);
     });
 
     it("a change the watcher reports that leaves the content as the tab loaded it is not a conflict (the echo of its own save)", async () => {
