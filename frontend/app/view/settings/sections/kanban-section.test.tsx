@@ -92,7 +92,7 @@ describe("Settings → Kanban", () => {
         fireEvent.click(apply());
         await waitFor(() => expect(h.acts).toHaveLength(1));
         expect(h.acts[0]).toMatchObject({ action: "board_edit", board: "main", stages_rev: 0 });
-        expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", name: "Waiting", colour: "grey", takes: ["backlog"] });
+        expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", name: "Waiting", colour: "muted", takes: ["backlog"] });
     });
 
     it("keeps Apply off, and says why, while a name is empty or taken", async () => {

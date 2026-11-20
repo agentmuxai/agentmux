@@ -399,13 +399,13 @@ impl Controller for ShellController {
         rt_opts: Option<serde_json::Value>,
         force: bool,
     ) -> Result<(), String> {
+        crate::backend::mcp_folder_rule::not_refused(&block_meta)?;
         let cmd_str_preview = Self::get_cmd_str(&block_meta);
-        let interactive_preview = Self::is_interactive(&block_meta);
         tracing::info!(
             block_id = %self.block_id,
             controller = %self.controller_type,
             cmd = %cmd_str_preview,
-            interactive = interactive_preview,
+            interactive = Self::is_interactive(&block_meta),
             force = force,
             "block start requested"
         );

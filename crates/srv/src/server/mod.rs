@@ -37,6 +37,7 @@ mod install_task;
 #[cfg(all(test, unix))]
 mod install_task_tests;
 mod lsp_handlers;
+pub(crate) mod mcp_folder_notice;
 mod system_install_handlers;
 mod uninstall_handlers;
 mod messagebus;
@@ -49,6 +50,7 @@ mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod agent_folder_open;
+pub(crate) mod agent_media_files;
 pub(crate) mod container_pane_snapshot;
 pub(crate) mod streamed_browser;
 pub(crate) mod files_root;

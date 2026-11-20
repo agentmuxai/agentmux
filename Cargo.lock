@@ -358,6 +358,7 @@ dependencies = [
  "keepass",
  "keyring-core",
  "libc",
+ "libloading 0.8.9",
  "lopdf",
  "mdns-sd",
  "memchr",

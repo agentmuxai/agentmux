@@ -136,6 +136,10 @@ declare global {
         /** Keep a floating pane above every window of this instance (the header tack).
          *  SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27. */
         floatingAlwaysOnTop: boolean;
+        /** The host measures the machine and pushes the performance signals itself (`health-signal`,
+         *  `getHealthSignals`: low RAM, low page file, low disk space). Without it the page works the low-disk
+         *  notice out from the system info it already receives (statusbar/low-disk.ts). */
+        hostHealthSignals: boolean;
     };
 
     /** Host-mediated approvals (the approval windows) and the Vault's file steps. */

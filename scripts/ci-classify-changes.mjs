@@ -119,6 +119,7 @@ const RUST_READS_FRONTEND = [
     /^frontend\/app\/view\/agent\/providers\/catalog\.ts$/,
     /^frontend\/layout\/tests\/fixtures\//,
     /^frontend\/app\/util\/widgets-json-template\.jsonc$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
 ];
 
 /**
@@ -146,6 +147,7 @@ const CEF_BUILT_FROM = [
     /^settings-template\.jsonc$/,
     /^assets\/linux\/icons\//,
     /^frontend\/app\/keybindings\/host-keys\.json$/,
+    /^frontend\/app\/store\/low-disk-levels\.json$/,
     /^\.github\/workflows\/ci-pr\.yml$/,
     /^scripts\/(ci-apt|ci-require-tools|ci-classify-changes)\./,
 ];

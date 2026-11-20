@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::backend::account_usage::AccountUsage;
 use crate::backend::agent_state::AgentState;
 use crate::backend::storage::identities::IdentityAccount;
 use crate::identity::stable_account::stable_account_id;
@@ -52,7 +53,7 @@ impl AccountQuota {
 }
 
 /// One account, as `identity.accounts` lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AccountView {
     /// The id every machine agrees on (`identity::stable_account`); absent for an
@@ -69,13 +70,16 @@ pub struct AccountView {
     /// `valid`, `ok`, `unknown`, `expired`, `needs_reauth` or `invalid`.
     pub sign_in: String,
     pub quota: AccountQuota,
+    /// How much of each usage window is used and when it resets, from the provider's own report
+    /// (`backend::account_usage`); `not_reported` for a provider whose CLI reports none.
+    pub usage: AccountUsage,
     /// Marked "never fail over to this": no agent is moved onto it by itself (`failover`).
     pub never_failover: bool,
     pub agents: Vec<AccountAgent>,
 }
 
 /// `identity.accounts`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct IdentityAccountsResult {
     pub accounts: Vec<AccountView>,
@@ -128,6 +132,7 @@ pub(super) fn accounts(state: &AppState, now_ms: u64) -> Result<IdentityAccounts
             None if matches!(a.status.as_str(), "expired" | "needs_reauth" | "invalid") => AccountQuota::of("signed_out"),
             None => AccountQuota::of("ok"),
         };
+        let usage = AccountUsage::of(&provider, &a.id, now_ms);
         out.push(AccountView {
             stable_id: stable_account_id(a),
             account_id: a.id.clone(),
@@ -136,6 +141,7 @@ pub(super) fn accounts(state: &AppState, now_ms: u64) -> Result<IdentityAccounts
             label: account_label_in(a, &same_provider),
             sign_in: a.status.clone(),
             quota,
+            usage,
             never_failover: super::failover::is_never(a),
             agents,
         });

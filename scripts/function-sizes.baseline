@@ -262,7 +262,6 @@
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 183 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
-105 crates/srv/src/server/files.rs::handle_stream_local_file
 121 crates/srv/src/server/http_health.rs::handle_discovery
 229 crates/srv/src/server/http_shell.rs::create_shell
 147 crates/srv/src/server/http_shell.rs::try_attach_to_existing_shell
@@ -324,7 +323,7 @@
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
-105 frontend/app/modals/command-palette.tsx::CommandPaletteModal
+102 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 114 frontend/app/notification/notificationitem.tsx::NotificationItem
 111 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
@@ -383,7 +382,7 @@
 118 frontend/app/view/agent/shutdown/ShutdownPendingBanner.tsx::ShutdownPendingBanner
 138 frontend/app/view/agent/stream-flush-queue.ts::createStreamFlushQueue
 116 frontend/app/view/agent/stream-parser.ts::ClaudeCodeStreamParser::eventToNode
-229 frontend/app/view/agent/useAgentStream.ts::useAgentStream
+219 frontend/app/view/agent/useAgentStream.ts::useAgentStream
 102 frontend/app/view/agent/virtualization/held-release.ts::useScrolledOffRelease
 115 frontend/app/view/audit/audit-manager.tsx::AuditManager
 101 frontend/app/view/browser/browser-profile-menu.tsx::BrowserProfileButton

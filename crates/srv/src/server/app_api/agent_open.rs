@@ -501,8 +501,9 @@ fn write_rendered_config_files(
     );
     crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
+    let on_host = !agent.runtime().is_container();
     for file in &config_files {
-        super::agent_config_render::write_config_file(&wd, base_path, &expanded_dir, file)?;
+        super::agent_config_render::write_config_file(&wd, base_path, &expanded_dir, file, on_host)?;
     }
 
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);

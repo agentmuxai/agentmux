@@ -535,6 +535,10 @@ impl StdoutReader {
         // The latest `rate_limit_event`: a usage limit stored later
         // reads its reset from it (`agents::limit_reset`).
         crate::agents::limit_reset::observe_frame(&self.block_id_read, parsed);
+        // The same frame's usage windows, kept for the pane's account (`backend::account_usage`).
+        if let Some(store) = self.mstore_read.as_ref() {
+            crate::backend::account_usage::observe_claude_frame(&self.block_id_read, store, parsed);
+        }
         crate::backend::context_reading::observe_claude_frame(&self.block_id_read, parsed);
         // This block's CLI compacted: only its pane may send the
         // hidden memory reinjection for that boundary.

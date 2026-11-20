@@ -228,7 +228,8 @@
 .command-palette-item-group {
     flex-shrink: 0;
     box-sizing: border-box;
-    width: 9ch;
+    // "other commands" is the longest name a group has (the categories are shorter).
+    width: 14ch;
     text-align: right;
     white-space: nowrap;
     font-size: var(--text-xs);

@@ -182,7 +182,7 @@ window, is unchanged.
 
 - **macOS: a login agent registered with `SMAppService`.** It is the only path that shows in Login Items and
   respects the user's approval there. A bundle with a stable `CFBundleIdentifier` (no version; the release
-  channel, once the identity question in §7 is decided: `AGENTMUX_STABLE_BUNDLE_ID=1` in
+  channel, decided in §7 question 4: `AGENTMUX_STABLE_BUNDLE_ID=1` in the release's build job, see
   `scripts/package-macos.sh`) and that is signed with the Developer ID ships
   `Contents/Library/LaunchAgents/<id>.login.plist`, and the launcher registers it
   (`autostart/login_item.rs`). The job is the launcher's own `--login-start` shim (a signed Mach-O: launchd's launch
@@ -309,7 +309,7 @@ in, the Settings copy says again that a login start opens in the tray, without a
 | 1 | Keep start-at-login off by default, or offer it once on first run? | **Decided 2026-09-25: off by default, no prompt.** A Settings toggle and a tray check item on one property (§3.9). |
 | 2 | Should `local-*` dev builds be allowed to own start-at-login? | Yes, but with the owner shown (§3.5), since the owner runs dev builds as their main app. |
 | 3 | Linux: add a `systemd --user` option for restart-on-crash? | Not now. The launcher already supervises its children, and lingering past logout is a separate decision (tray spec §4). |
-| 4 | macOS: is dropping the version from the release bundle id acceptable? It is required for `SMAppService` and also changes how macOS treats updates (one app, not many). | Yes, for the release channel only. |
+| 4 | macOS: is dropping the version from the release bundle id acceptable? It is required for `SMAppService` and also changes how macOS treats updates (one app, not many). | **Decided 2026-11-20: yes, for the release channel.** The stable app is `ai.agentmux.stable` for every release: the build job sets `AGENTMUX_STABLE_BUNDLE_ID=1`, and a check (`scripts/verify-app-identity-darwin.sh`) fails the build if the id or the signed requirement carries a version. The one cost is a last round of permission asks on the first upgrade from a per-version install; after it, upgrades keep Screen Recording, Accessibility, folder and notification grants and the Login Items entry. |
 
 ## Appendix — file references
 

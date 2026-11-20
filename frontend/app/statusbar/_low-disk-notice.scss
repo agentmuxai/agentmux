@@ -1,0 +1,50 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The low-disk panel on the status bar's Disk readout (LowDiskNotice.tsx): the chip-style card the backend panel's
+// health notices use (_health-notices.scss), amber for warn and red-tinted for critical.
+
+@use "../element/popover-frame" as popoverFrame;
+
+.low-disk-notice {
+    // The body of an AnchoredPopover (shell: position, z-index; body: zoom).
+    @include popoverFrame.readout-popover;
+    padding: var(--space-1);
+
+    .low-disk-notice-card {
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--warning-color);
+        border-radius: var(--radius-md);
+        background: var(--warning-bg);
+
+        &--critical {
+            border-color: var(--error-color);
+            background: var(--error-bg-strong);
+        }
+    }
+
+    .low-disk-notice-title {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-1);
+        font-weight: 600;
+    }
+
+    .low-disk-notice-free {
+        margin-top: var(--space-0-5);
+        font-family: var(--font-mono);
+    }
+
+    .low-disk-notice-line {
+        margin-top: var(--space-0-5);
+        line-height: 1.35;
+        opacity: 0.85;
+    }
+
+    .low-disk-notice-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-1);
+        margin-top: var(--space-1);
+    }
+}

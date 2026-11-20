@@ -183,7 +183,7 @@ tasks:
         platforms: [darwin]
         cmds:
             - bash scripts/guard-stable-build.sh
-            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh {{.CLI_ARGS}}'
+            - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable AGENTMUX_STABLE_BUNDLE_ID=1 bash scripts/package-macos.sh {{.CLI_ARGS}}'
 
     package:linux:
         desc: 'Build + package a LOCAL portable AppImage to ~/Desktop with an ephemeral, traceable label and a per-build data-dir channel (local-<branch>-<hash>-<build-id>) so the build runs as its own AgentMux instance alongside a release install. Does NOT bump the version. Pass `-- <dir>` for an alternate output dir. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'

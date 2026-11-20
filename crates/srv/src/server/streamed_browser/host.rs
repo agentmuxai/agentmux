@@ -41,11 +41,47 @@ pub const TOKEN_HEADER: &str = "x-agentmux-lease";
 /// How long an open pane gets to end after the server is told to stop.
 const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// What the server holds: the gate, whether a connection is open, and the signal that ends the server and its pane.
+/// How long the host may have no pane open before it ends itself: the task then stops, and the lease that named it
+/// ends with it. Counted from the start, and again from each time a pane that was let in goes away.
+const IDLE_EXIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// How often the idle clock is looked at.
+const IDLE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// What the server holds: the gate, whether a connection is open, the signal that ends the server and its pane, and
+/// since when no accepted pane has been open (`None` while one is).
 struct Host {
     gate: LeaseGate,
     open: AtomicBool,
     stop: CancellationToken,
+    idle_since: std::sync::Mutex<Option<std::time::Instant>>,
+}
+
+impl Host {
+    fn idle_for(&self) -> Option<std::time::Duration> {
+        self.idle_since.lock().ok().and_then(|s| s.map(|t| t.elapsed()))
+    }
+
+    fn set_idle(&self, since: Option<std::time::Instant>) {
+        if let Ok(mut s) = self.idle_since.lock() {
+            *s = since;
+        }
+    }
+}
+
+/// Ends the server once it has had no accepted pane for `limit`, looking every `every`. A refused connection
+/// (no token, a bad token) does not count as a pane, so it cannot keep the host alive.
+async fn end_when_idle(host: Arc<Host>, limit: std::time::Duration, every: std::time::Duration) {
+    loop {
+        tokio::select! {
+            _ = host.stop.cancelled() => return,
+            _ = tokio::time::sleep(every) => {}
+        }
+        if host.idle_for().is_some_and(|idle| idle >= limit) {
+            eprintln!("agentmux-srv {FLAG}: no pane for {} s, ending", limit.as_secs());
+            host.stop.cancel();
+            return;
+        }
+    }
 }
 
 /// Was srv started as the browser host?
@@ -81,7 +117,12 @@ fn listen_from(args: &[String]) -> Result<SocketAddr, String> {
 fn host_from(env: impl Fn(&str) -> Option<String>) -> Result<Host, String> {
     let need = |name: &str| env(name).filter(|v| !v.trim().is_empty()).ok_or(format!("{name} is not set"));
     let keys = parse_public_keys(&need(KEYS_ENV)?)?;
-    Ok(Host { gate: LeaseGate::new(keys, need(LEASE_ENV)?, need(WORKSPACE_ENV)?), open: AtomicBool::new(false), stop: CancellationToken::new() })
+    Ok(Host {
+        gate: LeaseGate::new(keys, need(LEASE_ENV)?, need(WORKSPACE_ENV)?),
+        open: AtomicBool::new(false),
+        stop: CancellationToken::new(),
+        idle_since: std::sync::Mutex::new(Some(std::time::Instant::now())),
+    })
 }
 
 /// A folder only this process can open, named at random: the browser's profile lives under it, and it is removed at exit.
@@ -117,6 +158,7 @@ async fn serve(listen: SocketAddr, host: Arc<Host>) -> Result<(), String> {
     }
     eprintln!("agentmux-srv {FLAG}: listening on {listen}");
     let stop = host.stop.clone();
+    tokio::spawn(end_when_idle(host.clone(), IDLE_EXIT, IDLE_CHECK_EVERY));
     tokio::spawn({
         let stop = stop.clone();
         async move {
@@ -155,6 +197,22 @@ impl Drop for Open {
     }
 }
 
+/// Held by a pane the host let in: while it lives the host is not idle, and when it goes the idle clock starts over.
+struct Serving(Arc<Host>);
+
+impl Serving {
+    fn begin(host: &Arc<Host>) -> Self {
+        host.set_idle(None);
+        Self(host.clone())
+    }
+}
+
+impl Drop for Serving {
+    fn drop(&mut self) {
+        self.0.set_idle(Some(std::time::Instant::now()));
+    }
+}
+
 /// `GET /agentmux/streamed-browser?url=&w=&h=` with a lease token, upgraded to a WebSocket.
 async fn connect(
     State(host): State<Arc<Host>>,
@@ -182,8 +240,10 @@ async fn connect(
         return (StatusCode::FORBIDDEN, "the lease token was refused").into_response();
     }
     let stop = host.stop.clone();
+    let serving = Serving::begin(&host);
     super::upgrade(ws, start, async move {
         let _open = open;
+        let _serving = serving;
         stop.cancelled().await
     })
 }
@@ -239,6 +299,50 @@ mod tests {
         stop.cancel();
         let ended = tokio::time::timeout(STOP_GRACE + std::time::Duration::from_secs(2), served).await;
         assert!(matches!(ended, Ok(Ok(Ok(())))), "{ended:?}");
+    }
+
+    const SHORT: std::time::Duration = std::time::Duration::from_millis(60);
+    const TICK: std::time::Duration = std::time::Duration::from_millis(10);
+
+    #[tokio::test]
+    async fn it_ends_itself_when_no_pane_has_come_for_the_idle_limit() {
+        let host = test_host();
+        let watcher = tokio::spawn(end_when_idle(host.clone(), SHORT, TICK));
+        tokio::time::timeout(std::time::Duration::from_secs(5), host.stop.cancelled()).await.expect("it stops itself");
+        watcher.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_does_not_end_while_a_pane_is_open_and_starts_the_clock_again_when_it_goes() {
+        let host = test_host();
+        let watcher = tokio::spawn(end_when_idle(host.clone(), SHORT, TICK));
+        let serving = Serving::begin(&host);
+        assert!(host.idle_for().is_none());
+        tokio::time::sleep(SHORT * 4).await;
+        assert!(!host.stop.is_cancelled(), "a pane is open, so it is not idle");
+        drop(serving);
+        // The clock restarts at the pane's end, not at the host's start.
+        assert!(host.idle_for().unwrap() < SHORT);
+        tokio::time::timeout(std::time::Duration::from_secs(5), host.stop.cancelled()).await.expect("idle again, so it ends");
+        watcher.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_refused_connection_does_not_keep_it_alive() {
+        let host = test_host();
+        // What `connect` does before the token is checked: take the open flag, then give it back on a refusal.
+        let before = host.idle_for().unwrap();
+        host.open.store(true, Ordering::SeqCst);
+        drop(Open(host.clone()));
+        assert!(host.idle_for().unwrap() >= before, "the idle clock was not reset by a refusal");
+    }
+
+    #[tokio::test]
+    async fn it_stops_looking_when_it_was_stopped_for_another_reason() {
+        let host = test_host();
+        let watcher = tokio::spawn(end_when_idle(host.clone(), std::time::Duration::from_secs(3600), TICK));
+        host.stop.cancel();
+        tokio::time::timeout(std::time::Duration::from_secs(5), watcher).await.expect("the watcher returns").unwrap();
     }
 
     #[test]

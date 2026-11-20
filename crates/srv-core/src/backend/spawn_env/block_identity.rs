@@ -102,7 +102,7 @@ pub fn carry_agent_workdir_env(
         let absolute = std::path::absolute(&expanded).map_or(expanded, |p| p.to_string_lossy().into_owned());
         env_vars.insert(
             CONFIG_KEY.to_string(),
-            crate::backend::mcp_config_file::config_path(&absolute).to_string_lossy().into_owned(),
+            crate::backend::mcp_config_file::host_config_path(&absolute).to_string_lossy().into_owned(),
         );
         env_vars.insert(KEY.to_string(), absolute);
     } else {

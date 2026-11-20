@@ -11,17 +11,30 @@
 //! nearly full, and stopped after space was freed. A drive that is filling up
 //! is cheap to warn about before it gets there.
 
-/// Warn below either line, so a small drive warns on gigabytes and a large
-/// one on its share.
-pub const WARN_PCT: f64 = 8.0;
-pub const WARN_GB: f64 = 10.0;
-/// Critical below either line.
-pub const CRITICAL_PCT: f64 = 4.0;
-pub const CRITICAL_GB: f64 = 3.0;
-/// Leaving a level needs this much headroom over its line, so a drive
-/// hovering at the line doesn't make the signal flicker.
-const CLEAR_PCT: f64 = 1.0;
-const CLEAR_GB: f64 = 2.0;
+/// The lines, in `frontend/app/store/low-disk-levels.json`: AgentMux Web has no
+/// host to push this signal, so its page classifies the same drive itself
+/// (`frontend/app/statusbar/low-disk.ts`) from the same file, and the two warn
+/// at the same free space.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Levels {
+    /// Warn below either line, so a small drive warns on gigabytes and a large
+    /// one on its share.
+    warn_pct: f64,
+    warn_gb: f64,
+    /// Critical below either line.
+    critical_pct: f64,
+    critical_gb: f64,
+    /// Leaving a level needs this much headroom over its line, so a drive
+    /// hovering at the line doesn't make the signal flicker.
+    clear_pct: f64,
+    clear_gb: f64,
+}
+
+static LEVELS: std::sync::LazyLock<Levels> = std::sync::LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../../../frontend/app/store/low-disk-levels.json"))
+        .expect("frontend/app/store/low-disk-levels.json is the shared low-disk lines and must parse")
+});
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
@@ -67,18 +80,19 @@ fn below(r: &DiskReading, pct: f64, gb: f64) -> bool {
 /// under either of its lines; leaving it takes being clear of both by the
 /// margin.
 pub fn classify(r: &DiskReading, prev: DiskLevel) -> DiskLevel {
+    let l = &*LEVELS;
     let critical = if prev == DiskLevel::Critical {
-        below(r, CRITICAL_PCT + CLEAR_PCT, CRITICAL_GB + CLEAR_GB)
+        below(r, l.critical_pct + l.clear_pct, l.critical_gb + l.clear_gb)
     } else {
-        below(r, CRITICAL_PCT, CRITICAL_GB)
+        below(r, l.critical_pct, l.critical_gb)
     };
     if critical {
         return DiskLevel::Critical;
     }
     let warn = if prev == DiskLevel::Normal {
-        below(r, WARN_PCT, WARN_GB)
+        below(r, l.warn_pct, l.warn_gb)
     } else {
-        below(r, WARN_PCT + CLEAR_PCT, WARN_GB + CLEAR_GB)
+        below(r, l.warn_pct + l.clear_pct, l.warn_gb + l.clear_gb)
     };
     if warn {
         DiskLevel::Warn
@@ -178,6 +192,16 @@ mod tests {
 
     fn gb(free_gb: f64, total_gb: f64) -> DiskReading {
         DiskReading { free_gb, total_gb, free_pct: free_gb / total_gb * 100.0 }
+    }
+
+    #[test]
+    fn the_shared_file_holds_the_lines_the_desktop_warns_at() {
+        // The web page reads the same file (low-disk.test.ts pins the same numbers), so a change
+        // to a line is made there on purpose, in both tests.
+        let l = &*LEVELS;
+        assert_eq!((l.warn_pct, l.warn_gb), (8.0, 10.0));
+        assert_eq!((l.critical_pct, l.critical_gb), (4.0, 3.0));
+        assert_eq!((l.clear_pct, l.clear_gb), (1.0, 2.0));
     }
 
     #[test]

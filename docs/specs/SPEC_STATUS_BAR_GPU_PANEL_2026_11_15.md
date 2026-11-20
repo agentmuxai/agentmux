@@ -72,3 +72,12 @@ Decisions (operator, via AgentY): (a) phases Windows, then Linux, then macOS; (b
 - Reading the counters enumerates every process's engines, so one read is the cost, not the number of counters. A read over 50 ms doubles the interval to the next one (up to 60 s for the meter, 10 s for the panel) and the panel's footer says so; a read under 25 ms halves it back. The cost test (`gpu::cost_tests`, ignored by default) prints a run's median and maximum; it runs in CI and on a host of its own, never on a person's screen.
 - The adapter's use is its busiest engine's (as Task Manager's is); a process's is its engines added up, within 100%. Memory share for the warning is dedicated memory for a card with its own, shared memory for an integrated GPU (dedicated under 1 GiB).
 - A click on an AgentMux row opens Tower's Processes view filtered to AgentMux's own processes; Tower has no filter for one process id yet.
+
+## 11. Built in phase 2 (Linux)
+
+- The same sampler and panel, a Linux reader behind them (`backend::gpu::linux`): adapters are found from the PCI bus (display class; AMD, Intel and NVIDIA vendors) and named from `pci.ids`.
+- AMD adapters: use and memory from the card's sysfs files (`gpu_busy_percent`, `mem_info_vram_*`, `mem_info_gtt_*`). NVIDIA adapters: NVML (`libnvidia-ml.so.1`), loaded when the sampler starts. A machine without it has no NVIDIA figures and that is not an error (the panel's own "NVIDIA tools not found" notice is a follow-up); the load is tried again every 5 minutes, and not at all while every NVIDIA card is suspended. Intel adapters: memory only, added up from the processes that hold it, so the meter has no use figure for them.
+- Per process: the DRM clients in `/proc/<pid>/fdinfo` (`drm-engine-*` time between two reads for use; `drm-memory-*`, `drm-total-*` and `drm-resident-*` for memory, dedicated before shared). A client opened through several descriptors or by several processes is counted once. The first read has no earlier one to compare with and shows as warming up.
+- A card the kernel has suspended (`power/runtime_status`) is reported idle and never read, so an open panel does not wake a laptop's second GPU.
+- A scan of the processes' descriptors stops after 300 ms and gives what it has; the sampler's cost budget (section 4) widens the interval after a slow read, as on Windows.
+- Tested on fixtures: a fake `/sys` and `/proc`, and a fake NVML library built in the test. The cost run (section 4) on a Linux host with a real adapter is still to be done, on a host that has one.

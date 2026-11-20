@@ -1,0 +1,8 @@
+{
+    "warnPct": 8,
+    "warnGb": 10,
+    "criticalPct": 4,
+    "criticalGb": 3,
+    "clearPct": 1,
+    "clearGb": 2
+}

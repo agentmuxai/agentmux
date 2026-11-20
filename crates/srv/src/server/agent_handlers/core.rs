@@ -428,6 +428,7 @@ async fn update_agent(
     if !found {
         return Err(format!("updateagent: agent {} not found", agent.id));
     }
+    crate::backend::mcp_folder_rule::mark_when_moved_to_the_host(old, &agent);
     // The seat `listagents` would show.
     agent.seat = crate::backend::agent_seat::effective_seat(&mstore, &agent);
     broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
@@ -589,18 +590,16 @@ async fn import_agent_from_claw(
         }
     }
 
-    // Read .mcp.json → mcp content
-    let mcp_path = workspace_path.join(".mcp.json");
-    if mcp_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&mcp_path) {
-            let fc = AgentContent {
-                agent_id: agent.id.clone(),
-                content_type: "mcp".to_string(),
-                content,
-                updated_at: now,
-            };
-            let _ = mstore.agent_content_set(&fc);
-        }
+    // Read .mcp.json → mcp content. Not from a folder a container agent can write: the host agent
+    // imported gets the servers set in AgentMux, and its pane names the rest (`mcp_folder_rule`).
+    if let Some(content) = crate::backend::mcp_folder_rule::config_to_import(workspace_path) {
+        let fc = AgentContent {
+            agent_id: agent.id.clone(),
+            content_type: "mcp".to_string(),
+            content,
+            updated_at: now,
+        };
+        let _ = mstore.agent_content_set(&fc);
     }
 
     broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);

@@ -166,6 +166,8 @@ zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] 
 # Agent process tracking (process_tracker::cgroup_linux): ask the systemd user
 # manager for srv's delegated scope. Same zbus 5 the launcher already uses.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
+# NVIDIA's management library, opened at run time for the GPU panel (backend/gpu/nvml.rs); already in the tree.
+libloading = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Trash through NSFileManager ourselves, to learn where each item went, so
