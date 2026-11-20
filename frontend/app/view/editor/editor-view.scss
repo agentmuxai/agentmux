@@ -97,8 +97,14 @@
     display: flex;
     // A narrow tree at a large chrome zoom has less room than its buttons: they wrap to a second row, none is cut off.
     flex-wrap: wrap;
+    align-items: center;
+    align-content: center;
     gap: 2px;
     padding: var(--space-1);
+    // As tall as the document tab bar beside it (its strip, one pixel more for the strip's own bottom edge, and the
+    // row's line), so the two lines under them meet at every zoom.
+    box-sizing: border-box;
+    min-height: calc(var(--pane-tab-strip-height) + 2px);
     border-bottom: 1px solid var(--border-color);
     background: var(--block-bg-color);
 }

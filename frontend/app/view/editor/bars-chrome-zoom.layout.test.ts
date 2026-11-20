@@ -14,8 +14,8 @@ import { describe, expect, it } from "vitest";
 import { findBrowser, measureInBrowser } from "@/app/view/agent/components/layout-browser";
 
 const BROWSER = findBrowser();
-const CSS = sass.compile(join(__dirname, "editor-view.scss")).css;
-const TOKENS = `:root{--space-1:4px;--space-2:8px;--space-3:12px;--border-color:#444;--block-bg-color:#111;--main-text-color:#eee}
+const CSS = sass.compile(join(__dirname, "editor-view.scss")).css + sass.compile(join(__dirname, "viewers", "viewers.scss")).css;
+const TOKENS = `:root{--pane-tab-strip-height:28px;--space-1:4px;--space-2:8px;--space-3:12px;--border-color:#444;--block-bg-color:#111;--main-text-color:#eee}
 *{box-sizing:border-box}body{margin:0;font:13px sans-serif;background:#111;color:#eee}`;
 
 /** A probe is a box 20 px (a bar's content) or 100 px (a body) tall at no zoom. */
@@ -38,8 +38,17 @@ const corner = (p: number, c: number) =>
     `<div class="editor-tree-zoom" style="zoom:${p};--editor-tree-zoom:${p}">` +
     `<div class="file-tree-toolbar">${probe("treebar", 20)}</div>${probe("treebody", 100)}</div></div>`;
 
+/** A viewer bar in a narrow document column (120 css px, the facts wider than that at a large chrome zoom). */
+const narrowViewerBar =
+    `<div data-narrow style="--zoomfactor:2;width:120px;overflow:hidden"><div class="editor-main-zoom" style="zoom:1;--editor-main-zoom:1">` +
+    `<div class="editor-mode-toolbar editor-viewer-bar" data-bar2><div class="editor-viewer-bar-facts"><span>320 × 200</span><span>720 B</span></div></div></div></div>`;
+
 const MEASURE = `
 const out = {};
+for (const c of document.querySelectorAll("[data-narrow]")) {
+    const bar = c.querySelector("[data-bar2]");
+    out.narrow = { overflow: bar.scrollWidth - bar.clientWidth };
+}
 const h = (el) => Math.round(el.getBoundingClientRect().height * 100) / 100;
 for (const c of document.querySelectorAll("[data-case]")) {
     const o = {};
@@ -48,7 +57,7 @@ for (const c of document.querySelectorAll("[data-case]")) {
 }
 for (const c of document.querySelectorAll("[data-column]")) {
     const bar = c.querySelector("[data-bar]");
-    out["col-" + c.dataset.column] = { overflow: bar.scrollWidth - bar.clientWidth };
+    out["col-" + c.dataset.column] = { overflow: bar.scrollWidth - bar.clientWidth, height: bar.getBoundingClientRect().height };
 }
 const pre = document.createElement("pre"); pre.id = "result"; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 `;
@@ -58,7 +67,7 @@ const LEVELS = [0.5, 2];
 describe.skipIf(!BROWSER)("Editor control bars and the chrome zoom", () => {
     it("draws the bars at the chrome's level and the bodies at the pane's, at the four corners", async () => {
         const cases = LEVELS.flatMap((p) => LEVELS.map((c) => corner(p, c) + column(p, c))).join("");
-        const html = `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${CSS}</style>${cases}<script>window.addEventListener("load",()=>{${MEASURE}})</script>`;
+        const html = `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${CSS}</style>${cases}${narrowViewerBar}<script>window.addEventListener("load",()=>{${MEASURE}})</script>`;
         const r = await measureInBrowser<Record<string, Record<string, number>>>(BROWSER!, html, { width: 600, height: 4000 });
 
         for (const p of LEVELS) {
@@ -68,7 +77,12 @@ describe.skipIf(!BROWSER)("Editor control bars and the chrome zoom", () => {
                 for (const body of ["document", "treebody"]) expect(m[body] / 100, `${body} at pane ${p}, chrome ${c}`).toBeCloseTo(p, 1);
                 // A narrow tree at a large chrome zoom: the buttons wrap, nothing runs past the column.
                 expect(r[`col-p${p}c${c}`].overflow, `the tree's toolbar at pane ${p}, chrome ${c}`).toBeLessThanOrEqual(1);
+                // As tall as the tab bar beside it (a 28 px strip, its edge and the row's line: 30 px at the chrome's level),
+                // or taller when its buttons wrap, so the lines under the two meet.
+                expect(r[`col-p${p}c${c}`].height, `the tree's toolbar height at pane ${p}, chrome ${c}`).toBeGreaterThanOrEqual(30 * c - 0.5);
             }
         }
+        // The viewer bar's facts ("320 × 200") break in a bar narrower than they are, instead of running past its edge.
+        expect(r.narrow.overflow, "the viewer bar's facts in a narrow column at chrome 2").toBeLessThanOrEqual(1);
     }, 60_000);
 });
