@@ -572,7 +572,7 @@ const MarkdownImg = (p: { props: JSX.ImgHTMLAttributes<HTMLImageElement>; media?
     const kind = inlineMediaKind(path);
     // Fail closed: a message of an agent not known to run on this computer, with no pane to name, reads nothing. srv
     // decides by the pane's runtime; this flag only picks the route, and without a pane there is no route.
-    if (p.media.confined && !p.media.blockId) return <span class="am-muted">[image: {shown} — not shown here]</span>;
+    if (p.media.confined && !p.media.blockId) return <span class="am-muted">{t("mediaPreview.notShownHere", { name: shown })}</span>;
     const owner: MediaOwner = { blockId: p.media.blockId, confined: p.media.confined };
     if (kind === "image") return <LocalImage path={path} src={shown} alt={alt} openGallery={p.media.openGallery} owner={owner} />;
     if (kind === "video" || kind === "audio") return <LocalAV path={path} src={shown} kind={kind} openGallery={p.media.openGallery} owner={owner} />;
