@@ -36,6 +36,7 @@ export const LowDiskNotice = (props: LowDiskNoticeProps): JSX.Element => {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-start"
+            fitHeight
             onDismiss={() => props.onDismiss()}
             class="low-disk-notice"
             role="alert"
