@@ -419,7 +419,7 @@ fn clipboard_temp_dir() -> std::path::PathBuf {
 
 /// Write `bytes` to a fresh temp file with extension `ext`, pruning old ones.
 #[cfg_attr(not(any(target_os = "windows", target_os = "macos", target_os = "linux")), allow(dead_code))]
-fn write_clipboard_temp(bytes: &[u8], ext: &str) -> Result<String, String> {
+pub(super) fn write_clipboard_temp(bytes: &[u8], ext: &str) -> Result<String, String> {
     let dir = clipboard_temp_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     if let Ok(entries) = std::fs::read_dir(&dir) {

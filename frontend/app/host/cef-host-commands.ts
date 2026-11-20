@@ -310,6 +310,9 @@ export const cefHostMisc = {
     writeClipboardText: async (text: string) => {
         await invokeCommand("write_clipboard", { text });
     },
+    writeClipboardImage: async (png: string) => {
+        await invokeCommand("write_clipboard_image", { png });
+    },
     // The host keeps one entry per window; name ours (drag_stash.rs).
     consumeDroppedFilePaths: () =>
         invokeCommand<string[]>("consume_drag_paths", { windowLabel: ownWindowLabel() }),

@@ -411,8 +411,9 @@ pub fn tell_askers(request: &Request, note: &str) {
 }
 
 /// Tell one asker, from AgentMux; whether the note was delivered. An agent of another machine (`remote:agent@machine`)
-/// has no pane here to put a note in, and srv can't speak as one of that machine's agents: it is not told, and that is
-/// no failure. It reads where its request stands (`app.upgrade` with `status`), which says how it ended.
+/// has no pane here to put a note in, and srv can't speak as one of that machine's agents: it is not told from here,
+/// and that is no failure. Its own machine reads where the request stands (`app.upgrade` with `status`) and tells
+/// it how it ended (`remote_ops::upgrade_watch`); the agent can read the same itself.
 pub fn tell_one(uid: &str, note: &str) -> bool {
     if uid.starts_with(crate::backend::sensitive_requests::REMOTE_OWNER_PREFIX) {
         tracing::debug!(requester = %uid, "sensitive request: the asker is on another machine; it reads the request's status");

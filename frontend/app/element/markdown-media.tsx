@@ -11,6 +11,7 @@ import {
     MediaTooLargeError,
     resolveMediaPath,
 } from "@/app/element/local-media";
+import { showMediaCopyMenu, sourceFromUrl } from "@/app/element/media-copy";
 import { t } from "@/app/i18n/i18n";
 import { formatBytes } from "@/util/format-bytes";
 import { MarkdownContentBlockType } from "@/app/element/markdown-util";
@@ -256,6 +257,7 @@ function LocalImage(props: LocalImageProps): JSX.Element {
                                 style={ratio() ? { "aspect-ratio": ratio() } : undefined}
                                 {...(props.openGallery ? galleryKeys(open, props.alt || basenameOf(props.path)) : {})}
                                 onClick={open}
+                                onContextMenu={(e) => showMediaCopyMenu(e, sourceFromUrl(src(), { path: props.path }))}
                                 onError={() => {
                                     // Undecodable: free the blob now, not at unmount.
                                     if (url) URL.revokeObjectURL(url);

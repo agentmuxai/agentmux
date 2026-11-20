@@ -145,17 +145,23 @@ export function buildPaneContextMenu(
     const clipboard: ContextMenuItem[] = [];
     if (has("clipboard") && has("copy")) {
         const selection = getPaneSelection(viewModel);
-        // Copy — disabled when nothing is selected
-        clipboard.push({
-            label: "Copy",
-            icon: MENU_ICON.copy,
-            enabled: selection.length > 0,
-            click: () => {
-                if (selection) {
-                    clipboardWriteText(selection).catch(console.error);
-                }
-            },
-        });
+        // A view of media (an image) has its own Copy; the plain one only a text selection enables.
+        const own = viewModel?.getCopyMenuItems?.(selection) ?? [];
+        if (own.length > 0) {
+            clipboard.push(...own);
+        } else {
+            // Copy — disabled when nothing is selected
+            clipboard.push({
+                label: "Copy",
+                icon: MENU_ICON.copy,
+                enabled: selection.length > 0,
+                click: () => {
+                    if (selection) {
+                        clipboardWriteText(selection).catch(console.error);
+                    }
+                },
+            });
+        }
     }
     if (has("clipboard")) {
         // Paste — only shown for input-accepting panes (terminals)
