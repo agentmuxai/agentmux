@@ -35,6 +35,8 @@ pub mod store_update;
 pub mod store_working;
 pub mod vault_files;
 pub(crate) mod file_dialog;
+pub(crate) mod file_dialog_helper;
+pub(crate) mod file_dialog_proto;
 pub mod stubs;
 pub mod palette;
 pub mod recycle;

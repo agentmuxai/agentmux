@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use super::file_dialog::{DialogSpec, Kind};
 use crate::state::AppState;
 
 const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.jsonc");
@@ -971,12 +972,7 @@ pub(super) struct NoDialogGuard;
 pub async fn show_open_file_dialog(
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let path = tokio::task::spawn_blocking(|| {
-        let _dialog_guard = host_dialog_guard();
-        rfd::FileDialog::new().pick_file()
-    })
-    .await
-    .map_err(|e| format!("show_open_file_dialog: task join error: {e}"))?;
+    let path = super::file_dialog::ask(DialogSpec::new(Kind::Open, ""), "show_open_file_dialog").await?;
     Ok(match path {
         Some(p) => serde_json::json!(p.to_string_lossy()),
         None => serde_json::Value::Null,
@@ -994,14 +990,8 @@ pub async fn show_open_file_dialog(
 pub async fn show_open_bundle_dialog(
     _args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let path = tokio::task::spawn_blocking(|| {
-        let _dialog_guard = host_dialog_guard();
-        rfd::FileDialog::new()
-            .add_filter("Agent bundle", &["abf"])
-            .pick_file()
-    })
-    .await
-    .map_err(|e| format!("show_open_bundle_dialog: task join error: {e}"))?;
+    let spec = DialogSpec::new(Kind::Open, "").filter("Agent bundle", &["abf"]);
+    let path = super::file_dialog::ask(spec, "show_open_bundle_dialog").await?;
     Ok(match path {
         Some(p) => serde_json::json!(p.to_string_lossy()),
         None => serde_json::Value::Null,
@@ -1108,19 +1098,13 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
         let _ = std::fs::create_dir_all(dir);
     }
     let extension = kind.extension;
-    let path = tokio::task::spawn_blocking(move || {
-        let _dialog_guard = host_dialog_guard();
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(kind.save_title)
-            .set_file_name(format!("{stem}{}", kind.extension))
-            .add_filter(kind.filter, &[kind.extension.trim_start_matches('.'), "json"]);
-        if let Some(dir) = dir.filter(|d| d.is_dir()) {
-            dialog = dialog.set_directory(dir);
-        }
-        dialog.save_file()
-    })
-    .await
-    .map_err(|e| format!("show_save_layout_dialog: task join error: {e}"))?;
+    let mut spec = DialogSpec::new(Kind::Save, kind.save_title)
+        .file_name(format!("{stem}{}", kind.extension))
+        .filter(kind.filter, &[kind.extension.trim_start_matches('.'), "json"]);
+    if let Some(dir) = dir.filter(|d| d.is_dir()) {
+        spec = spec.dir(dir);
+    }
+    let path = super::file_dialog::ask(spec, "show_save_layout_dialog").await?;
     Ok(match path {
         Some(p) => serde_json::json!(with_extension(p, extension).to_string_lossy()),
         None => serde_json::Value::Null,
@@ -1138,16 +1122,11 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
 pub async fn show_open_layout_dialog(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let kind = dialog_kind(args);
     let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(kind.folder));
-    let path = tokio::task::spawn_blocking(move || {
-        let _dialog_guard = host_dialog_guard();
-        let mut dialog = rfd::FileDialog::new().set_title(kind.open_title).add_filter(kind.filter, kind.opens);
-        if let Some(dir) = dir.filter(|d| d.is_dir()) {
-            dialog = dialog.set_directory(dir);
-        }
-        dialog.pick_file()
-    })
-    .await
-    .map_err(|e| format!("show_open_layout_dialog: task join error: {e}"))?;
+    let mut spec = DialogSpec::new(Kind::Open, kind.open_title).filter(kind.filter, kind.opens);
+    if let Some(dir) = dir.filter(|d| d.is_dir()) {
+        spec = spec.dir(dir);
+    }
+    let path = super::file_dialog::ask(spec, "show_open_layout_dialog").await?;
     Ok(match path {
         Some(p) => serde_json::json!(p.to_string_lossy()),
         None => serde_json::Value::Null,
