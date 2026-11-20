@@ -47,9 +47,25 @@ pub(in crate::server) fn query_here(state: &AppState, req: &AuditQueryReq, own_o
     Ok(result)
 }
 
-/// Whether a request is the first page of the `machine` scope, the only one that asks the other channels.
-fn asks_other_channels(req: &AuditQueryReq) -> bool {
-    req.cursor.is_none() && matches!(req.scope.as_deref().map(str::trim), None | Some("") | Some("machine"))
+/// Whether a request is the first page of a scope that lists more than this channel, the only page that asks the
+/// other channels (and, for `lan`, the paired computers).
+fn asks_beyond_this_channel(req: &AuditQueryReq) -> bool {
+    req.cursor.is_none() && matches!(req.scope.as_deref().map(str::trim), None | Some("") | Some("machine") | Some("lan"))
+}
+
+/// A page of this computer's Audit as the window lists it: this channel's stores, and on the first page of a scope
+/// that lists more, the rows the other channels on this computer keep in their own files.
+pub(in crate::server) async fn machine_page(state: &AppState, req: &AuditQueryReq) -> Result<AuditQueryResult, String> {
+    let here = {
+        let (state, req) = (state.clone(), req.clone());
+        // Reads files, the whole segment ledger and the registry: off the async workers.
+        tokio::task::spawn_blocking(move || query_here(&state, &req, false)).await.map_err(|e| format!("audit.query: {e}"))?
+    };
+    let mut result = here?;
+    if asks_beyond_this_channel(req) {
+        result.other_channels = Some(other_channels(state, req).await).filter(|rows| !rows.is_empty());
+    }
+    Ok(result)
 }
 
 /// The other channels that are running, asked for their own rows.
@@ -71,14 +87,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let state = state.clone();
         async move {
             ctx.operator_only("the Audit is the AgentMux window's, not an agent API")?;
-            let here = {
-                let (state, req) = (state.clone(), req.clone());
-                // Reads files, the whole segment ledger and the registry: off the async workers.
-                tokio::task::spawn_blocking(move || query_here(&state, &req, false)).await.map_err(|e| format!("audit.query: {e}"))?
-            };
-            let mut result = here?;
-            if asks_other_channels(&req) {
-                result.other_channels = Some(other_channels(&state, &req).await).filter(|rows| !rows.is_empty());
+            let mut result = machine_page(&state, &req).await?;
+            // The paired computers are asked on the `lan` scope's first page, and shown and forgotten.
+            if req.cursor.is_none() && req.scope.as_deref().map(str::trim) == Some("lan") {
+                result.peers = Some(crate::server::remote_ops::audit_ops::ask_peers(&state, &req).await).filter(|rows| !rows.is_empty());
             }
             Ok(result)
         }

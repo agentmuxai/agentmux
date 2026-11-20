@@ -15,6 +15,7 @@ pub mod jekt_file;
 pub mod message_stats;
 pub mod ordered;
 pub mod other_channels;
+pub mod peers;
 pub mod provenance;
 pub mod segments;
 pub mod tasks;
@@ -208,8 +209,9 @@ impl Filter {
         }
         let channel = match req.scope.as_deref().map(str::trim) {
             Some("channel") => Some(own_channel.to_string()),
-            None | Some("") | Some("machine") => None,
-            Some(other) => return Err(format!("audit.query: unknown scope '{other}'; the scopes are channel and machine")),
+            // `lan` reads the same rows here as `machine`: the paired computers' own are asked for by the caller.
+            None | Some("") | Some("machine") | Some("lan") => None,
+            Some(other) => return Err(format!("audit.query: unknown scope '{other}'; the scopes are channel, machine and lan")),
         };
         Ok(Self {
             agent: req.agent_id.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(str::to_string),
@@ -499,7 +501,7 @@ pub fn query<'a>(src: &'a Sources<'a>, req: &AuditQueryReq) -> Result<AuditQuery
     });
     let not_recorded = NOT_RECORDED.iter().filter(|k| filter.kinds.contains(**k)).map(|k| k.to_string()).collect();
     let totals = req.totals.unwrap_or(false).then(|| totals::of(src, &filter));
-    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()), other_channels: None })
+    Ok(AuditQueryResult { entries, next_cursor, not_recorded, totals, channel: Some(src.channel.to_string()), other_channels: None, peers: None })
 }
 
 #[cfg(test)]

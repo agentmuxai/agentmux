@@ -133,8 +133,8 @@ export const AuditManager = (props: { paneBlockId: string; visible?: boolean; ag
             >
                 <AuditFeed
                     entries={list.entries()}
-                    sectioned={filter().scope === "machine"}
-                    channel={list.channel()}
+                    sectioned={filter().scope !== "channel"}
+                    channel={list.channel()} peers={list.peers()}
                     now={now()}
                     paneBlockId={props.paneBlockId}
                     sounds={sounds}

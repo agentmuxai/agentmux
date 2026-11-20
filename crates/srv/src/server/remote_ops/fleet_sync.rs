@@ -98,7 +98,7 @@ fn peer_key(install_id: &str, hostname: &str, channel: &str, address: &str, port
 }
 
 /// An agent of this machine to sign with: the requests are `slug@machine` on both audit trails.
-fn signer(state: &AppState) -> Option<String> {
+pub(crate) fn signer(state: &AppState) -> Option<String> {
     state.fleet_feed.snapshot().agents.iter().find(|a| !a.trim().is_empty()).cloned()
 }
 

@@ -141,6 +141,10 @@ fn audit_unproven(state: &AppState, from: Option<SocketAddr>, reason: &str, now:
 /// The audit row on this machine: `remote.<op>`, by `agent@machine`, with how it was proven and how it ended.
 fn audit(state: &AppState, who: &str, op: &str, proof: &str, result: &RemoteOpResult, nonce: &str, reason: &str) {
     let ok = matches!(result.status, OpStatus::Done | OpStatus::Queued | OpStatus::PendingVeto);
+    // A read of the Audit that worked is not a row in it: the Audit asks again every few seconds while it is shown.
+    if op == crate::backend::audit_query::peers::QUERY_OP && ok {
+        return;
+    }
     let note = result.refused_reason.clone().or_else(|| result.result.get("error").and_then(|e| e.as_str()).map(str::to_string));
     state.reactive_handler.log_fleet_action_audit(
         Some(who),
