@@ -22,6 +22,17 @@ process.on("exit", () => {
 });
 
 /**
+ * The environment a gate runs in inside a fixture: this process's, without the pull request's base branch. CI sets
+ * `GITHUB_BASE_REF` to the PR's base, which a fixture repo does not have, so a gate that compares against it would fail
+ * on any PR whose base is not `main` (a stacked PR) for a reason that is not the change. A test that needs one
+ * passes it in `opts.env`, which is applied after this.
+ */
+function fixtureEnv() {
+    const { GITHUB_BASE_REF: _base, ...env } = process.env;
+    return env;
+}
+
+/**
  * A temp repo holding the named gates (and `scripts/lib`, which several import) plus `files`
  * ({ "relative/path": "text" }). Call `remove()` when done.
  */
@@ -42,7 +53,7 @@ export function makeFixture(gates, files = {}) {
         /** Run `scripts/<gate>` in the fixture: `.mjs` with node, `.sh` with bash. */
         run(gate, args = [], opts = {}) {
             const [cmd, first] = gate.endsWith(".sh") ? [BASH, [join(root, "scripts", gate)]] : [process.execPath, [join(root, "scripts", gate)]];
-            const r = spawnSync(cmd, [...first, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...opts.env } });
+            const r = spawnSync(cmd, [...first, ...args], { cwd: root, encoding: "utf8", env: { ...fixtureEnv(), ...opts.env } });
             return { status: r.status, out: `${r.stdout}${r.stderr}`, stdout: r.stdout, stderr: r.stderr };
         },
         /** `git init` and track everything written so far, for gates that read `git ls-files`. */
