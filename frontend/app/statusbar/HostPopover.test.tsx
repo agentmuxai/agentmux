@@ -182,7 +182,7 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
     it.each([
         ["win", "Reveal in File Explorer"],
         ["mac", "Reveal in Finder"],
-        ["linux", "Reveal in file manager"],
+        ["linux", "Open in File Manager"],
     ] as const)("tooltip on %s names the action (the path itself is shown in full)", (os, label) => {
         platform = os;
         renderPanel();

@@ -65,6 +65,7 @@ import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { cursorAtLine, META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { POSITION_META_CLEARED, readPositionMeta, setOpenPosition } from "./open-position";
 import { openRemoteFile } from "./open-from-remote";
+import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { MENU_ICON } from "@/app/util/menu-icons";
 
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -1267,12 +1268,13 @@ export class EditorViewModel {
         }
     }
 
-    /** Reveal a path in the OS file manager. */
+    /** Show a path in the computer's file manager through `fs.reveal` (as the Files pane does): refusals are shown, a remote file is refused. */
     async revealInExplorer(path: string): Promise<void> {
+        if (this.connection()) return this.reportFileOpError(revealInFileManagerLabel(), new Error(`The file is on ${this.connection()}`));
         try {
-            await RpcApi.OpenInShellCommand(TabRpcClient, { path });
-        } catch {
-            // Non-fatal — some platforms may not support this.
+            await RpcApi.FsRevealCommand(TabRpcClient, { path, block_id: this.blockId });
+        } catch (e: unknown) {
+            this.reportFileOpError(revealInFileManagerLabel(), e);
         }
     }
 

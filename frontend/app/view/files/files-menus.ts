@@ -50,7 +50,7 @@ export const buildRowMenu = (model: FilesModel, entry: FsEntry, actions: RowMenu
         items.push({ type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
     }
     items.push(
-        { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
+        { type: "action", label: revealInFileManagerLabel(entry.is_dir ? "folder" : "file"), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(path, model.blockId).catch(fail) },
         { type: "separator" },
         { type: "action", label: "Cut", icon: MENU_ICON.cut, shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
         { type: "action", label: "Copy", icon: MENU_ICON.copy, shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
@@ -86,7 +86,7 @@ export const buildFolderMenu = (model: FilesModel, actions: Pick<RowMenuActions,
         },
         { type: "separator" },
         { type: "action", label: "Open terminal here", icon: MENU_ICON.openTerminal, onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
-        { type: "action", label: revealInFileManagerLabel(), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
+        { type: "action", label: revealInFileManagerLabel("folder"), icon: MENU_ICON.reveal, onSelect: () => void revealInOs(model.path(), model.blockId).catch(fail) },
         { type: "action", label: "Copy folder path", icon: MENU_ICON.copy, onSelect: () => void navigator.clipboard?.writeText(model.path()) },
         { type: "separator" },
         { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", icon: model.showHidden() ? MENU_ICON.hide : MENU_ICON.show, onSelect: () => model.toggleHidden() },

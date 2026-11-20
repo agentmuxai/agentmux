@@ -287,8 +287,9 @@ pub fn open_command(path: &Path) -> Command {
     }
 }
 
-/// The command that shows `path` selected in the OS file manager. Linux has
-/// no portable "select", so it opens the containing folder.
+/// The command that shows `path` selected in the OS file manager. On Linux
+/// this is the fallback of [`reveal`]: `xdg-open` has no "select", so it opens
+/// the containing folder.
 pub fn reveal_command(path: &Path) -> Command {
     #[cfg(windows)]
     {
@@ -308,6 +309,97 @@ pub fn reveal_command(path: &Path) -> Command {
         let mut cmd = Command::new("xdg-open");
         cmd.arg(path.parent().unwrap_or(path));
         cmd
+    }
+}
+
+/// `path` as a `file://` URI, percent-encoded byte by byte: only letters, digits, `-`, `.`, `_`, `~` and the
+/// `/` separators stay as they are, so a space, `#`, `%`, `,` or a non-ASCII character can't change what the
+/// URI names (and `dbus-send` splits its array values at a `,`).
+pub fn file_uri(path: &Path) -> String {
+    let mut uri = String::from("file://");
+    for &b in path.to_string_lossy().as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/') {
+            uri.push(b as char);
+        } else {
+            uri.push_str(&format!("%{b:02X}"));
+        }
+    }
+    uri
+}
+
+/// The `dbus-send` call that asks the desktop's file manager to show `path` selected: the session bus's
+/// `org.freedesktop.FileManager1.ShowItems`, which Nautilus, Dolphin, Nemo, Thunar and the other file managers
+/// that implement the interface answer. The empty string is the startup id.
+pub fn dbus_show_items_command(path: &Path) -> Command {
+    let mut cmd = Command::new("dbus-send");
+    cmd.args([
+        "--session",
+        "--print-reply",
+        "--dest=org.freedesktop.FileManager1",
+        "--type=method_call",
+        "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1.ShowItems",
+    ])
+    .arg(format!("array:string:{}", file_uri(path)))
+    .arg("string:");
+    cmd
+}
+
+/// How long the file manager gets to answer `ShowItems` before `xdg-open` is tried instead. A file manager that
+/// isn't running is started by the bus, which can take a moment.
+pub const DBUS_REVEAL_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Runs `cmd` with its stdio discarded and waits up to `limit` for it to exit; true only when it exited with
+/// success. A program that is missing, fails or is still running at the limit (which is then stopped) is false.
+/// The strict external-process policy applies, as in [`spawn_detached`] (invariant I7).
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
+fn succeeds_within(mut cmd: Command, limit: std::time::Duration) -> bool {
+    crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
+    let Ok(mut child) = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+/// The Linux half of [`reveal`], with its two steps passed in so each can be tested alone: `dbus` runs the
+/// `ShowItems` call and says whether it worked; when it didn't (no `dbus-send`, no session bus, the call
+/// failed or timed out), `fallback` gets the `xdg-open` of the containing folder, which is what Linux did
+/// before the file could be selected.
+pub fn reveal_linux(
+    path: &Path,
+    dbus: impl FnOnce(Command) -> bool,
+    fallback: impl FnOnce(Command) -> io::Result<()>,
+) -> io::Result<()> {
+    if dbus(dbus_show_items_command(path)) {
+        return Ok(());
+    }
+    let mut cmd = Command::new("xdg-open");
+    cmd.arg(path.parent().unwrap_or(path));
+    fallback(cmd)
+}
+
+/// Show `path` selected in the OS file manager, the one function every reveal goes through. Windows and macOS
+/// start their file manager detached ([`reveal_command`]). Linux asks the desktop's file manager to select the
+/// file through D-Bus and, where that isn't there, opens the containing folder ([`reveal_linux`]).
+pub fn reveal(path: &Path) -> io::Result<()> {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        spawn_detached(reveal_command(path))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        reveal_linux(path, |cmd| succeeds_within(cmd, DBUS_REVEAL_LIMIT), spawn_detached)
     }
 }
 
@@ -410,5 +502,96 @@ mod tests {
         std::fs::write(sub.join("deeper").join("f.txt"), "x").unwrap();
         remove_entry_no_follow(&sub).unwrap();
         assert!(!sub.exists());
+    }
+
+    #[test]
+    fn a_file_uri_keeps_a_path_in_one_piece() {
+        assert_eq!(file_uri(Path::new("/home/me/a.txt")), "file:///home/me/a.txt");
+        // A space, `#`, `%` and `,` would each change what the URI names, or where dbus-send splits it.
+        assert_eq!(file_uri(Path::new("/home/me/a b#c%d,e.txt")), "file:///home/me/a%20b%23c%25d%2Ce.txt");
+        // Non-ASCII is encoded byte by byte, as UTF-8.
+        assert_eq!(file_uri(Path::new("/home/me/é.txt")), "file:///home/me/%C3%A9.txt");
+        assert_eq!(file_uri(Path::new("/home/me/a-b_c~d.e")), "file:///home/me/a-b_c~d.e");
+    }
+
+    #[test]
+    fn the_dbus_call_names_the_file_managers_show_items_method_and_the_file() {
+        let cmd = dbus_show_items_command(Path::new("/home/me/a b.txt"));
+        assert_eq!(cmd.get_program().to_string_lossy(), "dbus-send");
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            args,
+            [
+                "--session",
+                "--print-reply",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+                "array:string:file:///home/me/a%20b.txt",
+                "string:",
+            ]
+        );
+    }
+
+    #[test]
+    fn linux_selects_the_file_through_dbus_and_never_opens_the_folder_when_it_worked() {
+        let asked = std::cell::RefCell::new(Vec::new());
+        let r = reveal_linux(
+            Path::new("/home/me/a.txt"),
+            |cmd| {
+                asked.borrow_mut().push(cmd.get_program().to_string_lossy().into_owned());
+                true
+            },
+            |_| panic!("xdg-open must not run when ShowItems worked"),
+        );
+        assert!(r.is_ok());
+        assert_eq!(*asked.borrow(), ["dbus-send"]);
+    }
+
+    #[test]
+    fn linux_opens_the_containing_folder_when_dbus_did_not_work() {
+        // No dbus-send, no session bus, a failed call and a timeout all reach `reveal_linux` as `false`.
+        let opened = std::cell::RefCell::new(None);
+        let r = reveal_linux(
+            Path::new("/home/me/dir/a.txt"),
+            |_| false,
+            |cmd| {
+                let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+                *opened.borrow_mut() = Some((cmd.get_program().to_string_lossy().into_owned(), args));
+                Ok(())
+            },
+        );
+        assert!(r.is_ok());
+        assert_eq!(opened.into_inner(), Some(("xdg-open".to_string(), vec!["/home/me/dir".to_string()])));
+    }
+
+    #[test]
+    fn linux_reports_a_failed_fallback() {
+        let r = reveal_linux(Path::new("/home/me/a.txt"), |_| false, |_| Err(io::Error::new(io::ErrorKind::NotFound, "no xdg-open")));
+        assert_eq!(r.unwrap_err().kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn a_missing_program_is_not_a_success() {
+        let cmd = Command::new("agentmux-no-such-program-for-this-test");
+        assert!(!succeeds_within(cmd, std::time::Duration::from_secs(1)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_exits_zero_is_a_success_and_one_that_exits_non_zero_is_not() {
+        assert!(succeeds_within(Command::new("true"), std::time::Duration::from_secs(5)));
+        assert!(!succeeds_within(Command::new("false"), std::time::Duration::from_secs(5)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_still_running_at_the_limit_is_stopped_and_is_not_a_success() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let started = std::time::Instant::now();
+        assert!(!succeeds_within(cmd, std::time::Duration::from_millis(150)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "it waited for the program instead of stopping it");
     }
 }
