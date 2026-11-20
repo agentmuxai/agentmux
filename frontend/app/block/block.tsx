@@ -201,13 +201,23 @@ function getViewElem(
 }
 
 /**
+ * A pane in the shared zoom has its level as `--pane-zoom`, for a view that scales only part of itself (Sysinfo: its
+ * text, not its charts) and for a dialog over it that follows the pane's zoom (the agent pane's sign-in).
+ */
+function paneZoomLevelOf(meta: { view?: string } | null | undefined): string | undefined {
+    return paneTabCapability(meta?.view, "paneZoom") ? String(readZoom(meta)) : undefined;
+}
+
+/**
  * The pane's modal host, for every kind of pane: a dialog about this pane (`<Modal scope="pane">`,
  * `useModalLayer()`, or a request raised with `openPaneModal`) covers its content and nothing else.
  * SPEC_PANE_MODALS_NOT_WINDOW_MODALS_2026_11_02.md D3.
  */
-function PaneModalHost(props: { blockId: string; children: JSX.Element }): JSX.Element {
+function PaneModalHost(props: { blockId: string; paneZoom?: string; children: JSX.Element }): JSX.Element {
     return (
-        <ModalLayer scope="pane" fill>
+        // `--pane-zoom` is the pane's level, for a dialog that follows the pane's zoom (the agent pane's sign-in)
+        // instead of the chrome's, as every other dialog does.
+        <ModalLayer scope="pane" fill style={props.paneZoom === undefined ? undefined : { "--pane-zoom": props.paneZoom } as JSX.CSSProperties}>
             <PaneRequestModals blockId={props.blockId} />
             {props.children}
         </ModalLayer>
@@ -274,15 +284,12 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
     // Track previous focus state to handle blockClicked
     const [blockContentOffset, setBlockContentOffset] = createSignal<Dimensions>(null);
 
+    const paneZoomLevel = createMemo(() => paneZoomLevelOf(blockData()?.meta));
     const blockContentStyle = createMemo<JSX.CSSProperties>(() => {
         const retVal: JSX.CSSProperties = {
             "pointer-events": disablePointerEvents() ? "none" : undefined,
         };
-        // A pane in the shared zoom gets its level as `--pane-zoom`, for a view
-        // that scales only part of itself (Sysinfo: its text, not its charts).
-        if (paneTabCapability(blockData()?.meta?.view, "paneZoom")) {
-            (retVal as Record<string, string>)["--pane-zoom"] = String(readZoom(blockData()?.meta));
-        }
+        if (paneZoomLevel() !== undefined) (retVal as Record<string, string>)["--pane-zoom"] = paneZoomLevel()!;
         const rect = innerRect();
         const offset = blockContentOffset();
         if (rect?.width && rect?.height && offset) {
@@ -368,7 +375,7 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
             blockModel={blockModel}
             viewModel={viewModel}
         >
-            <PaneModalHost blockId={nodeModel.blockId}>
+            <PaneModalHost blockId={nodeModel.blockId} paneZoom={paneZoomLevel()}>
                 <div class="block-focuselem">
                     <input
                         type="text"

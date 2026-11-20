@@ -12,7 +12,7 @@ viewer.currentScaleValue = page-width
 bus.dispatch find {"source":null,"type":"","query":"cat","caseSensitive":false,"entireWord":false,"highlightAll":true,"findPrevious":false,"matchDiacritics":false}
 --- typed
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -54,7 +54,7 @@ bus.dispatch find {"source":null,"type":"","query":"cat","caseSensitive":false,"
       <div class="pdfViewer">
 --- 4 matches
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -100,7 +100,7 @@ bus.dispatch find {"source":null,"type":"again","query":"cat","caseSensitive":fa
 bus.dispatch find {"source":null,"type":"again","query":"cat","caseSensitive":false,"entireWord":false,"highlightAll":true,"findPrevious":true,"matchDiacritics":false}
 --- on match 2
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -145,7 +145,7 @@ bus.dispatch find {"source":null,"type":"again","query":"cat","caseSensitive":fa
 bus.dispatch find {"source":null,"type":"","query":"dog","caseSensitive":false,"entireWord":false,"highlightAll":true,"findPrevious":false,"matchDiacritics":false}
 --- no matches
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">
@@ -190,7 +190,7 @@ bus.dispatch find {"source":null,"type":"","query":"dog","caseSensitive":false,"
 bus.dispatch find {"source":null,"type":"","query":"","caseSensitive":false,"entireWord":false,"highlightAll":true,"findPrevious":false,"matchDiacritics":false}
 --- cleared
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">

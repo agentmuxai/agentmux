@@ -1,0 +1,50 @@
+/* Mock-ups for SPEC_CONNECTORS_ONE_LIST_2026_11_19.md. Pictures of intent, not of built UI.
+   Square corners, lines not fills, tokens only in the real build (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM). */
+:root {
+  --bg: #161616; --line: #343434; --line-soft: #262626;
+  --text: #e4e4e4; --text-2: #a0a0a0; --accent: #6fbf73; --warn: #e0b956; --err: #eb755d; --ok: #6fbf73;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #0e0e0e; color: var(--text); font: 13px/1.35 "Segoe UI", Inter, system-ui, sans-serif; }
+.pane { background: var(--bg); border: 1px solid var(--line); margin: 12px; }
+.pane-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.pane-head .title { font-weight: 600; }
+.pane-head .count { color: var(--text-2); font-size: 11px; }
+.pane-head .filter { margin-left: auto; width: 130px; border: 1px solid var(--line); color: var(--text-2); padding: 3px 6px; font-size: 11px; }
+.group { padding: 8px 10px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); }
+.grid { display: grid; gap: 6px; padding: 6px 10px 10px; grid-template-columns: repeat(var(--cols), minmax(0, var(--max, 1fr))); }
+.cell { container-type: inline-size; }
+.card { border: 1px solid var(--line); background: #1b1b1b; padding: 10px; height: 100%;
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; grid-template-areas: "icon text control"; column-gap: 10px; align-items: center; }
+.card.open { border-color: var(--accent); background: #1a211b; }
+.card.warn { border-color: #6b5a24; }
+.logo { grid-area: icon; width: 28px; height: 28px; border: 1px solid var(--line); display: grid; place-items: center; font-weight: 700; font-size: 12px; color: var(--text-2); }
+.text { grid-area: text; min-width: 0; }
+.name { font-weight: 600; }
+.what { color: var(--text-2); font-size: 12px; }
+.state { font-size: 11px; margin-top: 2px; }
+.state.ok { color: var(--ok); } .state.warn { color: var(--warn); } .state.err { color: var(--err); }
+.control { grid-area: control; }
+.btn { display: inline-block; border: 1px solid var(--line); background: #262626; color: var(--text); padding: 4px 12px; font-size: 12px; white-space: nowrap; }
+.btn.accent { border-color: var(--accent); color: var(--accent); background: transparent; }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.danger { border-color: var(--err); color: var(--err); background: transparent; }
+/* A card narrower than 340 px stacks: the control drops under the text. */
+@container (max-width: 339px) {
+  .card { grid-template-columns: 28px minmax(0, 1fr); grid-template-areas: "icon text" "control control"; row-gap: 8px; align-content: start; }
+  .control { justify-self: start; }
+}
+.foot { padding: 4px 10px 10px; color: var(--text-2); font-size: 12px; }
+.foot a { color: #7fb2ff; }
+.detail { grid-column: 1 / -1; position: relative; border: 1px solid var(--accent); background: #191919; padding: 8px 12px 12px; margin-top: 4px; }
+.detail::before { content: ""; position: absolute; top: -6px; left: var(--caret, 75%); width: 10px; height: 10px; background: #191919;
+  border-left: 1px solid var(--accent); border-top: 1px solid var(--accent); transform: translateX(-50%) rotate(45deg); }
+.detail .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.detail h4 { margin: 10px 0 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+.inst { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.grow { flex: 1; min-width: 0; }
+.sub { color: var(--text-2); font-size: 11px; }
+.confirm { border: 1px solid var(--err); padding: 8px; margin-top: 8px; max-width: 420px; }
+.confirm p { margin: 0 0 6px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.caption { color: #888; font-size: 11px; margin: 0 12px 12px; }

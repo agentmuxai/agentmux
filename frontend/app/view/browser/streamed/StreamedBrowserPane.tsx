@@ -17,6 +17,8 @@ function statusText(status: PaneStatus): string {
         case "waiting":
         case "connecting":
             return t("browser.streamed.connecting");
+        case "starting":
+            return t("browser.streamed.starting");
         case "failed":
             return t("browser.streamed.failed");
         case "ended":

@@ -3398,6 +3398,25 @@
     }
   },
   {
+    "command": "fs.agent_folder",
+    "request": "agentmux_srv_core::backend::rpc_types::fs::FsPathReq",
+    "requestName": "FsPathReq",
+    "requestTs": {
+      "imports": [
+        "FsPathReq"
+      ],
+      "name": "FsPathReq"
+    },
+    "response": "agentmux_srv_core::backend::rpc_types::fs::FsAgentFolder",
+    "responseName": "FsAgentFolder",
+    "responseTs": {
+      "imports": [
+        "FsAgentFolder"
+      ],
+      "name": "FsAgentFolder"
+    }
+  },
+  {
     "command": "fs.create",
     "request": "agentmux_srv_core::backend::rpc_types::fs::FsCreateReq",
     "requestName": "FsCreateReq",

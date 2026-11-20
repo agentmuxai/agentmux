@@ -97,6 +97,6 @@ export async function requestShutdown(blockId: string, name: string, askIn: stri
             ...shutdownConfirmText(name, preview),
             onConfirm: (stopBackground: boolean) => void shutDown(blockId, name, stopBackground),
         },
-        { source: "shutdown", waits: false }
+        { source: "shutdown", waits: false, operatorOnly: false }
     );
 }

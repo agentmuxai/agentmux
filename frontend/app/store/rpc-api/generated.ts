@@ -337,6 +337,7 @@ import type { FleetGroup } from "@/types/rpc/FleetGroup";
 import type { FleetGroupDeleteResult } from "@/types/rpc/FleetGroupDeleteResult";
 import type { FleetGroupListResult } from "@/types/rpc/FleetGroupListResult";
 import type { ForkAgentDefinitionSuggestResult } from "@/types/rpc/ForkAgentDefinitionSuggestResult";
+import type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 import type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 import type { FsCreateResult } from "@/types/rpc/FsCreateResult";
 import type { FsDeleteReq } from "@/types/rpc/FsDeleteReq";
@@ -1461,6 +1462,10 @@ export const GeneratedApi = {
   // command "fs.delete"
   FsDeleteCommand(client: RpcClient, data: FsDeleteReq, opts?: RpcOpts): Promise<FsOpResults> {
     return client.rpcCall("fs.delete", data, opts);
+  },
+  // command "fs.agent_folder"
+  FsAgentFolderCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsAgentFolder> {
+    return client.rpcCall("fs.agent_folder", data, opts);
   },
   // command "fs.git_status"
   FsGitStatusCommand(client: RpcClient, data: FsPathReq, opts?: RpcOpts): Promise<FsGitStatus> {

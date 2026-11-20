@@ -6,8 +6,8 @@
  * question and permission panels
  * (docs/specs/SPEC_VAULT_REQUESTS_AS_CARDS_IN_THE_AGENT_PANE_2026_11_01.md §4.1, §7).
  * Outside the scrolling transcript, so nothing an agent prints sits where a
- * card does, and marked operator-only, so an agent's UI query, click and key
- * presses never reach one. One card is shown in full, the first to come unless
+ * card does. A card that answers an agent's ask is marked operator-only, so an
+ * agent's UI query, click and key presses never reach it. One card is shown in full, the first to come unless
  * the person picks another; the rest are a line each under it. The dock never
  * takes the focus: the person typing in the composer keeps typing.
  *
@@ -35,7 +35,7 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
     const rest = createMemo(() => cards().filter((r) => r !== shown()));
     return (
         <Show when={shown()}>
-            <div class="pane-request-dock" data-testid="pane-request-dock" data-toast-avoid data-operator-only="" role="region" aria-label="Waiting for you">
+            <div class="pane-request-dock" data-testid="pane-request-dock" data-toast-avoid data-operator-only={shown()?.operatorOnly ? "" : undefined} role="region" aria-label="Waiting for you">
                 <Show when={shown()} keyed>
                     {(r) => <Drawn request={r} />}
                 </Show>
@@ -44,7 +44,7 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
                         <span class="pane-request-more-count">{rest().length} more:</span>
                         <For each={rest()}>
                             {(r) => (
-                                <Button tone="quiet" class="pane-request-more-item" onClick={() => setPicked(r.id)}>
+                                <Button tone="quiet" class="pane-request-more-item" data-operator-only={r.operatorOnly ? "" : undefined} onClick={() => setPicked(r.id)}>
                                     {r.summary ?? r.source}
                                 </Button>
                             )}
@@ -57,12 +57,16 @@ export function PaneRequestDock(props: { blockId: string }): JSX.Element {
 }
 
 /** A modal renders through a portal, outside anything this host draws, so its
- *  operator-only mark comes from the context every `Modal` reads. */
+ *  operator-only mark comes from the context every `Modal` reads: the request's own. */
 export function PaneRequestModals(props: { blockId: string }): JSX.Element {
     const modals = createMemo(() => paneRequests.of(props.blockId).filter((r) => r.presentation === "modal"));
     return (
-        <OperatorOnlyModals.Provider value={true}>
-            <For each={modals()}>{(r) => <Drawn request={r} />}</For>
-        </OperatorOnlyModals.Provider>
+        <For each={modals()}>
+            {(r) => (
+                <OperatorOnlyModals.Provider value={r.operatorOnly}>
+                    <Drawn request={r} />
+                </OperatorOnlyModals.Provider>
+            )}
+        </For>
     );
 }

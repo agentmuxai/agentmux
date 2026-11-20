@@ -59,14 +59,27 @@ export function createAutostart() {
     // is rewritten ("repair"); another build's entry is taken over ("use this build"). The setting is written off
     // and on again, which the launcher reconciles like any change (`autostart::plan` writes for a missing target
     // and for another channel's entry), so no second path to the login entry exists.
-    const fix = (): "repair" | "use-this-build" | null => {
+    // On macOS the login item can wait for the person's approval in System Settings -> Login Items ("approve"):
+    // the button opens that page, and the registration is read again when they come back to the window.
+    const fix = (): "repair" | "use-this-build" | "approve" | null => {
         const st = autostart();
         if (autostart.loading || !st || st.available === false) return null;
+        if (st.state === "needs_approval") return "approve";
         if (st.state === "broken") return "repair";
         if (st.state === "on" && st.movable) return "use-this-build";
         return null;
     };
+    const openLoginItems = () => {
+        getApi()
+            .openLoginItems()
+            .catch(() => {
+                // No launcher, or a macOS that cannot open the page: the description still says where to go.
+            });
+        // Read the registration again when the person comes back from System Settings.
+        window.addEventListener("focus", () => setRepairs((n) => n + 1), { once: true });
+    };
     const applyFix = () => {
+        if (fix() === "approve") return openLoginItems();
         set("app:startatlogin", false);
         setTimeout(() => {
             set("app:startatlogin", true);
@@ -76,11 +89,18 @@ export function createAutostart() {
     const autostartDescription = () => {
         const st = autostart();
         if (st?.available === false) return "Unavailable in this build (not started by the AgentMux launcher).";
+        if (fix() === "approve") return t("settings.notifications.autostart.needsApproval");
         if (fix() === "repair") return t("settings.notifications.autostart.broken");
         if (fix() === "use-this-build") {
             return st?.ownerChannel
                 ? t("settings.notifications.autostart.owner", { channel: st.ownerChannel })
                 : t("settings.notifications.autostart.ownerUnknown");
+        }
+        // The Store package's login entry is Windows' own: the person can turn it off in Windows, and AgentMux
+        // cannot turn it back on, so the switch here says where.
+        if (startAtLogin() && st && !autostart.loading) {
+            if (st.package === "disabled_by_user") return t("settings.notifications.autostart.packageOffByUser");
+            if (st.package === "disabled_by_policy") return t("settings.notifications.autostart.packageOffByPolicy");
         }
         if (startAtLogin() && st && !autostart.loading && !st.enabled) {
             return "On, but not registered with the system yet. If this persists, see the launcher log.";

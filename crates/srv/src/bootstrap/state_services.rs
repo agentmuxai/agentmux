@@ -325,7 +325,7 @@ pub fn spawn_state_services(state: &AppState) {
         Arc::clone(&state.config_watcher),
     );
     // The version folders and unpacked portables an upgrade leaves behind are listed daily, and cleared on a host that turns it on.
-    backend::old_versions_service::install(Arc::clone(&state.config_watcher));
+    backend::old_versions_service::install(Arc::clone(&state.config_watcher), crate::server::external_host::host().is_some());
     install_turn_outcome_notes(state);
 }
 

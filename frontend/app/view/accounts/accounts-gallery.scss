@@ -1,27 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Connectors → Accounts gallery — brand tiles + per-tile connected count +
-// the OAuth/Key chooser. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
-
-// The brand chips are `Card size="chip"` and the connected accounts are
-// cards, both styled by element/ui/card.scss
-// (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.2); this file keeps the chooser.
+// The add section under a connector's card in Connectors' list: the OAuth/Key chooser, the guide and the "Other agents"
+// lines. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3. (The brand-tile gallery that once held these
+// styles is gone: SPEC_CONNECTORS_ONE_LIST_2026_11_19.md.)
 
 @use "../../mixins.scss";
 @use "../../element/menu-frame";
-
-.accounts-gallery {
-    display: flex;
-    flex-direction: column;
-
-    // A tile's line says what the service is for ("Repos, Actions, PRs"): it wraps to a second line
-    // rather than ending in an ellipsis, which in a thin pane cut every one of them.
-    .account-tile .ui-card-subtitle {
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-}
 
 // The brand logo in the chooser's header.
 .account-tile-logo {
@@ -33,9 +18,8 @@
 
 // ── Tile-click chooser (OAuth / Key) ──────────────────────────────────────────
 // These class names are shared by TWO different dialogs:
-//  1. AccountsGallery.tsx's own OAuth-vs-Key mode picker — a small, still
-//     hand-rolled overlay+dialog (`.accounts-chooser-overlay` provides its
-//     backdrop; `.accounts-chooser` its box chrome). Unrelated to Modal.
+//  1. The OAuth-vs-Key mode picker (Connectors' add section uses the inline
+//     form of it; `.accounts-chooser` is its box chrome). Unrelated to Modal.
 //  2. ProviderLoginPanel.tsx's dialog — now wrapped in the canonical <Modal>
 //     via `panelClass="accounts-chooser"`, which just adds this class
 //     alongside `modal-panel` on the same element. Outer chrome (backdrop,
@@ -122,6 +106,22 @@
 .modal-panel.accounts-chooser {
     width: 320px;
     max-width: calc((100vw - 32px) / var(--zoomfactor));
+    // `.accounts-chooser` clips (the menu frame's rounded corners), which left a dialog taller than its room cut off
+    // with nothing to scroll: a field taking focus scrolled it, out of sight, and the top never came back. The dialog
+    // scrolls instead, with its bar, and keeps its corners. Nothing scrolls sideways.
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+// Over an agent pane (a sign-in from the composer): the dialog follows the pane's zoom, as the conversation does,
+// not the chrome's. `--pane-zoom` is the pane's level, set on the pane's dialog layer (block.tsx); a pane with no
+// shared zoom has none, and the dialog keeps the chrome's. A length in `%` is the pane's real size, and a length in
+// px is scaled by the zoom, so the room it may take is the pane's whole, minus the gap the layer already leaves.
+.modal-root[data-scope="pane"] .modal-panel.accounts-chooser--pane {
+    zoom: var(--pane-zoom, var(--zoomfactor));
+    width: min(360px, 100%);
+    max-width: 100%;
+    max-height: 100%;
 }
 
 // An OAuth account's card: the line saying what stopped it or what the

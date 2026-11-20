@@ -13,6 +13,7 @@ import {
     SysinfoGroup,
     TerminalGroup,
 } from "./advanced-section-parts";
+import { UnrecognizedGroup } from "./unrecognized-group";
 
 export { ADVANCED_SETTINGS } from "./advanced-settings-index";
 
@@ -29,6 +30,7 @@ export function AdvancedSection(): JSX.Element {
             <DragDropGroup />
             <EnvironmentGroup />
             <DeveloperGroup />
+            <UnrecognizedGroup />
         </div>
     );
 }

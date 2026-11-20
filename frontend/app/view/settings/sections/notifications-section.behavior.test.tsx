@@ -66,6 +66,10 @@ vi.mock("@/util/app-api", () => ({
             h.log.push("getAutostartStatus");
             return h.autostartFails ? Promise.reject(new Error("no verb")) : Promise.resolve(h.autostart);
         },
+        openLoginItems: () => {
+            h.log.push("openLoginItems");
+            return Promise.resolve();
+        },
     }),
 }));
 vi.mock("@/app/store/rpc-api", () => ({
@@ -272,6 +276,42 @@ describe("NotificationsSection, pinned", () => {
         await flush();
         lookRow("an entry from before owners were recorded");
         await snapshot("autostart-fix");
+    });
+
+    it("says a login item waits for the person's approval in Login Items, opens that page from its button, and reads the registration again when the window gets the focus back", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: true, state: "needs_approval", target: "/Applications/AgentMux.app/Contents/MacOS/agentmux-launcher", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        mount();
+        await flush();
+        lookRow("registered, waiting for approval");
+        log("== Open Login Items");
+        fireEvent.click(row("autostart")!.querySelector("[data-stand=Button] [data-cb], [data-stand=Button][data-cb]")!);
+        await flush();
+        h.autostart = { available: true, enabled: true, state: "on", ownerChannel: "stable", thisChannel: "stable", movable: false };
+        log("== the person allows it and comes back to the window");
+        window.dispatchEvent(new Event("focus"));
+        await flush();
+        lookRow("allowed: no button");
+        await snapshot("autostart-approval");
+    });
+
+    it("says where to turn start at login back on when Windows has it off for the Store package, by the person or by policy", async () => {
+        setSettings({ "app:startatlogin": true });
+        h.autostart = { available: true, enabled: false, state: "off", thisChannel: "stable", movable: false, package: "disabled_by_user" };
+        mount();
+        await flush();
+        lookRow("the person turned it off in Windows");
+        cleanup();
+        h.autostart = { available: true, enabled: false, state: "off", thisChannel: "stable", movable: false, package: "disabled_by_policy" };
+        mount();
+        await flush();
+        lookRow("off by the organisation's policy");
+        cleanup();
+        h.autostart = { available: true, enabled: true, state: "on", thisChannel: "stable", movable: false, package: "enabled" };
+        mount();
+        await flush();
+        lookRow("on, as Windows says");
+        await snapshot("autostart-package");
     });
 
     it("reads the registration again two seconds after a change to start at login, and not for another setting", async () => {

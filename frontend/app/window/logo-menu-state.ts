@@ -5,8 +5,7 @@ import { atoms, getApi } from "@/store/global";
 import { createTab } from "@/store/tab-actions";
 import { hostHas } from "@/util/host-caps";
 import { fireAndForget } from "@/util/util";
-import { openModal } from "@/app/store/modalmodel";
-import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openCommandPalette } from "@/app/store/open-command-palette";
 import {
     currentWindowLabel,
     currentWindowOpacity,
@@ -179,7 +178,7 @@ function buildMenuItems(openWorkspaceItems: () => MenuItem[]): MenuItem[] {
             label: "Command Palette",
             icon: "magnifying-glass",
             shortcut: shortcutFor("view:command-palette"),
-            onClick: () => openModal(CommandPaletteModal),
+            onClick: () => void openCommandPalette(),
         },
         // Only in dev mode. Reading it here makes this memo rebuild once
         // when the setting changes, which never happens with the menu open.

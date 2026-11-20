@@ -206,6 +206,14 @@ ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # See docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
 CHANNEL_ID="$(printf '%s' "$CHANNEL" | tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]')"
 BUNDLE_ID="ai.agentmux.${CHANNEL_ID}.${VERSION}"
+# A stable bundle id (no version) is what lets start at login be a real Login Items entry (SMAppService) that
+# survives upgrades, and keeps the notification permission across them. Off until the identity decision is made
+# (docs/specs/SPEC_START_WITH_OS_2026_09_25.md section 7 question 4 and the notification spec's section 2): set
+# AGENTMUX_STABLE_BUNDLE_ID=1 for the release channel. Every other build keeps the per-version id above.
+AGENTMUX_STABLE_BUNDLE_ID="${AGENTMUX_STABLE_BUNDLE_ID:-0}"
+if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ]; then
+    BUNDLE_ID="ai.agentmux.${CHANNEL_ID}"
+fi
 NOTARIZE="${NOTARIZE:-1}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-notarytool}"
 SRV="dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}"
@@ -515,6 +523,38 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Start at login, as a Login Items entry: a login agent the launcher registers with SMAppService
+# (crates/launcher/src/autostart/login_item.rs). Only a bundle with a stable id ships it: the launcher
+# registers it when the file is there and otherwise keeps writing the LaunchAgent plist of earlier builds.
+# The job is the launcher's --login-start shim (BundleProgram must be a signed Mach-O in the bundle): it opens
+# the app through LaunchServices in background mode unless it already runs, then exits.
+# Only a Developer-ID-signed bundle ships it: the system ties the registration to the app's code requirement, which for
+# an ad-hoc signature is the build's own hash, so after an in-place upgrade launchd refuses to start the job (a
+# "launch constraint violation" with no message to the person). A build that no job will sign with a Developer ID keeps
+# the LaunchAgent plist. With --unsigned-app the release job signs the bundle afterwards, so that counts as signed.
+if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ] && { [ -n "$CERT" ] || [ "$UNSIGNED_APP" = "1" ]; }; then
+    LOGIN_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
+    mkdir -p "$LOGIN_AGENT_DIR"
+    cat > "$LOGIN_AGENT_DIR/${BUNDLE_ID}.login.plist" <<LOGINPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>${BUNDLE_ID}.login</string>
+    <key>BundleProgram</key><string>Contents/MacOS/agentmux-launcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>agentmux-launcher</string>
+        <string>--login-start</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><false/>
+    <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+LOGINPLIST
+fi
 
 FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 

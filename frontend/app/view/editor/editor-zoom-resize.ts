@@ -23,9 +23,10 @@ import { contentZoomOf, hasContentZoom } from "./viewers/content-zoom";
 export function useEditorZoom(model: EditorViewModel, cm: CmHandle, root: () => HTMLDivElement | undefined) {
     const contentZoomed = () => hasContentZoom(model.activeViewer());
     const mainZoom = () => (contentZoomed() ? chromeZoomAtom() : model.zoomAtom());
-    // Ctrl+scroll zoom, before CodeMirror's own wheel handling; it zooms the part under the pointer. Over the
-    // chrome of a content-zoomed viewer it is left to the window's handler, which steps chrome zoom.
-    usePaneZoomWheel(root, () => model.blockId, undefined, (ev) => !(contentZoomed() && isOverChrome(ev.target as HTMLElement)));
+    // Ctrl+scroll zoom, before CodeMirror's own wheel handling; it zooms the part under the pointer. Over a control bar
+    // (`data-zoom-scope="chrome"`: the tree's toolbar, the tab bar, the mode and viewer bars, or the chrome of a
+    // content-zoomed viewer) it is left to the window's handler, which steps chrome zoom.
+    usePaneZoomWheel(root, () => model.blockId, undefined, (ev) => !isOverChrome(ev.target as HTMLElement));
     // What is under the pointer stays under it across a zoom: CodeMirror's scroller moves by how far
     // that character moved (SPEC_ZOOM_ANCHOR_AND_AUDIT_2026_10_29.md §4.3); a viewer's content by its own.
     const textAnchor = editorZoomAnchor({ view: () => cm.view, zoom: model.zoomAtom });

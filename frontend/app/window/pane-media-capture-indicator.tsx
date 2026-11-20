@@ -122,7 +122,7 @@ export function PaneMediaCaptureIndicator(): JSX.Element {
             void doRevoke(blockId);
         };
         // The person asked by clicking Stop, so nothing else waits on them.
-        asking.set(blockId, openPaneModal(blockId, StopCaptureConfirm, { onStop, onCancel: done }, { source: "media-stop", waits: false, onGone: done }));
+        asking.set(blockId, openPaneModal(blockId, StopCaptureConfirm, { onStop, onCancel: done }, { source: "media-stop", waits: false, operatorOnly: false, onGone: done }));
         // The pane may be in another tab: show it, so the question has somewhere to appear.
         void revealBlock(blockId, { source: "media-stop", focusCaret: false, localOnly: true });
     };

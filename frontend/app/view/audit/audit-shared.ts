@@ -9,6 +9,7 @@ import type { AuditEnd } from "@/types/rpc/AuditEnd";
 import type { AuditEntry } from "@/types/rpc/AuditEntry";
 import type { AuditHistoryLink } from "@/types/rpc/AuditHistoryLink";
 import type { AuditQueryReq } from "@/types/rpc/AuditQueryReq";
+import type { AuditQueryResult } from "@/types/rpc/AuditQueryResult";
 import type { AuditTotals } from "@/types/rpc/AuditTotals";
 
 export const AUDIT_PAGE = 50;
@@ -89,6 +90,19 @@ export function buildRequest(filter: AuditFilter, now: number, cursor?: string, 
         ...(cursor ? { cursor } : {}),
         ...(totals ? { totals: true } : {}),
     };
+}
+
+/**
+ * The entries of a newest page: this channel's, and the rows the other channels on this computer keep in their own
+ * files (`other_channels`), newest first. Those channels' rows are one page and are not paged further, so when this
+ * channel has older pages to come, the ones older than this page's last entry are left out: they would sit above
+ * entries the next page adds.
+ */
+export function pageEntries(res: AuditQueryResult): AuditEntry[] {
+    const others = (res.other_channels ?? []).flatMap((c) => c.entries);
+    if (others.length === 0) return res.entries;
+    const floor = res.next_cursor && res.entries.length > 0 ? res.entries[res.entries.length - 1].ts_ms : 0;
+    return [...res.entries, ...others.filter((e) => e.ts_ms >= floor)].sort((a, b) => b.ts_ms - a.ts_ms);
 }
 
 /** The entries that came from one channel, in the order of the list. */

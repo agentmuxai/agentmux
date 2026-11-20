@@ -205,7 +205,9 @@ export function StartAtLoginRow({ a }: { a: AutostartState }): JSX.Element {
                                         <Button onClick={a.applyFix}>
                                             {kind() === "repair"
                                                 ? t("settings.notifications.autostart.repair")
-                                                : t("settings.notifications.autostart.useThisBuild")}
+                                                : kind() === "approve"
+                                                  ? t("settings.notifications.autostart.openLoginItems")
+                                                  : t("settings.notifications.autostart.useThisBuild")}
                                         </Button>
                                     )}
                                 </Show>

@@ -10,9 +10,9 @@ export { registerPaneCommandRunner } from "./app-api";
 import type { KeyPane } from "./defaults";
 import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
-import { formatCommand, keybindingsVersion, keysFor, matchPaneKey, resolveKey, type KeyContext } from "./registry";
+import { formatCommand, keybindingsVersion, keyRunsCommand, keysFor, matchPaneKey, resolveKey, type KeyContext } from "./registry";
 
-let keyContext: () => KeyContext = () => ({ textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false });
+let keyContext: () => KeyContext = () => ({ textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "", docTabsHost: false });
 
 /** Where focus is, for `isGlobalKey`: the dispatcher supplies it at load
  *  (keymodel-dispatch's currentKeyContext), which avoids an import cycle. */
@@ -38,6 +38,11 @@ export function keyPlatform(): KeyPlatform {
 export function shortcutFor(command: string): string {
     keybindingsVersion();
     return formatCommand(command, keyPlatform());
+}
+
+/** Whether `e` is the key the shortcut table (with the person's changes) binds to `command`. */
+export function isKeyFor(e: KeyboardEvent, command: string): boolean {
+    return keyRunsCommand(keyEventLike(e), command, keyPlatform());
 }
 
 /** A component-local key in this platform's notation: `keyLabel("mod+s")`. */
