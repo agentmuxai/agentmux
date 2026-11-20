@@ -76,6 +76,26 @@ pub fn target_origin(url: &str) -> Option<String> {
     }
 }
 
+/// `url` as an origin and nothing else: the origin ([`target_origin`]) when `url` names no more than one (no path
+/// beyond `/`, no query, fragment or user information), else `None`. What a saved site is stored as when it is only
+/// an origin written another way (`HTTPS://Example.com:443/` becomes `https://example.com`); an address with a path
+/// is a login's own page and is left as it was typed.
+pub fn bare_origin(url: &str) -> Option<String> {
+    let u = url::Url::parse(url.trim()).ok()?;
+    let bare = u.path() == "/" && u.query().is_none() && u.fragment().is_none() && u.username().is_empty() && u.password().is_none();
+    if bare { target_origin(u.as_str()) } else { None }
+}
+
+/// Whether `a` and `b` name the same origin: the same scheme, host (any case) and port (the scheme's default when
+/// absent), whatever else either carries (a trailing slash, a path, a query, user information). Never true for
+/// another host, port or scheme. An address with no web origin is the same as another only when written the same.
+pub fn same_origin(a: &str, b: &str) -> bool {
+    match (target_origin(a.trim()), target_origin(b.trim())) {
+        (Some(x), Some(y)) => x == y,
+        _ => a.trim() == b.trim(),
+    }
+}
+
 /// May a pane limited to `list` (normal form) go to `url`? `about:` pages
 /// always; any other address with no web origin, never.
 pub fn allows(list: &[String], url: &str) -> bool {
@@ -116,6 +136,46 @@ fn split_port(s: &str) -> (&str, &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_site_and_a_page_origin_match_as_origins_not_as_strings() {
+        // With and without the trailing slash, in both directions.
+        assert!(same_origin("http://host.example:8080", "http://host.example:8080/"));
+        assert!(same_origin("http://host.example:8080/", "http://host.example:8080"));
+        // Upper-case scheme and host.
+        assert!(same_origin("HTTPS://Example.COM", "https://example.com/"));
+        // The scheme's default port is the same as none, and an explicit other port is another origin.
+        assert!(same_origin("https://example.com:443", "https://example.com"));
+        assert!(same_origin("http://example.com:80/", "http://example.com"));
+        assert!(!same_origin("https://example.com:8443", "https://example.com"));
+        assert!(!same_origin("http://example.com:8080", "http://example.com:8081"));
+        // Another scheme is another origin: http is not https.
+        assert!(!same_origin("http://example.com", "https://example.com"));
+        // A look-alike host is another host, however it is written.
+        assert!(!same_origin("https://example.com.evil.test", "https://example.com"));
+        assert!(!same_origin("https://exarnple.com", "https://example.com"));
+        assert!(!same_origin("https://example.com@evil.test", "https://example.com"), "the host is what follows the @");
+        assert!(!same_origin("https://sub.example.com", "https://example.com"));
+        // A path, query or user information is ignored for the match, and widens it to no other host or port.
+        assert!(same_origin("https://example.com/login?next=/a", "https://example.com"));
+        assert!(same_origin("https://user@example.com/app", "https://example.com/"));
+        assert!(!same_origin("https://example.com/app", "https://example.com:8443"));
+        // What has no web origin is the same only as written.
+        assert!(same_origin("example.com", " example.com "));
+        assert!(!same_origin("example.com", "https://example.com"));
+    }
+
+    #[test]
+    fn a_site_that_is_only_an_origin_is_stored_in_one_form_and_a_login_page_is_left_alone() {
+        assert_eq!(bare_origin("HTTPS://Example.com:443/").as_deref(), Some("https://example.com"));
+        assert_eq!(bare_origin("http://host.example:8080/").as_deref(), Some("http://host.example:8080"));
+        assert_eq!(bare_origin(" https://example.com ").as_deref(), Some("https://example.com"));
+        assert_eq!(bare_origin("https://example.com/login"), None, "a path is the login's own page");
+        assert_eq!(bare_origin("https://example.com/?a=1"), None);
+        assert_eq!(bare_origin("https://user@example.com"), None, "user information is not dropped without being asked");
+        assert_eq!(bare_origin("example.com"), None);
+        assert_eq!(bare_origin("about:blank"), None);
+    }
 
     #[test]
     fn entries_parse_to_their_normal_form() {
