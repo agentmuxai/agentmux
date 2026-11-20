@@ -296,6 +296,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: a macOS-only test starts a process that has already ended"),
     ("crates/launcher/src/upgrade_macos.rs", "\"/usr/bin/osascript\"", 1,
      "not-windows: macOS-only (osascript upgrade dialog)"),
+    ("crates/launcher/src/autostart/login_item.rs", "\"/usr/bin/open\"", 1,
+     "not-windows: macOS-only (the login job opens the app through LaunchServices; on Windows the function returns before it)"),
     ("crates/launcher/src/upgrade_package.rs", "\"/bin/sh\"", 2,
      "not-windows: Linux-only (the .deb/.rpm install waiter, and its test)"),
     ("crates/launcher/src/upgrade_package.rs", "\"sleep\"", 2,

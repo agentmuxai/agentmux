@@ -465,6 +465,8 @@ declare global {
         getHostCaps(): HostCaps;
         /** Start at login: can the host manage a login entry, and is one registered? */
         getAutostartStatus(): Promise<AutostartStatus>;
+        /** macOS: open System Settings at Login Items, where the person allows AgentMux to start at login. */
+        openLoginItems(): Promise<void>;
         /** Create the settings file if it is missing (or bring it up to the latest template) and return its path. */
         ensureSettingsFile(): Promise<string>;
         /** Create the settings file if it is missing, and open it in the operating system's default editor. The
