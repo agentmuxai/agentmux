@@ -47,6 +47,11 @@ impl Snapshot {
         )
     }
 
+    /// What its pane is called.
+    fn title(&self) -> String {
+        format!("{} (read-only snapshot, {})", self.of, self.taken)
+    }
+
     /// The pane opened: note which one it is, so closing it takes the copy with it.
     pub fn opened(&self, block_id: &str) {
         if let Err(e) = std::fs::write(self.dir.join(MARKER), block_id) {
@@ -71,8 +76,38 @@ fn remove_snapshot(dir: &Path) {
 }
 
 /// Where the copies are kept.
-fn root() -> Option<PathBuf> {
+pub(crate) fn root() -> Option<PathBuf> {
     agentmux_common::DataPaths::from_env().map(|p| p.data_dir.join("container-snapshots"))
+}
+
+/// A read-only copy of `file`, which lies in the folder `within` (both resolved), in a folder of its own under
+/// `root`: at most `limit` bytes. `of` is what its pane calls it. Returns the copy's path.
+fn take(root: Option<&Path>, within: &Path, file: &Path, of: String, limit: u64) -> Result<(PathBuf, Snapshot), String> {
+    let root = root.ok_or("srv has no folder to keep snapshots in")?;
+    let dir = root.join(uuid::Uuid::new_v4().to_string());
+    {
+        // Counting the folders and making this one is a single step, so requests at once can't pass the count together.
+        static RESERVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _reserving = RESERVING.lock().unwrap_or_else(|e| e.into_inner());
+        if std::fs::read_dir(root).map(|d| d.count()).unwrap_or(0) >= MAX_SNAPSHOTS {
+            return Err(format!("there are {MAX_SNAPSHOTS} snapshots open already: close some of those panes first"));
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| format!("srv can't keep a snapshot: {e}"))?;
+    }
+    // The copy is in a folder of its own, so a workspace file named like the marker can't take its place.
+    let copy = crate::backend::workspace_copy::copy_file(within, file, &dir.join("copy"), limit).inspect_err(|_| remove_snapshot(&dir))?;
+    let taken = chrono::Local::now().format("%H:%M").to_string();
+    Ok((copy, Snapshot { dir, of, taken }))
+}
+
+/// A file of a container agent's folder for a pane the person asked for: `cmd` is turned to open a read-only
+/// copy of `file`, which lies in the folder `within` (both resolved), kept under `root`. `of` is what the pane
+/// calls it. The person may open a picture or a recording this way, so the larger limit holds.
+pub(crate) fn for_person(cmd: &mut CommandPaneOpenData, root: Option<&Path>, within: &Path, file: &Path, of: String) -> Result<Snapshot, String> {
+    let (copy, snapshot) = take(root, within, file, of, MEDIA_LIMIT)?;
+    cmd.file = Some(copy.to_string_lossy().into_owned());
+    cmd.title = Some(snapshot.title());
+    Ok(snapshot)
 }
 
 /// Check a container agent's `pane.open` and, for a file, take its snapshot under `root`. Returns the request to open, with
@@ -115,23 +150,10 @@ pub(crate) fn prepare(workspace: &Path, root: Option<&Path>, req: CommandPaneOpe
     let real = PathBuf::from(real);
     let workspace_real = crate::server::browser_uploads::canonical(workspace).map_err(|e| format!("the agent's workspace can't be read: {e}"))?;
     let of = container_path(&workspace_real, &real).ok_or_else(|| format!("{raw} is outside this agent's workspace"))?;
-    let root = root.ok_or("srv has no folder to keep snapshots in")?;
-    let dir = root.join(uuid::Uuid::new_v4().to_string());
-    {
-        // Counting the folders and making this one is a single step, so requests at once can't pass the count together.
-        static RESERVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _reserving = RESERVING.lock().unwrap_or_else(|e| e.into_inner());
-        if std::fs::read_dir(root).map(|d| d.count()).unwrap_or(0) >= MAX_SNAPSHOTS {
-            return Err(format!("there are {MAX_SNAPSHOTS} snapshots open already: close some of those panes first"));
-        }
-        std::fs::create_dir_all(&dir).map_err(|e| format!("srv can't keep a snapshot: {e}"))?;
-    }
-    // The copy is in a folder of its own, so a workspace file named like the marker can't take its place.
-    let copy = crate::backend::workspace_copy::copy_file(&workspace_real, &real, &dir.join("copy"), limit).inspect_err(|_| remove_snapshot(&dir))?;
-    let taken = chrono::Local::now().format("%H:%M").to_string();
+    let (copy, snapshot) = take(root, &workspace_real, &real, of, limit)?;
     open.file = Some(copy.to_string_lossy().into_owned());
-    open.title = Some(format!("{of} (read-only snapshot, {taken})"));
-    Ok((open, Some(Snapshot { dir, of, taken })))
+    open.title = Some(snapshot.title());
+    Ok((open, Some(snapshot)))
 }
 
 /// A folder of the agent's workspace as a Files pane confined to it: the pane is given the folder's canonical host
@@ -147,20 +169,14 @@ fn folder_pane(workspace: &Path, req: CommandPaneOpenData) -> Result<(CommandPan
     }
     let workspace_real = crate::server::browser_uploads::canonical(workspace).map_err(|e| format!("the agent's workspace can't be read: {e}"))?;
     let of = container_path(&workspace_real, &real).ok_or_else(|| format!("{raw} is outside this agent's workspace"))?;
-    let host = real.to_string_lossy().into_owned();
     // The supplied meta is used as it is, so it holds everything the pane needs; the agent's own fields do not survive.
-    let mut meta = crate::backend::obj::MetaMapType::new();
-    meta.insert("view".into(), "files".into());
-    meta.insert("files:path".into(), host.clone().into());
-    meta.insert(super::files_root::FILES_ROOT_META_KEY.into(), host.into());
-    meta.insert("frame:title".into(), format!("{of} (read-only, from the agent's workspace)").into());
     let open = CommandPaneOpenData {
         view: "files".into(),
         title: req.title.clone(),
         split_direction: req.split_direction.clone(),
         split_reference_block_id: req.split_reference_block_id.clone(),
         focus: req.focus,
-        meta: Some(meta),
+        meta: Some(super::files_root::confined_meta(&real, &of)),
         ..Default::default()
     };
     Ok((open, None))

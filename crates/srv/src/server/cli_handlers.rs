@@ -33,7 +33,6 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(
         COMMAND_RESOLVE_CLI,
         move |cmd: CommandResolveCliData, _ctx| {
-            let broker = broker_resolve.clone();
             let notices = CliNotices {
                 broker: broker_resolve.clone(),
                 filestore: filestore_resolve.clone(),
@@ -42,508 +41,43 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 agent_id: cmd.agent_id.clone().filter(|a| !a.trim().is_empty()),
                 provider: cmd.provider_id.clone(),
             };
-            async move {
-                const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-                tracing::info!(
-                    provider = %cmd.provider_id,
-                    cli = %cmd.cli_command,
-                    block_id = %cmd.block_id,
-                    agentmux_version = AGENTMUX_VERSION,
-                    "ResolveCli"
-                );
-
-                // Only AgentMux's own registry names a package to install: an id
-                // outside it that sends one is refused before anything is looked up.
-                if !cmd.npm_package.is_empty() && crate::backend::providers::get_provider(&cmd.provider_id).is_none() {
-                    return Err(format!("resolvecli: {:?} is not a known agent CLI", cmd.provider_id));
-                }
-
-                // Install location: shared across AgentMux versions, keyed
-                // by the provider's pinned CLI version, with the legacy
-                // per-version dir as a read-only fallback — see
-                // `backend::cli_install` (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md
-                // F1). The backend registry's pin wins over the caller's.
-                let paths = agentmux_common::DataPaths::from_env()
-                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                let pinned_version = crate::backend::providers::get_provider(&cmd.provider_id)
-                    .map(|p| p.pinned_version.to_string())
-                    .unwrap_or_else(|| cmd.pinned_version.clone());
-                let install_dir = crate::backend::cli_install::install_dir(&paths, &cmd.provider_id, &pinned_version);
-                let provider_dir = install_dir.to_string_lossy().to_string();
-                // npm binary path — the only valid location for installed CLIs.
-                let npm_bin = crate::backend::cli_install::npm_bin(&install_dir, &cmd.cli_command)
-                    .to_string_lossy()
-                    .to_string();
-
-                // Steps 1 and 2: already there? A provider in the registry goes
-                // through the one lookup (`locate_provider_cli`): AgentMux's
-                // install, else the user's own copy only when the registry says
-                // AgentMux doesn't install it. A core tool (git, node, …) isn't
-                // in the registry: its install dir, else PATH when the caller
-                // sent no package.
-                let registered = crate::backend::providers::get_provider(&cmd.provider_id);
-                let located = match registered {
-                    Some(_) => locate_provider_cli(&cmd.provider_id).await,
-                    None => match crate::backend::cli_install::find_installed(
-                        &paths,
-                        &cmd.provider_id,
-                        &pinned_version,
-                        &cmd.cli_command,
-                    ) {
-                        Some(found) => Some(LocatedCli {
-                            path: found.to_string_lossy().into_owned(),
-                            source: CliSource::LocalInstall,
-                        }),
-                        None if cmd.npm_package.is_empty() => {
-                            resolve_provider_cli_on_path(&cmd.provider_id, &cmd.cli_command)
-                                .await
-                                .map(|path| LocatedCli { path, source: CliSource::SystemPath })
-                        }
-                        None => None,
-                    },
-                };
-                if let Some(found) = located {
-                    let version = get_cli_version(&found.path).await;
-                    tracing::info!(path = %found.path, version = %version, source = found.source.as_str(), "CLI found");
-                    notices.observe_version(&version);
-                    return Ok(ResolveCliResult {
-                        cli_path: found.path,
-                        version,
-                        source: found.source.as_str().to_string(),
-                    });
-                }
-
-                // Not found. AgentMux doesn't install it: say how to.
-                let path_only = registered
-                    .map(|p| p.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(p.id))
-                    .unwrap_or_else(|| cmd.npm_package.is_empty());
-                if path_only {
-                    // This branch fires for PATH-only providers
-                    // (`npm_package` empty) whose CLI isn't on the
-                    // system PATH. AgentMux can't auto-install these
-                    // — emit AMX-CLI-004 with a manual install hint
-                    // instead of AMX-CLI-001 ("Click Install now"),
-                    // which would point the user at an install
-                    // affordance that doesn't apply.
-                    let install_hint = if cfg!(target_os = "windows") {
-                        cmd.windows_install_command.clone()
-                    } else {
-                        cmd.unix_install_command.clone()
-                    };
-                    return Err(agentmux_common::AgentMuxError::CliMissingOnPath {
-                        provider: cmd.provider_id.clone(),
-                        cli: cmd.cli_command.clone(),
-                        install_hint,
-                    }
-                    .to_wire()
-                    .to_string());
-                }
-                // An npm-managed provider that isn't installed, asked about
-                // without its package: a look, not an install request.
-                if cmd.npm_package.is_empty() {
-                    return Err(agentmux_common::AgentMuxError::CliNotInstalled {
-                        provider: cmd.provider_id.clone(),
-                        cli: cmd.cli_command.clone(),
-                    }
-                    .to_wire()
-                    .to_string());
-                }
-
-                // What gets installed is the registry's package for this id,
-                // whatever the request names; an id outside the registry is not
-                // installed.
-                let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
-                    .map_err(|e| format!("resolvecli: {e}"))?;
-                if crate::backend::cli_download::is_managed_install(provider.id) {
-                    return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await;
-                }
-                tracing::info!(
-                    provider = %provider.id,
-                    npm_package = %provider.npm_package,
-                    pinned_version = %pinned_version,
-                    target_dir = %provider_dir,
-                    "CLI not found locally, installing via npm"
-                );
-
-                {
-                    // Verify npm is available before attempting install.
-                    let npm_available = if cfg!(windows) {
-                        // CREATE_NO_WINDOW (0x08000000) suppresses cmd flash —
-                        // see broader fix in this file's other spawns.
-                        let mut probe = tokio::process::Command::new("where");
-                        probe.arg("npm");
-                        #[cfg(windows)]
-                        {
-                            probe.no_window();
-                        }
-                        probe.output().await.map(|o| o.status.success()).unwrap_or(false)
-                    } else {
-                        tokio::process::Command::new("which").arg("npm").output().await
-                            .map(|o| o.status.success()).unwrap_or(false)
-                    };
-                    if !npm_available {
-                        return Err(format!(
-                            "{} requires Node.js/npm to install. \
-                            Install Node.js from https://nodejs.org then restart AgentMux.",
-                            cmd.cli_command
-                        ));
-                    }
-
-                    // One install routine for this and the startup warm-up
-                    // (`cli_install::install_pinned_cli`): cross-instance lock
-                    // held for npm's whole lifetime — inside the blocking task,
-                    // so a timed-out RPC can't release it early — reuse of an
-                    // install another instance finished while we waited, and
-                    // the completion marker only after the shim is verified.
-                    let req = crate::backend::cli_install::NpmInstallRequest {
-                        provider_id: provider.id.to_string(),
-                        npm_package: provider.npm_package.to_string(),
-                        pinned_version: pinned_version.clone(),
-                        cli_command: provider.cli_command.to_string(),
-                        background: false,
-                    };
-                    let install_paths = paths.clone();
-                    let block_id_install = cmd.block_id.clone();
-                    // The pane says it's installing, then how it went: a pane
-                    // restored at startup otherwise just starts slower.
-                    let install_id = format!("{}-{}-{}", cmd.provider_id, pinned_version, agentmux_common::time::now_ms());
-                    let install_started = std::time::Instant::now();
-                    notices.install(&install_id, &pinned_version, crate::backend::cli_notice::InstallState::Installing, None, None);
-                    let broker_npm = broker.clone();
-                    let outcome = tokio::task::spawn_blocking(move || {
-                        let on_line = |stream: &'static str, line: &str| {
-                            tracing::info!(stream, line = %line, "npm output");
-                            if !block_id_install.is_empty() {
-                                crate::backend::mps::publish_install_progress(
-                                    &broker_npm,
-                                    &block_id_install,
-                                    line,
-                                );
-                            }
-                        };
-                        crate::backend::cli_install::install_pinned_cli(
-                            &install_paths,
-                            &req,
-                            &on_line,
-                        )
-                    })
-                    .await
-                    .map_err(|e| format!("npm install task panicked: {e}"))?;
-                    match &outcome {
-                        Ok(_) => notices.install(
-                            &install_id,
-                            &pinned_version,
-                            crate::backend::cli_notice::InstallState::Installed,
-                            Some(install_started.elapsed().as_secs_f64()),
-                            None,
-                        ),
-                        Err(e) => notices.install(
-                            &install_id,
-                            &pinned_version,
-                            crate::backend::cli_notice::InstallState::Failed,
-                            None,
-                            Some(&e.to_string()),
-                        ),
-                    }
-
-                    use crate::backend::cli_install::{InstallError, InstallOutcome};
-                    let (bin, source) = match outcome {
-                        Ok(InstallOutcome::Installed(bin)) => (bin, "installed"),
-                        Ok(InstallOutcome::AlreadyInstalled(bin)) => (bin, "local_install"),
-                        Err(InstallError::NpmFailed { code }) => {
-                            return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
-                                package: format!("{}@{}", provider.npm_package, pinned_version),
-                                message: format!(
-                                    "exit {}; check the output above",
-                                    code.unwrap_or(-1)
-                                ),
-                            }
-                            .to_wire()
-                            .to_string());
-                        }
-                        Err(InstallError::ShimMissing { .. }) => {
-                            return Err(agentmux_common::AgentMuxError::CliShimMissing {
-                                provider: cmd.provider_id.clone(),
-                                expected_path: npm_bin.clone(),
-                            }
-                            .to_wire()
-                            .to_string());
-                        }
-                        Err(e) => return Err(e.to_string()),
-                    };
-                    let bin = bin.to_string_lossy().to_string();
-                    let version = get_cli_version(&bin).await;
-                    tracing::info!(path = %bin, version = %version, source, "CLI installed (npm)");
-                    notices.observe_version(&version);
-                    Ok(ResolveCliResult {
-                        cli_path: bin,
-                        version,
-                        source: source.to_string(),
-                    })
-                }
-            }
+            resolve_cli(cmd, broker_resolve.clone(), notices)
         },
     );
 
     // checkcliauth → check if a CLI tool is authenticated
     // For Claude: reads ~/.claude/.credentials.json directly (instant, no subprocess).
     // For other providers: falls back to running the CLI auth check command.
-    engine.register_typed(
-        COMMAND_CHECK_CLI_AUTH,
-        |cmd: CommandCheckCliAuthData, _ctx| {
-            async move {
-                tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
-
-                // Two-phase auth check for Claude; single-phase for other providers.
-                //
-                // Phase 1 (fast, <1 ms): read the credentials file to determine whether
-                // tokens exist at all. If no file / no tokens → return unauthenticated
-                // immediately without spawning the CLI. This avoids a 10+ second cold-start
-                // stall when the user is definitely not logged in.
-                //
-                // Phase 2 (CLI, 10 s timeout): only when tokens ARE present, run
-                // `claude auth status --json` to validate them and obtain the real email.
-                // This catches expired/revoked tokens — the false-positive that the old
-                // file-only fast path missed.
-                //
-                // Other providers skip Phase 1 and go straight to the CLI (they don't have
-                // a predictable credentials file layout).
-                //
-                // See SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md.
-                if cmd.cli_path.to_lowercase().contains("claude") {
-                    let home = std::env::var("HOME")
-                        .or_else(|_| std::env::var("USERPROFILE"))
-                        .unwrap_or_default();
-
-                    // REMOVED 2026-08-31 — the first-run bootstrap that copied
-                    // the user's global `~/.claude/.credentials.json` into the
-                    // isolated CLAUDE_CONFIG_DIR (gated on a
-                    // `.agentmux-cred-seeded` sentinel).
-                    //
-                    // It ran during a routine AUTH CHECK — no login, no user
-                    // action, no bound account — so an agent in a fresh
-                    // channel silently acquired the operator's personal
-                    // credential. That is the most direct of the four
-                    // per-channel-isolation bypasses catalogued in
-                    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
-                    // (#4), and the most likely answer to the reported "agents
-                    // operate with no account" (it also explains why the
-                    // symptom varied by machine — it depended on whether
-                    // `~/.claude` happened to hold a valid credential).
-                    //
-                    // Its original justification
-                    // (`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`)
-                    // predates the "agents never use ~/.claude" requirement
-                    // (`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`)
-                    // and was never revisited against it.
-                    //
-                    // An unauthenticated isolated dir must now simply report
-                    // `authenticated: false` and let the user log in FOR THIS
-                    // CHANNEL. Do not reintroduce an import here: a check must
-                    // report state, never mint credentials as a side effect.
-
-                    // §4 INVARIANT (provider-auth-isolation.md): validate the SAME dir
-                    // the agent runs in — the isolated CLAUDE_CONFIG_DIR if set, else
-                    // global ~/.claude. NEVER "isolated OR global": that "check global /
-                    // run isolated" split is the validate-spin regression's root cause
-                    // (phase 2 below runs `claude auth status --json` against this exact
-                    // dir, so phase 1 must check the same one).
-                    let creds_path = cmd
-                        .auth_env
-                        .get("CLAUDE_CONFIG_DIR")
-                        .map(|d| format!("{}/.credentials.json", d))
-                        .unwrap_or_else(|| format!("{}/.claude/.credentials.json", home));
-
-                    let tokens_exist = match std::fs::read_to_string(&creds_path) {
-                        Ok(content) => serde_json::from_str::<serde_json::Value>(&content)
-                            .ok()
-                            .map(|json| {
-                                let oauth = json.get("claudeAiOauth");
-                                let has_token = oauth
-                                    .and_then(|o| o.get("accessToken"))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| !s.is_empty())
-                                    .unwrap_or(false);
-                                let has_refresh = oauth
-                                    .and_then(|o| o.get("refreshToken"))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| !s.is_empty())
-                                    .unwrap_or(false);
-                                has_token || has_refresh
-                            })
-                            .unwrap_or(false),
-                        Err(_) => false,
-                    };
-
-                    // Login/logout robustness diagnostic: snapshot the SAME dir
-                    // we validate (token fingerprint is redacted — see
-                    // identity::auth_diag). Across login/logout rounds this
-                    // surfaces the classic bugs — a check reading a different
-                    // dir than login wrote, a token that didn't change after a
-                    // re-login, or a credential that outlived a logout. The CLI
-                    // verdict is logged separately below; compare the two.
-                    // Cover BOTH the isolated dir (CLAUDE_CONFIG_DIR) and the
-                    // global-fallback dir (~/.claude) — creds_path/tokens_exist
-                    // above use exactly this resolution, so the snapshot always
-                    // reflects the dir actually validated (not only the isolated
-                    // case). "auth.credstate:" is `muxlog auth` vocabulary.
-                    let checked_dir = cmd
-                        .auth_env
-                        .get("CLAUDE_CONFIG_DIR")
-                        .cloned()
-                        .unwrap_or_else(|| format!("{home}/.claude"));
-                    tracing::info!(
-                        "auth.credstate: check {}",
-                        crate::identity::auth_diag::snapshot(&checked_dir)
-                    );
-
-                    if !tokens_exist {
-                        // On macOS the Claude CLI stores credentials in the
-                        // Keychain ("Claude Safe Storage"), NOT in
-                        // .credentials.json — so a missing file does NOT mean
-                        // logged out. Fall through to `claude auth status`, which
-                        // reads the Keychain (and does so without a prompt — the
-                        // CLI owns that Keychain item). On Windows/Linux the file
-                        // IS the credential store, so the fast "definitely not
-                        // authenticated" short-circuit stays correct there.
-                        #[cfg(not(target_os = "macos"))]
-                        {
-                            tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
-                            return Ok(CheckCliAuthResult::signed_out("no credentials found"));
-                        }
-                        #[cfg(target_os = "macos")]
-                        {
-                            // No login keychain: say so instead of asking the CLI, whose read of it
-                            // makes macOS open its "Keychain Not Found" dialog on every poll.
-                            if let Some(result) = super::keychain_probe::no_keychain_result().await {
-                                return Ok(result);
-                            }
-                            tracing::info!("claude auth check: no credentials file — checking Keychain via CLI (macOS)");
-                        }
-                    } else {
-                        // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
-                        tracing::info!("claude auth check: credentials found, validating via CLI");
-                    }
-                }
-
-                let (authenticated, email, auth_method, raw_output) =
-                    run_auth_check(&cmd.cli_path, &cmd.auth_check_args, &cmd.auth_env).await?;
-
-                // REMOVED 2026-08-31 (Codex P1 on PR #2878) — the "self-heal a
-                // stale isolated Claude credential" step. When validation
-                // failed, it copied the user's personal
-                // `~/.claude/.credentials.json` into the isolated dir (via
-                // `refresh_claude_dir_from_global_if_stale`) whenever the global
-                // access token differed, then re-validated ONCE so the agent
-                // "recovered" — meaning a channel silently acquired a credential
-                // authenticated OUTSIDE it and could then report authenticated
-                // with no channel-local login at all.
-                //
-                // Same source and same end state as the first-run bootstrap
-                // removed above, just a different trigger, so removing only that
-                // one would have left this per-channel-isolation bypass wide
-                // open. See
-                // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
-                // (#5).
-                //
-                // The real failure it was papering over (a global re-login
-                // rotating the token and killing the isolated refresh token —
-                // the "Pozl 401") is now surfaced honestly: validation fails, the
-                // auth card appears, and the user logs in FOR THIS CHANNEL.
-
-                let result = CheckCliAuthResult {
-                    authenticated,
-                    email,
-                    auth_method,
-                    raw_output,
-                    store_problem: None,
-                };
-                Ok(result)
-            }
-        },
-    );
+    engine.register_typed(COMMAND_CHECK_CLI_AUTH, |cmd: CommandCheckCliAuthData, _ctx| check_cli_auth(cmd));
 
     // provider.ensureauthdir → create the provider's default (shared) auth dir
     // and apply its isolation guarantees, exactly as agent open does; returns
     // the path for the launch env (e.g. CLAUDE_CONFIG_DIR). Replaces the CEF
     // host's `ensure_auth_dir`, which only created the dir.
-    engine.register_typed(
-        COMMAND_ENSURE_PROVIDER_AUTH_DIR,
-        |req: EnsureProviderAuthDirReq, _ctx| async move {
-            let provider = crate::backend::providers::get_provider(&req.provider_id)
-                .ok_or_else(|| format!("provider.ensureauthdir: unknown provider {:?}", req.provider_id))?;
-            let path = crate::backend::providers::default_auth_dir(provider)?;
-            crate::backend::providers::prepare_provider_auth_dir(provider, &path)
-                .map_err(|e| format!("provider.ensureauthdir: failed to prepare {path}: {e}"))?;
-            Ok(EnsureProviderAuthDirResult { path })
-        },
-    );
+    engine.register_typed(COMMAND_ENSURE_PROVIDER_AUTH_DIR, |req: EnsureProviderAuthDirReq, _ctx| {
+        ensure_provider_auth_dir(req)
+    });
 
     // runclilogin → spawn CLI login flow, extract OAuth URL from output, return immediately
-    engine.register_typed(
-        "runclilogin",
-        |cmd: CommandRunCliLoginData, _ctx| {
-            async move {
-                tracing::info!(cli = %cmd.cli_path, args = ?cmd.login_args, "RunCliLogin");
-
-                // Dead path: the active login flow is the CEF host IPC
-                // `run_cli_login`, which owns the child's lifecycle (supersede-kill
-                // + timeout reaper). This srv-side variant previously spawned a
-                // DETACHED, unkillable `auth login` child here — a process leak if
-                // ever invoked. It has no live caller; do NOT spawn.
-                Ok(RunCliLoginResult { auth_url: None, raw_output: String::new() })
-            }
-        },
-    );
+    engine.register_typed("runclilogin", |cmd: CommandRunCliLoginData, _ctx| run_cli_login(cmd));
 
     // toolchain.env — report the environment the srv resolves tools in: the
     // effective PATH, how it was derived (set by the host/srv PATH enricher,
     // see SPEC_TOOLCHAIN_MANAGER §3), and OS/arch. Powers the Toolchain
     // modal's Environment section so PATH problems are diagnosable.
-    engine.register_typed(
-        "toolchain.env",
-        // `Option<_>` -- see `ToolchainEnvReq`: it is what makes both encodings
-        // of "no argument" deserialize.
-        |_req: Option<ToolchainEnvReq>, _ctx| {
-            async move {
-                Ok(ToolchainEnvResult {
-                    path: std::env::var("PATH").unwrap_or_default(),
-                    path_source: std::env::var("AGENTMUX_PATH_SOURCE")
-                        .unwrap_or_else(|_| "inherited".to_string()),
-                    os: std::env::consts::OS.to_string(),
-                    arch: std::env::consts::ARCH.to_string(),
-                })
-            }
-        },
-    );
+    //
+    // `Option<_>` -- see `ToolchainEnvReq`: it is what makes both encodings
+    // of "no argument" deserialize.
+    engine.register_typed("toolchain.env", |_req: Option<ToolchainEnvReq>, _ctx| toolchain_env());
 
     // toolchain.prune — find (dry run, the default) or remove (an explicit
     // `dry_run: false`, from a user action) provider CLI installs that nothing
     // has used for 30 days and nothing is running. Never runs on its own.
     // SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md §5.
     let mstore_prune = state.mstore.clone();
-    engine.register_typed(
-        "toolchain.prune",
-        move |req: Option<ToolchainPruneReq>, _ctx| {
-            let mstore = mstore_prune.clone();
-            async move {
-                let dry_run = req.as_ref().and_then(|r| r.dry_run).unwrap_or(true);
-                let only = req.and_then(|r| r.only);
-                let paths = agentmux_common::DataPaths::from_env()
-                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
-                let live = super::uninstall_handlers::live_block_commands(&mstore).map_err(|e| format!("toolchain.prune: {e}"))?;
-                let max_idle = crate::backend::cli_prune::DEFAULT_MAX_IDLE;
-                let now = std::time::SystemTime::now();
-                let run = tokio::task::spawn_blocking(move || {
-                    crate::backend::cli_prune::run(&paths, &live, dry_run, only.as_deref(), max_idle, now)
-                })
-                .await
-                .map_err(|e| format!("toolchain.prune: {e}"))?;
-                Ok(prune_result(run, dry_run, max_idle))
-            }
-        },
-    );
+    engine.register_typed("toolchain.prune", move |req: Option<ToolchainPruneReq>, _ctx| {
+        toolchain_prune(req, mstore_prune.clone())
+    });
 
     // widget.health — HTTP liveness probe for an external widget server running
     // on localhost. The frontend passes { port, health_check_path,
@@ -559,53 +93,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //
     // What it buys over `register_handler` is the RESPONSE type, which is the
     // half that was actually drifting.
-    engine.register_typed(
-        "widget.health",
-        |data: serde_json::Value, _ctx| {
-            async move {
-                let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-                if port_raw == 0 || port_raw > 65535 {
-                    return Ok(WidgetHealthResult { healthy: false, status_code: None });
-                }
-                let port = port_raw as u16;
-                let path = data
-                    .get("health_check_path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("/")
-                    .to_string();
-                let body_contains = data
-                    .get("health_check_body_contains")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = crate::http_client::builder()
-                    .timeout(std::time::Duration::from_secs(3))
-                    .build()
-                    .map_err(|e| e.to_string())?;
-                match client.get(&url).send().await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let ok_status = resp.status().is_success();
-                        if !ok_status {
-                            return Ok(WidgetHealthResult {
-                                healthy: false,
-                                status_code: Some(status),
-                            });
-                        }
-                        // Optionally verify response body for service identity.
-                        let healthy = if let Some(needle) = body_contains {
-                            let body = resp.text().await.unwrap_or_default();
-                            body.contains(&needle)
-                        } else {
-                            true
-                        };
-                        Ok(WidgetHealthResult { healthy, status_code: Some(status) })
-                    }
-                    Err(_) => Ok(WidgetHealthResult { healthy: false, status_code: None }),
-                }
-            }
-        },
-    );
+    engine.register_typed("widget.health", |data: serde_json::Value, _ctx| widget_health(data));
 
     // widget.api — HTTP proxy to a widget's local server. Bypasses browser CORS
     // restrictions: the frontend sends { port, path, method?, headers?, body? }
@@ -614,131 +102,700 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // 30-second timeout accommodates generative tasks (image synthesis, etc.).
     // `Value` request for the same reason as `widget.health` above: an invalid
     // port or path is a `ok: false` ANSWER, not a rejected request.
-    engine.register_typed(
-        "widget.api",
-        |data: serde_json::Value, _ctx| {
-            async move {
-                let reject = |why: &str| WidgetApiResult {
-                    ok: false,
-                    status_code: None,
-                    body: None,
-                    error: Some(why.to_string()),
-                };
-                let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-                if port_raw == 0 || port_raw > 65535 {
-                    return Ok(reject("invalid port"));
-                }
-                let port = port_raw as u16;
-                let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("/").to_string();
-                // Reject paths that could escape localhost: must start with '/',
-                // no '@' (user-info injection: 127.0.0.1@evil.com), no backslash,
-                // no protocol-relative '//' prefix.
-                if !path.starts_with('/') || path.contains('@') || path.contains('\\') || path.starts_with("//") {
-                    return Ok(reject("invalid path"));
-                }
-                let method = data
-                    .get("method")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("GET")
-                    .to_uppercase();
-                let body_str = data.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let headers_obj = data.get("headers").and_then(|v| v.as_object()).cloned();
-
-                let url = format!("http://127.0.0.1:{}{}", port, path);
-                let client = crate::http_client::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .redirect(reqwest::redirect::Policy::none())
-                    .build()
-                    .map_err(|e| e.to_string())?;
-
-                let mut req = match method.as_str() {
-                    "POST" => client.post(&url),
-                    "PUT" => client.put(&url),
-                    "DELETE" => client.delete(&url),
-                    "PATCH" => client.patch(&url),
-                    _ => client.get(&url),
-                };
-
-                if let Some(headers) = headers_obj {
-                    for (k, v) in &headers {
-                        if let Some(vs) = v.as_str() {
-                            if let (Ok(hn), Ok(hv)) = (
-                                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
-                                reqwest::header::HeaderValue::from_str(vs),
-                            ) {
-                                req = req.header(hn, hv);
-                            }
-                        }
-                    }
-                }
-
-                if let Some(body) = body_str {
-                    req = req
-                        .header(reqwest::header::CONTENT_TYPE, "application/json")
-                        .body(body);
-                }
-
-                match req.send().await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let body = resp.text().await.unwrap_or_default();
-                        Ok(WidgetApiResult {
-                            ok: true,
-                            status_code: Some(status),
-                            body: Some(body),
-                            error: None,
-                        })
-                    }
-                    Err(e) => Ok(reject(&e.to_string())),
-                }
-            }
-        },
-    );
+    engine.register_typed("widget.api", |data: serde_json::Value, _ctx| widget_api(data));
 
     // toolchain.versions — fetch the latest published version for a list of npm
     // packages from the npm registry. Input: { packages: [{id, package}] }.
     // Output: { id: "x.y.z" | null, ... }. Each lookup is independent — a
     // network error for one package yields null for that entry, not a failure.
     // 5-second per-request timeout; all lookups run concurrently.
-    engine.register_typed(
-        "toolchain.versions",
-        |req: ToolchainVersionsReq, _ctx| {
-            async move {
-                let packages = req.packages;
+    engine.register_typed("toolchain.versions", |req: ToolchainVersionsReq, _ctx| toolchain_versions(req));
+}
 
-                let client = crate::http_client::builder()
-                    .timeout(std::time::Duration::from_secs(5))
-                    .user_agent("agentmux/toolchain-versions")
-                    .build()
-                    .map_err(|e| e.to_string())?;
+/// `resolvecli`: find the CLI, else say how to install it, else install it.
+async fn resolve_cli(
+    cmd: CommandResolveCliData,
+    broker: Arc<crate::backend::mps::Broker>,
+    notices: CliNotices,
+) -> Result<ResolveCliResult, String> {
+    const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-                let futs: Vec<_> = packages.into_iter().map(|pkg| {
-                    let c = client.clone();
-                    async move {
-                        let url = format!("https://registry.npmjs.org/{}/latest", pkg.package);
-                        let version = match c.get(&url).send().await {
-                            Ok(resp) if resp.status().is_success() => {
-                                resp.json::<serde_json::Value>().await.ok()
-                                    .and_then(|v| v.get("version").and_then(|s| s.as_str()).map(|s| s.to_string()))
-                            }
-                            _ => None,
-                        };
-                        (pkg.id, version)
-                    }
-                }).collect();
-
-                let results = futures_util::future::join_all(futs).await;
-                // A map keyed by the caller's own `id`s, so the response type
-                // is the map itself rather than a named struct -- there is no
-                // fixed set of fields to name.
-                let mut out = std::collections::HashMap::new();
-                for (id, version) in results {
-                    out.insert(id, version);
-                }
-                Ok(out)
-            }
-        },
+    tracing::info!(
+        provider = %cmd.provider_id,
+        cli = %cmd.cli_command,
+        block_id = %cmd.block_id,
+        agentmux_version = AGENTMUX_VERSION,
+        "ResolveCli"
     );
+
+    // Only AgentMux's own registry names a package to install: an id
+    // outside it that sends one is refused before anything is looked up.
+    if !cmd.npm_package.is_empty() && crate::backend::providers::get_provider(&cmd.provider_id).is_none() {
+        return Err(format!("resolvecli: {:?} is not a known agent CLI", cmd.provider_id));
+    }
+
+    // Install location: shared across AgentMux versions, keyed
+    // by the provider's pinned CLI version, with the legacy
+    // per-version dir as a read-only fallback — see
+    // `backend::cli_install` (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md
+    // F1). The backend registry's pin wins over the caller's.
+    let paths = agentmux_common::DataPaths::from_env()
+        .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
+    let pinned_version = crate::backend::providers::get_provider(&cmd.provider_id)
+        .map(|p| p.pinned_version.to_string())
+        .unwrap_or_else(|| cmd.pinned_version.clone());
+    let install_dir = crate::backend::cli_install::install_dir(&paths, &cmd.provider_id, &pinned_version);
+    let provider_dir = install_dir.to_string_lossy().to_string();
+    // npm binary path — the only valid location for installed CLIs.
+    let npm_bin = crate::backend::cli_install::npm_bin(&install_dir, &cmd.cli_command)
+        .to_string_lossy()
+        .to_string();
+
+    let registered = crate::backend::providers::get_provider(&cmd.provider_id);
+    if let Some(found) = locate_for_resolve(&cmd, &paths, &pinned_version).await {
+        let version = get_cli_version(&found.path).await;
+        tracing::info!(path = %found.path, version = %version, source = found.source.as_str(), "CLI found");
+        notices.observe_version(&version);
+        return Ok(ResolveCliResult {
+            cli_path: found.path,
+            version,
+            source: found.source.as_str().to_string(),
+        });
+    }
+    if let Some(refusal) = not_installed_refusal(&cmd, registered) {
+        return Err(refusal);
+    }
+
+    // What gets installed is the registry's package for this id,
+    // whatever the request names; an id outside the registry is not
+    // installed.
+    let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
+        .map_err(|e| format!("resolvecli: {e}"))?;
+    if crate::backend::cli_download::is_managed_install(provider.id) {
+        return resolve_by_download(&notices, &broker, &paths, &cmd, provider.id, &pinned_version).await;
+    }
+    tracing::info!(
+        provider = %provider.id,
+        npm_package = %provider.npm_package,
+        pinned_version = %pinned_version,
+        target_dir = %provider_dir,
+        "CLI not found locally, installing via npm"
+    );
+    install_via_npm(&cmd, &broker, &notices, &paths, provider, &pinned_version, &npm_bin).await
+}
+
+/// Steps 1 and 2 of `resolvecli`: already there? A provider in the registry goes
+/// through the one lookup (`locate_provider_cli`): AgentMux's
+/// install, else the user's own copy only when the registry says
+/// AgentMux doesn't install it. A core tool (git, node, …) isn't
+/// in the registry: its install dir, else PATH when the caller
+/// sent no package.
+async fn locate_for_resolve(
+    cmd: &CommandResolveCliData,
+    paths: &agentmux_common::DataPaths,
+    pinned_version: &str,
+) -> Option<LocatedCli> {
+    if crate::backend::providers::get_provider(&cmd.provider_id).is_some() {
+        return locate_provider_cli(&cmd.provider_id).await;
+    }
+    match crate::backend::cli_install::find_installed(paths, &cmd.provider_id, pinned_version, &cmd.cli_command) {
+        Some(found) => Some(LocatedCli {
+            path: found.to_string_lossy().into_owned(),
+            source: CliSource::LocalInstall,
+        }),
+        None if cmd.npm_package.is_empty() => {
+            resolve_provider_cli_on_path(&cmd.provider_id, &cmd.cli_command)
+                .await
+                .map(|path| LocatedCli { path, source: CliSource::SystemPath })
+        }
+        None => None,
+    }
+}
+
+/// A CLI that was not found and that `resolvecli` must not install: AgentMux doesn't
+/// install it (say how to), or the caller sent no package (a look, not an install request).
+fn not_installed_refusal(
+    cmd: &CommandResolveCliData,
+    registered: Option<&'static crate::backend::providers::ProviderConfig>,
+) -> Option<String> {
+    let path_only = registered
+        .map(|p| p.npm_package.is_empty() && !crate::backend::cli_download::is_managed_install(p.id))
+        .unwrap_or_else(|| cmd.npm_package.is_empty());
+    if path_only {
+        // This branch fires for PATH-only providers
+        // (`npm_package` empty) whose CLI isn't on the
+        // system PATH. AgentMux can't auto-install these
+        // — emit AMX-CLI-004 with a manual install hint
+        // instead of AMX-CLI-001 ("Click Install now"),
+        // which would point the user at an install
+        // affordance that doesn't apply.
+        let install_hint = if cfg!(target_os = "windows") {
+            cmd.windows_install_command.clone()
+        } else {
+            cmd.unix_install_command.clone()
+        };
+        return Some(
+            agentmux_common::AgentMuxError::CliMissingOnPath {
+                provider: cmd.provider_id.clone(),
+                cli: cmd.cli_command.clone(),
+                install_hint,
+            }
+            .to_wire()
+            .to_string(),
+        );
+    }
+    // An npm-managed provider that isn't installed, asked about
+    // without its package: a look, not an install request.
+    if cmd.npm_package.is_empty() {
+        return Some(
+            agentmux_common::AgentMuxError::CliNotInstalled {
+                provider: cmd.provider_id.clone(),
+                cli: cmd.cli_command.clone(),
+            }
+            .to_wire()
+            .to_string(),
+        );
+    }
+    None
+}
+
+/// Whether `npm` can be found: `where` on Windows, `which` elsewhere.
+async fn npm_is_available() -> bool {
+    if cfg!(windows) {
+        // CREATE_NO_WINDOW (0x08000000) suppresses cmd flash —
+        // see broader fix in this file's other spawns.
+        let mut probe = tokio::process::Command::new("where");
+        probe.arg("npm");
+        #[cfg(windows)]
+        {
+            probe.no_window();
+        }
+        probe.output().await.map(|o| o.status.success()).unwrap_or(false)
+    } else {
+        tokio::process::Command::new("which").arg("npm").output().await
+            .map(|o| o.status.success()).unwrap_or(false)
+    }
+}
+
+/// Install the provider's pinned package with npm and report the result.
+async fn install_via_npm(
+    cmd: &CommandResolveCliData,
+    broker: &Arc<crate::backend::mps::Broker>,
+    notices: &CliNotices,
+    paths: &agentmux_common::DataPaths,
+    provider: &'static crate::backend::providers::ProviderConfig,
+    pinned_version: &str,
+    npm_bin: &str,
+) -> Result<ResolveCliResult, String> {
+    // Verify npm is available before attempting install.
+    if !npm_is_available().await {
+        return Err(format!(
+            "{} requires Node.js/npm to install. \
+            Install Node.js from https://nodejs.org then restart AgentMux.",
+            cmd.cli_command
+        ));
+    }
+
+    let outcome = run_npm_install(cmd, broker, notices, paths, provider, pinned_version).await?;
+
+    use crate::backend::cli_install::{InstallError, InstallOutcome};
+    let (bin, source) = match outcome {
+        Ok(InstallOutcome::Installed(bin)) => (bin, "installed"),
+        Ok(InstallOutcome::AlreadyInstalled(bin)) => (bin, "local_install"),
+        Err(InstallError::NpmFailed { code }) => {
+            return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
+                package: format!("{}@{}", provider.npm_package, pinned_version),
+                message: format!(
+                    "exit {}; check the output above",
+                    code.unwrap_or(-1)
+                ),
+            }
+            .to_wire()
+            .to_string());
+        }
+        Err(InstallError::ShimMissing { .. }) => {
+            return Err(agentmux_common::AgentMuxError::CliShimMissing {
+                provider: cmd.provider_id.clone(),
+                expected_path: npm_bin.to_string(),
+            }
+            .to_wire()
+            .to_string());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let bin = bin.to_string_lossy().to_string();
+    let version = get_cli_version(&bin).await;
+    tracing::info!(path = %bin, version = %version, source, "CLI installed (npm)");
+    notices.observe_version(&version);
+    Ok(ResolveCliResult {
+        cli_path: bin,
+        version,
+        source: source.to_string(),
+    })
+}
+
+/// One install routine for this and the startup warm-up
+/// (`cli_install::install_pinned_cli`): cross-instance lock
+/// held for npm's whole lifetime — inside the blocking task,
+/// so a timed-out RPC can't release it early — reuse of an
+/// install another instance finished while we waited, and
+/// the completion marker only after the shim is verified.
+/// The pane says it's installing, then how it went: a pane
+/// restored at startup otherwise just starts slower.
+async fn run_npm_install(
+    cmd: &CommandResolveCliData,
+    broker: &Arc<crate::backend::mps::Broker>,
+    notices: &CliNotices,
+    paths: &agentmux_common::DataPaths,
+    provider: &'static crate::backend::providers::ProviderConfig,
+    pinned_version: &str,
+) -> Result<
+    Result<crate::backend::cli_install::InstallOutcome, crate::backend::cli_install::InstallError>,
+    String,
+> {
+    let req = crate::backend::cli_install::NpmInstallRequest {
+        provider_id: provider.id.to_string(),
+        npm_package: provider.npm_package.to_string(),
+        pinned_version: pinned_version.to_string(),
+        cli_command: provider.cli_command.to_string(),
+        background: false,
+    };
+    let install_paths = paths.clone();
+    let block_id_install = cmd.block_id.clone();
+    let install_id = format!("{}-{}-{}", cmd.provider_id, pinned_version, agentmux_common::time::now_ms());
+    let install_started = std::time::Instant::now();
+    notices.install(&install_id, pinned_version, crate::backend::cli_notice::InstallState::Installing, None, None);
+    let broker_npm = broker.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let on_line = |stream: &'static str, line: &str| {
+            tracing::info!(stream, line = %line, "npm output");
+            if !block_id_install.is_empty() {
+                crate::backend::mps::publish_install_progress(
+                    &broker_npm,
+                    &block_id_install,
+                    line,
+                );
+            }
+        };
+        crate::backend::cli_install::install_pinned_cli(
+            &install_paths,
+            &req,
+            &on_line,
+        )
+    })
+    .await
+    .map_err(|e| format!("npm install task panicked: {e}"))?;
+    match &outcome {
+        Ok(_) => notices.install(
+            &install_id,
+            pinned_version,
+            crate::backend::cli_notice::InstallState::Installed,
+            Some(install_started.elapsed().as_secs_f64()),
+            None,
+        ),
+        Err(e) => notices.install(
+            &install_id,
+            pinned_version,
+            crate::backend::cli_notice::InstallState::Failed,
+            None,
+            Some(&e.to_string()),
+        ),
+    }
+    Ok(outcome)
+}
+
+/// `checkcliauth`.
+///
+/// Two-phase auth check for Claude; single-phase for other providers.
+///
+/// Phase 1 (fast, <1 ms): read the credentials file to determine whether
+/// tokens exist at all. If no file / no tokens → return unauthenticated
+/// immediately without spawning the CLI. This avoids a 10+ second cold-start
+/// stall when the user is definitely not logged in.
+///
+/// Phase 2 (CLI, 10 s timeout): only when tokens ARE present, run
+/// `claude auth status --json` to validate them and obtain the real email.
+/// This catches expired/revoked tokens — the false-positive that the old
+/// file-only fast path missed.
+///
+/// Other providers skip Phase 1 and go straight to the CLI (they don't have
+/// a predictable credentials file layout).
+///
+/// See SPEC_AUTH_CHECK_FALSE_POSITIVE_2026_04_15.md.
+async fn check_cli_auth(cmd: CommandCheckCliAuthData) -> Result<CheckCliAuthResult, String> {
+    tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
+
+    if cmd.cli_path.to_lowercase().contains("claude") {
+        if let Some(signed_out) = claude_credentials_gate(&cmd).await {
+            return Ok(signed_out);
+        }
+    }
+
+    let (authenticated, email, auth_method, raw_output) =
+        run_auth_check(&cmd.cli_path, &cmd.auth_check_args, &cmd.auth_env).await?;
+
+    // REMOVED 2026-08-31 (Codex P1 on PR #2878) — the "self-heal a
+    // stale isolated Claude credential" step. When validation
+    // failed, it copied the user's personal
+    // `~/.claude/.credentials.json` into the isolated dir (via
+    // `refresh_claude_dir_from_global_if_stale`) whenever the global
+    // access token differed, then re-validated ONCE so the agent
+    // "recovered" — meaning a channel silently acquired a credential
+    // authenticated OUTSIDE it and could then report authenticated
+    // with no channel-local login at all.
+    //
+    // Same source and same end state as the first-run bootstrap
+    // removed above, just a different trigger, so removing only that
+    // one would have left this per-channel-isolation bypass wide
+    // open. See
+    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+    // (#5).
+    //
+    // The real failure it was papering over (a global re-login
+    // rotating the token and killing the isolated refresh token —
+    // the "Pozl 401") is now surfaced honestly: validation fails, the
+    // auth card appears, and the user logs in FOR THIS CHANNEL.
+
+    Ok(CheckCliAuthResult {
+        authenticated,
+        email,
+        auth_method,
+        raw_output,
+        store_problem: None,
+    })
+}
+
+/// Phase 1 of the Claude auth check: `Some(result)` answers "signed out" without
+/// running the CLI; `None` means go on and ask the CLI.
+async fn claude_credentials_gate(cmd: &CommandCheckCliAuthData) -> Option<CheckCliAuthResult> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+
+    // REMOVED 2026-08-31 — the first-run bootstrap that copied
+    // the user's global `~/.claude/.credentials.json` into the
+    // isolated CLAUDE_CONFIG_DIR (gated on a
+    // `.agentmux-cred-seeded` sentinel).
+    //
+    // It ran during a routine AUTH CHECK — no login, no user
+    // action, no bound account — so an agent in a fresh
+    // channel silently acquired the operator's personal
+    // credential. That is the most direct of the four
+    // per-channel-isolation bypasses catalogued in
+    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+    // (#4), and the most likely answer to the reported "agents
+    // operate with no account" (it also explains why the
+    // symptom varied by machine — it depended on whether
+    // `~/.claude` happened to hold a valid credential).
+    //
+    // Its original justification
+    // (`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`)
+    // predates the "agents never use ~/.claude" requirement
+    // (`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`)
+    // and was never revisited against it.
+    //
+    // An unauthenticated isolated dir must now simply report
+    // `authenticated: false` and let the user log in FOR THIS
+    // CHANNEL. Do not reintroduce an import here: a check must
+    // report state, never mint credentials as a side effect.
+
+    // §4 INVARIANT (provider-auth-isolation.md): validate the SAME dir
+    // the agent runs in — the isolated CLAUDE_CONFIG_DIR if set, else
+    // global ~/.claude. NEVER "isolated OR global": that "check global /
+    // run isolated" split is the validate-spin regression's root cause
+    // (phase 2 below runs `claude auth status --json` against this exact
+    // dir, so phase 1 must check the same one).
+    let creds_path = cmd
+        .auth_env
+        .get("CLAUDE_CONFIG_DIR")
+        .map(|d| format!("{}/.credentials.json", d))
+        .unwrap_or_else(|| format!("{}/.claude/.credentials.json", home));
+
+    let tokens_exist = claude_tokens_exist(&creds_path);
+
+    // Login/logout robustness diagnostic: snapshot the SAME dir
+    // we validate (token fingerprint is redacted — see
+    // identity::auth_diag). Across login/logout rounds this
+    // surfaces the classic bugs — a check reading a different
+    // dir than login wrote, a token that didn't change after a
+    // re-login, or a credential that outlived a logout. The CLI
+    // verdict is logged separately below; compare the two.
+    // Cover BOTH the isolated dir (CLAUDE_CONFIG_DIR) and the
+    // global-fallback dir (~/.claude) — creds_path/tokens_exist
+    // above use exactly this resolution, so the snapshot always
+    // reflects the dir actually validated (not only the isolated
+    // case). "auth.credstate:" is `muxlog auth` vocabulary.
+    let checked_dir = cmd
+        .auth_env
+        .get("CLAUDE_CONFIG_DIR")
+        .cloned()
+        .unwrap_or_else(|| format!("{home}/.claude"));
+    tracing::info!(
+        "auth.credstate: check {}",
+        crate::identity::auth_diag::snapshot(&checked_dir)
+    );
+
+    if !tokens_exist {
+        // On macOS the Claude CLI stores credentials in the
+        // Keychain ("Claude Safe Storage"), NOT in
+        // .credentials.json — so a missing file does NOT mean
+        // logged out. Fall through to `claude auth status`, which
+        // reads the Keychain (and does so without a prompt — the
+        // CLI owns that Keychain item). On Windows/Linux the file
+        // IS the credential store, so the fast "definitely not
+        // authenticated" short-circuit stays correct there.
+        #[cfg(not(target_os = "macos"))]
+        {
+            tracing::info!("claude auth check: no credentials in provider dir, skipping CLI");
+            return Some(CheckCliAuthResult::signed_out("no credentials found"));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // No login keychain: say so instead of asking the CLI, whose read of it
+            // makes macOS open its "Keychain Not Found" dialog on every poll.
+            if let Some(result) = super::keychain_probe::no_keychain_result().await {
+                return Some(result);
+            }
+            tracing::info!("claude auth check: no credentials file — checking Keychain via CLI (macOS)");
+        }
+    } else {
+        // Tokens exist in the provider dir — validate with the CLI (10 s timeout).
+        tracing::info!("claude auth check: credentials found, validating via CLI");
+    }
+    None
+}
+
+/// Whether the Claude credentials file holds an access or a refresh token.
+fn claude_tokens_exist(creds_path: &str) -> bool {
+    match std::fs::read_to_string(creds_path) {
+        Ok(content) => serde_json::from_str::<serde_json::Value>(&content)
+            .ok()
+            .map(|json| {
+                let oauth = json.get("claudeAiOauth");
+                let has_token = oauth
+                    .and_then(|o| o.get("accessToken"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                let has_refresh = oauth
+                    .and_then(|o| o.get("refreshToken"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                has_token || has_refresh
+            })
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+async fn ensure_provider_auth_dir(req: EnsureProviderAuthDirReq) -> Result<EnsureProviderAuthDirResult, String> {
+    let provider = crate::backend::providers::get_provider(&req.provider_id)
+        .ok_or_else(|| format!("provider.ensureauthdir: unknown provider {:?}", req.provider_id))?;
+    let path = crate::backend::providers::default_auth_dir(provider)?;
+    crate::backend::providers::prepare_provider_auth_dir(provider, &path)
+        .map_err(|e| format!("provider.ensureauthdir: failed to prepare {path}: {e}"))?;
+    Ok(EnsureProviderAuthDirResult { path })
+}
+
+async fn run_cli_login(cmd: CommandRunCliLoginData) -> Result<RunCliLoginResult, String> {
+    tracing::info!(cli = %cmd.cli_path, args = ?cmd.login_args, "RunCliLogin");
+
+    // Dead path: the active login flow is the CEF host IPC
+    // `run_cli_login`, which owns the child's lifecycle (supersede-kill
+    // + timeout reaper). This srv-side variant previously spawned a
+    // DETACHED, unkillable `auth login` child here — a process leak if
+    // ever invoked. It has no live caller; do NOT spawn.
+    Ok(RunCliLoginResult { auth_url: None, raw_output: String::new() })
+}
+
+async fn toolchain_env() -> Result<ToolchainEnvResult, String> {
+    Ok(ToolchainEnvResult {
+        path: std::env::var("PATH").unwrap_or_default(),
+        path_source: std::env::var("AGENTMUX_PATH_SOURCE")
+            .unwrap_or_else(|_| "inherited".to_string()),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+    })
+}
+
+async fn toolchain_prune(
+    req: Option<ToolchainPruneReq>,
+    mstore: Arc<crate::backend::storage::store::Store>,
+) -> Result<ToolchainPruneResult, String> {
+    let dry_run = req.as_ref().and_then(|r| r.dry_run).unwrap_or(true);
+    let only = req.and_then(|r| r.only);
+    let paths = agentmux_common::DataPaths::from_env()
+        .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
+    let live = super::uninstall_handlers::live_block_commands(&mstore).map_err(|e| format!("toolchain.prune: {e}"))?;
+    let max_idle = crate::backend::cli_prune::DEFAULT_MAX_IDLE;
+    let now = std::time::SystemTime::now();
+    let run = tokio::task::spawn_blocking(move || {
+        crate::backend::cli_prune::run(&paths, &live, dry_run, only.as_deref(), max_idle, now)
+    })
+    .await
+    .map_err(|e| format!("toolchain.prune: {e}"))?;
+    Ok(prune_result(run, dry_run, max_idle))
+}
+
+async fn widget_health(data: serde_json::Value) -> Result<WidgetHealthResult, String> {
+    let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
+    if port_raw == 0 || port_raw > 65535 {
+        return Ok(WidgetHealthResult { healthy: false, status_code: None });
+    }
+    let port = port_raw as u16;
+    let path = data
+        .get("health_check_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("/")
+        .to_string();
+    let body_contains = data
+        .get("health_check_body_contains")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let url = format!("http://127.0.0.1:{}{}", port, path);
+    let client = crate::http_client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let ok_status = resp.status().is_success();
+            if !ok_status {
+                return Ok(WidgetHealthResult {
+                    healthy: false,
+                    status_code: Some(status),
+                });
+            }
+            // Optionally verify response body for service identity.
+            let healthy = if let Some(needle) = body_contains {
+                let body = resp.text().await.unwrap_or_default();
+                body.contains(&needle)
+            } else {
+                true
+            };
+            Ok(WidgetHealthResult { healthy, status_code: Some(status) })
+        }
+        Err(_) => Ok(WidgetHealthResult { healthy: false, status_code: None }),
+    }
+}
+
+fn widget_api_rejection(why: &str) -> WidgetApiResult {
+    WidgetApiResult {
+        ok: false,
+        status_code: None,
+        body: None,
+        error: Some(why.to_string()),
+    }
+}
+
+async fn widget_api(data: serde_json::Value) -> Result<WidgetApiResult, String> {
+    let reject = widget_api_rejection;
+    let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
+    if port_raw == 0 || port_raw > 65535 {
+        return Ok(reject("invalid port"));
+    }
+    let port = port_raw as u16;
+    let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("/").to_string();
+    // Reject paths that could escape localhost: must start with '/',
+    // no '@' (user-info injection: 127.0.0.1@evil.com), no backslash,
+    // no protocol-relative '//' prefix.
+    if !path.starts_with('/') || path.contains('@') || path.contains('\\') || path.starts_with("//") {
+        return Ok(reject("invalid path"));
+    }
+    let method = data
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_uppercase();
+    let body_str = data.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let headers_obj = data.get("headers").and_then(|v| v.as_object()).cloned();
+
+    let url = format!("http://127.0.0.1:{}{}", port, path);
+    let client = crate::http_client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut req = match method.as_str() {
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        "PATCH" => client.patch(&url),
+        _ => client.get(&url),
+    };
+
+    if let Some(headers) = headers_obj {
+        for (k, v) in &headers {
+            if let Some(vs) = v.as_str() {
+                if let (Ok(hn), Ok(hv)) = (
+                    reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(vs),
+                ) {
+                    req = req.header(hn, hv);
+                }
+            }
+        }
+    }
+
+    if let Some(body) = body_str {
+        req = req
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            Ok(WidgetApiResult {
+                ok: true,
+                status_code: Some(status),
+                body: Some(body),
+                error: None,
+            })
+        }
+        Err(e) => Ok(reject(&e.to_string())),
+    }
+}
+
+async fn toolchain_versions(
+    req: ToolchainVersionsReq,
+) -> Result<std::collections::HashMap<String, Option<String>>, String> {
+    let packages = req.packages;
+
+    let client = crate::http_client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .user_agent("agentmux/toolchain-versions")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let futs: Vec<_> = packages.into_iter().map(|pkg| {
+        let c = client.clone();
+        async move {
+            let url = format!("https://registry.npmjs.org/{}/latest", pkg.package);
+            let version = match c.get(&url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    resp.json::<serde_json::Value>().await.ok()
+                        .and_then(|v| v.get("version").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                }
+                _ => None,
+            };
+            (pkg.id, version)
+        }
+    }).collect();
+
+    let results = futures_util::future::join_all(futs).await;
+    // A map keyed by the caller's own `id`s, so the response type
+    // is the map itself rather than a named struct -- there is no
+    // fixed set of fields to name.
+    let mut out = std::collections::HashMap::new();
+    for (id, version) in results {
+        out.insert(id, version);
+    }
+    Ok(out)
 }
 
 pub(crate) use crate::backend::pane_env::make_cli_cmd;
@@ -1199,294 +1256,4 @@ fn prune_result(
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn agy_probes_run_without_the_clis_own_update() {
-        assert!(super::is_agy("/home/x/.local/bin/agy"));
-        assert!(super::is_agy("/home/x/.local/bin/AGY"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn agy_exe_on_windows_is_found_by_its_name() {
-        assert!(super::is_agy("C:\\Users\\x\\AppData\\Local\\agy\\bin\\agy.exe"));
-    }
-
-    #[test]
-    fn other_clis_are_left_alone() {
-        assert!(!super::is_agy("/usr/bin/claude"));
-        assert!(!super::is_agy("/opt/tools/agyx"));
-    }
-
-
-    /// The strict order: a copy on PATH is never "found" (a launch would not run
-    /// it), for an npm provider (claude) or any other (goose), unless the person
-    /// listed the provider in `cli:usepath`; then it is, as their own copy.
-    #[tokio::test]
-    async fn locate_provider_cli_uses_a_copy_on_path_only_when_the_person_asked() {
-        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        // No managed installs: an empty AgentMux home.
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
-        // `claude` (npm-managed) and `goose` (no npm package; AgentMux's own copy is absent here) both on PATH, first.
-        let bin = tempfile::tempdir().unwrap();
-        for cli in ["claude", "goose"] {
-            let file = if cfg!(windows) { bin.path().join(format!("{cli}.cmd")) } else { bin.path().join(cli) };
-            std::fs::write(&file, if cfg!(windows) { "@echo off\r\n" } else { "#!/bin/sh\n" }).unwrap();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
-            }
-        }
-        let old_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut dirs = vec![bin.path().to_path_buf()];
-        dirs.extend(std::env::split_paths(&old_path));
-        std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
-
-        let claude_off = super::locate_provider_cli_with("claude", false).await;
-        let goose_off = super::locate_provider_cli_with("goose", false).await;
-        let claude_on = super::locate_provider_cli_with("claude", true).await;
-        let goose = super::locate_provider_cli_with("goose", true).await;
-        let unknown = super::locate_provider_cli_with("no-such-provider", true).await;
-
-        std::env::set_var("PATH", old_path);
-        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
-
-        assert_eq!((claude_off, goose_off), (None, None), "a copy on PATH is not the one a launch runs");
-        assert_eq!(claude_on.expect("listed: claude on PATH is found").source, super::CliSource::SystemPath);
-        let goose = goose.expect("listed: goose on PATH is found");
-        assert_eq!(goose.source, super::CliSource::SystemPath);
-        // The same folder, whichever way each side spells it. `where` returns the long form of a
-        // path even when PATH holds the 8.3 short one (GitHub's Windows runners put TEMP under
-        // `C:\Users\RUNNER~1`), so comparing the strings fails the nightly while both name one file.
-        let found = std::fs::canonicalize(std::path::Path::new(&goose.path).parent().unwrap()).unwrap();
-        assert_eq!(found, std::fs::canonicalize(bin.path()).unwrap(), "{}", goose.path);
-        assert_eq!(unknown, None);
-    }
-
-    /// `where` lists every match; a `.cmd` shim first must not hide the
-    /// `.exe` after it, which the prompt-argument branch then picks.
-    #[test]
-    fn every_spawnable_match_is_kept_in_path_order() {
-        let out = [r"C:\Users\u\bin\agy", r"C:\Users\u\bin\agy.cmd", r"D:\tools\agy.exe", ""].join("\r\n");
-        assert_eq!(
-            super::spawnable_candidates(&out, true),
-            vec![r"C:\Users\u\bin\agy.cmd".to_string(), r"D:\tools\agy.exe".to_string()]
-        );
-        let first_real = super::spawnable_candidates(&out, true)
-            .into_iter()
-            .find(|p| !super::is_script_wrapper(p));
-        assert_eq!(first_real.as_deref(), Some(r"D:\tools\agy.exe"));
-        assert_eq!(super::spawnable_candidates("/usr/bin/agy\n", false), vec!["/usr/bin/agy".to_string()]);
-    }
-
-    #[test]
-    fn pi_is_signed_in_only_when_it_lists_models() {
-        let none = "No models available. Use /login to log into a provider via OAuth or API key.";
-        assert!(!super::pi_lists_models(true, none, ""));
-        assert!(!super::pi_lists_models(true, "", none));
-        assert!(!super::pi_lists_models(false, "", ""));
-        assert!(super::pi_lists_models(true, "anthropic/claude-sonnet-4-6
-", ""));
-    }
-
-    #[tokio::test]
-    async fn pi_acp_without_its_pi_is_refused_not_read_as_signed_in() {
-        let dir = tempfile::tempdir().unwrap();
-        let acp = dir.path().join(if cfg!(windows) { "pi-acp.cmd" } else { "pi-acp" });
-        std::fs::write(&acp, "").unwrap();
-        let args = vec!["--list-models".to_string()];
-        let err = super::run_auth_check(&acp.to_string_lossy(), &args, &Default::default()).await.unwrap_err();
-        assert!(err.contains("not installed beside pi-acp"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn an_empty_check_command_is_refused_not_read_as_signed_in() {
-        let err = super::run_auth_check("pi-acp", &[], &Default::default()).await.unwrap_err();
-        assert!(err.contains("no sign-in check"), "{err}");
-    }
-
-    /// A prompt passed through one of these is re-parsed by `cmd.exe`.
-    #[test]
-    fn batch_scripts_are_script_wrappers_and_executables_are_not() {
-        for p in [r"C:\Users\u\bin\agy.cmd", r"C:\x\AGY.CMD", r"C:\x\run.bat"] {
-            assert!(super::is_script_wrapper(p), "{p}");
-        }
-        for p in [r"C:\Users\u\AppData\Local\agy\bin\agy.exe", "/home/u/.local/bin/agy", r"C:\x\cmd\agy.exe"] {
-            assert!(!super::is_script_wrapper(p), "{p}");
-        }
-    }
-    use super::*;
-
-    fn resolve_cmd(block_id: &str, notice_block_id: Option<&str>) -> CommandResolveCliData {
-        CommandResolveCliData {
-            provider_id: "qwen".to_string(),
-            cli_command: "qwen".to_string(),
-            npm_package: "@qwen-code/qwen-code".to_string(),
-            pinned_version: "0.24.0".to_string(),
-            windows_install_command: String::new(),
-            unix_install_command: String::new(),
-            block_id: block_id.to_string(),
-            notice_block_id: notice_block_id.map(str::to_string),
-            agent_id: None,
-        }
-    }
-
-    /// CLI notices go to the pane being launched: a quick fork resolves from
-    /// its source pane (`block_id`) but names its new pane (Codex on #4128).
-    #[test]
-    fn cli_notices_go_to_the_launch_target() {
-        assert_eq!(notice_block_id(&resolve_cmd("source", Some("fork"))), "fork");
-        assert_eq!(notice_block_id(&resolve_cmd("source", None)), "source");
-        assert_eq!(notice_block_id(&resolve_cmd("source", Some("  "))), "source");
-    }
-
-    /// An unknown provider is refused before anything touches the disk.
-    #[tokio::test]
-    async fn ensure_provider_auth_dir_rejects_an_unknown_provider() {
-        let state = crate::server::tests::test_state();
-        let (engine, mut out) = WshRpcEngine::new();
-        register_cli_handlers(&engine, &state);
-        engine.handle_message(crate::backend::rpc_types::RpcMessage {
-            command: COMMAND_ENSURE_PROVIDER_AUTH_DIR.to_string(),
-            reqid: "r1".to_string(),
-            data: Some(serde_json::json!({ "provider_id": "no-such-provider" })),
-            ..Default::default()
-        });
-        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), out.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(resp.data.is_none(), "{resp:?}");
-        assert!(resp.error.contains("unknown provider"), "{resp:?}");
-    }
-
-    /// `resolvecli` installs the registry's package for an id; an id outside the
-    /// registry that names a package is refused, not installed.
-    #[tokio::test]
-    async fn resolvecli_does_not_install_a_package_for_an_unknown_provider() {
-        let state = crate::server::tests::test_state();
-        let (engine, mut out) = WshRpcEngine::new();
-        register_cli_handlers(&engine, &state);
-        let mut cmd = resolve_cmd("b1", None);
-        cmd.provider_id = "no-such-agent".to_string();
-        cmd.cli_command = "no-such-agent".to_string();
-        cmd.npm_package = "left-pad".to_string();
-        engine.handle_message(crate::backend::rpc_types::RpcMessage {
-            command: COMMAND_RESOLVE_CLI.to_string(),
-            reqid: "r1".to_string(),
-            data: Some(serde_json::to_value(&cmd).unwrap()),
-            ..Default::default()
-        });
-        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), out.recv()).await.unwrap().unwrap();
-        assert!(resp.data.is_none(), "{resp:?}");
-        assert!(resp.error.contains("not a known agent CLI"), "{resp:?}");
-    }
-
-    /// All seven cli/toolchain/widget commands record their request and
-    /// response types.
-    ///
-    /// The two widget commands are the interesting entries. They read their
-    /// payload field-by-field off a `serde_json::Value` and turn a bad port or
-    /// path into an `ok: false` ANSWER rather than an error, so they cannot
-    /// take a struct request. Earlier slices concluded such handlers had to
-    /// stay on `register_handler` entirely -- but `Value` deserializes from
-    /// anything, so registering it AS the request type is exactly as tolerant
-    /// while still recording the response. That is what this asserts.
-    #[tokio::test]
-    async fn register_typed_records_every_cli_command() {
-        let state = crate::server::tests::test_state();
-        let (engine, _rx) = WshRpcEngine::new();
-        register_cli_handlers(&engine, &state);
-        let schema = engine.schema_json();
-        let rows = schema.as_array().unwrap();
-        let find = |cmd: &str| {
-            rows.iter()
-                .find(|r| r["command"] == cmd)
-                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
-        };
-
-        for (cmd, req, resp) in [
-            (COMMAND_RESOLVE_CLI, "CommandResolveCliData", "ResolveCliResult"),
-            (COMMAND_CHECK_CLI_AUTH, "CommandCheckCliAuthData", "CheckCliAuthResult"),
-            ("runclilogin", "CommandRunCliLoginData", "RunCliLoginResult"),
-            (COMMAND_ENSURE_PROVIDER_AUTH_DIR, "EnsureProviderAuthDirReq", "EnsureProviderAuthDirResult"),
-            ("toolchain.versions", "ToolchainVersionsReq", "HashMap<alloc::string::String, core::option::Option<alloc::string::String>>"),
-        ] {
-            let row = find(cmd);
-            assert_eq!(row["requestName"], req, "{cmd} request");
-            assert!(
-                row["responseName"].as_str().unwrap().contains(resp.split('<').next().unwrap()),
-                "{cmd} response should mention {resp}, got {:?}",
-                row["responseName"],
-            );
-        }
-
-        // The widget pair: `Value` request, named response.
-        for cmd in ["widget.health", "widget.api"] {
-            let row = find(cmd);
-            assert_eq!(
-                row["requestName"], "Value",
-                "{cmd} keeps a Value request so a bad port stays an answer, not an error",
-            );
-        }
-        assert_eq!(find("widget.health")["responseName"], "WidgetHealthResult");
-        assert_eq!(find("widget.api")["responseName"], "WidgetApiResult");
-
-        // `toolchain.env` takes no argument, so `Option<_>` of an empty struct.
-        let env = find("toolchain.env");
-        let env_req = env["requestName"].as_str().unwrap();
-        assert!(
-            env_req.starts_with("core::option::Option<") && env_req.contains("ToolchainEnvReq"),
-            "toolchain.env should take Option<ToolchainEnvReq>, got {env_req:?}",
-        );
-        assert_eq!(env["responseName"], "ToolchainEnvResult");
-    }
-
-    /// A `Value` request really does accept everything, which is the whole
-    /// reason it is safe to use here. If this ever stops holding, the two
-    /// widget commands silently start rejecting payloads they used to answer.
-    #[test]
-    fn a_value_request_deserializes_from_any_payload() {
-        for payload in [
-            serde_json::json!({ "port": 3000 }),
-            serde_json::json!({ "port": "not a number" }),
-            serde_json::json!({}),
-            serde_json::json!([1, 2, 3]),
-            serde_json::Value::Null,
-        ] {
-            serde_json::from_value::<serde_json::Value>(payload.clone())
-                .unwrap_or_else(|e| panic!("{payload} should deserialize as Value, got {e}"));
-        }
-    }
-
-    /// `toolchain.env`'s `pathSource` is camelCase on the wire while every
-    /// other field in that response is lowercase, so it needs BOTH
-    /// `serde(rename)` and `ts(rename)` -- ts-rs does not read the serde one.
-    /// Without the second the generated key is `path_source`, which nothing
-    /// sends and nothing reads, and every gate still passes.
-    #[test]
-    fn toolchain_env_reports_path_source_as_camel_case() {
-        let v = serde_json::to_value(ToolchainEnvResult {
-            path: "/usr/bin".to_string(),
-            path_source: "inherited".to_string(),
-            os: "linux".to_string(),
-            arch: "x86_64".to_string(),
-        })
-        .unwrap();
-        assert_eq!(v["pathSource"], "inherited");
-        assert!(v.get("path_source").is_none(), "the Rust field name must not reach the wire: {v}");
-
-        // Match the DECLARATION, not any mention: the doc comment on this
-        // field names `path_source` on purpose (explaining why the rename
-        // exists), and a bare substring check matched that instead of the
-        // field and failed on a correct binding.
-        let ts = <ToolchainEnvResult as ts_rs::TS>::inline(&ts_rs::Config::from_env());
-        assert!(ts.contains("pathSource: string"), "generated TS lost the rename: {ts}");
-        assert!(
-            !ts.contains("path_source: string"),
-            "generated TS kept the Rust name as a field: {ts}",
-        );
-    }
-}
+mod tests;

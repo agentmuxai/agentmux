@@ -152,6 +152,7 @@ function createStandIn(
         headerText: () => real()?.headerText?.() ?? "",
         headerActions: () => real()?.headerActions?.() ?? [],
         contextMenu: (c) => real()?.contextMenu?.(c) ?? [],
+        copyMenu: (selection) => real()?.copyMenu?.(selection) ?? [],
         settingsMenu: () => real()?.settingsMenu?.() ?? [],
         background: () => real()?.background?.(),
         manageConnection: () => real()?.manageConnection?.() ?? true,

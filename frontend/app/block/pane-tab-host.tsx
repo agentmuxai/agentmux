@@ -57,6 +57,7 @@ export function adaptPaneTabInstance(
     if (instance.headerText) vm.viewText = instance.headerText;
     if (instance.headerActions) vm.endIconButtons = instance.headerActions;
     if (instance.contextMenu) vm.getBodyContextMenuItems = (c) => instance.contextMenu!(c);
+    if (instance.copyMenu) vm.getCopyMenuItems = (selection) => instance.copyMenu!(selection);
     if (instance.settingsMenu) vm.getSettingsMenuItems = () => instance.settingsMenu!();
     if (instance.background) vm.blockBg = instance.background;
     if (manifest.capabilities?.connection) vm.manageConnection = instance.manageConnection ?? (() => true);

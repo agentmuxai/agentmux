@@ -69,7 +69,7 @@
 119 crates/cef/src/floating_pane.rs::CreatePanePoolWindowWin32Task::Task::execute
 153 crates/cef/src/floating_pane.rs::create_popup
 142 crates/cef/src/floating_pane.rs::floating_pane_wndproc
-1048 crates/cef/src/ipc.rs::route_command
+1049 crates/cef/src/ipc.rs::route_command
 130 crates/cef/src/launcher_ipc/mod.rs::apply_event_to_shadow
 259 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher
 209 crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher#2
@@ -263,7 +263,6 @@
 116 crates/srv/src/server/browser_bypass_routes.rs::handle_ui_browser_request_bypass
 216 crates/srv/src/server/browser_terminal.rs::handle_ui_browser_terminal
 183 crates/srv/src/server/browser_vault_fill.rs::handle_vault_fill
-722 crates/srv/src/server/cli_handlers.rs::register_cli_handlers
 105 crates/srv/src/server/files.rs::handle_stream_local_file
 121 crates/srv/src/server/http_health.rs::handle_discovery
 229 crates/srv/src/server/http_shell.rs::create_shell
@@ -303,10 +302,10 @@
 163 frontend/app-init.ts::initHostNewWindow
 218 frontend/app-init.ts::initMux
 364 frontend/app/block/block.tsx::Block
-138 frontend/app/block/block.tsx::BlockFull
+135 frontend/app/block/block.tsx::BlockFull
 293 frontend/app/block/blockframe.tsx::BlockFrame_Header
 114 frontend/app/block/blockutil.tsx::ConnectionButton
-108 frontend/app/block/lazy-pane-tab.tsx::createStandIn
+109 frontend/app/block/lazy-pane-tab.tsx::createStandIn
 235 frontend/app/block/sandboxed-widget-host.tsx::createSandboxedInstance
 202 frontend/app/block/widget-bridge.ts::answer
 106 frontend/app/drag/CrossWindowDragMonitor.darwin.tsx::performTearOff

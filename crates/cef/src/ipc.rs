@@ -235,7 +235,7 @@ async fn route_command(
         // Settings UI → launcher auto-start verbs (SPEC_OS_NOTIFICATIONS_SYSTEM
         // _2026_09_24 §4.1). Kept separate from background mode on purpose —
         // tray spec §7.4.
-        "autostart_status" => commands::autostart::autostart_status().await,
+        "autostart_status" | "autostart_open_login_items" => commands::autostart::route(cmd).await,
         // Issue #2977 WS4 — hand the frontend whatever the background
         // service did while no window was open, so it can tell the user.
         "background_audit_take" => crate::background_audit::background_audit_take(state),
@@ -469,6 +469,7 @@ async fn route_command(
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
+        "write_clipboard_image" => commands::clipboard_image::write_clipboard_image(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
 
         // ---- Tier 3: Provider/CLI management ----

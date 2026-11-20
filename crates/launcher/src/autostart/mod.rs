@@ -59,6 +59,8 @@
 use agentmux_common::win32::NoWindow;
 use std::path::Path;
 
+pub mod login_item;
+
 /// The flag every generated artifact passes to the launcher.
 ///
 /// This is the ONLY thing that makes an auto-started instance behave like a
@@ -486,7 +488,9 @@ pub fn is_enabled() -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        artifact_path().map(|p| p.exists()).unwrap_or(false)
+        // A login item waiting for the person's approval is registered too: switching it on twice must not
+        // register it twice, and an uninstaller must find it.
+        artifact_path().map(|p| p.exists()).unwrap_or(false) || login_item::registration().is_some_and(|r| r.is_registered())
     }
 }
 
@@ -534,6 +538,13 @@ pub fn enable(exe: &Path, channel: &str) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // A bundle that ships a login agent registers it with the system (`SMAppService`): the entry shows in Login
+        // Items, and the LaunchAgent plist an earlier build wrote is removed so AgentMux does not start twice.
+        if login_item::available() {
+            let _ = (exe, channel);
+            login_item::register()?;
+            return remove_launch_agent_plist();
+        }
         let path = artifact_path().ok_or_else(|| "unsupported platform".to_string())?;
         let contents = if cfg!(target_os = "macos") {
             launch_agent_plist(exe, channel)
@@ -574,16 +585,23 @@ pub fn disable() -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let Some(path) = artifact_path() else {
-            return Ok(());
-        };
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            // Already gone is success, not an error — that is what makes this
-            // safe to call unconditionally from an uninstaller.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("remove {}: {}", path.display(), e)),
-        }
+        // Both: the registration of a build that ships a login agent, and the plist an earlier build wrote.
+        login_item::unregister()?;
+        remove_launch_agent_plist()
+    }
+}
+
+/// Remove the login entry written as a file (the LaunchAgent plist, the XDG desktop entry). Succeeds when it is not
+/// there, which is what makes [`disable`] safe to call unconditionally from an uninstaller.
+#[cfg(not(target_os = "windows"))]
+fn remove_launch_agent_plist() -> Result<(), String> {
+    let Some(path) = artifact_path() else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove {}: {}", path.display(), e)),
     }
 }
 
@@ -690,12 +708,26 @@ pub fn read_entry() -> Option<Entry> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // A registered login item is this build's own entry, whatever else is on the machine.
+        if login_item::registration().is_some_and(|r| r.is_registered()) {
+            return Some(Entry {
+                target: std::env::current_exe().ok().map(|p| p.display().to_string()),
+                channel: Some(current_channel()),
+                current: true,
+            });
+        }
         let text = std::fs::read_to_string(artifact_path()?).ok()?;
-        Some(if cfg!(target_os = "macos") {
+        let mut entry = if cfg!(target_os = "macos") {
             parse_plist(&text)
         } else {
             parse_desktop_entry(&text)
-        })
+        };
+        // An earlier build's LaunchAgent plist, read by a build that registers a login item: out of date, so
+        // the reconcile rewrites it as the login item (`plan` writes for an entry that is not current).
+        if login_item::available() {
+            entry.current = false;
+        }
+        Some(entry)
     }
 }
 
@@ -833,7 +865,8 @@ pub enum State {
     On,
     /// An entry whose file is gone: the session skips it without a word.
     Broken,
-    /// Registered, but the system waits for the user's approval (macOS Login Items, phase 4). Not produced yet.
+    /// Registered, but the system waits for the user's approval (macOS Login Items): `current_status` says so for a
+    /// login item whose registration is `RequiresApproval`.
     NeedsApproval,
 }
 
@@ -890,6 +923,16 @@ pub fn plan(setting: Option<bool>, entry: Option<&Entry>, channel: &str, target:
     }
 }
 
+/// [`status`] of this machine, with the login item's approval: a registration the person has not allowed (or has
+/// switched off) in System Settings is `needs_approval`, not `on` (`SPEC_START_WITH_OS_2026_09_25.md` §3.8).
+pub fn current_status() -> Status {
+    let mut s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+    if login_item::registration() == Some(login_item::Registration::RequiresApproval) {
+        s.state = State::NeedsApproval;
+    }
+    s
+}
+
 /// Does the login entry run a file inside `dir`? An uninstaller asks this with its own install folder, so it
 /// removes the entry that would be left pointing at nothing (`SPEC_START_WITH_OS_2026_09_25.md` G6, G7) and
 /// leaves an entry that another install or channel owns alone. Windows paths compare without case.
@@ -908,9 +951,23 @@ pub fn entry_runs_from(entry: &Entry, dir: &Path) -> bool {
 pub fn handle_cli(args: &[String]) -> bool {
     let has = |v: &str| args.iter().any(|a| a == v);
 
+    // The login job of a build that registers a login item (`login_item`): open AgentMux and leave.
+    if has(login_item::LOGIN_START_FLAG) {
+        std::process::exit(login_item::login_start());
+    }
+    if has(login_item::OPEN_LOGIN_ITEMS_FLAG) {
+        match login_item::open_settings() {
+            Ok(()) => println!("opened Login Items"),
+            Err(e) => {
+                eprintln!("failed to open Login Items: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
     if has("--autostart-status") {
         if has("--json") {
-            let s = status(read_entry().as_ref(), is_enabled(), &current_channel(), stable_target().is_ok());
+            let s = current_status();
             println!("{}", serde_json::to_string(&s).unwrap_or_else(|_| "{}".to_string()));
         } else {
             println!("{}", if is_enabled() { "enabled" } else { "disabled" });

@@ -10,6 +10,7 @@
 // (`MpsEvents.FilesChanged`), scoped to `block:<block_id>`, with
 // `{ dir }` set to the folder's path exactly as `fs.list` returns it.
 
+export type { FsAgentFolder } from "@/types/rpc/FsAgentFolder";
 export type { FsCreateKind } from "@/types/rpc/FsCreateKind";
 export type { FsCreateReq } from "@/types/rpc/FsCreateReq";
 export type { FsCreateResult } from "@/types/rpc/FsCreateResult";

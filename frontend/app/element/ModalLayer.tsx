@@ -35,6 +35,8 @@ interface ModalLayerProps {
     /** The mount is a flex item that fills the rest of its column (and a column itself), for a layer
      *  that sits between a pane's header and its content, instead of a block box filling its parent. */
     fill?: boolean;
+    /** Custom properties for the mount, which its modals inherit (a pane's zoom, for a dialog that follows it). */
+    style?: JSX.CSSProperties;
     children: JSX.Element;
 }
 
@@ -133,7 +135,7 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
                     ARCHITECTURE_2026_05_26. */}
                 <div
                     class={props.fill ? "modal-layer-mount modal-layer-mount--fill" : "modal-layer-mount"}
-                    ref={setMountEl}
+                    ref={setMountEl} style={props.style}
                 >
                     {props.children}
                     <Modal

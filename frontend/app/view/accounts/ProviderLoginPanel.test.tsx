@@ -192,10 +192,12 @@ describe("ProviderLoginPanel — re-login link verification (#2414)", () => {
         });
         hub.listAgentIdentities.mockResolvedValueOnce([]); // link never landed
 
+        const onClose = vi.fn();
         render(() => (
-            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={onClose} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
         const retryButton = await screen.findByText("Retry");
+        expect(onClose).not.toHaveBeenCalled(); // not signed in: the panel stays, with its reason and Retry
 
         // Second attempt (Retry): this time the link verification succeeds.
         hub.runProviderLogin.mockImplementationOnce(async (opts: any) => {
@@ -207,7 +209,7 @@ describe("ProviderLoginPanel — re-login link verification (#2414)", () => {
         ]);
         retryButton.click();
 
-        await screen.findByText(/signed in to anthropic/i);
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1)); // signed in: it closes itself
         // The whole point: Retry must refresh the SAME account
         // ("acct-new") the first attempt already minted and persisted, not
         // mint a brand-new one under the still-undefined original prop —
@@ -218,17 +220,18 @@ describe("ProviderLoginPanel — re-login link verification (#2414)", () => {
         );
     });
 
-    it("shows success when the link IS confirmed present for this agent", async () => {
+    it("signs in, and closes, when the link IS confirmed present for this agent", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";
         });
 
+        const onClose = vi.fn();
         render(() => (
-            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
+            <ProviderLoginPanel onClose={onClose} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
-        await screen.findByText(/signed in to anthropic/i);
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
@@ -269,31 +272,32 @@ describe("ProviderLoginPanel — re-login link verification (#2414)", () => {
             return "inapp-success";
         });
 
-        render(() => <ProviderLoginPanel onClose={() => {}} />);
+        const onClose = vi.fn();
+        render(() => <ProviderLoginPanel onClose={onClose} />);
 
-        await screen.findByText(/signed in to anthropic/i);
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
         expect(hub.listAgentIdentities).not.toHaveBeenCalled();
     });
 });
 
 describe("ProviderLoginPanel — unmount cleanup (#2414)", () => {
-    it("does NOT cancel the host's login when unmounting after already reaching success (inFlight is false)", async () => {
+    it("closes itself once signed in, with no success step, and does not cancel the host's login as it goes", async () => {
         hub.runProviderLogin.mockImplementation(async (opts: any) => {
             opts.onAccountRegistered?.("acct-new", "/tmp/acct-new");
             return "inapp-success";
         });
 
-        const { unmount } = render(() => (
-            <ProviderLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
-        ));
-        await screen.findByText(/signed in to anthropic/i);
-        hub.cancelCliLogin.mockClear(); // clear whatever the login flow itself called
+        let unmount: () => void = () => {};
+        const onClose = vi.fn(() => unmount());
+        ({ unmount } = render(() => (
+            <ProviderLoginPanel onClose={onClose} linkTarget={{ agentDefinitionId: "agent-1" }} />
+        )));
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
 
-        unmount();
-
-        // The whole point: a lingering "✓ Signed in" panel that finally
-        // closes must not kill some OTHER, newer login the host's single
-        // global slot might hold by then.
+        // No "Signed in" panel to read and dismiss (it is gone), and the panel closing as the login ends must not
+        // kill some OTHER, newer login the host's single global slot might hold by then.
+        expect(screen.queryByText(/signed in/i)).toBeNull();
+        expect(screen.queryByText("Done")).toBeNull();
         expect(hub.cancelCliLogin).not.toHaveBeenCalled();
     });
 
