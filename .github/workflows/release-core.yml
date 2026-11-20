@@ -908,6 +908,11 @@ jobs:
     # microsoft/winget-create ships no Linux binary (only wingetcreate.exe).
     runs-on: windows-latest
     continue-on-error: true
+    # For the WinGet line of the run summary (winget-note below): a continue-on-error job reads as success even when it failed
+    # or never ran a step, so the step that submitted says so itself, and the step that failed is named.
+    outputs:
+      failed_step: ${{ steps.failed.outputs.step }}
+      submitted: ${{ steps.submit.outputs.sent }}
     permissions:
       contents: read
     env:
@@ -918,6 +923,7 @@ jobs:
       WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
     steps:
       - name: The run is for the release tag
+        id: tag
         shell: bash
         env:
           REF_TYPE: ${{ github.ref_type }}
@@ -929,6 +935,7 @@ jobs:
           fi
 
       - name: Install wingetcreate (pinned)
+        id: install
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri $env:WINGETCREATE_URL -OutFile wingetcreate.exe
@@ -941,6 +948,7 @@ jobs:
       # The installer URL is the one the release published, so WinGet gets what
       # GitHub has; wingetcreate downloads it and writes its hash into the manifest.
       - name: Submit the WinGet manifest pull request
+        id: submit
         shell: bash
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -964,6 +972,71 @@ jobs:
             --urls "$INSTALLER_URL" \
             --submit \
             --token "$WINGET_TOKEN"
+          # Only reached when wingetcreate exited 0 (the shell stops at the first failing command).
+          echo "sent=true" >> "$GITHUB_OUTPUT"
+
+      - name: Say which step failed
+        id: failed
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          O_TAG: ${{ steps.tag.outcome }}
+          O_INSTALL: ${{ steps.install.outcome }}
+          O_SUBMIT: ${{ steps.submit.outcome }}
+        run: |
+          step="a step of the job"
+          [ "$O_TAG" = failure ] && step="the check that the run is for the release tag"
+          [ "$O_INSTALL" = failure ] && step="installing wingetcreate"
+          [ "$O_SUBMIT" = failure ] && step="submitting the WinGet manifest pull request"
+          echo "step=$step" >> "$GITHUB_OUTPUT"
+
+  # One line, on every release, for what happened to the WinGet submission, in the same style as the Microsoft Store line: the
+  # WinGet job above is skipped when its switch is off and is continue-on-error, so by itself a release that never reached WinGet
+  # looks the same as one that did. "Submitted" means a pull request was opened in microsoft/winget-pkgs; a moderator still has
+  # to merge it before `winget install` offers the release. This changes nothing about whether anything is submitted. It sends
+  # nothing out of the run and holds no token beyond reading the repository.
+  winget-note:
+    name: WinGet line of the run summary
+    needs: [gate, publish, winget]
+    if: ${{ always() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TAG: v${{ needs.gate.outputs.version }}
+      RESULT: ${{ needs.winget.result }}
+      FAILED_STEP: ${{ needs.winget.outputs.failed_step }}
+      SUBMITTED: ${{ needs.winget.outputs.submitted }}
+    steps:
+      - name: Say what happened to the WinGet submission
+        shell: bash
+        run: |
+          by_hand="submit it with wingetcreate update AgentMux.AI, or fix the job and re-run it"
+          if [ -n "$FAILED_STEP" ] || [ "$RESULT" = failure ]; then
+            line="failed: ${FAILED_STEP:-the WinGet job failed}. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = success ] && [ "$SUBMITTED" != true ]; then
+            # A continue-on-error job reads as success even when it stopped before any step ran: only the submit step's own
+            # output says a pull request was opened.
+            line="failed: the WinGet job did not reach the submission. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = skipped ]; then
+            line="skipped: WinGet submission is switched off. $TAG is on GitHub but was not sent to WinGet: $by_hand."
+            warn=1
+          elif [ "$RESULT" = cancelled ]; then
+            line="cancelled: the WinGet job was cancelled. $TAG was not sent to WinGet: $by_hand."
+            warn=1
+          else
+            line="submitted: a WinGet pull request for $TAG was opened in microsoft/winget-pkgs. A moderator has to merge it before winget install offers $TAG."
+            warn=0
+          fi
+          {
+            echo "### WinGet"
+            echo ""
+            echo "$line"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$warn" = 1 ]; then echo "::warning title=WinGet::$line"; else echo "$line"; fi
 
   # The Microsoft Store: submits the MSIX that `publish` attached to the GitHub
   # Release, through the Store Developer CLI (`msstore`). The Store certifies it
