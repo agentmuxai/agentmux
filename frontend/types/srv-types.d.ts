@@ -1300,6 +1300,7 @@ declare global {
         "agent:exploremodel"?: string;
         "agent:compacthints"?: boolean;
         "agent:compacthintat"?: number;
+        "agent:compactbackstopat"?: number;
         "agent:freshhintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;

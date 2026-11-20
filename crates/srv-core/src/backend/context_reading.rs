@@ -24,6 +24,10 @@ pub const SETTING_HINTS: &str = "agent:compacthints";
 /// suggests compacting.
 pub const SETTING_HINT_AT: &str = "agent:compacthintat";
 pub const DEFAULT_HINT_AT: u64 = 400000; // plain digits: settings-defaults.test.ts reads it
+/// `agent:compactbackstopat`: the context size, in tokens, over which srv itself compacts a container agent between
+/// turns (`compact_backstop`), because it ignored the hint. 0 turns it off.
+pub const SETTING_BACKSTOP_AT: &str = "agent:compactbackstopat";
+pub const DEFAULT_BACKSTOP_AT: u64 = 600000; // plain digits, as above
 /// `agent:freshhintat`: from this many tokens, a turn that finished a task
 /// suggests a fresh session instead.
 pub const SETTING_FRESH_HINT_AT: &str = "agent:freshhintat";
@@ -89,6 +93,28 @@ fn hint_at() -> u64 {
     CONFIG.get().and_then(|c| c.extra_u64(SETTING_HINT_AT)).unwrap_or(DEFAULT_HINT_AT)
 }
 
+/// The size over which srv compacts a container agent itself, or `None` when the setting is 0 (off).
+pub fn backstop_at() -> Option<u64> {
+    Some(CONFIG.get().and_then(|c| c.extra_u64(SETTING_BACKSTOP_AT)).unwrap_or(DEFAULT_BACKSTOP_AT)).filter(|at| *at > 0)
+}
+
+/// Told when a container agent's turn has ended well, so the compaction backstop can look at its context. A container
+/// has no per-response event of its own, as a route agent's spend watcher gives one.
+pub type TurnEndObserver = Box<dyn Fn(&str) + Send + Sync>;
+static TURN_END_OBSERVER: OnceLock<TurnEndObserver> = OnceLock::new();
+
+/// Register what [`container_turn_ended`] tells (bootstrap, once).
+pub fn observe_container_turn_ends(observer: TurnEndObserver) {
+    let _ = TURN_END_OBSERVER.set(observer);
+}
+
+/// A container agent's turn has ended well.
+pub fn container_turn_ended(block_id: &str) {
+    if let Some(observer) = TURN_END_OBSERVER.get() {
+        observer(block_id);
+    }
+}
+
 fn fresh_hint_at() -> u64 {
     CONFIG.get().and_then(|c| c.extra_u64(SETTING_FRESH_HINT_AT)).unwrap_or(DEFAULT_FRESH_HINT_AT)
 }
@@ -100,6 +126,12 @@ fn with<R>(block_id: &str, f: impl FnOnce(&mut ContextReading) -> R) -> R {
 /// `block_id`'s reading now.
 pub fn get(block_id: &str) -> Option<ContextReading> {
     BY_BLOCK.lock().get(block_id).cloned()
+}
+
+/// Tokens in `block_id`'s context at its last reading, or 0 when there is none: for log lines, so what a compaction
+/// or a note about one cost can be counted from the logs.
+pub fn tokens_now(block_id: &str) -> u64 {
+    BY_BLOCK.lock().get(block_id).and_then(|r| r.tokens).unwrap_or(0)
 }
 
 /// Forget `block_id` (its pane closed).
@@ -310,6 +342,32 @@ pub fn compact_sent(block_id: &str, sent: bool) {
     });
 }
 
+/// Says in the log why a turn that ended with a large (or unread) context gave no compaction hint, so "why did this agent
+/// never get the note" can be answered from the log. Nothing is logged for a context below the hint's size or with the
+/// hints off.
+fn log_withheld(block_id: &str, r: &ContextReading, verdict: &str) {
+    if !hints_on() {
+        return;
+    }
+    let Some(tokens) = r.tokens else {
+        tracing::info!(block_id, "compaction hint withheld: no reading of this agent's context");
+        return;
+    };
+    if tokens < hint_at() {
+        return;
+    }
+    let why = if verdict == "compact" && r.hinted {
+        "the hint was already given for this climb"
+    } else if r.compacting {
+        "a compaction is marked as running"
+    } else if r.compact_scheduled {
+        "a compaction is waiting to be sent"
+    } else {
+        refusal_reason(r, agentmux_common::time::now_ms_u64()).unwrap_or("below the re-arm size")
+    };
+    tracing::info!(block_id, tokens, why, "compaction hint withheld");
+}
+
 /// At the end of a turn: the hint's note text when it's due. A compact hint
 /// is marked given, so it isn't repeated before the context drops and crosses
 /// again; a fresh hint belongs to the task that just finished, comes with each
@@ -326,6 +384,7 @@ pub fn take_turn_end_hint_for(block_id: &str, fresh_allowed: bool) -> Option<Str
     with(block_id, |r| {
         r.task_boundary = false;
         if verdict == "none" || (verdict == "compact" && r.hinted) {
+            log_withheld(block_id, r, verdict);
             return None;
         }
         if verdict == "compact" {

@@ -1874,14 +1874,9 @@ impl LanDiscoveryController {
     }
 
     fn start_daemon(&self) -> Result<Arc<LanDiscovery>, String> {
-        LanDiscovery::start(
-            self.instance_id.clone(),
-            self.hostname.clone(),
-            self.version.clone(),
-            self.port,
-            self.auth_key.clone(),
-            self.event_bus.clone(),
-        )
+        // A started daemon registers on the real multicast group: a test that asked for LAN was listed as a fake peer by the AgentMux installed on the same machine.
+        if cfg!(any(test, feature = "test-support")) { return Err("no mDNS daemon in a test build".to_string()); }
+        LanDiscovery::start(self.instance_id.clone(), self.hostname.clone(), self.version.clone(), self.port, self.auth_key.clone(), self.event_bus.clone())
     }
 
     /// Remove this instance's `lan_instances` record on clean process exit,

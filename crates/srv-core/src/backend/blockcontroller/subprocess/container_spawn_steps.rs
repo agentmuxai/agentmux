@@ -727,6 +727,8 @@ impl Turn {
             .is_some_and(|stem| stem == "claude");
         if runs_claude {
             crate::backend::context_reading::hold_turn_end_hint(&self.block_id, false);
+            // srv's own backstop looks at the context too, for an agent that does not act on the note.
+            crate::backend::context_reading::container_turn_ended(&self.block_id);
         } else {
             crate::backend::context_reading::clear_task_boundary(&self.block_id);
         }

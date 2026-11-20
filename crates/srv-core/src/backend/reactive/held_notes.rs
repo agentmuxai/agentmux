@@ -294,7 +294,8 @@ impl Attached {
     pub fn delivered(mut self) {
         if !self.notes.is_empty() {
             let keys = self.notes.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>().join(", ");
-            tracing::info!(block_id = %self.block_id, notes = %keys, "held notes: went to the agent with a message");
+            let tokens = crate::backend::context_reading::tokens_now(&self.block_id);
+            tracing::info!(block_id = %self.block_id, notes = %keys, tokens, "held notes: went to the agent with a message");
         }
         self.notes.clear();
         if let Some(suffix) = self.suffix.take() {
