@@ -4,6 +4,7 @@ lsp#1 new typescript /home/u/a.ts
 lsp#1 start
 lsp#1 didOpen /home/u/a.ts typescript "export const a = 1;\n"
 diagnostics wired to lsp#1
+rpc ReadEditorFile {"path":"/home/u/a.ts"}
 rpc WriteEditorFile {"path":"/home/u/a.ts","content":"// edit\nexport const a = 1;\n","encoding":"UTF-8","bom":"none","line_ending":"lf"}
 rpc ReadEditorFile {"path":"/home/u/b.ts"}
 rpc WatchEditorFile {"path":"/home/u/b.ts","block_id":"session<n>"}
