@@ -154,7 +154,7 @@ mod gpu_panel;
 pub(crate) mod record_read;
 mod blockstats;
 mod history_agents;
-mod audit_query;
+pub(in crate::server) mod audit_query;
 mod history_usage;
 mod shells;
 pub(crate) mod kanban;

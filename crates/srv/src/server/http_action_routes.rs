@@ -94,6 +94,9 @@ pub(super) const HANDLER: &[&str] = &[
 /// Answers a question or carries a stream; nothing it changes is kept.
 pub(super) const NEVER: &[&str] = &[
     "POST /agentmux/agents/resolve", "POST /agentmux/wps/publish", "POST /api/post-chat-message",
+    // The Audit's read of another channel's own rows, every ten seconds while it is listed: a record of each would
+    // be rows in the Audit it reads.
+    "POST /agentmux/audit/own",
     "POST /api/v1/agent/memory/session-start/ack", "POST /api/v1/agent/memory/session-start/part",
     "POST /api/v1/agent/self/context", "POST /api/v1/agent/self/mcp-beat", "POST /api/v1/agent/self/mcp-health",
     "POST /api/v1/agent/tool-chunk", "POST /api/v1/agent/compaction-started", "POST /api/v1/agent/watch", "POST /api/v1/agent/workers", "POST /api/v1/agent/routes",

@@ -55,6 +55,7 @@ fn todays_refused() -> Vec<(Match, &'static str)> {
         (Match::Exact("/agentmux/reactive/ensure-signing-key"), APP_ONLY),
         (Match::Exact("/agentmux/reactive/agents"), APP_ONLY),
         (Match::Exact("/agentmux/reactive/audit"), APP_ONLY),
+        (Match::Exact("/agentmux/audit/own"), APP_ONLY),
         (Match::Exact("/agentmux/agent/holding"), APP_ONLY),
         (Match::Exact("/agentmux/diag/sagas"), APP_ONLY),
         (Match::Prefix("/api/messaging/"), APP_ONLY),
