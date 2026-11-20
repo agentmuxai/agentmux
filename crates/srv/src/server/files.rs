@@ -236,12 +236,11 @@ pub(super) async fn handle_stream_local_file(
         }
     };
 
-    let bound = match super::files_root::bound_path(&state, params.block_id.as_deref(), raw_path).await {
-        Ok(p) => p,
-        Err(message) => return (StatusCode::FORBIDDEN, Json(json!({"error": message}))).into_response(),
+    let (path_buf, opened) = match local_file_source(&state, params.block_id.as_deref(), raw_path).await {
+        Ok(source) => source,
+        Err(refused) => return refused,
     };
-    let expanded = expand_home_dir_safe(&bound);
-    let path = expanded.as_path();
+    let path = path_buf.as_path();
 
     // Async metadata + streamed read, not std::fs::read — the earlier
     // synchronous-read version blocked a shared Tokio worker thread and
@@ -249,15 +248,13 @@ pub(super) async fn handle_stream_local_file(
     // real problem at this route's size ceiling (up to 500MB) and given the
     // Media pane's live-update re-fetch pattern (repeated large reads as
     // watched files change). Flagged in review (ReAgent P1, Codex P2).
-    let metadata = match tokio::fs::metadata(path).await {
+    let metadata = match &opened {
+        Some(file) => file.metadata(),
+        None => tokio::fs::metadata(path).await,
+    };
+    let metadata = match metadata {
         Ok(m) => m,
-        Err(e) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": format!("stream-local-file: {e}")})),
-            )
-                .into_response()
-        }
+        Err(e) => return failed(StatusCode::NOT_FOUND, e),
     };
     if !metadata.is_file() {
         return (
@@ -286,15 +283,12 @@ pub(super) async fn handle_stream_local_file(
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
     }
 
-    let mut file = match tokio::fs::File::open(path).await {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("stream-local-file: {e}")})),
-            )
-                .into_response()
-        }
+    let mut file = match opened {
+        Some(file) => tokio::fs::File::from_std(file),
+        None => match tokio::fs::File::open(path).await {
+            Ok(f) => f,
+            Err(e) => return failed(StatusCode::INTERNAL_SERVER_ERROR, e),
+        },
     };
     let builder = Response::builder()
         .header(header::CONTENT_TYPE, mime_from_path(path))
@@ -305,11 +299,7 @@ pub(super) async fn handle_stream_local_file(
         // (SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §5).
         ByteRange::Partial(start, end) => {
             if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("stream-local-file: {e}")})),
-                )
-                    .into_response();
+                return failed(StatusCode::INTERNAL_SERVER_ERROR, e);
             }
             let len = end - start + 1;
             builder
@@ -324,6 +314,32 @@ pub(super) async fn handle_stream_local_file(
             .body(Body::from_stream(tokio_util::io::ReaderStream::new(file))),
     };
     response.unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn failed(status: StatusCode, e: impl std::fmt::Display) -> Response {
+    (status, Json(json!({"error": format!("stream-local-file: {e}")}))).into_response()
+}
+
+/// The file a request names. A container agent's message may name any path: in the agent's own pane it is found in
+/// the agent's own folders and opened from there without following a link (`agent_media_files`), and what is served is
+/// that open file. Any other pane (or none) reads the path as asked, within the pane's `files:root` when it has one.
+async fn local_file_source(
+    state: &AppState,
+    block_id: Option<&str>,
+    raw_path: &str,
+) -> Result<(PathBuf, Option<std::fs::File>), Response> {
+    if let Some(meta) = block_id.and_then(|b| super::agent_media_files::pane_meta(state, b)) {
+        let asked = raw_path.to_string();
+        return match tokio::task::spawn_blocking(move || super::agent_media_files::open(&meta, &asked)).await {
+            Ok(Ok((file, found))) => Ok((found.file, Some(file))),
+            Ok(Err(message)) => Err((StatusCode::FORBIDDEN, Json(json!({"error": message}))).into_response()),
+            Err(e) => Err(failed(StatusCode::INTERNAL_SERVER_ERROR, e)),
+        };
+    }
+    match super::files_root::bound_path(state, block_id, raw_path).await {
+        Ok(bound) => Ok((expand_home_dir_safe(&bound), None)),
+        Err(message) => Err((StatusCode::FORBIDDEN, Json(json!({"error": message}))).into_response()),
+    }
 }
 
 /// A request's `Range`, resolved against the file's size.
@@ -499,6 +515,61 @@ mod stream_local_file_range_tests {
         assert_eq!(ask(root.join("a.txt"), Some("confined")).await.status(), StatusCode::OK);
         assert_eq!(ask(outside.join("b.txt"), Some("confined")).await.status(), StatusCode::FORBIDDEN);
         assert_eq!(ask(outside.join("b.txt"), None).await.status(), StatusCode::OK);
+    }
+
+    /// The pane of a container agent whose workspace is `ws`, and one of a native agent: a message in the first
+    /// is shown a file of the agent's own folders and nothing else; the second is served as before.
+    #[tokio::test]
+    async fn a_container_agents_message_is_served_only_files_of_its_own_folders() {
+        let top = tempfile::tempdir().unwrap();
+        let (ws, private) = (top.path().join("ws"), top.path().join("private"));
+        std::fs::create_dir_all(ws.join("img")).unwrap();
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(ws.join("img").join("a.png"), "the agent's picture").unwrap();
+        std::fs::write(private.join("photo.png"), "the person's photo").unwrap();
+        let state = crate::server::tests::test_state();
+        let pane = |oid: &str, mode: &str| {
+            let mut meta = crate::backend::obj::MetaMapType::default();
+            meta.insert("agentMode".into(), mode.into());
+            meta.insert(crate::backend::blockcontroller::META_KEY_CMD_CWD.into(), ws.to_string_lossy().into_owned().into());
+            let mut block = crate::backend::obj::Block { oid: oid.into(), meta, ..Default::default() };
+            state.mstore.insert(&mut block).unwrap();
+        };
+        pane("container-pane", "container");
+        pane("native-pane", "host");
+        let ask = |path: String, block_id: Option<&str>, range: Option<&str>| {
+            let params = LocalFileQueryParams { path: Some(path), block_id: block_id.map(str::to_string) };
+            let mut headers = HeaderMap::new();
+            if let Some(r) = range {
+                headers.insert(header::RANGE, r.parse().unwrap());
+            }
+            handle_stream_local_file(State(state.clone()), Query(params), headers)
+        };
+        let body = |resp: Response| async move { String::from_utf8(axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap() };
+        let host = |p: &std::path::Path| p.to_string_lossy().into_owned();
+
+        // The agent's own picture, as the container names it and as the shared folder is spelled on the host.
+        for asked in ["/workspace/img/a.png".to_string(), host(&ws.join("img").join("a.png"))] {
+            let resp = ask(asked.clone(), Some("container-pane"), None).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{asked}");
+            assert_eq!(body(resp).await, "the agent's picture");
+        }
+        // A part of it: a video's poster and a seek read a range.
+        let part = ask("/workspace/img/a.png".into(), Some("container-pane"), Some("bytes=4-8")).await;
+        assert_eq!(part.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body(part).await, "agent");
+
+        // The person's own file, by any spelling: refused with the reason, and nothing of the file is in the answer.
+        for asked in [host(&private.join("photo.png")), "/workspace/../private/photo.png".to_string(), "~/photo.png".to_string(), "//host/share/photo.png".to_string(), "C:/Users/me/photo.png".to_string()] {
+            let resp = ask(asked.clone(), Some("container-pane"), None).await;
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{asked}");
+            let text = body(resp).await;
+            assert!(text.contains("isn't in a folder the agent shares") && !text.contains("the person's photo"), "{asked}: {text}");
+        }
+
+        // A pane that is not a container agent's is served as before, whatever the path.
+        assert_eq!(ask(host(&private.join("photo.png")), Some("native-pane"), None).await.status(), StatusCode::OK);
+        assert_eq!(ask(host(&private.join("photo.png")), None, None).await.status(), StatusCode::OK);
     }
 
     #[tokio::test]

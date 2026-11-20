@@ -116,6 +116,7 @@
     "mediaPreview.imageGone": "This image is no longer available.",
     "mediaPreview.videoGone": "This video is no longer available.",
     "mediaPreview.enlarge": "Enlarge {{name}}",
+    "mediaPreview.notShownHere": "[image: {{name}} — not shown here]",
     "containerCaches.label": "Build cache",
     "containerCaches.size.one": "{{size}} in {{count}} volume: what {{name}}'s builds keep (the cargo registry and build output), so a new container or an image update does not start from nothing.",
     "containerCaches.size.other": "{{size}} in {{count}} volumes: what {{name}}'s builds keep (the cargo registry and build output), so a new container or an image update does not start from nothing.",

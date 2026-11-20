@@ -12,6 +12,7 @@ import {
     fetchMediaRange,
     INLINE_AV_MAX_BYTES,
     MediaTooLargeError,
+    type MediaOwner,
 } from "@/app/element/local-media";
 import { createSignal, onCleanup, onMount } from "solid-js";
 
@@ -53,7 +54,7 @@ type AvState =
 
 export type LocalAvState = ReturnType<typeof createLocalAv>;
 
-export function createLocalAv(props: { path: string; src: string; kind: "video" | "audio" }) {
+export function createLocalAv(props: { path: string; src: string; kind: "video" | "audio"; owner?: MediaOwner }) {
     const [state, setState] = createSignal<AvState>({ kind: "waiting" });
     const [poster, setPoster] = createSignal<string>();
     const [posterFailed, setPosterFailed] = createSignal(false);
@@ -75,7 +76,7 @@ export function createLocalAv(props: { path: string; src: string; kind: "video" 
     const probe = async () => {
         try {
             const end = props.kind === "video" ? POSTER_BYTES - 1 : 0;
-            const { blob, total } = await fetchMediaRange(props.path, 0, end, { signal: abort.signal });
+            const { blob, total } = await fetchMediaRange(props.path, 0, end, { signal: abort.signal, blockId: props.owner?.blockId });
             if (disposed) return;
             if (total > INLINE_AV_MAX_BYTES) return setState({ kind: "too-large", size: total });
             if (props.kind === "video" && blob) setPoster(own(blob));
@@ -90,7 +91,7 @@ export function createLocalAv(props: { path: string; src: string; kind: "video" 
         if (s.kind !== "ready") return;
         setState({ kind: "loading", total: s.total });
         try {
-            const blob = await fetchMediaBlob(props.path, { maxBytes: INLINE_AV_MAX_BYTES, signal: abort.signal });
+            const blob = await fetchMediaBlob(props.path, { maxBytes: INLINE_AV_MAX_BYTES, signal: abort.signal, blockId: props.owner?.blockId });
             if (disposed) return;
             setState({ kind: "playing", url: own(blob) });
         } catch (e) {
