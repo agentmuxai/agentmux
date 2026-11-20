@@ -434,3 +434,44 @@ describe("a container agent's large build caches", () => {
         expect(parseCliNoticeFrame(caches({ bytes: "big" }), 0)).toBeNull();
     });
 });
+
+describe("the MCP servers a host agent is not given from its folder's own file", () => {
+    const leftOut = (extra: Record<string, unknown> = {}) => ({
+        type: "system",
+        subtype: "agentmux_mcp_left_out",
+        provider: "claude",
+        block_id: "blk-1",
+        event_id: "ev-1",
+        names: ["build-tools", "notes"],
+        timestamp: TS,
+        ...extra,
+    });
+
+    it("is a row that names each server, says why, and says where to add one", () => {
+        const row = parseCliNoticeFrame(leftOut(), 0) as CliNoticeNode;
+        expect(row).toMatchObject({ kind: "mcp_left_out", id: "mcp-left-out-ev-1", servers: ["build-tools", "notes"], blockId: "blk-1" });
+        const text = cliNoticeText(row);
+        expect(text).toMatchObject({ label: "2 MCP servers of this folder not started: build-tools, notes", tone: "warn" });
+        expect(text.detail).toContain("A container agent can write in this folder");
+        expect(text.detail).toContain("add it in the agent's own settings");
+        const one = parseCliNoticeFrame(leftOut({ names: ["notes"] }), 0) as CliNoticeNode;
+        expect(cliNoticeText(one).label).toBe("1 MCP server of this folder not started: notes");
+    });
+
+    it("lists at most twenty names and only text ones", () => {
+        const many = Array.from({ length: 30 }, (_, i) => `s${i}`);
+        expect((parseCliNoticeFrame(leftOut({ names: many }), 0) as CliNoticeNode).servers).toHaveLength(20);
+        expect((parseCliNoticeFrame(leftOut({ names: ["ok", 7, "", null] }), 0) as CliNoticeNode).servers).toEqual(["ok"]);
+    });
+
+    it("ignores a frame without an event id or without a name", () => {
+        expect(parseCliNoticeFrame(leftOut({ event_id: undefined }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(leftOut({ names: [] }), 0)).toBeNull();
+        expect(parseCliNoticeFrame(leftOut({ names: "notes" }), 0)).toBeNull();
+    });
+
+    it("is replayed from the stored conversation", () => {
+        const { nodes } = parseHistoryLines([JSON.stringify(leftOut())], "claude-stream-json");
+        expect(nodes.some((n) => n.type === "cli_notice" && n.kind === "mcp_left_out")).toBe(true);
+    });
+});

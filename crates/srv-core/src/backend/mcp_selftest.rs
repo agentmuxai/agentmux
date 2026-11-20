@@ -107,9 +107,10 @@ fn is_bundled(prefix: &str, bundled: Option<&Path>) -> bool {
 }
 
 /// The agent's MCP config: `cmd:cwd` may be a default folder stored as `~/.agentmux/agents/<slug>`
-/// (the file is in it), or a user's project (the config is AgentMux's relocated one, #3680).
+/// (the file is in it), or a user's project (the config is AgentMux's relocated one, #3680). In a folder a
+/// container agent can write it is AgentMux's own file outside the folder, never the folder's.
 fn mcp_json_path(cwd: &str) -> std::path::PathBuf {
-    crate::backend::mcp_config_file::config_path(cwd)
+    crate::backend::mcp_config_file::host_config_path(cwd)
 }
 
 /// Probe the `agentmux` entry of the `.mcp.json` at `path` through `prefix`.

@@ -54,7 +54,8 @@ pub(super) fn write_agent_config(
         hands_out_keys,
         &final_working_dir,
     )?;
-    write_files(&cmd.files, Path::new(&final_working_dir))?;
+    let on_host = !crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&agent_mode).is_container();
+    write_files(&cmd.files, Path::new(&final_working_dir), on_host)?;
     // The final path goes back so the caller can patch `cmd:cwd` if collision resolution changed it.
     Ok(CommandWriteAgentConfigResult { working_dir: final_working_dir })
 }
@@ -76,7 +77,7 @@ fn resolve_workdir(cmd: &CommandWriteAgentConfigData) -> Result<String, String> 
     Ok(expanded_working_dir.to_string_lossy().to_string())
 }
 
-fn write_files(files: &[AgentConfigFile], base_path: &Path) -> Result<(), String> {
+fn write_files(files: &[AgentConfigFile], base_path: &Path, on_host: bool) -> Result<(), String> {
     // The base is canonicalized ONCE (it exists: allocate_agent_workdir or the explicit-path mkdir -p created
     // it). The per-file symlink-escape verifier uses it to catch a symlinked ancestor like
     // `<base>/.claude -> /tmp/outside` before fs::write follows it.
@@ -95,7 +96,7 @@ fn write_files(files: &[AgentConfigFile], base_path: &Path) -> Result<(), String
     crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
     for file in files {
-        write_file(&wd, base_path, &canonical_base, file)?;
+        write_file(&wd, base_path, &canonical_base, file, on_host)?;
     }
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);
     Ok(())
@@ -103,7 +104,7 @@ fn write_files(files: &[AgentConfigFile], base_path: &Path) -> Result<(), String
 
 /// One config file, written the way its kind needs: CLAUDE.md and the other providers' startup files keep an
 /// existing file's content, `.mcp.json` merges into the user's own, anything else is an atomic workdir write.
-fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canonical_base: &Path, file: &AgentConfigFile) -> Result<(), String> {
+fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canonical_base: &Path, file: &AgentConfigFile, on_host: bool) -> Result<(), String> {
     // A lexical join plus traversal check works on Windows where canonicalize() adds the `\\?\` UNC prefix and
     // breaks starts_with against not-yet-created files. It catches `..`, absolute paths and drive-letter
     // prefixes (root and inner).
@@ -140,10 +141,16 @@ fn write_file(wd: &crate::backend::workdir_fs::Workdir, base_path: &Path, canoni
         return Ok(());
     }
     // `.mcp.json` never goes into a user's project (#3680): in a folder AgentMux owns it merges into the
-    // agent's own file; elsewhere it is written under the data directory, outside the project.
+    // agent's own file; elsewhere it is written under the data directory, outside the project. A host
+    // agent's also goes outside a folder a container agent can write, with nothing of that folder's file.
     if file.path == ".mcp.json" {
         let expanded = base_path.to_string_lossy();
-        if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+        let outside = if on_host {
+            crate::backend::mcp_config_file::host_relocated_path(&expanded)
+        } else {
+            crate::backend::mcp_config_file::relocated_path(&expanded)
+        };
+        if let Some(path) = outside {
             crate::backend::mcp_config_file::write_relocated(&path, &file.content)
                 .map_err(|e| format!("failed to write the agent's MCP config: {e}"))?;
             tracing::debug!(path = %path.display(), "wrote config file (relocated, owner-only)");

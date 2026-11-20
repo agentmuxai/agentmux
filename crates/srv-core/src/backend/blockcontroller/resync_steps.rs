@@ -142,6 +142,14 @@ impl ResyncCtx<'_> {
 
     /// Create a controller of `controller_type`, register it and start it.
     pub(super) fn create_and_start(self, controller_type: &str) -> Result<(), String> {
+        // An agent whose CLI starts with its controller (a terminal agent, a session agent) is not started on
+        // the host in a folder a container agent can write (`mcp_folder_rule`). A turn-based agent's CLI
+        // starts with each turn, which asks the same there.
+        if !matches!(controller_type, BLOCK_CONTROLLER_SUBPROCESS | BLOCK_CONTROLLER_PERSISTENT) {
+            if let Some(why) = crate::backend::mcp_folder_rule::refusal(&self.block.meta) {
+                return Err(why);
+            }
+        }
         refresh_agent_skill_files(&self.block.meta, &self.mstore, &self.identity_store);
         match controller_type {
             // A durable SSH pane: the shell lives in the helper's session on the

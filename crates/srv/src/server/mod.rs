@@ -37,6 +37,7 @@ mod install_task;
 #[cfg(all(test, unix))]
 mod install_task_tests;
 mod lsp_handlers;
+pub(crate) mod mcp_folder_notice;
 mod system_install_handlers;
 mod uninstall_handlers;
 mod messagebus;

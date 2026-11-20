@@ -532,6 +532,7 @@ impl Controller for AcpController {
         _rt_opts: Option<serde_json::Value>,
         _force: bool,
     ) -> Result<(), String> {
+        crate::backend::mcp_folder_rule::not_refused(&block_meta)?;
         // Extract spawn config from block metadata
         let cmd = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD, "");
         let cwd = super::super::obj::meta_get_string(&block_meta, super::META_KEY_CMD_CWD, "");

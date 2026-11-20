@@ -186,6 +186,14 @@ pub fn relocated_dir_for(expanded: &Path) -> Option<PathBuf> {
     if is_agent_owned_workdir(&expanded) {
         return None;
     }
+    outside_dir_for(&expanded)
+}
+
+/// The folder under the data root that is keyed by an expanded working directory, whoever owns that
+/// directory: where [`relocated_dir_for`] puts a user's project's config, and where srv keeps the config of
+/// an agent whose own folder may not hold it. `None` when the data root can't be named.
+pub fn outside_dir_for(expanded: &Path) -> Option<PathBuf> {
+    let expanded = absolutize(expanded);
     let root = crate::data_paths::agentmux_root().ok()?;
     Some(root.join("mcp").join(workdir_key(&expanded)))
 }

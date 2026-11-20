@@ -95,8 +95,9 @@ fn rewrite_file(
     }
     let expanded = crate::backend::blockcontroller::core::expand_home_dir(work_dir);
     // A user's project keeps its own `.mcp.json` (#3680): the agent's config is AgentMux's
-    // relocated file, and that is the one a repair may rewrite.
-    if let Some(path) = crate::backend::mcp_config_file::relocated_path(&expanded) {
+    // relocated file, and that is the one a repair may rewrite. So is the config of a host agent in a
+    // folder a container agent can write (only a host agent's file is repaired here).
+    if let Some(path) = crate::backend::mcp_config_file::host_relocated_path(&expanded) {
         let content = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),

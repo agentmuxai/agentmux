@@ -377,6 +377,7 @@ struct Launch {
 impl Controller for MspController {
     fn start(&self, block_meta: super::super::obj::MetaMapType, _rt_opts: Option<serde_json::Value>, _force: bool) -> Result<(), String> {
         use super::super::obj::meta_get_string;
+        crate::backend::mcp_folder_rule::not_refused(&block_meta)?;
         let cmd = meta_get_string(&block_meta, super::META_KEY_CMD, "");
         if cmd.is_empty() {
             return Err("MSP controller: no cmd specified in block meta".to_string());

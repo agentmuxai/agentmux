@@ -73,6 +73,14 @@ pub(super) async fn gated_spawn_env(
     env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, TurnGate> {
     let AgentTurnDeps { mstore, id_store, identity_store, auth_key, broker, .. } = deps.clone();
+    // First, before anything is written for the spawn: a harness other than Claude Code is not started on
+    // the host in a folder a container agent can write. Asked off the async workers (it reads the disk).
+    let meta = block.meta.clone();
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::refusal(&meta)).await.unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::REFUSAL.to_string()));
+    if let Some(why) = refusal {
+        return Err(TurnGate::Folder(why));
+    }
+    crate::server::mcp_folder_notice::tell(&broker, &deps.filestore_gate, &mstore, block).await;
     // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
     // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
     // comment. Broker hand-in lets the identity resolver publish

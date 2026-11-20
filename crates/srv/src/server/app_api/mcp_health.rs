@@ -24,6 +24,22 @@ use crate::server::state::AppState;
 pub(crate) struct SelfRequest {
     /// The caller's slug (`AGENTMUX_AGENT_SLUG`), which its token must name.
     agent: String,
+    /// The folder `doctor` runs for, when it asks whether it may start a command from that folder's own
+    /// `.mcp.json` (`folder_rule` in the answer). Absent: the pane's own folder.
+    #[serde(default)]
+    folder: Option<String>,
+}
+
+/// Whether a host agent in `folder` (else the folder of the pane `block_id`) gets only the MCP servers
+/// AgentMux writes: a container agent can write it, or has run in it (`backend::mcp_folder_rule`). Yes when
+/// that can't be told.
+async fn folder_rule(state: &AppState, block_id: &str, folder: Option<String>) -> bool {
+    let folder = folder.filter(|f| !f.trim().is_empty()).or_else(|| {
+        let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten()?;
+        Some(crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "")).filter(|cwd| !cwd.trim().is_empty())
+    });
+    let Some(folder) = folder else { return false };
+    tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::holds_in(&folder)).await.unwrap_or(true)
 }
 
 fn own_pane(state: &AppState, caller: Option<&Caller>, agent: &str) -> Option<String> {
@@ -48,6 +64,7 @@ pub(crate) async fn handle_mcp_health(
     let health = crate::backend::mcp_health::snapshot(&block_id);
     Json(json!({
         "block_id": block_id,
+        "folder_rule": folder_rule(&state, &block_id, req.folder.clone()).await,
         "health": health,
         "safe_profile": crate::backend::mcp_health::is_safe_profile(&block_id),
         "auto": crate::backend::mcp_health::auto_enabled(),

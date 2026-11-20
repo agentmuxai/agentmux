@@ -381,11 +381,34 @@ fn refuse_spawn_gate(
     block_id: &str,
     gate: &crate::identity::resolver::SpawnGateError,
 ) -> String {
+    show_refused_spawn(state, block_id, &gate.to_string());
+    format!("identity spawn gate: {gate}")
+}
+
+/// As `agentinput` does first: a harness other than Claude Code is not started on the host in a folder a
+/// container agent can write (`mcp_folder_rule`), and the pane is told why. A Claude turn there goes on, and the
+/// pane is told which servers of the folder's own file it is not given. Asked off the async workers (it reads
+/// the disk).
+async fn folder_gate(state: &AppState, block: &Block) -> Result<(), String> {
+    let meta = block.meta.clone();
+    let refusal = tokio::task::spawn_blocking(move || crate::backend::mcp_folder_rule::refusal(&meta))
+        .await
+        .unwrap_or_else(|_| Some(crate::backend::mcp_folder_rule::REFUSAL.to_string()));
+    if let Some(why) = refusal {
+        show_refused_spawn(state, &block.oid, &why);
+        return Err(why);
+    }
+    crate::server::mcp_folder_notice::tell(&state.broker, &state.filestore, &state.mstore, block).await;
+    Ok(())
+}
+
+/// Put a refused spawn's reason where the pane reads it, and record the structured failure.
+fn show_refused_spawn(state: &AppState, block_id: &str, reason: &str) {
     let error_frame = serde_json::json!({
         "type": "result",
         "is_error": true,
         "subtype": "error_during_execution",
-        "error": {"message": format!("[AgentMux] {gate}")}
+        "error": {"message": format!("[AgentMux] {reason}")}
     })
     .to_string();
     // Some(filestore): the frame must be PERSISTED to the
@@ -416,7 +439,7 @@ fn refuse_spawn_gate(
     let gate_failure = crate::agents::failure::classify(
         None,
         None,
-        &gate.to_string(),
+        reason,
         None,
     );
     crate::backend::blockcontroller::core::persist_last_failure(
@@ -426,7 +449,6 @@ fn refuse_spawn_gate(
         &Some(state.event_bus.clone()),
     );
     state.broker.publish_event::<crate::backend::mps_events::AgentFailed>(&gate_failure, vec![format!("block:{block_id}")], 1);
-    format!("identity spawn gate: {gate}")
 }
 
 /// `agent.send` to a persistent-CLI block. Returns the controller's session id.
@@ -572,6 +594,7 @@ pub(crate) async fn agent_send(state: &AppState, cmd: CommandAgentSendData) -> R
             .collect(),
         _ => vec![],
     };
+    folder_gate(state, &block).await?;
     // Same backstop as `agentinput`: this path has no frontend rebuild.
     let cli_args = crate::backend::agent_runtime::with_runtime_flags(&block.meta, cli_args);
     let working_dir = obj::meta_get_string(&block.meta, "cmd:cwd", "");

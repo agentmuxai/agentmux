@@ -339,6 +339,14 @@ impl<F: Fn()> Drop for IfDropped<F> {
     }
 }
 
+/// What a container agent's turn does to its workspace folder on the host before the container has it: the
+/// folder is marked as a container agent's, so a host agent given it later gets only the MCP servers AgentMux
+/// writes (`mcp_folder_rule`), and signing keys an earlier launch left in its `.mcp.json` come out.
+fn before_the_container_has_the_folder(dir: &str) {
+    crate::backend::mcp_folder_rule::mark(dir);
+    crate::backend::mcp_json_identity::strip_workspace_signing_keys(dir);
+}
+
 impl ContainerStartup {
     /// Start the container, then make sure the provider CLI is in it. The pane
     /// shows each step that takes time (frames persisted, so they survive a
@@ -370,9 +378,9 @@ impl ContainerStartup {
 
     async fn run_reporting(&self, report_failure: bool) -> Result<(), String> {
         // The workspace is mounted into the container: signing keys an earlier launch wrote into its
-        // .mcp.json come out before it starts (and a launch no longer writes them).
+        // .mcp.json come out before it starts (and a launch no longer writes them), and it is marked.
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
-            let _ = tokio::task::spawn_blocking(move || crate::backend::mcp_json_identity::strip_workspace_signing_keys(&dir)).await;
+            let _ = tokio::task::spawn_blocking(move || before_the_container_has_the_folder(&dir)).await;
         }
         // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
         let mut mount_spec = self.mount_spec.clone();

@@ -28,6 +28,9 @@
  * - `agentmux_container_caches` — a container agent's cache volumes (a developer agent's cargo registry and build
  *   output) hold 20 GiB or more ("This agent's build caches hold 24.0 GB") with a "Container settings" button. Sent
  *   once per agent per run of srv.
+ * - `agentmux_mcp_left_out` — a container agent can write the folder of this host agent, so it starts only the MCP
+ *   servers set in AgentMux; the row names the ones its folder's own `.mcp.json` lists besides
+ *   (`crates/srv-core/src/backend/mcp_folder_rule.rs`). Each frame is its own row.
  * - `agentmux_mcp_health` — the agent's AgentMux MCP server didn't connect and
  *   AgentMux is repairing it (`crates/srv-core/src/backend/mcp_health.rs`). Every
  *   frame of one episode shares an `episode`, so it is one row that updates.
@@ -45,6 +48,9 @@ import type { CliNoticeNode } from "../../agent-model/types";
 const CLI_INSTALL_SUBTYPE = "agentmux_cli_install";
 const CLI_VERSION_CHANGED_SUBTYPE = "agentmux_cli_version_changed";
 const MCP_HEALTH_SUBTYPE = "agentmux_mcp_health";
+const MCP_LEFT_OUT_SUBTYPE = "agentmux_mcp_left_out";
+/** The most server names one row lists; srv sends no more, and the row is drawn from a stored frame. */
+const MOST_LEFT_OUT_NAMES = 20;
 const CONTAINER_START_SUBTYPE = "agentmux_container_start";
 const CONTAINER_IMAGE_SUBTYPE = "agentmux_container_image";
 const CONTAINER_LIMIT_SUBTYPE = "agentmux_container_limit";
@@ -234,7 +240,23 @@ export function parseCliNoticeFrame(rawEvent: unknown, now: number): CliNoticeNo
             timestamp,
         };
     }
-    return null;
+    return e.subtype === MCP_LEFT_OUT_SUBTYPE ? mcpLeftOutNode(e, provider, timestamp) : null;
+}
+
+/** The node for an `agentmux_mcp_left_out` frame, or `null` when it names no server or has no id. */
+function mcpLeftOutNode(e: Record<string, unknown>, provider: string, timestamp: number): CliNoticeNode | null {
+    const eventId = str(e.event_id);
+    const servers = Array.isArray(e.names) ? e.names.filter((n): n is string => typeof n === "string" && n.length > 0).slice(0, MOST_LEFT_OUT_NAMES) : [];
+    if (!eventId || servers.length === 0) return null;
+    return {
+        type: "cli_notice",
+        id: `mcp-left-out-${eventId}`,
+        kind: "mcp_left_out",
+        provider,
+        servers,
+        blockId: str(e.block_id) ?? undefined,
+        timestamp,
+    };
 }
 
 /** "Claude Code" for `claude`; the id itself for a provider the catalog doesn't know. */
@@ -251,6 +273,14 @@ export function cliNoticeText(node: CliNoticeNode, appVersion?: string): { label
         return { label: `${name} couldn't compact the conversation`, detail: node.error ?? null, tone: "error" };
     }
     if (node.kind === "mcp_health") return mcpHealthText(node);
+    if (node.kind === "mcp_left_out") {
+        const servers = node.servers ?? [];
+        return {
+            label: `${servers.length === 1 ? "1 MCP server" : `${servers.length} MCP servers`} of this folder not started: ${servers.join(", ")}`,
+            detail: "A container agent can write in this folder, so this agent starts only the MCP servers set in AgentMux. To use one of these, add it in the agent's own settings",
+            tone: "warn",
+        };
+    }
     if (node.kind === "container_start") return containerStartText(node);
     if (node.kind === "container_image") return containerImageText(node, appVersion);
     if (node.kind === "container_limit") return containerLimitText(node);
