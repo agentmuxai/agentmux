@@ -800,8 +800,12 @@ jobs:
           curl -fsS http://127.0.0.1:17380/ | grep -qi '<html'
           "$bin/agentmux" status
 
-      # What a person gets: the unpacked programs are signed by the Developer ID team with the hardened runtime, and
-      # Gatekeeper (which asks Apple for the notarization ticket) accepts them as notarized.
+      # What a person gets: the unpacked programs are signed by the Developer ID team with the hardened runtime, and Apple's
+      # notarization covers each one. A bare program cannot carry a stapled ticket, so Gatekeeper asks Apple for it (or its own
+      # cache of an earlier answer): the assessment needs the network, and the ticket can lag a minute behind an accepted
+      # submission, so it is asked a few times. `spctl -t exec` assesses app bundles and says "does not seem to be an app" about
+      # a bare program, so the assessment is the one for any signed code (`-t open --context context:primary-signature`).
+      # The step fails when a program never reads as a notarized Developer ID program (no ticket, or Apple not reachable).
       - name: Check the signatures of the packed programs
         run: |
           set -eu
@@ -814,14 +818,12 @@ jobs:
             echo "$info" | grep -q "TeamIdentifier=" || { echo "::error::$prog has no team identifier"; exit 1; }
             echo "$info" | grep -q "flags=0x[0-9a-f]*(.*runtime" || { echo "::error::$prog is not signed with the hardened runtime"; exit 1; }
             codesign --verify --strict "$f"
-            # Gatekeeper's own answer needs the notarization ticket from Apple, which can lag a minute behind an accepted
-            # submission: it is asked a few times and reported, and does not fail the leg by itself.
             ok=no
             for _ in 1 2 3 4 5; do
-              if spctl -a -t exec -vv "$f" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then ok=yes; break; fi
+              if spctl -a -vvv -t open --context context:primary-signature "$f" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then ok=yes; break; fi
               sleep 20
             done
-            [ "$ok" = yes ] || echo "::warning::Gatekeeper did not report $prog as a notarized Developer ID program after five tries"
+            [ "$ok" = yes ] || { echo "::error::Gatekeeper did not report $prog as a notarized Developer ID program after five tries (no ticket for it at Apple, or Apple was not reachable)"; exit 1; }
           done
 
       - uses: actions/upload-artifact@v4

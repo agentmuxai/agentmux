@@ -7,7 +7,9 @@
 // workflow-macos-signing-split.test.mjs), `sign-macos` runs in the `apple-signing` environment, checks what it receives
 // against a digest that came by job output before anything reads it, holds nothing until then, and calls its tools by
 // absolute path. This reads the jobs and steps by indentation and fails when a change loosens any of that.
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -177,5 +179,61 @@ describe("build-server-package.yml: a dispatch can ask for signing, on main only
     it("never uploads to a release", () => {
         expect(code(source)).not.toMatch(/gh release|release upload|release create|softprops\/action-gh-release/);
         expect(code(source)).not.toMatch(/contents: write/);
+    });
+});
+
+// The step that checks the packed programs runs here with stand-ins for codesign, spctl and sleep: what it does when Apple's
+// answer is "notarized", "rejected", or only comes late.
+describe("build-server-package.yml: the packed programs must read as notarized", () => {
+    const step = stepsOf("pack-macos").find((x) => /Check the signatures of the packed programs/.test(x));
+    const script = step
+        .split("\n")
+        .slice(step.split("\n").findIndex((l) => /^\s+run: \|/.test(l)) + 1)
+        .map((l) => l.replace(/^ {10}/, ""))
+        .join("\n");
+
+    // `spctl` answers by the file name; `late` answers "rejected" the first `n` times it is asked about a program
+    function run(spctlBody) {
+        const dir = mkdtempSync(join(tmpdir(), "pack-check-"));
+        const bin = join(dir, "stubs");
+        mkdirSync(bin);
+        const stub = (name, body) => {
+            writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`);
+            chmodSync(join(bin, name), 0o755);
+        };
+        stub("codesign", `case "$1" in -dvv) printf 'Identifier=x\\nAuthority=Developer ID Application: T\\nTeamIdentifier=ABCDE12345\\nCodeDirectory v=20500 flags=0x10000(runtime)\\n' >&2 ;; esac`);
+        stub("sleep", "true");
+        stub("spctl", spctlBody);
+        mkdirSync(join(dir, "unpacked/pkg/bin"), { recursive: true });
+        for (const p of ["agentmux", "agentmux-srv", "agentmux-mcp", "agentmux-bashwrap"]) writeFileSync(join(dir, "unpacked/pkg/bin", p), "x");
+        const r = spawnSync("bash", ["-c", script], { cwd: dir, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, COUNT_DIR: dir }, encoding: "utf8" });
+        return { status: r.status, out: `${r.stdout}${r.stderr}` };
+    }
+
+    it("asks the assessment that works for a bare program, not the one for app bundles", () => {
+        expect(code(step)).toMatch(/spctl -a -vvv -t open --context context:primary-signature "\$f"/);
+        expect(code(step)).not.toMatch(/-t exec/);
+    });
+
+    it("passes when every program reads as a notarized Developer ID program", () => {
+        const r = run(`echo "$@ : accepted" ; echo "source=Notarized Developer ID"`);
+        expect(r.status, r.out).toBe(0);
+    });
+
+    it("fails when a program never reads as notarized (rejected, or Apple not reachable)", () => {
+        const r = run(`echo "$*: rejected" >&2; exit 3`);
+        expect(r.status, r.out).toBe(1);
+        expect(r.out).toMatch(/::error::Gatekeeper did not report agentmux as a notarized Developer ID program after five tries/);
+    });
+
+    it("fails when only one of the four is not notarized", () => {
+        const r = run(`case "$*" in *agentmux-mcp) echo "rejected" >&2; exit 3 ;; *) echo "source=Notarized Developer ID" ;; esac`);
+        expect(r.status, r.out).toBe(1);
+        expect(r.out).toMatch(/agentmux-mcp as a notarized/);
+    });
+
+    it("waits for a ticket that comes late: the fourth try is enough", () => {
+        const r = run(`f="$COUNT_DIR/n"; n=$(cat "$f" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$f"; if [ $n -lt 4 ]; then echo rejected >&2; exit 3; fi; echo "source=Notarized Developer ID"; rm -f "$f"`);
+        expect(r.status, r.out).toBe(0);
     });
 });
