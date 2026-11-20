@@ -3,7 +3,7 @@
 
 /**
  * The command palette's search row is balanced (#47671): the kit's magnifier cell is a square of (--ui-height - 2px),
- * so the row gives it a definite --ui-height and no size of its own, and ESC gets as much room on the right as the
+ * so the row gives it a definite --ui-height and no size of its own, and the input gets as much room on the right as the
  * cell leaves left of the glyph. Before, the row overrode the cell to `width: auto; aspect-ratio: 1`, which collapsed
  * it to the glyph's own width (10px) and left the magnifier flush against the left edge. The stylesheet is read as
  * text, like PaneTabStrip.progress-style.test.ts.
@@ -47,7 +47,7 @@ describe("the command palette's search row", () => {
         expect(cell).not.toMatch(/aspect-ratio/);
     });
 
-    it("puts as much room right of ESC as the cell leaves left of the glyph, ((42 - 2) - 10) / 2 = 15px", () => {
+    it("puts as much room right of the input as the cell leaves left of the glyph, ((42 - 2) - 10) / 2 = 15px", () => {
         expect(row).toMatch(/padding:\s*0 15px 0 0;/);
     });
 });
