@@ -208,6 +208,29 @@
         margin-bottom: -4px;
     }
 
+    // A row just outside the mounted window, before it is drawn: an empty box of the row's own height
+    // (virtualization/skeleton-band.ts), so a fast scroll past the window edge meets a row's shape, not a
+    // hole. No text, nothing to measure, and it never takes a click or a scroll anchor.
+    .agent-row-skeleton {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 12px;
+        pointer-events: none;
+        overflow-anchor: none;
+        contain: layout paint style;
+
+        &::before {
+            content: "";
+            display: block;
+            height: min(100%, 72px);
+            border-radius: var(--radius-sm);
+            background: var(--tint-1);
+        }
+    }
+
     .agent-document-streaming-buffer {
         // Trailing nodes rendered in normal flex flow — no
         // virtualization. Always mounted so streaming token batches
