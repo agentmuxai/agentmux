@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Command palette modal — opened via Ctrl+P, lists all registered commands.
-// Uses the canonical `element/modal` primitive; the palette's specific
-// chrome (search row + scroll list) lives in the panel body.
+// Uses the canonical `element/modal` primitive, hung from the top of the window with no backdrop; the palette's
+// specific chrome (search row + scroll list) lives in the panel body.
 
 import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
@@ -12,67 +12,10 @@ import { SearchIcon } from "@/app/element/ui";
 import { Modal } from "@/element/modal";
 import { searchCommands } from "./command-palette-search";
 import { usePaletteAgents } from "./palette-agents";
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { paletteRows, sortCommands } from "./palette-groups";
+import { PaletteRow } from "./palette-row";
+import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
 import "./command-palette.scss";
-import { shortcutFor } from "@/app/keybindings";
-
-const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Agent", "Dev"];
-
-function sortCommands(cmds: CommandEntry[]): CommandEntry[] {
-    return [...cmds].sort((a, b) => {
-        const ai = CATEGORY_ORDER.indexOf(a.category);
-        const bi = CATEGORY_ORDER.indexOf(b.category);
-        const ac = ai === -1 ? 99 : ai;
-        const bc = bi === -1 ? 99 : bi;
-        if (ac !== bc) return ac - bc;
-        return a.label.localeCompare(b.label);
-    });
-}
-
-function PaletteRow(props: {
-    cmd: CommandEntry;
-    selected: boolean;
-    onHover: (e: MouseEvent) => void;
-    onPick: (e: MouseEvent) => void;
-}): JSX.Element {
-    return (
-        <div
-            class={`command-palette-item${props.selected ? " selected" : ""}`}
-            onClick={(e) => props.onPick(e)}
-            onMouseMove={(e) => props.onHover(e)}
-        >
-            {props.cmd.icon && (
-                <i
-                    class={`fa-solid fa-${props.cmd.icon} command-palette-item-icon`}
-                    style={props.cmd.iconColor ? { color: props.cmd.iconColor } : {}}
-                />
-            )}
-            <span class="command-palette-item-text">
-                <span class="command-palette-item-label">{props.cmd.label}</span>
-                <Show when={props.cmd.detail}>
-                    <span class="command-palette-item-detail">{props.cmd.detail}</span>
-                </Show>
-            </span>
-            <span class="command-palette-item-category">{props.cmd.category}</span>
-            <Show when={shortcutFor(props.cmd.id)}>{(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}</Show>
-        </div>
-    );
-}
-
-/**
- * A pointer over the list selects the row it moves onto, and only a real move does: the list scrolling under a
- * pointer at rest (a key move) puts another row under it, and that must not take the selection. The first
- * event only records where the pointer is.
- */
-function createPointerGate(): (e: MouseEvent) => boolean {
-    let at: string | null = null;
-    return (e) => {
-        const here = `${e.clientX},${e.clientY}`;
-        const moved = at != null && at !== here;
-        at = here;
-        return moved;
-    };
-}
 
 /** The row a navigation key selects from row `i` (`last` is the last row), or null for any other key. */
 function selectionAfterKey(key: string, i: number, last: number, page: number): number | null {
@@ -121,7 +64,8 @@ function usePaletteResults(query: () => string, selectedIdx: () => number) {
         return searchCommands(all, q);
     });
     const clampedIdx = createMemo(() => Math.min(selectedIdx(), Math.max(filtered().length - 1, 0)));
-    return { filtered, clampedIdx };
+    const rows = createMemo(() => paletteRows(filtered(), query().trim() !== ""));
+    return { filtered, clampedIdx, rows };
 }
 
 const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
@@ -129,7 +73,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     const [selectedIdx, setSelectedIdx] = createSignal(0);
     let inputRef!: HTMLInputElement;
     let listRef!: HTMLDivElement;
-    const { filtered, clampedIdx } = usePaletteResults(query, selectedIdx);
+    const { filtered, clampedIdx, rows } = usePaletteResults(query, selectedIdx);
 
     onMount(() => {
         disableGlobalKeybindings();
@@ -158,8 +102,6 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
             void Promise.resolve(cmd.execute({ forceNew }));
         }, 0);
     }
-
-    const pointerMoved = createPointerGate();
 
     function moveSelection(next: (i: number) => number) {
         const idx = next(clampedIdx());
@@ -193,7 +135,8 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         <Modal
             open={true}
             onClose={close}
-            placement="top"
+            placement="dropdown"
+            backdrop="none"
             panelClass="command-palette-panel"
             ariaLabel="Command palette"
         >
@@ -210,17 +153,14 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                         autocomplete="off"
                         spellcheck={false}
                     />
-                    <kbd class="command-palette-esc-hint">ESC</kbd>
                 </div>
                 <div class="command-palette-list" ref={listRef}>
-                    <For each={filtered()}>
-                        {(cmd, i) => (
+                    <For each={rows()}>
+                        {(row, i) => (
                             <PaletteRow
-                                cmd={cmd}
+                                row={row}
                                 selected={i() === clampedIdx()}
-                                onHover={(e) => {
-                                    if (pointerMoved(e)) setSelectedIdx(i());
-                                }}
+                                groupColumn={query().trim() === ""}
                                 onPick={(e) => {
                                     setSelectedIdx(i());
                                     executeSelected(e.shiftKey);

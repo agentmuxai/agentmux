@@ -20,7 +20,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::backend::cli_notice::{self, ContainerStartState, InstallState};
-use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent};
+use crate::backend::container::{CliProvision, ContainerError, ContainerManager, ContainerMountSpec, StartEvent, StartObserver};
 use crate::backend::container::cli::CliInstall;
 use crate::backend::container::image::resolve_container_image;
 use crate::backend::runtime_adapter::{ContainerAdapter, ContainerLaunch, RuntimeAdapter, RuntimeKind};
@@ -412,11 +412,7 @@ impl ContainerStartup {
                 StartEvent::Starting => start_row(ContainerStartState::Starting, None, &image, None),
             }
         };
-        let ensured = async {
-            self.cm.ensure_running_observed(&self.container_name, &image, &self.volumes, &[], &mount_spec, &observe).await?;
-            self.cm.check_image_tools(&self.container_name, &image).await
-        };
-        if let Err(e) = ensured.await {
+        if let Err(e) = self.ensure_container(&image, &mount_spec, &observe).await {
             if shown.load(Ordering::Relaxed) {
                 start_row(ContainerStartState::Failed, None, &image, Some(&e.user_message()));
             }
@@ -475,6 +471,16 @@ impl ContainerStartup {
                 Err(self.fail(&e, report_failure))
             }
         }
+    }
+
+    /// The container up with its tools in it. A container started anew ran nothing before, so the rows the pane's
+    /// dock still holds for what ran in the old one can only be stale: they end here.
+    async fn ensure_container(&self, image: &str, mount_spec: &ContainerMountSpec, observe: StartObserver<'_>) -> Result<(), ContainerError> {
+        let started = self.cm.ensure_running_observed(&self.container_name, image, &self.volumes, &[], mount_spec, observe).await?;
+        if started {
+            crate::backend::background_task_exit::end_for_restarted_container(&self.mstore, &self.broker, &self.block_id);
+        }
+        self.cm.check_image_tools(&self.container_name, image).await
     }
 
     /// Once per agent per run: a row in the pane when the agent's cache volumes have grown past the warning level.

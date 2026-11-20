@@ -45,7 +45,8 @@ export function isStaleRegistryRow(task: BackgroundTaskView, now: number): boole
  *  any other kind's `Show` gate failing). `canStop: false` mirrors
  *  `tool-adapter.ts`'s own reasoning for an accepted background launch: no
  *  stop path exists for a single detached task today. A stale row reads
- *  `unknown`, its clock stopped at the last sighting. */
+ *  `unknown`: the row says when it was last seen (`endedAt`), and it leaves the dock
+ *  `RETENTION_MS.unknown` after it turned unknown (`unknownSince`). */
 export function backgroundTaskToActivity(task: BackgroundTaskView, now: number = Date.now()): PinnedActivity {
     const stale = isStaleRegistryRow(task, now);
     return {
@@ -55,6 +56,7 @@ export function backgroundTaskToActivity(task: BackgroundTaskView, now: number =
         status: stale ? "unknown" : task.status,
         startedAt: task.started_at_ms,
         endedAt: stale ? task.last_seen_ms : (task.ended_at_ms ?? undefined),
+        ...(stale ? { unknownSince: task.last_seen_ms + STALE_AFTER_MS } : {}),
         canStop: false,
     };
 }
