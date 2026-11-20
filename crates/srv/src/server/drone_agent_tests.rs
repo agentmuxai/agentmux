@@ -113,11 +113,26 @@ async fn a_drone_that_reads_a_credential_shows_an_agent_no_output() {
         };
         state.mstore.drone_run_insert(&row).unwrap();
     }
-    let hidden = call(&state, "runs", json!({ "drone_id": keyed.id })).await.unwrap();
-    let text = hidden.to_string();
-    assert!(!text.contains("private") && !text.contains("boom") && !text.contains("secret-entry"), "{text}");
-    assert_eq!(hidden["runs"][0]["status"], "done");
-    assert!(hidden["output_withheld"].is_string());
+    // A drone that calls the keyed one passes its Response up as its own value: it is withheld too.
+    let caller = saved(&state, "caller", json!([node("c", json!({ "kind": "drone", "drone_id": keyed.id }))]));
+    let row = crate::drone::types::DroneRun {
+        id: "run-caller".into(),
+        drone_id: caller.id.clone(),
+        status: "done".into(),
+        started_at: 1,
+        ended_at: 2,
+        block_states: Default::default(),
+        output: "{\"fetched\":\"private\"}".into(),
+        error: "boom".into(),
+    };
+    state.mstore.drone_run_insert(&row).unwrap();
+    for d in [&keyed, &caller] {
+        let hidden = call(&state, "runs", json!({ "drone_id": d.id })).await.unwrap();
+        let text = hidden.to_string();
+        assert!(!text.contains("private") && !text.contains("boom") && !text.contains("secret-entry"), "{}: {text}", d.name);
+        assert_eq!(hidden["runs"][0]["status"], "done");
+        assert!(hidden["output_withheld"].is_string());
+    }
     let shown = call(&state, "runs", json!({ "drone_id": plain.id })).await.unwrap();
     assert!(shown["runs"][0]["output"].as_str().unwrap().contains("private"));
     assert!(shown.get("output_withheld").is_none());

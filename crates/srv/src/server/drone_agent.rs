@@ -106,12 +106,13 @@ async fn act(state: &AppState, uid: &str, action: &str, body: &Value) -> Result<
             let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_RUNS).clamp(1, MAX_RUNS);
             let runs = list_drone_runs(state, ListRunsReq { drone_id: drone.id.clone(), limit }).map_err(|e| format!("drone runs: {e}"))?;
             // What a run returns can be what a Vault-authenticated call fetched (only the credential's own
-            // value is scrubbed from it), so a drone that reads a credential shows an agent no output or error text:
-            // it would read data the agent was never granted.
-            let withheld = !graph::credentials(&drone.graph, None).is_empty();
+            // value is scrubbed from it), here or in a drone it calls (the callee's Response is the call's value).
+            // So an agent is shown the output and error text of the drones it may fire, and the status and times of
+            // the others: anything else could be data it was never granted.
+            let withheld = why_not_fireable(&drone).is_some();
             let mut answer = json!({ "drone_id": drone.id, "runs": runs.iter().map(|r| run_brief(r, withheld)).collect::<Vec<_>>() });
             if withheld {
-                answer["output_withheld"] = json!("this drone reads a Vault credential, so its output and error text are not shown to an agent; the Drone pane has them");
+                answer["output_withheld"] = json!("an agent can't fire this drone (see get), so its output and error text are not shown to an agent; the Drone pane has them");
             }
             Ok(answer)
         }
