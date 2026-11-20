@@ -959,6 +959,7 @@
     "vault.activity.about": "Every change to the Vault and every use of an entry: who, what, where. Never a value.",
     "vault.activity.audit": "See agents' use in the Audit",
     "vault.activity.none": "Nothing yet.",
+    "palette.listLabel": "Commands and agents",
     "vault.activity.when": "When",
     "vault.activity.who": "Who",
     "vault.activity.what": "What",

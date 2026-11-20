@@ -147,9 +147,20 @@ function isEditable(el: EventTarget | null): boolean {
     return el.isContentEditable || el.matches("input, textarea, select");
 }
 
+// The dismissable popovers open now, so a surface that takes the window (the command palette) can close them first.
+const openDismissers = new Set<() => void>();
+
+/** Dismisses every open popover that can be dismissed (a menu, a list from a control), as a press outside would. */
+export function dismissAnchoredPopovers(): void {
+    for (const dismiss of [...openDismissers]) dismiss();
+}
+
 /** Dismiss on a press outside the panel (its anchor and what `keepOpenOn` names count as inside) or on Esc. */
 function listenForDismiss(props: AnchoredPopoverProps, shell: () => HTMLElement | undefined): void {
     if (!props.onDismiss) return;
+    const dismiss = () => props.onDismiss?.("outside");
+    openDismissers.add(dismiss);
+    onCleanup(() => openDismissers.delete(dismiss));
     const anchorEl = (): Element | null => {
         const a = untrack(() => props.anchor);
         return a instanceof Element ? a : null;

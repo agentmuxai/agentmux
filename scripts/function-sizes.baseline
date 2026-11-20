@@ -320,12 +320,12 @@
 160 frontend/app/element/install/install-session.ts::createInstallSession
 118 frontend/app/element/markdown-incremental.ts::findSafeSplitPoint
 113 frontend/app/element/markdown-util.ts::transformBlocks
-231 frontend/app/element/modal.tsx::Modal
+228 frontend/app/element/modal.tsx::Modal
 109 frontend/app/element/ui/CardGrid.tsx::CardGrid
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
-108 frontend/app/modals/command-palette.tsx::CommandPaletteModal
+105 frontend/app/modals/command-palette.tsx::CommandPaletteModal
 114 frontend/app/notification/notificationitem.tsx::NotificationItem
 111 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
