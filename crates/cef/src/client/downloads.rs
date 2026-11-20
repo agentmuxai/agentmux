@@ -938,7 +938,6 @@ wrap_download_handler! {
             let mut payload = update_payload(&block_id, id, &snap);
             name_a_pathless_update(&mut payload, asked_name.as_deref());
             if let Some(note) = fallback_note.filter(|_| state == DownloadState::Done) {
-                tracing::info!(target: "pane-download", %block_id, id, "saved without asking: the strip is told why");
                 payload["reason"] = serde_json::json!(note);
             }
             crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &payload);
