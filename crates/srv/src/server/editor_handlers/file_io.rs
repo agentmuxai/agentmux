@@ -189,10 +189,13 @@ pub(super) fn reveal_in_shell(home: &Path, cmd: &OpenInShellReq) -> Result<(), S
     }
     #[cfg(target_os = "linux")]
     {
-        let target = if canonical.is_dir() { canonical.clone() } else { canonical.parent().unwrap_or(&canonical).to_path_buf() };
-        let mut cmd = std::process::Command::new("xdg-open");
-        crate::backend::pane_env::sanitize_external_std_command(&mut cmd);
-        let _ = cmd.arg(&target).spawn();
+        // The one function every reveal goes through: it selects the file where the desktop's file manager can
+        // (D-Bus `ShowItems`) and otherwise opens its folder, under the same strict policy (I7).
+        // It waits up to two seconds for the file manager to answer, and this handler runs on the async runtime:
+        // a thread of its own keeps that wait off it (the answer was never used, as with the spawn before).
+        std::thread::spawn(move || {
+            let _ = crate::backend::fs_ops::platform::reveal(&canonical);
+        });
     }
     Ok(())
 }
