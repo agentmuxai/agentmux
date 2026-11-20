@@ -80,6 +80,7 @@ impl ContainerProbe for DockerProbe {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     fn run(args: &[&str]) -> String {
         let out = std::process::Command::new("sh").arg("-c").arg(SCRIPT).arg("sh").args(args).output().expect("sh runs");
         String::from_utf8_lossy(&out.stdout).trim().to_string()

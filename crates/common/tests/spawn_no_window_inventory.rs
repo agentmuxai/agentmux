@@ -266,6 +266,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path (the shell tests are cfg(unix))"),
     ("crates/srv-core/src/backend/container/cli_release_tests.rs", "\"tar\"", 2,
      "not-windows: macOS/Linux/unix-only code path (the shell tests are cfg(unix))"),
+    ("crates/srv-core/src/backend/container_task_probe.rs", "\"sh\"", 1,
+     "not-windows: the script test runs the probe's shell script on Linux only (cfg(target_os = \"linux\"))"),
     ("crates/srv-core/src/backend/process_tracker/cgroup_linux.rs", "\"sleep\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/bootstrap/watchers.rs", "\"sleep\"", 1,
