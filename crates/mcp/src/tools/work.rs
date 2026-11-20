@@ -246,6 +246,11 @@ async fn run_work_update(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
     let id = task_id(arguments)?;
     let Some(attempt) = arguments.get("attempt").and_then(|v| v.as_i64()) else {
+        // A note or links on a task nobody holds need no claim. A task this agent holds still asks for its
+        // attempt: it is how srv rejects a stale holder, so it is never left out for the holder.
+        if name == "WorkUpdate" && is_only_a_note(arguments) && !holds_it(arguments, &self_id, cx).await {
+            return note_on_unheld(id, arguments, &self_id, cx).await;
+        }
         return Err(missing_attempt(arguments, &self_id, cx).await);
     };
     let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
@@ -928,6 +933,51 @@ async fn missing_attempt(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> 
             held.iter().map(|(task, n)| format!("#{task} (attempt {n})")).collect::<Vec<_>>().join(", ")
         ),
     })
+}
+
+/// An `update` that only leaves a note and/or links: the part of `update` that needs no claim. A checklist,
+/// files, or the UI flags are the holder's, and still ask for the attempt.
+fn is_only_a_note(arguments: &Value) -> bool {
+    let text = |v: Option<&Value>| v.and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty());
+    let links = arguments.get("links");
+    let has_text = text(arguments.get("note")) || ["pr", "branch", "doc"].iter().any(|k| text(links.and_then(|l| l.get(*k))));
+    let holder_only = ["checklist", "files", "captions", "ui_change", "no_media_reason"].iter().any(|k| arguments.get(*k).is_some_and(|v| !v.is_null()));
+    has_text && !holder_only
+}
+
+/// Whether this agent holds the task the call names (claimed, or blocked on a question it asked).
+async fn holds_it(arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> bool {
+    let asked = arguments.get("id").and_then(|v| v.as_str()).map(|s| s.trim().trim_start_matches('#')).unwrap_or("");
+    let mut held = held_in("claimed", self_id, cx).await;
+    held.extend(held_in("blocked", self_id, cx).await);
+    held.iter().any(|(task, _)| task == asked)
+}
+
+/// `Tasks update` with a note or links and no attempt, on a task nobody holds: srv writes it on the card as
+/// this agent's, with no claim and no attempt used. srv refuses it, saying what to do instead, if someone holds it.
+async fn note_on_unheld(id: &str, arguments: &Value, self_id: &str, cx: &ToolCtx<'_>) -> Result<String> {
+    let ToolCtx { local_url, auth_key, client, .. } = *cx;
+    let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let links = arguments.get("links").cloned().unwrap_or(Value::Null);
+    let url = format!("{}/agentmux/work/{}/update", local_url.trim_end_matches('/'), path_seg(id));
+    let body = serde_json::json!({
+        "agent_id": self_id,
+        "note": str_arg("note"),
+        "pr_url": links.get("pr").and_then(|v| v.as_str()),
+        "branch": links.get("branch").and_then(|v| v.as_str()),
+        "doc": links.get("doc").and_then(|v| v.as_str()),
+    });
+    let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("work update request failed: {e}"))?;
+    let status = resp.status();
+    let reply = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        // A 409 here is srv's own words (the task is held by someone), not "your claim is old".
+        anyhow::bail!("Tasks update failed: HTTP {status} — {}", refusal_words(&reply));
+    }
+    Ok(format!(
+        "Noted on task {id}: nobody holds it, so no claim or attempt was needed. The card shows the note as written by {self_id}."
+    ))
 }
 
 fn task_id(arguments: &Value) -> Result<&str> {
