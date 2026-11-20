@@ -199,6 +199,24 @@ describe("ActivityDock, pinned", () => {
         return snapshot("retention");
     });
 
+    it("keeps an unknown row for ten minutes after it turned unknown, flags it as leaving, then drops it, and never shows one from long ago", () => {
+        // The report: stale rows of a container that was never restarted, left in the dock for good.
+        const now = Date.now();
+        const day = 24 * 60 * 60 * 1000;
+        const unknown = (id: string, since: number) => act(id, { status: "unknown", canStop: false, endedAt: since - 2 * 60 * 60 * 1000, unknownSince: since });
+        mount([act("run"), unknown("just-turned", now), unknown("days-old", now - 3 * day)]);
+        const rows = () => [...host.querySelectorAll('[data-stand="ActivityRow"]')].map((e) => `${e.getAttribute("data-id")}${e.getAttribute("data-leaving") === "true" ? " (leaving)" : ""}`);
+        expect(rows()).toEqual(["run", "just-turned"]);
+        advance(599_000);
+        expect(rows()).toEqual(["run", "just-turned"]);
+        advance(1_100);
+        expect(rows()).toEqual(["run", "just-turned (leaving)"]);
+        advance(500);
+        expect(rows()).toEqual(["run"]);
+        advance(60 * 60 * 1000);
+        expect(rows()).toEqual(["run"]);
+    });
+
     it("dismisses a row for good, stops only shells and crons and ignores a stop that fails", () => {
         h.stop = (id: string) => (id === "bad" ? Promise.reject(new Error("gone")) : Promise.resolve());
         mount([act("sh"), act("bad"), act("cr", { kind: "cron" }), act("er", { status: "error", canStop: false, endedAt: Date.now() })], [act("sa", { kind: "subagent" })]);
