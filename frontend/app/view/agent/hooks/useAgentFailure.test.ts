@@ -425,7 +425,7 @@ describe("useAgentFailure — a failed turn ends too, and that is not a success 
         });
     });
 
-    it("the row shows what happened in one line: tried 3 times, next in 60 s", async () => {
+    it("the row says it in its title, which wraps in a narrow pane: tried 3 times, next in 30 s", async () => {
         await createRoot(async (dispose) => {
             const { ui } = mkUI(() => {});
             await Promise.resolve();
@@ -434,7 +434,8 @@ describe("useAgentFailure — a failed turn ends too, and that is not a success 
             failingTurn();
             vi.advanceTimersByTime(LADDER_MS[1]);
             failingTurn();
-            expect(ui.row()?.meta).toContain("tried 3 times, next in 30 s");
+            expect(ui.row()?.title).toBe("Throttled, tried 3 times, next in 30 s");
+            expect(ui.row()?.meta).toBe("rate_limited · retryable");
             dispose();
         });
     });
@@ -480,6 +481,20 @@ describe("useAgentFailure — a usage limit waits for its reset (#48173)", () =>
             vi.advanceTimersByTime(24 * 3600_000);
             expect(onRetry).toHaveBeenCalledTimes(1);
 
+            dispose();
+        });
+    });
+
+    it("the row counts the minutes down on its own, without anything else redrawing it", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(() => {});
+            await Promise.resolve();
+            fire("agentfailure", limit(NOW + 24 * 60_000));
+            expect(ui.row()?.title).toMatch(/, in 24 min$/);
+            vi.advanceTimersByTime(60_000);
+            expect(ui.row()?.title).toMatch(/, in 23 min$/);
+            vi.advanceTimersByTime(3 * 60_000);
+            expect(ui.row()?.title).toMatch(/, in 20 min$/);
             dispose();
         });
     });

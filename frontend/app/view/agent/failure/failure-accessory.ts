@@ -200,14 +200,22 @@ function metaLine(f: AgentFailure, view: FailureViewState): string {
     if (f.signal != null) meta.push(`signal ${f.signal}`);
     else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
     if (f.retryable) meta.push("retryable");
-    // One row that updates: "tried 3 times, next in 60 s".
-    if (view.autoRetryIn != null && (view.tries ?? 0) > 0) {
-        meta.push(`tried ${view.tries} ${view.tries === 1 ? "time" : "times"}, next in ${view.autoRetryIn} s`);
-    }
     if (view.reconnectHint) meta.push(view.reconnectHint);
     // The message this pane refused is not lost: say so, and what it was.
     if (view.notSent) meta.push(`not sent: "${view.notSent.length > 60 ? `${view.notSent.slice(0, 57)}…` : view.notSent}"`);
     return meta.join(" · ");
+}
+
+/**
+ * The row's one line, in plain words: a usage limit says when it lifts ("Out of quota until 3:10 AM, in 24 min"), a
+ * transient failure being retried says how it is going ("..., tried 3 times, next in 60 s"). It is the title, which
+ * wraps in a narrow pane; the meta line beside it does not.
+ */
+function rowTitle(f: AgentFailure, view: FailureViewState): string {
+    if (f.code === "usage_limit" && view.quotaLine) return view.quotaLine;
+    const title = f.title || "Agent run failed";
+    if (view.autoRetryIn == null || (view.tries ?? 0) <= 0) return title;
+    return `${title}, tried ${view.tries} ${view.tries === 1 ? "time" : "times"}, next in ${view.autoRetryIn} s`;
 }
 
 /** Project a failure + view state + handlers into a PaneRow descriptor. */
@@ -383,7 +391,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
 
     return {
         sigil: ICON[f.code] ?? "⚠",
-        title: (f.code === "usage_limit" && view.quotaLine) || f.title || "Agent run failed",
+        title: rowTitle(f, view),
         meta: metaLine(f, view),
         // Only the never-signed-in auth case is not an error — see FailureRow.accent.
         accent: f.code === "auth" && !turnAttempted ? "active" : "error",

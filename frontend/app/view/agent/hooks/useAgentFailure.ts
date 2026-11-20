@@ -676,6 +676,9 @@ function watchUsageResend(s: FailureHookState) {
 /** The row's view flags: what is expanded, counting down, armed or copied, and what the recovery says. */
 function rowViewState(s: FailureHookState, pf: PaneFailure, verdict: FailureVerdict | null): FailureViewState {
     const { opts } = s;
+    // Read here, not only in the verdict: the verdict's value does not change as the minutes go, so a row that follows
+    // only it never redraws, and a usage limit's "in 24 min" would stand still.
+    s.clockTick();
     return {
         expanded: s.expanded(),
         autoRetryIn: s.autoRetryIn(),
