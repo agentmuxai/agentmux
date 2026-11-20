@@ -306,9 +306,9 @@ describe("the hand-offs are bound by digest", () => {
 // The signing job holds the keychain and can ask for the identity token: the commands it runs by one bare word are
 // called by absolute path, so nothing earlier on a search path can answer for them.
 describe("the signing job calls its tools by absolute path", () => {
-    it("has no bare security, codesign, xcrun, rm, mv or uuidgen", () => {
+    it("has no bare security, codesign, xcrun, rm, mv, uuidgen, jq, curl, awk or base64 (the AWS CLI has no one path on the images)", () => {
         const text = code(jobText("sign"));
-        expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen)\s+[-\w"$]/m);
+        expect(text).not.toMatch(/(^|[\s(;|&`])(security|codesign|xcrun|rm|mv|uuidgen|jq|curl|awk|base64)\s+[-+\w"'$]/m);
     });
 });
 

@@ -449,15 +449,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          TOKEN=$(/usr/bin/curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | /usr/bin/jq -r .value)
           echo "::add-mask::$TOKEN"
-          CLAIMS=$(echo "$TOKEN" | jq -R 'split(".")[1] | @base64d | fromjson')
-          echo "$CLAIMS" | jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name, environment}'
+          CLAIMS=$(echo "$TOKEN" | /usr/bin/jq -R 'split(".")[1] | @base64d | fromjson')
+          echo "$CLAIMS" | /usr/bin/jq '{sub, job_workflow_ref, job_workflow_sha, workflow_ref, ref, event_name, environment}'
           WANT="${GITHUB_REPOSITORY}/.github/workflows/build-macos.yml@refs/heads/main"
-          GOT=$(echo "$CLAIMS" | jq -r .job_workflow_ref)
-          SUB=$(echo "$CLAIMS" | jq -r .sub)
-          REF=$(echo "$CLAIMS" | jq -r .ref)
-          SHA=$(echo "$CLAIMS" | jq -r .job_workflow_sha)
+          GOT=$(echo "$CLAIMS" | /usr/bin/jq -r .job_workflow_ref)
+          SUB=$(echo "$CLAIMS" | /usr/bin/jq -r .sub)
+          REF=$(echo "$CLAIMS" | /usr/bin/jq -r .ref)
+          SHA=$(echo "$CLAIMS" | /usr/bin/jq -r .job_workflow_sha)
           if [ "$GOT" != "$WANT" ]; then
             echo "::error::the identity token's job_workflow_ref is '$GOT', not '$WANT'; the Apple signing role accepts only the latter. Is the caller using build-macos.yml@main?"
             exit 1
@@ -545,15 +545,15 @@ jobs:
           if [ -n "$SECRET_FIELD" ]; then
             # Only the object picked out of the secret reaches the disk.
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text \
-              | jq -ce "$SECRET_FIELD" > "$FILE" \
+              | /usr/bin/jq -ce "$SECRET_FIELD" > "$FILE" \
               || { echo "::error::the Apple signing secret has no value at the configured field"; exit 1; }
           else
             aws secretsmanager get-secret-value --secret-id "$SECRET_ID" --query SecretString --output text > "$FILE"
           fi
           # Every field is a non-empty single-line string, and each one is masked in the logs.
-          jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
+          /usr/bin/jq -e 'type == "object" and length > 0 and all(.[]; type == "string" and length > 0 and (contains("\n") | not))' "$FILE" > /dev/null \
             || { echo "::error::the Apple signing secret is not a flat object of non-empty single-line strings"; exit 1; }
-          jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
+          /usr/bin/jq -r '.[]' "$FILE" | while IFS= read -r v; do echo "::add-mask::$v"; done
           echo "APPLE_SIGNING_FILE=$FILE" >> "$GITHUB_ENV"
           # The role is needed for this one call. Later steps get no AWS session: configure-aws-credentials
           # exported one to the job, so it is emptied here.
@@ -565,8 +565,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APPLE_CERTIFICATE="$(jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE")"
-          APPLE_CERTIFICATE_PASSWORD="$(jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")"
+          APPLE_CERTIFICATE="$(/usr/bin/jq -er .APPLE_CERTIFICATE "$APPLE_SIGNING_FILE")"
+          APPLE_CERTIFICATE_PASSWORD="$(/usr/bin/jq -er .APPLE_CERTIFICATE_PASSWORD "$APPLE_SIGNING_FILE")"
           # Use a full absolute path so security(1) and notarytool agree on the
           # file location — passing just a name causes a -db suffix mismatch on
           # modern macOS (the file lands at ~/Library/Keychains/<name>-db but
@@ -583,7 +583,7 @@ jobs:
           # step that signs, so a locked keychain never makes codesign wait for a password.
           /usr/bin/security set-keychain-settings -t 21600 -u "$KEYCHAIN_PATH"
 
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          echo "$APPLE_CERTIFICATE" | /usr/bin/base64 --decode > "$RUNNER_TEMP/cert.p12"
           /usr/bin/security import "$RUNNER_TEMP/cert.p12" \
             -k "$KEYCHAIN_PATH" \
             -P "$APPLE_CERTIFICATE_PASSWORD" \
@@ -602,9 +602,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APPLE_ID="$(jq -er .APPLE_ID "$APPLE_SIGNING_FILE")"
-          APPLE_PASSWORD="$(jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")"
-          APPLE_TEAM_ID="$(jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")"
+          APPLE_ID="$(/usr/bin/jq -er .APPLE_ID "$APPLE_SIGNING_FILE")"
+          APPLE_PASSWORD="$(/usr/bin/jq -er .APPLE_PASSWORD "$APPLE_SIGNING_FILE")"
+          APPLE_TEAM_ID="$(/usr/bin/jq -er .APPLE_TEAM_ID "$APPLE_SIGNING_FILE")"
           # --no-validate skips the live Apple credential check so a pending
           # Developer Program agreement doesn't block credential storage; a
           # submission Apple does not accept then fails the notarize step below.
@@ -647,7 +647,7 @@ jobs:
         run: |
           set -euo pipefail
           /usr/bin/security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application/ {print $2; exit}')"
+          CERT="$(/usr/bin/security find-identity -v -p codesigning "$KEYCHAIN_PATH" | /usr/bin/awk -F'"' '/Developer ID Application/ {print $2; exit}')"
           [ -n "$CERT" ] || { echo "::error::no 'Developer ID Application' identity in the keychain"; exit 1; }
           /usr/bin/codesign --force --timestamp --sign "$CERT" --keychain "$KEYCHAIN_PATH" "$DMG"
           bash signing-scripts/scripts/notarize-macos.sh dmg "$DMG"
