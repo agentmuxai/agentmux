@@ -55,6 +55,7 @@ import { TitleBar } from "./titlebar";
 import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { MENU_ICON } from "@/app/util/menu-icons";
 import { tip } from "@/app/element/tip";
+import { catchPaneErrors } from "@/app/util/pane-error-scope";
 
 /**
  * The header background a block's own assigned color resolves to (a subtle
@@ -1213,15 +1214,16 @@ function createFrameHeaders(
     // caller (PR 3) will pass nodeModel.activeBlockId instead, to track a
     // switch without this header remounting.
     const headerBlockId: Accessor<string> = () => nodeModel.blockId;
-    const headerElem = (
+    // Each header is built under a handler that names the pane and "chrome" in the log for a throw in it.
+    const headerElem = catchPaneErrors(nodeModel.blockId, "chrome", () => (
         <BlockFrame_Header
             {...props}
             connBtnRef={connBtnRef}
             changeConnModalAtom={changeConnModalAtom}
             blockId={headerBlockId}
         />
-    );
-    const headerElemNoView = (
+    ));
+    const headerElemNoView = catchPaneErrors(nodeModel.blockId, "chrome", () => (
         <BlockFrame_Header
             {...props}
             connBtnRef={connBtnRef}
@@ -1229,7 +1231,7 @@ function createFrameHeaders(
             viewModel={null}
             blockId={headerBlockId}
         />
-    );
+    ));
     return { headerElem, headerElemNoView };
 }
 
