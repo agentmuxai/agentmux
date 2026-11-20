@@ -36,6 +36,7 @@ import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/ap
 import { startAgentPrewarm } from "./agent-prewarm-driver";
 import { createDisplayWatchdog } from "./display-watchdog";
 import { createPaneWatchdog } from "./pane-watchdog";
+import { mountedPaneIds } from "./mounted-panes";
 import { chosenReloadOffer, WindowReloadOffer } from "./window-reload-offer";
 import { peekLayoutModelForTab } from "@/layout/index";
 import { onWindowErrorBurst } from "@/app/util/window-error-burst";
@@ -248,12 +249,7 @@ function WorkspaceElem(): JSX.Element {
     onCleanup(onWindowErrorBurst(() => setErrorBurst(true)));
     const paneWatchdog = createPaneWatchdog({
         expected: () => peekLayoutModelForTab(untrack(displayTabId))?.leafOrder().map((e) => e.blockid) ?? [],
-        mounted: () => {
-            const ids = new Set<string>();
-            const tabEl = tabEls.get(untrack(displayTabId));
-            tabEl?.querySelectorAll(".block-frame-default[data-blockid]:not(.block-preview)").forEach((el) => ids.add(el.getAttribute("data-blockid")!));
-            return ids;
-        },
+        mounted: () => mountedPaneIds(tabEls.get(untrack(displayTabId))),
         inFlight: () => untrack(() => tabSwitching() || switchIntentTabId() != null || gateTargetTabId() != null || creatingTabId() != null || displayTabId() !== targetTabId()),
         offerReload: () => setPanesMissing(true),
         withdrawOffer: () => setPanesMissing(false),
