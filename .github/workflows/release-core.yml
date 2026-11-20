@@ -558,7 +558,9 @@ jobs:
           MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # Each package file from the artifact that makes it and no other (a build job runs the built commit's code and can
+          # upload an artifact of its own): see the script for the list. A package file anywhere else stops the release.
+          bash scripts/release-collect-files.sh release-artifacts dist-flat
           # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
           # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
           # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.
@@ -714,7 +716,9 @@ jobs:
           MACOS_DMG_SHA256: ${{ needs.build-macos.outputs.dmg-sha256 }}
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.7z" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.xz" -o -name "agentmux-headless-*.tar.gz" -o -name "agentmux-headless-*-windows-x64.zip" \) -exec cp {} dist-flat/ \;
+          # Each package file from the artifact that makes it and no other (a build job runs the built commit's code and can
+          # upload an artifact of its own): see the script for the list. A package file anywhere else stops the release.
+          bash scripts/release-collect-files.sh release-artifacts dist-flat
           # The macOS DMG is the one in the artifact named macos-dmg, which only build-macos.yml's publish job uploads, after it
           # has checked the DMG's signature, its stapled ticket and its team. A .dmg in any other artifact (the build job runs the
           # built commit's code and can upload an artifact of its own) is not taken: it stops the release instead.

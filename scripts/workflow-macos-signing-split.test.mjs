@@ -247,11 +247,12 @@ describe("what the release picks up", () => {
 // upload an artifact of its own, so a .dmg is taken from the artifact the publish job uploads and from no other.
 describe("release-core.yml takes the macOS DMG from the macos-dmg artifact only", () => {
     const releaseCore = readFileSync(join(ROOT, ".github/workflows/release-core.yml"), "utf8").replace(/\r\n/g, "\n");
-    const finds = releaseCore.split("\n").filter((l) => /^\s+find release-artifacts -type f \\\(/.test(l));
+    const finds = releaseCore.split("\n").filter((l) => /^\s+bash scripts\/release-collect-files\.sh release-artifacts dist-flat$/.test(l));
 
-    it("has the two flatten steps (sign-release and publish), neither selecting *.dmg generally", () => {
+    it("has the two flatten steps (sign-release and publish), each collecting the package files from their own artifacts, neither selecting *.dmg generally", () => {
         expect(finds).toHaveLength(2);
-        for (const f of finds) expect(f).not.toContain('-name "*.dmg"');
+        expect(releaseCore).not.toMatch(/find release-artifacts -type f \\\(/);
+        expect(releaseCore).not.toContain('-name "*.dmg" -o');
     });
 
     it("stops the release on a .dmg in any other artifact, in both steps", () => {
