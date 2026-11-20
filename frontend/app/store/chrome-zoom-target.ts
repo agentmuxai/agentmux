@@ -2,6 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
+ * What an agent pane draws at chrome zoom below its conversation: the siblings after the transcript, except the
+ * sign-in panel. A direct child of the zoomed column marks none of them itself (they have no wrapper, see
+ * view/agent/agent-view.scss, which holds the same selector and the rule that applies the zoom).
+ */
+export const AGENT_PANE_CHROME_SELECTOR =
+    ".agent-view-zoomed > .agent-document-scroll-region ~ :not(.agent-auth-panel-card, .agent-auth-notice)";
+
+/**
  * Whether a Ctrl+wheel over `target` zooms chrome rather than its pane. Shared
  * by AppZoomHandler and AppAllPanesZoomHandler (app.tsx), which route a wheel
  * by this one hit-test, so which elements count as chrome has one place to
@@ -15,6 +23,7 @@
 export function isOverChrome(target: HTMLElement): boolean {
     const scope = target.closest("[data-zoom-scope]")?.getAttribute("data-zoom-scope");
     if (scope) return scope === "chrome";
+    if (target.closest(AGENT_PANE_CHROME_SELECTOR)) return true;
     return (
         !!target.closest(".window-header") ||
         !!target.closest(".status-bar") ||

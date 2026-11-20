@@ -111,7 +111,7 @@ export function AgentViewLayout({ v }: { v: AgentViewParts }): JSX.Element {
             <MessagesPanelContext.Provider value={messages}>
                 {/* The top band: what the pane puts across its top (the find bar). Above the row, so the Messages
                     panel, which lies over the conversation, never covers it. */}
-                <AgentTopBand blockId={model.blockId} zoom={input.zoomFactor} />
+                <AgentTopBand blockId={model.blockId} />
                 <div class="agent-view-row">
                     <div class="agent-view-zoomed" style={{ zoom: input.zoomFactor() }}>
                         <AgentViewOverlays v={v} />
