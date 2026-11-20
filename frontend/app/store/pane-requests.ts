@@ -22,9 +22,14 @@
  *   `onGone` runs (deny, cancel).
  * - **Drawn from AgentMux's own record**: callers pass a component of their
  *   own and the text of srv's record, never an agent's words as a title or a
- *   button. The dock is marked operator-only, and every `Modal` a modal
- *   request renders is too (`OperatorOnlyModals`), so an agent's UI query,
- *   click and keys reach neither.
+ *   button.
+ * - **Operator-only is a property of the request** (`operatorOnly`, which every
+ *   caller states): a request that is the person's answer to something an
+ *   agent or a page asked for (an approval, a grant, a sign-in, a secret) is
+ *   marked, its card or every `Modal` it renders carries `data-operator-only`,
+ *   and an agent's UI query, click and keys reach none of it. The person's own
+ *   action asking "are you sure?" (replace this pane, close it) is not: an
+ *   agent can cancel it, and answer it as it could do the thing itself.
  */
 
 import { createEffect, createRoot, createSignal, type JSX, untrack } from "solid-js";
@@ -57,6 +62,13 @@ export interface PaneRequestOptions<P extends object> {
     kind?: string;
     /** Its line in the dock's "N more" list while another is shown. */
     summary?: string;
+    /**
+     * Whether it is the person's answer to something an agent or a page asked for (an approval, a grant, a
+     * sign-in, a secret): marked `data-operator-only`, so an agent's UI query, click and keys leave it alone, and
+     * the shortcut API sends nothing into its pane but a cancel. False for the person's own action asking "are you
+     * sure?". Stated by every caller, so none is left reachable by one that forgot.
+     */
+    operatorOnly: boolean;
     /** Whether something waits on the person for it (default true). */
     waits?: boolean;
     /** The pane was closed before it was answered: give the safe answer. */
@@ -73,6 +85,7 @@ export interface PaneRequest {
     deadlineMs?: number;
     summary?: string;
     waits: boolean;
+    operatorOnly: boolean;
 }
 
 export interface PaneRequestHandle {
@@ -127,6 +140,7 @@ export const paneRequests = {
             deadlineMs: opts.deadlineMs,
             summary: opts.summary,
             waits: opts.waits ?? true,
+            operatorOnly: opts.operatorOnly,
         };
         setAll((prev) => [...prev, r]);
         untrack(() => {
@@ -151,8 +165,8 @@ export const paneRequests = {
 export function openPaneModal<P extends object>(
     blockId: string,
     Component: (props: P & PaneRequestProps) => JSX.Element,
-    props?: P,
-    opts: Omit<PaneRequestOptions<P>, "Component" | "props" | "presentation" | "source"> & { source?: string } = {}
+    props: P | undefined,
+    opts: Omit<PaneRequestOptions<P>, "Component" | "props" | "presentation" | "source"> & { source?: string }
 ): PaneRequestHandle {
     return paneRequests.push(blockId, { ...opts, source: opts.source ?? "modal", Component, props, presentation: "modal" });
 }

@@ -42,6 +42,8 @@ function show(n: NoticeView): void {
     if (n.status === "line") {
         const handle = paneRequests.push(n.block_id, {
             source: "agent-notice-line",
+            // One line that goes by itself: nothing to answer.
+            operatorOnly: false,
             Component: AgentNoticeLine,
             props: { notice: n },
             // A refused credential's headline is a whole sentence: the dock's "N more:" row names it by what it is about.
@@ -54,6 +56,8 @@ function show(n: NoticeView): void {
     }
     const handle = paneRequests.push(n.block_id, {
         source: "agent-notice",
+        // Start now and Always allow answer an agent's start of another agent.
+        operatorOnly: true,
         Component: AgentNoticeCard,
         props: { notice: n, decide: (choice: NoticeChoice) => decide(n, choice) },
         deadlineMs: n.deadline_ms,
