@@ -96,7 +96,12 @@ async function connectOnce(port, pane) {
         let cdp;
         try {
             cdp = await attach(t);
-            if (await cdp.evaluate(probe)) return cdp;
+            if (await cdp.evaluate(probe)) {
+                // A window nobody has raised (no window manager, a private display) reports itself hidden and
+                // takes no key events: raise it, as a person would by clicking it.
+                await cdp.send("Page.bringToFront").catch(() => {});
+                return cdp;
+            }
             if (await cdp.evaluate(`typeof window.__agentmux_shortcuts === "object"`)) sawApi = true;
         } catch {
             // Not a page we can drive; try the next.
