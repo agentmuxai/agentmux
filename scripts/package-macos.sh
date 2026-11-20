@@ -531,8 +531,9 @@ PLIST
 # the app through LaunchServices in background mode unless it already runs, then exits.
 # Only a Developer-ID-signed bundle ships it: the system ties the registration to the app's code requirement, which for
 # an ad-hoc signature is the build's own hash, so after an in-place upgrade launchd refuses to start the job (a
-# "launch constraint violation" with no message to the person). A build without a certificate keeps the LaunchAgent plist.
-if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ] && [ -n "$CERT" ]; then
+# "launch constraint violation" with no message to the person). A build that no job will sign with a Developer ID keeps
+# the LaunchAgent plist. With --unsigned-app the release job signs the bundle afterwards, so that counts as signed.
+if [ "$AGENTMUX_STABLE_BUNDLE_ID" = "1" ] && { [ -n "$CERT" ] || [ "$UNSIGNED_APP" = "1" ]; }; then
     LOGIN_AGENT_DIR="$APP/Contents/Library/LaunchAgents"
     mkdir -p "$LOGIN_AGENT_DIR"
     cat > "$LOGIN_AGENT_DIR/${BUNDLE_ID}.login.plist" <<LOGINPLIST
