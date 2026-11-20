@@ -12,6 +12,9 @@ import { formatKey, keyId, matchKey, parseKey, sameKey, type KeyEventLike, type 
 export interface KeyContext {
     /** A text field, the agent composer or the code editor has focus. */
     textInputFocus: boolean;
+    /** The focused text field holds text. A key that moves or selects inside a field (a word, a line) belongs to it
+     *  then; with nothing typed there is nothing to move or select, so such a key can go on to the window. */
+    textInputFilled: boolean;
     /** A terminal has focus. */
     terminalFocus: boolean;
     /** The focused pane's view type ("term", "agent", "editor", …). */
@@ -229,7 +232,7 @@ export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; sour
     return rowsFor(platform).map(({ row, source, user }) => ({ row, source, user }));
 }
 
-const WHEN_FLAGS = new Set(["textInputFocus", "terminalFocus", "docTabsHost"]);
+const WHEN_FLAGS = new Set(["textInputFocus", "textInputFilled", "terminalFocus", "docTabsHost"]);
 
 /** Throws on any term that isn't a known flag or a viewType comparison.
  *  Checks every term: evalWhen stops at the first false one, so a bad flag
@@ -309,7 +312,7 @@ export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | 
 }
 
 /** Where focus is when the host forwards a key from a browser pane. */
-const BROWSER_PANE_CONTEXT: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "browser", docTabsHost: false };
+const BROWSER_PANE_CONTEXT: KeyContext = { textInputFocus: false, textInputFilled: false, terminalFocus: false, viewType: "browser", docTabsHost: false };
 
 /**
  * The global command a single key forwarded from a browser pane runs in the
