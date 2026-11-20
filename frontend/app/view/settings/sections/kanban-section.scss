@@ -60,6 +60,11 @@
     padding-left: var(--space-4);
 }
 
+// A line that wraps (a narrow pane) takes two or three rows: a gap between lines keeps each change a unit.
+.kanban-stages__history-list > li + li {
+    margin-top: var(--space-1);
+}
+
 .kanban-stages__row[data-dragging] {
     opacity: 0.5;
 }
@@ -109,6 +114,13 @@
     height: 0.6em;
     border-radius: 50%;
     background: var(--kanban-stage, var(--border-color));
+}
+
+// The colour button: its swatch, its name and a chevron, one line, so the name never wraps beside the stage's name.
+.kanban-stages__colour {
+    flex: none;
+    gap: var(--space-1);
+    white-space: nowrap;
 }
 
 .kanban-stages__count {

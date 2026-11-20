@@ -6,13 +6,13 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 
-import { Button, FilterChip, FilterChips, IconButton, Notice, Select, TextInput } from "@/app/element/ui";
+import { Button, FilterChip, FilterChips, IconButton, MenuTrigger, Notice, Select, TextInput, type MenuEntry } from "@/app/element/ui";
 import { tip } from "@/app/element/tip";
 import { t } from "@/app/i18n/i18n";
 import { makeIconClass } from "@/util/util";
 import { COLUMNS, type ColumnId } from "@/app/view/kanban/kanban-columns";
 import { canRemove, canShow } from "@/app/view/kanban/kanban-stages-draft";
-import { MAX_STAGES, STAGE_PALETTE, validateStages, type KanbanStage, type StageColour } from "@/app/view/kanban/kanban-stages";
+import { MAX_STAGES, STAGE_PALETTE, validateStages, type KanbanStage } from "@/app/view/kanban/kanban-stages";
 
 import type { KanbanStagesState } from "./kanban-section-state";
 import { createStageReorder, type StageReorder } from "./kanban-stages-reorder";
@@ -22,7 +22,39 @@ import "./kanban-section.scss";
 
 type Part = { s: KanbanStagesState };
 
-const colourOptions = () => STAGE_PALETTE.map((p) => ({ value: p.id, label: t(`settings.kanban.colour.${p.id}`) }));
+/** The palette as the menu's rows: each swatch is drawn in its own theme token, with its name written beside it. */
+const colourItems = (s: KanbanStagesState, stage: KanbanStage): MenuEntry[] =>
+    STAGE_PALETTE.map((p) => ({
+        label: t(`settings.kanban.colour.${p.id}`),
+        type: "radio",
+        checked: p.id === stage.colour,
+        swatchColor: `var(--kanban-stage-${p.token})`,
+        onSelect: () => s.recolour(stage.id, p.id),
+    }));
+
+/** The stage's colour: a button showing its swatch and name, which opens the palette. Read-only, it is the button without the menu. */
+function ColourPicker(props: Part & { stage: KanbanStage }): JSX.Element {
+    const face = (disabled: boolean) => (
+        <Button
+            density="compact"
+            class="kanban-stages__colour"
+            disabled={disabled}
+            aria-haspopup={disabled ? undefined : "menu"}
+            aria-label={t("settings.kanban.colourIs", { name: t(`settings.kanban.colour.${props.stage.colour}`) })}
+        >
+            <span class="kanban-stages__dot" aria-hidden="true" />
+            {t(`settings.kanban.colour.${props.stage.colour}`)}
+            <i class={makeIconClass("chevron-down", true)} aria-hidden="true" />
+        </Button>
+    );
+    return (
+        <Show when={props.s.editable()} fallback={face(true)}>
+            <MenuTrigger items={colourItems(props.s, props.stage)} placement="bottom-start" aria-label={t("settings.kanban.colour")}>
+                {face(false)}
+            </MenuTrigger>
+        </Show>
+    );
+}
 
 /** The sources a stage may show, as toggle chips: what it shows is what its stage holds. */
 function SourceToggles(props: Part & { stage: KanbanStage }): JSX.Element {
@@ -116,14 +148,7 @@ function StageRow(props: Part & { stage: KanbanStage; index: number; last: boole
                     disabled={!s.editable()}
                     onInput={(e) => s.rename(stage().id, e.currentTarget.value)}
                 />
-                <Select
-                    density="compact"
-                    ariaLabel={t("settings.kanban.colour")}
-                    value={stage().colour}
-                    disabled={!s.editable()}
-                    onChange={(v) => s.recolour(stage().id, v as StageColour)}
-                    options={colourOptions()}
-                />
+                <ColourPicker s={s} stage={stage()} />
                 <span class="kanban-stages__count" {...tip(t("settings.kanban.tasksHere"))}>
                     {s.counts()[stage().id] ?? 0}
                 </span>
