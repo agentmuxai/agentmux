@@ -122,6 +122,22 @@
 .modal-panel.accounts-chooser {
     width: 320px;
     max-width: calc((100vw - 32px) / var(--zoomfactor));
+    // `.accounts-chooser` clips (the menu frame's rounded corners), which left a dialog taller than its room cut off
+    // with nothing to scroll: a field taking focus scrolled it, out of sight, and the top never came back. The dialog
+    // scrolls instead, with its bar, and keeps its corners. Nothing scrolls sideways.
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+// Over an agent pane (a sign-in from the composer): the dialog follows the pane's zoom, as the conversation does,
+// not the chrome's. `--pane-zoom` is the pane's level, set on the pane's dialog layer (block.tsx); a pane with no
+// shared zoom has none, and the dialog keeps the chrome's. A length in `%` is the pane's real size, and a length in
+// px is scaled by the zoom, so the room it may take is the pane's whole, minus the gap the layer already leaves.
+.modal-root[data-scope="pane"] .modal-panel.accounts-chooser--pane {
+    zoom: var(--pane-zoom, var(--zoomfactor));
+    width: min(360px, 100%);
+    max-width: 100%;
+    max-height: 100%;
 }
 
 // An OAuth account's card: the line saying what stopped it or what the
