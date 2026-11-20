@@ -25,6 +25,7 @@ pub(crate) mod log_ops;
 pub(crate) mod receive;
 mod reclaim_op;
 mod upgrade_op;
+mod upgrade_watch;
 pub(crate) mod send;
 pub(crate) mod signin_ops;
 pub(crate) mod tasks;

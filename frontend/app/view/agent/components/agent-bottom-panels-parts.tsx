@@ -133,7 +133,7 @@ export function PendingQueue(part: Part): JSX.Element {
                 No "Send now" affordance — Esc on an empty composer delivers
                 a queued message immediately instead (mirrors Claude Code
                 CLI). See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md. */}
-            <PendingMessagesPanel pendingMessages={p.pendingMessages} />
+            <PendingMessagesPanel pendingMessages={p.pendingMessages} onStop={p.onStop} />
         </>
     );
 }

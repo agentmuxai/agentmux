@@ -21,7 +21,7 @@ readSwarmSummary({"model":"sonnet"})
       <span data-cb=onCancel>
         "onCancel"
     <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
-  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=PendingMessagesPanel data-props={"onStop":"<fn>","pendingMessages":"[]"}>
   <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
   <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
   <div data-stand=SensitiveBanner data-props={}>
@@ -71,7 +71,7 @@ readSwarmSummary({"model":"sonnet"})
       <span data-cb=onCancel>
         "onCancel"
     <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
-  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=PendingMessagesPanel data-props={"onStop":"<fn>","pendingMessages":"[]"}>
   <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
   <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
   <div data-stand=SensitiveBanner data-props={}>
@@ -121,7 +121,7 @@ readSwarmSummary({"model":"sonnet"})
       <span data-cb=onCancel>
         "onCancel"
     <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
-  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=PendingMessagesPanel data-props={"onStop":"<fn>","pendingMessages":"[]"}>
   <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
   <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
   <div data-stand=SensitiveBanner data-props={}>
@@ -171,7 +171,7 @@ readSwarmSummary({"model":"sonnet"})
       <span data-cb=onCancel>
         "onCancel"
     <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
-  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=PendingMessagesPanel data-props={"onStop":"<fn>","pendingMessages":"[]"}>
   <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
   <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
   <div data-stand=SensitiveBanner data-props={}>
@@ -221,7 +221,7 @@ readSwarmSummary({"model":"sonnet"})
       <span data-cb=onCancel>
         "onCancel"
     <div data-stand=PaneRequestDock data-props={"blockId":"\"blk-1\""}>
-  <div data-stand=PendingMessagesPanel data-props={"pendingMessages":"[]"}>
+  <div data-stand=PendingMessagesPanel data-props={"onStop":"<fn>","pendingMessages":"[]"}>
   <div data-stand=AgentCredentialsRevokedChip data-props={"agentId":"\"agent-7\"","flowRunning":"false"}>
   <div data-stand=ShutdownPendingBanner data-props={"agentId":"\"agent-7\"","agentName":"\"Seven\"","blockId":"\"blk-1\""}>
   <div data-stand=SensitiveBanner data-props={}>
