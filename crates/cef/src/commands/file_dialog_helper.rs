@@ -19,7 +19,7 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::file_dialog::{run_here, Outcome};
+use super::file_dialog::{run_here, Outcome, QUICK_CANCEL};
 use super::file_dialog_proto::{parse_answer, DialogSpec, EXIT_CANCELLED, EXIT_FAILED, MAX_ANSWER_BYTES};
 
 /// How long a dialog may stay open before the host stops waiting for it and ends its helper. A person who walked
@@ -103,7 +103,20 @@ pub(crate) fn run(spec: &DialogSpec) -> Outcome {
         }
     };
     let out = reader.and_then(|r| r.join().ok()).unwrap_or_default();
-    decide(status.code(), &out)
+    quick_cancel_is_failure(decide(status.code(), &out), started.elapsed())
+}
+
+/// With no session bus and no `zenity`, `rfd` shows nothing and answers "nothing chosen" at once, which the helper
+/// reports as a cancel (charlie, 2026-11-20: a Vault export looked like it did nothing). A cancel that comes back
+/// sooner than a person could have looked at a window and closed it ([`QUICK_CANCEL`]) is a dialog that never
+/// opened, so the person is told. Only a last resort: [`can_ask`](super::file_dialog::can_ask) is the check made first.
+fn quick_cancel_is_failure(outcome: Outcome, took: Duration) -> Outcome {
+    match outcome {
+        Outcome::Cancelled if took < QUICK_CANCEL => {
+            Outcome::Failed("the file window closed at once, so it could not open (no desktop portal or zenity to show it)".into())
+        }
+        other => other,
+    }
 }
 
 /// What the helper's exit code and output come to. Pure, so it is tested without a dialog.
@@ -166,6 +179,17 @@ mod tests {
         for name in ["AGENTMUX_AUTH_KEY", "AGENTMUX_IPC_TOKEN", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "AGENTMUX_AGENT_ID", "RUST_LOG", "LD_PRELOAD"] {
             assert!(!keeps_env(name), "{name} is not kept");
         }
+    }
+
+    #[test]
+    fn a_cancel_too_quick_to_be_a_person_is_told_as_a_dialog_that_never_opened() {
+        let quick = Duration::from_millis(150);
+        let slow = Duration::from_secs(4);
+        assert!(matches!(quick_cancel_is_failure(Outcome::Cancelled, quick), Outcome::Failed(_)));
+        assert!(matches!(quick_cancel_is_failure(Outcome::Cancelled, slow), Outcome::Cancelled), "a person closed it");
+        let path = std::env::temp_dir().join("a.txt");
+        assert!(matches!(quick_cancel_is_failure(Outcome::Chosen(path.clone()), quick), Outcome::Chosen(p) if p == path));
+        assert!(matches!(quick_cancel_is_failure(Outcome::Failed("x".into()), quick), Outcome::Failed(_)));
     }
 
     #[test]
