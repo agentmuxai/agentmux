@@ -5,6 +5,7 @@
 // Checks every shortcut the Help pane lists in a running AgentMux instance,
 // at layers L1 and L2 of docs/specs/PLAN_SHORTCUTS_VERIFIED_AND_APP_API_2026_10_10.md:
 //   L1  the command runs (RunCommand's code path: `__agentmux_shortcuts.run`)
+//   L1b after it ran, the window shows something different (scripts/verify-shortcuts-effect.mjs)
 //   L2  each of its keys, sent as real key events with modifiers through the
 //       DevTools protocol, resolves to that command (PressKeys' code path)
 // L3, whether the OS lets the key reach the app at all, is the grab reports
@@ -47,6 +48,7 @@
 // setup error (no CDP target, or a build without the shortcut API).
 
 import { appWindows, close, closeNewWindows, connect, js, MANUAL, S, sendKey, settle, sleep } from "./verify-shortcuts-cdp.mjs";
+import { changed, describe, idleNoise, judge, OPPOSITE, SNAPSHOT } from "./verify-shortcuts-effect.mjs";
 import { insideTree, isWithinPath, makeTempTree, removeTempTree } from "./verify-shortcuts-temp-tree.mjs";
 
 const args = (() => {
@@ -85,6 +87,9 @@ const FILES_NAVIGATE = new Set(["files:back", "files:forward", "files:up", "file
  *  sent, and the next Escape closes it anyway). */
 const SETUP = {
     "app:escape": "pane:replaceWithLauncher",
+    // The first and last tab are the same one until the active tab moves off it.
+    "tab:goto:last": "tab:goto:1",
+    "tab:goto:1": "tab:goto:last",
     // Cycling and moving need a second document.
     "doctab:next": "doctab:new",
     "doctab:prev": "doctab:new",
@@ -218,8 +223,12 @@ async function main() {
     // row that would leave the pane out of reach (treeDone).
     let tree = args.filesMutate && list.some((s) => s.pane === "files") ? await setUpTree(cdp).catch((e) => ({ refused: e.message })) : null;
     if (tree?.refused) console.error(`not running the rows that change files: ${tree.refused}`);
+    let grid;
     try {
         for (const s of list) {
+            if (grid === undefined && DIRECTIONAL.test(s.command)) grid = await makeGrid(cdp).catch(() => null);
+            const now = grid && DIRECTIONAL.test(s.command) ? corners(await visiblePanes(cdp)) : null;
+            s.gridPane = now?.[CORNER_FOR[s.command.split(":")[2]]];
             if (tree && treeDone(s)) {
                 await tearDownTree(cdp, tree);
                 tree = null;
@@ -259,7 +268,7 @@ async function checkRow(cdp, s, row, tree) {
         row.note = `skipped: changes files on disk, and ${tree?.refused ?? "there's no temp tree"}`;
         return;
     }
-    const target = paneFor(s);
+    const target = paneFor(s) ?? s.gridPane;
     if (needsPane(s) && !target) {
         row.note = `skipped: needs a ${s.pane ?? "term"} pane (--${s.pane === "doctabs" ? "editor or --media" : (s.pane ?? "term")})`;
         return;
@@ -283,13 +292,36 @@ async function checkRow(cdp, s, row, tree) {
     if (args.layer !== "2") {
         await setup();
         if (await guard()) return;
-        const r = await cdp.evaluate(`${S}.run(${js(s.command)}, ${js(target)})`);
-        row.l1 = r.ran ? { ok: true } : { ok: false, why: r.reason };
+        const first = await runWithEffect(cdp, s.command, target);
+        row.l1 = first.ran ? { ok: true } : { ok: false, why: first.reason };
+        let effect = first;
+        // At the edge a move does nothing (the first tab, the left-most pane). Step the other way, which leaves
+        // the edge, and run the row again: now it has room, so it must show something.
+        const opposite = s.command.startsWith("tab:") ? OPPOSITE[s.command] : undefined;
+        if (first.ran && first.effect && !first.effect.fields.length && opposite) {
+            const back = await runWithEffect(cdp, opposite, target);
+            if (back.ran && back.effect?.fields.length) {
+                await settle(cdp);
+                effect = await runWithEffect(cdp, s.command, target);
+                row.effectRetried = opposite;
+            }
+        }
+        if (effect.ran && effect.effect) {
+            const { fields, ctx } = effect.effect;
+            row.effect = describe(s.command, fields, true, ctx) + (row.effectRetried ? ` (after ${row.effectRetried}, which left the edge)` : "");
+            const verdict = judge(s.command, fields, true, ctx);
+            if (verdict) row.l1 = { ok: false, why: verdict };
+        }
         await settle(cdp);
     }
     if (args.layer === "1") return;
     for (const keys of s.raw) {
         await setup();
+        if (s.gridPane) {
+            // The L1 run (or an earlier key) may have moved the panes: focus the corner that has a neighbour now.
+            const now = corners(await visiblePanes(cdp));
+            if (now) await cdp.evaluate(`${S}.focus(${js(now[CORNER_FOR[s.command.split(":")[2]]])})`);
+        }
         const plan = await cdp.evaluate(`${S}.plan(${js(keys)}, ${js(target)})`);
         if (plan.reason) {
             row.l2.push({ keys, ok: false, why: plan.reason });
@@ -312,6 +344,73 @@ async function checkRow(cdp, s, row, tree) {
     }
 }
 
+/** Runs a command and says what the window showed: `{ ran, reason, effect: { fields, ctx } | null }`. The
+ *  effect is null when the page couldn't be read. */
+async function runWithEffect(cdp, command, target) {
+    const before = await snapshot(cdp);
+    const r = await cdp.evaluate(`${S}.run(${js(command)}, ${js(target)})`);
+    if (!r.ran || !before) return { ran: r.ran, reason: r.reason, effect: null };
+    await sleep(250);
+    const after = await snapshot(cdp);
+    if (!after) return { ran: true, effect: null };
+    const ctx = { tabs: before.snap.tabs.split("|").length, panes: before.snap.tiles ? before.snap.tiles.split(";").length : 0 };
+    return { ran: true, effect: { fields: changed(before.snap, after.snap, { noisy: before.noisy }), ctx } };
+}
+
+/** The rows that act on a pane's neighbour in a direction (focus, swap, resize). They need a pane with a
+ *  neighbour that way, so they run in a 2x2 grid made for them, from the corner that has one. */
+const DIRECTIONAL = /^pane:(focus|swap|resize):(up|down|left|right)$/;
+/** Which corner of the grid has a neighbour in each direction. */
+const CORNER_FOR = { up: "bottomRight", down: "topLeft", left: "bottomRight", right: "topLeft" };
+
+/** The visible panes of the active tab, by block id and place. */
+async function visiblePanes(cdp) {
+    return cdp.evaluate(`[...document.querySelectorAll(".tile-node")].filter((t) => t.offsetParent !== null).map((t) => {
+        const r = t.getBoundingClientRect();
+        return { id: t.querySelector("[data-blockid]")?.getAttribute("data-blockid"), x: r.x, y: r.y };
+    }).filter((p) => p.id)`);
+}
+
+/** A new tab with its pane split into a 2x2 grid; the block ids by corner, or null if it didn't come out as
+ *  four panes. */
+async function makeGrid(cdp) {
+    const run = async (command, pane) => cdp.evaluate(`${S}.run(${js(command)}, ${js(pane)})`);
+    await run("tab:new");
+    await sleep(600);
+    const first = (await visiblePanes(cdp))[0]?.id;
+    if (!first) return null;
+    await run("split:right", first);
+    await sleep(500);
+    for (const p of await visiblePanes(cdp)) {
+        await run("split:down", p.id);
+        await sleep(500);
+    }
+    return corners(await visiblePanes(cdp));
+}
+
+/** The four panes by corner, from where they are now (a swap moves them); null unless there are four. */
+function corners(panes) {
+    if (panes.length !== 4) return null;
+    const byY = [...panes].sort((a, b) => a.y - b.y || a.x - b.x);
+    const [top, bottom] = [byY.slice(0, 2).sort((a, b) => a.x - b.x), byY.slice(2).sort((a, b) => a.x - b.x)];
+    return { topLeft: top[0].id, topRight: top[1].id, bottomLeft: bottom[0].id, bottomRight: bottom[1].id };
+}
+
+/** What the window shows now, and whether it changes by itself (the clock, a spinner): two snapshots 150 ms
+ *  apart. Null when the page can't be read. */
+async function snapshot(cdp) {
+    const read = async () => JSON.parse(await cdp.evaluate(SNAPSHOT));
+    try {
+        const a = await read();
+        await sleep(150);
+        const b = await read();
+        b.windows = (await appWindows(args.port)).length;
+        return { snap: b, noisy: idleNoise(a, b).includes("html") };
+    } catch {
+        return null;
+    }
+}
+
 function report(rows) {
     const failed = rows.filter((r) => (r.l1 && !r.l1.ok) || r.l2.some((k) => !k.ok) || r.note.startsWith("FAIL"));
     if (args.json) {
@@ -321,10 +420,11 @@ function report(rows) {
         console.log("| Command | L1 RunCommand | L2 keys | Note |\n|---|---|---|---|");
         for (const r of rows) {
             const l1 = r.l1 ? (r.l1.ok ? "pass" : `FAIL: ${r.l1.why}`) : "";
+            const effect = r.effect ? `<br>${r.effect}` : "";
             const l2 = r.l2
                 .map((k) => `\`${k.keys}\` ${k.ok ? "pass" : k.why ? `FAIL: ${k.why}` : `FAIL: resolved ${k.got ?? "nothing"}`}`)
                 .join("<br>");
-            console.log(`| \`${r.command}\` | ${l1} | ${l2} | ${r.note} |`);
+            console.log(`| \`${r.command}\` | ${l1}${effect} | ${l2} | ${r.note} |`);
         }
     }
     process.exit(failed.length ? 1 : 0);
