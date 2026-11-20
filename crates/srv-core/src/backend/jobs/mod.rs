@@ -543,9 +543,23 @@ impl RunLedger {
         started_at_ms: i64,
         trigger: &Value,
     ) -> Option<String> {
+        self.drone_started_by(drone_run_id, drone_id, drone_name, started_at_ms, trigger, BY_OPERATOR)
+    }
+
+    /// [`Self::drone_started`] for a run somebody other than the operator started: `triggered_by` is
+    /// the agent's id (an agent that fires a drone with `Drone` is recorded as itself).
+    pub fn drone_started_by(
+        &self,
+        drone_run_id: &str,
+        drone_id: &str,
+        drone_name: &str,
+        started_at_ms: i64,
+        trigger: &Value,
+        triggered_by: &str,
+    ) -> Option<String> {
         let mut run = self.row(drone_id, SOURCE_DRONE, drone_name, TRIGGER_MANUAL, started_at_ms);
         run.state = state::RUNNING.to_string();
-        run.triggered_by = BY_OPERATOR.to_string();
+        run.triggered_by = triggered_by.to_string();
         run.links = json!({
             "drone_run_id": drone_run_id,
             "channel": crate::backend::reactive::registry::local_channel_id(),
