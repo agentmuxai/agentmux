@@ -658,8 +658,11 @@
 
 .files-op {
     display: flex;
+    // In a narrow pane (or with a long name) the text takes a line of its own and the bar and Cancel go below it,
+    // instead of the bar and Cancel keeping their width and squeezing the text to an ellipsis.
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 2px 8px;
     padding: 3px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
@@ -667,6 +670,8 @@
 }
 
 .files-op-text {
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
 }
