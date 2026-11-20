@@ -293,6 +293,7 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/muxspect/background-tasks"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/conversations"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/describe"), Audience::Everyone),
+    (Match::Route("/api/v1/drone/:action"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/dock"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/dock/clear"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/find"), Audience::Everyone),
