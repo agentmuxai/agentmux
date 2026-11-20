@@ -320,11 +320,33 @@ thread_local! {
         std::cell::RefCell::new(HashMap::new());
 }
 
+/// What the Save As dialog came to.
+#[derive(Clone, Debug, PartialEq)]
+enum SaveAnswer {
+    /// The person picked this file.
+    Chosen(PathBuf),
+    /// The person closed the dialog.
+    Cancelled,
+    /// The dialog could not open or died (a panic in its thread, a missing portal): nobody answered.
+    Failed,
+}
+
+/// Run the blocking dialog `ask` so that a panic inside it is an answer too. Without this a dead dialog thread
+/// never posted anything back: the download waited for an answer for good, and so did every download behind it.
+fn ask_guarded(ask: impl FnOnce() -> Option<PathBuf>) -> SaveAnswer {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(ask)) {
+        Ok(Some(path)) => SaveAnswer::Chosen(path),
+        Ok(None) => SaveAnswer::Cancelled,
+        Err(_) => SaveAnswer::Failed,
+    }
+}
+
 wrap_task! {
     struct SaveAnswerTask {
         block_id: String,
         id: u32,
-        path: Option<PathBuf>,
+        suggested: String,
+        answer: SaveAnswer,
     }
 
     impl Task {
@@ -332,12 +354,19 @@ wrap_task! {
             let cb = ASKING.with(|m| m.borrow_mut().remove(&(self.block_id.clone(), self.id)));
             // Gone: the pane closed while the dialog was open.
             let Some(cb) = cb else { return };
-            match &self.path {
+            match &self.answer {
                 // `show_dialog = false`: the person already chose, CEF just writes there.
-                Some(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
+                SaveAnswer::Chosen(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
                 // Cancelled: dropping the last reference cancels the download (CEF does that for a
                 // callback never answered). An empty path would instead save to the temp folder.
-                None => drop(cb),
+                SaveAnswer::Cancelled => drop(cb),
+                // Nobody could be asked. The person did start this download, so it is saved the way it would
+                // be with "Ask where to save" off (the default folder, a name that replaces nothing), and the
+                // strip says so; with no room for it, it is cancelled rather than left waiting.
+                SaveAnswer::Failed => match super::download_place::save_after_dialog_failed(&self.block_id, self.id, &self.suggested) {
+                    Some(p) => cb.cont(Some(&CefString::from(p.to_string_lossy().as_ref())), 0),
+                    None => drop(cb),
+                },
             }
         }
     }
@@ -349,16 +378,22 @@ wrap_task! {
 fn ask_with_rfd(block_id: &str, id: u32, path: PathBuf, cb: &BeforeDownloadCallback) {
     ASKING.with(|m| m.borrow_mut().insert((block_id.to_string(), id), cb.clone()));
     let block_id = block_id.to_string();
+    let suggested = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     std::thread::spawn(move || {
-        let mut dialog = rfd::FileDialog::new().set_title("Save as");
-        if let Some(name) = path.file_name() {
-            dialog = dialog.set_file_name(name.to_string_lossy());
+        let answer = ask_guarded(|| {
+            let mut dialog = rfd::FileDialog::new().set_title("Save as");
+            if let Some(name) = path.file_name() {
+                dialog = dialog.set_file_name(name.to_string_lossy());
+            }
+            if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+                dialog = dialog.set_directory(dir);
+            }
+            dialog.save_file()
+        });
+        if answer == SaveAnswer::Failed {
+            tracing::warn!(target: "pane-download", %block_id, id, "the Save As dialog could not open");
         }
-        if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
-            dialog = dialog.set_directory(dir);
-        }
-        let chosen = dialog.save_file();
-        let mut task = SaveAnswerTask::new(block_id.clone(), id, chosen);
+        let mut task = SaveAnswerTask::new(block_id.clone(), id, suggested, answer);
         if post_task(ThreadId::UI, Some(&mut task)) == 0 {
             tracing::warn!(target: "pane-download", %block_id, id, "could not post the Save As answer to the UI thread");
         }
@@ -835,6 +870,8 @@ wrap_download_handler! {
             let chosen = !block_id.as_deref().is_some_and(|b| {
                 super::agent_downloads::is_saving(b, id) || super::download_place::is_quiet(b, id)
             });
+            // Read before the end below forgets it: a download saved because the Save As window could not open.
+            let fallback_note = block_id.as_deref().and_then(|b| super::download_place::fallback_note(b, id));
             if let Some(block_id) = &block_id {
                 with_waiting(|w| w.release(block_id, id));
                 // This dialog is over: the pane's next parked download asks now.
@@ -896,12 +933,11 @@ wrap_download_handler! {
                 reason: (state == DownloadState::Failed)
                     .then(|| failure_reason(&format!("{:?}", item.interrupt_reason()))),
             };
-            crate::events::emit_browser_pane_event(
-                &self.state,
-                &block_id,
-                UPDATE_EVENT,
-                &update_payload(&block_id, id, &snap),
-            );
+            let mut payload = update_payload(&block_id, id, &snap);
+            if let Some(note) = fallback_note.filter(|_| state == DownloadState::Done) {
+                payload["reason"] = serde_json::json!(note);
+            }
+            crate::events::emit_browser_pane_event(&self.state, &block_id, UPDATE_EVENT, &payload);
         }
     }
 }
@@ -1222,6 +1258,16 @@ mod tests {
         assert!(!w.release("p2", 2), "p1's id 2 is not p2's");
         assert!(w.release("p1", 1));
         assert!(w.has_room("p1"));
+    }
+
+    #[test]
+    fn a_dialog_that_panics_is_an_answer_not_a_wait_for_ever() {
+        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/a.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/a.txt")));
+        assert_eq!(ask_guarded(|| None), SaveAnswer::Cancelled);
+        // The Linux portal panic of 2026-11-20: "there is no reactor running".
+        assert_eq!(ask_guarded(|| panic!("there is no reactor running")), SaveAnswer::Failed);
+        // And a dialog thread that has failed once does not stop the next one.
+        assert_eq!(ask_guarded(|| Some(PathBuf::from("/d/b.txt"))), SaveAnswer::Chosen(PathBuf::from("/d/b.txt")));
     }
 
     #[test]
