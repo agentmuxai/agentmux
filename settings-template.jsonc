@@ -606,6 +606,10 @@
     // longest with no pane is stopped to make room. 0 turns the check off.
     // "agents:commit_limit_pct": 85,
 
+    // Where a new agent runs when nothing else says: container, or native (host also means
+    // native). Applies to agents created after the change.
+    // "agents:defaultruntime": "container",
+
     // The most agents one sender (an agent, a job) may start in a minute; a start over it is
     // refused. 0 turns the limit off.
     // "agents:start_per_minute": 5,
@@ -758,6 +762,12 @@
     // is AgentMux's own monochrome glyphs. Where the system has no source yet, or an icon can't
     // be made, the glyph shows. See docs/specs/SPEC_FILES_SYSTEM_FILE_ICONS_2026_10_27.md.
     // "files:icons": "system",
+
+    // -- Editor --
+
+    // Language-server features in the Editor (diagnostics, hover, completion). false turns them
+    // off.
+    // "editor:lsp.enabled": true,
 
     // -- Network --
 

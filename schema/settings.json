@@ -1433,6 +1433,18 @@
             "windows"
           ]
         },
+        "agents:defaultruntime": {
+          "type": "string",
+          "default": "container",
+          "description": "Where a new agent runs when nothing else says: container, or native (host also means native). Applies to agents created after the change.",
+          "x-section": "Agents"
+        },
+        "editor:lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Language-server features in the Editor (diagnostics, hover, completion). false turns them off.",
+          "x-section": "Editor"
+        },
         "agents:start_per_minute": {
           "type": "integer",
           "default": 5,
