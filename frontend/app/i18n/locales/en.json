@@ -1217,5 +1217,7 @@
     "window.reloadOffer.panes": "Some panes of this tab are not showing.",
     "window.reloadOffer.errors": "This window has hit repeated errors and may be out of date.",
     "window.reloadOffer.reload": "Reload",
-    "window.reloadOffer.dismiss": "Dismiss"
+    "window.reloadOffer.dismiss": "Dismiss",
+    "jobs.openGraph": "Open graph",
+    "jobs.openGraphTip": "Open this drone's graph in the Drone pane"
 }
