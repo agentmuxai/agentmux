@@ -9,6 +9,7 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="rescap">
 
@@ -52,6 +53,16 @@
           Square310x310Logo="Assets\Square310x310Logo.png"
           ShortName="AgentMux" />
       </uap:VisualElements>
+      <Extensions>
+        <!-- Start at login. Off until the person turns it on (Settings in AgentMux, or Windows' Settings > Apps >
+             Startup); the launcher drives it through StartupTask (crates/launcher/src/autostart/packaged.rs), so
+             a Scheduled Task pointing into this versioned install folder is never needed. Removing the package
+             removes the task. The TaskId must equal packaged::TASK_ID. See
+             docs/specs/SPEC_START_WITH_OS_2026_09_25.md section 3.7. -->
+        <desktop:Extension Category="windows.startupTask" Executable="agentmux.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="AgentMuxStartup" Enabled="false" DisplayName="AgentMux" />
+        </desktop:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

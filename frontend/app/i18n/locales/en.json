@@ -500,6 +500,8 @@
     "settings.notifications.autostart.ownerUnknown": "Start at login is on for another build. This build can take it over.",
     "settings.notifications.autostart.needsApproval": "Start at login is on, but macOS is waiting for you to allow AgentMux in System Settings > General > Login Items & Extensions.",
     "settings.notifications.autostart.openLoginItems": "Open Login Items",
+    "settings.notifications.autostart.packageOffByUser": "Start at login is turned off for AgentMux in Windows. Turn it on in Windows Settings > Apps > Startup; AgentMux cannot change it.",
+    "settings.notifications.autostart.packageOffByPolicy": "Start at login is turned off for AgentMux by your organisation's policy, so this switch has no effect.",
     "settings.notifications.autostart.repair": "Repair",
     "settings.notifications.autostart.useThisBuild": "Use this build",
     "settings.notifications.osEnabled.label": "Desktop notifications",

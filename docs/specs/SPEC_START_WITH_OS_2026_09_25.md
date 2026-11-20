@@ -294,7 +294,7 @@ broadcasts it like every other setting.
 | 1b | `--background` second instance exits quietly (§3.6) | **Built** (Phase 2 PR) | G8 |
 | 2 | Start hidden when the tray is up (§3.3); the Linux watcher wait (§3.4); Explorer-restart icon re-add (already in `tray-icon`) | **Built** (Phase 2 PR) | G2, G3 |
 | 3 | Status JSON; Settings status with owner and Repair (§3.8) | **Built** (this PR: `--autostart-status --json`; Settings shows the owner and offers Repair or Use this build) | G9 |
-| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | Not started | G6 (Windows), G7 |
+| 4 | macOS `SMAppService` with a stable bundle id; MSIX `StartupTask`; Inno uninstall hook (§3.7) | **Windows built** (the Inno uninstall hook and a logon task that needs no elevation, PR #7842; the MSIX `StartupTask`, the launcher's `packaged.rs` and the Settings text, the PR after it). macOS not started. A real login start of the Store package is not tested: the activation kind that marks it is logged at every packaged start (`packaged start: activation ...`) and printed by `--autostart-status --json` | G6 (Windows), G7 |
 
 Phase 4 needs signing and packaging work that cannot be verified on the Linux dev host. With Phase 2
 in, the Settings copy says again that a login start opens in the tray, without a window.
