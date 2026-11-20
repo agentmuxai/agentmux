@@ -1268,6 +1268,11 @@ jobs:
       - name: generated settings template is current
         if: matrix.shard == 1
         run: node scripts/gen-settings-template.mjs --check
+      # The schema and the code that reads settings list the same keys, and every entry has what settings.json shows
+      # for it. Known gaps are in scripts/check-settings-keys.baseline; the list only shrinks.
+      - name: settings schema and code agree (one to one)
+        if: matrix.shard == 1
+        run: node scripts/check-settings-keys.mjs
       # npm dependencies match the imports (#4207 S2, the npm half of the
       # cargo machete gate): fails on an unused dependency, or on an import
       # that only resolves because npm hoisted someone else's dependency.

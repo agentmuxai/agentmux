@@ -25,7 +25,7 @@ const OUT = path.join(root, "settings-template.jsonc");
 export const SECTION_ORDER = [
     "Terminal", "Drag and drop", "Animations", "Window", "Panes and tabs", "Keyboard", "Shell environment", "App",
     "Telemetry", "Connections", "Notifications", "Voice input", "Attachments", "Agents", "Swarm supervisor",
-    "Kanban", "Browser panes", "Jobs", "Desktop control", "Files pane", "Network", "Cloud and sharing", "Messaging",
+    "Kanban", "Browser panes", "Jobs", "Desktop control", "Files pane", "Editor", "Network", "Cloud and sharing", "Messaging",
 ];
 
 const WRAP = 96;
