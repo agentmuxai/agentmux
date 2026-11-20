@@ -437,8 +437,20 @@ declare global {
         }): Promise<{ label: string | null; window_id: string | null }>;
     };
 
-    /** Whether the host can manage an OS login entry, and whether one is registered. */
-    type AutostartStatus = { available: boolean; enabled: boolean };
+    /** Whether the host can manage an OS login entry, and whether one is registered. A launcher that reports it
+     *  (SPEC_START_WITH_OS_2026_09_25.md §3.8) also says how the entry stands and which channel owns it. */
+    type AutostartStatus = {
+        available: boolean;
+        enabled: boolean;
+        state?: "off" | "on" | "broken" | "needs_approval";
+        /** What the entry runs, when readable. */
+        target?: string | null;
+        /** The channel that wrote the entry; null for none, or one from before ownership was recorded. */
+        ownerChannel?: string | null;
+        thisChannel?: string;
+        /** The entry is another channel's (or nobody's) and this build can take it over. */
+        movable?: boolean;
+    };
 
     /** A window opened at a user's click, to be pointed at a URL later (`AppApi.reserveExternalWindow`). */
     type ExternalWindow = {
