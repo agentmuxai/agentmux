@@ -183,10 +183,13 @@ window, is unchanged.
 - **macOS: a login agent registered with `SMAppService`.** It is the only path that shows in Login Items and
   respects the user's approval there. A bundle with a stable `CFBundleIdentifier` (no version; the release
   channel, once the identity question in §7 is decided: `AGENTMUX_STABLE_BUNDLE_ID=1` in
-  `scripts/package-macos.sh`) ships `Contents/Library/LaunchAgents/<id>.login.plist`, and the launcher registers it
+  `scripts/package-macos.sh`) and that is signed with the Developer ID ships
+  `Contents/Library/LaunchAgents/<id>.login.plist`, and the launcher registers it
   (`autostart/login_item.rs`). The job is the launcher's own `--login-start` shim (a signed Mach-O: launchd's launch
   constraints refuse a script): it opens the app through LaunchServices with `--background` unless it already runs,
-  then exits. `SMAppService.mainApp` was not used: it cannot carry `--background`, and an agent whose job is the
+  then exits. Only a Developer-ID-signed bundle ships it: the system binds the registration to the app's code
+  requirement, which for an ad-hoc signature is the build's own hash, so after an in-place upgrade launchd refuses to
+  start the job (a launch constraint violation, silently). `SMAppService.mainApp` was not used: it cannot carry `--background`, and an agent whose job is the
   app itself is stopped when the entry is switched off (unregistering boots the job out), which Settings does from
   inside that very app. Going through `open` also keeps the login-started app able to post notifications (a
   `launchd`-started process is refused by `UNUserNotificationCenter`). When the status is `requiresApproval`,

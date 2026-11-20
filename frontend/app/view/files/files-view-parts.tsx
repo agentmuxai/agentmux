@@ -64,8 +64,8 @@ export interface FilesViewParts {
 export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
     const { model, ctx, fv, win, keys, pointer } = v;
     const { refs } = fv;
-    // The pane's parts zoom apart (files-zoom-parts.ts): the root is not zoomed. The toolbar, the list with
-    // the preview and the footer take the pane's own level (`term:zoom`), Places its own, each on a wrapper
+    // The pane's parts zoom apart (files-zoom-parts.ts): the root is not zoomed. The list with the preview takes
+    // the pane's own level (`term:zoom`), Places its own, the toolbar and the footer the chrome's, each on a wrapper
     // that marks its part. A part with no room, or hidden, is not drawn at all, so the indicator names
     // Places and the rest only while both are on screen.
     const mainZoom = () => paneZoom(model.blockId, ctx.meta());
@@ -85,7 +85,10 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
             onContextMenu={(e) => e.preventDefault()}
             onKeyDown={keys.onPaneKeyDown}
         >
-            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: mainZoom() }}>
+            {/* The control bar at the top and the footer (status, operation progress, the conflict panel) follow the
+                chrome's zoom (siblings of the zoomed parts, so they are not scaled twice); the list, Places and the
+                preview keep the pane's. The zoom keys still step the pane's level from them (`zoomPartAttrs`). */}
+            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="chrome" style={{ zoom: "var(--zoomfactor)" }}>
                 <FilesToolbar
                     model={model}
                     grid={win.grid}
@@ -111,7 +114,7 @@ export function FilesViewLayout({ v }: { v: FilesViewParts }): JSX.Element {
 
             <FilesBody v={v} narrow={narrow} mainZoom={mainZoom} placesZoom={placesZoom} />
 
-            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="pane" style={{ zoom: mainZoom() }}>
+            <div class="files-zoom files-zoom-bar" {...zoomPartAttrs(MAIN_PART)} data-zoom-scope="chrome" style={{ zoom: "var(--zoomfactor)" }}>
                 <FilesFooter model={model} summary={pointer.summary} />
             </div>
 

@@ -87,12 +87,14 @@ export function DocTabStrip<P>(props: {
     onRename?: (tab: DocTab<P>) => void;
     /** A pane's own items for a tab's menu, above the strip's. */
     menuItems?: (tab: DocTab<P>) => ContextMenuItem[];
+    /** Which zoom the strip is drawn at, for a Ctrl+wheel over it (`data-zoom-scope`): "chrome" when the pane draws it at the chrome's. */
+    zoomScope?: "chrome";
 }): JSX.Element {
     const ctl = props.ctl;
     const bindMenu = tabMenuBinder(ctl, props.blockId, (tab) => props.menuItems?.(tab) ?? []);
     return (
         <Show when={props.show?.() ?? ctl.showStrip()}>
-            <div class="doc-tab-strip" role="presentation" ref={bindMenu}>
+            <div class="doc-tab-strip" role="presentation" ref={bindMenu} data-zoom-scope={props.zoomScope}>
                 {props.leading}
                 <Show when={ctl.tabs().length > 0}>
                     <PaneTabStrip<DocTab<P>>

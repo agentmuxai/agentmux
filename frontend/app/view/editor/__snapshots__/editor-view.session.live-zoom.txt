@@ -1,3 +1,5 @@
 root zoom: "" scope=undefined
 document zoom: "1" part=main scope=undefined
 tree zoom: "1" part=tree scope=pane
+published levels: document=1 tree=1
+bars: tree toolbar=chrome tab strip=undefined

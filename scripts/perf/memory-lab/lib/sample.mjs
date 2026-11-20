@@ -10,7 +10,8 @@
 // - Chromium's memory-infra dump over CDP (`Tracing.requestMemoryDump`,
 //   detailed; with `gc`, deterministic: Chromium forces a garbage collection
 //   first), reduced to each process's allocator roots (v8, blink_gc,
-//   partition_alloc, malloc, cc, gpu, ...);
+//   partition_alloc, malloc, cc, gpu, ...): what each holds (`roots`) and,
+//   where the dump says, what is alive in it (`rootsLive`);
 // - per page: the JS heap, the DOM counters and a few AgentMux counts.
 //
 // Compare samples taken with `gc`; one without includes garbage.
@@ -21,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { connectBrowser, connectPage, listTargets } from "../../../ui-screenshots/lib/cdp-client.mjs";
+import { allocatorLive } from "./allocators.mjs";
 import { CpuLedger } from "./cpu.mjs";
 
 const hex = (v) => (typeof v === "string" ? parseInt(v, 16) : Number(v ?? 0));
@@ -146,7 +148,8 @@ export function dumpedProcesses(events) {
         const d = e.args.dumps;
         const alloc = {};
         for (const [path, node] of Object.entries(d.allocators ?? {})) {
-            alloc[path] = { size: node.attrs?.size ? hex(node.attrs.size.value) : null };
+            // `size` is what the allocator holds from the system, `live` the objects alive in it (lib/allocators.mjs).
+            alloc[path] = { size: node.attrs?.size ? hex(node.attrs.size.value) : null, live: node.attrs?.allocated_objects_size ? hex(node.attrs.allocated_objects_size.value) : null };
         }
         const totals = {};
         for (const [k, v] of Object.entries(d.process_totals ?? {})) totals[k] = hex(v);
@@ -293,7 +296,7 @@ async function takeSampleInner({ port, memtree, rootPid, label, gc = false, page
     const byPid = new Map(dumps.map((d) => [d.pid, d]));
     const procs = os.procs.map((p) => {
         const d = byPid.get(p.pid);
-        return d ? { ...p, footprint: d.totals?.private_footprint_bytes ?? null, roots: allocatorRoots(d.alloc) } : p;
+        return d ? { ...p, footprint: d.totals?.private_footprint_bytes ?? null, roots: allocatorRoots(d.alloc), rootsLive: allocatorLive(d.alloc) } : p;
     });
     return { label, time: new Date().toISOString(), gc, procs, pages: pageList };
 }

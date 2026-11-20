@@ -12,7 +12,7 @@ viewer.setDocument pages=5
 linkService.setDocument pages=5 base=null
 --- only the second load opened
 <div class="editor-viewer pdf-viewer">
-  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer">
+  <div class="editor-mode-toolbar editor-viewer-bar" role="toolbar" aria-label="Viewer" data-zoom-scope="chrome">
     <div class="editor-viewer-bar-group">
       <div class="ui-tooltip-anchor">
         <button aria-label="Previous page" type="button" class="ui-button ui-tone-quiet ui-density-compact ui-icon-button" disabled="">

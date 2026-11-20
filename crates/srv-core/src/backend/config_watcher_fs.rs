@@ -107,6 +107,7 @@ pub fn load_settings_from_disk(config_watcher: &ConfigState) {
 
     // A readable file applies key by key: a key with a bad value has its default, and is reported.
     config_watcher.update_settings(read.settings);
+    config_watcher.set_unrecognized(read.unrecognized);
     if read.errors.is_empty() {
         keep_last_good(&settings_path);
         tracing::info!("settings.json loaded successfully");
@@ -329,6 +330,7 @@ fn reload_and_broadcast(
         tracing::warn!(file = %err.file, error = %err.err, line = ?err.line, "settings.json key not applied");
     }
     config_watcher.update_settings(read.settings);
+    config_watcher.set_unrecognized(read.unrecognized);
     config_watcher.set_config_errors(read.errors.clone());
     if read.errors.is_empty() {
         keep_last_good(settings_path);
@@ -677,6 +679,33 @@ mod tests {
             assert_eq!(config.get_settings().term_font_size, 18.0);
             assert!(config.get_full_config().config_errors.is_empty());
             assert!(dir.join("settings.json.lastgood").exists(), "a clean file becomes the last good one");
+        });
+    }
+
+    #[test]
+    fn keys_that_are_not_settings_reach_the_full_config_at_startup_and_on_reload_and_removing_one_clears_it_and_a_broken_file_keeps_the_list() {
+        with_settings_dir(|dir| {
+            let path = dir.join(wconfig::SETTINGS_FILE);
+            let text = "{\n  \"term:fontsise\": 18,\n  \"term:theme\": \"nord\"\n}\n";
+            std::fs::write(&path, text).unwrap();
+            let config = Arc::new(ConfigState::new());
+            load_settings_from_disk(&config);
+            let listed = config.get_full_config().unrecognized.clone();
+            assert_eq!(listed.len(), 1, "{listed:?}");
+            assert_eq!((listed[0].key.as_str(), listed[0].suggestion.as_deref(), listed[0].line), ("term:fontsise", Some("term:fontsize"), Some(2)));
+            assert!(config.get_full_config().config_errors.is_empty(), "an unknown key is not an error");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "the file is left as it was");
+
+            // A file that does not parse changes nothing about the list: the last good one stays.
+            let bus = Arc::new(EventBus::new());
+            std::fs::write(&path, "{ not json").unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert_eq!(config.get_full_config().unrecognized, listed);
+
+            // The person removes the key (or fixes it): the next read has none.
+            std::fs::write(&path, "{\n  \"term:theme\": \"nord\"\n}\n").unwrap();
+            reload_and_broadcast(&path, &config, &bus);
+            assert!(config.get_full_config().unrecognized.is_empty());
         });
     }
 
