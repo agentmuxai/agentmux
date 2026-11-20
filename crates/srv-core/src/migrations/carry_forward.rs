@@ -149,12 +149,37 @@ pub fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
     }
 }
 
+/// What a failed copy-forward is, in plain words: the cause a person can act on.
+fn plain_cause(error: &str) -> &'static str {
+    let e = error.to_ascii_lowercase();
+    let full = ["no space left", "disk is full", "disk full", "not enough space", "os error 28", "os error 112", "quota"];
+    let unreadable = ["not a database", "malformed", "corrupt", "unable to open", "permission denied", "locked", "busy"];
+    if full.iter().any(|m| e.contains(m)) {
+        "there is not enough free space on the disk"
+    } else if unreadable.iter().any(|m| e.contains(m)) {
+        "a database of the previous version could not be read"
+    } else {
+        "the previous version's data could not be copied"
+    }
+}
+
+/// The message a start that cannot carry the previous version's data forward stops with: the cause in plain words, that the
+/// previous version's data was not touched, and that this version did not start empty. `error` is what
+/// [`try_from_previous_version`] returned; it goes last, for the log.
+pub fn stop_message(error: &str) -> String {
+    format!(
+        "this version could not start with the previous version's data: {}. The previous version's data is untouched and this version \
+         did not start with empty data instead. Fix that and start again ({error})",
+        plain_cause(error)
+    )
+}
+
 /// [`from_previous_version`], telling "nothing to copy" (`Ok(None)`) apart
 /// from "there was data to copy and copying it failed" (`Err`), which
 /// `migrate --prepare` must not treat as a fresh start: that would relaunch
 /// the new version without the user's data (`migrations/prepare.rs`). Copies
 /// that failed are removed again, so a retry starts clean.
-pub(crate) fn try_from_previous_version(db_dir: &Path, version: &str) -> Result<Option<PathBuf>, String> {
+pub fn try_from_previous_version(db_dir: &Path, version: &str) -> Result<Option<PathBuf>, String> {
     let Some(source) = source_for(db_dir, version) else {
         return Ok(None);
     };
@@ -286,6 +311,52 @@ mod tests {
         let dev = root.path().join("dev/main/data/db");
         assert!(from_previous_version(&dev, "0.59.27").is_none());
         assert!(from_previous_version(&first, "not-a-version").is_none());
+    }
+
+    #[test]
+    fn a_failed_copy_stops_the_start_and_leaves_the_previous_versions_data_as_it_was() {
+        let root = tempfile::tempdir().unwrap();
+        let prev = seed(root.path(), "0.59.26", "previous");
+        let old = db_dir(root.path(), "0.59.26");
+        Connection::open(old.join("filestore.db")).unwrap().execute_batch("CREATE TABLE f (v)").unwrap();
+        std::fs::write(old.join("sagas.db"), b"not a database").unwrap();
+        drop(prev);
+        let bytes = |dir: &Path| {
+            let mut files: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+            files.sort();
+            files.into_iter().map(|f| (f.file_name().unwrap().to_owned(), std::fs::read(&f).unwrap())).collect::<Vec<_>>()
+        };
+        let before = bytes(&old);
+        let new = db_dir(root.path(), "0.59.27");
+
+        let err = try_from_previous_version(&new, "0.59.27").expect_err("a copy that failed is an error, not a fresh start");
+        assert_eq!(bytes(&old), before, "the previous version's files are byte-identical");
+        let left: Vec<_> = std::fs::read_dir(&new).map(|d| d.map(|e| e.unwrap().file_name()).collect()).unwrap_or_default();
+        assert!(left.is_empty(), "nothing half-written is left in the new version's folder: {left:?}");
+        assert!(!new.join("objects.db").exists());
+
+        let say = stop_message(&err);
+        assert!(say.contains("a database of the previous version could not be read"), "{say}");
+        assert!(say.contains("untouched") && say.contains("did not start with empty data"), "{say}");
+    }
+
+    #[test]
+    fn the_stop_names_the_cause_in_plain_words() {
+        for full in ["copy x: database or disk is full", "rename into y: No space left on device (os error 28)", "There is not enough space on the disk. (os error 112)"] {
+            assert!(stop_message(full).contains("not enough free space on the disk"), "{full}");
+        }
+        assert!(stop_message("open x: file is not a database").contains("could not be read"));
+        assert!(stop_message("something else").contains("the previous version's data could not be copied"));
+        assert!(stop_message("copy x: database or disk is full").contains("(copy x: database or disk is full)"), "the detail is kept for the log");
+    }
+
+    #[test]
+    fn a_first_start_with_no_older_version_still_starts_fresh_on_purpose() {
+        let root = tempfile::tempdir().unwrap();
+        let first = db_dir(root.path(), "0.59.27");
+        assert_eq!(try_from_previous_version(&first, "0.59.27"), Ok(None));
+        let _prev = seed(root.path(), "0.59.30", "newer");
+        assert_eq!(try_from_previous_version(&db_dir(root.path(), "0.59.20"), "0.59.20"), Ok(None), "only an OLDER version is copied from");
     }
 
     #[test]

@@ -200,6 +200,16 @@ fn open_work_store(
     (store.clone(), Some(store))
 }
 
+/// The copy-forward of the previous version's data before this version's first start: `Ok(true)` when it was copied, `Ok(false)`
+/// when there was nothing to copy (a first start, or this version already has data: a fresh start on purpose), and `Err` with the
+/// message to stop with when an older version has data and copying it failed.
+fn carry_forward_or_stop(db_dir: &std::path::Path, code_version: &str) -> Result<bool, String> {
+    match super::carry_forward::try_from_previous_version(db_dir, code_version) {
+        Ok(from) => Ok(from.is_some()),
+        Err(e) => Err(super::carry_forward::stop_message(&e)),
+    }
+}
+
 /// What an unsupervised srv does before opening its stores: copy a previous
 /// version's data forward, snapshot, and run pending migrations (the same
 /// work `agentmux-srv migrate --prepare` does for the launcher).
@@ -235,7 +245,17 @@ pub(super) fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::p
     // A new version's first start begins from the previous version's data,
     // then migrates it like any upgrade (carry_forward.rs). No snapshot after
     // a copy-forward: the previous version's folder is that data, untouched.
-    let carried = super::carry_forward::from_previous_version(&db_dir, &code_version).is_some();
+    // A copy that failed while an older version has data is NOT a fresh start: with no launcher to show a dialog (this path is
+    // the headless and hosted one), the person would see an empty workspace while the previous version's folder still holds
+    // their data. srv stops, says why, and leaves that folder as it was.
+    let carried = match carry_forward_or_stop(&db_dir, &code_version) {
+        Ok(carried) => carried,
+        Err(message) => {
+            tracing::error!("startup: refusing to start: {}", message);
+            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&message));
+            std::process::exit(1);
+        }
+    };
     let snapshot = if carried {
         Ok(None)
     } else {
@@ -385,5 +405,23 @@ mod tests {
         let conn = rusqlite::Connection::open(db_dir.join("objects.db")).unwrap();
         let v: String = conn.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(v, "from 1.0.0");
+    }
+
+    /// A start whose carry-forward fails while an older version has data stops with a message; a first start does not.
+    #[test]
+    fn a_failed_carry_forward_stops_instead_of_starting_empty() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path().join("channels").join("x").join("versions");
+        let old = versions.join("1.0.0").join("data").join("db");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("objects.db"), b"not a database").unwrap();
+        let new = versions.join("1.1.0").join("data").join("db");
+        let message = super::carry_forward_or_stop(&new, "1.1.0").expect_err("an older version has data that could not be copied");
+        assert!(message.contains("could not be read") && message.contains("untouched"), "{message}");
+        assert_eq!(std::fs::read(old.join("objects.db")).unwrap(), b"not a database");
+        assert!(!new.join("objects.db").exists(), "no empty database was started in its place");
+
+        let first = root.path().join("channels").join("y").join("versions").join("1.0.0").join("data").join("db");
+        assert_eq!(super::carry_forward_or_stop(&first, "1.0.0"), Ok(false), "a first start with no older version starts fresh");
     }
 }
