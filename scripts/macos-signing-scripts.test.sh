@@ -22,12 +22,54 @@ trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 ok()   { pass=$((pass+1)); printf '  PASS  %s\n' "$1"; }
 bad()  { fail=$((fail+1)); printf '  FAIL  %s\n     -> %s\n' "$1" "${2:-}"; }
-skip() { printf '  SKIP  %s\n' "$1"; }
+# A section that cannot run is a failure under CI: a skipped test must not look like a passed one.
+skip() { if [ -n "${CI:-}" ]; then bad "$1" "skipped in CI"; else printf '  SKIP  %s\n' "$1"; fi; }
 
 SCRIPTS=(unpack-macos-app.sh sign-macos-app.sh verify-srv-identity-darwin.sh notarize-macos.sh make-macos-dmg.sh)
 
 # ── 1. The unpack step ────────────────────────────────────────────────────────
-if command -v ditto > /dev/null 2>&1 && command -v zipinfo > /dev/null 2>&1 && command -v python3 > /dev/null 2>&1; then
+# ditto is macOS's. Where it is missing (the Linux CI runner) a stand-in writes and reads zips with python's zipfile,
+# symlinks and modes included, so the same cases run: the refusals come before any extraction, and the cases that do
+# extract (a good app, a symlink that leaves) exercise the script's checks of the unpacked tree.
+if ! command -v ditto > /dev/null 2>&1 && command -v python3 > /dev/null 2>&1; then
+    mkdir -p "$TMP/shim"
+    cat > "$TMP/shim/ditto" <<'SHIM'
+#!/usr/bin/env python3
+import os, stat, sys, zipfile
+a = [x for x in sys.argv[1:] if x not in ("--keepParent", "--sequesterRsrc", "-k")]
+if a[0] == "-c":
+    src, zp = a[1], a[2]
+    with zipfile.ZipFile(zp, "w") as z:
+        top = os.path.basename(src.rstrip("/"))
+        for root, dirs, files in os.walk(src):
+            for n in dirs + files:
+                path = os.path.join(root, n)
+                rel = os.path.join(top, os.path.relpath(path, src))
+                st = os.lstat(path)
+                zi = zipfile.ZipInfo(rel + ("/" if stat.S_ISDIR(st.st_mode) else ""))
+                zi.external_attr = st.st_mode << 16
+                data = os.readlink(path).encode() if stat.S_ISLNK(st.st_mode) else (b"" if stat.S_ISDIR(st.st_mode) else open(path, "rb").read())
+                z.writestr(zi, data)
+else:
+    zp, dest = a[1], a[2]
+    with zipfile.ZipFile(zp) as z:
+        for info in z.infolist():
+            path = os.path.join(dest, info.filename)
+            mode = info.external_attr >> 16
+            if info.filename.endswith("/"):
+                os.makedirs(path, exist_ok=True)
+            elif stat.S_ISLNK(mode):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                os.symlink(z.read(info).decode(), path)
+            else:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "wb").write(z.read(info))
+SHIM
+    chmod +x "$TMP/shim/ditto"
+    export PATH="$TMP/shim:$PATH"
+fi
+
+if command -v ditto > /dev/null 2>&1 && command -v python3 > /dev/null 2>&1; then
     unpack() { bash "$HERE/unpack-macos-app.sh" "$1" "$2" > "$TMP/unpack.out" 2>&1; }
     mkzip() { # <zip> <name>... : a zip with those entry names (empty files), written by python so any name goes in
         local zip="$1"; shift
@@ -130,7 +172,7 @@ PY
         refuses "refuses a $kind symlink that leaves the app" "$TMP/link-$kind.zip"
     done
 else
-    skip "unpack tests (need ditto, zipinfo and python3)"
+    skip "unpack tests (need python3, and ditto or its stand-in)"
 fi
 
 # ── 2. Nothing in the app is started ──────────────────────────────────────────

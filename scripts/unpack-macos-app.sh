@@ -25,26 +25,12 @@ DEST="${2:-}"
 
 fail() { echo "❌ unpack: $1" >&2; rm -rf "$DEST/AgentMux.app" "$DEST/__MACOSX"; exit 1; }
 
-# 1. The entries, before anything is written. zipinfo -1 prints one name per line; a name with a line break in it
-# comes out as two lines that cannot both pass the pattern below.
-entries="$(zipinfo -1 "$ZIP")" || { echo "❌ unpack: not a readable zip" >&2; exit 1; }
-[ -n "$entries" ] || { echo "❌ unpack: the zip is empty" >&2; exit 1; }
-while IFS= read -r name; do
-    case "$name" in
-        AgentMux.app|AgentMux.app/*|__MACOSX|__MACOSX/*) ;;
-        *) echo "❌ unpack: an entry is outside AgentMux.app: '$name'" >&2; exit 1 ;;
-    esac
-    case "$name" in
-        *\\*) echo "❌ unpack: an entry has a backslash: '$name'" >&2; exit 1 ;;
-        */../*|*/..|../*|..|*//*|/*|*/./*|*/.|./*|.) echo "❌ unpack: an entry leaves its folder or spells it another way: '$name'" >&2; exit 1 ;;
-    esac
-done <<< "$entries"
-
-# 1b. The entries' types and their order, before anything is written. ditto writes entries in order and follows a
-# symlink it has made: a symlink entry followed by an entry beneath it, both with clean names, would put a file where
-# the link points, outside the folder, before any check of the unpacked tree could run. So refuse, from the zip's own
-# records: a duplicate name, an entry beneath a symlink entry (whatever the order), and any type other than a regular
-# file, a folder or a symlink.
+# 1. The entries, before anything is written, from the zip's own records (python's zipfile; no other tool reads them
+# here). ditto writes entries in order and follows a symlink it has made: a symlink entry followed by an entry beneath
+# it, both with clean names, would put a file where the link points, outside the folder, before any check of the
+# unpacked tree could run. So refuse: an entry outside AgentMux.app (and the __MACOSX folder ditto writes), an
+# absolute path, an empty, `.` or `..` component, a backslash or a control character in a name, a duplicate name, an
+# entry beneath a symlink entry (whatever the order), and any type other than a regular file, a folder or a symlink.
 python3 -I - "$ZIP" <<'PY' || { echo "❌ unpack: the zip has an entry that is not allowed (see above)" >&2; exit 1; }
 import stat, sys, unicodedata, zipfile
 bad = []
@@ -54,15 +40,28 @@ def key(name):
     # decomposed. Names are compared the way it would, a component at a time.
     return "/".join(unicodedata.normalize("NFD", part).casefold() for part in name.split("/"))
 
-with zipfile.ZipFile(sys.argv[1]) as z:
+try:
+    z = zipfile.ZipFile(sys.argv[1])
+except Exception as e:
+    print("  not a readable zip: %s" % e, file=sys.stderr)
+    sys.exit(1)
+with z:
     seen, links, entries = {}, set(), []
-    for info in z.infolist():
-        name = info.filename.rstrip("/")
+    infos = z.infolist()
+    if not infos:
+        bad.append("the zip is empty")
+    for info in infos:
+        name = info.filename[:-1] if info.filename.endswith("/") else info.filename
         k = key(name)
         mode = info.external_attr >> 16
         kind = stat.S_IFMT(mode)
-        if "." in name.split("/"):
-            bad.append("a '.' component: " + info.filename)
+        parts = name.split("/")
+        if parts[0] not in ("AgentMux.app", "__MACOSX"):
+            bad.append("an entry outside AgentMux.app: " + repr(info.filename))
+        if any(p in ("", ".", "..") for p in parts):
+            bad.append("an entry that leaves its folder or spells it another way: " + repr(info.filename))
+        if "\\" in name or any(ord(c) < 32 or ord(c) == 127 for c in name):
+            bad.append("a backslash or control character in a name: " + repr(info.filename))
         if k in seen:
             bad.append("two entries for one name (%r and %r)" % (seen[k], info.filename))
         seen[k] = info.filename
