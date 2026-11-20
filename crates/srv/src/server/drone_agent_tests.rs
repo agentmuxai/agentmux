@@ -93,6 +93,36 @@ async fn the_payload_is_an_object_within_the_limit() {
     assert!(call(&state, "fire", json!({ "drone_id": d.id })).await.is_ok(), "no input is fine");
 }
 
+/// A drone that reads a Vault credential may have fetched data the agent has no grant for: its runs show the
+/// status and times, never the output or the error text, and no entry name is shown anywhere.
+#[tokio::test]
+async fn a_drone_that_reads_a_credential_shows_an_agent_no_output() {
+    let state = crate::server::tests::test_state();
+    let keyed = saved(&state, "keyed", json!([node("g", json!({ "kind": "api", "method": "GET", "url": "https://example.com/x", "auth": { "vault": "secret-entry" } }))]));
+    let plain = saved(&state, "plain", json!([]));
+    for (d, tag) in [(&keyed, "keyed"), (&plain, "plain")] {
+        let row = crate::drone::types::DroneRun {
+            id: format!("run-{tag}"),
+            drone_id: d.id.clone(),
+            status: "done".into(),
+            started_at: 1,
+            ended_at: 2,
+            block_states: Default::default(),
+            output: "{\"fetched\":\"private\"}".into(),
+            error: "boom".into(),
+        };
+        state.mstore.drone_run_insert(&row).unwrap();
+    }
+    let hidden = call(&state, "runs", json!({ "drone_id": keyed.id })).await.unwrap();
+    let text = hidden.to_string();
+    assert!(!text.contains("private") && !text.contains("boom") && !text.contains("secret-entry"), "{text}");
+    assert_eq!(hidden["runs"][0]["status"], "done");
+    assert!(hidden["output_withheld"].is_string());
+    let shown = call(&state, "runs", json!({ "drone_id": plain.id })).await.unwrap();
+    assert!(shown["runs"][0]["output"].as_str().unwrap().contains("private"));
+    assert!(shown.get("output_withheld").is_none());
+}
+
 #[tokio::test]
 async fn an_unknown_action_is_refused() {
     let state = crate::server::tests::test_state();
@@ -115,7 +145,8 @@ async fn get_names_what_the_drone_writes_and_which_credentials_it_reads() {
     let got = call(&state, "get", json!({ "drone_id": d.id })).await.unwrap();
     assert_eq!(got["agents"], 1);
     assert_eq!(got["writes_outside"][0], "p: DELETE https://example.com/x");
-    assert!(got["credentials"][0].as_str().unwrap().contains("entry-1"));
+    assert_eq!(got["credentials"], 1, "how many, never which entry");
+    assert!(!got.to_string().contains("entry-1"), "{got}");
     assert_eq!(got["kinds"], json!(["agent", "api"]));
     assert_eq!(got["fireable"], false);
 }

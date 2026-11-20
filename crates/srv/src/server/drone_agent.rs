@@ -83,7 +83,8 @@ async fn act(state: &AppState, uid: &str, action: &str, body: &Value) -> Result<
             let summary = graph::summarize(&drone.graph);
             v["agents"] = json!(summary.agents);
             v["writes_outside"] = json!(summary.writes_outside);
-            v["credentials"] = json!(graph::credentials(&drone.graph, None));
+            // How many, not which: the entries' names are the Vault's to show.
+            v["credentials"] = json!(graph::credentials(&drone.graph, None).len());
             v["kinds"] = json!(kinds(&drone));
             Ok(v)
         }
@@ -104,7 +105,15 @@ async fn act(state: &AppState, uid: &str, action: &str, body: &Value) -> Result<
             let drone = find(state, body)?;
             let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(DEFAULT_RUNS).clamp(1, MAX_RUNS);
             let runs = list_drone_runs(state, ListRunsReq { drone_id: drone.id.clone(), limit }).map_err(|e| format!("drone runs: {e}"))?;
-            Ok(json!({ "drone_id": drone.id, "runs": runs.iter().map(run_brief).collect::<Vec<_>>() }))
+            // What a run returns can be what a Vault-authenticated call fetched (only the credential's own
+            // value is scrubbed from it), so a drone that reads a credential shows an agent no output or error text:
+            // it would read data the agent was never granted.
+            let withheld = !graph::credentials(&drone.graph, None).is_empty();
+            let mut answer = json!({ "drone_id": drone.id, "runs": runs.iter().map(|r| run_brief(r, withheld)).collect::<Vec<_>>() });
+            if withheld {
+                answer["output_withheld"] = json!("this drone reads a Vault credential, so its output and error text are not shown to an agent; the Drone pane has them");
+            }
+            Ok(answer)
         }
         other => Err(format!("INVALID_ARG: unknown action {other:?}; use list, get, fire or runs")),
     }
@@ -160,7 +169,7 @@ fn why_not_fireable(drone: &DroneDefinition) -> Option<String> {
     }
     let credentials = graph::credentials(&drone.graph, None);
     if !credentials.is_empty() {
-        return Some(format!("it reads a Vault credential ({})", credentials.join("; ")));
+        return Some(format!("it reads a Vault credential ({} place(s))", credentials.len()));
     }
     let kinds = kinds(drone);
     if kinds.iter().any(|k| k == "run") {
@@ -187,16 +196,13 @@ fn brief(d: &DroneDefinition) -> Value {
     v
 }
 
-fn run_brief(r: &crate::drone::types::DroneRun) -> Value {
-    let output: String = r.output.chars().take(OUTPUT_CHARS).collect();
-    json!({
-        "id": r.id,
-        "status": r.status,
-        "started_at": r.started_at,
-        "ended_at": r.ended_at,
-        "error": r.error,
-        "output": output,
-    })
+fn run_brief(r: &crate::drone::types::DroneRun, withheld: bool) -> Value {
+    let mut v = json!({ "id": r.id, "status": r.status, "started_at": r.started_at, "ended_at": r.ended_at });
+    if !withheld {
+        v["error"] = json!(r.error);
+        v["output"] = json!(r.output.chars().take(OUTPUT_CHARS).collect::<String>());
+    }
+    v
 }
 
 #[cfg(test)]
