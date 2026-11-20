@@ -253,7 +253,7 @@ export const shots = [
                 // Closing a tab asks only when `tab:confirmclose` is on (off by default).
                 await session.evaluate(`RpcApi.SetConfigCommand(TabRpcClient, { "tab:confirmclose": true })`);
                 await openNewTab(session, tab);
-                await session.clickSelector(`.tab[data-tab-id="${tab.tabId}"] [title="Close Tab"]`);
+                await session.clickSelector(`.tab[data-tab-id="${tab.tabId}"] .ui-close--tab`);
                 await session.wait(500);
             },
             verify: ".modal-root .modal-panel",

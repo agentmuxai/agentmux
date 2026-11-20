@@ -179,7 +179,7 @@ export async function closeTab(session, tabId) {
     if (!(await session.evaluate(`!!document.querySelector(${JSON.stringify(tab)})`))) return;
     // A wide viewport keeps the tab's close button clear of the window buttons.
     await session.setViewport({ width: 1920, height: 800, scale: 1 });
-    await session.clickSelector(`${tab} [title="Close Tab"]`);
+    await session.clickSelector(`${tab} .ui-close--tab`);
     await session.wait(400);
     const confirm = await session.evaluate(visibleCenter(".modal-backdrop ~ * button, [role=dialog] button"));
     if (confirm) {
