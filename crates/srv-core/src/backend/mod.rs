@@ -15,6 +15,7 @@ pub mod attachments;
 pub mod agent_color;
 pub mod palette;
 pub mod account_availability;
+pub mod account_usage;
 pub mod jekt_held_summary;
 pub mod agent_env;
 pub mod endpoint_notice;

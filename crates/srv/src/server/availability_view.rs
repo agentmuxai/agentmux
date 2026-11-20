@@ -200,7 +200,20 @@ pub(super) fn describe_block(
             out["failure"] = json!(why);
         }
     }
+    if let Some(usage) = usage_of(block.as_ref(), now_ms) {
+        out["usage"] = usage;
+    }
     out
+}
+
+/// How much of each usage window of the account the agent's run launched on is used, by window
+/// (`five_hour`, `seven_day`): `used_percent`, `resets_at_ms` and the reading's `age_ms`. `None` when
+/// the account has no reading that has not reset (a provider that reports none, or nothing has run
+/// on it yet): `Identity accounts` says which.
+fn usage_of(block: Option<&crate::backend::obj::Block>, now_ms: u64) -> Option<Value> {
+    let account = block?.meta.get(crate::backend::agent_state::RUN_ACCOUNT_META_KEY)?.as_str()?;
+    let windows = crate::backend::account_usage::of_account(account, now_ms);
+    (!windows.is_empty()).then(|| json!(windows))
 }
 
 #[derive(serde::Deserialize)]
@@ -456,6 +469,28 @@ mod tests {
         let none = crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] };
         let v = describe_block(&store, None, Some(&block.oid), &none, Some(AFTER), 1_000);
         assert_eq!((v["state"].as_str(), v["pane"].as_str(), v["wanted"].as_str()), (Some("stopped"), Some("parked"), Some("stopped")));
+    }
+
+    /// An agent's availability carries how much of each usage window of its account is used, with the
+    /// reading's age, and nothing when the account has no reading that is still current.
+    #[test]
+    fn the_availability_of_an_agent_carries_its_accounts_usage_when_there_is_a_reading() {
+        use crate::backend::account_usage::{observe, windows_of_frame};
+        let store = Store::open_in_memory().unwrap();
+        let account = format!("acct-{}", uuid::Uuid::new_v4());
+        let mut block = crate::backend::obj::Block::default();
+        block.oid = uuid::Uuid::new_v4().to_string();
+        block.meta.insert(crate::backend::agent_state::RUN_ACCOUNT_META_KEY.into(), json!(account));
+        store.insert(&mut block).unwrap();
+        let none = crate::connectivity::ConnectivityStatus { revision: 0, services: vec![] };
+        let view = |now_ms: u64| describe_block(&store, None, Some(&block.oid), &none, Some(AFTER), now_ms);
+        assert!(view(1_000_000).get("usage").is_none(), "no reading yet: no field");
+        let frame = json!({"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": {"five_hour": {"utilization": 0.6, "resetsAt": 2_000}}}});
+        observe(&account, &windows_of_frame(&frame), 1_000_000);
+        let v = view(1_030_000);
+        assert_eq!(v["usage"]["five_hour"]["used_percent"], 60.0);
+        assert_eq!((v["usage"]["five_hour"]["resets_at_ms"].as_u64(), v["usage"]["five_hour"]["age_ms"].as_u64()), (Some(2_000_000), Some(30_000)));
+        assert!(view(2_000_000).get("usage").is_none(), "the window reset: the reading is gone");
     }
 
     #[test]

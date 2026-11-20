@@ -82,6 +82,8 @@ static CONFIG: OnceLock<Arc<crate::backend::wconfig::ConfigState>> = OnceLock::n
 
 /// Attach the live settings (bootstrap), so the hint's settings can be read.
 pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
+    // The account usage notices read their thresholds from the same live settings.
+    crate::backend::account_usage::install_config(Arc::clone(&config));
     let _ = CONFIG.set(config);
 }
 
