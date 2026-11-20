@@ -1075,6 +1075,34 @@ async fn identity_accounts_lists_stable_id_quota_and_who_uses_each() {
     cleanup(&[&limited]);
 }
 
+/// `identity.accounts` says how much of each usage window an account has used (the newest reading from
+/// any pane on it), `not_yet` before a reading, and `not_reported` for a provider whose CLI reports none.
+#[tokio::test]
+async fn identity_accounts_shows_usage_windows_or_that_the_provider_reports_none() {
+    use crate::backend::account_usage::{observe, windows_of_frame, UsageStatus};
+    let state = test_state();
+    let (read, unread) = (format!("use-{}", uuid::Uuid::new_v4()), format!("use-{}", uuid::Uuid::new_v4()));
+    for a in [mail(&read, "valid", "r@x.com"), mail(&unread, "valid", "u@x.com"), account("cx", "codex", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    let now = agentmux_common::time::now_ms_u64();
+    let (five, week) = ((now / 1000) + 3_600, (now / 1000) + 86_400);
+    let frame = serde_json::json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "unifiedWindows": {
+        "five_hour": {"utilization": 0.6, "resetsAt": five}, "seven_day": {"utilization": 0.44, "resetsAt": week}}}});
+    observe(&read, &windows_of_frame(&frame), now - 5_000);
+
+    let all = accounts::accounts(&state, now).unwrap().accounts;
+    let by = |id: &str| all.iter().find(|a| a.account_id == id).unwrap();
+    let usage = &by(&read).usage;
+    assert_eq!(usage.status, UsageStatus::Reported);
+    assert_eq!((usage.windows["five_hour"].used_percent, usage.windows["five_hour"].resets_at_ms), (60.0, five * 1000));
+    assert_eq!((usage.windows["seven_day"].used_percent, usage.windows["seven_day"].age_ms), (44.0, 5_000));
+    assert_eq!((by(&unread).usage.status, by(&unread).usage.windows.len()), (UsageStatus::NotYet, 0));
+    assert_eq!(by("cx").usage.status, UsageStatus::NotReported);
+    let json = serde_json::to_value(&by(&read).usage).unwrap();
+    assert_eq!(json["windows"]["five_hour"]["used_percent"], 60.0);
+}
+
 /// `any with quota` skips the account the agent is on and the ones out of quota or signed out,
 /// and refuses with the list when nothing is left.
 #[tokio::test]

@@ -1301,6 +1301,8 @@ declare global {
         "agent:compacthints"?: boolean;
         "agent:compacthintat"?: number;
         "agent:compactbackstopat"?: number;
+        "agent:usagenoticeat"?: number;
+        "agent:usagenoticehighat"?: number;
         "agent:freshhintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
