@@ -415,6 +415,7 @@ pub(crate) fn copy_definition(
     } else {
         branch_label.to_string()
     };
+    crate::backend::reserved_names::check_all(&[&fork_name]).map_err(|e| format!("forkagentdefinition: {e}"))?;
     let label = if branch_label.is_empty() {
         fork_name.clone()
     } else {

@@ -262,6 +262,26 @@ fn resolve_named(store: &crate::backend::storage::store::Store, named: &str) -> 
     }
 }
 
+/// How a switch names who asked: the person for the window, else the agent with its prefix, so no agent id can
+/// read as the person or as AgentMux's own failover.
+fn actor_named(caller: &str) -> String {
+    if caller.is_empty() { "operator".to_string() } else { crate::backend::rpc::actor::Actor::Agent(caller.to_string()).label() }
+}
+
+#[cfg(test)]
+mod actor_tests {
+    use super::actor_named;
+
+    #[test]
+    fn an_agent_is_named_with_its_prefix_whatever_it_is_called() {
+        assert_eq!(actor_named(""), "operator");
+        assert_eq!(actor_named("wren"), "agent:wren");
+        assert_eq!(actor_named("operator"), "agent:operator");
+        assert_eq!(actor_named("failover"), "agent:failover");
+        assert_ne!(actor_named("operator"), actor_named(""));
+    }
+}
+
 /// `agent.account.switch`. `caller` is the connection's agent slug, empty for the window.
 /// BLOCKING (store reads, link writes, restarts).
 pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq) -> Result<AgentAccountSwitchResult, String> {
@@ -297,8 +317,8 @@ pub(super) fn switch(state: &AppState, caller: &str, req: &AgentAccountSwitchReq
         };
         return Err(format!("ACCOUNT_CANT_RUN: {}: {why}", account_label_in(to, &accounts)));
     }
-    let actor = if caller.is_empty() { "operator" } else { caller };
-    switch_to(state, actor, &def_id, to, &provider, &accounts, req.when)
+    let actor = actor_named(caller);
+    switch_to(state, &actor, &def_id, to, &provider, &accounts, req.when)
 }
 
 /// Move the agent `def_id` to `to` (a signed-in account of `provider`; `accounts` are all of the

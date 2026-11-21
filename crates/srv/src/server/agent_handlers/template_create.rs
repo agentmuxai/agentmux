@@ -143,6 +143,7 @@ pub(crate) fn create_from_template(
     };
     let chosen_container_image = super::template_image::chosen_container_image(cmd.container_image.as_deref(), &chosen_agent_type, &template.container_image)
         .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
+    crate::backend::reserved_names::check_all(&[&name]).map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
     let mut new_def = AgentDefinition {
         id: uuid::Uuid::new_v4().to_string(),
         // agent_def_insert derives a unique slug from the

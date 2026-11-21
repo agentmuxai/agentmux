@@ -55,6 +55,7 @@ pub(crate) async fn rename_title(state: &AppState, id: &str, title: &str, refuse
     if title.is_empty() {
         return Err(RenameError::Invalid("title must not be empty".to_string()));
     }
+    crate::backend::reserved_names::check_all(&[title]).map_err(RenameError::Invalid)?;
 
     let all = mstore.agent_def_list()?;
     let old = all.iter().find(|a| a.id == id).ok_or_else(|| RenameError::NotFound(format!("agent {id} not found")))?;

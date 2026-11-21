@@ -27,6 +27,7 @@ pub mod agent_skill_files;
 pub mod agent_registry_lookup;
 pub mod agent_resolve;
 pub mod name_resolution;
+pub mod reserved_names;
 pub mod identity_spawn;
 pub mod work_store_handle;
 pub mod agent_session;

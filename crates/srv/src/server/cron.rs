@@ -529,7 +529,12 @@ fn may_act_on(state: &AppState, caller: Option<&Caller>, job: &CronJob) -> bool 
         return job.created_by_uid == uid;
     }
     match state.mstore.agent_def_get(uid) {
-        Ok(Some(def)) => !job.created_by.is_empty() && def.slug.eq_ignore_ascii_case(&job.created_by),
+        // A creator that reads as the person or the system is never an agent's slug, whatever the agent is called.
+        Ok(Some(def)) => {
+            !job.created_by.is_empty()
+                && crate::backend::reserved_names::check(&job.created_by).is_none()
+                && def.slug.eq_ignore_ascii_case(&job.created_by)
+        }
         _ => false,
     }
 }
@@ -1028,6 +1033,29 @@ mod tests {
         // A job with no recorded creator is open to any caller.
         job.created_by_uid.clear();
         assert!(may_change_job(Some(&agent("uid-other")), &job));
+    }
+
+    #[tokio::test]
+    async fn an_agent_called_operator_cannot_act_on_a_job_the_person_made() {
+        use super::super::caller::Caller;
+        let state = crate::server::tests::test_state();
+        // Agents seeded directly: one with a reserved name (made before the rule), one with a nickname.
+        let seed = |id: &str, slug: &str| {
+            let mut def = crate::backend::storage::agents::test_agent_def(id, slug, "claude", "agent", 1, "");
+            def.slug = slug.to_string();
+            state.mstore.agent_def_insert(&mut def).unwrap();
+            Caller::Agent { uid: id.to_string() }
+        };
+        let reserved = seed("uid-reserved", "operator");
+        let nickname = seed("uid-nick", "creator-agent");
+        let mut job = mk_job(true, None, 0);
+        // A job the person made: the creator is `operator`, with no agent uid.
+        job.created_by = "operator".to_string();
+        assert!(!may_act_on(&state, Some(&reserved), &job), "an agent that is called operator is not the person");
+        // A job an agent made, recorded by its slug before uids were kept, is still its own.
+        job.created_by = "creator-agent".to_string();
+        assert!(may_act_on(&state, Some(&nickname), &job));
+        assert!(!may_act_on(&state, Some(&reserved), &job));
     }
 
     #[test]

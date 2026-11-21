@@ -385,10 +385,10 @@ fn raise_toast(state: &AppState, view: &SensitiveView) {
 /// when known, for the typed audit fields (§4.6); `os_prompt_answer` is the only op with `prompt`,
 /// `answer` and `level` among them today, so every other op's row carries none of the three.
 fn audit(state: &AppState, v: &SensitiveView, action: &str, ok: bool, error: Option<&str>, outcome: &str, facts: Option<&BTreeMap<String, String>>) {
-    let source = if action == "sensitive.veto" { "operator" } else { v.approver.as_deref().unwrap_or("no super agent") };
+    let source = if action == "sensitive.veto" { "operator".to_string() } else { approver_label(v.approver.as_deref().unwrap_or("no super agent")) };
     let note = format!("{}: {} | requested by {} | {outcome}", v.op, v.summary, v.requester);
     state.reactive_handler.log_sensitive_op_audit(
-        Some(source),
+        Some(&source),
         &v.requester,
         action,
         ok,
@@ -428,12 +428,31 @@ pub fn tell_one(uid: &str, note: &str) -> bool {
     }
 }
 
+#[cfg(test)]
+mod approver_label_tests {
+    use super::approver_label;
+
+    #[test]
+    fn an_approving_agent_is_named_with_its_prefix_and_the_fallback_keeps_its_words() {
+        assert_eq!(approver_label("opaz"), "agent:opaz");
+        assert_eq!(approver_label("operator"), "agent:operator");
+        assert_eq!(approver_label("no super agent"), "no super agent");
+    }
+}
+
+/// How an audit row names the approver: an agent with its prefix, so none can read as the person; the
+/// fallback's own words stay as they are.
+fn approver_label(approver: &str) -> String {
+    if approver == "no super agent" { approver.to_string() } else { crate::backend::rpc::actor::Actor::Agent(approver.to_string()).label() }
+}
+
 /// One audit row for a step of a request, done by `actor` (the agent that did it, or
 /// "no super agent" for the fallback): the request, the approval, the denial, the withdrawal.
 pub fn audit_step(state: &AppState, actor: &str, r: &Request, action: &str, ok: bool, error: Option<&str>, outcome: &str) {
     let note = format!("{}: {} | requested by {} | {outcome}", r.op, r.summary, r.requester_slug);
+    let actor = approver_label(actor);
     state.reactive_handler.log_sensitive_op_audit(
-        Some(actor),
+        Some(&actor),
         &r.requester_slug,
         action,
         ok,

@@ -213,3 +213,72 @@ async fn deleteagent_removes_the_definition() {
     assert!(resp.error.is_empty(), "{resp:?}");
     assert!(!listed(&state).iter().any(|a| a.id == "doomed"));
 }
+
+/// The names no agent may have (`backend::reserved_names`): refused at every way an agent is made or renamed.
+mod reserved_names {
+    use super::*;
+
+    const NAMES: &[&str] = &["operator", "User", "ADMIN", "System", "agentmux", "Unproven", "unknown", "window", "host", "github-consumer", "muxreview", "swarm-forward", "Op3rator"];
+
+    fn created(name: &str) -> serde_json::Value {
+        serde_json::json!({ "name": name, "provider": "claude" })
+    }
+
+    fn names(state: &AppState) -> Vec<String> {
+        state.mstore.agent_def_list().unwrap().into_iter().map(|d| d.name).collect()
+    }
+
+    #[tokio::test]
+    async fn create_refuses_every_reserved_name_and_accepts_a_nickname() {
+        let state = test_state();
+        for name in NAMES {
+            let resp = call(&state, "createagent", created(name)).await;
+            assert!(resp.error.contains("reserved") && resp.error.contains("nickname"), "{name}: {resp:?}");
+            assert!(!names(&state).iter().any(|n| n == name), "{name} was made");
+        }
+        let ok = call(&state, "createagent", created("Winny")).await;
+        assert!(ok.error.is_empty(), "{ok:?}");
+        assert!(names(&state).contains(&"Winny".to_string()));
+    }
+
+    #[tokio::test]
+    async fn rename_refuses_every_reserved_name() {
+        let state = test_state();
+        let made: AgentDefinition = answer(&call(&state, "createagent", created("Winny")).await);
+        for name in NAMES {
+            let err = crate::server::agent_handlers::rename::rename_title(&state, &made.id, name, true).await.unwrap_err();
+            assert!(matches!(err, crate::server::agent_handlers::rename::RenameError::Invalid(_)) && err.to_string().contains("reserved"), "{name}: {err}");
+        }
+        assert_eq!(state.mstore.agent_def_list().unwrap().iter().find(|d| d.id == made.id).unwrap().name, "Winny");
+        assert!(crate::server::agent_handlers::rename::rename_title(&state, &made.id, "Pulp", true).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn update_refuses_a_reserved_name_but_leaves_an_existing_one_alone() {
+        let state = test_state();
+        let made: AgentDefinition = answer(&call(&state, "createagent", created("Winny")).await);
+        let update = |id: &str, name: &str| {
+            serde_json::json!({ "id": id, "name": name, "icon": "x", "provider": "claude", "agent_type": "standalone" })
+        };
+        let resp = call(&state, "updateagent", update(&made.id, "Operator")).await;
+        assert!(resp.error.contains("reserved"), "{resp:?}");
+        // An agent that already has such a name (seeded directly: it was made before the rule) is not broken:
+        // saving it without changing the name goes through, and it is still listed.
+        let mut old = test_agent_def("old-admin", "Admin", "claude", "agent", 1, "");
+        old.slug = "admin-legacy".to_string();
+        state.mstore.agent_def_insert(&mut old).unwrap();
+        let resp = call(&state, "updateagent", update("old-admin", "Admin")).await;
+        assert!(resp.error.is_empty(), "{resp:?}");
+        assert!(names(&state).contains(&"Admin".to_string()));
+    }
+
+    #[tokio::test]
+    async fn import_from_a_workspace_refuses_a_reserved_name() {
+        let state = test_state();
+        let dir = std::env::temp_dir().join(format!("reserved-names-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let resp = call(&state, "importagentfromclaw", serde_json::json!({ "workspace_path": dir.to_str().unwrap(), "agent_name": "Host" })).await;
+        assert!(resp.error.contains("reserved"), "{resp:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
