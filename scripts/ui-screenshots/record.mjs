@@ -80,6 +80,9 @@ async function main() {
     await session.send("Page.bringToFront").catch(() => {});
     // Every clip is captured at CAPTURE_SCALE, whatever scale the display has.
     await session.applyBaseScale();
+    // A window that is off-screen or behind others is treated as hidden, and the screencast then sends a frame
+    // every second or so; focus emulation keeps the page painting as if it were in front.
+    await session.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
     const pairs = args.redact ? machinePairs(undefined, args.redactExtra) : [];
     // Redaction runs throughout a clip, not only before it: text the clip
     // brings up (a tab's content, a tooltip) is redacted before it's painted.
