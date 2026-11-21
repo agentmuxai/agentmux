@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 // Antigravity (AGY) — Google's agentic coding CLI harness. Its own
 // stream-json schema, prompt as an argument (`prompt_arg_flag`), and flags,
@@ -9,6 +9,7 @@ use super::{ProviderConfig, ControllerType};
 // No base_url_env_var: a custom endpoint is not verified.
 pub(super) static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     id: "antigravity",
+    tier: Tier::Preview,
     cli_command: "agy",
     controller_type: ControllerType::Subprocess,
     app_server: None,
