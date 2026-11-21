@@ -248,6 +248,9 @@ mod http_skill_tests;
 #[path = "tests/peer_veto_tests.rs"]
 mod peer_veto_tests;
 #[cfg(test)]
+#[path = "tests/mcp_actor_tests.rs"]
+mod mcp_actor_tests;
+#[cfg(test)]
 #[path = "tests/rpc_attribution_tests.rs"]
 mod rpc_attribution_tests;
 #[cfg(test)]
