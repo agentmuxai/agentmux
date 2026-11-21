@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //! A card's pull requests: every one of them, in every repository, each with its state
-//! (docs/specs/SPEC_KANBAN_GITHUB_TIGHTER_2026_11_21.md §3). The card's own `pr_url` stays as the newest
+//! (the Kanban and GitHub spec, §3). The card's own `pr_url` stays as the newest
 //! open one; this list is what the board derives its "merged" and "open work" from.
 //!
 //! Kept in `db_work_card_prs`, beside the board's other tables, so an older build on the same computer never
