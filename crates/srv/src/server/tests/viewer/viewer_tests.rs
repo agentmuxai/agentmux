@@ -516,7 +516,7 @@ async fn a_feed_shows_nothing_srv_holds_secret_in_the_snapshot_or_in_what_follow
     let (_, token) = pair_device(&state, "Pixel");
     let (name, block, _) = register_defined(&state, "viewer-withhold");
     let (stored_before, written_after) = ("canary-feed-old-6620-AbCd", "canary-feed-new-3318-WxYz");
-    state.filestore.append_lines(&block, "output", format!("{}\n", user_line(&format!("env {stored_before}"))).as_bytes()).unwrap();
+    append(&state, &block, &user_line(&format!("env {stored_before}")));
     withhold::register(stored_before);
     withhold::register(written_after);
 

@@ -116,3 +116,37 @@ async fn forwarded_request_404s_without_a_second_hop() {
     .await;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+/// What `Agents transcript` returns to another agent holds no value srv holds secret, in a line stored before the value
+/// was known too.
+#[tokio::test]
+async fn a_transcript_read_by_another_agent_withholds_what_srv_holds_secret() {
+    use crate::backend::transcript::withhold;
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let agent_id = format!("transcript-withhold-agent-{unique}");
+    let block_id = format!("transcript-withhold-block-{unique}");
+    state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
+    let value = format!("canary-transcript-{}-ZxCv", &unique.simple().to_string()[..8]);
+    crate::backend::transcript::append::append_output_line(
+        &state.broker,
+        &block_id,
+        &format!("{{\"type\":\"user\",\"n\":1,\"text\":\"env {value}\"}}"),
+        Some(&state.filestore),
+        None,
+    );
+    let mut block = crate::backend::obj::Block { oid: block_id.clone(), ..Default::default() };
+    state.mstore.insert(&mut block).expect("mstore insert");
+    withhold::register(&value);
+
+    let resp = handle_reactive_transcript(
+        State(state),
+        Query(TranscriptQuery { agent: agent_id, max_lines: 100, forwarded: false }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(!body.contains(&value), "a value reached another agent: {body}");
+    assert!(body.contains(withhold::MARK), "{body}");
+}
