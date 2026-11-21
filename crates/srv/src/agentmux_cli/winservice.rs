@@ -13,6 +13,8 @@
 //! installer and for tests; only [`run`] needs Windows.
 
 use std::path::Path;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
+use std::time::Duration;
 
 /// The service's name for a channel: the product's, with the channel in it for any channel but the default. SCM names
 /// are one word (no spaces, no slashes), and the virtual account is made from the name.
@@ -78,9 +80,13 @@ pub fn command_line(program: &Path, channel: &str, home: Option<&Path>) -> Strin
     line
 }
 
-/// How long the service may take to start and to stop before SCM calls it stuck, in seconds.
+/// How long the service may take to start before SCM calls it stuck, in seconds.
 pub const START_WAIT_SECS: u64 = 25;
-pub const STOP_WAIT_SECS: u64 = 25;
+/// How long a stop may take, in seconds: the graceful stop waits up to 30 seconds for the server to leave and then ends it
+/// at once (`agentmux stop --force`), and a few seconds more are left for its thread to report.
+pub const STOP_WAIT_SECS: u64 = 45;
+/// How long, after the stop returned, the thread that hosts the server is given to report that it ended.
+pub const STOP_REPORT_SECS: u64 = 8;
 
 /// What the service reports to SCM for the state of the server it hosts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +123,36 @@ pub fn while_starting(server_ended: Option<i32>, answering: bool, waited_secs: u
     }
 }
 
+/// Has the thread that hosts the server ended, and with what code? A thread that panicked never sent a code: that is the
+/// server having ended with 1, never "still running" (the service would then show running with no server behind it).
+pub fn server_end(done: &Receiver<i32>) -> Option<i32> {
+    match done.try_recv() {
+        Ok(code) => Some(code),
+        Err(TryRecvError::Empty) => None,
+        Err(TryRecvError::Disconnected) => Some(1),
+    }
+}
+
+/// The same, waiting up to `wait` for the end.
+pub fn wait_server_end(done: &Receiver<i32>, wait: Duration) -> Option<i32> {
+    match done.recv_timeout(wait) {
+        Ok(code) => Some(code),
+        Err(RecvTimeoutError::Timeout) => None,
+        Err(RecvTimeoutError::Disconnected) => Some(1),
+    }
+}
+
+/// The code the service ends with after a stop was carried out: `stop_code` is what the stop returned (0 when the server
+/// left), `ended` what the server's thread reported, if it did. A server that is still there, or whose thread never
+/// reported, is not a clean stop: SCM is told so, and the next start must not find the old one.
+pub fn after_stop(stop_code: i32, ended: Option<i32>) -> i32 {
+    match ended {
+        Some(code) => code,
+        None if stop_code != 0 => stop_code,
+        None => 1,
+    }
+}
+
 #[cfg(windows)]
 pub use imp::run;
 
@@ -124,7 +160,7 @@ pub use imp::run;
 mod imp {
     use std::ffi::OsString;
     use std::sync::{mpsc, Mutex, OnceLock};
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use windows_service::service::{
         ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus, ServiceType,
@@ -132,14 +168,15 @@ mod imp {
     use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
     use windows_service::{define_windows_service, service_dispatcher};
 
-    use super::{while_starting, Next, Phase, START_WAIT_SECS, STOP_WAIT_SECS};
+    use super::{after_stop, server_end, wait_server_end, while_starting, Duration, Next, Phase, START_WAIT_SECS, STOP_REPORT_SECS, STOP_WAIT_SECS};
 
-    /// What the service hosts: the server's run (it blocks until the server ends, and gives its exit code), how to ask
-    /// it to stop, and whether it answers yet. Set once by [`run`], before SCM calls the service's main.
+    /// What the service hosts: the server's run (it blocks until the server ends, and gives its exit code), how to stop it
+    /// (it asks, waits, and ends the server at once if it did not leave; it returns 0 when the server is gone) and whether
+    /// it answers yet. Set once by [`run`], before SCM calls the service's main.
     struct Host {
         name: String,
         serve: Box<dyn FnOnce() -> i32 + Send>,
-        stop: Box<dyn Fn() + Send + Sync>,
+        stop: Box<dyn Fn() -> i32 + Send + Sync>,
         answering: Box<dyn Fn() -> bool + Send + Sync>,
     }
 
@@ -153,7 +190,7 @@ mod imp {
     pub fn run(
         name: &str,
         serve: impl FnOnce() -> i32 + Send + 'static,
-        stop: impl Fn() + Send + Sync + 'static,
+        stop: impl Fn() -> i32 + Send + Sync + 'static,
         answering: impl Fn() -> bool + Send + Sync + 'static,
     ) -> i32 {
         let host = Host { name: name.to_string(), serve: Box::new(serve), stop: Box::new(stop), answering: Box::new(answering) };
@@ -204,8 +241,8 @@ mod imp {
         let started = Instant::now();
         let mut ended: Option<i32> = None;
         loop {
-            if let Ok(code) = done_rx.try_recv() {
-                ended = Some(code);
+            if ended.is_none() {
+                ended = server_end(&done_rx);
             }
             match while_starting(ended, (host.answering)(), started.elapsed().as_secs()) {
                 Next::Wait => std::thread::sleep(Duration::from_millis(500)),
@@ -228,17 +265,17 @@ mod imp {
 
         // Running: until SCM asks for a stop or the server ends by itself.
         let code = loop {
-            if let Ok(code) = done_rx.try_recv() {
+            if let Some(code) = server_end(&done_rx) {
                 break code;
             }
             match stop_rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(()) => {
-                    let _ = handle.set_service_status(status(ServiceState::StopPending, none, ServiceExitCode::Win32(0), Duration::from_secs(STOP_WAIT_SECS + 5)));
-                    (host.stop)();
-                    break done_rx.recv_timeout(Duration::from_secs(STOP_WAIT_SECS)).unwrap_or(0);
-                }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break done_rx.recv_timeout(Duration::from_secs(STOP_WAIT_SECS)).unwrap_or(0),
+                // A stop was asked for (or SCM's handler is gone, which is the same for a server nobody can stop).
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = handle.set_service_status(status(ServiceState::StopPending, none, ServiceExitCode::Win32(0), Duration::from_secs(STOP_WAIT_SECS)));
+                    let stop_code = (host.stop)();
+                    break after_stop(stop_code, wait_server_end(&done_rx, Duration::from_secs(STOP_REPORT_SECS)));
+                }
             }
         };
         let exit = if code == 0 { ServiceExitCode::Win32(0) } else { ServiceExitCode::ServiceSpecific(code as u32) };
@@ -296,6 +333,34 @@ mod tests {
             command_line(&program, "headless", Some(&home)),
             "\"C:\\Program Files\\AgentMux\\Headless\\current\\bin\\agentmux.exe\" --channel headless --home C:\\ProgramData\\AgentMux\\Headless service run"
         );
+    }
+
+    #[test]
+    fn a_server_thread_that_died_without_a_code_has_ended_with_1_never_still_running() {
+        let (tx, rx) = std::sync::mpsc::channel::<i32>();
+        assert_eq!(server_end(&rx), None, "nothing yet: still running");
+        tx.send(0).unwrap();
+        assert_eq!(server_end(&rx), Some(0));
+        let (tx, rx) = std::sync::mpsc::channel::<i32>();
+        // The thread panicked: its sender is gone and no code was sent.
+        let t = std::thread::spawn(move || {
+            let _keep = tx;
+            panic!("the server's thread died");
+        });
+        assert!(t.join().is_err());
+        assert_eq!(server_end(&rx), Some(1));
+        assert_eq!(wait_server_end(&rx, Duration::from_millis(10)), Some(1));
+        let (_tx, rx) = std::sync::mpsc::channel::<i32>();
+        assert_eq!(wait_server_end(&rx, Duration::from_millis(10)), None);
+    }
+
+    #[test]
+    fn a_stop_that_left_the_server_behind_is_never_reported_as_clean() {
+        assert_eq!(after_stop(0, Some(0)), 0, "asked, it left, and said 0");
+        assert_eq!(after_stop(3, Some(0)), 0, "gone by itself while the stop was failing: gone is gone");
+        assert_eq!(after_stop(0, Some(2)), 2, "it ended with its own error code");
+        assert_eq!(after_stop(3, None), 3, "the stop could not end it and it never reported");
+        assert_eq!(after_stop(0, None), 1, "the stop said done, the thread never reported: not clean");
     }
 
     #[test]

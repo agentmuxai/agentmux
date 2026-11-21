@@ -263,10 +263,11 @@ fn cmd_service_run(paths: &DataPaths, args: &ServerArgs) -> i32 {
     winservice::run(
         &name,
         move || cmd_run(&serve_paths, &serve_args),
-        move || {
-            let _ = ask_to_shut_down(&stop_paths);
-        },
-        move || running(&up_paths).is_some(),
+        // `agentmux stop --force`: ask, wait, and end the server at once if it did not leave. The code is what that says.
+        move || cmd_stop(&stop_paths, true),
+        // Answering, not merely started: the record names the server's process as soon as it is spawned, before it listens,
+        // and a server that dies on a busy port would be reported running. SCM is told running only when `/health` answers.
+        move || state::read(&up_paths.instance_dir).is_some_and(|s| process::is_server(s.pid) && process::health_ok(s.web_port)),
     )
 }
 
