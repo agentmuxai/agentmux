@@ -1256,5 +1256,5 @@
     "drone.node.note": "Note",
     "drone.node.noteHint": "the line to add; used with a task number above",
     "agentPicker.openHere": "Open here",
-    "agentPicker.openHereTip": "Move {name} into this pane. The pane that has it now closes; its session carries on here."
+    "agentPicker.openHereTip": "Move {{name}} into this pane. The pane that has it now closes; its session carries on here."
 }
