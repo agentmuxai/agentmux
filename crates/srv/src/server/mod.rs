@@ -71,6 +71,8 @@ pub(crate) mod agent_lifecycle;
 pub(crate) mod agent_wanted_running;
 pub(crate) mod restart_resume;
 pub(crate) mod availability_view;
+/// What each agent runs on and is doing now, for `Agents list`, `Agents status` and the Swarm.
+pub(crate) mod live_facts;
 pub(crate) mod agent_runtime;
 pub(crate) mod registry_reconcile;
 pub(crate) mod start_rate;

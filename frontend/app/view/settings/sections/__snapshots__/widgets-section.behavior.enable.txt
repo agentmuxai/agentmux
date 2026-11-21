@@ -1,7 +1,7 @@
 WidgetsSetEnabled {"id":"acme.notes","enabled":false}
 -- turning off
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -76,7 +76,7 @@ WidgetsSetEnabled {"id":"acme.notes","enabled":false}
               "Uninstall"
 -- turned off
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -152,7 +152,7 @@ WidgetsSetEnabled {"id":"acme.notes","enabled":false}
 WidgetsSetEnabled {"id":"acme.off","enabled":true}
 -- turned on
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -228,7 +228,7 @@ WidgetsSetEnabled {"id":"acme.off","enabled":true}
 WidgetsSetEnabled {"id":"acme.off","enabled":false}
 -- failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

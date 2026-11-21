@@ -9,6 +9,8 @@
 /** srv commands that refuse a connection the host hasn't proven
  *  (`RpcContext::operator_only` and the guards built on it). */
 const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
+    "agentanswer",
+    "agentcancel",
     "agentinput",
     "agent.pane.unregister",
     "agent.setSeat",
@@ -33,6 +35,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "identity.account.availability",
     "identity.account.move_agents",
     "identity.account.signed_in",
+    "identity.account.usage",
     "jobs.act",
     "jobs.save",
     "jobs.templates.approve",
@@ -44,6 +47,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "pins.adopt",
     "pins.forget",
     "pins.list",
+    "tooldecision",
     "tower.forget",
     "tower.pair",
     "tower.peers",

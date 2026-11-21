@@ -102,6 +102,34 @@ async fn the_list_shows_each_job_with_its_runs_spend_and_whether_it_is_failing()
     assert_eq!((row["infra"].as_str(), row["failed"].as_bool()), (Some("error"), Some(true)));
 }
 
+/// A Drone graph that has run is listed from the store the Drone pane reads its definitions from. The test state
+/// aliases that store to the channel's own, which hid a list that read the wrong one, so here they are apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_drone_that_has_run_is_listed_from_the_store_the_drone_pane_reads() {
+    let (mut state, _) = state();
+    state.id_store = crate::test_support::core_parts().mstore;
+    let def: crate::drone::types::DroneDefinition = serde_json::from_value(json!({
+        "id": "", "name": "Say hello", "created_at": 0, "updated_at": 0,
+        "graph": { "nodes": [], "edges": [] },
+    }))
+    .unwrap();
+    let drone = crate::server::drone_handlers::upsert_drone(&state, def).unwrap();
+    let never_run = serde_json::from_value::<crate::drone::types::DroneDefinition>(json!({
+        "id": "", "name": "Never run", "created_at": 0, "updated_at": 0,
+        "graph": { "nodes": [], "edges": [] },
+    }))
+    .unwrap();
+    crate::server::drone_handlers::upsert_drone(&state, never_run).unwrap();
+    let mut run = JobRun::new(&uuid::Uuid::new_v4().to_string(), &drone.id, "drone", "Say hello", "manual", run_state::FINISHED, now_ms() - 1_000);
+    run.infra = infra::OK.to_string();
+    ledger_of(&state).store().job_run_insert(&run).unwrap();
+
+    let list = list(&state).await.unwrap();
+    let v = view(&list, &drone.id);
+    assert_eq!((v.source.as_str(), v.name.as_str(), v.recent.len()), ("drone", "Say hello", 1));
+    assert_eq!(list.jobs.iter().filter(|j| j.source == "drone").count(), 1, "a drone with no run is not a job: {:?}", list.jobs.iter().map(|j| &j.name).collect::<Vec<_>>());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_stays_failing_behind_more_skips_than_the_strip_shows_until_a_success() {
     let (state, _) = state();

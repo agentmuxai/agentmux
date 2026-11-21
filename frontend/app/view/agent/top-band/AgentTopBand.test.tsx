@@ -74,7 +74,7 @@ let n = 0;
 const mount = (...items: TopBandItem[]) => {
     const blockId = `b${++n}`;
     const disposers = items.map((i) => registerTopBandItem(blockId, i));
-    const view = render(() => <AgentTopBand blockId={blockId} zoom={() => 1} />);
+    const view = render(() => <AgentTopBand blockId={blockId} />);
     return { view, blockId, disposers };
 };
 const live = (view: { container: HTMLElement }, id: string) =>

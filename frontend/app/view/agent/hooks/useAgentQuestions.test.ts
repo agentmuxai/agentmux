@@ -406,3 +406,39 @@ describe("useAgentQuestions — handleCancel fallback", () => {
         dispose();
     });
 });
+
+// A refusal from srv ("FORBIDDEN: only the person answers ...") is none of the SAFE_TO_RETRY_VIA_FOLLOWUP shapes: the
+// answer must not be re-sent as a follow-up turn (that would put the words in the agent's conversation by another
+// route), the panel comes back, and the reason is logged.
+describe("useAgentQuestions — a refused answer or cancel", () => {
+    const FORBIDDEN = "FORBIDDEN: only the person answers a question an agent asked (this connection isn't the AgentMux window)";
+
+    it.each(["answer", "cancel"] as const)("rolls back and logs the reason for a refused %s, with no follow-up", async (which) => {
+        hub.agentAnswer.mockRejectedValue(new Error(FORBIDDEN));
+        hub.agentCancel.mockRejectedValue(new Error(FORBIDDEN));
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const log = vi.fn();
+        const { handleAnswer, handleCancel, dispose } = setup(sendMessage, log);
+
+        if (which === "answer") {
+            handleAnswer({
+                tool_use_id: TOOL_USE_ID,
+                answers: [],
+                answers_map: { "Pick one": "a" },
+                answer_text: "Pick one: a",
+                autoFilledCount: 0,
+            });
+        } else {
+            handleCancel(TOOL_USE_ID);
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(sendMessage).not.toHaveBeenCalled();
+        const lastFlush = hub.dispatched[hub.dispatched.length - 1] as any;
+        expect(lastFlush.updatedNodes[0].status).toBe("awaiting_answer");
+        expect(log).toHaveBeenCalledWith("error", expect.stringContaining("only the person answers a question"));
+        dispose();
+    });
+});

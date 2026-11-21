@@ -444,7 +444,6 @@ fn sort_jobs(jobs: &mut [JobView]) {
 pub(super) async fn list(state: &AppState) -> Result<JobsListResult, String> {
     let ledger = ledger(state)?;
     let jobs_store = crate::server::cron::jobs_store(state);
-    let mstore = state.mstore.clone();
     let regs = state.reactive_handler.list_agents();
     let st = state.clone();
     tokio::task::spawn_blocking(move || {
@@ -469,8 +468,9 @@ pub(super) async fn list(state: &AppState) -> Result<JobsListResult, String> {
                 view
             })
             .collect();
-        // Drone graphs are run by hand; list the ones the ledger has runs of.
-        for drone in mstore.drone_list().unwrap_or_default() {
+        // Drone graphs are run by hand; list the ones the ledger has runs of. The definitions are the ones the
+        // Drone pane lists (the shared store), not this channel's own store, where none are kept.
+        for drone in crate::server::drone_handlers::list_drones(&st).unwrap_or_default() {
             let l = ledgered(&ledger, &drone.id, midnight, week);
             if !l.recent.is_empty() {
                 views.push(drone_view(&drone.id, &drone.name, l));

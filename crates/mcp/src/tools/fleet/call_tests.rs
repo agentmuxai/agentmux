@@ -46,6 +46,16 @@ async fn discovery_is_read_and_returned_as_it_came() {
     }
 }
 
+#[test]
+fn a_discovery_query_carries_only_the_known_parameters_as_text_and_status_is_a_view() {
+    let args = json!({ "action": "list", "model": "!sonnet", "fields": "model, turn", "limit": 5, "state": " ", "agent": "x", "host": "h", "detail": null });
+    let query = discovery_query(&args, false);
+    assert_eq!(query, vec![("fields", "model, turn".to_string()), ("model", "!sonnet".to_string()), ("limit", "5".to_string())]);
+    let status = discovery_query(&json!({ "group_by": "model" }), true);
+    assert_eq!(status, vec![("group_by", "model".to_string()), ("view", "status".to_string())]);
+    assert!(discovery_query(&json!({}), false).is_empty(), "no parameter, no query: the answer is as it always was");
+}
+
 #[tokio::test]
 async fn a_bulk_stop_sends_what_it_was_given_and_names_the_agent() {
     let srv = stub_srv("200 OK", json!({ "stopped": ["b1"] }));

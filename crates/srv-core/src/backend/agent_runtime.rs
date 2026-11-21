@@ -218,6 +218,7 @@ pub fn publish_agent_runtime(
     effective: Option<&EffectiveRuntime>,
 ) {
     let payload = agent_runtime_event(block_id, running, restart_pending, effective);
+    crate::backend::agent_runtime_latest::record(&payload);
     broker.publish_event::<crate::backend::mps_events::AgentRuntime>(&payload, vec![format!("block:{block_id}")], 1);
 }
 

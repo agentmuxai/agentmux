@@ -493,6 +493,17 @@
     position: relative;
 }
 
+// What is below the conversation (the decision and question panels, the queue, the banners, the activity dock, the
+// working row, the composer strip and the composer) is the pane's controls: they follow the app's chrome zoom, while the
+// conversation above keeps the pane's. Each is a direct child of `.agent-view-zoomed` on purpose (no wrapper: the
+// list's height re-pin and the flex layout rely on it), so they are picked as the siblings after the conversation; the
+// pane's zoom is divided out (the box publishes it as `--agent-pane-zoom`) and the chrome's applied. The sign-in panel
+// stays at the pane's zoom, like the conversation it interrupts. The same selector is `AGENT_PANE_CHROME_SELECTOR`
+// (store/chrome-zoom-target.ts), which tells a Ctrl+wheel over them to zoom chrome.
+.agent-view-zoomed > .agent-document-scroll-region ~ :not(.agent-auth-panel-card, .agent-auth-notice) {
+    @include mixins.chrome-zoom-inside(--agent-pane-zoom);
+}
+
 // The conversation and, beside it, the Messages panel. It takes the space the Shell drawer doesn't, so the
 // composer still shifts up to make room for the drawer. min-height:0 so the transcript can scroll rather than
 // forcing the flex parent open. position:relative makes the row the Messages panel's containing block (the panel is
