@@ -137,6 +137,7 @@ mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
 mod fleet_check_limits;
+mod fleet_forward;
 mod fleet_pacing;
 mod fleet_result;
 mod supervisor;

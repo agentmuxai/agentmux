@@ -208,6 +208,15 @@ pub(super) struct AgentBroadcastForwardRequest {
     pub(super) recipients: usize,
 }
 
+/// A forwarded broadcast as a confirmation names it: the body by its SHA-256, never the words.
+#[derive(serde::Deserialize)]
+pub(super) struct AgentBroadcastConfirmRequest {
+    pub(super) block_id: String,
+    pub(super) body_sha256: String,
+    pub(super) msg_id: String,
+    pub(super) recipients: usize,
+}
+
 /// `POST /agentmux/agent/broadcast`: another channel on this machine asks this
 /// one to deliver a Swarm broadcast to one of its agent panes (same trust model
 /// as the stop forward above: loopback, this instance's own auth key). The
@@ -225,6 +234,20 @@ pub(super) async fn handle_agent_broadcast_forward(
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
         Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
     }
+}
+
+/// `POST /agentmux/agent/broadcast/confirm`: another instance on this machine asks whether this
+/// one sent that forward from the operator's window. Answers yes once, and only for a forward this
+/// instance sent; a request that carries an agent's token is refused.
+pub(super) async fn handle_agent_broadcast_confirm(
+    caller: Option<axum::Extension<super::caller::Caller>>,
+    Json(req): Json<AgentBroadcastConfirmRequest>,
+) -> impl IntoResponse {
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "confirmed": false, "error": "FORBIDDEN: only an AgentMux instance confirms a forwarded broadcast" }))).into_response();
+    }
+    let confirmed = app_api::fleet::confirm_forward(&req.msg_id, &req.block_id, &req.body_sha256, req.recipients);
+    (StatusCode::OK, Json(serde_json::json!({ "confirmed": confirmed }))).into_response()
 }
 
 #[derive(serde::Deserialize)]
