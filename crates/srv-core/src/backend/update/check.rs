@@ -615,6 +615,11 @@ async fn api_get(client: &reqwest::Client, etag: Option<&str>, now_ms: i64) -> R
 /// release's is lower.
 const BUILD_FLOOR: &str = include_str!("../../../../../UPGRADE_FLOOR");
 
+/// [`BUILD_FLOOR`] when it is a version.
+pub(crate) fn build_floor() -> Option<&'static str> {
+    Some(BUILD_FLOOR.trim()).filter(|f| version_core(f).is_some())
+}
+
 /// The oldest version known to upgrade in place: this build's own floor, or a later one an answer from the API
 /// carried. A signed manifest doesn't carry one.
 fn known_floor() -> Option<String> {
@@ -647,8 +652,7 @@ async fn fetch_latest(client: &reqwest::Client, web: &reqwest::Client) -> Result
         return Ok(release);
     }
     let signed = signed_floor_for(client, &release.tag_name, agentmux_common::time::now_ms()).await;
-    let built = Some(BUILD_FLOOR.trim()).filter(|f| version_core(f).is_some());
-    Ok(match signed_floor_in_force(built, &signed) {
+    Ok(match signed_floor_in_force(build_floor(), &signed) {
         Some(floor) => release.with_floor(&floor),
         None => release,
     })

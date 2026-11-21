@@ -418,19 +418,27 @@ pub enum Outcome {
 /// The decision, given what was fetched (`None`: the release has no signed
 /// manifest) and the file called `name` that has `size` bytes and hashes to `sha256`.
 pub fn judge_file(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, name: &str, size: u64, sha256: &str) -> Outcome {
+    judge_file_and_floor(keys, tag, fetched, name, size, sha256).0
+}
+
+/// [`judge_file`], and the upgrade floor the manifest signs. The floor is read from the same verified manifest the file is
+/// judged against, so a download can refuse on it without trusting what an earlier check saw; it is `Absent` whenever the
+/// manifest did not verify (the outcome says why).
+pub fn judge_file_and_floor(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, name: &str, size: u64, sha256: &str) -> (Outcome, SignedFloor) {
     let Some((envelope, signatures, manifest)) = fetched else {
-        return Outcome::Unsigned;
+        return (Outcome::Unsigned, SignedFloor::Absent);
     };
     let manifest: Manifest = match verify_release(keys, tag, envelope, signatures, manifest) {
         Ok(m) => m,
-        Err(e) => return Outcome::Failed(e.to_string()),
+        Err(e) => return (Outcome::Failed(e.to_string()), SignedFloor::Absent),
     };
-    match manifest.file(name) {
+    let outcome = match manifest.file(name) {
         None => Outcome::NotListed(format!("{name} isn't in the signed manifest")),
         Some(f) if f.size != size => Outcome::Disagrees(format!("size {} in the manifest, {size} in the file", f.size)),
         Some(f) if !f.sha256.eq_ignore_ascii_case(sha256) => Outcome::Disagrees("the manifest's SHA-256 differs from the file's".into()),
         Some(_) => Outcome::Verified,
-    }
+    };
+    (outcome, manifest.signed_floor())
 }
 
 /// What to do about `outcome` for `version`: `Ok` to go on, or the message to show (spec §7).
