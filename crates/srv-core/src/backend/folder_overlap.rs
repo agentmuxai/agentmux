@@ -125,10 +125,15 @@ pub fn accept(host_id: &str, container_id: &str) -> Result<(), String> {
     std::fs::write(&file, format!("{host_id}\n{container_id}\n")).map_err(|e| format!("the choice can't be kept: {e}"))
 }
 
-/// Forgets the choice for the pair (a pair that no longer shares a folder asks again if it ever does).
-pub fn forget(host_id: &str, container_id: &str) {
-    if let Some(file) = choice_file(host_id, container_id) {
-        let _ = std::fs::remove_file(file);
+/// Forgets every choice the person made for a pair that includes agent `id`: the agent is deleted.
+pub fn forget_agent(id: &str) {
+    let Some(dir) = choices_dir() else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if std::fs::read_to_string(&path).is_ok_and(|text| text.lines().any(|line| line == id)) {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
 
@@ -155,12 +160,6 @@ pub fn refusal(overlaps: &[Overlap]) -> String {
 pub fn check(store: &Store, def: &AgentDefinition, host_folder: Option<&Path>) -> Result<(), String> {
     let pending = unchosen(of(store, def, host_folder));
     if pending.is_empty() { Ok(()) } else { Err(refusal(&pending)) }
-}
-
-/// `check` for an agent that is opened: only a host agent is asked there (a container agent is asked when its folders
-/// are saved). `folder` is the folder it opens in, when that is not the one its definition names.
-pub fn check_open(store: &Store, def: &AgentDefinition, folder: Option<&Path>) -> Result<(), String> {
-    if is_container(def) { Ok(()) } else { check(store, def, folder) }
 }
 
 /// Whether a save of `new` over `old` changes a folder an agent works in or can write.

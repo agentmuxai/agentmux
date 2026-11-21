@@ -32,6 +32,20 @@ describe("SharedFolderPanel", () => {
         expect(screen.getByTestId("shared-folder-text").textContent).toContain("Aria, Ula can write");
     });
 
+    it("brings itself into view when it appears, without moving what is already in view", () => {
+        const scroll = vi.fn();
+        const had = Element.prototype.scrollIntoView;
+        Element.prototype.scrollIntoView = scroll as never;
+        try {
+            show();
+        } finally {
+            Element.prototype.scrollIntoView = had;
+        }
+        expect(scroll).toHaveBeenCalledTimes(1);
+        expect(scroll).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+        expect(scroll.mock.contexts[0]).toBe(screen.getByTestId("shared-folder-panel"));
+    });
+
     it("says what to do instead", () => {
         show();
         const panel = screen.getByTestId("shared-folder-panel").textContent ?? "";

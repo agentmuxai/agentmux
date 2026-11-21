@@ -45,7 +45,7 @@
       "cmd": "FolderOverlapCheck",
       "data": {
         "agent_id": "agent-1",
-        "folder": "/srv/home/agents/korp-1103c"
+        "folder": "/srv/home/agents/korp-old"
       }
     },
     {

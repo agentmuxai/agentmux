@@ -528,7 +528,8 @@ export class AgentViewModel {
         const blockId = targetBlockId ?? this.blockId;
         const oref = MOS.makeORef("block", blockId);
         try {
-            const shared = await sharedFolderOverlaps(agent.id, agentMode, workDir);
+            // The folder it will run in: a continuation runs in the folder it names, not the definition's.
+            const shared = await sharedFolderOverlaps(agent.id, agentMode, overrides?.workDirOverride?.trim() || workDir);
             if (shared) {
                 this.sharedFolder = { hostName: agent.name, overlaps: shared, launch: { agent, overrides, targetBlockId, targetTabId } };
                 return false;

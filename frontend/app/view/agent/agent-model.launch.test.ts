@@ -292,6 +292,23 @@ describe("a host agent that opens in a folder a container agent can write", () =
         }
     });
 
+    it("asks about the folder a continuation runs in, not the one the definition names", async () => {
+        answers.FolderOverlapCheckCommand = { overlaps: [pair] };
+        const overrides: LaunchOverrides = {
+            instanceName: "Korp",
+            agentType: "host",
+            environment: "local",
+            accountId: ACCOUNT,
+            bundleId: "",
+            continueOfInstanceId: "inst-0",
+            workDirOverride: "/srv/home/agents/korp-old",
+        };
+        const { ok, model } = await held(def(), overrides);
+        expect(ok).toBe(false);
+        expect(model.sharedFolder).not.toBeNull();
+        expect(calls.find((c) => c.cmd === "FolderOverlapCheck")?.data).toEqual({ agent_id: "agent-1", folder: "/srv/home/agents/korp-old" });
+    });
+
     it("goes on once the person has gone ahead with the pair", async () => {
         answers.FolderOverlapCheckCommand = { overlaps: [] };
         const { ok, model } = await held(def());

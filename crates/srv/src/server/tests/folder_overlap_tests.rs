@@ -117,7 +117,7 @@ async fn creating_a_host_agent_in_a_container_agents_folder_is_refused_with_what
     let f = fleet();
     let created = f.state.mstore.agent_def_list().unwrap().len();
     let make = json!({ "name": "Newhost", "provider": "claude", "working_directory": f.path("shared/deeper") });
-    for ctx in [agent(), window()] {
+    for ctx in [agent(), unproven()] {
         let (_, error) = call(&f.state, ctx, "createagent", make.clone()).await;
         assert!(error.contains("Newhost (host) and Aria (container) share a folder"), "{error}");
         assert!(error.contains("separate workspaces") && error.contains(":ro"), "{error}");
@@ -125,6 +125,9 @@ async fn creating_a_host_agent_in_a_container_agents_folder_is_refused_with_what
     let (_, error) = call(&f.state, agent(), "agent.define", json!({ "name": "Defhost", "working_directory": f.path("shared") })).await;
     assert!(error.contains("Defhost (host) and Aria (container) share a folder"), "{error}");
     assert_eq!(f.state.mstore.agent_def_list().unwrap().len(), created, "neither was made");
+
+    let (data, error) = call(&f.state, window(), "createagent", make.clone()).await;
+    assert!(error.is_empty() && data["name"] == json!("Newhost"), "the window's own save goes on, the picker asks before it opens: {error}");
 
     let (data, error) = call(&f.state, agent(), "createagent", json!({ "name": "Apart", "provider": "claude", "working_directory": f.path("apart") })).await;
     assert!(error.is_empty() && data["name"] == json!("Apart"), "a folder of its own: {error}");
@@ -143,6 +146,12 @@ async fn saving_a_workspace_or_a_writable_volume_over_a_host_agents_folder_is_re
     let (_, error) = call(&f.state, agent(), "updateagent", update("[]".into(), f.path("shared/work/in"))).await;
     assert!(error.contains("Hosty (host) and Calm (container)"), "a workspace over the host agent's folder: {error}");
 
+    let writable = json!([format!("{}:/data", f.path("shared/work"))]).to_string();
+    let (_, error) = call(&f.state, unproven(), "updateagent", update(writable.clone(), f.path("calm"))).await;
+    assert!(error.contains("Hosty (host) and Calm (container) share a folder"), "{error}");
+    let (_, error) = call(&f.state, window(), "updateagent", update(writable, f.path("calm"))).await;
+    assert!(error.is_empty(), "the window's own save goes on: {error}");
+
     let read_only = json!([format!("{}:/data:ro", f.path("shared/work"))]).to_string();
     let (_, error) = call(&f.state, agent(), "updateagent", update(read_only, f.path("calm"))).await;
     assert!(error.is_empty(), "a read-only volume can't be changed by the container agent: {error}");
@@ -155,13 +164,4 @@ async fn a_save_that_leaves_the_folders_alone_goes_on_even_where_the_pair_overla
     let rename = json!({ "id": f.host, "name": "Hosty renamed", "icon": "X", "provider": "claude", "agent_type": host.agent_type, "working_directory": host.working_directory });
     let (data, error) = call(&f.state, window(), "updateagent", rename).await;
     assert!(error.is_empty() && data["name"] == json!("Hosty renamed"), "{error}");
-}
-
-#[tokio::test]
-async fn opening_a_host_agent_in_a_container_agents_folder_is_refused_before_anything_starts() {
-    let f = fleet();
-    let (_, error) = call(&f.state, agent(), "agent.open", json!({ "agent_id": f.host })).await;
-    assert!(error.starts_with("FOLDER_SHARED: ") && error.contains("Hosty (host) and Aria (container) share a folder"), "{error}");
-    let (_, error) = call(&f.state, agent(), "agent.open", json!({ "agent_id": f.container })).await;
-    assert!(!error.contains("share a folder"), "a container agent is asked when its folders are saved: {error}");
 }

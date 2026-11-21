@@ -127,8 +127,11 @@ fn the_persons_choice_is_kept_for_that_pair_of_agents_only() {
     assert_eq!(still.iter().map(|o| o.container_id.as_str()).collect::<Vec<_>>(), vec![two.id.as_str()], "the other pair still asks");
     assert!(accepted(&host.id, &one.id) && !accepted(&one.id, &host.id), "a pair is ordered: host then container");
 
-    forget(&host.id, &one.id);
-    assert_eq!(unchosen(of(&store, &host, None)).len(), 2);
+    forget_agent(&one.id);
+    assert_eq!(unchosen(of(&store, &host, None)).len(), 2, "the container agent was deleted: its choices go with it");
+    accept(&host.id, &two.id).unwrap();
+    forget_agent(&one.id);
+    assert!(accepted(&host.id, &two.id), "another agent's choices stay");
 }
 
 #[test]
@@ -156,4 +159,20 @@ fn two_container_agents_or_two_host_agents_sharing_a_folder_are_not_asked_about(
     let h1 = saved(&store, definition("host", "He1", &path(&root, "h"), "[]"));
     saved(&store, definition("host", "He2", &path(&root, "h"), "[]"));
     assert!(of(&store, &c1, None).is_empty() && of(&store, &h1, None).is_empty());
+}
+
+#[test]
+fn a_container_worker_as_spawn_records_it_is_a_container_agent_here() {
+    choices();
+    let store = Store::open_in_memory().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    // What `agent_spawn::container::apply` leaves on a worker's definition: the type, the environment and the image.
+    let mut worker = definition("container", "Pell", &path(&root, "pell"), &serde_json::json!([format!("{}:/shared", path(&root, "shared"))]).to_string());
+    worker.environment = "docker".to_string();
+    worker.container_image = "agentmux/developer:1".to_string();
+    let worker = saved(&store, worker);
+    let host = saved(&store, definition("host", "Leady", &path(&root, "shared/leader"), "[]"));
+    let found = of(&store, &host, None);
+    assert_eq!((found.len(), found[0].container_id.as_str(), found[0].container_name.as_str()), (1, worker.id.as_str(), "Pell"));
+    assert_eq!(of(&store, &worker, None).len(), 1, "and the worker's own save finds the host agent");
 }

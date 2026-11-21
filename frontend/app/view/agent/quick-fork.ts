@@ -67,6 +67,19 @@ export interface QuickForkModel {
         targetBlockId?: string,
         targetTabId?: string,
     ) => Promise<boolean>;
+    /** Set when the launch was held for the person's answer about a folder a container agent can write. */
+    sharedFolder?: { hostName: string } | null;
+}
+
+/**
+ * Why a fork did not start. One held for a folder a container agent can write is not asked about here, the picker
+ * asks: the hold is dropped and the person is told where to go ahead.
+ */
+function failedForkMessage(model: QuickForkModel, name: string): string {
+    const held = model.sharedFolder;
+    model.sharedFolder = null;
+    if (!held) return "The forked agent could not be launched.";
+    return `A container agent can write the folder ${name} works in. Open ${name} from the agent picker to go ahead.`;
 }
 
 /**
@@ -276,7 +289,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "Quick Fork failed",
-                message: "The forked agent could not be launched.",
+                message: failedForkMessage(model, forkedDef.name),
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
