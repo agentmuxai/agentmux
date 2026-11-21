@@ -225,7 +225,7 @@ describe("flowCurve", () => {
     });
 
     it("keeps its label off the strip a region's title is written in", () => {
-        // An agent in a region, and the review bot in the region under it: the middle of the line between them
+        // An agent in a region, and another agent in the region under it: the middle of the line between them
         // is on the lower region's title.
         const agent = { x: 16, y: 40 };
         const bot = { x: 16, y: 154 };
@@ -276,13 +276,13 @@ describe("flowCurves", () => {
     });
 
     it("keeps a label inside the map, off a region's title and off the line along its bottom", () => {
-        // A machine's region with one agent, and the review bot in its region under it, as the layout places them.
+        // A machine's region with one agent, and another agent in the region under it, as the layout places them.
         const agent = { x: 16, y: 56 };
         const bot = { x: 16, y: 204 };
         const layout = {
             regions: [
                 { key: "m", x: 0, y: 0, w: 220, h: 120, foldX: 0, foldY: 0 },
-                { key: "services", x: 0, y: 148, w: 220, h: 120, foldX: 0, foldY: 0 },
+                { key: "n", x: 0, y: 148, w: 220, h: 120, foldX: 0, foldY: 0 },
             ],
             width: 220,
             height: 268,

@@ -30,15 +30,11 @@ export const REGION_TITLE_H = 30;
 const HEAD = REGION_TITLE_H;
 const FOLD_H = 30;
 const REGION_GAP = 28;
-/** Between the agents and the row of the review bot and CI in the By seat layout: room for the labels of their lines. */
-const SERVICES_GAP = 72;
 /** A row of regions wraps once it would be wider than this. */
 export const ROW_MAX_W = 1400;
 /** The columns of the grid the agents with no lead and no reports stand in. */
 const GRID_COLS = 5;
 const MIN_REGION_W = 220;
-/** The key of the region the review bot and CI stand in. */
-export const SERVICES_REGION = "services";
 
 /**
  * The gaps of the map. They are the ones above in the fitted view, and every one closes by the same share as the
@@ -58,8 +54,6 @@ export interface Gaps {
     pad: number;
     /** Between two regions, side by side or one row under another. */
     region: number;
-    /** Between the agents and the review bot and CI in the By seat layout. */
-    services: number;
     /** How far the dashed frame of a container agent reaches past its node. */
     frame: number;
 }
@@ -71,7 +65,6 @@ const FULL_GAPS: Gaps = {
     reportRow: REPORT_ROW_GAP,
     pad: PAD,
     region: REGION_GAP,
-    services: SERVICES_GAP,
     frame: CONTAINER_FRAME_OUT,
 };
 /** The least share of a gap that is left, however far the person zooms in: a line and a frame still fit in it. */
@@ -88,7 +81,6 @@ export function gapsAt(spread = 1): Gaps {
         reportRow: REPORT_ROW_GAP * s,
         pad: PAD * s,
         region: REGION_GAP * s,
-        services: SERVICES_GAP * s,
         frame: CONTAINER_FRAME_OUT * s,
     };
 }
@@ -282,13 +274,11 @@ function slotOf(
 const ROW_STARTS = new WeakMap<AtlasLayout, ReadonlySet<number>>();
 
 /**
- * The slots in rows; the review bot and CI (`services`) stand in a row of their own after the machines. `wrap` is a
- * width (a row wraps once it would be wider) or the slots that start a new row: a picture rebuilt at closer gaps is
- * narrower, and keeps its rows by where they broke, not by a width.
+ * The slots in rows. `wrap` is a width (a row wraps once it would be wider) or the slots that start a new row: a
+ * picture rebuilt at closer gaps is narrower, and keeps its rows by where they broke, not by a width.
  */
 function shelfPack(
     slots: readonly Slot[],
-    services: Slot | null,
     wrap: number | ReadonlySet<number>,
     gaps: Gaps = FULL_GAPS
 ): AtlasLayout {
@@ -322,10 +312,6 @@ function shelfPack(
         width = Math.max(width, x - gaps.region);
     };
     slots.forEach(place);
-    if (services) {
-        if (x > 0) newRow();
-        place(services, slots.length);
-    }
     const layout = { regions: boxes, nodes, width, height: boxes.length === 0 ? 0 : y + rowH, wrapped, gaps };
     ROW_STARTS.set(layout, rowStarts);
     return layout;
@@ -411,15 +397,11 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
                 g
             )
         );
-        const svc = graph.services.map((s) => s.key);
-        return {
-            slots,
-            services: svc.length > 0 ? slotOf(SERVICES_REGION, svc, false, graph.edges, cols, reportCols, g) : null,
-        };
+        return { slots };
     };
     const packed = (cols: number, reportCols: number, wrap: number | ReadonlySet<number>, g: Gaps): AtlasLayout => {
-        const { slots, services } = build(cols, reportCols, g);
-        return shelfPack(slots, services, wrap, g);
+        const { slots } = build(cols, reportCols, g);
+        return shelfPack(slots, wrap, g);
     };
     if (!pane || pane.w <= 0 || pane.h <= 0) return packed(GRID_COLS, Number.POSITIVE_INFINITY, ROW_MAX_W, gaps);
     const candidates: AtlasLayout[] = [];
@@ -427,11 +409,11 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
     // Unwrapped first: with nothing to gain from wrapping a lead's reports, the pick keeps the look it had.
     for (const reportCols of reportColsChoices(graph)) {
         for (const cols of GRID_COLS_CHOICES) {
-            const { slots, services } = build(cols, reportCols, FULL_GAPS);
-            // With no machine box (an empty or not-yet-loaded fleet, or only the services) there is no width to choose.
+            const { slots } = build(cols, reportCols, FULL_GAPS);
+            // With no machine box (an empty or not-yet-loaded fleet) there is no width to choose.
             const wraps = slots.length > 0 ? wrapWidths(slots) : [ROW_MAX_W];
             for (const wrapW of wraps) {
-                const full = shelfPack(slots, services, wrapW);
+                const full = shelfPack(slots, wrapW);
                 candidates.push(full);
                 closed.push(() => packed(cols, reportCols, ROW_STARTS.get(full) ?? wrapW, gaps));
             }
@@ -444,8 +426,7 @@ export function layoutAtlas(graph: AtlasGraph, pane?: PaneShape, spread = 1): At
 /**
  * The By seat layout: every shown agent in one picture, whatever machine it is on, a lead above its reports. No
  * regions: the machine is the node's tint. Stopped agents are not drawn (the bar counts them). The containers no
- * agent uses stand with the agents that have no lead, and the review bot and CI in a row of their own under them
- * all, for the same reason as their region in the other layout. With the pane's size, the columns of the grid of
+ * agent uses stand with the agents that have no lead. With the pane's size, the columns of the grid of
  * agents with no lead are the ones that fit it best. `spread` under 1 closes the gaps, as in `layoutAtlas`: the
  * columns are the ones chosen at the full gaps.
  */
@@ -472,20 +453,15 @@ function seatWithCols(
         ...graph.regions.flatMap((r) => r.shown.map((a) => a.key)),
         ...graph.regions.flatMap((r) => r.orphans.map((o) => o.key)),
     ];
-    const services = graph.services.map((s) => s.key);
     const inner = layoutRegion(keys, graph.edges, cols, reportCols, gaps);
     const nodes = new Map<string, Placed>();
     for (const [key, p] of inner.nodes) nodes.set(key, { x: gaps.pad + p.x, y: gaps.pad + p.y });
-    const servicesTop = keys.length === 0 ? 0 : inner.h + gaps.services;
-    services.forEach((key, i) => nodes.set(key, { x: gaps.pad + i * (NODE_W + gaps.x), y: gaps.pad + servicesTop }));
     if (nodes.size === 0) return { regions: [], nodes, width: 0, height: 0, wrapped: new Map(), gaps };
-    const servicesW = services.length === 0 ? 0 : services.length * (NODE_W + gaps.x) - gaps.x;
-    const h = services.length === 0 ? inner.h : servicesTop + NODE_H;
     return {
         regions: [],
         nodes,
-        width: Math.max(inner.w, servicesW) + gaps.pad * 2,
-        height: h + gaps.pad * 2,
+        width: inner.w + gaps.pad * 2,
+        height: inner.h + gaps.pad * 2,
         wrapped: inner.wrapped,
         gaps,
     };
