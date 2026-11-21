@@ -28,6 +28,8 @@
     // inside itself past that, so the sections stay in view.
     max-height: 6rem;
     overflow-y: auto;
+    // A box that scrolls may shrink below its content in a flex column; the bar keeps its height and the list scrolls under it.
+    flex-shrink: 0;
 }
 
 .kanban-section-bar__links {
