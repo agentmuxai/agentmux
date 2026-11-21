@@ -1,6 +1,6 @@
 # Spec: the upgrade floor is carried in the release's signed manifest
 
-**Task #47853** (spec), build #47854. Winny@narko, 2026-11-20. Uncommitted: it ships in the build's first PR. Requirements and tests only.
+**Status:** active. Spec task #47853, built in #47854 (this PR). Approved with the recommendations as relayed by AgentY, 2026-11-20. Owner: Winny@narko. Requirements and tests only.
 
 ## 1. What the build guarantees
 
