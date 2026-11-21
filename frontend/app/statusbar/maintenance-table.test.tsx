@@ -19,6 +19,7 @@ vi.mock("@/app/store/flash-notifications", () => ({ pushNotification: () => {} }
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
+import { acceptAppUpdate } from "@/store/app-update";
 import { MessageRows } from "./maintenance-rows";
 import type { MaintenanceState } from "./maintenance-state";
 import { ALL_ROWS, type RowDef } from "./maintenance-table";
@@ -78,7 +79,7 @@ const FIXTURES: Record<string, { m: Fix; texts: string[]; buttons: string[] }> =
         buttons: ["Show folder", "Show installer", "Upgrade & restart"],
     },
     waiting: { m: { updaterStatus: () => "ready", download: dl({ state: "waiting", waiting_for: 2 }) }, texts: ["Waiting for 2 agents to finish…"], buttons: ["Restart now", "Cancel"] },
-    restarting: { m: { updaterStatus: () => "ready", download: dl({ state: "restarting" }) }, texts: ["Restarting: answer the AgentMux dialog (No cancels)"], buttons: [] },
+    restarting: { m: { updaterStatus: () => "ready", download: dl({ state: "restarting" }) }, texts: ["Restarting into v0.60.36…"], buttons: [] },
     "host-ready": { m: { updaterStatus: () => "ready" }, texts: ["v0.60.36 ready"], buttons: ["Restart"] },
     failed: { m: { updaterStatus: () => "error", download: dl({ state: "failed", error: LONG }) }, texts: [`Download failed: ${LONG}`], buttons: ["Try again", "Release page"] },
     stopping: {
@@ -138,6 +139,25 @@ describe("every state of the Maintenance section", () => {
         // The message text is in the document once, whatever the number of buttons.
         const text = rows[0].querySelector(".maintenance-row-text")!.textContent!;
         expect(host.textContent!.split(text).length - 1).toBe(1);
+    });
+
+    // A decided restart is sent to the launcher as confirmed and opens no dialog of ours (srv-core update/restart.rs); only a
+    // .deb or .rpm install still has the system's own permission prompt. The row says which, from the install kind srv reports.
+    it.each([
+        ["windows-setup", "Restarting into v0.60.36…"],
+        ["windows-portable", "Restarting into v0.60.36…"],
+        ["macos-app", "Restarting into v0.60.36…"],
+        ["linux-appimage", "Restarting into v0.60.36…"],
+        ["linux-portable", "Restarting into v0.60.36…"],
+        ["unknown", "Restarting into v0.60.36…"],
+        ["linux-package", "Restarting into v0.60.36… Your system may ask for your password to install it; refusing cancels the restart."],
+    ])("restarting on a %s install says: %s", (install, text) => {
+        acceptAppUpdate({ state: "available", current: "0.60.35", latest: "0.60.36", checked_ms: 1, install, can_download: true });
+        const restarting = ALL_ROWS.find((d) => d.id === "restarting")!;
+        const rows = restarting.rows(state(FIXTURES.restarting.m));
+        expect(rows.map((r) => r.text)).toEqual([text]);
+        expect(rows[0].actions).toEqual([]);
+        expect(text).not.toMatch(/dialog/i);
     });
 
     it("a row with no buttons has no empty button area", () => {
