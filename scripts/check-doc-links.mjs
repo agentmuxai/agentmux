@@ -36,6 +36,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { changedRows, pathsOf } from "./lib/branch-changes.mjs";
 
 const args = process.argv.slice(2);
 const ALL = args.includes("--all");
@@ -45,23 +46,9 @@ function git(...a) {
   return execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
+// Staged and edited files count as well as committed ones, so the answer is the same before and after the commit.
 function changedFiles() {
-  const base = process.env.GITHUB_BASE_REF || "main";
-  let ref = `origin/${base}`;
-  try {
-    git("rev-parse", "--verify", "--quiet", ref);
-  } catch {
-    ref = base;
-  }
-  let mergeBase;
-  try {
-    mergeBase = git("merge-base", ref, "HEAD").trim();
-  } catch {
-    return [];
-  }
-  return git("diff", "--name-only", "--diff-filter=ACMR", `${mergeBase}...HEAD`)
-    .split("\n")
-    .filter(Boolean);
+  return pathsOf(changedRows(), "ACMR");
 }
 
 const tracked = new Set(git("ls-files").split("\n").filter(Boolean));
