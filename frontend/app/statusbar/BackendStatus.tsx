@@ -61,14 +61,14 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
     const backendInfo = props.backendInfo;
     const color = () => statusDotColor(backendStatus(), worstHealthLevel());
 
-    // Opens upward, left-aligned to the status dot. Positioning, chrome zoom, dismiss
-    // and the airspace cut are AnchoredPopover's.
+    // Opens upward, left-aligned to the status dot; positioning, zoom, dismiss and the airspace cut are AnchoredPopover's.
     const POPOVER_WIDTH = 260;
 
     return (
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-start"
+            fitHeight
             onDismiss={props.onClose}
             class="status-bar-popover"
             role="dialog"

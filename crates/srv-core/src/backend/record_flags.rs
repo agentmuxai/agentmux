@@ -11,9 +11,8 @@
 //! - **growth**: a size whose trend rose over each of the last two days by more than the margin and by more
 //!   than its floor, and that more content does not explain.
 //!
-//! A flag is a line in the record and nothing more: it is read with the events (`App record`, kind `events`),
-//! tells no one and stops nothing. What a flag shows the person comes after these rules have run against real
-//! weeks.
+//! A flag is a line in the record: it is read with the events (`App record`, kind `events`) and stops nothing.
+//! What is said of it, to the person and to the machine's steward, is `record_notice`.
 //!
 //! What the growth rule reads, and what it leaves out:
 //! - the `core` part and each `core:` row (srv, the host, the GPU process), only over two days in which srv
@@ -256,16 +255,54 @@ pub fn found(dir: &Path, now_ms: u64) -> (u64, Vec<Flag>) {
     (end, flags)
 }
 
-/// Run the rules for the hour that just ended and write each new flag as an event at that hour's end. BLOCKING
-/// (file reads and an append). A failure is logged: the rules are never a reason for the record to fail.
-pub fn look(dir: &Path, now_ms: u64) {
-    let (end, flags) = found(dir, now_ms);
-    for flag in flags {
-        tracing::info!(rule = flag.rule, key = %flag.key, fields = %flag.fields, "[record] flag");
-        if let Err(e) = agentmux_common::record_events::append_event(dir, end, KIND, flag.line()) {
-            tracing::warn!(error = %e, "[record] a flag could not be written");
+/// How long a flag is still said after its hour: a growing size is found again each day while it grows, so its
+/// flag lasts until the next would be written; a bad hour of stalls is over when the next hour or two are quiet.
+const GROWTH_SAID_MS: u64 = DAY_MS + HOUR_MS;
+const STALLS_SAID_MS: u64 = 2 * HOUR_MS;
+
+/// The flags among `events` that are still said at `now_ms`, oldest first: the newest of each rule and key,
+/// while it is younger than its rule's time.
+pub fn still_said(events: &[Value], now_ms: u64) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for e in events.iter().filter(|e| e["kind"] == KIND) {
+        let Some(t) = e["t"].as_u64() else { continue };
+        let lasts = if e["rule"] == "growth" { GROWTH_SAID_MS } else { STALLS_SAID_MS };
+        if t > now_ms || t + lasts <= now_ms {
+            continue;
+        }
+        match out.iter_mut().find(|o| o["rule"] == e["rule"] && o["key"] == e["key"]) {
+            Some(same) if same["t"].as_u64().unwrap_or(0) <= t => *same = e.clone(),
+            Some(_) => {}
+            None => out.push(e.clone()),
         }
     }
+    out.sort_by_key(|e| e["t"].as_u64().unwrap_or(0));
+    out
+}
+
+/// What a look at the record found.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Looked {
+    /// The flags this look wrote.
+    pub new: Vec<Flag>,
+    /// Every flag still said now ([`still_said`]), these among them, as the record holds them.
+    pub said: Vec<Value>,
+}
+
+/// Run the rules for the hour that just ended and write each new flag as an event at that hour's end. BLOCKING
+/// (file reads and an append). A failure is logged: the rules are never a reason for the record to fail.
+pub fn look(dir: &Path, now_ms: u64) -> Looked {
+    let (end, flags) = found(dir, now_ms);
+    let mut new = Vec::new();
+    for flag in flags {
+        tracing::info!(rule = flag.rule, key = %flag.key, fields = %flag.fields, "[record] flag");
+        match agentmux_common::record_events::append_event(dir, end, KIND, flag.line()) {
+            Ok(()) => new.push(flag),
+            Err(e) => tracing::warn!(error = %e, "[record] a flag could not be written"),
+        }
+    }
+    let (_, events) = read_events(dir, now_ms.saturating_sub(GROWTH_SAID_MS), now_ms, usize::MAX);
+    Looked { new, said: still_said(&events, now_ms) }
 }
 
 #[cfg(test)]
@@ -404,6 +441,28 @@ mod tests {
     }
 
     #[test]
+    fn a_stall_flag_is_said_for_two_hours_and_a_growth_flag_until_the_next_days_would_be() {
+        let flag = |t: u64, rule: &str, key: &str| json!({ "t": t, "kind": KIND, "rule": rule, "key": key });
+        let events = vec![
+            flag(END - DAY_MS, "growth", "core"),
+            json!({ "t": END - 10, "kind": "ui_stall", "ms": 9_000 }),
+            flag(END, "stalls", "ui_stall"),
+            flag(END, "growth", "core"),
+        ];
+        let said = |now: u64| -> Vec<(String, u64)> {
+            still_said(&events, now).iter().map(|e| (e["rule"].as_str().unwrap().to_string(), e["t"].as_u64().unwrap())).collect()
+        };
+        // Both of this hour; of the series that keeps growing, only its newest flag. A stall is not a flag.
+        assert_eq!(said(END + 5 * 60_000), [("growth".to_string(), END), ("stalls".to_string(), END)]);
+        // Two hours on the stalls are no longer said. The growth is, until a day and an hour after it.
+        assert_eq!(said(END + 2 * HOUR_MS), [("growth".to_string(), END)]);
+        assert_eq!(said(END + DAY_MS + HOUR_MS - 1).len(), 1);
+        assert!(said(END + DAY_MS + HOUR_MS).is_empty());
+        // Before this hour's flags were written, yesterday's growth was the one said.
+        assert_eq!(said(END - 1), [("growth".to_string(), END - DAY_MS)]);
+    }
+
+    #[test]
     fn the_hour_s_flags_are_written_once_and_a_growing_series_once_a_day() {
         let dir = tempfile::tempdir().unwrap();
         let write = |t: u64, kind: &str, fields: Value| agentmux_common::record_events::append_event(dir.path(), t, kind, fields).unwrap();
@@ -420,7 +479,13 @@ mod tests {
         let said: Vec<(&str, &str)> = flags.iter().map(|f| (f.rule, f.key.as_str())).collect();
         assert_eq!(said, vec![("stalls", "ui_stall"), ("growth", "core")]);
 
-        look(dir.path(), END + 5 * 60_000);
+        let looked = look(dir.path(), END + 5 * 60_000);
+        assert_eq!(looked.new.iter().map(|f| f.rule).collect::<Vec<_>>(), ["stalls", "growth"]);
+        assert_eq!(looked.said.len(), 2);
+        // Looked at again in the same hour: nothing new is written, and both are still said.
+        let again = look(dir.path(), END + 20 * 60_000);
+        assert!(again.new.is_empty());
+        assert_eq!(again.said, looked.said);
         let (_, events) = read_events(dir.path(), END, END, 10);
         assert_eq!(events.len(), 2);
         assert_eq!(events[0]["kind"], KIND);

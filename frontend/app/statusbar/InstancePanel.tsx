@@ -169,6 +169,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            fitHeight
             onDismiss={props.onClose}
             class="instance-panel"
             role="dialog"

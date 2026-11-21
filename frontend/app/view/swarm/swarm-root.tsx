@@ -6,6 +6,7 @@ import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-hold
 import { createEffect, createMemo, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel } from "./swarm-model";
 import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
+import { AccountUsageStrip } from "@/app/view/account-usage/account-usage";
 import { selectTrace } from "@/app/util/select-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 import { SwarmAgentList, useSwarmAgents, type SwarmAgents } from "./swarm-agent-list";
@@ -105,6 +106,7 @@ export function SwarmView(props: {
             >
                 <RegistrationFlagsProvider visible={() => ctx.visibility() === "active"}>
                     <AccountAvailabilityStrip />
+                    <AccountUsageStrip />
                     {/* The area above the list follows the open sections; the list itself is rendered once and
                         never remounted by opening or closing one, which is what keeps a press on a row from
                         being lost (#5208). */}

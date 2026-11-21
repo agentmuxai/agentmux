@@ -71,11 +71,15 @@ pub fn install_state_hooks(state: &AppState) {
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
+    // Only the agents running in this process: the roster and the identity folders are shared by every
+    // channel on the host, and a channel starting beside another reads nothing of the other's agents.
+    let drift_state = state.clone();
     backend::memory::native_drift::spawn(
         state.fs_watch_pool.clone(),
         state.mstore.clone(),
         state.id_store.clone(),
         state.broker.clone(),
+        std::sync::Arc::new(move || crate::server::agent_lifecycle::running_agent_ids(&drift_state)),
     );
 
     // Retention/GC for native-memory version history — see

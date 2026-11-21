@@ -928,6 +928,24 @@
       "alt": false,
       "meta": false,
       "vk": 71
+    },
+    {
+      "command": "pane:history:back",
+      "source": "ctrl+alt+-",
+      "ctrl": true,
+      "shift": false,
+      "alt": true,
+      "meta": false,
+      "vk": 189
+    },
+    {
+      "command": "pane:history:forward",
+      "source": "ctrl+shift+-",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 189
     }
   ],
   "linux": [
@@ -1380,6 +1398,24 @@
       "alt": false,
       "meta": false,
       "vk": 71
+    },
+    {
+      "command": "pane:history:back",
+      "source": "ctrl+alt+-",
+      "ctrl": true,
+      "shift": false,
+      "alt": true,
+      "meta": false,
+      "vk": 189
+    },
+    {
+      "command": "pane:history:forward",
+      "source": "ctrl+shift+-",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 189
     }
   ]
 }

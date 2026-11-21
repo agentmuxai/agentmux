@@ -77,6 +77,45 @@ fn the_cap_and_the_commit_limit_are_each_a_reason_to_make_room() {
     assert!(over_limit(&off, 99, Some(99.0)).is_none());
 }
 
+/// The memory watch looks only at the agents `running_agent_ids` names, and finds them in the memory roster by
+/// the id the roster uses. If the two ids differed, the watch would quietly stop looking at every running agent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_memory_watch_finds_a_running_agent_by_the_id_the_memory_roster_uses() {
+    use crate::backend::memory::native_drift::{owned_targets, OwnedAgents};
+    use crate::backend::memory::native_files::list_all_memory_targets;
+    let state = test_state();
+    let (_ws, tabs) = seed_workspace(&state, 1).await;
+    let config = tempfile::tempdir().unwrap();
+    let running = seed_agent_block(&state, &tabs[0], "ag-mem-running").await;
+    register_quiet(&running, 1000);
+    seed_agent_block(&state, &tabs[0], "ag-mem-stopped").await; // an agent with a pane and no process
+    for id in ["ag-mem-running", "ag-mem-stopped"] {
+        let mut def = state.mstore.agent_def_get(id).unwrap().unwrap();
+        def.working_directory = format!("/work/{id}");
+        state.mstore.agent_def_update(&mut def).unwrap();
+        state
+            .mstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: id.to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+    }
+    let ids_in_roster: Vec<String> = list_all_memory_targets(&state.mstore).into_iter().map(|(id, _)| id).collect();
+    assert!(
+        ids_in_roster.contains(&"ag-mem-running".to_string()) && ids_in_roster.contains(&"ag-mem-stopped".to_string()),
+        "the memory roster resolves both agents' folders: {ids_in_roster:?}"
+    );
+
+    let watching = state.clone();
+    let owned: OwnedAgents = std::sync::Arc::new(move || running_agent_ids(&watching));
+    let mine: Vec<String> = owned_targets(&state.mstore, &owned).into_iter().map(|(id, _)| id).collect();
+    assert_eq!(mine, vec!["ag-mem-running".to_string()], "the running agent's folder, and no other");
+    blockcontroller::delete_controller(&running);
+}
+
 /// A parked agent whose process is a running stub, quiet between turns.
 async fn parked_running(state: &AppState, tab: &str, agent: &str) -> String {
     let block = seed_agent_block(state, tab, agent).await;

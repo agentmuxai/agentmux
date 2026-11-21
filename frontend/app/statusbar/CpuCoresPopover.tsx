@@ -34,6 +34,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            fitHeight
             onDismiss={props.onClose}
             class={`cpu-cores-popover cpu-cores-popover--${s.tier()}`}
             role="dialog"

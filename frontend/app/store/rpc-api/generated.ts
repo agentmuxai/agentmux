@@ -399,6 +399,7 @@ import type { IdentityAccountSetFailoverReq } from "@/types/rpc/IdentityAccountS
 import type { IdentityAccountSetFailoverResult } from "@/types/rpc/IdentityAccountSetFailoverResult";
 import type { IdentityAccountSignedInReq } from "@/types/rpc/IdentityAccountSignedInReq";
 import type { IdentityAccountSignedInResult } from "@/types/rpc/IdentityAccountSignedInResult";
+import type { IdentityAccountsResult } from "@/types/rpc/IdentityAccountsResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
@@ -3194,6 +3195,10 @@ export const GeneratedApi = {
   // command "identity.account.availability"
   IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
     return client.rpcCall("identity.account.availability", {}, opts);
+  },
+  // command "identity.account.usage"
+  IdentityAccountUsageCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountsResult> {
+    return client.rpcCall("identity.account.usage", {}, opts);
   },
   // command "jekt.held.summary"
   JektHeldSummaryCommand(client: RpcClient, opts?: RpcOpts): Promise<JektHeldSummaryResult> {

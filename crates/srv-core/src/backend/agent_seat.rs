@@ -57,6 +57,12 @@ pub fn is_remote_lead(lead: &str) -> bool {
     lead.contains('@')
 }
 
+/// Whether a seat names its agent this computer's steward: in its qualifier or the line about what it owns.
+/// There is no steward role; the steward is who the machine's own notes go to (a low disk, a flag of the record).
+pub fn is_steward(seat: &AgentSeat) -> bool {
+    [seat.qualifier.as_deref(), seat.area.as_deref()].into_iter().flatten().any(|t| t.to_ascii_lowercase().contains("steward"))
+}
+
 /// Whether `role` is one a seat may name.
 pub fn is_role(role: &str) -> bool {
     ROLES.contains(&role)

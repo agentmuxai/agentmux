@@ -107,6 +107,27 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
     { command: "term:multiInput", label: "Type into all terminals", category: "Terminal", mac: ["meta+shift+m"], other: ["ctrl+shift+alt+m"], skipShell: true },
     { command: "pane:voice", label: "Voice input", category: "General", mac: ["ctrl+shift+v"], other: ["ctrl+shift+v"], when: "!terminalFocus" },
+    // "Open" chords: Ctrl+Shift+O (⌘⇧O), then a letter. Nothing else uses Ctrl+Shift+O as a first step.
+    ...(
+        [
+            ["open:terminal", "Open Terminal", "t"],
+            ["open:files", "Open Files", "f"],
+            ["open:swarm", "Open Swarm", "s"],
+            ["open:kanban", "Open Kanban", "k"],
+            ["open:vault", "Open Vault", "v"],
+            ["open:history", "Open History", "h"],
+            ["open:sysinfo", "Open System Info", "i"],
+            ["app:connectors", "Connectors", "c"],
+            ["app:memory", "Memory", "m"],
+        ] as const
+    ).map(
+        ([command, label, letter]): KeyBindingRow => ({ command, label, category: "General", mac: [`meta+shift+o ${letter}`], other: [`ctrl+shift+o ${letter}`], skipShell: true })
+    ),
+    // Back and forward through the panes you focused. In a terminal ⌃- and ⌃⇧- are the shell's undo, so on macOS they are left to it.
+    { command: "pane:history:back", label: "Back to Previous Pane", category: "Panes", other: ["ctrl+alt+-"], skipShell: true },
+    { command: "pane:history:back", label: "Back to Previous Pane", category: "Panes", mac: ["ctrl+-"] },
+    { command: "pane:history:forward", label: "Forward to Next Pane", category: "Panes", other: ["ctrl+shift+-"], skipShell: true },
+    { command: "pane:history:forward", label: "Forward to Next Pane", category: "Panes", mac: ["ctrl+shift+-"] },
 
     // ── Find & zoom ──
     { command: "pane:find", label: "Find in pane", category: "Find & zoom", mac: ["meta+f"], skipShell: true },

@@ -1,5 +1,98 @@
 # AgentMux Version History
 
+## 0.60.37 — 2026-11-20
+
+- Connectors is one list of cards, one per connector, with Connect on each; a connected card opens its accounts in place, and the cards reflow from a thin pane to a very wide one
+- A file opened from a Files pane that shows a container agent's folder, and a link to a path in such a folder, opens as a read-only copy
+- Copy on an image in the Editor, in an agent's reply and in the media viewer puts the image on the clipboard; video gets Copy frame, and a file gets Copy path
+- A hosted workspace now removes the version folders older than the one before the running version, two minutes after it starts, and only when this version carried the previous one's data forward
+- feat(skills): a non-Claude agent's skills index names each Agent Skill's SKILL.md and tells it to read the file before acting
+- The command palette's arrow keys wrap, its opening key closes it, an input method composing is not cut short, and a screen reader announces its list, groups and rows
+- AgentMux Web warns when free space on the data volume is low, at the same levels as the desktop, once per crossing, in a panel on the Disk readout
+- fix: the sign-in over an agent pane follows the pane's zoom and scrolls when the pane is small, and closes by itself once signed in
+- A host agent whose folder a container agent can write starts only the MCP servers set in AgentMux: Claude Code gets AgentMux's own config and reads no other, other harnesses are not started on the host there, the pane names the folder's servers that are left out, and agentmux-mcp doctor starts no command from that folder's own config
+- macOS start at login can be a Login Items entry (SMAppService) with a needs-approval state in Settings; off until the release bundle id is stable
+- Host log and the page's slow-call line say whether a slow call from the page waited to reach the host, was slow in the host, or waited on its way back
+- Internal: the cli, toolchain and widget RPC handlers are named functions instead of closures inside one 700-line register function, with tests that pin their answers
+- Settings: a problem in settings.json shows its line, and Fix in editor opens the file on it
+- The Audit's This machine scope also lists the rows another channel on this computer keeps in its own file, asked over loopback every ten seconds
+- The server package's macOS signing job runs in the apple-signing environment, and the programs it signs and packs are checked against digests from the jobs that made them (signing stays off until its repository switch is turned on)
+- Linux: the status bar GPU panel reads AMD, Intel and NVIDIA adapters and per-process GPU use (sysfs, DRM fdinfo, NVML when present)
+- Test: the browser's credential calls answer a shared HTTP-prompt sign-in end to end
+- Shortcuts verifier: each row also checks that the window shows a change after the command runs
+- Settings: Advanced lists the keys of settings.json that are not settings, with a suggestion for a typo and a Remove button
+- The Swarm list rebuilds at most once per animation frame, so a burst of agent events no longer rebuilds it once per event
+- fix: the Editor and Files control bars (tree toolbar, document tab bar, mode and viewer bars, the Files top bar) follow the chrome zoom; the tree rows, document and file list keep the pane's
+- The desktop build's macOS signing job calls jq, curl, awk and base64 by absolute path, like its other tools
+- Swarm: a broadcast to many agents is sent over a few seconds instead of all at once, and shows how many have been sent
+- The Browser pane of a server that runs the browser for each person asks for it first and waits while it starts, and gives it back when the pane closes
+- macOS packaging: the Login Items agent ships only in a Developer-ID-signed bundle
+- An agent that is out of quota waits for the reset instead of re-sending: a 429 that names a plan window (the 5-hour limit, the weekly limit) is a usage limit whose reset time is read from the message in its own time zone, the row says when it lifts, the waiting message is sent once after the reset, and a failed turn's end no longer restarts the retry ladder
+- A right-click on a video or audio element never opens the engine's own menu, which could block the window on macOS
+- feat(windows): start at login for the Microsoft Store package through an MSIX startup task, shown in Settings with the state Windows gives (start-with-OS phase 4, Windows MSIX half)
+- Shortcuts verifier: rows that need a text field out of the way or one kind of pane say so, and a prompt left open is named
+- the nightly memory lab records what is alive in each allocator beside what it holds, per process, and a night's comparison shows both by allocator
+- Pane focus, swap and resize keys work from a text field with nothing typed in it, such as a Shortcuts pane's filter, instead of being swallowed as text input
+- Dev script: a UI-level layout stress run that checks the window against the stored layout
+- The release skill ends with bumping the Homebrew tap, so brew installs get the new version
+- Agents and the person can read how much of an account's usage windows is used (percent and reset time) from Claude Code's own report, and an account's leaders get one note at 75% and 90%
+- A confirm that is the person's own action (replace a pane, close one, shut an agent down) no longer stops the shortcut API: only requests that answer an agent's ask are operator-only, and only in their own pane; Escape always goes through
+- The record's hourly rules write a flag for many or long stalls and for a size that grows two days running, and App record says them in words
+- Browser pane downloads: the strip says how many downloads of a burst were skipped, and a skipped download no longer adds a cancelled row
+- The command palette lists the commands you ran from it first, under recently used, and a new command clears that list
+- Internal: the agent-definition RPC handlers are named functions instead of closures inside one 700-line register function
+- The record of a long-running AgentMux outlasts an upgrade: it lives in the channel's folder, and what older versions kept is brought into it
+- The signed server package's check of the macOS programs now fails when Apple's notarization does not cover one of them
+- feat(editor): right-click a document tab to show its file in the computer's file manager (Reveal in File Explorer, Reveal in Finder, Open Containing Folder), and Linux selects the file where the file manager supports it
+- Transcript messages for an agent pane are applied once per frame, in order, at the pane's own rate
+- Agent panes nobody can see (a hidden pane tab or window tab) place their incoming transcript records in one pass about every quarter second, and when shown, instead of parsing every message as it arrives
+- Pictures, video and files in a container agent's messages are read and opened only from the agent's own shared folders
+- A container agent's backgrounded Bash call is checked inside its container, so its dock row ends when the process does and carries the call's own description instead of Bash
+- The streamed browser host ends itself after ten minutes with no pane open
+- Kanban stage colours are stored under role names (Muted, Research, Info, Active, Attention, Review, Done, Shipped); sets stored with the older hue names still read
+- The Audit's LAN scope lists the rows of paired computers on your network, when their owners share their Audit
+- dev script: the layout stress run aims its header drags at the drop guides and reports drags by target kind
+- Files: a running copy or move's progress line wraps in a narrow pane, so the name and percentage stay readable above the bar and Cancel
+- UI screenshot and record: a container agent gets its own copy of the file, so it can open it and attach it to a task or message
+- macOS: the stable app now has one fixed bundle id (ai.agentmux.stable) for every release, so upgrades keep Screen Recording, Accessibility, folder and notification permissions and the Login Items entry. The first upgrade from a per-version install asks macOS for those permissions one last time.
+- The UI-stall probe's once-a-second ping no longer makes a file lookup on the UI thread, which could hold it for seconds, and a stall it watched is never recorded as shorter than it saw
+- macOS: the quit warning is an alert with the AgentMux icon instead of osascript's generic one (#48213)
+- Browser pane downloads: a Save As window that cannot open no longer leaves the pane waiting; the download is saved without asking and the strip says so
+- CI: pushes to main share one concurrency group, so a burst of merges is tested at its head and a run in progress finishes
+- CI: the advisory Windows and macOS jobs start after the docs and frontend gates have not failed
+- A refused Kanban stage change from a stale revision now says what the stages are now and which revision to send
+- The Store listing check names the package version the Store serves and which releases are newer, and the release run's summary gets a WinGet line like the Store's
+- macOS release builds: the identity check expects exactly ai.agentmux.stable, so a lost channel variable cannot slip through
+- The release skill lists one read-only check per distribution channel to run after a release is published
+- Editor: when a file with unsaved edits changed on disk, a panel offers Reload or Keep mine, and a save no longer overwrites the other change silently
+- The release collects each package file only from the artifact that makes it, and stops on one found in any other artifact
+- An agent can leave a note on a Kanban task nobody holds, without claiming it
+- macOS quit warning: the answer reader's doc comment says what the alert prints (#48213)
+- A link to a path in a container agent's message is opened from the agent's own folders; a refused picture says why
+- Right-clicking an inline video or audio in a reply gives Copy frame and Copy path, before it is played as well as after
+- Jobs: the watchdog gives up on a local job's slot that passed with no row, as missed (not_started)
+- Settings > Kanban: rows for closing a task when its PR merges and for Review's limit
+- A pane that follows the bottom no longer reads its scroll position on every document change, which forced a layout of the rows just written
+- A flush that touches only the live end of a long transcript no longer redoes the work for every row above it
+- CI: a red main-red report for a push run lists the commits since the last run that finished
+- Save As: the dialog runs on the app's Tokio runtime so it opens on Linux, opens in the default folder on macOS, and a cancelled download keeps its file name (#196)
+- A waiting Vault request in the status bar no longer holds back every pane's commands from an agent's shortcut API; only a prompt in the pane or over the window does
+- A Drone tool lets an agent list, read and fire the drones on its computer (a fire is recorded as that agent) and read their runs
+- Settings > Kanban: a stage's colour is a button with its swatch and name, opening a menu of named swatches
+- The update download no longer flashes to 99% near the start: the Store's progress is read over the whole update, and a download's figure only goes forward
+- A container agent's turn on a machine with no container runtime now ends with the reason in the pane instead of sitting in Working
+- net-fault README: record the boot-time offline scenarios run on current main
+- Two CI tests that failed on a loaded runner are steadier: the 4,096-colour backdrop sweep runs as 16 short tests, and the wheel test waits for a slow notch instead of sending another
+- The Maintenance section lays out every update state the same way: the message takes the full width and its buttons sit under it when they do not fit beside it
+- The Audit's Secrets list stacks each row in a narrow pane (when, agent and what first, then the entry, where and the outcome) instead of scrolling sideways
+- Settings > Kanban: a gap between the stage-history lines when they wrap
+- Linux file dialogs run in a helper process, so the portal accepts them and they have a title and a start folder (#196)
+- A throw in a pane's header, body or view model is now logged with the pane and which part threw (and a view model's own computations no longer abort the window's updates silently), so one pane's fault is reported with its pane
+- macOS: clicks on the main window work again while a Browser pane is open (#48237)
+- Internal: bundle.import_for_agent is split into named steps instead of one 285-line function
+- A menu's button now tells a screen reader that it opens a menu and whether the menu is open
+- A window whose panes stopped following its layout (a pane the layout holds that stays unmounted for several seconds), or that keeps throwing errors it cannot contain, now offers a Reload, like the one for a window that stopped switching tabs; it never reloads on its own
+
 ## 0.60.36 — 2026-11-20
 
 - The composer strip keeps its tallest line count at a pane width until the width changes, so the CPU and memory readout changing by a character no longer flips it between one and two rows

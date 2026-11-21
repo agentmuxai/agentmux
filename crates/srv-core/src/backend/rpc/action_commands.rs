@@ -101,7 +101,7 @@ pub const READ_ONLY: &[&str] = &[
     "geteditorroots", "getfullconfig", "getidentityaccount", "getmemory", "getmeta", "gettoolstatus",
     "getwaveairatelimit", "globalmemory:diff", "globalmemory:history", "globalmemory:import_sources",
     "globalmemory:reach_list", "globalmemory:removed", "globalmemory:sections", "history.agent_sessions", "history.agents", "history.locate",
-    "history.usage", "identity.account.availability",
+    "history.usage", "identity.account.availability", "identity.account.usage",
     "identity.self.accounts", "install.check", "jobs.dryrun", "jobs.get", "jobs.list", "jobs.reporters.list", "jobs.runs",
     "jekt.held.summary", "jobs.templates.catalog", "jobs.templates.get", "jobs.templates.list", "jobs.templates.update_diff",
     "kanban.list", "kanban.task", "layout.otherBuilds", "layout.preview", "listagenthistory", "listagentidentities",
