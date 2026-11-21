@@ -144,10 +144,24 @@ async fn an_agents_service_read_is_recorded_but_the_windows_reads_and_bookkeepin
     let read = r#"{"service":"object","method":"GetObject","args":["x"]}"#;
     let (_, id) = send(&state, Method::POST, "/agentmux/service", Some(&token), read).await;
     assert_eq!(recorded(&id).await.source_agent.as_deref(), Some("agent:uid-http-act-f"));
-    for quiet in [read, r#"{"service":"credential","method":"Lookup","args":[]}"#, r#"{"service":"window","method":"SetWindowOpacity","args":[]}"#] {
+    let bookkeeping = r#"{"service":"object","method":"UpdateObjectMeta","args":["block:b1",{"term:osc_title":"build","term:human_turns":2}]}"#;
+    for quiet in [read, bookkeeping, r#"{"service":"credential","method":"Lookup","args":[]}"#, r#"{"service":"window","method":"SetWindowOpacity","args":[]}"#] {
         let (_, id) = send(&state, Method::POST, "/agentmux/service", None, quiet).await;
         not_recorded(&id).await;
     }
+}
+
+#[tokio::test]
+async fn a_meta_write_with_any_other_key_is_recorded_with_the_object_and_the_key_names_and_never_the_values() {
+    let state = test_state();
+    let body = r#"{"service":"object","method":"UpdateObjectMeta","args":["block:b1",{"term:osc_title":"build","controller":"a-secret-value"}]}"#;
+    let (_, id) = send(&state, Method::POST, "/agentmux/service", None, body).await;
+    let line = recorded(&id).await;
+    assert_eq!(line.source_agent.as_deref(), Some("unproven"));
+    let subject = line.reason.clone().unwrap_or_default();
+    assert!(subject.starts_with("object.UpdateObjectMeta object=block:b1 keys="), "{subject}");
+    assert!(subject.contains("controller") && subject.contains("term:osc_title"), "{subject}");
+    assert!(!serde_json::to_string(&line).unwrap().contains("a-secret-value"));
 }
 
 #[tokio::test]
