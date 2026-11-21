@@ -103,13 +103,25 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let fades: Vec<(String, f64)> = FADES.with(|fades| fades.borrow().values().cloned().collect());
-            if fades.is_empty() {
+            // A window that closed, or whose browser was made again under a new id, is forgotten here: the timer
+            // must end when no live window is faded, and must not keep sending to a browser that is back at 100%.
+            let fades: Vec<(i32, String, f64)> =
+                FADES.with(|fades| fades.borrow().iter().map(|(id, (label, alpha))| (*id, label.clone(), *alpha)).collect());
+            let mut live = Vec::new();
+            for (id, label, alpha) in fades {
+                match self.state.get_browser(&label) {
+                    Some(browser) if browser.identifier() == id => live.push((browser, alpha)),
+                    _ => {
+                        FADES.with(|fades| fades.borrow_mut().remove(&id));
+                    }
+                }
+            }
+            if live.is_empty() {
                 TIMER_RUNNING.with(|running| running.set(false));
                 return;
             }
-            for (label, alpha) in fades {
-                if let Some(host) = self.state.get_browser(&label).and_then(|b| b.host()) {
+            for (browser, alpha) in live {
+                if let Some(host) = browser.host() {
                     host.send_dev_tools_message(Some(renderer_background_override(alpha).as_bytes()));
                 }
             }
