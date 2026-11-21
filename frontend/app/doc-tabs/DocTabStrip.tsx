@@ -26,6 +26,7 @@ import { moveDocTabToNewPane } from "./doc-tab-new-pane";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
 import { MENU_ICON } from "@/app/util/menu-icons";
+import { writeText } from "@/util/clipboard";
 
 /**
  * A right-click on a tab adds its items to the pane menu (blockframe's body
@@ -33,19 +34,41 @@ import { MENU_ICON } from "@/app/util/menu-icons";
  * is noted as the click starts, so the items, built a moment later, act on
  * it. Returns the strip row's `ref`.
  */
-function tabMenuBinder<P>(ctl: DocTabsModel<P>, blockId: string, own: (tab: DocTab<P>) => ContextMenuItem[]): (el: HTMLDivElement) => void {
+function tabMenuBinder<P>(
+    ctl: DocTabsModel<P>,
+    blockId: string,
+    own: (tab: DocTab<P>) => ContextMenuItem[],
+    pathOf?: (tab: DocTab<P>) => string | undefined
+): (el: HTMLDivElement) => void {
     let rightClicked: string | null = null;
     const noteTab = (e: MouseEvent) => {
         rightClicked = (e.target as Element | null)?.closest?.("[data-tab-id]")?.getAttribute("data-tab-id") ?? null;
     };
     const tabMenu = (): ContextMenuItem[] => {
         const id = rightClicked;
-        const tab = id ? ctl.tabs().find((t) => t.id === id) : undefined;
+        const tabs = ctl.tabs();
+        const at = id ? tabs.findIndex((t) => t.id === id) : -1;
+        const tab = tabs[at];
         if (!id || !tab) return [];
+        const path = pathOf?.(tab);
         return [
             ...own(tab),
+            { label: tab.pinned ? "Unpin Tab" : "Pin Tab", icon: tab.pinned ? MENU_ICON.unpin : MENU_ICON.pin, click: () => ctl.pin(id, !tab.pinned) },
+            ...(path ? [{ label: "Copy Path", icon: MENU_ICON.copy, click: () => void writeText(path).catch(() => {}) }] : []),
             { label: "Move to New Pane", icon: MENU_ICON.open, click: () => void moveDocTabToNewPane(blockId, id, blockId, "right") },
+            { type: "separator" as const },
             { label: "Close Tab", icon: MENU_ICON.close, click: () => void ctl.close(id) },
+            // Pinned tabs stay, so a pane with only pinned others has nothing for these to close.
+            {
+                label: "Close Others",
+                enabled: tabs.some((t) => t.id !== id && !t.pinned),
+                click: () => ctl.closeOthers(id),
+            },
+            {
+                label: "Close to the Right",
+                enabled: tabs.slice(at + 1).some((t) => !t.pinned),
+                click: () => ctl.closeToRight(id),
+            },
         ];
     };
     return (el) => {
@@ -87,11 +110,13 @@ export function DocTabStrip<P>(props: {
     onRename?: (tab: DocTab<P>) => void;
     /** A pane's own items for a tab's menu, above the strip's. */
     menuItems?: (tab: DocTab<P>) => ContextMenuItem[];
+    /** The tab's file path, for the menu's Copy Path; undefined for a tab with none (an untitled buffer). */
+    pathOf?: (tab: DocTab<P>) => string | undefined;
     /** Which zoom the strip is drawn at, for a Ctrl+wheel over it (`data-zoom-scope`): "chrome" when the pane draws it at the chrome's. */
     zoomScope?: "chrome";
 }): JSX.Element {
     const ctl = props.ctl;
-    const bindMenu = tabMenuBinder(ctl, props.blockId, (tab) => props.menuItems?.(tab) ?? []);
+    const bindMenu = tabMenuBinder(ctl, props.blockId, (tab) => props.menuItems?.(tab) ?? [], (tab) => props.pathOf?.(tab));
     return (
         <Show when={props.show?.() ?? ctl.showStrip()}>
             <div class="doc-tab-strip" role="presentation" ref={bindMenu} data-zoom-scope={props.zoomScope}>
@@ -103,7 +128,12 @@ export function DocTabStrip<P>(props: {
                         animateWidth
                         getId={(t) => t.id}
                         getLabel={(t) => t.title}
-                        getIcon={(t) => (t.icon ? <i class={`fa fa-${t.icon}`} aria-hidden="true" /> : <></>)}
+                        getIcon={(t) => (
+                            <>
+                                {t.pinned && <i class="fa fa-thumbtack doc-tab-pin-mark" aria-label="Pinned" role="img" />}
+                                {t.icon ? <i class={`fa fa-${t.icon}`} aria-hidden="true" /> : <></>}
+                            </>
+                        )}
                         getTooltip={(t) => {
                             const base = props.tooltipOf?.(t) ?? t.title;
                             return t.preview ? `${base} (preview, double-click to keep)` : base;

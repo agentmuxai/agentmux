@@ -36,6 +36,7 @@ const h = vi.hoisted(() => ({
     readOnly: new Set<string>(),
     listing: [] as { name: string; is_dir: boolean; is_symlink: boolean }[],
     inflight: new Set<Promise<unknown>>(),
+    copied: [] as string[],
 }));
 
 vi.mock("@/app/store/global", async (orig) => ({
@@ -78,7 +79,11 @@ vi.mock("@/app/store/rpc-api", () => {
         }),
     };
 });
-vi.mock("@/util/clipboard", () => ({ writeText: async () => {} }));
+vi.mock("@/util/clipboard", () => ({
+    writeText: async (text: string) => {
+        h.copied.push(text);
+    },
+}));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({ WorkspaceService: {} }));
 vi.mock("@/app/tab/tab-presets", () => ({ createBlockOnModel: () => {}, waitForLayoutModel: async () => null }));
@@ -168,6 +173,7 @@ vi.mock("./lsp/lsp-extensions", () => ({
 import { EditorViewComponent } from "./editor-view";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { EditorViewModel } from "./editor-model";
+import { editorDocTabs } from "./editor-doc-tabs";
 import { revealInFileManagerLabel } from "@/app/util/file-manager-label";
 import { undo } from "@codemirror/commands";
 import { language } from "@codemirror/language";
@@ -1085,9 +1091,30 @@ describe("renaming a file from its tab", () => {
             return resolveContextMenuRegion(tabEl(v, id))!.items!();
         };
         // A file on disk can be shown in another viewer; an Untitled document has only its text.
-        expect(menuOf(fileTab).map((i) => i.label)).toEqual(["Rename…", revealInFileManagerLabel(), "Show As", "Move to New Pane", "Close Tab"]);
+        // (The undefined label is the separator before the Close rows.)
+        expect(menuOf(fileTab).map((i) => i.label)).toEqual([
+            "Rename…",
+            revealInFileManagerLabel(),
+            "Show As",
+            "Pin Tab",
+            "Copy Path",
+            "Move to New Pane",
+            undefined,
+            "Close Tab",
+            "Close Others",
+            "Close to the Right",
+        ]);
         expect(menuOf(fileTab)[2].submenu!.map((i) => i.label)).toEqual(["Text", "File info", "Hex"]);
-        expect(menuOf(scratchTab).map((i) => i.label)).toEqual(["Save As…", "Move to New Pane", "Close Tab"]);
+        // No path to copy yet.
+        expect(menuOf(scratchTab).map((i) => i.label)).toEqual([
+            "Save As…",
+            "Pin Tab",
+            "Move to New Pane",
+            undefined,
+            "Close Tab",
+            "Close Others",
+            "Close to the Right",
+        ]);
 
         // Ctrl+S on the Untitled tab opens its Save As box; Rename on the other tab closes it.
         run(v.model, "editor:save");
@@ -1112,6 +1139,88 @@ describe("renaming a file from its tab", () => {
         const calls = h.log.filter((l) => l.startsWith("rpc FsReveal "));
         expect(calls).toHaveLength(1);
         expect(JSON.parse(calls[0].slice("rpc FsReveal ".length))).toMatchObject({ path: "/home/u/a.ts", block_id: v.model.blockId });
+    });
+
+    describe("the tab's menu: Pin, Copy Path, Close Others, Close to the Right", () => {
+        const itemOf = (v: Awaited<ReturnType<typeof mountView>>, id: string, label: string) => {
+            fireEvent.contextMenu(tabEl(v, id));
+            return resolveContextMenuRegion(tabEl(v, id))!.items!().find((i) => i.label === label)!;
+        };
+        const paths = (v: Awaited<ReturnType<typeof mountView>>) => editorDocTabs(v.model).tabs().map((t) => t.payload.filePath);
+
+        it("Copy Path copies the file's path", async () => {
+            const v = await mountView();
+            const a = await open(v.model, "/home/u/a.ts");
+            h.copied.length = 0;
+            itemOf(v, a, "Copy Path").click!();
+            await settle();
+            expect(h.copied).toEqual(["/home/u/a.ts"]);
+        });
+
+        it("Pin Tab keeps the tab at the left with a pin mark and no ×, and Unpin undoes it", async () => {
+            const v = await mountView();
+            await open(v.model, "/home/u/a.ts");
+            const b = await open(v.model, "/home/u/b.ts");
+            itemOf(v, b, "Pin Tab").click!();
+            await settle();
+            expect(paths(v)).toEqual(["/home/u/b.ts", "/home/u/a.ts"]);
+            expect(tabEl(v, b).classList.contains("doc-tab--pinned")).toBe(true);
+            expect(tabEl(v, b).querySelector(".doc-tab-pin-mark")).not.toBeNull();
+            expect(itemOf(v, b, "Unpin Tab")).toBeDefined();
+            expect(itemOf(v, b, "Pin Tab")).toBeUndefined();
+            itemOf(v, b, "Unpin Tab").click!();
+            await settle();
+            expect(tabEl(v, b).classList.contains("doc-tab--pinned")).toBe(false);
+        });
+
+        it("Close Others closes the unpinned tabs but not the pinned ones, and shows the tab", async () => {
+            const v = await mountView();
+            const a = await open(v.model, "/home/u/a.ts");
+            const b = await open(v.model, "/home/u/b.ts");
+            await open(v.model, "/home/u/c.ts");
+            itemOf(v, a, "Pin Tab").click!();
+            await settle();
+            expect(itemOf(v, b, "Close Others").enabled).toBe(true);
+            itemOf(v, b, "Close Others").click!();
+            await settle();
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts"]);
+            expect(v.model.activeIdAtom()).toBe(b);
+            // Nothing left to close: the row is greyed.
+            expect(itemOf(v, b, "Close Others").enabled).toBe(false);
+        });
+
+        it("Close to the Right closes the unpinned tabs after the tab", async () => {
+            const v = await mountView();
+            await open(v.model, "/home/u/a.ts");
+            const b = await open(v.model, "/home/u/b.ts");
+            await open(v.model, "/home/u/c.ts");
+            await open(v.model, "/home/u/d.ts");
+            expect(itemOf(v, b, "Close to the Right").enabled).toBe(true);
+            itemOf(v, b, "Close to the Right").click!();
+            await settle();
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/b.ts"]);
+            expect(itemOf(v, b, "Close to the Right").enabled).toBe(false);
+        });
+
+        it("a tab with unsaved changes asks before Close Others closes it, and Keep leaves it open", async () => {
+            const v = await mountView();
+            await open(v.model, "/home/u/a.ts");
+            await type(v.model, 0, "x");
+            await open(v.model, "/home/u/b.ts");
+            const c = await open(v.model, "/home/u/c.ts");
+            itemOf(v, c, "Close Others").click!();
+            await settle();
+            // The clean tab closed at once; the edited one waits for an answer.
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/c.ts"]);
+            fireEvent.click([...document.body.querySelectorAll("button")].find((b) => /cancel/i.test(b.textContent ?? ""))!);
+            await settle();
+            expect(paths(v)).toEqual(["/home/u/a.ts", "/home/u/c.ts"]);
+            itemOf(v, c, "Close Others").click!();
+            await settle();
+            fireEvent.click([...document.body.querySelectorAll("button")].find((b) => /discard/i.test(b.textContent ?? ""))!);
+            await settle();
+            expect(paths(v)).toEqual(["/home/u/c.ts"]);
+        });
     });
 
     it("an Untitled document shows where it will be saved, and Enter saves it there", async () => {

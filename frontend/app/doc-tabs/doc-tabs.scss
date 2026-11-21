@@ -40,6 +40,18 @@
         font-style: italic;
     }
 
+    // A pinned tab is kept (Pin Tab on its menu): a small pin before its icon, and no × to close it by a
+    // slip; its menu and Ctrl+W still close it. One with unsaved changes keeps its ×, which says so.
+    .doc-tab--pinned:not(.pane-tab--attention) .pane-tab-close {
+        display: none;
+    }
+
+    .doc-tab-pin-mark {
+        margin-right: 4px;
+        font-size: 0.75em;
+        opacity: 0.75;
+    }
+
     // A tab without an icon (Media's "New Tab") starts with its label: no
     // empty icon box.
     .doc-tab--no-icon .pane-tab-icon {

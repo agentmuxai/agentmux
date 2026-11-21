@@ -913,6 +913,29 @@ export class EditorViewModel {
         }
     }
 
+    /**
+     * Close several tabs (Close Others, Close to the Right). The clean ones close at once; each one with
+     * unsaved changes asks in turn, and a refusal ends the round, leaving the rest of them open.
+     */
+    closeTabs(tabIds: string[]): void {
+        const dirty: string[] = [];
+        for (const tabId of tabIds) {
+            const events = dispatch(this.blockId, { type: "CloseTab", tabId, source: "user" });
+            if (events.some((e) => e.type === "RequestDirtyConfirm")) dirty.push(tabId);
+        }
+        const askNext = (): void => {
+            const tabId = dirty.shift();
+            const tab = tabId === undefined ? undefined : snapshot(this.blockId)?.tabs.find((t) => t.id === tabId);
+            if (!tabId || !tab || !this.confirmDirtyClose) return;
+            this.confirmDirtyClose(tab, () => {
+                dispatch(this.blockId, { type: "CloseTab", tabId, force: true, source: "user" });
+                // The panel clears itself right after this runs: the next ask goes after that.
+                queueMicrotask(askNext);
+            });
+        };
+        askNext();
+    }
+
     switchTab(tabId: string): void {
         dispatch(this.blockId, { type: "SwitchTab", tabId, source: "user" });
     }

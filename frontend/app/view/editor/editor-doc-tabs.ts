@@ -142,6 +142,18 @@ export function editorDocTabs(model: EditorViewModel): DocTabsModel<EditorBuffer
             return true;
         },
         promote: (id) => void dispatch(blockId, { type: "PinTab", tabId: id, source: "user" }),
+        pin: (id, pinned) => void dispatch(blockId, { type: "SetTabPinned", tabId: id, pinned, source: "user" }),
+        // Pinned tabs stay (as `closeOthers` and `closeToRight` in doc-tabs.ts have it); a dirty one asks first.
+        closeOthers: (id) => {
+            if (!tabOf(id)) return;
+            model.switchTab(id);
+            model.closeTabs(doc().tabs.filter((t) => t.id !== id && !t.pinned).map((t) => t.id));
+        },
+        closeToRight: (id) => {
+            const tabs = doc().tabs;
+            const at = tabs.findIndex((t) => t.id === id);
+            if (at >= 0) model.closeTabs(tabs.slice(at + 1).filter((t) => !t.pinned).map((t) => t.id));
+        },
         cycle: (delta) => model.cycleTab(delta),
         move: (id, delta) => {
             const at = doc().tabs.findIndex((t) => t.id === id);
