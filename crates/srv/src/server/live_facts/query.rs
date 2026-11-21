@@ -41,6 +41,8 @@ pub struct Params {
     pub limit: Option<usize>,
     pub offset: usize,
     pub group_by: Option<String>,
+    /// `host: all` was asked: the answer also names the LAN peers, so the caller can ask each one.
+    pub all_hosts: bool,
 }
 
 fn text(map: &HashMap<String, String>, key: &str) -> Option<String> {
@@ -52,9 +54,10 @@ impl Params {
     /// agents is the LAN call).
     pub fn from_map(map: &HashMap<String, String>, this_host: &str) -> Result<Self, String> {
         let select = Select::parse(map.get("fields").map(String::as_str), map.get("detail").map(String::as_str))?;
-        if let Some(host) = text(map, "host") {
+        let host = text(map, "host");
+        if let Some(host) = host.as_deref() {
             if !host.eq_ignore_ascii_case("all") && !host.eq_ignore_ascii_case(this_host) {
-                return Err(format!("host {host:?} is not this machine ({this_host}): another machine's agents are read through the LAN call, which this build does not have yet"));
+                return Err(format!("host {host:?} is not this machine ({this_host}): this route answers for this machine; another machine's agents are asked for with the tool's host argument"));
             }
         }
         let number = |key: &str| -> Result<Option<usize>, String> {
@@ -77,6 +80,7 @@ impl Params {
             limit: number("limit")?,
             offset: number("offset")?.unwrap_or(0),
             group_by,
+            all_hosts: host.as_deref().is_some_and(|h| h.eq_ignore_ascii_case("all")),
         })
     }
 }

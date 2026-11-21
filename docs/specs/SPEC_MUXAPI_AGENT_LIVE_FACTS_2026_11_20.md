@@ -1,6 +1,6 @@
 # Spec: MuxAPI agent live facts (model and the rest), on this host and across the LAN
 
-**Status:** active — approved 2026-11-20 with every recommended decision; phase 1 (this host: the facts, `Agents list` fields and filters, `Agents status`, the Swarm row) is built in the first build PR; phase 2 (LAN) and phase 3 (docs page) remain. Task #48221 (spec), build #48222. Author: Agent2-6.
+**Status:** active — approved 2026-11-20 with every recommended decision; phase 1 (this host: the facts, `Agents list` fields and filters, `Agents status`, the Swarm row) is built (merged); phase 2 (LAN: the `agents.status` op, `host` on `Agents list` and `Agents status`, the `hosts` block and the liveness-only fallback) is built in the second build PR; phase 3 (docs page) remains. Task #48221 (spec), build #48222. Author: Agent2-6.
 Builds on #48192 (account usage windows, merged as #7872 and #7909) and feeds the Swarm model tags (#48219, #48220).
 
 ## 1. Requirement
