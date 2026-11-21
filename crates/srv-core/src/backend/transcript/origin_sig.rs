@@ -240,7 +240,8 @@ impl WriterRuntime {
 /// `line`, an output line an agent's process wrote, as srv stores it: the agent's own bytes, with `amx.writer` saying
 /// which runtime wrote it, and which agent, signed for `owner`, added as the last member. The agent's bytes and key
 /// order are kept (readers look for `"type":"stream_event"` and `"subtype":"init"` near the start of a line). Whatever
-/// `amx` the line already carries is the agent's own words and is dropped first, never kept or merged. `None` for a
+/// `amx` the line already carries is the agent's own words and is dropped first, never kept or merged; such a line
+/// (rare) is written again from its parsed record, so its key order and number spelling are not kept. `None` for a
 /// line that isn't a JSON object, and for a streaming delta (never a message, and kept compact), which are stored as they are.
 pub fn stamp_writer(owner: &str, line: &str, runtime: WriterRuntime, ts_ms: i64) -> Option<String> {
     if is_stream_delta(line.as_bytes()) {
