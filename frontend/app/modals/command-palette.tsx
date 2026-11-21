@@ -80,6 +80,34 @@ function reportOver(name: string, ms: number | null, budget: number): void {
     if (ms != null && ms > budget) console.warn(`[perf] ${name} ${ms.toFixed(1)}ms, over its ${budget}ms budget`);
 }
 
+/** From the press that asked for the palette to the frame that shows it: the first frame after this task, which a timer queued from the frame callback follows. */
+function markOpenPainted(): void {
+    requestAnimationFrame(() => setTimeout(() => reportOver("palette-open", markEnd("palette-open", "painted"), OPEN_BUDGET_MS), 0));
+}
+
+/** The script time of `typed`, from the typed character to the rows it leaves (they are in the document when it returns). */
+function timeKeystroke(typed: () => void): void {
+    markStart("palette-keystroke");
+    typed();
+    reportOver("palette-keystroke", markEnd("palette-keystroke", "rows"), KEYSTROKE_BUDGET_MS);
+}
+
+/** A typed character: the new query, the first row selected and shown, and the rows built again from the first chunk. */
+function applyQuery(
+    value: string,
+    list: HTMLElement,
+    state: { setQuery: (q: string) => void; setSelectedIdx: (i: number) => void; restart: () => void }
+): void {
+    timeKeystroke(() => {
+        batch(() => {
+            state.setQuery(value);
+            state.setSelectedIdx(0);
+            state.restart();
+        });
+        list.scrollTop = 0;
+    });
+}
+
 /** Runs what the person picked: remembered as recently used (R29), and run after the palette has closed so it doesn't interfere. */
 function runPicked(cmd: CommandEntry, forceNew: boolean): void {
     rememberCommand(cmd.id);
@@ -129,6 +157,7 @@ function useBuiltRows(rows: () => PaletteRowModel[]) {
             grow();
         });
     };
+    onMount(grow); // the rows past the first chunk, a chunk a frame
     onCleanup(() => cancelAnimationFrame(frame));
     return {
         segments: createMemo(() => paletteSegments(rows().slice(0, built()))),
@@ -141,7 +170,6 @@ function useBuiltRows(rows: () => PaletteRowModel[]) {
         buildThrough: (idx: number) => {
             if (idx >= built()) setBuilt(idx + ROW_CHUNK);
         },
-        grow,
     };
 }
 
@@ -217,7 +245,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     let inputRef!: HTMLInputElement;
     let listRef!: HTMLDivElement;
     const { filtered, clampedIdx, rows, hasGroups } = usePaletteResults(query, selectedIdx);
-    const { segments, restart, buildThrough, grow } = useBuiltRows(rows);
+    const { segments, restart, buildThrough } = useBuiltRows(rows);
     const listId = `command-palette-list-${createUniqueId()}`;
     const optionId = (i: number) => `${listId}-option-${i}`;
 
@@ -227,19 +255,14 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         // (the search input). Keep a defensive explicit focus() in case
         // the order of focusable elements ever changes.
         queueMicrotask(() => inputRef?.focus());
-        // From the press that asked for the palette to the frame that shows it (the budget is 50 ms): the first frame
-        // after this one's task, which a timer queued from the frame callback follows.
-        requestAnimationFrame(() => setTimeout(() => reportOver("palette-open", markEnd("palette-open", "painted"), OPEN_BUDGET_MS), 0));
-        grow(); // the rows past the first chunk, a chunk a frame
+        markOpenPainted();
     });
 
     onCleanup(() => {
         enableGlobalKeybindings();
     });
 
-    function close() {
-        props.close();
-    }
+    const close = () => props.close();
 
     function executeSelected(forceNew = false) {
         const cmds = filtered();
@@ -264,16 +287,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
     }
 
     function handleInput(e: InputEvent) {
-        // The script time from the typed character to the rows it leaves (the budget is 16 ms): the rows are in the
-        // document when `setQuery` returns.
-        markStart("palette-keystroke");
-        batch(() => {
-            setQuery((e.target as HTMLInputElement).value);
-            setSelectedIdx(0);
-            restart();
-        });
-        listRef.scrollTop = 0; // the first row is selected again: show it
-        reportOver("palette-keystroke", markEnd("palette-keystroke", "rows"), KEYSTROKE_BUDGET_MS);
+        applyQuery((e.target as HTMLInputElement).value, listRef, { setQuery, setSelectedIdx, restart });
     }
 
     return (
