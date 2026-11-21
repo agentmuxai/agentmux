@@ -253,6 +253,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20`](SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20.md) | SPEC: Remote panes: open an agent that runs on another computer, see the same conversation live, and drive it, under a red "Remote" banner | active | 2026-11-20 |  |
 | [`SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20`](SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md) | SPEC: Settings fills a wide pane in several columns of readable width | implemented | 2026-11-20 |  |
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
 | [`SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20`](SPEC_WEBSITE_DOCS_MEDIA_REFRESH_2026_11_20.md) | Spec: website and docs media refresh: crisp screenshots and workflow videos, shot together with the video series | active | 2026-11-20 |  |
