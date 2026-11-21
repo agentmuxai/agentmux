@@ -297,6 +297,30 @@ function labelBesideEnd(to: FlowNode, end: Placed, fromBelow: boolean, free: (p:
     return null;
 }
 
+/** How high a line arcs over its row, past the top of the cards: the first line, an answer's extra, and each further line's. */
+const ARC_RISE = 16;
+const ARC_ANSWER = 8;
+const ARC_LANE = 8;
+/** The most it rises: less than the gap between two rows, so it stays out of the row above. */
+const ARC_MAX = 30;
+
+/** Whether `from` and `to` stand in one row with an agent's card between them. */
+function blockedInRow(from: Placed, to: Placed, nodes: readonly FlowNode[]): boolean {
+    if (Math.abs(to.y - from.y) >= NODE_H / 2) return false;
+    const left = Math.min(from.x, to.x) + NODE_W / 2;
+    const right = Math.max(from.x, to.x) + NODE_W / 2;
+    return nodes.some(
+        (n) =>
+            n.w === undefined &&
+            n.h === undefined &&
+            !(n.x === from.x && n.y === from.y) &&
+            !(n.x === to.x && n.y === to.y) &&
+            Math.abs(n.y - from.y) < NODE_H &&
+            n.x + NODE_W / 2 > left &&
+            n.x + NODE_W / 2 < right
+    );
+}
+
 /**
  * The curve from one node's edge to another's, bowed a little to the left of its direction, so a line and its
  * answer do not lie on each other. Its label goes on the stretch nearest its middle that no node of `nodes` covers;
@@ -326,13 +350,17 @@ export function flowCurve(
     // How far along the line a node's own box reaches from its centre.
     const reach = Math.min(dx === 0 ? Infinity : NODE_W / 2 / Math.abs(dx), dy === 0 ? Infinity : NODE_H / 2 / Math.abs(dy));
     if (length === 0 || reach >= 0.5) return null;
-    const x1 = ax + dx * reach;
-    const y1 = ay + dy * reach;
-    const x2 = bx - dx * reach;
-    const y2 = by - dy * reach;
+    // Two agents in one row with another between them: a straight line would run behind that card, and only its
+    // two ends would show. It leaves the top of one card and arcs over the row to the top of the other.
+    const arced = blockedInRow(from, to, nodes);
+    const rise = Math.min(ARC_MAX, ARC_RISE + (dx < 0 ? ARC_ANSWER : 0) + lane * ARC_LANE);
+    const x1 = arced ? ax : ax + dx * reach;
+    const y1 = arced ? from.y : ay + dy * reach;
+    const x2 = arced ? bx : bx - dx * reach;
+    const y2 = arced ? to.y : by - dy * reach;
     const bow = Math.min(28, length * 0.15) * (1 + lane * LANE_BOW);
-    const cx = (x1 + x2) / 2 + (dy / length) * bow;
-    const cy = (y1 + y2) / 2 - (dx / length) * bow;
+    const cx = arced ? (x1 + x2) / 2 : (x1 + x2) / 2 + (dy / length) * bow;
+    const cy = arced ? Math.min(y1, y2) - 2 * rise : (y1 + y2) / 2 - (dx / length) * bow;
     const at = (t: number): Placed => ({
         x: round((1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t ** 2 * x2),
         y: round((1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t ** 2 * y2),
@@ -362,9 +390,13 @@ export interface FlowLine {
 /**
  * The curve of each line, by its id. A line's label keeps clear of the labels of the lines before it, so two tasks
  * handed to one agent both show their number, and a line bows further than the ones before it between the same
- * two nodes.
+ * two nodes. A number also keeps clear of the lines in `keepClear` (the lines of reports-to, as polylines).
  */
-export function flowCurves(lines: readonly FlowLine[], nodes: readonly FlowNode[]): Map<string, FlowCurve> {
+export function flowCurves(
+    lines: readonly FlowLine[],
+    nodes: readonly FlowNode[],
+    keepClear: readonly (readonly Placed[])[] = []
+): Map<string, FlowCurve> {
     const laneOf = new Map<string, number>();
     const lanes = lines.map((line) => {
         const pair = `${line.from.x},${line.from.y}>${line.to.x},${line.to.y}`;
@@ -384,7 +416,7 @@ export function flowCurves(lines: readonly FlowLine[], nodes: readonly FlowNode[
         if (!bare[i]) return;
         // A label keeps clear of the crossings with the lines between other pairs of nodes, so it reads as its own line's.
         const mine = pairOf(line);
-        const others = bare.flatMap((c, j) => (j !== i && c && pairOf(lines[j]) !== mine ? [c.samples] : []));
+        const others = [...keepClear, ...bare.flatMap((c, j) => (j !== i && c && pairOf(lines[j]) !== mine ? [c.samples] : []))];
         const curve = flowCurve(line.from, line.to, nodes, line.label ? taken : [], halfWs[i], lanes[i], others);
         if (!curve) return;
         curves.set(line.id, curve);

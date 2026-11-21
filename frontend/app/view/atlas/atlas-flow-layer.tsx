@@ -37,7 +37,8 @@ function flowMarks(
     nodes: ReadonlyMap<string, Placed>,
     framed: ReadonlySet<string>,
     avoid: readonly FlowNode[],
-    frameOut: number
+    frameOut: number,
+    edges: readonly (readonly Placed[])[]
 ): Map<string, Mark> {
     const node = (key: string): FlowNode | undefined => {
         const p = nodes.get(key);
@@ -57,7 +58,7 @@ function flowMarks(
         else if (one && flow.kind === "message") marks.set(flow.id, { curve: null, ring: one });
     }
     const all = [...[...nodes.keys()].flatMap((key) => node(key) ?? []), ...avoid];
-    for (const [id, curve] of flowCurves(lines, all)) marks.set(id, { curve, ring: null });
+    for (const [id, curve] of flowCurves(lines, all, edges)) marks.set(id, { curve, ring: null });
     return marks;
 }
 
@@ -141,6 +142,8 @@ export function AtlasFlowLayer(props: {
     framed?: ReadonlySet<string>;
     /** What else a label keeps clear of (atlas-flow.ts `labelKeepOut`). */
     avoid?: readonly FlowNode[];
+    /** The lines of reports-to, as polylines: a task's number keeps clear of them. */
+    edges?: readonly (readonly Placed[])[];
     /** How far a frame reaches past its node: the layout's (`AtlasLayout.gaps.frame`), which closes in with its gaps. */
     frameOut?: number;
     width: number;
@@ -150,7 +153,7 @@ export function AtlasFlowLayer(props: {
     const ids = createMemo(() => props.flows.map((f) => f.id));
     const byId = createMemo(() => new Map(props.flows.map((f) => [f.id, f] as const)));
     const marks = createMemo(() =>
-        flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT)
+        flowMarks(props.flows, props.resolve, props.nodes, props.framed ?? NO_FRAMES, props.avoid ?? [], props.frameOut ?? CONTAINER_FRAME_OUT, props.edges ?? [])
     );
     return (
         <>
