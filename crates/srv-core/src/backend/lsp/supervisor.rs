@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
@@ -58,6 +59,10 @@ pub enum LspError {
     /// of its own.
     #[error("no_host_server_for_container_agent_folder")]
     ContainerAgentFolder,
+
+    /// A document was opened by an address that is not a file's path: a server is given files only.
+    #[error("not a file: {0}")]
+    NotAFile(String),
 
     #[error("spawn failed: {0}")]
     SpawnFailed(String),
@@ -98,6 +103,25 @@ async fn on_host_only(args: &StartArgs) -> Result<(), LspError> {
     } else {
         Err(LspError::ContainerAgentFolder)
     }
+}
+
+/// How often a running server's project folder is looked at again.
+const RECHECK_EVERY: Duration = Duration::from_secs(5);
+
+/// The method of the message that tells the Editor a running server was stopped because its project folder
+/// came to be one a container agent can write. It is sent as a message of the server, on the server's id, so
+/// every client of that server hears it.
+pub const NOT_ON_HOST_NOTICE: &str = "agentmux/notOnHost";
+
+/// The file a `textDocument/didOpen` message opens, which is what a server is given to serve: `None` for any
+/// other message, `Some(None)` for a document whose address is not a file's path.
+fn opened_document(message_json: &str) -> Option<Option<PathBuf>> {
+    let message: serde_json::Value = serde_json::from_str(message_json).ok()?;
+    if message.get("method")?.as_str()? != "textDocument/didOpen" {
+        return None;
+    }
+    let uri = message.pointer("/params/textDocument/uri").and_then(serde_json::Value::as_str);
+    Some(uri.and_then(|uri| url::Url::parse(uri).ok()).and_then(|url| url.to_file_path().ok()))
 }
 
 impl LspSupervisor {
@@ -236,6 +260,19 @@ impl LspSupervisor {
     /// Forward an LSP message (pre-serialized JSON) to the server's stdin.
     pub async fn send(&self, server_id: &str, message_json: &str) -> Result<(), LspError> {
         let key = parse_server_id(server_id)?;
+        // A server is given a file only by `didOpen`, and a running server is shared by every file under its
+        // root: the file is asked about here, as `start` asks about the first one, so a file that is a link
+        // into a container agent's folder is refused whichever client opens it.
+        if let Some(opened) = opened_document(message_json) {
+            let file = opened.ok_or_else(|| LspError::NotAFile(server_id.to_string()))?;
+            let root = PathBuf::from(&key.0);
+            let on_host = tokio::task::spawn_blocking(move || super::workspace::served_on_host(&file, &root))
+                .await
+                .map_err(|e| LspError::SpawnFailed(format!("the folder check did not finish: {e}")))?;
+            if !on_host {
+                return Err(LspError::ContainerAgentFolder);
+            }
+        }
         let handle = {
             let servers = self.servers.lock().await;
             servers
@@ -271,6 +308,45 @@ impl LspSupervisor {
             }
         }
         Ok(())
+    }
+}
+
+impl LspSupervisor {
+    /// Stops every running server whose project folder is no longer one the host serves: a container agent
+    /// came to be able to write the folder, or a folder beneath it, after the server started. Each client of
+    /// a stopped server is told on the server's id ([`NOT_ON_HOST_NOTICE`]). Returns the ids stopped.
+    pub async fn stop_where_not_on_host(&self) -> Vec<ServerId> {
+        let keys: Vec<(String, String)> = self.servers.lock().await.keys().cloned().collect();
+        let mut stopped = Vec::new();
+        for key in keys {
+            let root = PathBuf::from(&key.0);
+            // Where it can't be told, the server is not kept.
+            let on_host = tokio::task::spawn_blocking(move || super::workspace::served_on_host(&root, &root)).await.unwrap_or(false);
+            if on_host || self.servers.lock().await.remove(&key).is_none() {
+                continue;
+            }
+            let server_id = make_server_id(&key.0, &key.1);
+            tracing::warn!(server_id = %server_id, "LSP: stopped, its project folder is now one a container agent can write");
+            let notice = serde_json::json!({ "jsonrpc": "2.0", "method": NOT_ON_HOST_NOTICE, "params": {} });
+            let event = crate::backend::mps_events::LspMessageEvent { server_id: server_id.clone(), message: notice };
+            self.event_bus.broadcast_event(&EventBus::typed_ws_event::<crate::backend::mps_events::LspMessage>(&event, String::new()));
+            stopped.push(server_id);
+        }
+        stopped
+    }
+
+    /// Looks at the running servers' folders again every few seconds ([`Self::stop_where_not_on_host`]) until
+    /// the supervisor is dropped. Needs a running tokio runtime.
+    pub fn spawn_recheck(self: &Arc<Self>) {
+        let supervisor = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(RECHECK_EVERY);
+            loop {
+                tick.tick().await;
+                let Some(supervisor) = supervisor.upgrade() else { return };
+                supervisor.stop_where_not_on_host().await;
+            }
+        });
     }
 }
 
@@ -448,5 +524,116 @@ mod tests {
         // The person's own folder passes the check and goes on to the language.
         let own_folder = supervisor.start(start_args("no-such-language", &own)).await;
         assert!(matches!(own_folder, Err(LspError::UnsupportedLanguage(_))), "{:?}", own_folder.err());
+    }
+
+    /// A child that stays up and reads nothing: it stands for a language server that is running.
+    fn quiet_child() -> Child {
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut cmd = Command::new("ping");
+            cmd.args(["-n", "120", "127.0.0.1"]);
+            cmd.no_window();
+            cmd
+        };
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut cmd = Command::new("sleep");
+            cmd.arg("120");
+            cmd
+        };
+        cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+        cmd.spawn().unwrap()
+    }
+
+    /// A server for `root` that is already running, as `start` leaves one.
+    async fn running(supervisor: &LspSupervisor, root: &std::path::Path, language: &str) -> ServerId {
+        let mut child = quiet_child();
+        let stdin = child.stdin.take().unwrap();
+        let handle = Arc::new(ServerHandle { stdin: Mutex::new(stdin), refcount: std::sync::atomic::AtomicUsize::new(1), _child: Mutex::new(child) });
+        let root = root.to_string_lossy().into_owned();
+        supervisor.servers.lock().await.insert((root.clone(), language.to_string()), handle);
+        make_server_id(&root, language)
+    }
+
+    fn a_project(root: &std::path::Path) {
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+        std::fs::write(root.join("src").join("a.ts"), "").unwrap();
+    }
+
+    fn did_open(file: &std::path::Path) -> String {
+        let uri = url::Url::from_file_path(file).unwrap().to_string();
+        serde_json::json!({ "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": { "textDocument": { "uri": uri, "languageId": "typescript", "version": 1, "text": "" } } }).to_string()
+    }
+
+    fn link_file(to: &std::path::Path, at: &std::path::Path) -> bool {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(to, at).is_ok();
+        #[cfg(windows)]
+        return std::os::windows::fs::symlink_file(to, at).is_ok();
+    }
+
+    #[tokio::test]
+    async fn a_file_that_resolves_into_a_container_agents_folder_is_not_opened_on_a_running_server() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ws, own) = (tmp.path().join("ws"), tmp.path().join("own"));
+        a_project(&ws);
+        a_project(&own);
+        crate::backend::fs_ops::container_folders::add_for_test(&ws, &format!("lsp-{}", uuid::Uuid::new_v4().simple()), "/workspace");
+        let supervisor = LspSupervisor::new(Arc::new(EventBus::new()));
+        let id = running(&supervisor, &own, "typescript").await;
+
+        // A plain file of the project: the running server takes it.
+        assert!(supervisor.send(&id, &did_open(&own.join("src").join("a.ts"))).await.is_ok());
+        // Its other messages carry no file to ask about.
+        assert!(supervisor.send(&id, r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#).await.is_ok());
+
+        // A file under the project's path that is a link into the agent's folder: refused, and the answer is
+        // the one `start` gives, which the Editor shows as the folder being a container agent's.
+        let linked = own.join("src").join("linked.ts");
+        if link_file(&ws.join("src").join("a.ts"), &linked) {
+            let refused = supervisor.send(&id, &did_open(&linked)).await;
+            assert!(matches!(refused, Err(LspError::ContainerAgentFolder)), "{:?}", refused.err());
+            assert!(supervisor.send(&id, &did_open(&own.join("src").join("a.ts"))).await.is_ok(), "the plain file is still served");
+        } else {
+            eprintln!("no link could be made here: the linked file is not tried");
+        }
+        // A file written as a path inside the agent's folder is refused too, whatever the server's root.
+        let refused = supervisor.send(&id, &did_open(&ws.join("src").join("a.ts"))).await;
+        assert!(matches!(refused, Err(LspError::ContainerAgentFolder)), "{:?}", refused.err());
+        // A document that is no file is not given to a server.
+        let not_a_file = r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"untitled:one","languageId":"typescript","version":1,"text":""}}}"#;
+        assert!(matches!(supervisor.send(&id, not_a_file).await, Err(LspError::NotAFile(_))));
+    }
+
+    #[tokio::test]
+    async fn a_running_server_is_stopped_when_its_folder_comes_to_hold_a_container_agents_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        a_project(&a);
+        a_project(&b);
+        let bus = Arc::new(EventBus::new());
+        let mut heard = bus.register_ws("lsp-recheck", "lsp-recheck-tab");
+        let supervisor = LspSupervisor::new(bus);
+        let id_a = running(&supervisor, &a, "typescript").await;
+        let id_b = running(&supervisor, &b, "typescript").await;
+
+        assert!(supervisor.stop_where_not_on_host().await.is_empty(), "nothing has changed");
+        assert_eq!(supervisor.servers.lock().await.len(), 2);
+
+        // A container agent comes to be able to write a folder beneath a's root, and one beside b.
+        crate::backend::fs_ops::container_folders::add_for_test(&a.join("src"), &format!("lsp-{}", uuid::Uuid::new_v4().simple()), "/workspace");
+        crate::backend::fs_ops::container_folders::add_for_test(&tmp.path().join("beside"), &format!("lsp-{}", uuid::Uuid::new_v4().simple()), "/workspace");
+        assert_eq!(supervisor.stop_where_not_on_host().await, vec![id_a.clone()]);
+        let left: Vec<String> = supervisor.servers.lock().await.keys().map(|(root, _)| root.clone()).collect();
+        assert_eq!(left, vec![b.to_string_lossy().into_owned()], "the one beside it keeps running");
+        assert!(supervisor.send(&id_a, &did_open(&a.join("src").join("a.ts"))).await.is_err(), "a stopped server takes nothing");
+        assert!(supervisor.send(&id_b, &did_open(&b.join("src").join("a.ts"))).await.is_ok());
+
+        // Its clients are told, on its id, as the server's own message.
+        let frame = heard.priority.try_recv().expect("the clients of the stopped server are told").to_string();
+        assert!(frame.contains("lsp:message") && frame.contains(NOT_ON_HOST_NOTICE), "{frame}");
+        assert!(heard.priority.try_recv().is_err(), "once, and only for the one stopped");
+        assert!(supervisor.stop_where_not_on_host().await.is_empty(), "and not again");
     }
 }

@@ -158,7 +158,7 @@ pub async fn bind_listeners_and_network(
     // until the editor pane calls `lspstart`. Spec:
     // docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
     let lsp_supervisor = Arc::new(backend::lsp::LspSupervisor::new(event_bus.clone()));
-
+    lsp_supervisor.spawn_recheck();
     // Clean up stale cross-instance agent registry entries (entries older than 4h).
     backend::reactive::registry::cleanup_stale(
         &base::get_mux_data_dir(),
