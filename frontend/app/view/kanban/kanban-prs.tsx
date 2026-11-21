@@ -1,13 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// A card's pull requests: the chip that says
-// how many have merged, the line for a held task whose work has all merged, and the drawer's list. srv
-// derives the roll-up (`pr_rollup`); nothing here recomputes it, so an older srv with no list shows the card
-// as it always did.
+// A card's pull requests: the chip that says how many have merged, the line for a held task whose work has
+// all merged, and the drawer's list. srv derives the roll-up (`pr_rollup`); nothing here recomputes it, so an
+// older srv with no list shows the card as it always did.
 
 import { For, Show, type JSX } from "solid-js";
 
+import { t as tr } from "@/app/i18n/i18n";
 import { Pill, type PillTone } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
@@ -70,11 +70,18 @@ export function WaitingOnLine(props: { card: KanbanCardFields; holder: () => JSX
         <Show when={props.card.pr_rollup?.all_merged_waiting ? props.card.pr_rollup : undefined}>
             {(r) => (
                 <div class="kanban-card__waiting">
-                    {r().merged} of {r().total} merged, waiting on {props.holder()}
+                    {tr("kanban.prs.waitingOn", { merged: r().merged, total: r().total })} {props.holder()}
                 </div>
             )}
         </Show>
     );
+}
+
+/** When a pull request merged, or else opened, as the drawer's row says it. */
+function prAge(p: KanbanCardPr, now: number): string | null {
+    const at = p.merged_at ?? p.opened_at;
+    if (!at) return null;
+    return tr(p.state === "merged" ? "kanban.prs.mergedAgo" : "kanban.prs.openedAgo", { age: formatAge(Math.max(0, now - at)) });
 }
 
 /** The drawer's list: each pull request of the card, its state and age, newest first. One pull request keeps the drawer's own button. */
@@ -82,7 +89,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number }): JSX.E
     const prs = () => prsOf(props.card);
     return (
         <Show when={prs().length > 1}>
-            <ul class="kanban-drawer__prs" aria-label="Pull requests">
+            <ul class="kanban-drawer__prs" aria-label={tr("kanban.prs.list")}>
                 <For each={prs()}>
                     {(p) => (
                         <li class="kanban-drawer__pr">
@@ -96,13 +103,7 @@ export function DrawerPrs(props: { card: KanbanCardFields; now: number }): JSX.E
                                 {prName(p)}
                             </a>
                             <Pill tone={p.state === "merged" ? "ok" : p.state === "closed" ? "neutral" : "accent"}>{prStateWords(p)}</Pill>
-                            <Show when={p.merged_at ?? p.opened_at}>
-                                {(at) => (
-                                    <span class="warden-manager-dim">
-                                        {p.state === "merged" ? "merged" : "opened"} {formatAge(Math.max(0, props.now - at()))} ago
-                                    </span>
-                                )}
-                            </Show>
+                            <Show when={prAge(p, props.now)}>{(age) => <span class="warden-manager-dim">{age()}</span>}</Show>
                         </li>
                     )}
                 </For>

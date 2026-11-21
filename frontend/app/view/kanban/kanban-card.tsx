@@ -8,6 +8,7 @@ import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { type Accessor, createMemo, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 
 import { seatTooltipLine } from "@/app/agent-model/seat-format";
+import { t as tr } from "@/app/i18n/i18n";
 import { AgentLink, Linkified } from "@/app/links/linkified";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
@@ -237,8 +238,12 @@ export function KanbanCard(props: KanbanCardProps): JSX.Element {
             <WaitingOnLine
                 card={t().card}
                 holder={() => (
-                    <Show when={s.who()} fallback="its holder">
-                        {(w) => <AgentChip name={w().name} display={w().display} agent={w().agent} uid={w().uid} colors={props.colors} />}
+                    <Show when={s.who()} fallback={tr("kanban.prs.itsHolder")}>
+                        {(w) => (
+                            <Show when={w().uid} fallback={w().display || w().name}>
+                                {(id) => <AgentLink id={id()} name={w().display || w().name} />}
+                            </Show>
+                        )}
                     </Show>
                 )}
             />
