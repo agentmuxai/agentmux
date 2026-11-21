@@ -511,4 +511,59 @@ impl Act<'_> {
         record(state, &t.item.id, &actor.name, actor.kind(), "ui_change", if flag { "yes" } else { "no" }, "", text);
         Ok(json!({ "ok": true }))
     }
+
+    /// The pull request a `pr_*` move names: `pr` (an address or `owner/repo#12`), or `repo` and `number`;
+    /// a bare number is taken in the card's own repository.
+    fn pr_named(&self, card_repo: &str) -> Result<(String, u64), String> {
+        let req = self.req;
+        if let (Some(repo), Some(number)) = (req.repo.as_deref(), req.number) {
+            let repo = crate::backend::storage::work_card_prs::github_repo(repo).ok_or("repo is not a GitHub repository")?;
+            if number == 0 {
+                return Err("number is not a pull request".to_string());
+            }
+            return Ok((repo, number));
+        }
+        let pr = req.pr.as_deref().map(str::trim).filter(|p| !p.is_empty()).ok_or("pr (an address or owner/repo#12) is required")?;
+        crate::backend::storage::work_card_prs::parse_pr_ref(pr, card_repo).ok_or_else(|| "pr is not a pull request address".to_string())
+    }
+
+    /// Put a pull request on a task's card: the operator's own link, which a later report never undoes.
+    pub(super) fn pr_link(&self) -> Result<Value, String> {
+        use crate::backend::storage::work_card_prs::{pr_url, PrSource};
+        let Act { state, actor, text, now, .. } = *self;
+        let t = self.task()?;
+        let (repo, number) = self.pr_named(&t.card.repo)?;
+        let store = &state.work_store;
+        let changed = store.work_card_pr_link(&t.item.id, &repo, number, PrSource::Person, now).map_err(|e| e.to_string())?;
+        // It was on the list of pull requests no card had, if it came from there.
+        let _ = store.work_pr_unmatched_remove(&repo, number);
+        record(state, &t.item.id, &actor.name, actor.kind(), "pr_linked", &pr_url(&repo, number), "", text);
+        Ok(json!({ "ok": true, "changed": changed }))
+    }
+
+    /// Take a pull request off a task's card. It stays recorded, so no later report puts it back.
+    pub(super) fn pr_unlink(&self) -> Result<Value, String> {
+        use crate::backend::storage::work_card_prs::pr_url;
+        let Act { state, actor, text, now, .. } = *self;
+        let t = self.task()?;
+        let (repo, number) = self.pr_named(&t.card.repo)?;
+        let changed = state.work_store.work_card_pr_unlink(&t.item.id, &repo, number, now).map_err(|e| e.to_string())?;
+        if changed {
+            record(state, &t.item.id, &actor.name, actor.kind(), "pr_unlinked", &pr_url(&repo, number), "", text);
+        }
+        Ok(json!({ "ok": true, "changed": changed }))
+    }
+
+    /// The pull requests no card has, newest first.
+    pub(super) fn pr_unmatched(&self) -> Result<Value, String> {
+        let unmatched = self.state.work_store.work_pr_unmatched_list().map_err(|e| e.to_string())?;
+        Ok(json!({ "ok": true, "unmatched": unmatched }))
+    }
+
+    /// Take a pull request off the unmatched list without linking it.
+    pub(super) fn pr_dismiss(&self) -> Result<Value, String> {
+        let (repo, number) = self.pr_named("")?;
+        let gone = self.state.work_store.work_pr_unmatched_remove(&repo, number).map_err(|e| e.to_string())?;
+        Ok(json!({ "ok": true, "changed": gone }))
+    }
 }

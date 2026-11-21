@@ -373,6 +373,9 @@ pub(super) struct UpdateRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// A pull request to take off the card (`links.unpr`): the holder's alone.
+    #[serde(default)]
+    pub unpr: Option<String>,
     /// The path of the document the task wrote (`links.doc`).
     #[serde(default)]
     pub doc: Option<String>,
@@ -511,6 +514,17 @@ pub(super) async fn handle_work_update(
             .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
     }
+    if let Some(unpr) = req.unpr.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        let repo = state.work_store.work_board_get(&id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
+        match crate::backend::storage::work_card_prs::parse_pr_ref(unpr, &repo) {
+            Some((repo, number)) => {
+                if state.work_store.work_card_pr_unlink(&id, &repo, number, now).unwrap_or(false) {
+                    record(&state, &id, &req.agent_id, "agent", "pr_unlinked", &item.state, &item.state, &crate::backend::storage::work_card_prs::pr_url(&repo, number));
+                }
+            }
+            None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is not a pull request address" }))),
+        }
+    }
     let mut answer = json!({ "ok": true });
     if !attached.is_empty() {
         let names = attached.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ");
@@ -563,6 +577,9 @@ fn annotate(state: &AppState, caller: Option<&Caller>, id: &str, req: &UpdateReq
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let mut u = card_update(req);
+    if req.unpr.is_some() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "links.unpr is the holder's: only the task's holder takes a pull request off its card" })));
+    }
     if u.note.is_none() && u.branch.is_none() && u.pr_url.is_none() && u.doc.is_none() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "nothing to write: give a note or links (pr, branch, doc)" })));
     }

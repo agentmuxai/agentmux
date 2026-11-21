@@ -644,3 +644,39 @@ async fn ask_and_submit_still_need_the_attempt() {
         assert!(v["error"].as_str().unwrap().contains("attempt"), "{segment}: {v}");
     }
 }
+
+/// A task can have several pull requests: each `links.pr` adds one and keeps the ones before; `links.unpr` takes
+/// one off, and is the holder's alone.
+#[tokio::test]
+async fn the_holder_adds_pull_requests_and_takes_one_off_and_nobody_else_can() {
+    let (app, state) = app_and_state();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    let uri = format!("/agentmux/work/{num}/update");
+    let prs = |state: &crate::server::AppState| -> Vec<u64> {
+        let mut n: Vec<u64> = card_of(state, num).prs.iter().map(|p| p.number).collect();
+        n.sort();
+        n
+    };
+
+    for url in ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2", "https://github.com/o/other/pull/3"] {
+        let (s, _) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "pr_url": url})).await;
+        assert_eq!(s, StatusCode::OK);
+    }
+    assert_eq!(prs(&state), [1, 2, 3], "each link adds one");
+    assert_eq!(card_of(&state, num).pr_url, "https://github.com/o/other/pull/3", "pr_url is the last address set");
+
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "unpr": "https://github.com/o/r/pull/2"})).await;
+    assert_eq!((s, v["ok"].as_bool()), (StatusCode::OK, Some(true)), "{v}");
+    assert_eq!(prs(&state), [1, 3]);
+    assert!(history(&state, num).iter().any(|(k, a, _)| k == "pr_unlinked" && a == "a1"));
+
+    let (s, v) = post(&app, &uri, json!({"agent_id": "a1", "attempt": attempt, "unpr": "nonsense"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+
+    // Not the holder: refused, whether or not it has an attempt.
+    let (s, _) = post(&app, &uri, json!({"agent_id": "a2", "unpr": "https://github.com/o/r/pull/1"})).await;
+    assert_ne!(s, StatusCode::OK);
+    assert_eq!(prs(&state), [1, 3], "nothing was taken off");
+}
