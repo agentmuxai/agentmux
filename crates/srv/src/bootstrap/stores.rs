@@ -144,6 +144,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     crate::identity::github_tokens::attach_store(id_store.clone());
     let global_memory_recorder =
         attach_global_memory(&id_store, &global_transcript_store, &backfill_def_ids);
+    // A fork made before its mark said where the copied history came from gets that fact, signed (idempotent).
+    if let Some(fs) = &global_transcript_store {
+        let sealed = crate::boot_timing::time("fork_marks_seal", || backend::agent_session::fork_history::seal_existing_forks(fs, &mstore));
+        if sealed > 0 {
+            tracing::info!(sealed, "forks: the mark of each now says which runtime its copied history came from");
+        }
+    }
     let (saga_log, saga_id_seed) = open_saga_log(&db_dir);
     ensure_initial_data(&mstore);
     recover_and_seed(&mstore, &id_store, &identity_store, &global_memory_recorder);

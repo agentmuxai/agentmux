@@ -292,6 +292,47 @@ fn replace_trailing_amx(body: &[u8], amx: &Value, shown: Option<&Map<String, Val
     Some(out)
 }
 
+impl WriterRuntime {
+    /// The runtime a stored name says, `None` for any other text.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "host" => Some(WriterRuntime::Host),
+            "container" => Some(WriterRuntime::Container),
+            _ => None,
+        }
+    }
+}
+
+/// What a fork's mark says about the history copied into the fork: it came from `parent`, an agent that ran in
+/// `runtime`, and the first `upto` bytes of the fork's transcript are that copy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkCover {
+    pub parent: String,
+    pub runtime: WriterRuntime,
+    pub upto: u64,
+}
+
+/// The signature over a fork mark's facts, for the fork `fork` (agent ids): which parent, which runtime, how many bytes.
+pub fn sign_fork_mark(fork: &str, parent: &str, runtime: WriterRuntime, upto: u64) -> String {
+    let mut m = HmacSha256::new_from_slice(key()).expect("hmac takes any key length");
+    for part in [b"amx-fork-v1" as &[u8], fork.as_bytes(), parent.as_bytes(), runtime.as_str().as_bytes(), upto.to_string().as_bytes()] {
+        m.update(part);
+        m.update(b"\0");
+    }
+    hex(&m.finalize().into_bytes())
+}
+
+/// What the mark `mark` (`fork.json`) of the fork `fork` says about its copied history, when its signature holds; `None`
+/// for a mark that has none, or whose facts were changed or are another fork's.
+pub fn fork_cover(fork: &str, mark: &Value) -> Option<ForkCover> {
+    let parent = mark.get("from")?.as_str()?;
+    let runtime = WriterRuntime::parse(mark.get("runtime")?.as_str()?)?;
+    let upto = mark.get("upto")?.as_u64()?;
+    let sig = mark.get("sig")?.as_str()?;
+    let want = sign_fork_mark(fork, parent, runtime, upto);
+    constant_time_eq(want.as_bytes(), sig.as_bytes()).then(|| ForkCover { parent: parent.to_string(), runtime, upto })
+}
+
 /// Whether `record`'s `amx` claims a writer runtime srv knows (it is believed only if it verifies).
 fn writer_stamped(record: &Value) -> bool {
     record.pointer("/amx/writer/runtime").and_then(Value::as_str).is_some_and(|r| matches!(r, "host" | "container"))
@@ -379,7 +420,7 @@ pub fn resign_line(from_owner: &str, to_owner: &str, line: &[u8]) -> Option<(usi
     }
     let body = line.strip_suffix(b"\n").unwrap_or(line);
     let record: Value = serde_json::from_slice(body).ok()?;
-    if !is_user_record(&record) || !is_signed(from_owner, &record) {
+    if !(is_user_record(&record) || writer_stamped(&record)) || !is_signed(from_owner, &record) {
         return None;
     }
     let amx = record.get("amx")?.as_object()?;
@@ -529,6 +570,39 @@ mod tests {
 
     const INIT: &str = r#"{"type":"system","subtype":"init","cwd":"/workspace","session_id":"s1","tools":["Bash","Read"]}"#;
     const DELTA: &str = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}},"session_id":"s1","parent_tool_use_id":null,"uuid":"u1"}"#;
+
+    #[test]
+    fn a_fork_copy_re_signs_a_stamped_line_for_the_fork_keeping_its_length_and_what_it_says() {
+        let stored = stamp_writer("parent", &assistant_line("see /workspace/a.png"), WriterRuntime::Container, 7).unwrap();
+        let mut line = format!("{stored}\n").into_bytes();
+        assert!(writer_of(&vet_line("fork", &line)).is_none(), "another owner doesn't verify it");
+        let (at, new) = resign_line("parent", "fork", &line).expect("a stamped line is re-signed");
+        line[at..at + SIG_LEN].copy_from_slice(new.as_bytes());
+        assert_eq!(writer_of(&vet_line("fork", &line)), Some(("container".to_string(), "parent".to_string())), "still the parent's, written by a container");
+        assert!(writer_of(&vet_line("parent", &line)).is_none(), "and no longer verifies for the parent");
+        // A line nobody stamped is never stamped by a copy, and a forged stamp is not made good by it.
+        assert!(resign_line("parent", "fork", assistant_line("x").as_bytes()).is_none());
+        let mut forged: Value = serde_json::from_str(&assistant_line("hi")).unwrap();
+        forged["amx"] = json!({ "v": 1, "writer": { "runtime": "host", "agent": "parent" }, "ts_ms": 1, "sig": "ab".repeat(32) });
+        assert!(resign_line("parent", "fork", forged.to_string().as_bytes()).is_none());
+    }
+
+    #[test]
+    fn a_fork_mark_holds_only_for_its_fork_and_the_facts_it_was_signed_with() {
+        let sig = sign_fork_mark("fork", "parent", WriterRuntime::Container, 4096);
+        let mark = json!({ "from": "parent", "session_id": "s", "at_ms": 1, "runtime": "container", "upto": 4096, "sig": sig });
+        assert_eq!(fork_cover("fork", &mark), Some(ForkCover { parent: "parent".to_string(), runtime: WriterRuntime::Container, upto: 4096 }));
+        assert!(fork_cover("another-fork", &mark).is_none(), "another fork's");
+        for (key, value) in [("from", json!("someone")), ("runtime", json!("host")), ("upto", json!(8192)), ("sig", json!("00"))] {
+            let mut changed = mark.clone();
+            changed[key] = value;
+            assert!(fork_cover("fork", &changed).is_none(), "{key} changed");
+        }
+        let mut unsigned = mark.clone();
+        unsigned.as_object_mut().unwrap().remove("sig");
+        assert!(fork_cover("fork", &unsigned).is_none());
+        assert!(fork_cover("fork", &json!({ "from": "parent", "session_id": "s", "at_ms": 1 })).is_none(), "a mark from before");
+    }
 
     #[test]
     fn a_stamped_line_keeps_the_agents_bytes_and_key_order_with_the_stamp_last() {

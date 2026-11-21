@@ -16,12 +16,15 @@
 
 use crate::backend::storage::filestore::FileStore;
 
+use crate::backend::transcript::origin_sig::{fork_cover, sign_fork_mark, ForkCover, WriterRuntime};
+
 use super::helpers::{now_ms, write_zone_file};
 use super::session_io::{OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE};
 use super::zone_naming::{agent_current_zone, is_valid_definition_id};
 
-/// `{"from":<parent definition>,"session_id":<parent session>,"at_ms":..}`
-/// in the fork's zone.
+/// `{"from":<parent definition>,"session_id":<parent session>,"at_ms":..}` in the fork's zone, and once the copy is
+/// made `"runtime"` (the parent's, as srv's own record of it says), `"upto"` (how many bytes of the fork's transcript are
+/// the copy) and `"sig"`, which signs both for this fork and parent (`origin_sig::sign_fork_mark`).
 pub const FORK_MARK_FILE: &str = "fork.json";
 
 /// How far back from the end of the parent's transcript the session it ends
@@ -55,14 +58,18 @@ pub const FORK_COPY_MAX_BYTES: i64 = 64 << 20;
 /// fork continues `session_id`, the session the parent's transcript ends in.
 /// `session_id_field` is the provider's session field in its stream events.
 /// A transcript over [`FORK_COPY_MAX_BYTES`] is copied only from a turn start inside its newest part.
+///
+/// `parent_runtime` is the runtime of the parent's agent as srv's own record says (a parent that record doesn't
+/// know counts as a container); the copy's mark names it.
 pub fn copy_parent_history(
     gfs: &FileStore,
     parent_id: &str,
     fork_id: &str,
     session_id: &str,
     session_id_field: &str,
+    parent_runtime: WriterRuntime,
 ) -> Result<ForkHistory, String> {
-    copy_parent_history_capped(gfs, parent_id, fork_id, session_id, session_id_field, FORK_COPY_MAX_BYTES)
+    copy_parent_history_capped(gfs, parent_id, fork_id, session_id, session_id_field, parent_runtime, FORK_COPY_MAX_BYTES)
 }
 
 fn copy_parent_history_capped(
@@ -71,6 +78,7 @@ fn copy_parent_history_capped(
     fork_id: &str,
     session_id: &str,
     session_id_field: &str,
+    parent_runtime: WriterRuntime,
     cap: i64,
 ) -> Result<ForkHistory, String> {
     if !is_valid_definition_id(parent_id) || !is_valid_definition_id(fork_id) || parent_id == fork_id {
@@ -91,7 +99,7 @@ fn copy_parent_history_capped(
     gfs.flush_cache().map_err(|e| format!("flush before copy: {e}"))?;
     let size = gfs.stat(&parent, OUTPUT_FILE).map_err(|e| format!("stat transcript: {e}"))?.map_or(0, |f| f.size);
     if size > cap {
-        return copy_window(gfs, &parent, &fork, (parent_id, fork_id), (session_id, session_id_field), size, cap, true);
+        return copy_window(gfs, &parent, &fork, (parent_id, fork_id), (session_id, session_id_field), size, cap, true, parent_runtime);
     }
     // One copy of all four files, in one transaction, so the pane state can't
     // come from a different moment than the transcript.
@@ -107,7 +115,7 @@ fn copy_parent_history_capped(
         gfs.delete_files(&fork, &files).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
     }
-    sign_for_fork(gfs, &parent, &fork);
+    sign_for_fork(gfs, &parent, &fork, parent_runtime);
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, bytes, "fork: copied its parent's history");
     Ok(ForkHistory::Copied { bytes })
 }
@@ -117,7 +125,7 @@ fn copy_parent_history_capped(
 /// unsigned for the fork, which shows them in the container, never as the human. The signing
 /// rewrites bytes in the file, which drops its line epoch, so the file is counted again here (a copy
 /// is at most [`FORK_COPY_MAX_BYTES`]): the fork's pane opens from its line positions at once.
-fn sign_for_fork(gfs: &FileStore, from_zone: &str, fork_zone: &str) {
+fn sign_for_fork(gfs: &FileStore, from_zone: &str, fork_zone: &str, parent_runtime: WriterRuntime) {
     use crate::backend::transcript::origin_sig::owner_of_zone;
     let (from, to) = (owner_of_zone(from_zone), owner_of_zone(fork_zone));
     if let Err(e) = crate::backend::transcript::origin_resign::resign_zone(gfs, fork_zone, OUTPUT_FILE, from, to) {
@@ -126,6 +134,79 @@ fn sign_for_fork(gfs: &FileStore, from_zone: &str, fork_zone: &str) {
     if let Err(e) = gfs.init_line_counter(fork_zone, OUTPUT_FILE) {
         tracing::warn!(fork = %to, error = %e, "fork: couldn't count the copied transcript; the pane counts it when it opens");
     }
+    seal_fork_mark(gfs, fork_zone, from, parent_runtime);
+}
+
+/// The mark of the fork whose zone is `fork_zone`, signed with where its copied history came from: `parent`, the runtime
+/// that agent ran in, and how many bytes of the fork's transcript the copy is (all of it, as the copy has just been made).
+/// A failure leaves the mark as it was, which reads as no cover: the copied history is then taken as a container's.
+fn seal_fork_mark(gfs: &FileStore, fork_zone: &str, parent: &str, runtime: WriterRuntime) {
+    let upto = gfs.stat(fork_zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size.max(0) as u64);
+    if let Err(e) = write_sealed_mark(gfs, fork_zone, parent, runtime, upto) {
+        tracing::warn!(fork_zone = %fork_zone, error = %e, "fork: couldn't sign where its copied history came from");
+    }
+}
+
+fn write_sealed_mark(gfs: &FileStore, fork_zone: &str, parent: &str, runtime: WriterRuntime, upto: u64) -> Result<(), String> {
+    let fork = crate::backend::transcript::origin_sig::owner_of_zone(fork_zone);
+    let mut mark: serde_json::Value = gfs
+        .read_file(fork_zone, FORK_MARK_FILE)
+        .map_err(|e| format!("read fork mark: {e}"))?
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let runtime_name = if runtime == WriterRuntime::Container { "container" } else { "host" };
+    mark["from"] = serde_json::json!(parent);
+    mark["runtime"] = serde_json::json!(runtime_name);
+    mark["upto"] = serde_json::json!(upto);
+    mark["sig"] = serde_json::json!(sign_fork_mark(fork, parent, runtime, upto));
+    write_zone_file(gfs, fork_zone, FORK_MARK_FILE, mark.to_string().as_bytes())
+}
+
+/// Where the first bytes of `fork_zone`'s transcript came from, when its mark says so and the signature holds: the
+/// parent, the runtime that wrote it, and how far the copy reaches. `None` for a zone that is no fork's, a fork made
+/// before marks said so, or a mark whose facts were changed.
+pub fn fork_history_cover(gfs: &FileStore, fork_zone: &str) -> Option<ForkCover> {
+    let bytes = gfs.read_file(fork_zone, FORK_MARK_FILE).ok()??;
+    let mark: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    fork_cover(crate::backend::transcript::origin_sig::owner_of_zone(fork_zone), &mark)
+}
+
+/// The runtime the agent `agent_id` runs in, from srv's own record of it. An agent that record doesn't know is taken as a
+/// container's: the least trusted.
+pub fn runtime_of_agent(mstore: &crate::backend::storage::store::Store, agent_id: &str) -> WriterRuntime {
+    match mstore.agent_def_get(agent_id) {
+        Ok(Some(def)) if !crate::backend::runtime_adapter::RuntimeKind::of_agent_type(&def.agent_type).is_container() => WriterRuntime::Host,
+        _ => WriterRuntime::Container,
+    }
+}
+
+/// [`seal_existing_fork`] for every fork srv has a record of (a definition with a parent and a branch label): each takes the
+/// runtime of its parent and of itself, the less trusted of the two, from srv's own record. The number of marks written.
+pub fn seal_existing_forks(gfs: &FileStore, mstore: &crate::backend::storage::store::Store) -> usize {
+    let Ok(defs) = mstore.agent_def_list() else { return 0 };
+    defs.iter()
+        .filter(|def| !def.parent_id.is_empty() && !def.branch_label.is_empty())
+        .filter(|def| {
+            let (parent, own) = (runtime_of_agent(mstore, &def.parent_id), runtime_of_agent(mstore, &def.id));
+            let runtime = if parent == WriterRuntime::Container || own == WriterRuntime::Container { WriterRuntime::Container } else { WriterRuntime::Host };
+            seal_existing_fork(gfs, &def.id, &def.parent_id, runtime)
+        })
+        .count()
+}
+
+/// A fork made before its mark named where the copy came from: the mark gets it now, signed. The copied part isn't
+/// bounded here (the whole transcript is taken as the copy), so `runtime` must be the less trusted of the parent's and the
+/// fork's. `true` when the mark was written; `false` when it is already sealed or the zone is no fork's.
+pub fn seal_existing_fork(gfs: &FileStore, fork_id: &str, parent_id: &str, runtime: WriterRuntime) -> bool {
+    if !is_valid_definition_id(parent_id) || !is_valid_definition_id(fork_id) || parent_id == fork_id {
+        return false;
+    }
+    let zone = agent_current_zone(fork_id);
+    if gfs.read_file(&zone, FORK_MARK_FILE).ok().flatten().is_none() || fork_history_cover(gfs, &zone).is_some() {
+        return false;
+    }
+    let upto = gfs.stat(&zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size.max(0) as u64);
+    write_sealed_mark(gfs, &zone, parent_id, runtime, upto).is_ok()
 }
 
 /// A transcript over the cap: the fork's pane gets its newest part. The window is `[end - cap, end)`
@@ -144,6 +225,7 @@ fn copy_window(
     end: i64,
     cap: i64,
     with_state: bool,
+    parent_runtime: WriterRuntime,
 ) -> Result<ForkHistory, String> {
     use crate::backend::storage::error::StoreError;
     use crate::backend::storage::filestore::{FileMeta, FileOpts};
@@ -199,6 +281,7 @@ fn copy_window(
         gfs.delete_files(fork, &[OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE]).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
     }
+    seal_fork_mark(gfs, fork, parent_id, parent_runtime);
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, zone = %src_zone, bytes, from_byte = cut, "fork: copied the newest part of its parent's history");
     Ok(ForkHistory::Copied { bytes })
 }
@@ -265,8 +348,9 @@ pub fn copy_older_session_history(
     session_id_field: &str,
     src_zone: &str,
     end: i64,
+    parent_runtime: WriterRuntime,
 ) -> Result<ForkHistory, String> {
-    copy_older_session_history_capped(gfs, parent_id, fork_id, session_id, session_id_field, src_zone, end, FORK_COPY_MAX_BYTES)
+    copy_older_session_history_capped(gfs, parent_id, fork_id, session_id, session_id_field, src_zone, end, parent_runtime, FORK_COPY_MAX_BYTES)
 }
 
 /// [`copy_older_session_history`], with the cap on what is copied: a history longer than `cap` is
@@ -280,6 +364,7 @@ fn copy_older_session_history_capped(
     session_id_field: &str,
     src_zone: &str,
     end: i64,
+    parent_runtime: WriterRuntime,
     cap: i64,
 ) -> Result<ForkHistory, String> {
     if !is_valid_definition_id(parent_id) || !is_valid_definition_id(fork_id) || parent_id == fork_id {
@@ -317,7 +402,7 @@ fn copy_older_session_history_capped(
     write_fork_mark(gfs, &fork, parent_id, session_id)?;
     gfs.flush_cache().map_err(|e| format!("flush before copy: {e}"))?;
     if end > cap {
-        return copy_window(gfs, src_zone, &fork, (parent_id, fork_id), (session_id, session_id_field), end, cap, false);
+        return copy_window(gfs, src_zone, &fork, (parent_id, fork_id), (session_id, session_id_field), end, cap, false, parent_runtime);
     }
     let mut prefixes = vec![(OUTPUT_FILE, end)];
     if tsidx_len > 0 {
@@ -332,7 +417,7 @@ fn copy_older_session_history_capped(
         gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE]).map_err(|e| format!("undo copy: {e}"))?;
         return Ok(ForkHistory::NotTheLastSession);
     }
-    sign_for_fork(gfs, src_zone, &fork);
+    sign_for_fork(gfs, src_zone, &fork, parent_runtime);
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, zone = %src_zone, bytes, "fork: copied its parent's history up to an older session");
     Ok(ForkHistory::Copied { bytes })
 }
