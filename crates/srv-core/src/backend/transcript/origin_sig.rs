@@ -237,15 +237,51 @@ impl WriterRuntime {
     }
 }
 
-/// `line`, an output line an agent's process wrote, as srv stores it: with `amx.writer` saying which runtime wrote
-/// it, and which agent, signed for `owner`. Whatever `amx` the line already carries is the agent's own words and is
-/// dropped first, never kept or merged. `None` for a line that isn't a JSON object, which is stored as it is.
+/// `line`, an output line an agent's process wrote, as srv stores it: the agent's own bytes, with `amx.writer` saying
+/// which runtime wrote it, and which agent, signed for `owner`, added as the last member. The agent's bytes and key
+/// order are kept (readers look for `"type":"stream_event"` and `"subtype":"init"` near the start of a line). Whatever
+/// `amx` the line already carries is the agent's own words and is dropped first, never kept or merged. `None` for a
+/// line that isn't a JSON object, and for a streaming delta (never a message, and kept compact), which are stored as they are.
 pub fn stamp_writer(owner: &str, line: &str, runtime: WriterRuntime, ts_ms: i64) -> Option<String> {
+    if is_stream_delta(line.as_bytes()) {
+        return None;
+    }
     let mut record: Value = serde_json::from_str(line).ok()?;
     let map = record.as_object_mut()?;
-    map.insert("amx".to_string(), serde_json::json!({ "v": 1, "writer": { "runtime": runtime.as_str(), "agent": owner } }));
+    let carried = map.remove("amx").is_some();
+    // The record's own text, without an `amx` of its own; unchanged bytes unless it had one.
+    let base = if carried { serde_json::to_string(&record).ok()? } else { line.to_string() };
+    record["amx"] = serde_json::json!({ "v": 1, "writer": { "runtime": runtime.as_str(), "agent": owner } });
     sign_in_place(owner, &mut record, ts_ms)?;
-    serde_json::to_string(&record).ok()
+    let amx = serde_json::to_string(record.get("amx")?).ok()?;
+    let head = base.trim_end().strip_suffix('}')?;
+    let sep = if head.trim_end().ends_with('{') { "" } else { "," };
+    Some(format!("{head}{sep}\"amx\":{amx}}}"))
+}
+
+/// Whether `line` is a streaming delta, as the History reader tells them apart: it names its type near the start.
+fn is_stream_delta(line: &[u8]) -> bool {
+    let start = &line[..line.len().min(48)];
+    start.windows(14).any(|w| w == b"\"stream_event\"")
+}
+
+/// `body` (a JSON object whose last member is its `amx`, as [`stamp_writer`] stores it) with that member replaced by
+/// `shown`, or dropped when `None`; every other byte is kept. `None` when `amx` is not the last member or is not `amx`.
+fn replace_trailing_amx(body: &[u8], amx: &Value, shown: Option<&Map<String, Value>>) -> Option<Vec<u8>> {
+    const KEY: &[u8] = b",\"amx\":";
+    let body = body.trim_ascii_end();
+    let start = body.windows(KEY.len()).rposition(|w| w == KEY)?;
+    let (last, span) = (body.last()?, &body[start + KEY.len()..body.len() - 1]);
+    if *last != b'}' || &serde_json::from_slice::<Value>(span).ok()? != amx {
+        return None;
+    }
+    let mut out = body[..start].to_vec();
+    if let Some(shown) = shown {
+        out.extend_from_slice(KEY);
+        out.extend_from_slice(&serde_json::to_vec(shown).ok()?);
+    }
+    out.push(b'}');
+    Some(out)
 }
 
 /// Whether `record`'s `amx` claims a writer runtime srv knows (it is believed only if it verifies).
@@ -306,6 +342,16 @@ pub fn vet_line<'a>(owner: &str, line: &'a [u8]) -> Cow<'a, [u8]> {
             shown.retain(|k, _| matches!(k.as_str(), "v" | "writer" | "verified"));
         }
         map.insert("amx".to_string(), Value::Object(shown));
+    }
+    // An agent's own line keeps its bytes and key order: only its trailing `amx` changes.
+    if !user {
+        let shown = if signed { map.get("amx").and_then(Value::as_object).cloned() } else { None };
+        if let Some(mut out) = replace_trailing_amx(body, amx.as_ref().unwrap_or(&Value::Null), shown.as_ref()) {
+            if line.ends_with(b"\n") {
+                out.push(b'\n');
+            }
+            return Cow::Owned(out);
+        }
     }
     let Ok(mut out) = serde_json::to_vec(&record) else { return blank() };
     if line.ends_with(b"\n") {
@@ -471,6 +517,45 @@ mod tests {
         }
         assert!(stamp_writer("agent-1", "not json", WriterRuntime::Host, 7).is_none());
         assert!(stamp_writer("agent-1", "[1,2]", WriterRuntime::Host, 7).is_none());
+    }
+
+    const INIT: &str = r#"{"type":"system","subtype":"init","cwd":"/workspace","session_id":"s1","tools":["Bash","Read"]}"#;
+    const DELTA: &str = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}},"session_id":"s1","parent_tool_use_id":null,"uuid":"u1"}"#;
+
+    #[test]
+    fn a_stamped_line_keeps_the_agents_bytes_and_key_order_with_the_stamp_last() {
+        let stored = stamp_writer("agent-1", INIT, WriterRuntime::Container, 7).unwrap();
+        let (kept, stamp) = stored.split_at(INIT.len() - 1);
+        assert_eq!(kept, &INIT[..INIT.len() - 1], "every byte the agent wrote is where it was");
+        assert!(stamp.starts_with(",\"amx\":{") && stamp.ends_with("}}"), "{stamp}");
+        // The readers that look near the start of a line still find what they look for.
+        assert!(stored.as_bytes()[..96].windows(16).any(|w| w == br#""subtype":"init""#), "{stored}");
+        // What a viewer reads back keeps the same bytes, with the stamp shown last.
+        let vetted = vet_line("agent-1", stored.as_bytes()).into_owned();
+        let text = String::from_utf8(vetted).unwrap();
+        assert!(text.starts_with(kept), "{text}");
+        assert_eq!(writer_of(text.as_bytes()), Some(("container".to_string(), "agent-1".to_string())));
+        assert!(!text.contains("\"sig\""), "{text}");
+    }
+
+    #[test]
+    fn a_line_with_nothing_in_it_or_an_empty_object_is_stamped_too() {
+        assert_eq!(writer_of(vet_line("agent-1", stamp_writer("agent-1", "{}", WriterRuntime::Host, 7).unwrap().as_bytes()).as_ref()), Some(("host".to_string(), "agent-1".to_string())));
+        let spaced = stamp_writer("agent-1", "{\"a\": 1 }  ", WriterRuntime::Host, 7).unwrap();
+        assert!(spaced.starts_with("{\"a\": 1 ,\"amx\""), "{spaced}");
+        assert_eq!(shown(&vet_line("agent-1", spaced.as_bytes()))["a"], 1);
+    }
+
+    #[test]
+    fn a_streaming_delta_is_stored_as_it_is() {
+        assert!(stamp_writer("agent-1", DELTA, WriterRuntime::Container, 7).is_none());
+    }
+
+    #[test]
+    fn an_unsigned_trailing_amx_comes_off_and_every_other_byte_stays() {
+        let forged = format!("{},\"amx\":{{\"v\":1,\"writer\":{{\"runtime\":\"host\",\"agent\":\"agent-1\"}}}}}}", &INIT[..INIT.len() - 1]);
+        let vetted = vet_line("agent-1", forged.as_bytes()).into_owned();
+        assert_eq!(String::from_utf8(vetted).unwrap(), INIT);
     }
 
     #[test]
