@@ -178,8 +178,16 @@ pub(crate) fn upsert_drone_as(state: &AppState, mut cmd: DroneDefinition, saved_
     Ok(cmd)
 }
 
-/// `deletedrone`.
+/// `deletedrone` for a delete no connection asked for, or the person's own.
+#[cfg(test)]
 pub(crate) fn delete_drone(state: &AppState, cmd: DeleteDroneReq) -> Result<DeleteResp, String> {
+    delete_drone_as(state, cmd, crate::backend::jobs::BY_OPERATOR)
+}
+
+/// `deletedrone` with who deleted it: the log line names the connection's label (`agent:<id>` for an agent), never
+/// what the request says.
+pub(crate) fn delete_drone_as(state: &AppState, cmd: DeleteDroneReq, by: &str) -> Result<DeleteResp, String> {
+    tracing::info!(drone_id = %cmd.id, by = %by, "deletedrone");
     let deleted = state
         .id_store
         .drone_delete(&cmd.id)
@@ -372,6 +380,23 @@ pub(crate) fn spawn_run_drain(
     });
 }
 
+/// What an agent's own `rundrone` call may start: the drones the Drone tool may fire (nothing that writes outside
+/// AgentMux, reads a Vault credential, runs a command or calls another drone), so approving a credential or a
+/// write stays the person's. The person's window is not asked. A drone that does not exist is left for the run
+/// to report.
+pub(crate) fn run_allowed_for(state: &AppState, ctx: &RpcContext, drone_id: &str) -> Result<(), String> {
+    if !matches!(actor_of(ctx), Actor::Agent(_)) {
+        return Ok(());
+    }
+    let Ok(Some(drone)) = state.id_store.drone_get(drone_id) else {
+        return Ok(());
+    };
+    match crate::server::drone_agent::why_not_fireable(&drone) {
+        Some(why) => Err(format!("FORBIDDEN: an agent can't run {:?}: {why}. A person runs it from the Drone pane", drone.name)),
+        None => Ok(()),
+    }
+}
+
 /// The most a run's input may hold, as JSON. It lives in the run's memory
 /// and the ledger keeps only its hash and size (real-world jobs spec D11).
 pub(crate) const MAX_INPUT_BYTES: usize = 64 * 1024;
@@ -555,7 +580,15 @@ pub struct ResumeWaitResp {
 }
 
 /// `resumedronewait`: end a Wait block that waits on an event.
+#[cfg(test)]
 pub(crate) fn resume_drone_wait(cmd: ResumeWaitReq) -> Result<ResumeWaitResp, String> {
+    resume_drone_wait_as(cmd, crate::backend::jobs::BY_OPERATOR)
+}
+
+/// `resumedronewait` with the caller named as the connection says (the log line names it): the key stays what
+/// guards the wait.
+pub(crate) fn resume_drone_wait_as(cmd: ResumeWaitReq, by: &str) -> Result<ResumeWaitResp, String> {
+    tracing::info!(by = %by, "resumedronewait: a wait is being ended");
     let payload = cmd.payload.unwrap_or(serde_json::Value::Null);
     let size = payload.to_string().len();
     if size > MAX_INPUT_BYTES {
@@ -600,22 +633,23 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_DELETE_DRONE, move |cmd: DeleteDroneReq, _ctx| {
+    engine.register_typed(COMMAND_DELETE_DRONE, move |cmd: DeleteDroneReq, ctx| {
         let s = s.clone();
-        async move { delete_drone(&s, cmd) }
+        async move { delete_drone_as(&s, cmd, &recorded_as(&ctx)) }
     });
 
     let s = state.clone();
     engine.register_typed(COMMAND_RUN_DRONE, move |cmd: RunDroneReq, ctx| {
         let s = s.clone();
         async move {
+            run_allowed_for(&s, &ctx, &cmd.drone_id)?;
             let by = run_started_by(&ctx);
             start_drone_run_as(&s, cmd, by.as_deref()).await
         }
     });
 
     engine.register_typed(COMMAND_RESOLVE_DRONE_RUN, move |cmd: ResolveRunReq, ctx| async move { resolve_drone_run_as(&ctx, cmd) });
-    engine.register_typed(COMMAND_RESUME_DRONE_WAIT, move |cmd: ResumeWaitReq, _ctx| async move { resume_drone_wait(cmd) });
+    engine.register_typed(COMMAND_RESUME_DRONE_WAIT, move |cmd: ResumeWaitReq, ctx| async move { resume_drone_wait_as(cmd, &recorded_as(&ctx)) });
     let s = state.clone();
     engine.register_typed(COMMAND_REPLAY_DRONE_RUN, move |cmd: crate::server::drone_replay::ReplayRunReq, ctx| {
         let s = s.clone();
