@@ -290,7 +290,7 @@ async function submitKey(ctx: FormCtx, validate: boolean): Promise<void> {
 }
 
 /** `inline`: the form fills the section it is in (Connectors' add section), where the pane's own
- *  overlay would be a second dialog over the pane. */
+ *  overlay would be a second dialog over the pane, and the section's heading and close button are the form's. */
 export function AccountForm({ model, inline }: { model: IdentityViewModel; inline?: boolean }): JSX.Element {
     const editing = () => model.editingAccountAtom();
     const isEdit = () => editing() !== null;
@@ -307,10 +307,12 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
 
     const form = (
         <div class={inline ? "identity-form identity-form--inline" : "identity-form"}>
-            <div class="identity-form-header">
-                <span>{isEdit() ? t("accountForm.editAccount") : t("accountForm.addAccount")}</span>
-                <CloseButton tooltip={false} onClick={() => model.cancelForm()} />
-            </div>
+            <Show when={!inline}>
+                <div class="identity-form-header">
+                    <span>{isEdit() ? t("accountForm.editAccount") : t("accountForm.addAccount")}</span>
+                    <CloseButton tooltip={false} onClick={() => model.cancelForm()} />
+                </div>
+            </Show>
 
             <div class="identity-form-body">
                 <Show when={model.formErrorAtom()}>

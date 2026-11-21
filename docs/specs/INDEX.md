@@ -254,6 +254,7 @@ than none. Add the line when you touch one and know which area it belongs to.
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
 | [`SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20`](SPEC_REMOTE_PANES_WATCH_AND_DRIVE_AN_AGENT_ON_ANOTHER_COMPUTER_2026_11_20.md) | SPEC: Remote panes: open an agent that runs on another computer, see the same conversation live, and drive it, under a red "Remote" banner | active | 2026-11-20 |  |
+| [`SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20`](SPEC_SETTINGS_WIDE_PANE_COLUMNS_2026_11_20.md) | SPEC: Settings fills a wide pane in several columns of readable width | implemented | 2026-11-20 |  |
 | [`SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20`](SPEC_SKILLS_B6_PORTABLE_SKILL_FILES_2026_11_20.md) | Spec: Skills B6, portable skill files for non-Claude agents | implemented | 2026-11-20 |  |
 | [`SPEC_CONNECTORS_ONE_LIST_2026_11_19`](SPEC_CONNECTORS_ONE_LIST_2026_11_19.md) | Spec: Connectors is one list, one connector per line, details on click, open at startup | active | 2026-11-19 |  |
 | [`SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19`](SPEC_CONTAINER_AGENT_PERSISTENT_CONTROLLER_2026_11_19.md) | Spec: a container agent runs as one long-lived process, like a native agent | draft | 2026-11-19 |  |

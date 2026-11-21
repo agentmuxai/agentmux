@@ -4481,6 +4481,25 @@
     }
   },
   {
+    "command": "identity.account.usage",
+    "request": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv_core::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::account_episodes::accounts::IdentityAccountsResult",
+    "responseName": "IdentityAccountsResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountsResult"
+      ],
+      "name": "IdentityAccountsResult"
+    }
+  },
+  {
     "command": "identity.account.validate",
     "request": "agentmux_srv::server::app_api::identity::IdentityAccountValidateReq",
     "requestName": "IdentityAccountValidateReq",

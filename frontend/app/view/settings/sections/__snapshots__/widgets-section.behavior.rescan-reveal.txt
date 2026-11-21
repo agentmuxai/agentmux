@@ -1,7 +1,7 @@
 WidgetsRescan null
 -- rescanned
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -54,7 +54,7 @@ revealInFileExplorer "C:/Users/me/.agentmux/widgets/acme.notes"
 revealInFileExplorer "C:/Users/me/.agentmux/widgets/acme.notes"
 -- reveal failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -107,7 +107,7 @@ revealInFileExplorer "C:/Users/me/.agentmux/widgets/acme.notes"
 revealInFileExplorer "C:/Users/me/.agentmux/widgets"
 -- reveal worked again
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"
@@ -158,7 +158,7 @@ revealInFileExplorer "C:/Users/me/.agentmux/widgets"
 WidgetsRescan null
 -- rescan failed
 <div>
-  <div class="settings-section-body widgets-section">
+  <div class="settings-section-body settings-section-body--single widgets-section">
     <div data-stand="WidgetBarSettings">
     <div class="settings-subheader">
       "Widgets"

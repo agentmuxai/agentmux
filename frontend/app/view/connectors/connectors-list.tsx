@@ -74,10 +74,16 @@ export function ConnectorsList(): JSX.Element {
     const s = useConnectorsState();
     // Panel ids are per pane: two Connectors panes in one window must not share an id (aria-controls points at it).
     const uid = createUniqueId();
+    // The agents that sign in inside their own pane have no Connect: they end the list, under their own heading (§4.2).
+    const withConnect = () => s.available().filter((e) => e.control !== "howto");
+    const ownPane = () => s.available().filter((e) => e.control === "howto");
+    const renderAdd = (e: ConnectorEntry) => (
+        <AddAccountSection tile={e.tile} name={e.name} service={e.service} model={s.model} muxbus={s.muxbus} onClose={s.close} />
+    );
     return (
         <div class="identity-view accounts-manager">
             <div class="identity-body accounts-manager-body">
-                <section class="ui-card-section ui-density-compact" aria-label={t("connectors.title")}>
+                <section class="ui-card-section ui-density-compact connectors-section" aria-label={t("connectors.title")}>
                     <SectionHeader title={t("connectors.title")} count={s.connectedCount() > 0 ? s.connectedCount() : undefined}>
                         <FilterInput
                             class="ui-card-section-filter"
@@ -109,11 +115,17 @@ export function ConnectorsList(): JSX.Element {
                         s={s}
                         title={t("connectors.group.available")}
                         detailId={`connectors-${uid}-available`}
-                        items={s.available}
-                        renderDetail={(e) => (
-                            <AddAccountSection tile={e.tile} name={e.name} service={e.service} model={s.model} muxbus={s.muxbus} onClose={s.close} />
-                        )}
+                        items={withConnect}
+                        renderDetail={renderAdd}
                     />
+                    <Group
+                        s={s}
+                        title={t("connectors.group.ownPane")}
+                        detailId={`connectors-${uid}-own-pane`}
+                        items={ownPane}
+                        renderDetail={renderAdd}
+                    />
+                    <OtherAgentsSection />
                     <Show when={s.filter() && s.shownCount() === 0}>
                         <EmptyState>{t("connectors.noMatch", { query: s.filter() })}</EmptyState>
                     </Show>
@@ -124,7 +136,6 @@ export function ConnectorsList(): JSX.Element {
                             {t("connectors.foot.custom")}
                         </Button>
                     </p>
-                    <OtherAgentsSection />
                 </section>
             </div>
 

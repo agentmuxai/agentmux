@@ -150,7 +150,16 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         onSelectResult={handleSelectResult}
                     />
                     <ConfigErrorsBanner onOpen={(f, line) => void openFile(f, line)} />
-                    <Dynamic component={SECTION_VIEWS[section()]} model={props.model} />
+                    {/* The scroller. A section that flows into columns sits in it with an auto height, so the
+                        browser balances the columns down instead of paging them to the right; one wrapper per
+                        section, so a new section starts at the top. */}
+                    <Show when={section()} keyed>
+                        {(current) => (
+                            <div class="settings-scroll">
+                                <Dynamic component={SECTION_VIEWS[current]} model={props.model} />
+                            </div>
+                        )}
+                    </Show>
                     <footer class="settings-footer">
                         <Button icon="file-code" onClick={() => void openRaw()}>
                             {t("settings.footer.openRaw", { file: "settings.json" })}
