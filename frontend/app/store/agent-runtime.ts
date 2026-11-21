@@ -54,9 +54,11 @@ const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.l
 const sameIndex = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>) =>
     a.size === b.size && [...a].every(([block, agent]) => b.get(block) === agent);
 
-export function createAgentRuntimeStore(deps: AgentRuntimeDeps): AgentRuntimeStore {
-    // One signal for each agent's row, so an event for one agent wakes only the readers of that agent; a signal drops
-    // an event that says what the row already says. `latest` is the same rows for what reads them outside a reaction.
+/**
+ * The rows, one signal each, so an event for one agent wakes only the readers of that agent; a signal drops an event
+ * that says what the row already says. `latest` is the same rows for what reads them outside a reaction.
+ */
+function createRowSlots() {
     const slots = new Map<string, { get: Accessor<AgentRuntime | undefined>; set: (r: AgentRuntime | undefined) => void }>();
     const latest = new Map<string, AgentRuntime>();
     const slotOf = (id: string) => {
@@ -82,6 +84,17 @@ export function createAgentRuntimeStore(deps: AgentRuntimeDeps): AgentRuntimeSto
         undefined,
         { equals: sameIndex }
     );
+    const apply = (row: AgentRuntime) => {
+        const prev = latest.get(row.agent_id);
+        if (prev && sameRow(prev, row)) return;
+        latest.set(row.agent_id, row);
+        slotOf(row.agent_id).set(row);
+    };
+    return { slotOf, latest, ids, setIds, list, blockIndex, apply };
+}
+
+export function createAgentRuntimeStore(deps: AgentRuntimeDeps): AgentRuntimeStore {
+    const { slotOf, latest, ids, setIds, list, blockIndex, apply } = createRowSlots();
     const follows = new Map<string, () => void>();
     // The agents an event changed while a read was out: the read is older than that event.
     const changedMeanwhile = new Set<string>();
@@ -89,13 +102,6 @@ export function createAgentRuntimeStore(deps: AgentRuntimeDeps): AgentRuntimeSto
     let inFlight = false;
     let again = false;
     let disposed = false;
-
-    const apply = (row: AgentRuntime) => {
-        const prev = latest.get(row.agent_id);
-        if (prev && sameRow(prev, row)) return;
-        latest.set(row.agent_id, row);
-        slotOf(row.agent_id).set(row);
-    };
 
     const follow = (wanted: Set<string>) => {
         for (const [id, unsubscribe] of follows) {

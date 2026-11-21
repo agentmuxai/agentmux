@@ -113,8 +113,7 @@ export function createPickerLaunch(
         }
     };
 
-    // Each agent's runtime state, shared with the status bar and the Swarm.
-    // One agent's row wakes only what reads that agent: a row of My Agents is not read again for another agent's event.
+    // Each agent's runtime state, shared with the status bar and the Swarm; one agent's row wakes only what reads it.
     const runtimeStore = sharedAgentRuntime();
     const runtimeOf = (agentId: string) => runtimeStore.rowOf(agentId);
     // An agent that runs but that no window shows: attach to it rather than start another process (attach-target.ts).
