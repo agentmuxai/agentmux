@@ -99,11 +99,13 @@ fn speaks_acp(provider: &str) -> bool {
     crate::backend::providers::get_provider(provider).is_some_and(|p| p.controller_type_str() == "acp")
 }
 
-/// Whether an agent of `provider` can start a fresh session, and why not.
+/// Whether an agent of `provider` can start a fresh session, and why not. A container's Claude or Codex agent runs one
+/// `exec` per turn on the same controller a host Codex agent does, so ending its session is forgetting its id, as
+/// there (`blockcontroller/subprocess/codex_fresh.rs`); the harnesses that speak ACP have no such controller in a container.
 fn fresh_supported(provider: &str, container: bool) -> Result<(), &'static str> {
     match (provider, container) {
-        (_, true) => Err("unsupported in containers"),
-        ("claude" | "codex", false) => Ok(()),
+        ("claude" | "codex", _) => Ok(()),
+        (_, true) => Err("unsupported in containers: only Claude and Codex agents can start fresh there"),
         _ if speaks_acp(provider) => Ok(()),
         _ => Err("unsupported: only Claude, Codex and ACP agents can start fresh"),
     }
@@ -380,10 +382,15 @@ mod tests {
     }
 
     #[test]
-    fn fresh_is_offered_to_claude_codex_and_every_acp_harness_but_not_in_a_container() {
+    fn fresh_is_offered_to_claude_codex_and_every_acp_harness_and_in_a_container_to_claude_and_codex() {
         for provider in ["claude", "codex", "dsh", "copilot"] {
             assert_eq!(fresh_supported(provider, false), Ok(()), "{provider}");
-            assert_eq!(fresh_supported(provider, true), Err("unsupported in containers"), "{provider}");
+        }
+        for provider in ["claude", "codex"] {
+            assert_eq!(fresh_supported(provider, true), Ok(()), "a container's {provider} agent starts fresh as a host's does");
+        }
+        for provider in ["dsh", "copilot"] {
+            assert!(fresh_supported(provider, true).is_err_and(|why| why.contains("containers") && why.contains("Claude and Codex")), "{provider}");
         }
         assert!(fresh_supported("nonesuch", false).is_err_and(|why| why.contains("ACP")));
     }
