@@ -420,7 +420,7 @@ fn service_shell_and_vault_routes() -> Router<AppState> {
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
-        .route("/agentmux/discovery", get(handle_discovery))
+        .route("/agentmux/discovery", get(super::live_facts::handler::handle))
         .route("/agentmux/old-versions", get(super::old_versions_handlers::handle_get).post(super::old_versions_handlers::handle_post))
         .route("/agentmux/reactive/availability", get(super::availability_view::handle_availability))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))

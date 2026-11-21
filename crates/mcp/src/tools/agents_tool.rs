@@ -19,6 +19,7 @@ use super::*;
 
 pub(super) const ACTS: &[Act] = &[
     Act { action: "list", tool: "DiscoverAgents", rename: &[] },
+    Act { action: "status", tool: "AgentStatus", rename: &[] },
     Act { action: "conversations", tool: "ListConversations", rename: &[] },
     Act { action: "transcript", tool: "GetAgentTranscript", rename: &[] },
     Act { action: "open", tool: "OpenAgent", rename: &[("agent", "agent_id")] },
@@ -69,7 +70,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 return relabeled("Agents", ACTS, result);
             }
             let result = match act.tool {
-                "DiscoverAgents" => fleet::call(act.tool, &args, cx).await,
+                "DiscoverAgents" | "AgentStatus" => fleet::call(act.tool, &args, cx).await,
                 "OpenAgent" if args.get("agents").is_some_and(|a| !a.is_null()) => open_many(&args, cx).await,
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" if args.get("workers").is_some_and(|w| !w.is_null()) => spawn_many(&args, cx).await,
