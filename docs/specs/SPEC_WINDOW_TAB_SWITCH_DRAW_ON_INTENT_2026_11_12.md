@@ -1,6 +1,6 @@
 # SPEC: A faster window-tab switch: draw a tab's agent panes while the pointer is on its pill, so every pane appears at once at its latest content
 
-**Status:** approved. Camper (panes and tabs) agreed the design on 2026-11-12; the operator approved it on 2026-11-20 as recommended (relayed by AgentY). Spec task #47492, build #47493.
+**Status:** active (approved, being built). Camper (panes and tabs) agreed the design on 2026-11-12; the operator approved it on 2026-11-20 as recommended (relayed by AgentY). Spec task #47492, build #47493.
 **Author:** Loap-3 (performance). **Lane:** panes and tabs are Camper's; this reuses his prewarm lease (`ANALYSIS_WINDOW_TAB_PREWARM_2026_10_25.md`) and the pill-intent signal of browser hibernation (`SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md` §6).
 **Verified on:** `origin/main` at `e1a0e2044` (2026-11-12), 0.60.25. Re-checked 2026-11-20 against `origin/main` `87af6bbdf3`: the files this spec builds on (`agent-prewarm.ts`, `agent-prewarm-driver.ts`, `usePrewarm.ts`, `tab.tsx`, `agent-dormancy.tsx`) are unchanged since; the agent view's scroll code it only reads has had three changes (#7153 keeps the topmost row in place, #7914 limits a flush to the live end of a long transcript, #7261 is comments), so the build re-reads `settle-on-show.ts` and the virtual list before it starts and the section 2 numbers stay the baseline.
 **Follows:** PR #7039 (a pane in a hidden tab loads its older history before the first show) and `REPORT_TAB_SWITCH_CATCH_UP_2026_11_11.md`, whose §7 this spec corrects (section 6).
