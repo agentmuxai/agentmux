@@ -248,7 +248,6 @@
 143 crates/srv/src/server/agent_handlers/template.rs::copy_definition
 155 crates/srv/src/server/agent_handlers/template_create.rs::create_from_template
 103 crates/srv/src/server/agent_takeover.rs::handle_agent_release
-242 crates/srv/src/server/app_api/agent_define.rs::agent_define_core
 103 crates/srv/src/server/app_api/bundle/export_for_agent.rs::build_export_for_agent
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
