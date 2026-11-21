@@ -304,6 +304,8 @@ pub const ROUTES: &[(Match, Audience)] = &[
     (Match::Route("/api/v1/muxspect/migrations"), Audience::Everyone),
     (Match::Route("/api/v1/muxspect/verify-sender"), Audience::Everyone),
     (Match::Route("/api/v1/pane/open"), Audience::Everyone),
+    // A deep link: srv's guard refuses a path a container agent's snapshot rule would not open.
+    (Match::Route("/api/v1/pane/open_link"), Audience::Everyone),
     (Match::Route("/api/v1/pane/title"), Audience::Everyone),
     (Match::Route("/api/v1/quota-mode"), Audience::Everyone),
     (Match::Route("/api/v1/self"), Audience::Everyone),
