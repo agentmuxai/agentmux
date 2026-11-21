@@ -34,7 +34,6 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     match name {
         "SendMessage" => run_send_message(arguments, cx).await,
         "DiscoverAgents" | "FleetList" => run_discover_agents(arguments, false, cx).await,
-        "AgentStatus" => run_discover_agents(arguments, true, cx).await,
         "FleetBroadcast" => run_fleet_broadcast(arguments, cx).await,
         "FleetBulkStop" => run_fleet_bulk_stop(arguments, cx).await,
         _ => Err(not_in_family()),
@@ -141,7 +140,7 @@ fn discovery_query(arguments: &Value, status: bool) -> Vec<(&'static str, String
 }
 
 /// DiscoverAgents, its fleet-framed alias FleetList and `Agents status`: one call to the discovery endpoint, returned as it came.
-async fn run_discover_agents(arguments: &Value, status: bool, cx: &ToolCtx<'_>) -> Result<String> {
+pub(super) async fn run_discover_agents(arguments: &Value, status: bool, cx: &ToolCtx<'_>) -> Result<String> {
     let ToolCtx { local_url, auth_key, client, .. } = *cx;
     if local_url.is_empty() || auth_key.is_empty() {
         anyhow::bail!(
