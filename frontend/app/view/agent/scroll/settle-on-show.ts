@@ -21,6 +21,8 @@ export interface ShowCover {
     observe: () => readonly (Element | undefined)[];
     /** Why a cover lifted, for the log: `cap` means the layout had not been seen to hold still. */
     onLift?: (why: ShowCoverLift, frames: number, ms: number) => void;
+    /** A show of a following pane: whether it was covered (what it holds changed while hidden), for the log. */
+    onShow?: (covered: boolean) => void;
 }
 
 /** `still`: the size held for SHOW_COVER_QUIET_FRAMES frames; `cap`: SHOW_COVER_MAX_MS passed first. */
@@ -114,7 +116,11 @@ export function useSettleOnShow(
             lift();
         } else if (wasHidden && untrack(following)) {
             flow.settleOnShow();
-            if (cover && untrack(cover.changes) !== atHide) coverUntilStill(cover);
+            if (cover) {
+                const changed = untrack(cover.changes) !== atHide;
+                if (changed) coverUntilStill(cover);
+                cover.onShow?.(changed);
+            }
         }
         wasHidden = hidden;
     });
