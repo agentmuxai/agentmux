@@ -451,6 +451,25 @@ describe("Theme and Opacity are this window's", () => {
         cleanup();
     });
 
+    it("says menus turn solid after a restart while the OS fades the window, and says nothing once the page does", () => {
+        const labels = () => sub("Opacity").map((i) => i.label);
+        try {
+            history.replaceState(null, "", "/?window_transparent=0");
+            render(() => <LogoMenu />);
+            expect(labels().at(-1)).toBe("Menus turn solid after a restart");
+            expect(sub("Opacity").every((i) => i.keepOpen === true)).toBe(true);
+            cleanup();
+
+            history.replaceState(null, "", "/?window_transparent=1");
+            render(() => <LogoMenu />);
+            expect(labels()).not.toContain("Menus turn solid after a restart");
+            expect(labels().at(-1)).toBe("35%");
+        } finally {
+            history.replaceState(null, "", "/");
+            cleanup();
+        }
+    });
+
     it("the check follows this window's opacity, and a slider drag in progress", () => {
         const [live, setLive] = createSignal<number | undefined>(undefined);
         h.win.opacity = () => 0.8;

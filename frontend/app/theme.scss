@@ -772,10 +772,13 @@
 // - Backgrounds stay opaque: fading the alpha-aware `--window-opacity`
 //   backgrounds instead compounds through nested panes. `!important` beats
 //   the inline value AppSettingsUpdater sets.
-// - `opacity` goes on body, not html: a transparent html makes the body's
-//   background propagate to the canvas, which root opacity doesn't fade. So
-//   html and body are transparent and the page background is painted by
-//   body::before, inside the faded group.
+// - `opacity` goes on the app root (`#main`), not on html or body: a transparent html makes the body's background
+//   propagate to the canvas, which root opacity doesn't fade, so html and body are transparent and the page background
+//   is painted by `#main::before`, inside the root, faded with it. What a portal puts directly under body (a menu, a
+//   popover, a window-scope dialog) is outside that group: it is painted opaque and stays opaque over the desktop at
+//   any window opacity (#48092). A dialog with scope "tab" or "pane" is mounted inside the tab or pane, under `#main`,
+//   so it fades with the window, as it did under the whole-window alpha; mounting those outside the group is a
+//   separate change.
 :root.am-uniform-fade {
     --window-opacity: 1 !important;
     --am-window-fade: 1; // the host's inline value wins
@@ -783,16 +786,30 @@
 
     body {
         background: transparent !important;
-        opacity: var(--am-window-fade);
     }
 
-    body::before {
-        content: "";
-        @include mixins.fixed-fill;
-        z-index: var(--z-behind);
-        pointer-events: none;
-        background: var(--main-bg-color);
+    // One group: the page background is painted inside the app root, behind its children, so the root's opacity fades the
+    // background and the panes together, once. Two separately faded layers (the background on body, the panes in the
+    // root) compound: at 35% the window came out 57% opaque, at 65% 88% (Linux look check on #48092).
+    #main {
+        opacity: var(--am-window-fade);
+
+        &::before {
+            content: "";
+            @include mixins.fixed-fill;
+            z-index: var(--z-behind);
+            pointer-events: none;
+            background: var(--main-bg-color);
+        }
     }
+}
+
+// The list a native `<select>` opens is a drop-down: it paints the options' own background, and a select's
+// background follows the window opacity, so without this a drop-down shows the desktop (#48092).
+select option,
+select optgroup {
+    background-color: var(--modal-bg-color);
+    color: var(--main-text-color);
 }
 
 // The default theme (no `data-theme`): its terminal blue is 2.68:1 on its
