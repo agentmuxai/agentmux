@@ -72,7 +72,7 @@ export function DevicesSection(): JSX.Element {
     const s = createDevices();
 
     return (
-        <div class="settings-section-body">
+        <div class="settings-section-body settings-section-body--single">
             <SectionHeader label={DEVICES_SETTINGS.pairedDevices.label} />
             <PairedDevices
                 s={s}
