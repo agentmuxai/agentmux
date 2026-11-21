@@ -297,3 +297,54 @@ async fn a_turn_for_a_block_with_no_controller_is_refused_before_anything_is_rea
     .unwrap_err();
     assert_eq!(err, "no controller for block blk-turn-no-controller");
 }
+
+fn output_of(state: &crate::server::AppState, block_id: &str) -> String {
+    state
+        .filestore
+        .read_file(block_id, crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT)
+        .ok()
+        .flatten()
+        .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_refusal_for_an_agent_open_in_another_pane_is_written_into_the_history_of_a_pane_not_bound_by_open_here() {
+    let state = test_state();
+    let deps = AgentTurnDeps::from_state(&state);
+    let mut block = block_with(&[]);
+    state.mstore.insert(&mut block).unwrap();
+    let refusal = crate::backend::blockcontroller::persistent::held_elsewhere_error("blk-holder", false);
+
+    surface_refusal(&deps, &block.oid, &refusal);
+
+    assert!(output_of(&state, &block.oid).contains("already open in another pane"), "the refusal is in the history");
+}
+
+#[tokio::test]
+async fn that_refusal_stays_out_of_the_history_of_a_pane_bound_by_open_here_and_still_reaches_its_recovery_row() {
+    let state = test_state();
+    let deps = AgentTurnDeps::from_state(&state);
+    let mut block = block_with(&[(crate::backend::open_here_mark::META_OPEN_HERE, json!(true))]);
+    state.mstore.insert(&mut block).unwrap();
+    let refusal = crate::backend::blockcontroller::persistent::held_elsewhere_error("blk-holder", false);
+
+    surface_refusal(&deps, &block.oid, &refusal);
+
+    assert_eq!(output_of(&state, &block.oid), "", "no red line above the conversation");
+    let stored: Block = state.mstore.must_get(&block.oid).unwrap();
+    let failure = stored.meta.get(crate::backend::blockcontroller::core::META_LAST_FAILURE).expect("the recovery row still gets it");
+    assert!(failure.to_string().contains("open_in_other_pane"), "{failure}");
+}
+
+#[tokio::test]
+async fn a_pane_bound_by_open_here_keeps_every_other_refusal_in_its_history() {
+    let state = test_state();
+    let deps = AgentTurnDeps::from_state(&state);
+    let mut block = block_with(&[(crate::backend::open_here_mark::META_OPEN_HERE, json!(true))]);
+    state.mstore.insert(&mut block).unwrap();
+
+    surface_refusal(&deps, &block.oid, "Attachments aren't supported for container agents yet.");
+
+    assert!(output_of(&state, &block.oid).contains("Attachments aren't supported"));
+}

@@ -53,6 +53,8 @@ pub(crate) async fn move_here(state: &AppState, block_id: &str) -> Result<AgentM
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // The agent is here: a pane bound with Open here has had the refusal it expected.
+    crate::backend::open_here_mark::clear(block_id, &state.mstore, &Some(state.event_bus.clone()));
     // The pane that lost the agent says so and offers the way back.
     super::agent_takeover::surface_failure(state, &holder, &persistent::held_elsewhere_error(block_id, false));
     Ok(AgentMoveHereResult { from_block: Some(holder) })

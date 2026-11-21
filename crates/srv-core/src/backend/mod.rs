@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod open_here_mark;
 pub mod agent_route;
 pub mod session_snapshot;
 pub mod agent_grants;
