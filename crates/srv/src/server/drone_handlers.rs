@@ -390,14 +390,15 @@ pub(crate) async fn start_drone_run_as(state: &AppState, cmd: RunDroneReq, by: O
 }
 
 /// Start a run an agent fires with `Drone` `fire`: the ledger row says which agent did it (`by_agent`
-/// is the agent's id), not the operator.
+/// is the agent's id), as `agent:<id>` like every other path, so no agent id can read as the operator.
 pub(crate) async fn start_agent_drone_run(
     state: &AppState,
     drone_id: &str,
     input: serde_json::Value,
     by_agent: &str,
 ) -> Result<String, String> {
-    launch_run(state, drone_id, input, None, None, Some(by_agent)).await
+    let by = Actor::Agent(by_agent.to_string()).label();
+    launch_run(state, drone_id, input, None, None, Some(&by)).await
 }
 
 /// Start the run a job's `drone` action asks for. `job_run_id` is the job

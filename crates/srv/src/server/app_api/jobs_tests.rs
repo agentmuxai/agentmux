@@ -147,11 +147,18 @@ async fn a_drone_run_is_recorded_as_the_connection_that_started_it() {
         let resp = start_drone_run_as(&state, RunDroneReq { drone_id: drone.id.clone(), input: None }, by.as_deref()).await.unwrap();
         started.push((who, resp.run_id));
     }
+    // The Drone tool's `fire` names the agent the same way, even for an agent whose id is "operator".
+    for (who, id) in [("fired by opaz", "opaz"), ("fired by an agent called operator", "operator")] {
+        let run_id = crate::server::drone_handlers::start_agent_drone_run(&state, &drone.id, json!({}), id).await.unwrap();
+        started.push((who, run_id));
+    }
     let rows = ledger_of(&state).store().job_runs_for_job(&drone.id, 10, None).unwrap();
     let by_of = |run_id: &str| rows.iter().find(|r| r.links["drone_run_id"] == run_id).map(|r| r.triggered_by.clone());
     assert_eq!(by_of(&started[0].1).as_deref(), Some("agent:opaz"));
     assert_eq!(by_of(&started[1].1).as_deref(), Some("operator"));
     assert_eq!(by_of(&started[2].1).as_deref(), Some("unproven"));
+    assert_eq!(by_of(&started[3].1).as_deref(), Some("agent:opaz"));
+    assert_eq!(by_of(&started[4].1).as_deref(), Some("agent:operator"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

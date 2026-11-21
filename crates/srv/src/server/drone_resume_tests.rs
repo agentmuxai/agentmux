@@ -245,6 +245,39 @@ async fn only_the_persons_window_answers_a_run_that_needs_attention() {
     assert_eq!(row.block_states["call"].output, Some(json!({ "value": "given" })), "the window's output, not the agent's");
 }
 
+/// On a headless server the person signed in through a browser is the person: their proof (while its lease lasts)
+/// answers a run that needs attention, and the record names them. Once the lease has lapsed the answer is refused
+/// like any connection that has proved nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_signed_in_on_a_headless_server_answers_a_run_that_needs_attention_while_their_proof_lasts() {
+    let state = crate::server::tests::test_state();
+    let c = marked_run(&state).await;
+    assert_eq!(resume_runs(&state, None).await.len(), 1);
+    has_status(&state, &c, "needs_attention").await;
+
+    let now = agentmux_common::time::now_secs_u64();
+    let person = |until: Option<u64>| RpcContext {
+        operator_proven: true,
+        operator_person: Some("person-1".into()),
+        operator_proof_until: until,
+        ..Default::default()
+    };
+    let ask = |ctx: &RpcContext, output: Value| {
+        resolve_drone_run_as(ctx, ResolveRunReq { run_id: c.run_id.clone(), action: "skip".into(), output: Some(output) }).map(|_| ())
+    };
+    let err = ask(&person(Some(now - 60)), json!({ "value": "late" })).unwrap_err();
+    assert!(err.starts_with("FORBIDDEN") && err.contains("sign-in with the host has ended"), "{err}");
+    let row = has_status(&state, &c, "needs_attention").await;
+    assert!(row.ended_at == 0, "an expired proof answered nothing: {row:?}");
+
+    let live = person(Some(now + 600));
+    assert_eq!(crate::server::drone_handlers::run_started_by(&live).as_deref(), Some("person:person-1 (AgentMux Web)"));
+    ask(&live, json!({ "value": "given" })).unwrap();
+    let row = ended(&state, &c).await;
+    assert_eq!(row.status, RunStatus::Done.as_str(), "{row:?}");
+    assert_eq!(row.block_states["call"].output, Some(json!({ "value": "given" })));
+}
+
 #[tokio::test]
 async fn nobody_can_answer_a_run_that_is_not_waiting() {
     let err = resolve_drone_run(ResolveRunReq { run_id: "no-such-run".into(), action: "cancel".into(), output: None }).unwrap_err();
