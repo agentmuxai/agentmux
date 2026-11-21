@@ -197,6 +197,7 @@ async fn deliver_next(state: &AppState, block_id: &str) {
         crate::backend::message_origin::MessageOrigin::user(),
         attachments,
         None,
+        false,
     )
     .await;
     let (store2, block2, id2, attempt2) = (store.clone(), block_id.to_string(), id.clone(), attempt);

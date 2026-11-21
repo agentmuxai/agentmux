@@ -3122,7 +3122,7 @@ async fn a_deferred_message_past_its_senders_expiry_is_dropped_not_written() {
     // The message goes with a held `[AgentMux]` note, as any delivery does.
     crate::backend::reactive::held_notes::hold(&c.block_id, "upgrade", "[AgentMux] AgentMux was upgraded");
     let (message, attached) = crate::backend::reactive::held_notes::attach(&c.block_id, "too late");
-    let record = RecordOrigin { origin: MessageOrigin::user(), notes: attached.note_texts() };
+    let record = RecordOrigin { origin: MessageOrigin::user(), notes: attached.note_texts(), resend: false };
     let record_notes = attached.keyed_notes();
     let outcome = c
         .send_user_message_with_images_from(message, None, Vec::new(), record, Some(past), record_notes)
