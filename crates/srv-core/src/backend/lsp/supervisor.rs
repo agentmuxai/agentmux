@@ -131,16 +131,25 @@ pub const NOT_ON_HOST_NOTICE: &str = "agentmux/notOnHost";
 /// other than by `didOpen`. A client that adds a folder to a running server is refused here.
 const FOLDER_MESSAGES: [&str; 1] = ["workspace/didChangeWorkspaceFolders"];
 
-/// The file a `textDocument/didOpen` message opens, which is what a server is given to serve: `None` for any
-/// other message, `Some(None)` for a document whose address is not a file's path.
+/// Whether `message_json` is a message that gives a running server a folder ([`FOLDER_MESSAGES`]). A message
+/// that does not name one of them is not parsed: a `didChange` carries the whole buffer on every keystroke.
 fn adds_a_folder(message_json: &str) -> bool {
+    if !FOLDER_MESSAGES.iter().any(|method| message_json.contains(method)) {
+        return false;
+    }
     serde_json::from_str::<serde_json::Value>(message_json)
         .ok()
         .and_then(|m| m.get("method").and_then(serde_json::Value::as_str).map(|m| FOLDER_MESSAGES.contains(&m)))
         .unwrap_or(false)
 }
 
+/// The file a `textDocument/didOpen` message opens, which is what a server is given to serve: `None` for any
+/// other message, `Some(None)` for a document whose address is not a file's path. A message that does not name
+/// `textDocument/didOpen` is not parsed.
 fn opened_document(message_json: &str) -> Option<Option<PathBuf>> {
+    if !message_json.contains("textDocument/didOpen") {
+        return None;
+    }
     let message: serde_json::Value = serde_json::from_str(message_json).ok()?;
     if message.get("method")?.as_str()? != "textDocument/didOpen" {
         return None;
