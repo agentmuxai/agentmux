@@ -537,6 +537,29 @@ async fn a_feed_shows_nothing_srv_holds_secret_in_the_snapshot_or_in_what_follow
     assert!(!lines[0].contains(written_after) && lines[0].contains(withhold::MARK), "{}", lines[0]);
 }
 
+/// The values srv makes for an agent's process (its container token, its LAN key) are withheld from the feed as they
+/// are from the stored transcript.
+#[tokio::test]
+async fn a_feed_withholds_the_tokens_and_keys_srv_made_for_an_agents_process() {
+    use crate::backend::transcript::withhold;
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (name, block, _) = register_defined(&state, "viewer-withhold-made");
+    let container_token = crate::backend::container::credential::token_for_block(&block, None);
+    let lan_key = state.mstore.agent_lan_key_ensure("viewer-withhold-made").unwrap().private_key;
+    append(&state, &block, &user_line(&format!("TOKEN={container_token} LAN={lan_key}")));
+
+    let (status, mut body) = open_feed(&state, &name, &token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_chunk(&mut body).await.unwrap(), "retry: 3000
+
+");
+    let (_, _, snap) = next_event(&mut body).await.unwrap();
+    let shown = lines_of(&snap).join("
+");
+    assert!(shown.contains(withhold::MARK) && !shown.contains(&container_token) && !shown.contains(&lan_key), "{shown}");
+}
+
 #[tokio::test]
 async fn a_reconnect_resumes_without_gaps_or_duplicates() {
     let state = test_state();

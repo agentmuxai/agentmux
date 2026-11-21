@@ -23,10 +23,17 @@ import { createAgentSeat, type AgentSeatPanelProps } from "./AgentSeatPanelState
 
 export { createSeatForm, NO_SHARED_DEFINITION_NOTE, type SeatForm } from "./AgentSeatPanelState";
 
+/** The marker's value: what the refusal tells an agent to do instead (an agent sets a seat as itself through its own API). */
+export const SEAT_PANEL_AGENT_ROUTE = "An agent sets a seat as itself with Agents set_seat.";
+
 export const AgentSeatPanel = (props: AgentSeatPanelProps): JSX.Element => {
     const s = createAgentSeat(props);
     return (
-        <div class="agent-primitive-modal-detail agent-seat-panel" data-testid="agent-seat-panel">
+        <div
+            class="agent-primitive-modal-detail agent-seat-panel"
+            data-testid="agent-seat-panel"
+            data-operator-only={SEAT_PANEL_AGENT_ROUTE}
+        >
             <div class="agent-primitive-modal-readonly">
                 <SeatIntro s={s} agentName={props.agentName} />
                 <Show when={s.self()}>

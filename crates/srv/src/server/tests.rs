@@ -6592,8 +6592,8 @@ async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
 }
 
 /// A Global Memory write and a revert record the token's UID as the
-/// version's `written_by_uid`, beside the `written_by` name; Unattributed,
-/// both record `""`.
+/// version's `written_by_uid`, beside the `written_by` name; with no token
+/// both are refused and change nothing.
 #[tokio::test]
 async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
     let (state, token) = m4c1_state();
@@ -6626,8 +6626,9 @@ async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
         write(Some(&id), "two"),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(latest(&id).2, "", "Unattributed write");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert!(v.to_string().contains("AGENTMUX_AGENT_TOKEN"), "the refusal says what to send: {v}");
+    assert_eq!(latest(&id).2, "uid-m4c1", "a refused write changes nothing");
 
     let revert = serde_json::json!({"agent_id": "m4c1-agent", "id": id, "version_id": first});
     let (status, v) = m4c1_send(
@@ -6656,11 +6657,12 @@ async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
         .iter()
         .map(|v| v["written_by_uid"].as_str().unwrap())
         .collect();
-    assert_eq!(uids, ["uid-m4c1", "", "uid-m4c1"], "{history}");
+    assert_eq!(uids, ["uid-m4c1", "uid-m4c1"], "{history}");
 
+    let before = latest(&id).0;
     let (status, v) = m4c1_send(&state, None, "/api/v1/agent/globalmemory/revert", revert).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(latest(&id).2, "", "Unattributed revert");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(latest(&id).0, before, "a refused revert changes nothing");
 }
 
 /// A Global Memory removal is recorded under the agent the request's token

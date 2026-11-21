@@ -345,6 +345,7 @@ async fn create_agent(
     broker: Arc<crate::backend::mps::Broker>,
 ) -> Result<AgentDefinition, String> {
     let now = agentmux_common::time::now_ms();
+    crate::backend::reserved_names::check_all(&[&cmd.name]).map_err(|e| format!("createagent: {e}"))?;
     // slug is empty here — agent_def_insert auto-derives it
     // from name AND collision-resolves AND mutates the
     // struct so we serialize the resolved value back to
@@ -408,6 +409,10 @@ async fn update_agent(
     let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
     let old = existing.iter().find(|a| a.id == cmd.id)
         .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
+    // An agent that already has a reserved name keeps it; a new one is not given.
+    if cmd.name != old.name {
+        crate::backend::reserved_names::check_all(&[&cmd.name]).map_err(|e| format!("updateagent: {e}"))?;
+    }
     crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
         .and_then(|()| crate::server::app_api::check_volumes(&cmd.container_volumes)).map_err(|e| format!("updateagent: {e}"))?;
     // Model vendor base URL: `None` (omitted) preserves the
@@ -523,6 +528,7 @@ async fn import_agent_from_claw(
     if !workspace_path.exists() {
         return Err(format!("importagentfromclaw: path does not exist: {}", cmd.workspace_path));
     }
+    crate::backend::reserved_names::check_all(&[&cmd.agent_name]).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
     let now = agentmux_common::time::now_ms();
 
@@ -629,6 +635,10 @@ async fn import_agents(
                 continue;
             }
 
+        if let Err(e) = crate::backend::reserved_names::check_all(&[&agent_import.name, &agent_import.id]) {
+            failed.push(format!("{}: {e}", agent_import.name));
+            continue;
+        }
         let mut agent = agent_from_import(&agent_import, now);
 
         if let Err(e) = mstore.agent_def_insert(&mut agent) {

@@ -48,10 +48,13 @@ pub fn new_code() -> String {
 
 /// A fresh viewer token: `amxv_` + base64url (no padding) of 32 random bytes.
 pub fn new_token() -> String {
-    format!(
+    let token = format!(
         "{TOKEN_PREFIX}{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes::<32>())
-    )
+    );
+    // A device's token is never written into a transcript, nor shown on a paired device's feed.
+    crate::backend::transcript::withhold::register(&token);
+    token
 }
 
 /// What a token is stored as: lowercase hex SHA-256.

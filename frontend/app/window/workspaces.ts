@@ -219,7 +219,13 @@ export async function importWorkspace(): Promise<void> {
         onImport: async (runCommands: boolean) => {
             let notes: string[] = [];
             const switched = await switchWith(async () => {
-                const r = await WorkspaceService.ImportUserWorkspace(path, runCommands, windowId());
+                // A websocket command, not a service call: srv runs the file's commands and starts its agents only for
+                // the person's own window, and this connection is the proof.
+                const r = await RpcApi.WorkspaceImportUserWorkspaceCommand(TabRpcClient, {
+                    path,
+                    run_commands: runCommands,
+                    window_id: windowId(),
+                });
                 notes = r.notes ?? [];
                 return r;
             }, "Couldn't import the workspace");
