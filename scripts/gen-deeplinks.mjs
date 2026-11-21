@@ -298,6 +298,8 @@ export function renderMd(reg, en) {
         "",
         "# Deep links",
         "",
+        "**Status:** living (generated from the registry; it changes with every destination added)",
+        "",
         "A deep link opens a view of AgentMux at a place inside it: a Settings section, a Kanban task, a file at a line.",
         "Every link has the same form:",
         "",
@@ -310,8 +312,6 @@ export function renderMd(reg, en) {
         `- A link is at most ${reg.maxBytes} bytes, is percent-decoded once, and names each parameter once.`,
         "- A link never names a pane, tab or window, and never opens a connection.",
         "- A link with a view, place or parameter this AgentMux does not have is refused with the reason, never partly opened.",
-        "",
-        "Agents open the same places with the `Pane` tool's `open` action and a `link`.",
         "",
     ];
     for (const view of reg.views) {
