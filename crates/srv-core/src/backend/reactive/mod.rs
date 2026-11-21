@@ -23,6 +23,7 @@ pub mod progress_watcher;
 pub mod poller;
 pub mod rate_limiter;
 pub mod registry;
+pub mod post_secrets;
 pub mod sanitize;
 pub mod sensitive_audit;
 pub mod system_turn;

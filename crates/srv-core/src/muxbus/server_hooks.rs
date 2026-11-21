@@ -27,6 +27,10 @@ pub trait ServerHooks: Send + Sync {
     /// Verified and its agent can't work now: keep it here until it can. `true` when it is kept.
     fn hold_wan_for_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, req: &InjectionRequest) -> bool;
 
+    /// Not held, and its agent can't work now (out of quota, signed out): injecting it would start a turn that
+    /// ends in an error. `true` when the caller gives the claim back to the relay instead.
+    fn give_back_for_unavailable(&self, mstore: &Store, handler: &ReactiveHandler, req: &InjectionRequest) -> bool;
+
     /// A routine message to a session gone cold waits for its next activity. `true` when it is kept.
     fn hold_relayed<'a>(&'a self, req: &'a InjectionRequest) -> BoxFuture<'a, bool>;
 
@@ -88,6 +92,9 @@ impl ServerHooks for NotReady {
     fn hold_wan_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
         false
     }
+    fn give_back_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
+        false
+    }
     fn hold_relayed<'a>(&'a self, _: &'a InjectionRequest) -> BoxFuture<'a, bool> {
         Box::pin(async { false })
     }
@@ -110,7 +117,12 @@ impl ServerHooks for NotReady {
     }
 }
 
-/// What a delivery test gets when nothing registered: no hold, no files, no transcript request.
+/// The agents a delivery test declares out of quota: the plain steps give their messages back to the relay.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) static TEST_LIMITED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// What a delivery test gets when nothing registered: no hold, no files, no transcript request, and no agent
+/// out of quota unless the test says so ([`TEST_LIMITED`]).
 #[cfg(any(test, feature = "test-support"))]
 struct PlainSteps;
 
@@ -118,6 +130,9 @@ struct PlainSteps;
 impl ServerHooks for PlainSteps {
     fn hold_wan_for_unavailable(&self, _: &Store, _: &ReactiveHandler, _: &InjectionRequest) -> bool {
         false
+    }
+    fn give_back_for_unavailable(&self, _: &Store, _: &ReactiveHandler, req: &InjectionRequest) -> bool {
+        TEST_LIMITED.lock().unwrap().contains(&req.target_agent)
     }
     fn hold_relayed<'a>(&'a self, _: &'a InjectionRequest) -> BoxFuture<'a, bool> {
         Box::pin(async { false })

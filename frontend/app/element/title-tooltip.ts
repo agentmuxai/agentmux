@@ -18,6 +18,8 @@ import "./anchored-popover.scss";
 
 const CANDIDATE = "[title], [data-hover-tip]";
 const KEEP_NATIVE = "option, optgroup, iframe, [data-native-title]";
+/** Set by `tip(text, { instant: true })`: no rest before it shows, and it shows on keyboard focus too. */
+const INSTANT = "data-hover-tip-instant";
 /** Set on an element whose `aria-label` or `aria-description` is this tooltip's text, so it can be taken back. */
 const LABELLED = "data-title-tip-aria";
 
@@ -228,7 +230,7 @@ function openFor(t: TipState, el: HTMLElement, text: string): void {
         t.watcher.observe(el, { attributes: true, attributeFilter: ["title", "data-hover-tip"] });
     }
     void place(t);
-    const delay = handOver || isWarm(t.self) ? 0 : SHOW_DELAY_MS;
+    const delay = handOver || el.hasAttribute(INSTANT) || isWarm(t.self) ? 0 : SHOW_DELAY_MS;
     const show = () => {
         t.visible = true;
         paint(t);
@@ -277,6 +279,29 @@ function onPointerOver(t: TipState, e: Event): void {
     openFor(t, el, text);
 }
 
+/** Whether `el` shows its focus ring, i.e. was reached by the keyboard rather than a click. True where `:focus-visible` is unknown. */
+function focusIsFromKeyboard(el: HTMLElement): boolean {
+    try {
+        return el.matches(":focus-visible");
+    } catch {
+        return true;
+    }
+}
+
+/** Keyboard focus reaches an element with an instant tip: it shows at once, as it would for the pointer. */
+function onFocusIn(t: TipState, e: Event): void {
+    const el = e.target instanceof Element ? e.target.closest<HTMLElement>(`[${INSTANT}]`) : null;
+    if (!el || el.matches(KEEP_NATIVE) || !focusIsFromKeyboard(el)) return;
+    if (t.held) letGo(t);
+    const text = takeTitle(el);
+    if (text) openFor(t, el, text);
+}
+
+/** Focus leaves the element whose tip it showed. */
+function onFocusOut(t: TipState, e: Event): void {
+    if (t.current && e.target instanceof Node && t.current.contains(e.target)) closeNow(t);
+}
+
 /**
  * Start showing the shared tooltip for titled elements in `doc`. Safe to call twice (the
  * first call wins); returns a function that stops it and removes the panel.
@@ -296,7 +321,12 @@ export function initTitleTooltips(doc: Document = document): () => void {
         letGo(t);
     };
 
+    const onFocus = (e: Event) => onFocusIn(t, e);
+    const onBlur = (e: Event) => onFocusOut(t, e);
+
     doc.addEventListener("pointerover", onOver, true);
+    doc.addEventListener("focusin", onFocus, true);
+    doc.addEventListener("focusout", onBlur, true);
     doc.addEventListener("pointerdown", hideNow, true);
     doc.addEventListener("keydown", hideNow, true);
     doc.addEventListener("wheel", hideNow, { capture: true, passive: true });
@@ -306,6 +336,8 @@ export function initTitleTooltips(doc: Document = document): () => void {
     const stop = () => {
         hideAll();
         doc.removeEventListener("pointerover", onOver, true);
+        doc.removeEventListener("focusin", onFocus, true);
+        doc.removeEventListener("focusout", onBlur, true);
         doc.removeEventListener("pointerdown", hideNow, true);
         doc.removeEventListener("keydown", hideNow, true);
         doc.removeEventListener("wheel", hideNow, true);

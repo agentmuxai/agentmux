@@ -27,6 +27,7 @@ const PROMPTS: Record<string, string[]> = {
     "app/view/agent/components/SeatRosterImport.tsx": ["app/view/agent/components/AgentSeatPanel.tsx"],
     "app/view/agent/failure/takeover.ts": ["app/view/agent/failure/failure-accessory.ts"],
     "app/view/agent/failure/open-in-other-pane.ts": ["app/view/agent/failure/failure-accessory.ts"],
+    "app/view/drone/drone-template-picker.tsx": ["app/view/drone/drone-template-picker.tsx"],
     "app/view/swarm/swarm-model.ts": ["app/view/swarm/swarm-broadcast.tsx"],
     "app/view/tower/tower-model.ts": ["app/view/tower/tower-view.tsx"],
 };
