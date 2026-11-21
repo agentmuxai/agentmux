@@ -257,31 +257,41 @@ describe("what an event wakes", () => {
         });
     });
 
-    // The frame budget (Loap-3): a message costs at most 16 ms, and a burst of one from every agent at most 50 ms, with
-    // 25 agents streaming and a reader on each (a row of My Agents, a Swarm card), the status bar's and the pane's.
-    it("costs under 16 ms a message and 50 ms a burst with 25 agents streaming", async () => {
+    // The frame budget (Loap-3), as what keeps it: 25 agents stream, with a reader on each (a row of My Agents, a Swarm
+    // card), the status bar's and a pane's. An event for one agent wakes that agent's readers and the list's, once each, and
+    // no other agent's: the count of reader runs does not grow with the number of agents. A wall-clock budget is not a test
+    // on a shared runner, so the time is only logged, with one generous bound that catches a copy of the whole Map per event.
+    it("wakes, for each event of 25 agents streaming, that agent's readers and the list's once, and no other agent's", async () => {
         await createRoot(async (dispose) => {
             const { f, store } = await start(dispose);
+            const rowRuns = new Map<string, number>();
+            const paneRuns = new Map<string, number>();
+            let listRuns = 0;
             ids.forEach((id, i) => {
-                createEffect(() => store.rowOf(id));
-                createEffect(() => store.rowOfBlock(`blk${i}`));
+                createEffect(() => (store.rowOf(id), rowRuns.set(id, (rowRuns.get(id) ?? 0) + 1)));
+                createEffect(() => (store.rowOfBlock(`blk${i}`), paneRuns.set(id, (paneRuns.get(id) ?? 0) + 1)));
             });
-            createEffect(() => runtimeCounts(store.rows()));
+            createEffect(() => (runtimeCounts(store.rows()), listRuns++));
             await Promise.resolve();
             const states: AgentRuntime["state"][] = ["working", "idle", "waiting_on_user", "working"];
-            let worstMessage = 0;
-            let worstBurst = 0;
-            for (let round = 0; round < 40; round++) {
-                const burst = performance.now();
+            const ROUNDS = 40;
+            const started = performance.now();
+            for (let round = 0; round < ROUNDS; round++) {
                 ids.forEach((id, i) => {
-                    const t = performance.now();
                     f.handlers.get(id)!(row(id, states[(round + i) % states.length], { block_id: `blk${i}`, detail: `step ${round}` }));
-                    worstMessage = Math.max(worstMessage, performance.now() - t);
                 });
-                worstBurst = Math.max(worstBurst, performance.now() - burst);
             }
-            expect(worstMessage).toBeLessThan(16);
-            expect(worstBurst).toBeLessThan(50);
+            const elapsed = performance.now() - started;
+            console.info(`[agent-runtime] ${ROUNDS * AGENTS} events for ${AGENTS} agents: ${elapsed.toFixed(1)} ms`);
+            // Each agent's readers ran once at the start and once for each of its own ROUNDS events: no other agent's event woke them.
+            for (const id of ids) {
+                expect(rowRuns.get(id), `${id}'s row reader`).toBe(1 + ROUNDS);
+                expect(paneRuns.get(id), `${id}'s pane reader`).toBe(1 + ROUNDS);
+            }
+            // The list's reader ran once for each event, never more: an event is not copied for each reader.
+            expect(listRuns).toBe(1 + ROUNDS * AGENTS);
+            // Far above what 1000 events cost; a copy of the whole Map for every reader of every event is not under it.
+            expect(elapsed).toBeLessThan(5000);
             dispose();
         });
     });
