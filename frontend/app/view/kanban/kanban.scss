@@ -484,6 +484,35 @@ $kanban-narrow: 760px;
     gap: var(--space-1);
 }
 
+// A held task whose pull requests have all merged: it waits on its holder.
+.kanban-card__waiting {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+// The drawer's pull requests, one row each.
+.kanban-drawer__prs {
+    display: flex;
+    flex-direction: column;
+    flex-basis: 100%;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.kanban-drawer__pr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+}
+
 .kanban-card__repo,
 .kanban-card__untracked-label {
     font-size: var(--text-xs);
