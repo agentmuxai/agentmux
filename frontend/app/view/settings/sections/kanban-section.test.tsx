@@ -74,7 +74,10 @@ beforeEach(() => {
     h.onQueue = null;
     h.board = boardOf([info("main"), info("work")]);
 });
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    document.querySelectorAll(".kanban-stages__ghost").forEach((g) => g.remove());
+});
 
 describe("Settings → Kanban", () => {
     it("shows the default eight stages with nothing to apply", async () => {
@@ -93,6 +96,24 @@ describe("Settings → Kanban", () => {
         await waitFor(() => expect(h.acts).toHaveLength(1));
         expect(h.acts[0]).toMatchObject({ action: "board_edit", board: "main", stages_rev: 0 });
         expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", name: "Waiting", colour: "muted", takes: ["backlog"] });
+    });
+
+    it("picks a colour from a menu of named swatches, and Apply sends the role name", async () => {
+        await shown();
+        const button = screen.getByRole("button", { name: "Colour: Muted" });
+        expect(button.textContent).toContain("Muted");
+        fireEvent.click(button);
+        const rows = await screen.findAllByRole("menuitemradio");
+        expect(rows.map((r) => r.textContent)).toEqual(["Muted", "Research", "Info", "Active", "Attention", "Review", "Done", "Shipped"]);
+        expect(rows[0].getAttribute("aria-checked")).toBe("true");
+        fireEvent.click(rows[5]);
+        // The default eight use every colour, so the Review stage already shows "Review": two buttons now.
+        expect(screen.getAllByRole("button", { name: "Colour: Review" })).toHaveLength(2);
+        expect(screen.queryByRole("button", { name: "Colour: Muted" })).toBeNull();
+        expect(h.acts).toEqual([]);
+        fireEvent.click(apply());
+        await waitFor(() => expect(h.acts).toHaveLength(1));
+        expect(h.acts[0].stages.stages[0]).toMatchObject({ id: "backlog", colour: "review" });
     });
 
     it("keeps Apply off, and says why, while a name is empty or taken", async () => {
@@ -166,6 +187,22 @@ describe("Settings → Kanban", () => {
         expect(h.acts[0].stages.stages.map((s: any) => s.id)).toEqual([
             "backlog", "research", "specd", "progress", "needs", "merged", "released", "review",
         ]);
+    });
+
+    it("drags a copy of the row on a solid surface, with what was typed, and takes it away at once", async () => {
+        await shown();
+        const rows = () => Array.from(document.querySelectorAll<HTMLElement>("li.kanban-stages__row:not(.kanban-stages__ghost)"));
+        fireEvent.input(screen.getAllByLabelText("Stage name")[1], { target: { value: "Looking" } });
+        let image: HTMLElement | undefined;
+        const grip = rows()[1].querySelector<HTMLElement>(".kanban-stages__grip") as HTMLElement;
+        fireEvent.dragStart(grip, { dataTransfer: { setData: () => {}, setDragImage: (el: HTMLElement) => { image = el; } } });
+        expect(image).toBeDefined();
+        expect(image).not.toBe(rows()[1]);
+        expect(image!.classList.contains("kanban-stages__ghost")).toBe(true);
+        expect(image!.isConnected).toBe(true);
+        expect((image!.querySelector("input") as HTMLInputElement).value).toBe("Looking");
+        fireEvent.dragEnd(grip);
+        expect(image!.isConnected).toBe(false);
     });
 
     it("ignores a drop that did not start from a grip, and a drop on the held row", async () => {

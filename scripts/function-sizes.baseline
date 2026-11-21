@@ -253,7 +253,6 @@
 115 crates/srv/src/server/app_api/bundle/export_for_agent.rs::bundle_export_for_agent_with_history_impl
 259 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_commit_impl
 156 crates/srv/src/server/app_api/bundle/import.rs::bundle_import_preview_impl
-285 crates/srv/src/server/app_api/bundle/import_for_agent.rs::bundle_import_for_agent_impl
 142 crates/srv/src/server/app_api/dev_server.rs::handle_register_dev_server
 123 crates/srv/src/server/app_api/global_memory.rs::global_memory_write_inner
 111 crates/srv/src/server/app_api/layout.rs::layout_open_impl
@@ -421,7 +420,7 @@
 112 frontend/app/window/titlebar-context-menu.tsx::TitleBarContextMenu
 128 frontend/app/window/use-widget-bar-responsive.ts::useWidgetBarResponsive
 170 frontend/app/workspace/redock-ghost.ts::installFloatingRedockHoverListener
-472 frontend/app/workspace/workspace.tsx::WorkspaceElem
+467 frontend/app/workspace/workspace.tsx::WorkspaceElem
 119 frontend/layout/lib/layoutInvariants.ts::validateLayoutInvariants
 170 frontend/layout/lib/layoutModel.ts::LayoutModel::constructor
 158 frontend/layout/lib/layoutNodeModels.ts::getNodeModel

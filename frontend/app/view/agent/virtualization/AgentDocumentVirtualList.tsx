@@ -69,6 +69,7 @@ import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-
 import { blockAgentName } from "@/app/block/block-agent-name";
 import { liftedEarlyLine, logDrawnAheadShow, logShowCover } from "@/app/block/pane-cover-log";
 import { useSearchPaint } from "../search/search-paint";
+import { skeletonRows } from "./skeleton-band";
 import { partitionKeepingHead } from "./stable-head";
 import {
     initialStickyFrontierId,
@@ -233,6 +234,8 @@ interface ListState {
 /** What the render needs from the rows hook. */
 interface RowRendering {
     windowedRows: Accessor<RowPosition[]>;
+    /** Rows just outside the window, drawn as empty boxes of their own height (skeleton-band.ts). */
+    skeletonRows: Accessor<RowPosition[]>;
     nodeById: Accessor<Map<string, DocumentNode>>;
     observeRow: (el: HTMLElement, nodeId: string) => void;
     unobserveRow: (el: HTMLElement) => void;
@@ -1141,6 +1144,8 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
         return v.rows.slice(v.window.startIndex, v.window.endIndex + 1);
     });
 
+    const skeletons = createMemo<RowPosition[]>(() => skeletonRows(props.layoutView?.()));
+
     // nodeId → live DocumentNode for the virtualized partition, so a row renders the CURRENT node
     // (streaming updates propagate without remount). A windowed row with no node this frame is
     // skipped: a recoverable drop.
@@ -1171,7 +1176,7 @@ function useRowRendering(props: AgentDocumentVirtualListProps, s: ListState): Ro
         s.oneWayFlow.unobserveRow(el);
         elNodeId.delete(el);
     };
-    return { windowedRows, nodeById, observeRow, unobserveRow, showCovered };
+    return { windowedRows, skeletonRows: skeletons, nodeById, observeRow, unobserveRow, showCovered };
 }
 
 // Virtualized head, present only when the document exceeds the buffer. <Key by={r => r.nodeId}>
@@ -1190,6 +1195,18 @@ function VirtualizedHead(list: { props: AgentDocumentVirtualListProps; s: ListSt
                 width: "100%",
             }}
         >
+            <Key each={rows.skeletonRows()} by={(r) => r.nodeId}>
+                {(row) => (
+                    <div
+                        class="agent-row-skeleton"
+                        aria-hidden="true"
+                        style={{
+                            height: `${row().height}px`,
+                            transform: `translateY(${row().start - (props.layoutView?.()?.scrollMarginPx ?? 0)}px)`,
+                        }}
+                    />
+                )}
+            </Key>
             <Key each={rows.windowedRows()} by={(r) => r.nodeId}>
                 {(row) => {
                     let rowEl: HTMLElement | undefined;

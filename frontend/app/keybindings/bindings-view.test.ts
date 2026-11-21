@@ -53,9 +53,9 @@ describe("bindingsView", () => {
     });
 
     it("adds a command the table does not have only when the person bound it", () => {
-        expect(bindingsView("other").some((r) => r.command === "open:files")).toBe(false);
-        setUserKeybindings([{ command: "open:files", key: "ctrl+alt+f" }], (id) => id === "open:files");
-        expect(bindingsView("other").at(-1)).toMatchObject({ command: "open:files", label: "open:files", category: "General", keys: ["ctrl+alt+f"], defaults: [], changed: true });
+        expect(bindingsView("other").some((r) => r.command === "open:audit")).toBe(false);
+        setUserKeybindings([{ command: "open:audit", key: "ctrl+alt+f" }], (id) => id === "open:audit");
+        expect(bindingsView("other").at(-1)).toMatchObject({ command: "open:audit", label: "open:audit", category: "General", keys: ["ctrl+alt+f"], defaults: [], changed: true });
     });
 
     it("flags the dev-only rows", () => {

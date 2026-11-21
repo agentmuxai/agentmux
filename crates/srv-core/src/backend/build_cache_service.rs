@@ -190,10 +190,6 @@ pub struct LocalAgent {
     pub steward: bool,
 }
 
-/// Whether a seat names its agent a steward: in its qualifier or the line about what it owns.
-fn seat_is_steward(seat: &crate::registry::AgentSeat) -> bool {
-    [seat.qualifier.as_deref(), seat.area.as_deref()].into_iter().flatten().any(|t| t.to_ascii_lowercase().contains("steward"))
-}
 
 fn local_agents(mstore: &Store) -> Vec<LocalAgent> {
     let defs = mstore.agent_def_list().unwrap_or_default();
@@ -210,7 +206,7 @@ fn local_agents(mstore: &Store) -> Vec<LocalAgent> {
         if out.iter().any(|a| same_path(&a.workspace, &workspace) && a.target == rec.uid.clone().filter(|u| !u.is_empty()).unwrap_or(rec.agent_id.clone())) {
             continue;
         }
-        let steward = def.and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d)).is_some_and(|seat| seat_is_steward(&seat));
+        let steward = def.and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d)).is_some_and(|seat| crate::backend::agent_seat::is_steward(&seat));
         out.push(LocalAgent {
             target: rec.uid.clone().filter(|u| !u.is_empty()).unwrap_or(rec.agent_id.clone()),
             agent_id: rec.agent_id.clone(),
@@ -587,8 +583,9 @@ mod tests {
 
     #[test]
     fn a_seat_that_names_a_steward_makes_a_steward() {
+        use crate::backend::agent_seat::is_steward as seat_is_steward;
         use crate::registry::AgentSeat;
-        let seat = |q: Option<&str>, area: Option<&str>| AgentSeat { role: "worker".into(), qualifier: q.map(str::to_string), area: area.map(str::to_string), ..Default::default() };
+        let seat =|q: Option<&str>, area: Option<&str>| AgentSeat { role: "worker".into(), qualifier: q.map(str::to_string), area: area.map(str::to_string), ..Default::default() };
         assert!(seat_is_steward(&seat(Some("Steward"), None)));
         assert!(seat_is_steward(&seat(None, Some("narko's steward (see below); tasks AgentY gives it"))));
         assert!(!seat_is_steward(&seat(Some("product"), Some("agent pane, identity, accounts"))));

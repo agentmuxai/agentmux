@@ -51,6 +51,7 @@ pub mod build_slot_idle;
 pub mod record;
 pub mod record_carry;
 pub mod record_flags;
+pub mod record_notice;
 pub mod panic_watch;
 pub mod disk_notice;
 pub mod old_versions;

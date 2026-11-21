@@ -65,6 +65,7 @@ export const RestartToUpdatePopover = (props: RestartToUpdatePopoverProps): JSX.
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            fitHeight
             onDismiss={props.onClose}
             class="update-popover"
             role="dialog"

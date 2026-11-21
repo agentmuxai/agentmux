@@ -9,6 +9,8 @@
  * panel read this store. REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.
  * srv's own panics come the other way: srv publishes a persisted `srv-panics` mux event in the same shape, so a
  * window that opens mid-storm gets the last one on subscribe (kind `panics`; `normal` clears it).
+ * What the rules that read the long-run record have flagged comes the same way (`record-flags`, kind `record`):
+ * a note, never critical.
  *
  * Drive it from DevTools:
  *   window.dispatchEvent(new CustomEvent('agentmux-event',
@@ -18,10 +20,11 @@
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { PanicPlace } from "@/types/rpc/PanicPlace";
+import type { RecordFlagLine } from "@/types/rpc/RecordFlagLine";
 import { getApi } from "@/util/app-api";
 import { createSignal } from "solid-js";
 
-export type HealthKind = "ram" | "pagefile" | "backend" | "disk" | "panics";
+export type HealthKind = "ram" | "pagefile" | "backend" | "disk" | "panics" | "record";
 export type HealthLevel = "normal" | "warn" | "critical";
 export type ActiveHealthLevel = Exclude<HealthLevel, "normal">;
 
@@ -48,6 +51,8 @@ export interface HealthPayload {
     recovered_lock?: number;
     /** The places that panicked most, biggest first. */
     top?: PanicPlace[];
+    // "record": what the rules that read the long-run record still say (the `record-flags` event, RecordFlagsEvent)
+    flags?: RecordFlagLine[];
 }
 
 export interface HealthSignal {
@@ -57,7 +62,7 @@ export interface HealthSignal {
     payload: HealthPayload;
 }
 
-const KINDS: HealthKind[] = ["backend", "panics", "disk", "pagefile", "ram"];
+const KINDS: HealthKind[] = ["backend", "panics", "disk", "pagefile", "ram", "record"];
 
 function severity(level: HealthLevel): number {
     return level === "critical" ? 2 : level === "warn" ? 1 : 0;
@@ -130,7 +135,8 @@ export function startHealthSignals(): () => void {
     // A backend that has just started has no panics yet, and says nothing about the last one's storm (srv publishes
     // `normal` only when a storm clears), so the previous srv's warning goes when the new one is ready. If the new srv
     // is already panicking, its persisted event arrives over the reconnected socket after this.
-    track(api.listen("backend-ready", () => setSignals((s) => dropKind(s, "panics"))));
+    // The same holds for the record's flags: a new srv says them again at its first look, if they still hold.
+    track(api.listen("backend-ready", () => setSignals((s) => dropKind(dropKind(s, "panics"), "record"))));
     void api
         .getHealthSignals?.()
         .then((snapshot) => {
@@ -143,10 +149,15 @@ export function startHealthSignals(): () => void {
     const unlistenPanics = onMuxEvent(WpsEvent.SrvPanics, (p) => {
         setSignals((s) => applyHealthEvent(s, p, Date.now()));
     });
+    // What the record's rules flagged: persisted too, and an empty list (`normal`) clears it.
+    const unlistenRecord = onMuxEvent(WpsEvent.RecordFlags, (p) => {
+        setSignals((s) => applyHealthEvent(s, p, Date.now()));
+    });
     stop = () => {
         stopped = true;
         unlisteners.splice(0).forEach((u) => u());
         unlistenPanics();
+        unlistenRecord();
         stop = undefined;
     };
     return stop;

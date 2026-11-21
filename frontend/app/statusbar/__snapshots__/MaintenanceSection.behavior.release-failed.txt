@@ -3,37 +3,45 @@ rpc AppUpdateStatus
 <div>
   <div class="instance-panel-section-title">
     "Maintenance"
-  <div class="maintenance-update-row">
-    <span class="maintenance-icon maintenance-icon--error">
-      "✗"
-    <span class="maintenance-row-text maintenance-row-text--error" data-hover-tip="checksum mismatch" aria-description="checksum mismatch">
-      "Download failed: checksum mismatch"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Try again"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Release page"
-  <div class="maintenance-update-row">
-    <span class="maintenance-row-text maintenance-row-text--dim">
-      "Checked <time>"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Check again"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span aria-hidden="true" class="maintenance-icon maintenance-icon--error">
+        "✗"
+      <span class="maintenance-row-text maintenance-row-text--error" data-hover-tip="checksum mismatch" aria-description="checksum mismatch">
+        "Download failed: checksum mismatch"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Try again"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Release page"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span class="maintenance-row-text maintenance-row-text--dim">
+        "Checked <time>"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Check again"
 host appUpdate download
 openLink https://github.com/agentmuxai/agentmux/releases/tag/v0.59.27
 -- failed, no reason
 <div>
   <div class="instance-panel-section-title">
     "Maintenance"
-  <div class="maintenance-update-row">
-    <span class="maintenance-icon maintenance-icon--error">
-      "✗"
-    <span class="maintenance-row-text maintenance-row-text--error">
-      "Update failed"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Try again"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Release page"
-  <div class="maintenance-update-row">
-    <span class="maintenance-row-text maintenance-row-text--dim">
-      "Checked <time>"
-    <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
-      "Check again"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span aria-hidden="true" class="maintenance-icon maintenance-icon--error">
+        "✗"
+      <span class="maintenance-row-text maintenance-row-text--error">
+        "Update failed"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Try again"
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Release page"
+  <div class="maintenance-row">
+    <div class="maintenance-message">
+      <span class="maintenance-row-text maintenance-row-text--dim">
+        "Checked <time>"
+    <div class="maintenance-actions">
+      <button type="button" class="ui-button ui-tone-neutral ui-density-compact maintenance-btn">
+        "Check again"

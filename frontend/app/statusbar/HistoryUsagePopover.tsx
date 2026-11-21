@@ -52,6 +52,7 @@ export const HistoryUsagePopover = (props: HistoryUsagePopoverProps): JSX.Elemen
         <AnchoredPopover
             anchor={props.anchor}
             placement="top-end"
+            fitHeight
             onDismiss={props.onClose}
             class="history-usage-popover"
             role="dialog"

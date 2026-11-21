@@ -10,6 +10,9 @@
 //!   "late" (`storage::job_cloud`), so a slot is one row whichever way it ends.
 //! - **A run that stopped reporting.** A `started` run with no `finished` event, and no heartbeat, within the job's
 //!   `maxDurationMinutes` becomes `lost`.
+//! - **A local slot nothing handled** (the second half of this file). A local job's slot passed while AgentMux was
+//!   running and the ledger has no row for it, not even a skip: the job's scheduler task is gone or stalled. A
+//!   `missed` row (`not_started`) takes the slot.
 //!
 //! Both are failures the incident keeper judges like any other (§3.4): several misses of one job are one incident,
 //! one task and one alert. A pass runs every five minutes, and once after start-up, a little late so that what the
@@ -20,11 +23,13 @@ use std::sync::Arc;
 
 use agentmux_common::time::now_ms;
 
-use super::{RunLedger, SOURCE_CLOUD, TRIGGER_SCHEDULE};
-use crate::backend::cron::schedule::JobSchedule;
+use super::{RunLedger, SOURCE_CLOUD, SOURCE_CRON, TRIGGER_SCHEDULE};
+use crate::backend::cron::schedule::{JobSchedule, JITTER_MAX_MS};
 use crate::backend::job_templates::cloud::CloudExpect;
 use crate::backend::job_templates::JobTemplates;
+use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{reason, state, JobRun};
+use crate::backend::storage::store::Store;
 
 const DAY_MS: i64 = 24 * 3600 * 1000;
 /// Between two passes.
@@ -229,6 +234,161 @@ pub fn start(ledger: Arc<RunLedger>, jobs: Arc<dyn WatchedJobs + Send + Sync>) {
     });
 }
 
+// ── Local jobs ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/// How long after its slot a local job may take to write its row: the scheduler fires up to `JITTER_MAX_MS` after a
+/// slot and writes the row as it does, so a slot is only judged once this has passed.
+const LOCAL_GRACE_MS: i64 = JITTER_MAX_MS + 3 * 60 * 1000;
+/// A pass this much after the last means the computer was asleep or stopped: its scheduler tasks woke late and fire
+/// what they can, so nothing before that pass is judged.
+const SUSPEND_GAP_MS: i64 = 2 * PASS_MS as i64 + SETTLE_MS as i64;
+
+/// What the watchdog remembers between passes about the local jobs it watches. Only what happened while it ran
+/// counts: a slot from before its first pass belongs to the start-up catch-up (`app_not_running`), and one from
+/// before a job was edited or turned on again belongs to the old schedule.
+pub struct LocalWatch {
+    started_ms: i64,
+    last_pass_ms: Option<i64>,
+    /// Per job: its schedule when last seen, and the time after which its slots are judged.
+    seen: std::collections::HashMap<String, (String, i64)>,
+}
+
+impl LocalWatch {
+    pub fn new(started_ms: i64) -> Self {
+        Self { started_ms, last_pass_ms: None, seen: std::collections::HashMap::new() }
+    }
+}
+
+/// Everything about a job that decides its slots.
+fn schedule_signature(job: &CronJob) -> String {
+    format!("{}|{}|{}|{:?}|{:?}|{}", job.trigger_kind, job.expression, job.tz, job.every_secs, job.once_at_ms, job.created_at)
+}
+
+impl RunLedger {
+    /// One pass over the enabled local jobs `jobs` at `now_ms`: a `missed` row (`not_started`) for each slot past its
+    /// grace with no row of any kind. Returns how many it wrote. Blocking; running it again changes nothing.
+    pub fn watch_local(&self, watch: &mut LocalWatch, jobs: &[CronJob], now_ms: i64) -> usize {
+        let first_pass = watch.last_pass_ms.is_none();
+        let resumed = watch.last_pass_ms.is_some_and(|last| now_ms - last > SUSPEND_GAP_MS);
+        watch.last_pass_ms = Some(now_ms);
+        let live: BTreeSet<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+        // A job that is paused, deleted or done is forgotten, so its slots after it comes back are judged from then.
+        watch.seen.retain(|id, _| live.contains(id.as_str()));
+        let mut written = 0;
+        for job in jobs {
+            let Ok(schedule) = JobSchedule::of(job) else { continue };
+            if !matches!(schedule, JobSchedule::Cron { .. } | JobSchedule::Every { .. }) {
+                continue;
+            }
+            let sig = schedule_signature(job);
+            let baseline = match watch.seen.get_mut(&job.id) {
+                Some(seen) => {
+                    if seen.0 != sig || resumed {
+                        // Edited, or the computer slept: judge only what comes after this pass.
+                        *seen = (sig, now_ms);
+                    }
+                    seen.1
+                }
+                None => {
+                    // On the first pass a job's slots count from where the watchdog begins; a job that appears later, or
+                    // comes back, from now.
+                    let from = if first_pass { watch.started_ms } else { now_ms };
+                    watch.seen.insert(job.id.clone(), (sig, from));
+                    from
+                }
+            };
+            let missed = self.give_up_local_slots(job, &schedule, baseline, now_ms);
+            if missed > 0 {
+                written += missed;
+                self.changed(&job.id);
+            }
+            if let Some(seen) = watch.seen.get_mut(&job.id) {
+                // What was judged is not looked at again.
+                seen.1 = seen.1.max(now_ms - LOCAL_GRACE_MS);
+            }
+        }
+        written
+    }
+
+    /// A `missed` row for each slot of `job` in `(baseline_ms, now_ms - grace]` with no row; how many were written.
+    fn give_up_local_slots(&self, job: &CronJob, schedule: &JobSchedule, baseline_ms: i64, now_ms: i64) -> usize {
+        let until = now_ms - LOCAL_GRACE_MS;
+        let mut uncovered = Vec::new();
+        for slot in schedule.after(baseline_ms).take(MAX_SLOTS_LOOKED_AT) {
+            if slot > until {
+                break;
+            }
+            match self.store().job_run_slot_taken(&job.id, slot) {
+                Ok(true) => {}
+                Ok(false) => uncovered.push(slot),
+                Err(e) => {
+                    tracing::warn!(target: "jobs", error = %e, job = %job.id, "jobs: the watchdog couldn't read a local job's runs");
+                    return 0;
+                }
+            }
+        }
+        // The newest misses, as for a cloud job: a job that missed a day of minutes is one incident either way.
+        let skip = uncovered.len().saturating_sub(MAX_MISSES_PER_PASS);
+        let mut written = 0;
+        for slot in uncovered.into_iter().skip(skip) {
+            let mut run = JobRun::new(&format!("watchdog:{}:{slot}", job.id), &job.id, SOURCE_CRON, &job.name, TRIGGER_SCHEDULE, state::MISSED, slot);
+            run.scheduled_for_ms = Some(slot);
+            run.triggered_by = BY_WATCHDOG.to_string();
+            run.reason = reason::NOT_STARTED.to_string();
+            run.target_agent_uid = job.target_uid.clone();
+            run.ended_at_ms = Some(now_ms);
+            run.recorded_by = self.recorded_by.clone();
+            // The slot's unique index is the lease: a row the scheduler wrote since the read above wins.
+            match self.store().job_run_insert(&run) {
+                Ok(true) => written += 1,
+                Ok(false) => {}
+                Err(e) => tracing::warn!(target: "jobs", error = %e, job = %job.id, "jobs: the watchdog couldn't record a missed local slot"),
+            }
+        }
+        written
+    }
+}
+
+/// Start the local half of the watchdog over the cron jobs in `shared`: a first pass shortly after start-up, then one
+/// every five minutes. Needs a tokio runtime; without one it does nothing.
+pub fn start_local(ledger: Arc<RunLedger>, shared: Arc<Store>) {
+    let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+    rt.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(SETTLE_MS)).await;
+        // Counted from the first pass, not from start-up: the scheduler's catch-up for the slots missed while AgentMux
+        // was off writes one collapsed row for all of them, so a slot in that stretch has no row of its own.
+        let mut watch = LocalWatch::new(now_ms());
+        loop {
+            let (ledger, shared) = (ledger.clone(), shared.clone());
+            let moved = tokio::task::spawn_blocking(move || {
+                let missed = match shared.cron_list_enabled() {
+                    Ok(jobs) => ledger.watch_local(&mut watch, &jobs, now_ms()),
+                    Err(e) => {
+                        tracing::warn!(target: "jobs", error = %e, "jobs: the watchdog couldn't list the cron jobs");
+                        0
+                    }
+                };
+                (watch, missed)
+            })
+            .await;
+            match moved {
+                Ok((back, missed)) => {
+                    watch = back;
+                    if missed > 0 {
+                        tracing::info!(target: "jobs", missed, "jobs: the watchdog gave up on local slots nothing started");
+                    }
+                }
+                Err(_) => return,
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(PASS_MS)).await;
+        }
+    });
+}
+
 #[cfg(test)]
 #[path = "watchdog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "watchdog_local_tests.rs"]
+mod local_tests;

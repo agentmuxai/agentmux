@@ -9,9 +9,10 @@
  * REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.
  */
 
+import { recordLabel, recordMessage } from "./health-record-text";
 import type { ActiveHealthLevel, HealthKind, HealthPayload } from "./health-signals";
 
-const LABEL: Record<HealthKind, string> = {
+const LABEL: Record<Exclude<HealthKind, "record">, string> = {
     ram: "Low RAM",
     pagefile: "Low page file",
     backend: "Slow backend",
@@ -36,6 +37,7 @@ const PAGEFILE_DISK_LOW_PCT = 20;
 
 /** The heading of a signal's notice; the backend's carries its average. */
 export function healthLabel(kind: HealthKind, payload?: HealthPayload): string {
+    if (kind === "record") return recordLabel();
     const avg = kind === "backend" ? formatAvg(payload?.avg_ms) : "";
     return avg ? `${LABEL[kind]} ${avg}` : LABEL[kind];
 }
@@ -113,6 +115,7 @@ export function messageFor(kind: HealthKind, level: ActiveHealthLevel, payload: 
     if (kind === "backend") return backendMessage(level, payload.avg_ms);
     if (kind === "disk") return diskMessage(level, payload);
     if (kind === "panics") return panicsMessage(level, payload);
+    if (kind === "record") return recordMessage(payload.flags);
     return PAGEFILE_MESSAGE[level] + pagefileGuidance(payload.system_managed, payload.disk_free_pct);
 }
 

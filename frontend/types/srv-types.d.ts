@@ -1007,6 +1007,8 @@ declare global {
         /** The Swarm sections that are open, Broadcast and Supervise (swarm-section.ts). */
         "swarm:open"?: ("supervisor" | "broadcast")[];
         "warden:section"?: "jobs";
+        /** A saved drone to put on the canvas, set by a link from elsewhere (the Jobs tab's Open graph) and cleared once shown. Read by the Drone pane. */
+        "drone:open"?: string | null;
         /** A Kanban task to open in the drawer, set by a link from elsewhere (a Swarm row's task chip) and cleared once opened. Read by the Kanban pane. */
         "kanban:open"?: string | null;
         /** The Kanban pane shows one lane per repository. */

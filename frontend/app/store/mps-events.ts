@@ -81,6 +81,9 @@ export const WpsEvent = {
     // srv's own panics, counted by `backend::panic_watch`: a health-signal-shaped payload (`kind: "panics"`, a level, the counts).
     // Persisted, so a window that opens mid-storm gets the current state. Mirrors EVENT_SRV_PANICS in mps.rs.
     SrvPanics: "srv-panics",
+    // What the rules that read the long-run record have flagged and still say (`backend::record_notice`): a
+    // health-signal-shaped payload (`kind: "record"`, `warn` or `normal`, the flags). Persisted. Mirrors EVENT_RECORD_FLAGS in mps.rs.
+    RecordFlags: "record-flags",
     // A Claude CLI request is being retried, or no longer is (`{ retry }`,
     // `null` when cleared); see useApiRetryState.ts.
     AgentApiRetry: "agent-api-retry",

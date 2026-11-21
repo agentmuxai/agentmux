@@ -903,6 +903,15 @@
     }
   },
   {
+    "event": "record-flags",
+    "payloadTs": {
+      "imports": [
+        "RecordFlagsEvent"
+      ],
+      "name": "RecordFlagsEvent"
+    }
+  },
+  {
     "event": "remoteschange",
     "payloadTs": {
       "imports": [],
