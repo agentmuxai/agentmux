@@ -90,6 +90,9 @@ pub struct BrowserRow {
     pub animations: Option<u64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kinds: Vec<String>,
+    /// Why a page's facts could not be read (`failed`), cut short.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// This renderer serves only a frame of the page (a cross-site iframe), not its main document.
     pub frame: bool,
     /// Other browsers the same renderer serves; its CPU is the process's and is not split.
@@ -179,6 +182,7 @@ fn row(label: &str, pid: Option<u32>, entry: Option<&RendererEntry>, probe: Opti
         has_focus: p.has_focus,
         animations: p.animations,
         kinds: p.kinds.clone(),
+        error: p.error.as_ref().map(|e| e.chars().take(160).collect()),
         frame: false,
         shared_with: Vec::new(),
         cpu_pct: None,
@@ -218,13 +222,19 @@ pub fn browser_rows(
         served.extend(labels.iter().copied());
         let mut r = row(primary, host_pid(*reported), entry, probe_of.get(primary).copied());
         r.frame = main.is_none();
+        if r.frame {
+            // The facts are the main document's, which another process runs: not this one's.
+            (r.visibility, r.has_focus, r.animations, r.title) = (None, None, None, None);
+            r.kinds.clear();
+        }
         r.shared_with = labels.iter().filter(|l| **l != primary).map(|l| l.to_string()).collect();
         match r.pid.map(|pid| sample.cpu(pid)) {
             Some(Ok(cpu)) => r.cpu_pct = Some(cpu),
             Some(Err(why)) => r.cpu_note = Some(why.to_string()),
             None => r.cpu_note = Some("no such process on this computer".to_string()),
         }
-        if let (Some(b), Some(a)) = (before_of.get(primary).and_then(|p| p.metrics.as_ref()), probe_of.get(primary).and_then(|p| p.metrics.as_ref())) {
+        // A frame-only renderer's own main thread is not the page's, which the metrics read.
+        if let (false, Some(b), Some(a)) = (r.frame, before_of.get(primary).and_then(|p| p.metrics.as_ref()), probe_of.get(primary).and_then(|p| p.metrics.as_ref())) {
             r.main_thread_pct = main_thread_pct(b, a, sample.secs);
         }
         rows.push(r);
@@ -330,7 +340,33 @@ mod tests {
         assert_eq!(r.len(), 2);
         let frame = r.iter().find(|x| x.pid == Some(30)).unwrap();
         assert!(frame.frame && frame.label == "pane-a");
-        assert!(!r.iter().find(|x| x.pid == Some(10)).unwrap().frame);
+        // The page's facts are its main document's, which the other process runs.
+        assert_eq!((frame.visibility.clone(), frame.animations, frame.has_focus), (None, None, None));
+        let main = r.iter().find(|x| x.pid == Some(10)).unwrap();
+        assert!(!main.frame && main.visibility.as_deref() == Some("visible"));
+    }
+
+    #[test]
+    fn a_frame_only_renderer_is_not_given_the_pages_main_thread_time() {
+        let m = |t: f64, task: f64| BTreeMap::from([("Timestamp".to_string(), t), ("TaskDuration".to_string(), task)]);
+        let mut before = probe("pane-a", "browser-pane", "answered");
+        before.metrics = Some(m(1.0, 0.0));
+        let mut after = before.clone();
+        after.metrics = Some(m(3.0, 1.0));
+        let procs = [proc(10, 1, "agentmux-cef", 0), proc(30, 1, "agentmux-cef", 0)];
+        let sample = Sample { before: &procs, after: &procs, secs: 3.0 };
+        let entries = [entry(10, "pane-a", true, Some("b1"), false), entry(30, "pane-a", false, Some("b1"), false)];
+        let r = browser_rows(&entries, &[after], &[before], &sample, &Some);
+        assert!(r.iter().find(|x| x.pid == Some(10)).unwrap().main_thread_pct.is_some());
+        assert!(r.iter().find(|x| x.pid == Some(30)).unwrap().main_thread_pct.is_none());
+    }
+
+    #[test]
+    fn a_failed_page_says_why() {
+        let mut p = probe("main", "app-window", "failed");
+        p.error = Some("CDP Page.getFrameTree: no main frame".into());
+        let r = rows(&[entry(10, "main", true, None, false)], &[p]);
+        assert_eq!(r[0].error.as_deref(), Some("CDP Page.getFrameTree: no main frame"));
     }
 
     #[test]

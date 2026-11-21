@@ -674,6 +674,12 @@ describe("muxspect browsers", () => {
         expect(splitSampleFlag(["browsers", "--sample=2.5"]).sample).toBe(2.5);
         expect(splitSampleFlag(["browsers"]).sample).toBeUndefined();
         expect(Number.isNaN(splitSampleFlag(["browsers", "--sample", "soon"]).sample)).toBe(true);
+        // No value: not zero, and the next flag is left alone.
+        expect(Number.isNaN(splitSampleFlag(["browsers", "--sample"]).sample)).toBe(true);
+        expect(Number.isNaN(splitSampleFlag(["browsers", "--sample="]).sample)).toBe(true);
+        const swallowed = splitSampleFlag(["browsers", "--sample", "--json"]);
+        expect(Number.isNaN(swallowed.sample)).toBe(true);
+        expect(swallowed.rest).toEqual(["browsers", "--json"]);
         const parsed = parseArgs(["browsers", "--sample", "5", "--detail", "--json"]);
         expect(parsed).toMatchObject({ cmd: "browsers", sample: 5, detail: true, json: true, blockId: undefined });
         expect(parseArgs(["browsers"]).detail).toBeUndefined();

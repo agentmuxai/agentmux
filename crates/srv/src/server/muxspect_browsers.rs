@@ -33,6 +33,17 @@ const MAX_SAMPLE_SECS: f64 = 30.0;
 /// The host asks every page (1.5 s each, in parallel) before it answers.
 const HOST_WAIT: Duration = Duration::from_secs(6);
 
+/// The route's path: `muxspect --channel <name> browsers` forwards it, and this read outlasts the
+/// forward layer's usual 5 s (it sleeps the whole sample and asks the host twice).
+pub(super) const PATH: &str = "/api/v1/muxspect/browsers";
+
+/// The most a request for `query` can take: its sample, four host calls (the renderer map and the
+/// page facts, at each end of the sample, each bounded by [`HOST_WAIT`]), and a margin.
+pub(super) fn longest_answer(query: &str) -> Duration {
+    let asked = url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == "sample").and_then(|(_, v)| v.parse::<f64>().ok());
+    Duration::from_secs_f64(sample_secs(asked)) + HOST_WAIT * 4 + Duration::from_secs(5)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct BrowsersQuery {
     /// Seconds between the two samples (1 to 30; default 3).
@@ -125,6 +136,16 @@ mod tests {
         assert_eq!(sample_secs(Some(600.0)), 30.0);
         assert_eq!(sample_secs(Some(f64::NAN)), 3.0);
         assert_eq!(sample_secs(Some(5.0)), 5.0);
+    }
+
+    #[test]
+    fn a_forwarded_request_may_take_its_whole_sample_and_the_host_reads() {
+        // The forward layer's default is 5 s; a 30 s sample must not be cut at that.
+        assert!(longest_answer("sample=30") >= Duration::from_secs(30 + 24));
+        assert!(longest_answer("") > Duration::from_secs(5 + 3));
+        // A bad or huge value is bounded like the handler bounds it.
+        assert_eq!(longest_answer("sample=nope"), longest_answer(""));
+        assert_eq!(longest_answer("sample=9999"), longest_answer("sample=30"));
     }
 
     #[test]

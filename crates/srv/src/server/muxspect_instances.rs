@@ -69,6 +69,16 @@ fn error_response(status: StatusCode, message: String, known: &[InstanceRecord])
     (status, Json(json!({ "error": message, "live_channels": channels }))).into_response()
 }
 
+/// How long the forwarded request for `path` may take: [`FORWARD_TIMEOUT`], except for the one read
+/// that samples for a while on purpose (`muxspect browsers`).
+fn forward_timeout(path: &str, query: &str) -> Duration {
+    if path == super::muxspect_browsers::PATH {
+        super::muxspect_browsers::longest_answer(query).max(FORWARD_TIMEOUT)
+    } else {
+        FORWARD_TIMEOUT
+    }
+}
+
 fn forward_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     // Loopback only: a proxy in the environment must never see these requests.
@@ -108,7 +118,7 @@ async fn forward(
         return error_response(StatusCode::NOT_FOUND, format!("no live AgentMux instance on channel '{channel}'"), &records);
     };
     let url = if query.is_empty() { format!("{}{path}", target.local_url) } else { format!("{}{path}?{query}", target.local_url) };
-    let sent = forward_client().get(url).header(agentmux_common::AUTH_KEY_HEADER, &target.auth_key).send().await;
+    let sent = forward_client().get(url).timeout(forward_timeout(path, query)).header(agentmux_common::AUTH_KEY_HEADER, &target.auth_key).send().await;
     match sent {
         Ok(resp) => relay(resp, channel).await,
         Err(e) => error_response(

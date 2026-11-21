@@ -849,13 +849,20 @@ export function channelProblem(cmd, sub, channel) {
 export function splitSampleFlag(argv) {
     const rest = [];
     let sample;
+    const seconds = (text) => (text.trim() === "" ? NaN : Number(text));
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === "--sample") {
-            sample = Number(argv[i + 1] ?? "");
-            i++;
+            // A missing value, or the next flag, is not a number: and the flag is not swallowed.
+            const value = argv[i + 1];
+            if (value === undefined || value.startsWith("-")) {
+                sample = NaN;
+            } else {
+                sample = seconds(value);
+                i++;
+            }
         } else if (a.startsWith("--sample=")) {
-            sample = Number(a.slice("--sample=".length));
+            sample = seconds(a.slice("--sample=".length));
         } else {
             rest.push(a);
         }
