@@ -497,9 +497,11 @@ pub(super) async fn handle_agent_globalmemory_write(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryWrite, Some(&req.agent_id)).await {
-        return app_api_response::<()>(Err(e));
-    }
+    // The writer is the agent the request's token proves, never a name in the body; a request with no token is refused.
+    let (agent_id, written_by_uid) = match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryWrite, &req.agent_id).await {
+        Ok(who) => who,
+        Err(e) => return app_api_response::<()>(Err(e)),
+    };
     let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail_json();
@@ -507,12 +509,9 @@ pub(super) async fn handle_agent_globalmemory_write(
     } else {
         None
     };
-    // Identity M4c-1 (§6.5.9): the writer's UID is the request's `Caller` —
-    // its token — never a body field; `""` when Unattributed.
-    let written_by_uid = caller::attributed_uid(caller.as_deref());
     app_api_response(app_api::global_memory_write_with_reach_impl(
         &state,
-        &req.agent_id,
+        &agent_id,
         &written_by_uid,
         req.id.as_deref(),
         &req.name,
@@ -650,14 +649,14 @@ pub(super) async fn handle_agent_globalmemory_revert(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRevertRequest>,
 ) -> impl IntoResponse {
-    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRevert, Some(&req.agent_id)).await {
-        return app_api_response::<()>(Err(e));
-    }
-    // Identity M4c-1: as for write, the writer's UID is the `Caller`'s.
-    let written_by_uid = caller::attributed_uid(caller.as_deref());
+    // As for write: the agent the token proves, and no request without one.
+    let (agent_id, written_by_uid) = match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRevert, &req.agent_id).await {
+        Ok(who) => who,
+        Err(e) => return app_api_response::<()>(Err(e)),
+    };
     app_api_response(app_api::global_memory_revert_impl(
         &state,
-        &req.agent_id,
+        &agent_id,
         &written_by_uid,
         &req.id,
         &req.version_id,

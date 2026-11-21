@@ -60,7 +60,7 @@ pub const ALWAYS: &[&str] = &[
     "updateagentinstance", "updateagentskill", "upsertdrone", "upsertidentityaccount", "upsertmemory",
     "upsertsystemmemory", "viewer.pair-start", "viewer.revoke", "widget.api", "widgets.call",
     "widgets.catalog.install", "widgets.install", "widgets.rescan", "widgets.session", "widgets.setenabled",
-    "widgets.uninstall", "writeagentconfig", "writeeditorfile",
+    "widgets.uninstall", "workspace.importuserworkspace", "writeagentconfig", "writeeditorfile",
     "updatecontainer", "setcontainerlimits", "clearcontainercaches",
     "identity.account.set_failover", "identity.account.signed_in", "identity.account.validate",
 ];

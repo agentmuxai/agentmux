@@ -564,6 +564,11 @@ pub const COMMAND_AGENT_SET_SEAT: &str = "agent.setSeat";
 /// client only.
 pub const COMMAND_AGENT_PANE_UNREGISTER: &str = "agent.pane.unregister";
 
+/// `workspace.importuserworkspace`: open a saved workspace file as a new workspace and switch to it
+/// (`CommandWorkspaceImportUserWorkspaceData` -> `WorkspaceImportUserWorkspaceResult`). The person's window only:
+/// whether the file's terminal commands run and its agents start is the person's answer in the import preview.
+pub const COMMAND_WORKSPACE_IMPORT_USER_WORKSPACE: &str = "workspace.importuserworkspace";
+
 /// `agent.takeover`: the window takes a pane's agent over from another AgentMux
 /// instance on this host (`CommandAgentTakeoverData`, `AgentTakeoverResult`).
 /// The operator's client only.

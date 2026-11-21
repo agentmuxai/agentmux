@@ -298,6 +298,7 @@ import type { CommandViewerAgentHiddenData } from "@/types/rpc/CommandViewerAgen
 import type { CommandViewerCanSendData } from "@/types/rpc/CommandViewerCanSendData";
 import type { CommandViewerRevokeData } from "@/types/rpc/CommandViewerRevokeData";
 import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPathData";
+import type { CommandWorkspaceImportUserWorkspaceData } from "@/types/rpc/CommandWorkspaceImportUserWorkspaceData";
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
 import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
@@ -624,6 +625,7 @@ import type { WidgetSectionEntryResult } from "@/types/rpc/WidgetSectionEntryRes
 import type { WidgetSessionReq } from "@/types/rpc/WidgetSessionReq";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 import type { WidgetSetEnabledReq } from "@/types/rpc/WidgetSetEnabledReq";
+import type { WorkspaceImportUserWorkspaceResult } from "@/types/rpc/WorkspaceImportUserWorkspaceResult";
 import { RpcClient } from "../rpc-client";
 
 export const GeneratedApi = {
@@ -3387,6 +3389,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<CommandWriteAgentConfigResult> {
     return client.rpcCall("writeagentconfig", data, opts);
+  },
+  // command "workspace.importuserworkspace"
+  WorkspaceImportUserWorkspaceCommand(
+    client: RpcClient,
+    data: CommandWorkspaceImportUserWorkspaceData,
+    opts?: RpcOpts
+  ): Promise<WorkspaceImportUserWorkspaceResult> {
+    return client.rpcCall("workspace.importuserworkspace", data, opts);
   },
   // command "writeeditorfile"
   WriteEditorFileCommand(client: RpcClient, data: CommandWriteEditorFileData, opts?: RpcOpts): Promise<void> {

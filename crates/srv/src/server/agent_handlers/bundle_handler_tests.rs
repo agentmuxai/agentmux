@@ -10,8 +10,9 @@ fn upsert_req(v: serde_json::Value) -> CommandUpsertBundleData {
     serde_json::from_value(v).unwrap()
 }
 
+/// The person's own window, proven.
 fn user_ctx() -> RpcContext {
-    RpcContext::default()
+    RpcContext::operator_for_tests()
 }
 
 fn agent_ctx(agent_id: &str) -> RpcContext {
@@ -49,18 +50,21 @@ async fn upsert_memory_refuses_the_blank_singleton() {
     }
 }
 
-/// A save is recorded as the window, or as the registered agent that made it.
+/// A save is recorded as the window only when the window is proven, as the registered agent that made it, and as
+/// `unproven` for a connection that proved nothing.
 #[tokio::test]
 async fn upsert_memory_records_who_wrote_it() {
     let state = test_state();
     let by_window = upsert_memory(&state, &user_ctx(), upsert_req(serde_json::json!({ "id": "", "name": "W", "is_global": true }))).unwrap();
     let by_agent = upsert_memory(&state, &agent_ctx("agent-w"), upsert_req(serde_json::json!({ "id": "", "name": "A", "is_global": true }))).unwrap();
+    let by_unproven = upsert_memory(&state, &RpcContext::default(), upsert_req(serde_json::json!({ "id": "", "name": "U", "is_global": true }))).unwrap();
 
     let last_writer = |id: &str| {
         state.id_store.bundle_version_list(id).unwrap().first().map(|v| v.written_by.clone()).unwrap_or_default()
     };
     assert_eq!(last_writer(&by_window.id), "armory-ui");
     assert_eq!(last_writer(&by_agent.id), "agent-w");
+    assert_eq!(last_writer(&by_unproven.id), "unproven");
 }
 
 /// `deletememory` reports whether a row went, and a second delete says false.
