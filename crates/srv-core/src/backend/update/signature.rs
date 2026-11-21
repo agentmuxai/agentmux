@@ -12,7 +12,7 @@
 //! `unsigned` and is downloaded as before, so nobody on an old release is stranded.
 
 pub(crate) use agentmux_common::update_manifest::{decide, file_names, Outcome};
-use agentmux_common::update_manifest::{judge_file, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
+use agentmux_common::update_manifest::{judge_file_and_floor, SignedFloor, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
 
 use crate::backend::update::check::ReleaseAsset;
 use crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX;
@@ -20,7 +20,12 @@ use crate::backend::update::download::RELEASE_DOWNLOAD_PREFIX;
 /// The decision, given what was fetched (`None`: the release has no signed
 /// manifest) and the file about to be downloaded.
 pub(crate) fn judge(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, asset: &ReleaseAsset) -> Outcome {
-    judge_file(keys, tag, fetched, &asset.name, asset.size, &asset.sha256)
+    judge_with_floor(keys, tag, fetched, asset).0
+}
+
+/// [`judge`], and the upgrade floor the verified manifest signs.
+pub(crate) fn judge_with_floor(keys: &[UpdateKey], tag: &str, fetched: Option<(&[u8], &str, &[u8])>, asset: &ReleaseAsset) -> (Outcome, SignedFloor) {
+    judge_file_and_floor(keys, tag, fetched, &asset.name, asset.size, &asset.sha256)
 }
 
 /// Why a small release file wasn't read.
@@ -72,10 +77,10 @@ pub(crate) async fn fetch_small(client: &reqwest::Client, url: &str, cap: usize)
 /// Fetch the signed manifest of `asset`'s release and judge it. Release files
 /// sit side by side, so the others' addresses are the asset's with the name
 /// swapped; an address that isn't on AgentMux's releases is not fetched.
-pub(crate) async fn check(version: &str, asset: &ReleaseAsset) -> Outcome {
+pub(crate) async fn check(version: &str, asset: &ReleaseAsset) -> (Outcome, SignedFloor) {
     let tag = format!("v{version}");
     let Some(dir) = asset.url.strip_suffix(asset.name.as_str()).filter(|d| d.starts_with(RELEASE_DOWNLOAD_PREFIX)) else {
-        return Outcome::Failed("the release file isn't on AgentMux's GitHub releases".into());
+        return (Outcome::Failed("the release file isn't on AgentMux's GitHub releases".into()), SignedFloor::Absent);
     };
     let client = match crate::http_client::builder()
         .user_agent(format!("AgentMux/{}", env!("CARGO_PKG_VERSION")))
@@ -83,30 +88,52 @@ pub(crate) async fn check(version: &str, asset: &ReleaseAsset) -> Outcome {
         .build()
     {
         Ok(c) => c,
-        Err(e) => return Outcome::Unreachable(e.to_string()),
+        Err(e) => return (Outcome::Unreachable(e.to_string()), SignedFloor::Absent),
     };
     let (envelope_name, signature_name, manifest_name) = file_names(version);
     let envelope = match fetch_small(&client, &format!("{dir}{envelope_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => b,
-        Ok(None) => return Outcome::Unsigned,
-        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the envelope: {e}")),
+        Ok(None) => return (Outcome::Unsigned, SignedFloor::Absent),
+        Err(e) => return (Outcome::Unreachable(format!("couldn't fetch the envelope: {e}")), SignedFloor::Absent),
     };
     let signatures = match fetch_small(&client, &format!("{dir}{signature_name}"), MAX_ENVELOPE_BYTES).await {
         Ok(Some(b)) => String::from_utf8_lossy(&b).into_owned(),
-        Ok(None) => return Outcome::Failed("the envelope has no signature file".into()),
-        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the signature: {e}")),
+        Ok(None) => return (Outcome::Failed("the envelope has no signature file".into()), SignedFloor::Absent),
+        Err(e) => return (Outcome::Unreachable(format!("couldn't fetch the signature: {e}")), SignedFloor::Absent),
     };
     let manifest = match fetch_small(&client, &format!("{dir}{manifest_name}"), MAX_MANIFEST_BYTES).await {
         Ok(Some(b)) => b,
-        Ok(None) => return Outcome::Failed("the envelope has no manifest".into()),
-        Err(e) => return Outcome::Unreachable(format!("couldn't fetch the manifest: {e}")),
+        Ok(None) => return (Outcome::Failed("the envelope has no manifest".into()), SignedFloor::Absent),
+        Err(e) => return (Outcome::Unreachable(format!("couldn't fetch the manifest: {e}")), SignedFloor::Absent),
     };
-    judge(UPDATE_KEYS, &tag, Some((&envelope, &signatures, &manifest)), asset)
+    judge_with_floor(UPDATE_KEYS, &tag, Some((&envelope, &signatures, &manifest)), asset)
 }
 
-/// Check the release's signed manifest, log what was found, and say whether the download may start.
-pub(crate) async fn gate(version: &str, asset: &ReleaseAsset) -> Result<(), String> {
-    let outcome = check(version, asset).await;
+/// Refuse a release whose signed upgrade floor is above the running build: the higher of the floor the verified manifest
+/// signs and this build's own (`build`), as the check reads it, and the same message. The download asks this itself, from
+/// the manifest it has just verified, so it does not depend on what the check saw: a check whose manifest fetch failed, or
+/// had not run, reads the unsigned notes' floor, and a download must not install over a signed floor because of that.
+/// A manifest with no usable floor says nothing here (the check's own reading of the notes stands).
+pub(crate) fn enforce_floor(running: &str, version: &str, build: Option<&str>, signed: &SignedFloor) -> Result<(), String> {
+    let Some(floor) = crate::backend::update::signed_source::signed_floor_in_force(build, signed) else { return Ok(()) };
+    // A running version that can't be read is older than any floor, as in the check.
+    if crate::backend::update::check::version_core(running) < crate::backend::update::check::version_core(&floor) {
+        return Err(crate::backend::update::check::install_first_message(running, version, &floor));
+    }
+    Ok(())
+}
+
+/// Whether a download may start, given what the signed manifest said: the signature decision ([`decide`]), then the floor
+/// ([`enforce_floor`]).
+pub(crate) fn download_verdict(running: &str, version: &str, build: Option<&str>, outcome: &Outcome, floor: &SignedFloor) -> Result<(), String> {
+    decide(version, outcome)?;
+    enforce_floor(running, version, build, floor)
+}
+
+/// Check the release's signed manifest, log what was found, and say whether the download may start: the file must be
+/// listed as it is, and the running build (`running`) must not be below the floor the manifest signs ([`enforce_floor`]).
+pub(crate) async fn gate(running: &str, version: &str, asset: &ReleaseAsset) -> Result<(), String> {
+    let (outcome, floor) = check(version, asset).await;
     let file = &asset.name;
     match &outcome {
         Outcome::Unsigned => tracing::info!(%version, %file, "update signature: the release has no signed manifest"),
@@ -115,7 +142,11 @@ pub(crate) async fn gate(version: &str, asset: &ReleaseAsset) -> Result<(), Stri
         Outcome::Failed(why) => tracing::error!(%version, %file, %why, "update signature: the signed manifest did not verify"),
         Outcome::Unreachable(why) => tracing::warn!(%version, %file, %why, "update signature: couldn't fetch the signed manifest"),
     }
-    decide(version, &outcome)
+    let result = download_verdict(running, version, crate::backend::update::check::build_floor(), &outcome, &floor);
+    if let Err(message) = &result {
+        tracing::warn!(%running, %version, %message, "update: not downloading: refused by the signature or the signed upgrade floor");
+    }
+    result
 }
 
 /// A fixed signed release (seed-7 key), for this module's tests and the second source's.
@@ -186,8 +217,8 @@ mod tests {
     async fn an_address_off_the_releases_is_not_fetched() {
         let mut a = asset("AgentMux-0.60.1-x64-setup.exe", 100, SETUP_SHA);
         a.url = "https://example.com/AgentMux-0.60.1-x64-setup.exe".into();
-        assert!(matches!(check("0.60.1", &a).await, Outcome::Failed(w) if w.contains("isn't on AgentMux's GitHub releases")));
+        assert!(matches!(check("0.60.1", &a).await.0, Outcome::Failed(w) if w.contains("isn't on AgentMux's GitHub releases")));
         // ...and that is a refusal for a signed-era release, never a download.
-        assert!(gate("0.60.4", &a).await.is_err());
+        assert!(gate("0.60.4", "0.60.4", &a).await.is_err());
     }
 }
