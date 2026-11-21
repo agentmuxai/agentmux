@@ -382,11 +382,11 @@ impl ContainerStartup {
         if let Some(dir) = self.mount_spec.workspace_host_dir.clone() {
             let _ = tokio::task::spawn_blocking(move || before_the_container_has_the_folder(&dir)).await;
         }
-        // On macOS a Keychain-backed account has no credentials file to mount: its login is staged for the container.
+        // The container is never given the account's own credentials file: its login is staged as a copy for this container.
         let mut mount_spec = self.mount_spec.clone();
         if mount_spec.claude_config_host_dir.is_none() {
-            if let Some(config_dir) = mount_spec.keychain_config_dir.clone() {
-                match self.cm.stage_keychain_login(&self.container_name, &config_dir).await {
+            if let Some(config_dir) = mount_spec.staged_login_config_dir.clone() {
+                match self.cm.stage_login(&self.container_name, &config_dir, &mount_spec).await {
                     Ok(dir) => mount_spec.claude_config_host_dir = Some(dir),
                     // Stop before anything is pulled: a container with no login can only sit there signed out.
                     Err(reason) => return Err(self.fail(&ContainerError::NoLogin(reason), report_failure)),

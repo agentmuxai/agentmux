@@ -18,8 +18,6 @@
 //!   and the staged `expiresAt` is newer than the Keychain's;
 //! - each read and each write-back is one audit row (agent, account, direction), and no value is ever logged.
 
-#![cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
-
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -31,12 +29,56 @@ use super::{ContainerManager, ContainerMountSpec, CLAUDE_CREDENTIALS_FILE};
 pub(crate) const STAGING_ROOT: &str = "container-credentials";
 const META_FILE: &str = "meta.json";
 
-/// The Keychain, as far as this module needs it. One entry is addressed by its service name.
+/// Where an account's own login lives on the host, as far as this module needs it: the macOS Keychain, or the
+/// account's `.credentials.json`. One entry is addressed by its service name.
 pub(crate) trait Keychain {
     /// The entry's data, or `None` when there is no such entry.
     fn read(&self, service: &str) -> Result<Option<Zeroizing<String>>, String>;
     /// Replaces the data of the existing entry.
     fn write(&self, service: &str, value: &str) -> Result<(), String>;
+    /// The service name of the login of `config_dir` in this store.
+    fn service_of(&self, config_dir: &str) -> String {
+        service_name(config_dir)
+    }
+}
+
+/// The account's own login file: `<config dir>/.credentials.json`, where Claude Code keeps it on Linux and Windows
+/// (and on macOS for an account that has one). Nothing binds it into a container any more, so it is written by
+/// replacing the file, never in place: a host CLI reading it never sees half of it.
+pub(crate) struct FileLogin;
+
+impl Keychain for FileLogin {
+    fn read(&self, service: &str) -> Result<Option<Zeroizing<String>>, String> {
+        match std::fs::read_to_string(service) {
+            Ok(text) => Ok(Some(Zeroizing::new(text))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    fn write(&self, service: &str, value: &str) -> Result<(), String> {
+        let file = Path::new(service);
+        let temp = file.with_extension(format!("agentmux-{}", std::process::id()));
+        let wrote = put_file(&temp, value).and_then(|()| std::fs::rename(&temp, file));
+        if wrote.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        wrote.map_err(|e| e.to_string())
+    }
+
+    fn service_of(&self, config_dir: &str) -> String {
+        Path::new(config_dir).join(CLAUDE_CREDENTIALS_FILE).to_string_lossy().into_owned()
+    }
+}
+
+/// The store that holds the login of `config_dir`: its file when it has one, else (macOS) the Keychain.
+pub(crate) fn store_for(config_dir: &str) -> Box<dyn Keychain + Send> {
+    #[cfg(target_os = "macos")]
+    if !Path::new(config_dir).join(CLAUDE_CREDENTIALS_FILE).is_file() {
+        return Box::new(SecurityCli);
+    }
+    let _ = config_dir;
+    Box::new(FileLogin)
 }
 
 /// The service name Claude Code uses on macOS for the login of `config_dir` (an absolute path, as
@@ -50,8 +92,11 @@ pub(crate) fn service_name(config_dir: &str) -> String {
 /// Which way a login moved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
+    /// The account's own login to a container's copy: seeded, refreshed by the host, or put back after a refusal.
     KeychainToContainer,
     ContainerToKeychain,
+    /// A container's refresh, pushed to another container's copy of the same account.
+    ContainerToSibling,
 }
 
 /// One thing done, or refused, with a login: what the audit row says. Never carries a value.
@@ -67,6 +112,32 @@ pub(crate) struct Moved {
 #[derive(Serialize, Deserialize)]
 struct Meta {
     config_dir: String,
+    /// A short digest of the refresh token this copy was last made level with the account's own login by. A copy
+    /// whose account has refreshed since was made from a refresh token the provider has already replaced, so what
+    /// the container holds is not a login to write back. Empty for a copy made before this was kept.
+    #[serde(default)]
+    seed: String,
+}
+
+/// A short digest of a login's refresh token, to tell whether two copies descend from one refresh. Not a secret,
+/// and never logged.
+fn refresh_digest(raw: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let value: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    let token = value.pointer("/claudeAiOauth/refreshToken").and_then(|v| v.as_str()).unwrap_or_default();
+    if token.is_empty() {
+        return String::new();
+    }
+    hex::encode(&Sha256::digest(token.as_bytes())[..8])
+}
+
+/// The seed noted for the copy in `dir`, or empty.
+fn seed_of(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join(META_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Meta>(&text).ok())
+        .map(|meta| meta.seed)
+        .unwrap_or_default()
 }
 
 /// The expiry of a login in the Keychain's JSON, when that JSON holds a usable one.
@@ -108,6 +179,13 @@ fn host_account(config_dir: &str) -> (String, String) {
     let text =
         std::fs::read_to_string(Path::new(config_dir).join(".claude.json")).unwrap_or_default();
     account_in(&text)
+}
+
+/// Whether a folder bound into a container (`bound`: the host side of every bind) is the folder that holds the
+/// staged logins, or one above it: the container would then see every container's copy, not its own.
+pub(crate) fn staging_is_exposed(root: &Path, bound: &[String]) -> bool {
+    let staging = root.join(STAGING_ROOT);
+    bound.iter().filter(|dir| !dir.is_empty()).any(|dir| staging.starts_with(Path::new(dir)))
 }
 
 /// The staging folder of the login of `config_dir` for `container_name`, under the AgentMux `root`. It is named by
@@ -153,16 +231,13 @@ fn put_file(file: &Path, value: &str) -> std::io::Result<()> {
     private(file, 0o600)
 }
 
-/// Puts the Keychain's login in the staging folder, with the note of which config dir it is for.
+/// Puts `raw`, a login that is now the account's own, in the staging folder, with the note of which config dir it
+/// is for and which refresh it is level with.
 fn stage(dir: &Path, file: &Path, config_dir: &str, raw: &str) -> Result<(), String> {
     create_private_dir(dir).map_err(|e| format!("couldn't create the staging folder: {e}"))?;
     put_file(file, raw).map_err(|e| format!("couldn't write the staged login: {e}"))?;
-    let meta = serde_json::to_string(&Meta {
-        config_dir: config_dir.to_string(),
-    })
-    .unwrap_or_default();
-    put_file(&dir.join(META_FILE), &meta)
-        .map_err(|e| format!("couldn't write the staging note: {e}"))
+    let meta = serde_json::to_string(&Meta { config_dir: config_dir.to_string(), seed: refresh_digest(raw) }).unwrap_or_default();
+    put_file(&dir.join(META_FILE), &meta).map_err(|e| format!("couldn't write the staging note: {e}"))
 }
 
 /// [`sync_account`] for the account the agent is bound to now, after dealing with the accounts it was bound to
@@ -224,7 +299,7 @@ fn sync_account(
 ) -> Result<PathBuf, String> {
     let dir = staging_dir(root, container_name, config_dir);
     let file = dir.join(CLAUDE_CREDENTIALS_FILE);
-    let service = service_name(config_dir);
+    let service = keychain.service_of(config_dir);
     let (host_uuid, label) = host_account(config_dir);
     let label = if label.is_empty() {
         "unknown".to_string()
@@ -288,27 +363,102 @@ fn sync_account(
                     outcome: Ok(()),
                 });
             } else {
-                let outcome = if host_uuid.is_empty() {
-                    Err("the host account's id isn't known, so the container's login can't be tied to it".to_string())
-                } else if container_account != Some(host_uuid.as_str()) {
-                    Err("the container isn't signed in as the bound account (or can't say), so its login stays there".to_string())
-                } else if !plausible_expiry(staged_expiry) {
-                    Err("the container's login expires further ahead than a real one does, so it isn't written to the Keychain".to_string())
-                } else {
-                    with_login_of(&kc, &staged)
-                        .ok_or_else(|| {
-                            "the Keychain entry or the staged login can't be read as JSON"
-                                .to_string()
-                        })
-                        .and_then(|merged| write_verified(keychain, &service, &merged, &kc))
-                };
-                moved(Moved {
-                    direction: Direction::ContainerToKeychain,
-                    account: label,
-                    outcome,
-                });
+                let copy = Copy { keychain, root, container_name, config_dir, dir: &dir, file: &file, service: &service, label: &label };
+                write_back(&copy, (&host_uuid, container_account), (&kc, &staged), moved);
             }
             Ok(dir)
+        }
+    }
+}
+
+/// One container's staged login, and the account's own login it is level with.
+struct Copy<'a> {
+    keychain: &'a dyn Keychain,
+    root: &'a Path,
+    container_name: &'a str,
+    config_dir: &'a str,
+    dir: &'a Path,
+    file: &'a Path,
+    service: &'a str,
+    label: &'a str,
+}
+
+/// Why a container's login is not taken as the account's refresh, and whether the container is then given the
+/// account's own login back.
+struct Refusal {
+    reason: &'static str,
+    /// The container holds a login that is not this account's, or that the account has moved on from: it is no use
+    /// to keep, so it gets the account's own. Not set when the container may hold the only live copy of a refresh.
+    reseed: bool,
+}
+
+/// Whether the login a container refreshed (`staged`) can be taken as the account's (`kc`), by the guards the
+/// account must pass: the id is known, the container is signed in as it, the expiry is a real one, and the account
+/// has not refreshed since the copy was made (a copy made from an earlier refresh token is a dead pair).
+fn refusal(host_uuid: &str, container_account: Option<&str>, kc: &str, staged: &str, seed: &str) -> Option<Refusal> {
+    let refuse = |reason, reseed| Some(Refusal { reason, reseed });
+    if host_uuid.is_empty() {
+        return refuse("the host account's id isn't known, so the container's login can't be tied to it", false);
+    }
+    match container_account {
+        None => return refuse("the container can't say which account it is signed in as, so its login stays there", false),
+        Some(id) if id != host_uuid => return refuse("the container isn't signed in as the bound account, so its login is replaced by the account's own", true),
+        Some(_) => {}
+    }
+    if !expires_at(staged).is_some_and(plausible_expiry) {
+        return refuse("the container's login expires further ahead than a real one does, so it isn't kept", true);
+    }
+    if !seed.is_empty() && seed != refresh_digest(kc) {
+        return refuse("the account's login was refreshed after this copy was made, so the copy is replaced by the account's own", true);
+    }
+    None
+}
+
+/// A container's login is newer than the account's: takes it as the account's when the guards pass, and in the same
+/// step hands it to the account's file and to every other container's copy of the account, so no copy is left
+/// holding a refresh token the provider has already replaced. When the guards refuse it and the container's login
+/// is of no use, the container is given the account's own login at once. One audit row for each thing done.
+fn write_back(copy: &Copy, (host_uuid, container_account): (&str, Option<&str>), (kc, staged): (&str, &str), moved: &mut dyn FnMut(Moved)) {
+    let row = |direction, outcome: Result<(), String>| Moved { direction, account: copy.label.to_string(), outcome };
+    if let Some(refused) = refusal(host_uuid, container_account, kc, staged, &seed_of(copy.dir)) {
+        // One row for the whole event: what was refused, and (when it was) that the account's own login went back.
+        let mut reason = refused.reason.to_string();
+        if refused.reseed {
+            if let Err(e) = stage(copy.dir, copy.file, copy.config_dir, kc) {
+                reason = format!("{reason}; and putting the account's login back failed: {e}");
+            }
+        }
+        moved(row(Direction::ContainerToKeychain, Err(reason)));
+        return;
+    }
+    let outcome = with_login_of(kc, staged)
+        .ok_or_else(|| "the account's login or the container's can't be read as JSON".to_string())
+        .and_then(|merged| write_verified(copy.keychain, copy.service, &merged, kc));
+    let accepted = outcome.is_ok();
+    moved(row(Direction::ContainerToKeychain, outcome));
+    if accepted {
+        // The container's copy is now level with the account: note it, and give the others the same login.
+        let _ = stage(copy.dir, copy.file, copy.config_dir, staged);
+        push_to_siblings(copy, staged, moved);
+    }
+}
+
+/// Every other container's copy of this account that is older than `login` is replaced by it, in place, so a
+/// container that has the file bound sees it.
+fn push_to_siblings(copy: &Copy, login: &str, moved: &mut dyn FnMut(Moved)) {
+    let Some(newer) = expires_at(login) else { return };
+    let Ok(entries) = std::fs::read_dir(copy.root.join(STAGING_ROOT)) else { return };
+    for entry in entries.flatten() {
+        let sibling = entry.file_name().to_string_lossy().into_owned();
+        if sibling == copy.container_name {
+            continue;
+        }
+        let dir = staging_dir(copy.root, &sibling, copy.config_dir);
+        let file = dir.join(CLAUDE_CREDENTIALS_FILE);
+        let held = std::fs::read_to_string(&file).ok().map(Zeroizing::new).and_then(|raw| expires_at(&raw));
+        if held.is_some_and(|held| held < newer) {
+            let outcome = stage(&dir, &file, copy.config_dir, login);
+            moved(Moved { direction: Direction::ContainerToSibling, account: copy.label.to_string(), outcome });
         }
     }
 }
@@ -390,7 +540,7 @@ pub(crate) fn refresh_pending(
     let Some(staged) = staged.filter(|&expiry| plausible_expiry(expiry)) else {
         return false;
     };
-    match keychain.read(&service_name(config_dir)) {
+    match keychain.read(&keychain.service_of(config_dir)) {
         Err(_) => true,
         Ok(None) => false,
         Ok(Some(raw)) => expires_at(&raw).is_none_or(|kc| staged > kc),
@@ -561,74 +711,48 @@ impl Keychain for SecurityCli {
 }
 
 impl ContainerManager {
-    /// Stages the Keychain login of the account whose config dir is `config_dir` for the container about to be
-    /// created, and returns the folder to mount as the account's credentials; `Err` with the reason in plain words
-    /// when there is no login to give. Only called on macOS, where a config dir has a `keychain_config_dir`.
-    pub async fn stage_keychain_login(
-        &self,
-        container_name: &str,
-        config_dir: &str,
-    ) -> Result<String, String> {
-        #[cfg(target_os = "macos")]
-        {
-            self.sync_keychain_login(container_name, config_dir, true)
-                .await
-                .map(|dir| dir.to_string_lossy().into_owned())
+    /// Stages the login of the account whose config dir is `config_dir` for the container about to be created, and
+    /// returns the folder to mount as the account's credentials; `Err` with the reason in plain words when there is
+    /// no login to give. The container never gets the account's own file: it holds a copy of its own.
+    pub async fn stage_login(&self, container_name: &str, config_dir: &str, spec: &ContainerMountSpec) -> Result<String, String> {
+        let root = agentmux_common::data_paths::agentmux_root().map_err(|e| format!("AgentMux's data folder isn't available: {e}"))?;
+        if staging_is_exposed(&root, &spec.bound_host_dirs()) {
+            return Err("the folder that holds the container's copy of the login would be visible inside a container".to_string());
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (container_name, config_dir);
-            Err("a Keychain login only exists on macOS".to_string())
-        }
+        self.sync_login(container_name, config_dir, true).await.map(|dir| dir.to_string_lossy().into_owned())
     }
 
     /// After a drift removal, which is followed at once by a create from the same mount spec: the folder `remove`
     /// deleted is made again, since Docker refuses a bind mount whose source is missing.
-    pub(crate) async fn restage_keychain_login(
-        &self,
-        container_name: &str,
-        spec: &ContainerMountSpec,
-    ) {
-        if let Some(config_dir) = spec.keychain_config_dir.as_deref() {
-            let _ = self.stage_keychain_login(container_name, config_dir).await;
+    pub(crate) async fn restage_login(&self, container_name: &str, spec: &ContainerMountSpec) {
+        if let Some(config_dir) = spec.staged_login_config_dir.as_deref() {
+            let _ = self.stage_login(container_name, config_dir, spec).await;
         }
     }
 
-    /// Before a container is removed: writes a login it refreshed back to the Keychain, while the container is
-    /// still there to ask which account it is signed in as. Best effort; it never fails the removal.
-    pub(crate) async fn write_back_keychain_login(&self, container_name: &str) {
-        #[cfg(target_os = "macos")]
+    /// Before a container is removed: writes a login it refreshed back to the account, and to the other containers'
+    /// copies, while the container is still there to ask which account it is signed in as. Best effort; it never
+    /// fails the removal.
+    pub(crate) async fn write_back_login(&self, container_name: &str) {
         if let Ok(root) = agentmux_common::data_paths::agentmux_root() {
             for config_dir in staged_config_dirs(&root, container_name) {
-                let _ = self
-                    .sync_keychain_login(container_name, &config_dir, false)
-                    .await;
+                let _ = self.sync_login(container_name, &config_dir, false).await;
             }
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = container_name;
     }
 
     /// After a container is removed: deletes its staged logins, except one that holds a refresh that did not reach
-    /// the Keychain (it stays until a later sync can write it back).
-    pub(crate) async fn drop_staged_keychain_login(&self, container_name: &str) {
+    /// the account (it stays until a later sync can write it back).
+    pub(crate) async fn drop_staged_login(&self, container_name: &str) {
         let Ok(root) = agentmux_common::data_paths::agentmux_root() else {
             return;
         };
         for config_dir in staged_config_dirs(&root, container_name) {
-            #[cfg(target_os = "macos")]
-            {
-                let (root_for_check, name, dir) =
-                    (root.clone(), container_name.to_string(), config_dir.clone());
-                let pending = tokio::task::spawn_blocking(move || {
-                    refresh_pending(&SecurityCli, &root_for_check, &name, &dir)
-                })
-                .await
-                .unwrap_or(true);
-                if pending {
-                    tracing::warn!(container = container_name, "container agent: keeping the staged login, it holds a refresh the Keychain doesn't have yet");
-                    continue;
-                }
+            let (root_for_check, name, dir) = (root.clone(), container_name.to_string(), config_dir.clone());
+            let pending = tokio::task::spawn_blocking(move || refresh_pending(&*store_for(&dir), &root_for_check, &name, &dir)).await.unwrap_or(true);
+            if pending {
+                tracing::warn!(container = container_name, "container agent: keeping the staged login, it holds a refresh the account doesn't have yet");
+                continue;
             }
             remove_staging(&root, container_name, &config_dir);
         }
@@ -637,16 +761,12 @@ impl ContainerManager {
     /// The account id the container's own `.claude.json` names, or `None` when there is no container or file. Read
     /// through Docker's archive API, which works for a stopped container too: a container is stopped before it is
     /// removed, and its login must be written back then.
-    #[cfg(target_os = "macos")]
     async fn container_account(&self, container_name: &str) -> Option<String> {
         use bollard::container::DownloadFromContainerOptions;
         use futures_util::StreamExt as _;
         const LIMIT: usize = 4 * 1024 * 1024;
         let path = format!("{}/.claude.json", super::CONTAINER_CLAUDE_DIR);
-        let mut stream = self
-            .inner
-            .docker
-            .download_from_container(container_name, Some(DownloadFromContainerOptions { path }));
+        let mut stream = self.inner.docker.download_from_container(container_name, Some(DownloadFromContainerOptions { path }));
         let mut tar_bytes = Vec::new();
         while let Some(chunk) = stream.next().await {
             tar_bytes.extend_from_slice(&chunk.ok()?);
@@ -657,43 +777,25 @@ impl ContainerManager {
         account_in_archive(&tar_bytes)
     }
 
-    #[cfg(target_os = "macos")]
-    async fn sync_keychain_login(
-        &self,
-        container_name: &str,
-        config_dir: &str,
-        rebind_cleanup: bool,
-    ) -> Result<PathBuf, String> {
-        let root = agentmux_common::data_paths::agentmux_root()
-            .map_err(|e| format!("AgentMux's data folder isn't available: {e}"))?;
+    async fn sync_login(&self, container_name: &str, config_dir: &str, rebind_cleanup: bool) -> Result<PathBuf, String> {
+        let root = agentmux_common::data_paths::agentmux_root().map_err(|e| format!("AgentMux's data folder isn't available: {e}"))?;
         let account = self.container_account(container_name).await;
         let (name, dir) = (container_name.to_string(), config_dir.to_string());
         let (result, rows) = tokio::task::spawn_blocking(move || {
             let mut rows = Vec::new();
-            let sync = if rebind_cleanup {
-                prepare
-            } else {
-                sync_account
-            };
-            let result = sync(
-                &SecurityCli,
-                &root,
-                &name,
-                &dir,
-                account.as_deref(),
-                &mut |m| rows.push(m),
-            );
+            let sync = if rebind_cleanup { prepare } else { sync_account };
+            let result = sync(&*store_for(&dir), &root, &name, &dir, account.as_deref(), &mut |m| rows.push(m));
             (result, rows)
         })
         .await
-        .map_err(|e| format!("reading the Keychain was interrupted: {e}"))?;
+        .map_err(|e| format!("reading the account's login was interrupted: {e}"))?;
         for row in &rows {
             audit(container_name, row);
         }
         match result {
             Ok(dir) => Ok(dir),
             Err(reason) => {
-                tracing::warn!(container = container_name, %reason, "container agent: no Keychain login to give the container");
+                tracing::warn!(container = container_name, %reason, "container agent: no login to give the container");
                 Err(reason)
             }
         }
@@ -702,13 +804,11 @@ impl ContainerManager {
 
 /// One audit row for a login that moved (or was refused), in the same trail as the fleet actions. The row names the
 /// container (which carries the agent's id) and the account's label; never a value.
-#[cfg(target_os = "macos")]
 fn audit(container_name: &str, moved: &Moved) {
     let (action, how) = match moved.direction {
-        Direction::KeychainToContainer => ("container_credential_read", "Keychain to container"),
-        Direction::ContainerToKeychain => {
-            ("container_credential_writeback", "container to Keychain")
-        }
+        Direction::KeychainToContainer => ("container_credential_read", "account to container"),
+        Direction::ContainerToKeychain => ("container_credential_writeback", "container to account"),
+        Direction::ContainerToSibling => ("container_credential_sibling", "container to the other containers' copies"),
     };
     let reason = format!("account {}: {how}", moved.account);
     let error = moved.outcome.as_ref().err().map(String::as_str);

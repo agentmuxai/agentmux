@@ -221,7 +221,9 @@ fn a_login_the_container_refreshed_is_written_back_for_the_same_account() {
 
 #[test]
 fn a_login_for_another_account_or_an_unknown_one_is_not_written_back() {
-    for container_account in [Some("someone-else"), None] {
+    // Another account: the copy is of no use, so the account's own login goes back at once. One it can't tell
+    // the account of: the container may hold the only live copy of a refresh, so it is left as it is.
+    for (container_account, replaced) in [(Some("someone-else"), true), (None, false)] {
         let (tmp, config) = setup();
         let service = service_name(&config);
         let kc = Fake::with(&service, Some(login(100, "old")));
@@ -243,8 +245,10 @@ fn a_login_for_another_account_or_an_unknown_one_is_not_written_back() {
                     ..
                 }]
             ),
-            "{moved:?}"
+            "one audit row: {moved:?}"
         );
+        let held = std::fs::read_to_string(dir.join(".credentials.json")).unwrap();
+        assert_eq!(held, if replaced { login(100, "old") } else { login(300, "other") });
     }
 }
 
@@ -285,6 +289,7 @@ fn a_login_that_expires_implausibly_far_ahead_is_not_written_back_and_not_kept_a
         ),
         "{moved:?}"
     );
+    assert_eq!(std::fs::read_to_string(dir.join(".credentials.json")).unwrap(), login(100, "old"), "the account's own login went back");
     // It must not hold the staging back from deletion either.
     assert!(!refresh_pending(
         &kc,
@@ -832,4 +837,135 @@ fn a_container_with_no_login_says_why_and_how_to_sign_in() {
         "{msg}"
     );
     assert!(!msg.contains("Docker"), "it is not a Docker problem: {msg}");
+}
+
+/// [`run`] for a named container, so two containers can share an account.
+fn run_as(kc: &Fake, tmp: &tempfile::TempDir, config: &str, container: &str, container_account: Option<&str>) -> (Result<PathBuf, String>, Vec<Moved>) {
+    let mut moved = Vec::new();
+    let result = prepare(kc, &tmp.path().join("root"), container, config, container_account, &mut |m| moved.push(m));
+    (result, moved)
+}
+
+fn held(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join(".credentials.json")).unwrap()
+}
+
+#[test]
+fn a_refresh_in_one_container_reaches_the_account_and_every_other_copy_in_the_same_step() {
+    let (tmp, config) = setup();
+    let service = service_name(&config);
+    let kc = Fake::with(&service, Some(login(100, "old")));
+    let a = run_as(&kc, &tmp, &config, "agentmux-a", None).0.unwrap();
+    let b = run_as(&kc, &tmp, &config, "agentmux-b", None).0.unwrap();
+    let c = run_as(&kc, &tmp, &config, "agentmux-c", None).0.unwrap();
+    // A sibling that is already ahead of the refresh is never taken back to it.
+    std::fs::write(c.join(".credentials.json"), login(900, "c-ahead")).unwrap();
+
+    std::fs::write(a.join(".credentials.json"), login(300, "a")).unwrap();
+    let (_, moved) = run_as(&kc, &tmp, &config, "agentmux-a", Some(ACCOUNT));
+
+    assert_eq!(json(&kc.entries.borrow()[&service]), json(&login(300, "a")), "the account's own login");
+    assert_eq!(held(&b), login(300, "a"), "the other copy, at once and whole");
+    assert_eq!(held(&c), login(900, "c-ahead"), "a copy that is ahead is left");
+    let directions: Vec<_> = moved.iter().map(|m| m.direction).collect();
+    assert_eq!(directions, vec![Direction::ContainerToKeychain, Direction::ContainerToSibling], "{moved:?}");
+    assert!(moved.iter().all(|m| m.outcome.is_ok()), "{moved:?}");
+
+    // The copy that was pushed to has the account's refresh token as its seed, so its own next refresh is taken.
+    assert_eq!(seed_of(&b), refresh_digest(&login(300, "a")));
+    std::fs::write(b.join(".credentials.json"), login(400, "b")).unwrap();
+    let (_, moved) = run_as(&kc, &tmp, &config, "agentmux-b", Some(ACCOUNT));
+    assert_eq!(json(&kc.entries.borrow()[&service]), json(&login(400, "b")));
+    assert!(moved.iter().all(|m| m.outcome.is_ok()), "{moved:?}");
+    assert_eq!(json(&held(&a)), json(&login(400, "b")), "and the first container's copy follows");
+}
+
+#[test]
+fn a_copy_made_from_a_refresh_token_the_account_has_since_replaced_gets_the_accounts_login() {
+    let (tmp, config) = setup();
+    let service = service_name(&config);
+    let kc = Fake::with(&service, Some(login(100, "old")));
+    let dir = run(&kc, &tmp, &config, None).0.unwrap();
+    // The account refreshes on the host while the container refreshes from the pair it was given.
+    kc.entries.borrow_mut().insert(service.clone(), login(200, "host"));
+    std::fs::write(dir.join(".credentials.json"), login(300, "stale-pair")).unwrap();
+    let (_, moved) = run(&kc, &tmp, &config, Some(ACCOUNT));
+
+    assert_eq!(kc.entries.borrow()[&service], login(200, "host"), "the account's login is not overwritten");
+    assert!(!kc.touched.borrow().iter().any(|t| t.starts_with("write")));
+    assert_eq!(held(&dir), login(200, "host"), "the container is not left holding a dead pair");
+    assert!(matches!(moved.as_slice(), [Moved { direction: Direction::ContainerToKeychain, outcome: Err(_), .. }]), "one audit row: {moved:?}");
+    let text = format!("{moved:?}");
+    assert!(["old", "host", "stale-pair"].iter().all(|tag| !text.contains(&format!("-{tag}"))), "no value in the row: {text}");
+}
+
+#[test]
+fn a_container_never_holds_the_accounts_own_file_and_a_refresh_lands_in_it_whole() {
+    let (tmp, config) = setup();
+    let host_file = Path::new(&config).join(".credentials.json");
+    std::fs::write(&host_file, login(100, "old")).unwrap();
+    let root = tmp.path().join("root");
+    let sync = |account: Option<&str>| prepare(&FileLogin, &root, "agentmux-c1", &config, account, &mut |_| {}).unwrap();
+
+    let dir = sync(None);
+    assert!(dir.starts_with(root.join(STAGING_ROOT)) && !dir.starts_with(&config), "the copy is in the staging folder, not the account's folder");
+    assert_eq!(held(&dir), login(100, "old"));
+
+    // A container that empties or ruins its copy changes nothing of the account's.
+    std::fs::write(dir.join(".credentials.json"), "").unwrap();
+    let dir = sync(Some(ACCOUNT));
+    assert_eq!(std::fs::read_to_string(&host_file).unwrap(), login(100, "old"));
+    assert_eq!(held(&dir), login(100, "old"), "and is given the account's login again");
+
+    // A real refresh reaches the account's file, whole, with no temporary file left beside it.
+    std::fs::write(dir.join(".credentials.json"), login(300, "c")).unwrap();
+    sync(Some(ACCOUNT));
+    assert_eq!(json(&std::fs::read_to_string(&host_file).unwrap()), json(&login(300, "c")));
+    let beside: Vec<_> = std::fs::read_dir(&config).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(beside.len(), 2, "{beside:?}");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&dir), mode(&dir.join(".credentials.json")), mode(&host_file)), (0o700, 0o600, 0o600));
+    }
+}
+
+#[test]
+fn the_staging_folder_is_not_inside_anything_bound_into_a_container() {
+    use bollard::models::MountTypeEnum;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_path_buf();
+    let at = |p: &str| root.join(p).to_string_lossy().into_owned();
+    let copy = staging_dir(&root, "agentmux-c1", &at("shared/account"));
+    let spec = ContainerMountSpec {
+        claude_config_host_dir: Some(copy.to_string_lossy().into_owned()),
+        staged_login_config_dir: Some(at("shared/account")),
+        workspace_host_dir: Some(at("agents/aria")),
+        memory_host_dir: Some(at("shared/identities/aria/memory")),
+        mcp_config_host_dir: Some(at("agents/aria-mcp")),
+        github_hooks_host_dir: Some(at("container-hooks")),
+        aws_config_host_dir: Some(at("container-aws")),
+        aws_tools_host_dir: Some(at("container-tools")),
+        ..Default::default()
+    };
+    let mut mounts = super::super::mounts::agent_home_mounts("agentmux-c1", &spec);
+    mounts.push(bollard::models::Mount { source: spec.workspace_host_dir.clone(), typ: Some(MountTypeEnum::BIND), ..Default::default() });
+    let binds: Vec<String> = mounts
+        .iter()
+        .filter(|m| m.typ == Some(MountTypeEnum::BIND))
+        .filter(|m| !m.target.as_deref().unwrap_or_default().ends_with(".credentials.json"))
+        .filter_map(|m| m.source.clone())
+        .collect();
+    assert!(binds.len() >= 6, "{binds:?}");
+    assert!(!staging_is_exposed(&root, &binds), "no bound folder is the staging folder or above it: {binds:?}");
+    assert!(!staging_is_exposed(&root, &spec.bound_host_dirs()));
+    // The one bind that is the copy is the container's own file, in the staging folder.
+    let own = mounts.iter().find(|m| m.target.as_deref().unwrap_or_default().ends_with(".credentials.json")).unwrap();
+    assert_eq!(own.source.as_deref().map(|s| s.replace('\\', "/")), Some(format!("{}/.credentials.json", copy.to_string_lossy().replace('\\', "/"))));
+    // And a folder that would cover it is caught.
+    for covering in [root.to_string_lossy().into_owned(), root.join(STAGING_ROOT).to_string_lossy().into_owned(), root.parent().unwrap().to_string_lossy().into_owned()] {
+        assert!(staging_is_exposed(&root, &[covering.clone()]), "{covering}");
+    }
 }
