@@ -37,6 +37,24 @@ const ROUTE_PREFIX = "route:";
 const COMPACT_PREFIX = "compact:";
 const MORE_PREFIX = "more:";
 
+/** The row value of the choice to start a fresh session on the new model instead of resuming the conversation. */
+export const FRESH_VALUE = "fresh";
+
+/** The fresh-session choice's row: off, the conversation is resumed on the new model; on, the new model starts with a short note and the conversation stays in the record. */
+export function freshRow(on: boolean): OptionRow {
+    return {
+        section: "model",
+        value: FRESH_VALUE,
+        label: "Start a fresh session",
+        description: on
+            ? "On: the next model change starts with a note, not the conversation (it stays in your record)"
+            : "Off: the next model change resumes the conversation on the new model",
+        detail: "A model that did not write a long conversation can read it badly. A fresh session starts the new model without it, with a note that says where to find it.",
+        current: on,
+        setApart: true,
+    };
+}
+
 /** How many of a route's models its list in the panel shows: the first ones in the order srv lists them (the route's curated order, its default first). */
 export const TOP_ROUTE_MODELS = 12;
 
@@ -171,6 +189,8 @@ function reasonOf(e: unknown): string {
 export function createRoutePanel(props: AgentRuntimeDropupProps) {
     const [panel, setPanel] = createSignal<AgentModelPanel | null>(null);
     const [failure, setFailure] = createSignal<string | null>(null);
+    // Whether the next move starts a fresh session. Off each time the panel opens (`resetFresh`): a choice for one change, not a setting.
+    const [fresh, setFresh] = createSignal(false);
 
     const refresh = async () => {
         if (props.providerId !== "claude" || !props.blockId) return;
@@ -191,10 +211,10 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
         }
     };
 
-    /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn. */
-    const moveTo = async (route: string, model: string, restart: boolean): Promise<AgentModelSwitchResult> => {
+    /** Moves the agent to `route`/`model` (an empty route is the harness's own sign-in). The agent restarts after its turn; with `fresh` it starts a new session on the new model instead. */
+    const moveTo = async (route: string, model: string, restart: boolean, fresh = false): Promise<AgentModelSwitchResult> => {
         // srv counts the conversation's images before it moves, which reads a big transcript whole the first time: more than the default 5 s.
-        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart, fresh: false, handoff: null }, { timeout: SWITCH_TIMEOUT_MS });
+        const result = await RpcApi.AgentModelSwitchCommand(TabRpcClient, { blockid: props.blockId, route, model, restart, fresh, handoff: null }, { timeout: SWITCH_TIMEOUT_MS });
         await refresh();
         return result;
     };
@@ -215,6 +235,7 @@ export function createRoutePanel(props: AgentRuntimeDropupProps) {
             return next;
         });
     const collapseAll = () => setOpenRoutes(new Set<string>());
+    const resetFresh = () => setFresh(false);
 
-    return { panel, failure, refresh, moveTo, onSavedRoute, isExpanded, setExpanded, collapseAll };
+    return { panel, failure, refresh, moveTo, fresh, setFresh, resetFresh, onSavedRoute, isExpanded, setExpanded, collapseAll };
 }

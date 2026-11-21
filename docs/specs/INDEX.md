@@ -203,6 +203,12 @@ partial list.
 | [`SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21`](SPEC_LEADER_TOLD_WHEN_AN_AGENT_GOES_QUIET_2026_11_21.md) | Spec: a leader is told when an agent that owes it work has gone quiet, in one grouped note | active | 2026-11-21 |  |
 | [`SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14`](SPEC_AGENT_PREP_BEFORE_SESSION_RESTART_2026_11_14.md) | Spec: prepare, then proceed. An agent gets a window to reach a safe point before a user action restarts its session | active | 2026-11-14 |  |
 
+### agent pane
+
+| Spec | Title | Status | Date | Replaces / replaced by |
+|---|---|---|---|---|
+| [`SPEC_MESSAGES_CARRY_THE_RUNTIME_OF_THEIR_WRITER_2026_11_20`](SPEC_MESSAGES_CARRY_THE_RUNTIME_OF_THEIR_WRITER_2026_11_20.md) | Spec: a message carries the runtime of the agent that wrote it | active | 2026-11-20 |  |
+
 ### compaction
 
 | Spec | Title | Status | Date | Replaces / replaced by |

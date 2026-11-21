@@ -177,6 +177,8 @@ $kanban-narrow: 760px;
         align-content: start;
         overflow-x: visible;
         overflow-y: auto;
+        // The sections' offsets are the list's own, which the bar of links reads for the section you are in.
+        position: relative;
     }
 
     // Qualified by the board: these come before the base rules below and must win over them.
@@ -191,6 +193,13 @@ $kanban-narrow: 760px;
 
     .kanban-column__head {
         @include color-section.sticky-head;
+        // Under the bar of section links, when the list has one (kanban-section-bar.tsx sets its height).
+        top: var(--kanban-bar-h, 0px);
+    }
+
+    // A link of the bar brings a section's header to the top, under the bar.
+    .kanban-board .kanban-column {
+        scroll-margin-top: var(--kanban-bar-h, 0px);
     }
 
     // Extra-large section labels, so where one section ends and the next begins reads at a glance

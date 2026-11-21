@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentRuntime } from "@/types/rpc/AgentRuntime";
-import { createRoot } from "solid-js";
+import { createEffect, createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntimeStore, runtimeCounts } from "./agent-runtime";
 
@@ -159,5 +159,140 @@ describe("runtimeCounts", () => {
         ];
         expect(runtimeCounts(rows)).toEqual({ running: 7, waiting: 2 });
         expect(runtimeCounts([])).toEqual({ running: 0, waiting: 0 });
+    });
+});
+
+describe("what an event wakes", () => {
+    const AGENTS = 25;
+    const ids = Array.from({ length: AGENTS }, (_, i) => `a${i}`);
+    const start = async (dispose: () => void) => {
+        const f = fakeDeps(ids.map((id, i) => row(id, "idle", { block_id: `blk${i}` })));
+        const store = createAgentRuntimeStore(f.deps);
+        await store.load();
+        return { f, store, dispose };
+    };
+
+    it("wakes the readers of the agent that changed, and no other agent's", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            const runs = new Map<string, number>();
+            ids.forEach((id) =>
+                createEffect(() => {
+                    store.rowOf(id);
+                    runs.set(id, (runs.get(id) ?? 0) + 1);
+                })
+            );
+            await Promise.resolve();
+            f.handlers.get("a3")!(row("a3", "working", { block_id: "blk3" }));
+            await Promise.resolve();
+            expect(runs.get("a3")).toBe(2);
+            for (const id of ids.filter((x) => x !== "a3")) expect(runs.get(id), id).toBe(1);
+            dispose();
+        });
+    });
+
+    it("wakes nothing for an event that says what the row already says", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            let one = 0;
+            let all = 0;
+            createEffect(() => (store.rowOf("a1"), one++));
+            createEffect(() => (store.rows(), all++));
+            await Promise.resolve();
+            f.handlers.get("a1")!(row("a1", "idle", { block_id: "blk1" }));
+            await Promise.resolve();
+            expect([one, all]).toEqual([1, 1]);
+            dispose();
+        });
+    });
+
+    it("wakes the readers of the list once per event, and a pane's reader only for its own agent", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            let all = 0;
+            let pane = 0;
+            createEffect(() => (store.rows(), all++));
+            createEffect(() => (store.rowOfBlock("blk7"), pane++));
+            await Promise.resolve();
+            f.handlers.get("a2")!(row("a2", "working", { block_id: "blk2" }));
+            await Promise.resolve();
+            expect([all, pane]).toEqual([2, 1]);
+            f.handlers.get("a7")!(row("a7", "working", { block_id: "blk7" }));
+            await Promise.resolve();
+            expect([all, pane]).toEqual([3, 2]);
+            dispose();
+        });
+    });
+
+    it("moves a pane's reader to the agent now in that pane", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            const seen: (string | undefined)[] = [];
+            createEffect(() => seen.push(store.rowOfBlock("blk-new")?.agent_id));
+            await Promise.resolve();
+            f.handlers.get("a4")!(row("a4", "idle", { block_id: "blk-new" }));
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "a4"]);
+            dispose();
+        });
+    });
+
+    it("says nothing for an agent the list does not have, then has it when the list does", async () => {
+        const f = fakeDeps([row("a", "idle")]);
+        await createRoot(async (dispose) => {
+            const store = createAgentRuntimeStore(f.deps);
+            await store.load();
+            const seen: (string | undefined)[] = [];
+            createEffect(() => seen.push(store.rowOf("later")?.state));
+            await Promise.resolve();
+            f.setRows([row("a", "idle"), row("later", "working")]);
+            await store.load();
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "working"]);
+            f.setRows([row("a", "idle")]);
+            await store.load();
+            await Promise.resolve();
+            expect(seen).toEqual([undefined, "working", undefined]);
+            dispose();
+        });
+    });
+
+    // The frame budget (Loap-3), as what keeps it: 25 agents stream, with a reader on each (a row of My Agents, a Swarm
+    // card), the status bar's and a pane's. An event for one agent wakes that agent's readers and the list's, once each, and
+    // no other agent's: the count of reader runs does not grow with the number of agents. A wall-clock budget is not a test
+    // on a shared runner, so the time is only logged, with one generous bound that catches a copy of the whole Map per event.
+    it("wakes, for each event of 25 agents streaming, that agent's readers and the list's once, and no other agent's", async () => {
+        await createRoot(async (dispose) => {
+            const { f, store } = await start(dispose);
+            const rowRuns = new Map<string, number>();
+            const paneRuns = new Map<string, number>();
+            let listRuns = 0;
+            ids.forEach((id, i) => {
+                createEffect(() => (store.rowOf(id), rowRuns.set(id, (rowRuns.get(id) ?? 0) + 1)));
+                createEffect(() => (store.rowOfBlock(`blk${i}`), paneRuns.set(id, (paneRuns.get(id) ?? 0) + 1)));
+            });
+            createEffect(() => (runtimeCounts(store.rows()), listRuns++));
+            await Promise.resolve();
+            const states: AgentRuntime["state"][] = ["working", "idle", "waiting_on_user", "working"];
+            const ROUNDS = 40;
+            const started = performance.now();
+            for (let round = 0; round < ROUNDS; round++) {
+                ids.forEach((id, i) => {
+                    f.handlers.get(id)!(row(id, states[(round + i) % states.length], { block_id: `blk${i}`, detail: `step ${round}` }));
+                });
+            }
+            const elapsed = performance.now() - started;
+            console.info(`[agent-runtime] ${ROUNDS * AGENTS} events for ${AGENTS} agents: ${elapsed.toFixed(1)} ms`);
+            // Each agent's readers ran once at the start and once for each of its own ROUNDS events: no other agent's event woke them.
+            for (const id of ids) {
+                expect(rowRuns.get(id), `${id}'s row reader`).toBe(1 + ROUNDS);
+                expect(paneRuns.get(id), `${id}'s pane reader`).toBe(1 + ROUNDS);
+            }
+            // The list's reader ran once for each event, never more: an event is not copied for each reader.
+            expect(listRuns).toBe(1 + ROUNDS * AGENTS);
+            // Far above what 1000 events cost; a copy of the whole Map for every reader of every event is not under it.
+            expect(elapsed).toBeLessThan(5000);
+            dispose();
+        });
     });
 });
