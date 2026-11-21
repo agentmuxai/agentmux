@@ -10,15 +10,15 @@ use super::super::AppState;
 #[path = "object_methods.rs"]
 mod methods;
 
-pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType, caller_uid: Option<&str>) -> WebReturnType {
     let args = &call.args;
     let reply = match call.method.as_str() {
         "GetObject" => methods::get_object(state, args),
         "GetObjects" => methods::get_objects(state, args),
         "CreateBlock" => methods::create_block(state, call).await,
         "DeleteBlock" => methods::delete_block(state, args).await,
-        "QuitAgent" => methods::quit_agent(state, args).await,
-        "ShutdownAgent" => methods::shutdown_agent(state, args).await,
+        "QuitAgent" => methods::quit_agent(state, args, caller_uid),
+        "ShutdownAgent" => methods::shutdown_agent(state, args, caller_uid),
         "ShutdownPreview" => methods::shutdown_preview(state, args).await,
         "ClosePane" => methods::close_pane(state, args).await,
         "ApplyLayoutIntent" => methods::apply_layout_intent(state, args).await,
