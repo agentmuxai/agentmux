@@ -60,7 +60,7 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main").to_string();
     tracing::info!("set_window_transparency: label={} transparent={} opacity={}", label, transparent, opacity);
 
-    // Experiment (#48092): the page carries the opacity; no whole-window alpha is applied (see `set_window_opacity`).
+    // #48092: the page carries the opacity; no whole-window alpha is applied (see `set_window_opacity`).
     if crate::app::window_settings::page_fade_requested() {
         crate::ui_tasks::post_page_fade(state, &label, if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 });
         return Ok(serde_json::Value::Null);
@@ -220,8 +220,8 @@ pub fn set_window_opacity(
     // Match both arms.
     let changes = opacity_changes(&out.events);
 
-    // Experiment (#48092, `AGENTMUX_OPACITY_FADE=page`): the page carries the opacity on every platform and no
-    // whole-window alpha is applied, so a menu the page paints opaque stays opaque over the desktop.
+    // #48092 (the default; `AGENTMUX_OPACITY_FADE=window` turns it off): the page carries the opacity on every platform
+    // and no whole-window alpha is applied, so a menu the page paints opaque stays opaque over the desktop.
     let page_fade = crate::app::window_settings::page_fade_requested();
     if page_fade {
         for (ev_label, ev_opacity) in &changes {
