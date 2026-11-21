@@ -13,13 +13,16 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { transformSync } from "esbuild";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { findBrowser } from "@/app/view/agent/components/layout-browser";
 import { driveInBrowser, type DrivenPage } from "@/app/view/agent/components/layout-drive";
 
 const BROWSER = findBrowser();
-const GUARD = transformSync(readFileSync(join(__dirname, "text-drag.ts"), "utf8"), { loader: "ts", format: "iife", globalName: "TD" }).code;
+// The guard's own source, compiled to a script that leaves its exports on `TD`.
+const GUARD = `var TD = {}; (function (exports) {${
+    ts.transpileModule(readFileSync(join(__dirname, "text-drag.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
+}})(TD);`;
 // The stylesheet rules the guard turns its marker into: the real ones, not a copy.
 const RULES = (readFileSync(join(__dirname, "../../app.scss"), "utf8").match(/html\[data-text-drag\][^{]*\{[^}]*\}/g) ?? []).join("\n");
 
