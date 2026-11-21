@@ -54,7 +54,7 @@ mod window_query;
 mod workspace;
 mod workspace_lifecycle;
 
-use axum::{extract::State, response::Json};
+use axum::{extract::State, response::Json, Extension};
 
 use crate::backend::service::WebReturnType;
 
@@ -74,13 +74,15 @@ pub(crate) use tab_lifecycle::handle_create_tab;
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,
+    caller: Option<Extension<super::caller::Caller>>,
     body: axum::body::Bytes,
 ) -> Json<WebReturnType> {
     let call: WebCallType = match serde_json::from_slice(&body) {
         Ok(c) => c,
         Err(e) => return Json(WebReturnType::error(format!("invalid request body: {e}"))),
     };
-    Json(run_service_call(&state, &call).await)
+    let uid = caller.as_ref().and_then(|Extension(caller)| caller.uid());
+    Json(run_service_call_as(&state, &call, uid).await)
 }
 
 /// Dispatch a service call and broadcast any resulting `MuxObjUpdate`s to the
@@ -89,8 +91,13 @@ pub(super) async fn handle_service(
 /// persistence + broadcast to a raw `/agentmux/service` call without
 /// re-implementing it. See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md.
 pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> WebReturnType {
+    run_service_call_as(state, call, None).await
+}
+
+/// [`run_service_call`] for a request whose agent token names `caller_uid` (`None`: no agent credential).
+pub(crate) async fn run_service_call_as(state: &AppState, call: &WebCallType, caller_uid: Option<&str>) -> WebReturnType {
     let service_start = std::time::Instant::now();
-    let result = dispatch_service(state, call).await;
+    let result = dispatch_service(state, call, caller_uid).await;
     let elapsed = service_start.elapsed();
     // debug, not info: fires on every HTTP /agentmux/service call — a
     // meaningful slice (~10%+) of an unrotated 406 MB launcher-log mirror on
@@ -128,9 +135,9 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
     result
 }
 
-async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+async fn dispatch_service(state: &AppState, call: &WebCallType, caller_uid: Option<&str>) -> WebReturnType {
     match call.service.as_str() {
-        "object" => object::handle_object_service(state, call).await,
+        "object" => object::handle_object_service(state, call, caller_uid).await,
         "client" => client::handle_client_service(state, call).await,
         "credential" => credential::handle_credential_service(state, call).await,
         "window" => window::handle_window_service(state, call).await,

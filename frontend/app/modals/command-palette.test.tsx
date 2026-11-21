@@ -312,7 +312,7 @@ describe("CommandPaletteModal rows", () => {
         expect(document.querySelector(".command-palette-item.group-start")).toBeNull();
     });
 
-    it("gives a label the row cuts its full text as a tooltip, and a whole one none", () => {
+    it("gives a label the row cuts its full text as a tooltip, and a whole one none", async () => {
         const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollWidth");
         const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
         // jsdom has no layout: say the labels of "Close Tab" are cut and the others whole.
@@ -325,6 +325,8 @@ describe("CommandPaletteModal rows", () => {
         Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 100 });
         try {
             open();
+            // Which labels are cut is read for the whole list after the frame that drew it (palette-cut-labels.ts).
+            await new Promise((r) => requestAnimationFrame(r));
             expect(rowOf("Close Tab").getAttribute("data-hover-tip")).toBe("Close Tab");
             expect(rowOf("New Tab").hasAttribute("data-hover-tip")).toBe(false);
             expect(rowOf("Close Tab").hasAttribute("title")).toBe(false);

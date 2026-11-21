@@ -57,9 +57,11 @@ fn job_payload(job: &CronJob) -> JobPayload {
     }
 }
 
-/// `getdronepayloadschema`.
+/// `getdronepayloadschema`. The jobs are read where they live (the shared store, `server::cron::jobs_store`),
+/// not in the per-channel store, which has no jobs table of its own.
 pub(crate) fn get_payload_schema(state: &AppState, cmd: PayloadSchemaReq) -> Result<PayloadSchemaResp, String> {
-    let jobs = state.mstore.cron_list().map_err(|e| format!("getdronepayloadschema: {e}"))?;
+    let store = crate::server::cron::jobs_store(state).ok_or_else(|| "getdronepayloadschema: the shared store is unavailable".to_string())?;
+    let jobs = store.cron_list().map_err(|e| format!("getdronepayloadschema: {e}"))?;
     let runs_it = |j: &CronJob| j.action.get("kind").and_then(Value::as_str) == Some(action_kind::DRONE) && j.action.get("drone_id").and_then(Value::as_str) == Some(cmd.drone_id.as_str());
     Ok(PayloadSchemaResp { jobs: jobs.iter().filter(|j| runs_it(j)).map(job_payload).collect(), by_hand: by_hand_fields() })
 }
@@ -71,6 +73,28 @@ mod tests {
 
     fn job(trigger_kind: &str, trigger_event: Value) -> CronJob {
         CronJob { id: "j1".into(), name: "watch".into(), trigger_kind: trigger_kind.into(), trigger_event, ..Default::default() }
+    }
+
+    /// The jobs that run a drone are read from the store jobs live in (the state's cron store), and a job of
+    /// another drone, or one that runs no drone, is not listed.
+    #[tokio::test]
+    async fn the_jobs_that_run_a_drone_are_read_from_the_jobs_store() {
+        let mut state = crate::server::tests::test_state();
+        crate::server::cron::use_test_store_for_jobs(&mut state);
+        let mut mine = crate::backend::cron::test_job("jp-1", "nightly", "t", "uid-t", "uid-c");
+        mine.action = json!({ "kind": "drone", "drone_id": "d-1" });
+        let mut other = crate::backend::cron::test_job("jp-2", "other", "t", "uid-t", "uid-c");
+        other.action = json!({ "kind": "drone", "drone_id": "d-2" });
+        let plain = crate::backend::cron::test_job("jp-3", "plain", "t", "uid-t", "uid-c");
+        for j in [&mine, &other, &plain] {
+            state.mstore.cron_create(j).unwrap();
+        }
+        let answer = get_payload_schema(&state, PayloadSchemaReq { drone_id: "d-1".into() }).unwrap();
+        assert_eq!(answer.jobs.iter().map(|j| (j.job_id.as_str(), j.trigger.as_str())).collect::<Vec<_>>(), [("jp-1", "timer")]);
+        assert!(!answer.by_hand.is_empty());
+        state.cron_store = None;
+        let err = get_payload_schema(&state, PayloadSchemaReq { drone_id: "d-1".into() }).unwrap_err();
+        assert!(err.contains("shared store is unavailable"), "{err}");
     }
 
     #[test]
