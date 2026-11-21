@@ -1,6 +1,6 @@
 # SPEC: Settings fills a wide pane in several columns of readable width
 
-**Status:** draft for approval. Spec task #48117, build #48118. Owner: Tansy@narko. Written 2026-11-20 against origin/main `a54adee`. Local and uncommitted: it ships in the build PR.
+**Status:** implemented in PR #7942. Spec task #48117, build #48118. Owner: Tansy@narko. Written 2026-11-20 against origin/main `a54adee`.
 Everything in sections 2 and 3 was read from the code or measured on a prototype (a static page built from the real compiled `theme.scss`, `element/ui/ui.scss` and `settings.scss`, the real `Field` markup and the real English strings), not run in the app.
 
 ## 1. Requirement
