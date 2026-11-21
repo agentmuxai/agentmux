@@ -16,27 +16,27 @@
     // One above the sections' sticky heads (`sticky-head`), so a head never shows through the bar.
     z-index: calc(var(--z-tab-name) + 1);
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-1) var(--space-2);
+    flex-direction: column;
+    gap: var(--space-1);
     min-width: 0;
     padding: var(--space-1) 0;
     background: var(--main-bg-color);
     border-bottom: 1px solid var(--border-color);
-    // At a large zoom in a narrow pane the links wrap onto many lines: the bar keeps to a share of the list and scrolls
-    // inside itself past that, so the sections stay in view.
+    // At a large zoom in a narrow pane the links wrap onto many lines: the bar keeps to a share of the list and its links
+    // scroll inside it past that, so the sections stay in view. The bar itself does not scroll: a box that scrolls has no
+    // minimum height in the board's grid, and its row would shrink to the padding.
     max-height: 6rem;
-    overflow-y: auto;
-    // A box that scrolls may shrink below its content in a flex column; the bar keeps its height and the list scrolls under it.
-    flex-shrink: 0;
+    box-sizing: border-box;
 }
 
 .kanban-section-bar__links {
     display: flex;
     flex-wrap: wrap;
-    flex: 1 1 auto;
+    // Shrinks first when the bar is at its cap, and scrolls then.
+    flex: 0 1 auto;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
     gap: var(--space-1);
 }
 
@@ -93,4 +93,5 @@
 
 .kanban-section-bar__all {
     flex: none;
+    align-self: flex-start;
 }
