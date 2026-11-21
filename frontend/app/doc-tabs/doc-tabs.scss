@@ -52,9 +52,9 @@
         opacity: 0.75;
     }
 
-    // A tab without an icon (Media's "New Tab") starts with its label: no
-    // empty icon box.
-    .doc-tab--no-icon .pane-tab-icon {
+    // A tab without an icon (Media's "New Tab", the Editor's file tabs) starts with its label: no
+    // empty icon box. A pinned one keeps the box, which holds its pin mark.
+    .doc-tab--no-icon:not(.doc-tab--pinned) .pane-tab-icon {
         display: none;
     }
 }
