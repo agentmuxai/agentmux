@@ -372,6 +372,10 @@ pub fn installed(user_home: &Path, channel: &str) -> bool {
 /// way each manager's file spells the flag, with the folder as that file writes it.
 pub fn carries_home(definition: &str, data_home: Option<&Path>) -> bool {
     let Some(home) = data_home else { return !definition.contains("--home") };
+    // The task writes a folder as one word of a Windows command line, which doubles a backslash that ends it.
+    if definition.contains(&format!("--home {}", xml_escape(&windows_arg(home)))) {
+        return true;
+    }
     spellings(&home.to_string_lossy()).iter().any(|s| {
         definition.contains(&format!("--home \"{s}\""))
             || definition.contains(&format!("--home &quot;{s}&quot;"))
@@ -688,6 +692,9 @@ mod tests {
         assert!(carries_home(&unit, Some(mine)) && !carries_home(&unit, Some(other)) && !carries_home(&unit, None));
         assert!(carries_home(&plist, Some(mine)) && !carries_home(&plist, Some(other)) && !carries_home(&plist, None));
         assert!(carries_home(&task, Some(Path::new(r"D:\am data"))) && !carries_home(&task, Some(other)) && !carries_home(&task, None));
+        let ends_in_backslash = Path::new(r"D:\am data\");
+        let task = render_task_xml(Path::new(r"C:\u\agentmuxw.exe"), "work", None, Some(ends_in_backslash));
+        assert!(carries_home(&task, Some(ends_in_backslash)), "a folder that ends in a backslash is found in the task that was written for it: {task}");
         assert!(!carries_home(&default_unit, Some(Path::new("/home/u"))), "the person's own home folder in the unit's environment is not a --home");
     }
 
