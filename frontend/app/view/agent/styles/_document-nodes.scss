@@ -1572,7 +1572,8 @@ $tool-name-colors: (
         // Transparent so the parent .agent-tool-panel's shade shows
         // through — see the comment there.
         background: transparent;
-        cursor: default;
+        // It is a `role="link"` that opens the page, so it shows the link hand (a card that only expands keeps the arrow).
+        cursor: var(--cursor-link);
 
         &:hover {
             border-color: var(--accent-color);
