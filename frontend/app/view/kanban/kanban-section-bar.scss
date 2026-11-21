@@ -1,0 +1,89 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The narrow Kanban's bar of section links (kanban-section-bar.tsx). It is the first thing in the list, above the
+// section that shows what needs the operator, and stays at the top while the list scrolls; the sections' own heads sit
+// below it (`--kanban-bar-h`, kanban.scss). Sizes are the kit's, so it follows the pane's zoom; it wraps, and never
+// scrolls sideways.
+
+.kanban-section-bar {
+    // Above the list's first section, which `order: -1` puts first.
+    order: -2;
+    position: sticky;
+    top: 0;
+    // One above the sections' sticky heads (`sticky-head`), so a head never shows through the bar.
+    z-index: calc(var(--z-tab-name) + 1);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-2);
+    min-width: 0;
+    padding: var(--space-1) 0;
+    background: var(--main-bg-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.kanban-section-bar__links {
+    display: flex;
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: var(--space-1);
+}
+
+// A link: the section's name and count, a mark in its colour before them. The hand pointer, as every link has.
+.kanban-section-bar__link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    max-width: 100%;
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    color: var(--main-text-color);
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    text-decoration: none;
+    cursor: pointer;
+
+    &::before {
+        content: "";
+        flex: none;
+        width: 0.6em;
+        height: 0.6em;
+        border-radius: var(--radius-full);
+        background: var(--kanban-stage, var(--border-color));
+    }
+
+    &:hover {
+        border-color: var(--border-color);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+
+    // The section you are in, said by its outline as well as its colour.
+    &--current {
+        border-color: var(--kanban-stage, var(--accent-color));
+        font-weight: 600;
+    }
+}
+
+.kanban-section-bar__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kanban-section-bar__count {
+    color: var(--secondary-text-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.kanban-section-bar__all {
+    flex: none;
+}
