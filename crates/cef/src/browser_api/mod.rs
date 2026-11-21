@@ -54,6 +54,7 @@ pub mod locate;
 pub mod nav_settle;
 mod orphan_labels;
 pub mod page_state;
+pub mod page_probe;
 pub mod page_url;
 pub mod press;
 mod read_back_text;
@@ -123,6 +124,7 @@ pub fn register_routes(router: Router<Arc<AppState>>, state: Arc<AppState>) -> R
         .route("/agentmux/browser/owned_panes", post(routes::owned_panes))
         .route("/agentmux/browser/dialog_answer", post(routes::dialog_answer))
         .route("/agentmux/browser/renderer_map", post(routes::renderer_map))
+        .route("/agentmux/browser/page_probe", post(page_probe::page_probe_route))
         .route("/agentmux/browser/list_shortcuts", post(shortcuts::list_shortcuts))
         .route("/agentmux/browser/run_command", post(shortcuts::run_command))
         .route("/agentmux/browser/press_keys", post(shortcuts::press_keys))

@@ -180,6 +180,12 @@ fn row_in(state: AgentRuntimeState, desired: agent_runtime::AgentDesiredState) -
         color: None,
         blocked: None,
         runtime: crate::backend::runtime_adapter::RuntimeKind::Host,
+        model_id: None,
+        model_label: None,
+        model_source: None,
+        effort: None,
+        pending_switch: None,
+        definition_model_label: None,
     }
 }
 

@@ -98,7 +98,7 @@ muxlog host cat                # full host log (not tailed)
 
 The launcher writes an append-only JSONL event log to `~/.agentmux/channels/<ch>/versions/<v>/data/launcher-events.log` (crash forensics — one JSON object per line). The saga journal is a separate SQLite database at `~/.agentmux/channels/<ch>/versions/<v>/data/db/launcher-sagas.db` — that is what `--diag sagas` reads.
 
-`$AGENTMUX_LOG_DIR` inside AgentMux terminals points to `~/.agentmux/logs/` (stable channel) or `~/.agentmux-dev/logs/` (dev builds). The host log lives in the per-instance data dir; a pointer file (`current-host-v<v>.path`) in the shared logs dir lets `muxlog host` resolve it automatically.
+`$AGENTMUX_LOG_DIR` inside AgentMux terminals is the running instance's own log folder, `~/.agentmux/channels/<ch>/versions/<v>/logs/` (under the home override if one is set): the host and srv logs are in it, with the pointer files (`current-host-v<v>.path`) that let `muxlog host` resolve the current file automatically.
 
 ## Launcher diagnostics
 

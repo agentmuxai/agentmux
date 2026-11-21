@@ -3,11 +3,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const disk = vi.hoisted(() => ({ content: "one" as string | null, reads: 0 }));
+const disk = vi.hoisted(() => ({ content: "one" as string | null, reads: 0, gate: null as Promise<void> | null }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ReadEditorFileCommand: async () => {
             disk.reads++;
+            // A test holds the read here (`holdRead`) while it moves the tab on, so what the check sees after the read
+            // does not depend on how long the runner takes.
+            await disk.gate;
             if (disk.content === null) throw new Error("ENOENT");
             return { content: disk.content };
         },
@@ -32,6 +35,16 @@ function setup() {
     return { conflicts, calls };
 }
 
+/** Holds the next disk read until the returned function is called: the read is "in flight" for exactly as long as the test wants. */
+function holdRead(): () => void {
+    let release!: () => void;
+    disk.gate = new Promise<void>((resolve) => (release = resolve));
+    return () => {
+        disk.gate = null;
+        release();
+    };
+}
+
 /** A tab with unsaved edits that loaded "one" from disk. */
 async function tabOf(over: Partial<DiskConflictTab> = {}): Promise<DiskConflictTab> {
     const tab = { id: "t1", filePath: "/p/settings.json", contentHash: await sha256Hex("one"), ...over };
@@ -43,16 +56,33 @@ describe("DiskConflicts", () => {
     beforeEach(() => {
         disk.content = "one";
         disk.reads = 0;
+        disk.gate = null;
         live.clear();
     });
 
     it("the echo of the tab's own save that arrives while the write is in flight is not a conflict once the save has finished", async () => {
         const { conflicts } = setup();
         const tab = await tabOf(); // the event's snapshot: dirty, the hash from before the save
+        const saved = await sha256Hex("two"); // computed before the read starts: nothing below awaits while it is in flight
         disk.content = "two"; // the save's own write
+        const release = holdRead();
         const noting = conflicts.noteChange(tab);
-        live.set("t1", { ...tab, contentHash: await sha256Hex("two"), dirty: false }); // the save finished during the read
+        live.set("t1", { ...tab, contentHash: saved, dirty: false }); // the save finished during the read
+        release();
         await noting;
+        expect(conflicts.has("t1")).toBe(false);
+    });
+
+    it("the same echo, with the save not finished when the read ends, asks, and the save finishing clears it", async () => {
+        const { conflicts } = setup();
+        const tab = await tabOf();
+        disk.content = "two";
+        const release = holdRead();
+        const noting = conflicts.noteChange(tab);
+        release(); // the read ends while the tab is still dirty with the old hash: a conflict, for now
+        await noting;
+        expect(conflicts.has("t1")).toBe(true);
+        conflicts.forget("t1"); // the Editor's saveFile, once the write returned
         expect(conflicts.has("t1")).toBe(false);
     });
 
@@ -60,8 +90,10 @@ describe("DiskConflicts", () => {
         const { conflicts } = setup();
         const tab = await tabOf();
         disk.content = "two";
+        const release = holdRead();
         const noting = conflicts.noteChange(tab);
         live.set("t1", { ...tab, dirty: false });
+        release();
         await noting;
         expect(conflicts.has("t1")).toBe(false);
     });

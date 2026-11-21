@@ -17,19 +17,21 @@
 //!   (`signature::judge` and `decide`, with the same keys and signature rules, a second signature included),
 //!   so the check can't offer a file the download would refuse. Where the two could disagree on one input,
 //!   a test fails.
-//! - **The release's own upgrade floor.** A manifest carries none, so it is read from the repo's `UPGRADE_FLOOR`
-//!   file at the release's tag (the file the release notes' floor line is written from), which the API's
-//!   answer vouches for no better: GitHub over TLS, unsigned. The floor used is the higher of this build's
-//!   own and that file's, so a read can only block a download, never allow one. A tag that isn't plainly
-//!   `v<digits>.<digits>.<digits>` builds no address, and a file that can't be read or isn't a plain version
-//!   is no answer.
+//! - **The release's own upgrade floor, from what the pipeline signed.** A manifest may carry an `upgrade.floor`
+//!   (`SPEC_UPGRADE_FLOOR_IN_SIGNED_MANIFEST`). When it carries a usable one, the floor used is the higher of that
+//!   and this build's own (`BUILD_FLOOR`), and neither the notes' floor line nor the raw `UPGRADE_FLOOR` file is
+//!   asked for. A manifest with none (or an unusable one, logged once per tag) falls back to what was done before:
+//!   the repo's `UPGRADE_FLOOR` file at the release's tag, which the API's answer vouches for no better (GitHub
+//!   over TLS, unsigned). The floor used is then the higher of this build's own and that file's, so a read can only
+//!   block a download, never allow one. A tag that isn't plainly `v<digits>.<digits>.<digits>` builds no address,
+//!   and a file that can't be read or isn't a plain version is no answer.
 //! - **Bounded.** It runs only when the API is limited or failed. A result is kept for its tag, a failed try is
 //!   not repeated before the API's limit ends (and never within [`MIN_RETRY_GAP_MS`]), and a manifest or floor
 //!   that fails is logged once per tag.
 //!
 //! An unsigned, unverifiable or unreachable answer is no answer: the release stays known by its tag.
 
-use agentmux_common::update_manifest::{verify_release, version_core, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
+use agentmux_common::update_manifest::{verify_release, version_core, SignedFloor, UpdateKey, MAX_ENVELOPE_BYTES, MAX_MANIFEST_BYTES, UPDATE_KEYS};
 use parking_lot::Mutex;
 
 use crate::backend::update::check::{Release, ReleaseAsset};
@@ -86,6 +88,50 @@ pub(crate) fn floor_for(build: Option<&str>, file: Result<Option<Vec<u8>>, Strin
         Some(build) => build.to_string(),
         None => read.to_string(),
     })
+}
+
+/// The floor in force when the verified manifest carries a usable one: the higher of that and this build's own
+/// (`build`), which a signed floor never lowers. `None` when the manifest has none that can be used: the floor is then
+/// read the way it was before the manifest carried one ([`floor_for`]).
+pub(crate) fn signed_floor_in_force(build: Option<&str>, signed: &SignedFloor) -> Option<String> {
+    let SignedFloor::Valid(signed) = signed else { return None };
+    Some(match build.filter(|b| version_core(b) >= version_core(signed)) {
+        Some(build) => build.to_string(),
+        None => signed.clone(),
+    })
+}
+
+/// The floor for a release: the signed one when the manifest carries a usable one, else what the floor file at the
+/// release's tag says. `read_file` is asked only in the second case, so a signed floor never needs, and never reads,
+/// the unsigned file.
+pub(crate) async fn resolve_floor<F, Fut>(build: Option<&str>, signed: &SignedFloor, read_file: F) -> Result<String, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<Vec<u8>>, String>>,
+{
+    match signed_floor_in_force(build, signed) {
+        Some(floor) => Ok(floor),
+        None => floor_for(build, read_file().await),
+    }
+}
+
+/// What the manifest at `fetched` signs about the upgrade floor, once it verifies; `Absent` for anything that does not
+/// (no files, a fetch that failed, a manifest that doesn't verify: those are the verdict's to report).
+pub(crate) fn signed_floor_of(keys: &[UpdateKey], tag: &str, fetched: &Fetched) -> SignedFloor {
+    floor_read(keys, tag, fetched).0
+}
+
+/// [`signed_floor_of`], and why when signed files were fetched and did not verify. That is not the ordinary case (a
+/// release with no signed files is, and a fetch that failed is a network matter): it is what a tampered or mis-signed
+/// release looks like, so the caller says so, once per tag. The floor is `Absent` then, as before.
+pub(crate) fn floor_read(keys: &[UpdateKey], tag: &str, fetched: &Fetched) -> (SignedFloor, Option<String>) {
+    match fetched {
+        Ok(Some((e, s, m))) => match verify_release(keys, tag, e, s, m) {
+            Ok(manifest) => (manifest.signed_floor(), None),
+            Err(why) => (SignedFloor::Absent, Some(why.to_string())),
+        },
+        _ => (SignedFloor::Absent, None),
+    }
 }
 
 /// The decision for `tag`, given what was fetched (`None`: the release has no signed manifest) and the
@@ -191,6 +237,53 @@ async fn fetch(client: &reqwest::Client, tag: &str) -> Fetched {
     Ok(Some((envelope, String::from_utf8_lossy(&signature).into_owned(), manifest)))
 }
 
+/// What was learned of a release's signed floor, kept for its tag: a signed release's files do not change, so a manifest
+/// that was read is read once; a failed fetch is not repeated within [`MIN_RETRY_GAP_MS`].
+#[derive(Debug, Clone)]
+struct FloorTried {
+    tag: String,
+    /// The floor the verified manifest carries (`Absent` also for a release with no signed manifest, or one that did not
+    /// verify); `None` while only a fetch that failed is known.
+    floor: Option<SignedFloor>,
+    not_before_ms: i64,
+    logged: bool,
+}
+
+static SIGNED_FLOOR: Mutex<Option<FloorTried>> = Mutex::new(None);
+
+/// The upgrade floor `tag`'s signed manifest carries, for a check that learned the release from GitHub's API: the same
+/// verifier as the download's, asked once per tag. `Absent` when there is none to use (no manifest, one that does not
+/// verify, a fetch that failed): the floor is then what the release notes say, as before.
+pub(crate) async fn signed_floor_for(client: &reqwest::Client, tag: &str, now_ms: i64) -> SignedFloor {
+    let logged_before = {
+        let held = SIGNED_FLOOR.lock();
+        match held.as_ref().filter(|t| t.tag == tag) {
+            Some(t) if t.floor.is_some() => return t.floor.clone().unwrap_or(SignedFloor::Absent),
+            Some(t) if now_ms < t.not_before_ms => return SignedFloor::Absent,
+            Some(t) => t.logged,
+            None => false,
+        }
+    };
+    let fetched = fetch(client, tag).await;
+    let (signed, unverified) = floor_read(UPDATE_KEYS, tag, &fetched);
+    let mut logged = logged_before;
+    if !logged_before {
+        if let Some(why) = &unverified {
+            // A red flag, not the ordinary case: the release's signed files were there and did not verify. The floor falls
+            // back to the notes' (and the download, which verifies the same files, will refuse the release).
+            tracing::warn!(tag, %why, "update check: the release's signed manifest did not verify, so its signed upgrade floor is not used (a tampered or mis-signed release?)");
+            logged = true;
+        } else if let SignedFloor::Unusable(why) = &signed {
+            tracing::warn!(tag, %why, "update check: the release's signed upgrade floor isn't usable; its notes' floor is used");
+            logged = true;
+        }
+    }
+    // A fetch that failed says nothing about the release: try again later. Anything read (or a 404) is kept.
+    let floor = fetched.is_ok().then(|| signed.clone());
+    *SIGNED_FLOOR.lock() = Some(FloorTried { tag: tag.to_string(), floor, not_before_ms: now_ms + MIN_RETRY_GAP_MS, logged });
+    signed
+}
+
 /// What a check gets from the second source.
 pub(crate) enum Got {
     NothingNew,
@@ -221,13 +314,24 @@ pub(crate) async fn release_for(
             Step::Ask => tried.as_ref().is_some_and(|t| t.tag == tag && t.logged),
         }
     };
-    // The floor first: without it nothing is offered, and the signed files need not be asked for.
-    let floor_file = match floor_url(tag) {
-        Some(url) => fetch_small(client, &url, MAX_FLOOR_BYTES).await.map_err(|e| e.to_string()),
-        None => Err(format!("{tag} isn't a plain release tag")),
+    // The signed files first: their floor, when they carry a usable one, is the floor, and the unsigned file is not asked for.
+    let fetched = fetch(client, tag).await;
+    let signed = signed_floor_of(UPDATE_KEYS, tag, &fetched);
+    let floor = resolve_floor(build_floor, &signed, || async {
+        match floor_url(tag) {
+            Some(url) => fetch_small(client, &url, MAX_FLOOR_BYTES).await.map_err(|e| e.to_string()),
+            None => Err(format!("{tag} isn't a plain release tag")),
+        }
+    })
+    .await;
+    let unusable = match &signed {
+        SignedFloor::Unusable(why) if !logged_before => Some(why.clone()),
+        _ => None,
     };
-    let floor = floor_for(build_floor, floor_file);
-    let fetched = if floor.is_ok() { fetch(client, tag).await } else { Ok(None) };
+    if let Some(why) = &unusable {
+        tracing::warn!(tag, %why, "update check: the release's signed upgrade floor isn't usable; its notes' or floor file's is used");
+    }
+    let logged_before = logged_before || unusable.is_some();
     let verdict = verdict(UPDATE_KEYS, tag, current, kind, std::env::consts::ARCH, &floor, &fetched);
     // A manifest that was fetched and did not verify, or a floor that could not be used, is worth a warning,
     // once for the tag; a release that has no signed files, or one that could not be reached, is the ordinary case.
@@ -451,5 +555,161 @@ mod tests {
         assert_eq!(retry_not_before(0, now), now + MIN_RETRY_GAP_MS);
         assert_eq!(retry_not_before(now + 5_000, now), now + MIN_RETRY_GAP_MS);
         assert!(MIN_RETRY_GAP_MS >= 60_000, "never faster than the timed re-check after a limit");
+    }
+
+    // Two releases as `scripts/release-manifest.mjs build` makes them with an `upgrade` object, signed with the same
+    // seed-7 test key as the fixtures above, copied byte for byte: A has floor 0.55.0 (and a rollout flag), B has 0.60.1.
+    const A_MANIFEST: &str = "{\n  \"format\": 1,\n  \"version\": \"0.60.1\",\n  \"tag\": \"v0.60.1\",\n  \"files\": [\n    {\n      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",\n      \"size\": 5,\n      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"\n    },\n    {\n      \"name\": \"agentmux-0.60.1-x64-portable.7z\",\n      \"size\": 8,\n      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"\n    }\n  ],\n  \"upgrade\": {\n    \"floor\": \"0.55.0\",\n    \"shared_store_changed\": true\n  }\n}\n";
+    const A_ENVELOPE: &str = "{\n  \"format\": 1,\n  \"tag\": \"v0.60.1\",\n  \"manifest_sha256\": \"2038d37391a59d7b22bb0bee89eb31b6f94df10d4730389b79808fb32a52272f\",\n  \"created_at\": \"2026-10-25T12:00:00Z\"\n}\n";
+    const A_SIG: &str = "k1 wf8ru0NTcp3G7GCZff/1dX9O2SEd7nSHuacY058sSrcQHFkpidkkwklrjqb1hJOr61diLh/2rRGg32Gnn5whDw==\n\n";
+    const B_MANIFEST: &str = "{\n  \"format\": 1,\n  \"version\": \"0.60.1\",\n  \"tag\": \"v0.60.1\",\n  \"files\": [\n    {\n      \"name\": \"AgentMux-0.60.1-x64-setup.exe\",\n      \"size\": 5,\n      \"sha256\": \"8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73\"\n    },\n    {\n      \"name\": \"agentmux-0.60.1-x64-portable.7z\",\n      \"size\": 8,\n      \"sha256\": \"01e782826ae5182220bd6158f883d01ceb1bce659dc020e7c511f802a9aa7737\"\n    }\n  ],\n  \"upgrade\": {\n    \"floor\": \"0.60.1\"\n  }\n}\n";
+    const B_ENVELOPE: &str = "{\n  \"format\": 1,\n  \"tag\": \"v0.60.1\",\n  \"manifest_sha256\": \"2356952b4c0debe50af877ac299efa107dc851c865b6b96330af581007d5d519\",\n  \"created_at\": \"2026-10-25T12:00:00Z\"\n}\n";
+    const B_SIG: &str = "k1 7hvcUAvIjUfGzcTIOtS5zBD/0/k2VzeyWBR3akHyu6Lzp8kiydOj582QrSRoKVahOHMBnWdN6E+DFbKBgFeKAg==\n\n";
+
+    fn fetched(envelope: &str, sig: &str, manifest: &str) -> Fetched {
+        Ok(Some((envelope.as_bytes().to_vec(), sig.to_string(), manifest.as_bytes().to_vec())))
+    }
+
+    #[test]
+    fn the_floor_is_read_from_the_manifest_that_verified_and_from_nothing_else() {
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &fetched(A_ENVELOPE, A_SIG, A_MANIFEST)), SignedFloor::Valid("0.55.0".into()));
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &fetched(B_ENVELOPE, B_SIG, B_MANIFEST)), SignedFloor::Valid("0.60.1".into()));
+        // A manifest with none says nothing about it.
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &fetched(ENVELOPE, SIG, MANIFEST)), SignedFloor::Absent);
+        // One that does not verify, another release's, a release with no signed files and a failed fetch: nothing to use.
+        let tampered = A_MANIFEST.replace("0.55.0", "0.40.0");
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &fetched(A_ENVELOPE, A_SIG, &tampered)), SignedFloor::Absent);
+        assert_eq!(signed_floor_of(&keys(), "v0.60.2", &fetched(A_ENVELOPE, A_SIG, A_MANIFEST)), SignedFloor::Absent);
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &fetched(A_ENVELOPE, "k9 AAAA\n", A_MANIFEST)), SignedFloor::Absent);
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &Ok(None)), SignedFloor::Absent);
+        assert_eq!(signed_floor_of(&keys(), "v0.60.1", &Err("no network".into())), SignedFloor::Absent);
+    }
+
+    #[test]
+    fn the_floor_in_force_is_the_higher_of_the_signed_floor_and_the_builds() {
+        let signed = |f: &str| SignedFloor::Valid(f.into());
+        // Above the build's: it raises it. Below, or equal: it never lowers it.
+        assert_eq!(signed_floor_in_force(Some("0.55.0"), &signed("0.58.0")).as_deref(), Some("0.58.0"));
+        assert_eq!(signed_floor_in_force(Some("0.55.0"), &signed("0.40.0")).as_deref(), Some("0.55.0"));
+        assert_eq!(signed_floor_in_force(Some("0.55.0"), &signed("0.55.0")).as_deref(), Some("0.55.0"));
+        // A build floor that isn't a version never wins; none at all is the signed one.
+        assert_eq!(signed_floor_in_force(Some("junk"), &signed("0.40.0")).as_deref(), Some("0.40.0"));
+        assert_eq!(signed_floor_in_force(None, &signed("0.40.0")).as_deref(), Some("0.40.0"));
+        // No usable signed floor: nothing in force from it.
+        assert_eq!(signed_floor_in_force(Some("0.55.0"), &SignedFloor::Absent), None);
+        assert_eq!(signed_floor_in_force(Some("0.55.0"), &SignedFloor::Unusable("x".into())), None);
+    }
+
+    #[tokio::test]
+    async fn a_signed_floor_is_used_without_asking_for_the_unsigned_file() {
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        let spy = || async {
+            asked.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(b"0.59.0\n".to_vec()))
+        };
+        // The file would say 0.59.0, above the signed 0.58.0: it is not consulted, so the signed one is the floor.
+        let floor = resolve_floor(Some("0.55.0"), &SignedFloor::Valid("0.58.0".into()), spy).await;
+        assert_eq!(floor.as_deref(), Ok("0.58.0"));
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst), "the floor file was asked for");
+    }
+
+    #[tokio::test]
+    async fn without_a_usable_signed_floor_the_floor_is_read_as_it_was() {
+        for signed in [SignedFloor::Absent, SignedFloor::Unusable("upgrade.floor isn't a plain version".into())] {
+            let asked = std::sync::atomic::AtomicBool::new(false);
+            let spy = || async {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(Some(b"0.56.0\n".to_vec()))
+            };
+            assert_eq!(resolve_floor(Some("0.55.0"), &signed, spy).await.as_deref(), Ok("0.56.0"), "{signed:?}");
+            assert!(asked.load(std::sync::atomic::Ordering::SeqCst), "{signed:?}");
+            // And a file that can't be used is still no answer.
+            assert!(resolve_floor(Some("0.55.0"), &signed, || async { Ok(None) }).await.is_err(), "{signed:?}");
+            assert!(resolve_floor(Some("0.55.0"), &signed, || async { Err("offline".to_string()) }).await.is_err(), "{signed:?}");
+        }
+    }
+
+    #[test]
+    fn a_signed_floor_above_the_running_build_blocks_the_download_and_names_what_to_install_first() {
+        let kind = InstallKind::WindowsSetup;
+        let signed = signed_floor_of(&keys(), "v0.60.1", &fetched(B_ENVELOPE, B_SIG, B_MANIFEST));
+        let floor = signed_floor_in_force(Some("0.55.0"), &signed);
+        assert_eq!(floor.as_deref(), Some("0.60.1"));
+        // The running 0.60.0 is below the signed 0.60.1: no direct upgrade, and the reason names the version to install first.
+        let a = answer(&keys(), "v0.60.1", NEWER_THAN_FIXTURE, &kind, "x86_64", floor.as_deref(), Some((B_ENVELOPE.as_bytes(), B_SIG, B_MANIFEST.as_bytes())));
+        let status = crate::backend::update::check::status_for_arch(NEWER_THAN_FIXTURE, "stable", released(&a).unwrap(), 1, &kind, "x86_64");
+        assert_eq!(status.install_first.as_deref(), Some("0.60.1"));
+        assert!(!status.can_download, "{status:?}");
+        assert_eq!(
+            crate::backend::update::check::install_first_message("0.60.0", "0.60.1", "0.60.1"),
+            "This AgentMux (0.60.0) is older than 0.60.1 can upgrade from; install 0.60.1 first, then upgrade."
+        );
+    }
+
+    #[test]
+    fn the_signed_floor_replaces_the_notes_floor_line_and_the_notes_stay_readable() {
+        use crate::backend::update::check::{release_from_tag, status_for_arch};
+        let kind = InstallKind::WindowsSetup;
+        let notes = release_from_tag("v0.60.1", None).with_body("- Faster startup\n<!-- agentmux:min-upgrade-from=0.50.0 -->");
+        // The notes say 0.50.0; the signed floor says 0.58.0: the signed one is the floor, and the notes lose only the line.
+        let with = notes.clone().with_floor("0.58.0");
+        let status = status_for_arch("0.57.0", "stable", &with, 1, &kind, "x86_64");
+        assert_eq!(status.install_first.as_deref(), Some("0.58.0"));
+        assert_eq!(status.notes.as_deref(), Some("- Faster startup"));
+        // A signed floor lower than the notes' wins too (it is the pipeline's own word for this release).
+        let lower = notes.with_floor("0.40.0");
+        assert_eq!(status_for_arch("0.45.0", "stable", &lower, 1, &kind, "x86_64").install_first, None);
+        // No notes at all: just the floor.
+        let bare = release_from_tag("v0.60.1", None).with_floor("0.58.0");
+        assert_eq!(status_for_arch("0.57.0", "stable", &bare, 1, &kind, "x86_64").install_first.as_deref(), Some("0.58.0"));
+    }
+
+    /// The download's gate takes the floor from the manifest it verified, not from what the check saw: with a check that read
+    /// no floor (its manifest fetch failed, or the notes' floor was used), a manifest signing a floor above the running
+    /// build still refuses.
+    #[test]
+    fn the_downloads_gate_refuses_below_the_signed_floor_whatever_the_check_saw() {
+        use crate::backend::update::signature::{download_verdict, judge_with_floor};
+        let setup = ReleaseAsset { name: "AgentMux-0.60.1-x64-setup.exe".into(), size: 5, url: String::new(), sha256: "8fb6d5f37e8055ce720bd0b1d56587f88c0071f285966ba17e72b2b12672aa73".into() };
+        let gate = |running: &str, build: Option<&str>, e: &str, s: &str, m: &str| {
+            let (outcome, floor) = judge_with_floor(&keys(), "v0.60.1", Some((e.as_bytes(), s, m.as_bytes())), &setup);
+            download_verdict(running, "0.60.1", build, &outcome, &floor)
+        };
+        // Manifest B (floor 0.60.1), running 0.60.0: refused, naming 0.60.1, in the message the check gives.
+        let refusal = gate("0.60.0", Some("0.55.0"), B_ENVELOPE, B_SIG, B_MANIFEST).unwrap_err();
+        assert_eq!(refusal, crate::backend::update::check::install_first_message("0.60.0", "0.60.1", "0.60.1"));
+        assert!(refusal.contains("install 0.60.1 first"), "{refusal}");
+        // At the floor, or above it: allowed.
+        assert!(gate("0.60.1", Some("0.55.0"), B_ENVELOPE, B_SIG, B_MANIFEST).is_ok());
+        // Manifest A (floor 0.55.0): running 0.54.0 is refused, 0.55.0 is allowed.
+        assert!(gate("0.54.0", Some("0.40.0"), A_ENVELOPE, A_SIG, A_MANIFEST).unwrap_err().contains("install 0.55.0 first"));
+        assert!(gate("0.55.0", Some("0.40.0"), A_ENVELOPE, A_SIG, A_MANIFEST).is_ok());
+        // This build's own floor, when higher than the signed one, is the one in force (a signed floor never lowers it).
+        assert!(gate("0.57.0", Some("0.58.0"), A_ENVELOPE, A_SIG, A_MANIFEST).unwrap_err().contains("install 0.58.0 first"));
+        // A manifest that does not verify is refused for its signature, never read for a floor.
+        let tampered = B_MANIFEST.replace("\"size\": 5", "\"size\": 6");
+        assert!(gate("0.60.1", Some("0.55.0"), B_ENVELOPE, B_SIG, &tampered).unwrap_err().contains("signature"));
+    }
+
+    #[test]
+    fn a_floor_that_cannot_be_used_adds_nothing_to_the_gate() {
+        use crate::backend::update::signature::enforce_floor;
+        for floor in [SignedFloor::Absent, SignedFloor::Unusable("x".into())] {
+            assert!(enforce_floor("0.10.0", "0.60.1", Some("0.55.0"), &floor).is_ok());
+        }
+        // A running version that can't be read is below any floor, as in the check.
+        assert!(enforce_floor("junk", "0.60.1", Some("0.55.0"), &SignedFloor::Valid("0.60.1".into())).is_err());
+    }
+
+    #[test]
+    fn signed_files_that_were_fetched_and_did_not_verify_are_reported_once_as_unverified() {
+        let tampered = B_MANIFEST.replace("\"size\": 5", "\"size\": 6");
+        let (floor, why) = floor_read(&keys(), "v0.60.1", &fetched(B_ENVELOPE, B_SIG, &tampered));
+        assert_eq!(floor, SignedFloor::Absent);
+        assert!(why.is_some_and(|w| !w.is_empty()));
+        // The ordinary cases say nothing: a good manifest, no signed files, and a fetch that failed.
+        assert_eq!(floor_read(&keys(), "v0.60.1", &fetched(B_ENVELOPE, B_SIG, B_MANIFEST)), (SignedFloor::Valid("0.60.1".into()), None));
+        assert_eq!(floor_read(&keys(), "v0.60.1", &Ok(None)), (SignedFloor::Absent, None));
+        assert_eq!(floor_read(&keys(), "v0.60.1", &Err("HTTP 503".into())), (SignedFloor::Absent, None));
     }
 }

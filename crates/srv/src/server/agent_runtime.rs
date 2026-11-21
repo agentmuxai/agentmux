@@ -189,6 +189,7 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
     let net = crate::connectivity::status();
     let waiting_for: std::collections::HashSet<String> = mstore.jekt_held_targets().unwrap_or_default().into_iter().collect();
     let requests_open = super::browser_waiting::any_open();
+    let facts = super::live_facts::Ctx::new(state, now_ms, &super::live_facts::Select::default(), false);
     defs.into_iter()
         .filter(|d| d.is_seeded != 1 && d.user_hidden == 0)
         .map(|d| {
@@ -207,8 +208,27 @@ pub(crate) fn list(state: &AppState, now_ms: u64) -> Vec<AgentRuntime> {
                 .then(|| live.as_deref().and_then(|b| request_pane(&state.reactive_handler.names_for_block(b))))
                 .flatten();
             let (runtime_state, detail) = waiting_on_browser_request(runtime_state, detail, waiting_in.is_some());
+            let runtime = runtime_of_agent(block.as_ref(), &d.agent_type);
+            let model = super::live_facts::model_of(
+                &facts,
+                &super::live_facts::Agent {
+                    uid: &d.id,
+                    name: &d.name,
+                    provider: &d.provider,
+                    block_id: block_id.as_deref(),
+                    state: if matches!(runtime_state, AgentRuntimeState::Stopped | AgentRuntimeState::Error) { "stopped" } else { "idle" },
+                    container: runtime == RuntimeKind::Container,
+                },
+                block.as_ref(),
+            );
             AgentRuntime {
-                runtime: runtime_of_agent(block.as_ref(), &d.agent_type),
+                runtime,
+                model_id: model.id,
+                model_label: model.label,
+                model_source: serde_json::to_value(model.source).ok().and_then(|v| v.as_str().map(str::to_string)),
+                effort: model.effort,
+                pending_switch: model.pending_label,
+                definition_model_label: model.definition_label,
                 blocked,
                 color,
                 agent_id: d.id,
@@ -449,6 +469,12 @@ mod tests {
             color: None,
             blocked: None,
             runtime: RuntimeKind::Host,
+            model_id: None,
+            model_label: None,
+            model_source: None,
+            effort: None,
+            pending_switch: None,
+            definition_model_label: None,
         }
     }
 
