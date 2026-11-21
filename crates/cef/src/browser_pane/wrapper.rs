@@ -67,6 +67,58 @@ pub(crate) fn peek_wrapper_hwnd(label: &str) -> Option<isize> {
     PANE_WRAPPER_HWNDS.lock().unwrap().get(label).copied()
 }
 
+/// Fade a pane wrapper (and the browser inside it) to `alpha`: a layered child window takes a whole-window alpha
+/// (Windows 8 and later), which is what lets a Browser pane fade with a window whose own opacity the page carries
+/// (#48286). At 1.0 the layered style is removed, so a pane at full opacity is as it always was.
+pub(crate) fn set_wrapper_alpha(hwnd: *mut std::ffi::c_void, alpha: f64) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED,
+    };
+    unsafe {
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if alpha >= 1.0 {
+            if ex_style & WS_EX_LAYERED as isize != 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & !(WS_EX_LAYERED as isize));
+            }
+            return;
+        }
+        if ex_style & WS_EX_LAYERED as isize == 0 {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as isize);
+        }
+        let byte = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+        if SetLayeredWindowAttributes(hwnd, 0, byte, LWA_ALPHA) == 0 {
+            tracing::warn!(hwnd = ?hwnd, alpha, "[pane-wrapper] SetLayeredWindowAttributes failed");
+        }
+    }
+}
+
+/// The fade each window's page carries, by the window's HWND, so a pane made later in a faded window starts faded.
+static WINDOW_FADES: std::sync::LazyLock<Mutex<HashMap<isize, f64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Fade every pane wrapper that is a child of `parent_hwnd` (a window's own HWND) to `alpha`. Returns how many.
+pub(crate) fn fade_wrappers_of(parent_hwnd: *mut std::ffi::c_void, alpha: f64) -> usize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+    {
+        let mut fades = WINDOW_FADES.lock().unwrap();
+        if alpha >= 1.0 {
+            fades.remove(&(parent_hwnd as isize));
+        } else {
+            fades.insert(parent_hwnd as isize, alpha);
+        }
+    }
+    let wrappers: Vec<isize> = PANE_WRAPPER_HWNDS.lock().unwrap().values().copied().collect();
+    let mut faded = 0;
+    for hwnd in wrappers {
+        let hwnd = hwnd as *mut std::ffi::c_void;
+        if unsafe { GetParent(hwnd) } == parent_hwnd {
+            set_wrapper_alpha(hwnd, alpha);
+            faded += 1;
+        }
+    }
+    faded
+}
+
 /// Window-class name for pane wrappers, suffixed with the launcher-supplied
 /// `AGENTMUX_IPC_HASH` so two parallel AgentMux instances register distinct
 /// class atoms (I5 invariant) — same pattern as `floating_pane::floater_class_name`.
@@ -237,6 +289,9 @@ pub(crate) fn create_wrapper(
     }
 
     cache_wrapper_hwnd(label, hwnd as isize);
+    if let Some(alpha) = WINDOW_FADES.lock().unwrap().get(&(parent_hwnd as isize)).copied() {
+        set_wrapper_alpha(hwnd, alpha);
+    }
     tracing::info!(label, hwnd = ?hwnd, "[pane-wrapper] created");
     Ok(hwnd)
 }

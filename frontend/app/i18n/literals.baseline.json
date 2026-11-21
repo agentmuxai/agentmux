@@ -125,7 +125,7 @@
     "frontend/app/view/agent/components/AgentShellSubblock.tsx": 2,
     "frontend/app/view/agent/components/AgentSpendCard.tsx": 3,
     "frontend/app/view/agent/components/AgentStoppedBanner.tsx": 3,
-    "frontend/app/view/agent/components/AgentViewPopover.tsx": 7,
+    "frontend/app/view/agent/components/AgentViewPopover.tsx": 6,
     "frontend/app/view/agent/components/AmbientNarrationBlock.tsx": 2,
     "frontend/app/view/agent/components/AnsweredQuestionMessage.tsx": 1,
     "frontend/app/view/agent/components/ApiRetryRow.tsx": 1,
