@@ -416,7 +416,7 @@ pub(super) async fn inject(
                 format!("{} is too short to hand to a command: its output couldn't be cleaned of it", target.label),
             ));
         }
-        known.push((target.id.clone(), value.to_string()));
+        known.push(known_value(&target.id, &value));
         match delivery {
             Delivery::Env(name) => env.push((name.clone(), value.to_string())),
             Delivery::Stdin => stdin = Some(value),
@@ -429,6 +429,12 @@ pub(super) async fn inject(
         let _ = tokio::task::spawn_blocking(move || store.vault_touch(&id, agentmux_common::time::now_ms())).await;
     }
     Ok(Some(Injected { env, stdin, files, scrubber: Scrubber::new(&known), went_ahead }))
+}
+
+/// A value handed to a command, to be cleaned out of its output. It is never written into a transcript either.
+fn known_value(id: &str, value: &str) -> (String, String) {
+    crate::backend::transcript::withhold::register(value);
+    (id.to_string(), value.to_string())
 }
 
 #[cfg(test)]

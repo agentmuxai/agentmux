@@ -84,6 +84,8 @@ impl TokenIndex {
     }
 
     fn insert(&self, uid: &str, token: &str) {
+        // A token is never written into a transcript.
+        crate::backend::transcript::withhold::register(token);
         let mut maps = self.maps.write().unwrap_or_else(|e| e.into_inner());
         if let Some(old) = maps.token_by_uid.insert(uid.to_string(), token.to_string()) {
             if old != token {
@@ -181,6 +183,7 @@ impl Store {
         )?;
         let mut stmt = conn.prepare("SELECT token FROM db_agent_tokens WHERE agent_id = ?1")?;
         let token: String = stmt.query_row(params![uid], |row| row.get(0))?;
+        crate::backend::transcript::withhold::register(&token);
         // Still under the connection lock: the index follows the row.
         if let Some(index) = self.token_index() {
             index.insert(uid, &token);
@@ -217,6 +220,24 @@ mod tests {
     /// The property M4 will rely on: two agents never share a token, even
     /// when everything a human can see about them (their names) collides.
     /// The table is keyed by UID, so the names never enter into it.
+    #[test]
+    fn a_minted_or_loaded_token_is_withheld_from_transcripts() {
+        use crate::backend::transcript::withhold;
+        let store = object_store();
+        let minted = store.agent_token_ensure("uid-withhold-a").unwrap();
+        assert!(withhold::text(&format!("TOKEN={minted}")).contains(withhold::MARK), "a minted token");
+        // A token loaded at boot (a row a previous run minted) is registered when the index is built.
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_agent_tokens (agent_id, token, created_at) VALUES ('uid-withhold-b', 'loaded-at-boot-0123456789abcdef', 1)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        store.attach_token_index().unwrap();
+        assert_eq!(withhold::text("TOKEN=loaded-at-boot-0123456789abcdef"), format!("TOKEN={}", withhold::MARK));
+    }
+
     #[test]
     fn distinct_uids_get_distinct_tokens() {
         let store = object_store();
