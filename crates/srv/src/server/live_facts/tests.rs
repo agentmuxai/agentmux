@@ -159,3 +159,35 @@ async fn no_fact_carries_a_credential_a_prompt_or_a_message() {
     }
     blocks.iter().for_each(|b| crate::backend::agent_runtime_latest::forget(b));
 }
+
+/// A model switch asked for while a turn runs is carried by the agent's model facts until it applies: the process
+/// is still on the old model (the runtime event's `model` and the CLI's report), the pane's meta asks for the new
+/// one, and the event says a restart is waiting. Once the replacement runs, nothing is pending.
+#[tokio::test]
+async fn a_model_switch_asked_for_during_a_turn_is_pending_on_the_agents_model_until_it_applies() {
+    let state = test_state();
+    let block_id = format!("lf-pending-{}", uuid::Uuid::new_v4());
+    let mut block = crate::backend::obj::Block { oid: block_id.clone(), ..Default::default() };
+    block.meta = serde_json::from_value(json!({ "agent:runtime": { "model": "opus", "effort": "high" } })).unwrap();
+    let event = |restart: bool, model: &str, effective: &str| {
+        let mut e = agent_runtime_event(&block_id, None, restart, None);
+        e.running = true;
+        e.model = Some(model.to_string());
+        e.effective_model = Some(effective.to_string());
+        crate::backend::agent_runtime_latest::record(&e);
+    };
+    let ctx = Ctx::new(&state, 1_000, &Select::default(), false);
+    let agent = Agent { uid: "u-pending", name: "Switching", provider: "claude", block_id: Some(&block_id), state: "working", container: false };
+
+    event(true, "sonnet", "claude-sonnet-5-5");
+    let mid_turn = model_of(&ctx, &agent, Some(&block));
+    assert_eq!(mid_turn.label.as_deref(), Some("Sonnet 5.5"), "it still runs the old model");
+    assert!(mid_turn.pending_switch);
+    assert_eq!(mid_turn.pending_label.as_deref(), Some("Opus"), "and the row says which model it is switching to");
+
+    event(false, "opus", "claude-opus-5-5");
+    let applied = model_of(&ctx, &agent, Some(&block));
+    assert_eq!(applied.label.as_deref(), Some("Opus 5.5"));
+    assert!(!applied.pending_switch && applied.pending_label.is_none());
+    crate::backend::agent_runtime_latest::forget(&block_id);
+}
