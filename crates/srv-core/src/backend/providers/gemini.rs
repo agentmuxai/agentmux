@@ -1,10 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ProviderConfig, ControllerType};
+use super::{Tier, ProviderConfig, ControllerType};
 
 pub(super) static GEMINI: ProviderConfig = ProviderConfig {
     id: "gemini",
+    tier: Tier::FirstClass,
     cli_command: "gemini",
     controller_type: ControllerType::Subprocess,
     app_server: None,

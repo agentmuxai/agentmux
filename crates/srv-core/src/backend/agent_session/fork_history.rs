@@ -141,7 +141,10 @@ fn sign_for_fork(gfs: &FileStore, from_zone: &str, fork_zone: &str, parent_runti
 /// that agent ran in, and how many bytes of the fork's transcript the copy is (all of it, as the copy has just been made).
 /// A failure leaves the mark as it was, which reads as no cover: the copied history is then taken as a container's.
 fn seal_fork_mark(gfs: &FileStore, fork_zone: &str, parent: &str, runtime: WriterRuntime) {
-    let upto = gfs.stat(fork_zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size.max(0) as u64);
+    let Some(upto) = transcript_len(gfs, fork_zone) else {
+        tracing::warn!(fork_zone = %fork_zone, "fork: couldn't measure the copied history, so its mark is left unsigned");
+        return;
+    };
     if let Err(e) = write_sealed_mark(gfs, fork_zone, parent, runtime, upto) {
         tracing::warn!(fork_zone = %fork_zone, error = %e, "fork: couldn't sign where its copied history came from");
     }
@@ -205,8 +208,14 @@ pub fn seal_existing_fork(gfs: &FileStore, fork_id: &str, parent_id: &str, runti
     if gfs.read_file(&zone, FORK_MARK_FILE).ok().flatten().is_none() || fork_history_cover(gfs, &zone).is_some() {
         return false;
     }
-    let upto = gfs.stat(&zone, OUTPUT_FILE).ok().flatten().map_or(0, |f| f.size.max(0) as u64);
+    let Some(upto) = transcript_len(gfs, &zone) else { return false };
     write_sealed_mark(gfs, &zone, parent_id, runtime, upto).is_ok()
+}
+
+/// How many bytes the transcript of `zone` holds; `None` when that can't be told (no file, or the store failed), which
+/// is never taken as an empty one: a mark signed with a length of 0 would say nothing was copied.
+fn transcript_len(gfs: &FileStore, zone: &str) -> Option<u64> {
+    gfs.stat(zone, OUTPUT_FILE).ok().flatten().map(|f| f.size.max(0) as u64)
 }
 
 /// A transcript over the cap: the fork's pane gets its newest part. The window is `[end - cap, end)`

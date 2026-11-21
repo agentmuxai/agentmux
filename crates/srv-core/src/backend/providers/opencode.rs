@@ -1,13 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{ControllerType, ProviderConfig};
+use super::{Tier, ControllerType, ProviderConfig};
 
 // OpenCode (V1 line): `opencode acp` speaks ACP over stdio and runs signed out
 // on OpenCode Zen's free models. Checked against 1.19.0 on 2026-10-14
 // (SPEC_NINE_NEW_HARNESSES_2026_10_14.md §7.1).
 pub(super) static OPENCODE: ProviderConfig = ProviderConfig {
     id: "opencode",
+    tier: Tier::Preview,
     cli_command: "opencode",
     controller_type: ControllerType::Acp,
     app_server: None,
