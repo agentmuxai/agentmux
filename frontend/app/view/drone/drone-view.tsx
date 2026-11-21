@@ -11,6 +11,7 @@ import { abbreviateText } from "@/util/format-text";
 import { t } from "@/app/i18n/i18n";
 import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
+import { TriggerCard } from "./drone-trigger-card";
 import type { BlockKind, FlowEdge, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
@@ -40,6 +41,7 @@ export const DroneView = (props: { model: DroneViewModel }): JSX.Element => {
             <NodeTypeBar model={m} />
             <div class="drone-stage">
                 <Canvas model={m} />
+                <TriggerCard model={m} />
                 <RunPanel model={m} />
             </div>
         </div>

@@ -1254,5 +1254,17 @@
     "drone.node.noteTask": "Note on task",
     "drone.node.noteTaskHint": "to add a note instead of filing a task: the number of a task this drone filed",
     "drone.node.note": "Note",
-    "drone.node.noteHint": "the line to add; used with a task number above"
+    "drone.node.noteHint": "the line to add; used with a task number above",
+    "drone.trigger.title": "Trigger",
+    "drone.trigger.byHand": "By hand",
+    "drone.trigger.run": "▶ Run",
+    "drone.trigger.running": "Running…",
+    "drone.trigger.openJob": "Open job",
+    "drone.trigger.noJobs": "No job runs this drone yet.",
+    "drone.trigger.kindTimer": "timer",
+    "drone.trigger.kindAppEvent": "app event",
+    "drone.trigger.kindFileWatch": "file change",
+    "drone.trigger.kindWebhook": "local webhook",
+    "drone.trigger.kindPoll": "poll",
+    "drone.trigger.kindExpect": "expect"
 }

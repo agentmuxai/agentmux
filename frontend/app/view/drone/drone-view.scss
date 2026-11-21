@@ -276,6 +276,53 @@
     pointer-events: none;
 }
 
+// The Trigger card: fixed at the top left of the stage, outside the canvas's pan and zoom.
+.drone-trigger {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 220px;
+    max-width: calc(100% - 16px);
+    padding: 8px;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: var(--z-drone-controls);
+    font-size: var(--text-sm);
+}
+
+.drone-trigger-title {
+    margin: 0 0 6px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.drone-trigger-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.drone-trigger-name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.drone-trigger-kind,
+.drone-trigger-note {
+    color: var(--secondary-text-color);
+}
+
+.drone-trigger-note {
+    margin: 4px 0 0;
+}
+
 .drone-controls {
     position: absolute;
     left: 8px;
